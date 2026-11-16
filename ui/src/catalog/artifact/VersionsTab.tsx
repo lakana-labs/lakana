@@ -8,7 +8,7 @@
 import { type JSX, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
-import { type ArtifactVersionOut, listVersions } from "../../api";
+import { type ApiError, type ArtifactVersionOut, listVersions } from "../../api";
 import { useResource } from "../../shell/useResource";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import { ReadFailed, When } from "../cells";
@@ -43,6 +43,16 @@ interface FocusAfterDelete {
   readonly version: number;
   /** Its Delete button, after a Cancel; else, or when the button is gone, its number. */
   readonly on: "delete" | "row";
+}
+
+/** What the versions' read showed at one moment: its answer, its sentence and its failure. */
+interface ReadState {
+  /** The versions read, if any. */
+  readonly data: readonly ArtifactVersionOut[] | undefined;
+  /** The sentence of the last failed read, or null. */
+  readonly error: string | null;
+  /** The last failure the server answered, or null. */
+  readonly failure: ApiError | null;
 }
 
 /** Properties of {@link Stored}. */
@@ -107,12 +117,14 @@ export default function VersionsTab(): JSX.Element | null {
   const goneNote = useRef<HTMLParagraphElement>(null);
   const [deleting, setDeleting] = useState<ArtifactVersionOut | null>(null);
   const focusAfterDelete = useRef<FocusAfterDelete | null>(null);
-  // The versions as they were when the dialog's 409 or 404 asked for them again.
-  const goneAsked = useRef<{ base: readonly ArtifactVersionOut[] | undefined } | null>(null);
-  const focusOnRead = useRef<{
-    version: number;
-    base: readonly ArtifactVersionOut[] | undefined;
-  } | null>(null);
+  // The read as it stood when the dialog's 409 or 404 asked for the versions again.
+  const goneAsked = useRef<ReadState | null>(null);
+  const focusOnRead = useRef<{ version: number; asked: ReadState } | null>(null);
+  // A read settles with new versions, or with an error: a failed one keeps the versions it had.
+  const settled = (asked: ReadState): boolean =>
+    resource.data !== asked.data ||
+    resource.error !== asked.error ||
+    resource.failure !== asked.failure;
   const ids = useId();
   const dotted = markedText(`${namespace}.${name}`);
   const number = new Intl.NumberFormat(i18n.language);
@@ -146,13 +158,18 @@ export default function VersionsTab(): JSX.Element | null {
   useEffect(() => {
     // Cancel gave the focus to Delete… before the read the 409 asked for landed; when that read
     // removes the button, the focus goes to the version's number instead of the page.
+    // A read that failed leaves the button where it was, so nothing is owed any more.
     const watched = focusOnRead.current;
-    if (watched === null || resource.data === watched.base) {
+    if (watched === null || !settled(watched.asked)) {
       return;
     }
     focusOnRead.current = null;
     const lost = document.activeElement === document.body;
-    if (lost && document.getElementById(deleteId(watched.version)) === null) {
+    if (
+      lost &&
+      resource.data !== watched.asked.data &&
+      document.getElementById(deleteId(watched.version)) === null
+    ) {
       document.getElementById(numberId(watched.version))?.focus();
     }
   });
@@ -320,15 +337,19 @@ export default function VersionsTab(): JSX.Element | null {
           place={ref}
           version={deleting}
           onGone={() => {
-            goneAsked.current = { base: resource.data };
+            goneAsked.current = {
+              data: resource.data,
+              error: resource.error,
+              failure: resource.failure,
+            };
             resource.reload();
           }}
           onCancel={() => {
             focusAfterDelete.current = { version: deleting.version, on: "delete" };
             const asked = goneAsked.current;
             goneAsked.current = null;
-            if (asked !== null && asked.base === resource.data) {
-              focusOnRead.current = { version: deleting.version, base: asked.base };
+            if (asked !== null && !settled(asked)) {
+              focusOnRead.current = { version: deleting.version, asked };
             }
             setDeleting(null);
           }}
