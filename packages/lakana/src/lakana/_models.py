@@ -1395,6 +1395,28 @@ class QueryStatus:
     waiting_for
         Why a `QUEUED` query has not started; `None` for any other status and when the server
         predates the field.
+    origin
+        Where the run came from: `written`, `preview`, `check`, `write`, `maintenance` or
+        `task`. A value this SDK does not know is kept as it is. `None` from a server that
+        predates the field.
+    sql
+        The text as submitted, for a `written` or `write` run; `None` for every other origin
+        and from a server that predates the field.
+    created_at
+        When the run was submitted; `None` from a server that predates the field.
+    started_at
+        When a worker started it; `None` while it is queued.
+    finished_at
+        When it ended; `None` until then.
+    result_rows
+        Rows of the stored result, set once a read succeeded; `None` otherwise.
+    result_bytes
+        Size in bytes of the stored Arrow file, set with `result_rows`.
+    error_line
+        Line, from 1, of the submitted SQL where an `invalid_query` failure of a `written` or
+        `write` run points; `None` when unknown.
+    error_column
+        Column, from 1, within `error_line`.
     peak_memory_bytes
         Highest resident memory of the query's process in bytes; `None` if it was not measured
         and from a server that predates the field.
@@ -1418,6 +1440,15 @@ class QueryStatus:
     maintenance: dict | None = None
     error_cause: str | None = None
     waiting_for: WaitingFor | None = None
+    origin: str | None = None
+    sql: str | None = None
+    created_at: datetime | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result_rows: int | None = None
+    result_bytes: int | None = None
+    error_line: int | None = None
+    error_column: int | None = None
     peak_memory_bytes: int | None = None
     cpu_seconds: float | None = None
     bytes_read: int | None = None

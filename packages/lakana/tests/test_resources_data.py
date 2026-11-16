@@ -3631,3 +3631,50 @@ def test_sdk_health_sends_readers_false_only_when_asked() -> None:
     health = tables.health("dev", "bronze.sales", days=7, readers=False)
     assert [dict(r.url.params) for r in seen] == [{}, {"days": "7", "readers": "false"}]
     assert health.readers is None
+
+
+def test_status_reads_the_new_fields() -> None:
+    """The origin, SQL, times, result size and error position are parsed; times are aware."""
+    body = {
+        **_QUEUED_BODY,
+        "status": "FAILED",
+        "origin": "written",
+        "sql": "SELECT 1",
+        "created_at": "2026-11-01T10:00:00+00:00",
+        "started_at": "2026-11-01T10:00:01+00:00",
+        "finished_at": "2026-11-01T10:00:02+00:00",
+        "result_rows": 5,
+        "result_bytes": 900,
+        "error_line": 2,
+        "error_column": 7,
+    }
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(200, json=body)), id="q1", environment="dev"
+    )
+    status = run.status()
+    assert status.origin == "written"
+    assert status.sql == "SELECT 1"
+    assert status.created_at == datetime(2026, 11, 1, 10, 0, 0, tzinfo=UTC)
+    assert status.started_at == datetime(2026, 11, 1, 10, 0, 1, tzinfo=UTC)
+    assert status.finished_at == datetime(2026, 11, 1, 10, 0, 2, tzinfo=UTC)
+    assert (status.result_rows, status.result_bytes) == (5, 900)
+    assert (status.error_line, status.error_column) == (2, 7)
+
+
+def test_status_of_an_older_server_reads_them_as_none() -> None:
+    """A server that predates the fields sends none of them; each reads as `None`."""
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(200, json=_QUEUED_BODY)),
+        id="q1",
+        environment="dev",
+    )
+    status = run.status()
+    assert status.origin is None
+    assert status.sql is None
+    assert status.created_at is None
+    assert status.started_at is None
+    assert status.finished_at is None
+    assert status.result_rows is None
+    assert status.result_bytes is None
+    assert status.error_line is None
+    assert status.error_column is None

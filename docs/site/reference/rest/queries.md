@@ -75,7 +75,7 @@ Answer fields: `QuerySubmitOut`
 
 Show a query's status
 
-Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can see it; for anyone else the answer is 404, as for a query that does not exist.
+Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can see it; for anyone else the answer is 404, as for a query that does not exist. Besides the status, it names the run's `origin`, its times, the size of a stored result and the position of a syntax error. It gives back the run's `sql` for `written` and `write` runs only; for a preview, a check, maintenance or a task's query it is `null`.
 
 Parameters:
 
@@ -111,6 +111,15 @@ Answer fields: `QueryStatusOut`
 | `schema_diff` | mapping of text to list of mapping of text to text or null | no |  |
 | `maintenance` | mapping of text to any or null | no |  |
 | `error_cause` | text or null | no |  |
+| `origin` | one of `written`, `preview`, `check`, `write`, `maintenance`, `task` | yes |  |
+| `sql` | text or null | no |  |
+| `created_at` | text (date-time) | yes |  |
+| `started_at` | text (date-time) or null | no |  |
+| `finished_at` | text (date-time) or null | no |  |
+| `result_rows` | whole number or null | no |  |
+| `result_bytes` | whole number or null | no |  |
+| `error_line` | whole number or null | no |  |
+| `error_column` | whole number or null | no |  |
 | `peak_memory_bytes` | whole number or null | no | Highest resident memory of the attempt's process in bytes; null if not measured (for a container task: the container's cgroup peak). |
 | `cpu_seconds` | number or null | no | Processor time (user plus system) the attempt used, in seconds; null if not measured. |
 | `bytes_read` | whole number or null | no | Bytes DuckDB read for a query (its `io.total_bytes_read` metric, null when DuckDB answered from file metadata); for a Python task the bytes the SDK readers downloaded or read; null if unknown. |
@@ -157,6 +166,15 @@ Answer fields: `QueryStatusOut`
 | `schema_diff` | mapping of text to list of mapping of text to text or null | no |  |
 | `maintenance` | mapping of text to any or null | no |  |
 | `error_cause` | text or null | no |  |
+| `origin` | one of `written`, `preview`, `check`, `write`, `maintenance`, `task` | yes |  |
+| `sql` | text or null | no |  |
+| `created_at` | text (date-time) | yes |  |
+| `started_at` | text (date-time) or null | no |  |
+| `finished_at` | text (date-time) or null | no |  |
+| `result_rows` | whole number or null | no |  |
+| `result_bytes` | whole number or null | no |  |
+| `error_line` | whole number or null | no |  |
+| `error_column` | whole number or null | no |  |
 | `peak_memory_bytes` | whole number or null | no | Highest resident memory of the attempt's process in bytes; null if not measured (for a container task: the container's cgroup peak). |
 | `cpu_seconds` | number or null | no | Processor time (user plus system) the attempt used, in seconds; null if not measured. |
 | `bytes_read` | whole number or null | no | Bytes DuckDB read for a query (its `io.total_bytes_read` metric, null when DuckDB answered from file metadata); for a Python task the bytes the SDK readers downloaded or read; null if unknown. |

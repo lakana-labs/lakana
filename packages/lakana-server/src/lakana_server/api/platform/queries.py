@@ -14,7 +14,7 @@ from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.preview import PREVIEW_ROW_LIMIT, previewed_table
 from lakana_core.catalog.query_service import QUERY_LIST_MAX, QueryService, WriteTarget
 from lakana_core.errors import ConflictError, ValidationError
-from lakana_core.models import QueryRun, QueryRunStatus, WriteMode
+from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus, WriteMode
 from lakana_core.runs.waiting import WaitReason
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.storage.resolver import StorageResolver
@@ -46,6 +46,9 @@ router = APIRouter(
     tags=["queries"],
     responses=errors(401),
 )
+
+_SQL_SHOWN = frozenset({QueryOrigin.WRITTEN, QueryOrigin.WRITE})
+"""The origins whose SQL the status read gives back: what the submitter wrote themselves."""
 
 
 def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
@@ -79,6 +82,15 @@ def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
         schema_diff=run.schema_diff,
         maintenance=run.maintenance,
         error_cause=run.error_cause,
+        origin=run.origin.value,
+        sql=run.sql_text if run.origin in _SQL_SHOWN else None,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        result_rows=run.result_rows,
+        result_bytes=run.result_bytes,
+        error_line=run.error_line,
+        error_column=run.error_column,
         waiting_for=None if waiting is None else waiting.to_json(),
     )
 
@@ -243,7 +255,10 @@ def get_query_status(
     """Show a query's status.
 
     Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can
-    see it; for anyone else the answer is 404, as for a query that does not exist.
+    see it; for anyone else the answer is 404, as for a query that does not exist. Besides the
+    status, it names the run's `origin`, its times, the size of a stored result and the
+    position of a syntax error. It gives back the run's `sql` for `written` and `write` runs
+    only; for a preview, a check, maintenance or a task's query it is `null`.
 
     Parameters
     ----------

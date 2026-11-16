@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import LakanaError
-from lakana_core.models import QueryRun, QueryRunStatus, WriteMode
+from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus, WriteMode
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.api.platform import queries as queries_module
 from lakana_server.api.platform.schemas import (
@@ -1485,3 +1485,128 @@ def test_the_page_schema_declares_every_key_the_writer_emits() -> None:
     assert set(page["masked_columns"][0]) == set(MaskedColumnOut.model_fields)
     assert set(page["preview"]) == set(PreviewOut.model_fields)
     ResultPageOut.model_validate(page)
+
+
+def _submit_in(client: TestClient, env: str, sql: str = "SELECT 1") -> str:
+    """Create environment `env` and submit `sql` in it.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    env
+        Name of the environment to create.
+    sql
+        The query to submit.
+
+    Returns
+    -------
+    str
+        The new query's id.
+    """
+    client.post(
+        "/api/v1/environments",
+        json={"name": env, "storage": {"scheme": "file", "root": "file:///tmp/s", "options": {}}},
+        headers=AUTH_HEADER,
+    )
+    submitted = client.post(
+        f"/api/v1/environments/{env}/queries", json={"sql": sql}, headers=AUTH_HEADER
+    )
+    assert submitted.status_code == 202
+    return submitted.json()["query_id"]
+
+
+def _edit_run(client: TestClient, query_id: str, **values: object) -> None:
+    """Set attributes of a query run straight in the app's database.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    query_id
+        The query's id.
+    **values
+        Attribute names of `QueryRun` and the values to set.
+    """
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        run = session.get(QueryRun, uuid.UUID(query_id))
+        assert run is not None
+        for name, value in values.items():
+            setattr(run, name, value)
+        session.commit()
+
+
+def test_the_status_of_a_written_query_has_its_sql_origin_and_times(client: TestClient) -> None:
+    """A written query's status carries the SQL as submitted, its origin and its times."""
+    query_id = _submit_in(client, "st1", "SELECT 1 AS one")
+    started = datetime(2026, 11, 1, 10, 0, 1, tzinfo=UTC)
+    finished = datetime(2026, 11, 1, 10, 0, 2, tzinfo=UTC)
+    _edit_run(client, query_id, started_at=started, finished_at=finished)
+
+    body = client.get(f"/api/v1/environments/st1/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert body["origin"] == "written"
+    assert body["sql"] == "SELECT 1 AS one"
+    assert datetime.fromisoformat(body["created_at"]).tzinfo is not None
+    assert datetime.fromisoformat(body["started_at"]) == started
+    assert datetime.fromisoformat(body["finished_at"]) == finished
+    assert body["result_rows"] is None
+    assert body["result_bytes"] is None
+    assert body["error_line"] is None
+    assert body["error_column"] is None
+
+
+def test_the_status_of_a_write_has_its_sql_and_a_server_made_run_has_none(
+    client: TestClient,
+) -> None:
+    """Only `written` and `write` runs give back their SQL; every other origin says `null`."""
+    query_id = _submit_in(client, "st2", "SELECT 1")
+    shown = {"written": True, "write": True}
+    for origin in QueryOrigin:
+        _edit_run(client, query_id, origin=origin)
+        body = client.get(
+            f"/api/v1/environments/st2/queries/{query_id}", headers=AUTH_HEADER
+        ).json()
+        assert body["origin"] == origin.value
+        assert (body["sql"] is not None) is shown.get(origin.value, False)
+
+
+def test_the_status_of_a_preview_has_no_sql(client: TestClient) -> None:
+    """A preview's SQL is the server's own text; the status read says `null`."""
+    query_id = _submit_in(client, "st3", "SELECT 1")
+    _edit_run(client, query_id, origin=QueryOrigin.PREVIEW)
+
+    body = client.get(f"/api/v1/environments/st3/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert body["origin"] == "preview"
+    assert body["sql"] is None
+
+
+def test_the_status_of_a_succeeded_read_has_its_result_rows_and_bytes(
+    client: TestClient,
+) -> None:
+    """Once a read succeeded, its row count and the stored file's size are in the status."""
+    query_id = _submit_in(client, "st4")
+    _edit_run(client, query_id, status=QueryRunStatus.SUCCEEDED, result_rows=3, result_bytes=1234)
+
+    body = client.get(f"/api/v1/environments/st4/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert (body["result_rows"], body["result_bytes"]) == (3, 1234)
+
+
+def test_the_status_of_a_failed_query_has_its_error_position(client: TestClient) -> None:
+    """A failed query's status gives the line and column the worker recorded."""
+    query_id = _submit_in(client, "st5", "SELECT\n  FROM")
+    _edit_run(
+        client,
+        query_id,
+        status=QueryRunStatus.FAILED,
+        error_message="bad",
+        error_cause="invalid_query",
+        error_line=2,
+        error_column=3,
+    )
+
+    body = client.get(f"/api/v1/environments/st5/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert (body["error_line"], body["error_column"]) == (2, 3)

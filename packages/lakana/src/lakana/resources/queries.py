@@ -102,6 +102,22 @@ def waiting_for_from_json(data: object) -> WaitingFor | None:
     )
 
 
+def _optional_time(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 time of a response, or `None` when the field is absent or `null`.
+
+    Parameters
+    ----------
+    value
+        The time as the server wrote it, or `None`.
+
+    Returns
+    -------
+    datetime or None
+        The parsed time, or `None`.
+    """
+    return None if value is None else datetime.fromisoformat(value)
+
+
 def _status_from_json(data: dict[str, Any]) -> QueryStatus:
     """Build a `QueryStatus` from the platform API's JSON response body.
 
@@ -129,6 +145,15 @@ def _status_from_json(data: dict[str, Any]) -> QueryStatus:
         maintenance=data.get("maintenance"),
         error_cause=data.get("error_cause"),
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
+        origin=data.get("origin"),
+        sql=data.get("sql"),
+        created_at=_optional_time(data.get("created_at")),
+        started_at=_optional_time(data.get("started_at")),
+        finished_at=_optional_time(data.get("finished_at")),
+        result_rows=data.get("result_rows"),
+        result_bytes=data.get("result_bytes"),
+        error_line=data.get("error_line"),
+        error_column=data.get("error_column"),
         peak_memory_bytes=data.get("peak_memory_bytes"),
         cpu_seconds=data.get("cpu_seconds"),
         bytes_read=data.get("bytes_read"),
