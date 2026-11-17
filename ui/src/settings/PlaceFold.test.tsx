@@ -39,6 +39,8 @@ describe("PlaceFold", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
+    // The Sign-in page loads on demand: reopen Section only once it has shown and taken the focus.
+    expect(await screen.findByRole("heading", { level: 1, name: "Sign-in" })).toBeInTheDocument();
 
     const again = screen.getByRole("button", { name: "Section" });
     await user.click(again);
