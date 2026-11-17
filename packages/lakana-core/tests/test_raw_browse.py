@@ -1,5 +1,6 @@
 """Tests for browsing `raw/` before an external table is registered (#672)."""
 
+import errno
 import os
 from pathlib import Path
 
@@ -306,8 +307,13 @@ def test_a_local_name_that_is_not_utf8_is_left_out_and_the_listing_goes_on(
     folder = lake / "raw" / "bytes"
     folder.mkdir()
     for name in (b"a\xff.csv", b"b.csv"):
-        with open(os.path.join(os.fsencode(folder), name), "wb") as handle:
-            handle.write(b"id\n1\n")
+        try:
+            with open(os.path.join(os.fsencode(folder), name), "wb") as handle:
+                handle.write(b"id\n1\n")
+        except OSError as error:  # pragma: no cover -- APFS only
+            if error.errno != errno.EILSEQ:
+                raise
+            pytest.skip(f"this file system refuses a name that is not UTF-8: {error}")
     browser = _browser(session, _MAY_REGISTER)
     reader = _reader(session)
     first = browser.list_raw(reader, "dev", path="raw/bytes", limit=1)
