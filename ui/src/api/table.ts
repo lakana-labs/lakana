@@ -692,14 +692,16 @@ export interface TextChange {
   readonly description?: string | null;
   /** The new label (one line, 1 to 100 characters), or null to go back to the project's text. */
   readonly label?: string | null;
+  /** The label's language when it is not `lang`'s; only with `label`. */
+  readonly label_language?: string;
 }
 
 /**
- * Sets or resets a table's description and label in one language.
+ * Sets or resets a table's description and label, in one language or the label in its own.
  *
  * @param ref - The table.
- * @param change - The fields to change.
- * @param lang - The language of the texts.
+ * @param change - The fields to change, and the label's language when it differs.
+ * @param lang - The language of the description, and of the label unless the change names one.
  * @returns The table as the server answers it after the change.
  * @throws {ApiError} for a refusal: 403 for a person who may not edit, 422 for a text that breaks
  *   a rule.
@@ -713,12 +715,12 @@ export function describeTable(ref: TableRef, change: TextChange, lang: string): 
 }
 
 /**
- * Sets or resets a column's description and label in one language.
+ * Sets or resets a column's description and label, in one language or the label in its own.
  *
  * @param ref - The table.
  * @param column - The column's name.
- * @param change - The fields to change.
- * @param lang - The language of the texts.
+ * @param change - The fields to change, and the label's language when it differs.
+ * @param lang - The language of the description, and of the label unless the change names one.
  * @returns The table as the server answers it after the change.
  * @throws {ApiError} for a refusal: 403 for a person who may not edit, 422 for a text that breaks
  *   a rule.

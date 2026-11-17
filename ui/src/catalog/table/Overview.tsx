@@ -33,7 +33,7 @@ const FIRST_COLUMNS = 5;
 function DescriptionBlock(): JSX.Element {
   const { t, i18n } = useTranslation();
   const { table, mayEdit } = useTableData();
-  const { lang, named, fallback, saveTable } = useDescribe(table.description_language);
+  const { lang, labelLang, named, fallback, saveTable } = useDescribe(table);
   const [editing, setEditing] = useState(false);
   const { edit, fallback: heading, returned } = useReturnFocus<HTMLHeadingElement>();
   const edited = table.description_source === "edited" || table.label_source === "edited";
@@ -50,6 +50,7 @@ function DescriptionBlock(): JSX.Element {
         <TextEditor
           texts={{ description: table.description, label: table.label }}
           lang={lang}
+          labelLang={labelLang}
           named={named}
           onSave={saveTable}
           onDone={close}

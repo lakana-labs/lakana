@@ -1154,3 +1154,106 @@ def test_table_get_shows_the_effects_and_marks_a_column_the_table_does_not_have(
     assert shown.health_missing == ("range.pricee",)
     # A string column has no range: a blocking entry on it is never judged.
     assert shown.health_never_judged == {"range.status": "a string column has no range"}
+
+
+def test_a_label_is_saved_in_its_own_language_apart_from_the_descriptions(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """`label_language` puts the label in the main language while the description goes to `fr`."""
+    catalog_with_orders.set_table_description(
+        principal, _ORDERS, "Une ligne.", label="Orders", language="fr", label_language="EN"
+    )
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "id", "Le numéro.", label="Nummer", language="fr", label_language="de"
+    )
+    english = catalog_with_orders.describe_table(principal, _ORDERS)
+    french = catalog_with_orders.describe_table(principal, _ORDERS, languages=["fr"])
+    german = catalog_with_orders.describe_table(principal, _ORDERS, languages=["de"])
+    assert (english.label, english.label_source, english.label_language) == (
+        "Orders",
+        "edited",
+        "en",
+    )
+    assert (french.description, french.description_language) == ("Une ligne.", "fr")
+    assert (french.label, french.label_language) == ("Orders", "en")
+    assert german.column_labels["id"].text == "Nummer"
+    assert german.column_labels["id"].language == "de"
+    assert french.column_descriptions["id"].text == "Le numéro."
+    assert "id" not in french.column_labels or french.column_labels["id"].language != "fr"
+    row = session.scalars(select(Table)).one()
+    assert row.text_languages == ["de", "fr"]
+    (table_event,) = _events(session, AuditEventType.TABLE_DESCRIBED)
+    assert table_event.detail == {
+        "table": "silver.orders",
+        "language": "fr",
+        "label_language": "en",
+        "old_length": 0,
+        "new_length": 10,
+        "label_old_length": 0,
+        "label_new_length": 6,
+        "reset": False,
+    }
+    (column_event,) = _events(session, AuditEventType.COLUMN_DESCRIBED)
+    assert column_event.detail["label_language"] == "de"
+
+
+def test_a_label_language_like_the_descriptions_is_audited_as_before(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """Naming the same language for both is today's edit, with no extra audit field."""
+    catalog_with_orders.set_table_description(
+        principal, _ORDERS, label="Commandes", language="fr", label_language="FR"
+    )
+    (event,) = _events(session, AuditEventType.TABLE_DESCRIBED)
+    assert "label_language" not in event.detail
+    assert event.detail["language"] == "fr"
+
+
+def test_a_label_language_without_a_label_or_not_a_tag_is_refused(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """A label language needs a label to apply to and must be a tag; nothing is written."""
+    with pytest.raises(ValidationError, match="label_language names the language of `label`"):
+        catalog_with_orders.set_table_description(
+            principal, _ORDERS, "Une ligne.", language="fr", label_language="en"
+        )
+    with pytest.raises(ValidationError, match="label_language: "):
+        catalog_with_orders.set_column_description(
+            principal, _ORDERS, "id", label="Numéro", label_language="fr_FR"
+        )
+    assert session.scalars(select(Table)).one().text_languages is None
+    assert _events(session, AuditEventType.TABLE_DESCRIBED) == []
+
+
+def test_a_label_in_a_51st_language_is_refused_even_when_the_description_language_is_listed(
+    catalog_with_orders: CatalogService, principal: PrincipalRef, session: Session
+) -> None:
+    """The language limit counts the label's language too, and two new ones together."""
+    row = session.scalars(select(Table)).one()
+    tags = [f"a{chr(97 + i // 26)}{chr(97 + i % 26)}" for i in range(MAX_EDIT_LANGUAGES - 1)]
+    for tag in tags:
+        session.add(
+            TextTranslation(
+                id=uuid.uuid4(),
+                table_id=row.id,
+                subject="table",
+                name="",
+                language=tag,
+                field="label",
+                text_project="x",
+            )
+        )
+    row.text_languages = sorted(tags)
+    session.commit()
+    with pytest.raises(ValidationError, match=re.escape("To add `fr` and `it`, first remove")):
+        catalog_with_orders.set_table_description(
+            principal, _ORDERS, "Une ligne.", label="Ordini", language="fr", label_language="it"
+        )
+    catalog_with_orders.set_column_description(
+        principal, _ORDERS, "id", "Le numéro.", label="Numéro", language="fr", label_language="FR"
+    )
+    assert len(row.text_languages or []) == MAX_EDIT_LANGUAGES
+    catalog_with_orders.set_table_description(
+        principal, _ORDERS, "Une ligne.", label="y", language="fr", label_language=tags[0]
+    )
+    assert len(row.text_languages or []) == MAX_EDIT_LANGUAGES
