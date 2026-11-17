@@ -58,7 +58,8 @@ class Groups:
         Parameters
         ----------
         name
-            The group's unique name.
+            The group's unique name; no control or format character, no line separator
+            and no space at either end.
         override_reason
             Why, 10 to 500 characters on one line, to create the group although an access file
             manages its scope (an audited override, for an administrator of the instance).

@@ -17,7 +17,7 @@ Create a group.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str` | required | The group's unique name. |
+| `name` | `str` | required | The group's unique name; no control or format character, no line separator and no space at either end. |
 | `override_reason` | `str | None` | `None` | Why, 10 to 500 characters on one line, to create the group although an access file manages its scope (an audited override, for an administrator of the instance). |
 
 Returns: `Group`. The created group.

@@ -72,7 +72,8 @@ class PackageIndexes:
         Parameters
         ----------
         name
-            Unique name; no dots.
+            Unique name; no dots, no control or format character, no line
+            separator and no space at either end.
         url
             ``https://host/path`` of the index, without a user name or password.
         credential_secret

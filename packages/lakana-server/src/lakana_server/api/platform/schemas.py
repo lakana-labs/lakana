@@ -2191,7 +2191,8 @@ class GroupCreate(BaseModel):
     Parameters
     ----------
     name
-        Unique group name.
+        Unique group name; no control or format character, no line separator and no space
+        at either end.
     """
 
     name: str
@@ -2217,7 +2218,8 @@ class TokenIssueIn(BaseModel):
     Parameters
     ----------
     name
-        A human label for this PAT (e.g. "laptop", "CI").
+        A human label for this PAT (e.g. "laptop", "CI"); no control or format character,
+        no line separator and no space at either end.
     """
 
     name: str
@@ -3254,7 +3256,8 @@ class RepositoryCreate(BaseModel):
     Parameters
     ----------
     name
-        Unique name; no dots.
+        Unique name; no dots, no control or format character, no line separator and no
+        space at either end.
     kind
         ``local``, ``https`` or ``ssh``.
     url
@@ -3441,7 +3444,8 @@ class PackageIndexCreate(BaseModel):
     Parameters
     ----------
     name
-        Unique name; no dots.
+        Unique name; no dots, no control or format character, no line separator and no
+        space at either end.
     url
         ``https://host/path`` of the index, without a user name or password.
     credential_secret

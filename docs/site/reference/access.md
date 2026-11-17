@@ -140,6 +140,7 @@ The REST answer also has `picture`, the etag of the profile picture, which the w
 | a caller without the right in "Who may read what" | `403`, audited |
 | an unknown principal, group, environment, namespace or table, for an administrator | `404` |
 | an unknown principal, for anyone else | `403`, audited |
+| a grant the principal or group already holds: the same role or action on the same object | `409`; the message names that grant's id, and nothing is created |
 | a change in a scope an access file manages | `409`; the message names the scope and the next step, and `--override-managed --reason` overrides it ([The access file](access-file.md#the-override)) |
 
 ## SDK and REST

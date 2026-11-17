@@ -19,7 +19,9 @@ before it is done.
    GitLab and Bitbucket an HTTPS URL works too, even the address of a page of the repository
    (`…/tree/main`): the page names the host and shows the SSH address it connects to. A URL with
    `?` or `#` is refused. **Name in Lakana** is proposed from the URL's last part, a dot
-   turned into a hyphen. For an
+   turned into a hyphen. A name may not hold a `.`, a `/`, a control or format character
+   (such as U+202E, which reverses the text after it) or a line separator, nor start or end
+   with a space, so that no repository looks like another in a list. For an
    HTTPS URL of another host the page cannot tell its SSH address: enter the SSH URL (the
    host's Clone button shows it). **Use a token instead** shows the command that registers the
    HTTPS URL with a token, for every host; a token belongs to a person and expires, a deploy

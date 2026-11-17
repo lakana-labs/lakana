@@ -18,7 +18,7 @@ Issue a PAT for a principal.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `principal` | `str` | required | The principal the PAT authenticates as. |
-| `name` | `str` | required | A human label for this PAT (e.g. `"laptop"`, `"CI"`). |
+| `name` | `str` | required | A human label for this PAT (e.g. `"laptop"`, `"CI"`); no control or format character, no line separator and no space at either end. |
 
 Returns: `IssuedToken`. The full token value — shown here exactly once.
 

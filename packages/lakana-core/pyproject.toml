@@ -29,7 +29,7 @@ dependencies = [
     "sqlalchemy>=2.1.6",
     "alembic>=1.13",
     "pydantic>=2.14.3",
-    "pydantic-settings>=2.16.0",
+    "pydantic-settings>=2.16.3",
     # Before raising this bound, check `_stream_batches` in lakana_core/catalog/history.py: it
     # calls pyiceberg's private `ArrowScan._record_batches_from_scan_tasks_and_deletes` and
     # `_read_all_delete_files` to read history tables lazily.
