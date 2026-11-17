@@ -153,9 +153,6 @@
     "rows_other": "{{count}} rows · read as you",
     "partOf": "First {{shown}} of {{count}} rows · read as you",
     "time": " · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
-    "masked": "Masked for you:",
-    "maskedOf": "column {{column}} of {{table}}",
-    "maskedMore": "and {{count}} more",
     "notAllowed": "Preview runs a query as you, which needs the right to run queries in {{environment}}. Ask an administrator for the Analyst role there.",
     "starting": "Starting the preview…",
     "checking": "Checking that you may run queries…",
@@ -169,7 +166,6 @@
     "busy": "The server is busy preparing results. Try again.",
     "failed": "The preview did not finish. Refresh to run it again.",
     "empty": "No rows to show. Overview says when the table was last written.",
-    "cutNote": "Some values were too large to send and are marked cut.",
     "refresh": "Refresh"
   },
   "referencesTab": {

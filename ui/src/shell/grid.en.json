@@ -8,5 +8,9 @@
   "cutMark": "… (cut)",
   "value": "Value",
   "valueOf": "{{column}}, row {{row}}",
-  "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
+  "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here.",
+  "masked": "Masked for you:",
+  "maskedOf": "column {{column}} of {{table}}",
+  "maskedMore": "and {{count}} more",
+  "cutNote": "Some values were too large to send and are marked cut."
 }

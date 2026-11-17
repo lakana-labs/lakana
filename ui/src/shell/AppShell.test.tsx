@@ -32,6 +32,17 @@ describe("AppShell", () => {
     expect(link).toHaveFocus();
   });
 
+  it("keeps focus after a move to another page that asks to keep it", async () => {
+    const { router } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const link = screen.getByRole("link", { name: "Jobs" });
+    link.focus();
+
+    await act(() => router.navigate("/catalog/prod", { state: { keepFocus: true } }));
+
+    expect(link).toHaveFocus();
+  });
+
   it("still focuses the heading after moving to another page", async () => {
     const { router } = renderShell("/queries");
     await screen.findByRole("heading", { level: 1, name: "Queries" });

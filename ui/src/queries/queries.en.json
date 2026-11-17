@@ -1,3 +1,43 @@
 {
-  "sql": "SQL"
+  "sql": "SQL",
+  "untitled": "Untitled query",
+  "runName": "Query {{id}}",
+  "run": "Run",
+  "runKeys": {
+    "mac": "⌘↵",
+    "other": "Ctrl ↵"
+  },
+  "cancel": "Cancel",
+  "cancelling": "Cancelling…",
+  "loadingEditor": "Loading the editor…",
+  "environment": {
+    "label": "Environment",
+    "trigger": "Environment: {{environment}}",
+    "triggerProtected": "Environment: {{environment}}, protected",
+    "protected": "protected"
+  },
+  "noEnvironment": "You may not run queries in any environment yet. Ask an administrator for the right to run queries (SUBMIT_QUERY).",
+  "noEnvironmentCli": "Meanwhile, run a query from the command line:",
+  "copy": "Copy command",
+  "state": {
+    "submitting": "Submitting the query…",
+    "starting": "Starting the query…",
+    "reading": "Reading the rows…"
+  },
+  "failed": "The query failed.",
+  "cancelled": "The query was cancelled.",
+  "goTo": "Go to line {{line}}, column {{column}}",
+  "lost": "The state of the query could not be read: {{problem}}",
+  "tryAgain": "Try again",
+  "result": {
+    "label": "Result of {{name}}",
+    "summary_one": "{{rows}} row · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
+    "summary_other": "{{rows}} rows · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
+    "rows_one": "{{rows}} row",
+    "rows_other": "{{rows}} rows",
+    "limit": "Showing the first {{shown}} of {{rows}} rows; download the whole result.",
+    "more": "Show 100 more",
+    "empty": "The query returned no rows.",
+    "gone": "This run's result is no longer kept."
+  }
 }

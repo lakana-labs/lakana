@@ -1,0 +1,119 @@
+/* The Queries screen: the work column with its toolbar, the editor and the result. */
+.queries {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+}
+
+/* A grid item's minimum width is its content's: without this, a wide result would push the page
+   sideways at 320 px instead of scrolling inside its own region. */
+.queries-work {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The query's name, the environment and Run; it wraps at 320 px. */
+.queries-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.queries-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.env-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.env-picker .button,
+.env-picker .menu-item {
+  gap: var(--space-1);
+}
+
+/* A protected environment's mark: the colour of danger beside the word, never alone. */
+.env-protected {
+  color: var(--color-bad);
+}
+
+.queries-run kbd {
+  font-family: var(--font-sans);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+}
+
+/* The editor's host: the browser's own handle makes it taller or shorter. */
+.queries-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 12rem;
+  overflow: auto;
+  resize: vertical;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+.queries-editor-skeleton {
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.queries-run-line,
+.queries-result-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+/* Laid out over the shared .step-error, which gives the alert its look. */
+.queries-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.queries-alert p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.queries-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* The rows and duration, and the downloads after them; it wraps at 320 px. */
+.queries-result-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.queries-result-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}

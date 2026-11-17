@@ -54,9 +54,11 @@ export interface AppShellProps {
 /**
  * Renders the shell. Ctrl+K and ⌘ K open the palette from anywhere, a text field included;
  * after a navigation to another path, focus moves to the new page's heading (not when only the
- * query changes, so a search field or a tree keeps it, and not on the first load, so the
- * skip link stays the first stop). The person's access and interface state are there for every
- * screen inside; the interface state is read once, when the shell appears.
+ * query changes, so a search field or a tree keeps it, not when the move's history state is
+ * `{ keepFocus: true }`, so a control that moved to its own new address (Run) keeps it, and not
+ * on the first load, so the skip link stays the first stop). The person's access and interface
+ * state are there for every screen inside; the interface state is read once, when the shell
+ * appears.
  *
  * @param props - The access set and the person.
  * @param props.access - The areas the user may use.
@@ -76,12 +78,15 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   }, []);
   const areas = visibleAreas(access);
 
+  const keepFocus = (location.state as { keepFocus?: unknown } | null)?.keepFocus === true;
   useEffect(() => {
     if (location.pathname !== shownPath.current) {
       shownPath.current = location.pathname;
-      main.current?.querySelector("h1")?.focus();
+      if (!keepFocus) {
+        main.current?.querySelector("h1")?.focus();
+      }
     }
-  }, [location.pathname]);
+  }, [location.pathname, keepFocus]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {

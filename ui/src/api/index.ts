@@ -106,7 +106,6 @@ export type {
   GrantOut,
   GraphNodeOut,
   GraphOut,
-  MaskedColumnOut,
   ModelReferenceOut,
   PermissionOut,
   PermissionsOut,

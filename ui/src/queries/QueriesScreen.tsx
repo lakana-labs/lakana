@@ -1,40 +1,27 @@
 /**
- * The Queries area's screen, loaded on demand: for now its heading and the SQL editor.
+ * The Queries area's screen, loaded on demand: write SQL, run it in a chosen environment and
+ * see its result.
  *
  * @packageDocumentation
  */
-import "./queryStrings";
+import type { JSX } from "react";
+import { Route, Routes } from "react-router";
 
-import { type JSX, lazy, Suspense, useState } from "react";
-import { useTranslation } from "react-i18next";
-
-import { Page } from "../shell/Page";
-
-// CodeMirror loads in a chunk of its own, only when the screen opens.
-const SqlEditor = lazy(() => import("./editor/SqlEditor"));
+import { NotFound } from "../shell/NotFound";
+import { QueryWork } from "./QueryWork";
 
 /**
- * Renders the Queries area: its heading and the editor, named "SQL".
+ * The Queries screen: a new query at `/queries`, a run at `/queries/{environment}/runs/{id}`
+ * (where Home, Recent and Run lead), and the not-found state for every other address.
  *
- * @returns The screen.
+ * @returns The place the address names.
  */
 export function AreaScreen(): JSX.Element {
-  const { t } = useTranslation();
-  const [sql, setSql] = useState("");
   return (
-    <Page title={t("areas.queries.name")}>
-      <Suspense fallback={null}>
-        <SqlEditor
-          value={sql}
-          onChange={setSql}
-          onRun={() => undefined}
-          onCancel={() => false}
-          readOnly={false}
-          environment={null}
-          error={null}
-          label={t("queries.sql")}
-        />
-      </Suspense>
-    </Page>
+    <Routes>
+      <Route index element={<QueryWork mode="new" />} />
+      <Route path=":env/runs/:id" element={<QueryWork mode="run" />} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
   );
 }

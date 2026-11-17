@@ -12,6 +12,7 @@ import type {
   QueryWaitingOut,
 } from "../api/queries";
 import type { SavedQueryOut } from "../api/savedQueries";
+import type { ResultPageOut } from "../api/table";
 
 import type { FakeRoute } from "./server";
 
@@ -55,6 +56,28 @@ export function aRun(over: Partial<QueryRunOut> = {}): QueryRunOut {
     started_at: "2026-11-16T09:00:01Z",
     finished_at: "2026-11-16T09:00:02Z",
     waiting_for: null,
+    ...over,
+  };
+}
+
+/**
+ * The first page of a run's result: one column `one` and one row, nothing masked or cut, the end.
+ *
+ * @param over - The fields that differ.
+ * @returns The page, as the JSON result read answers it.
+ */
+export function aPage(over: Partial<ResultPageOut> = {}): ResultPageOut {
+  return {
+    columns: [{ name: "one", type: "int32" }],
+    columns_cut: 0,
+    masked_columns: [],
+    masked_columns_cut: 0,
+    rows: [[1]],
+    row_cut: [],
+    row_count: 1,
+    next_offset: null,
+    duration_ms: 1_000,
+    preview: null,
     ...over,
   };
 }

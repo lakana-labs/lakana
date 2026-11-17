@@ -8,8 +8,8 @@
 import { type JSX, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { MaskedColumnOut, QueryRunStatus, ResultPageOut } from "../../api";
-import { pageCells, ResultGrid } from "../../shell/ResultGrid";
+import type { QueryRunStatus, ResultPageOut } from "../../api";
+import { pageCells, ResultGrid, ResultNotes } from "../../shell/ResultGrid";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import { StatusGlyph } from "../../status/StatusGlyph";
 import { useTableData } from "./TableContext";
@@ -88,41 +88,6 @@ function summary(page: ResultPageOut, t: ReturnType<typeof useTranslation>["t"])
     : count + t("table.preview.time", { seconds: page.duration_ms / 1_000 });
 }
 
-/** Properties of {@link Masked}. */
-interface MaskedProps {
-  /** The columns masked for the person. */
-  readonly columns: readonly MaskedColumnOut[];
-  /** How many more the page left out. */
-  readonly more: number;
-  /** The previewed table's dotted name. */
-  readonly own: string;
-}
-
-/**
- * Names the columns masked for the person: a column of the table by its name, a column of a
- * table a view reads with that table.
- *
- * @param props - The columns, how many more, and the table's own name.
- * @param props.columns - The columns masked for the person.
- * @param props.more - How many more the page left out.
- * @param props.own - The previewed table's dotted name.
- * @returns The line.
- */
-function Masked({ columns, more, own }: MaskedProps): JSX.Element {
-  const { t } = useTranslation();
-  const names = columns.map((masked) =>
-    masked.table === own
-      ? masked.column
-      : t("table.preview.maskedOf", { column: masked.column, table: masked.table }),
-  );
-  const tail = more > 0 ? ` ${t("table.preview.maskedMore", { count: more })}` : "";
-  return (
-    <p className="second">
-      <span>{t("table.preview.masked")}</span> <VisibleText text={names.join(", ") + tail} />
-    </p>
-  );
-}
-
 /**
  * The Preview tab: runs the preview while it is open, cancels it when it is left, and shows the
  * rows, the masked columns and Refresh; a person who may not run queries gets one line and no
@@ -145,11 +110,6 @@ export function PreviewTab(): JSX.Element {
   const busy = phase === "checking" || phase === "waiting";
   const shown = phase === "done" ? page : null;
   const cells = shown === null ? [] : pageCells(shown, t);
-  const anyCut =
-    shown !== null &&
-    (shown.row_cut.length > 0 ||
-      shown.columns_cut > 0 ||
-      cells.some((row) => row.some((cell) => cell.cut)));
   return (
     <div className="preview">
       <div className="preview-bar">
@@ -168,14 +128,7 @@ export function PreviewTab(): JSX.Element {
       )}
       {shown !== null && (
         <>
-          {shown.masked_columns !== null && shown.masked_columns.length > 0 && (
-            <Masked
-              columns={shown.masked_columns}
-              more={shown.masked_columns_cut}
-              own={`${ref.namespace}.${ref.name}`}
-            />
-          )}
-          {anyCut && <p className="second">{t("table.preview.cutNote")}</p>}
+          <ResultNotes page={shown} cells={cells} own={`${ref.namespace}.${ref.name}`} />
           {shown.row_count === 0 ? (
             <p className="empty">{t("table.preview.empty")}</p>
           ) : (

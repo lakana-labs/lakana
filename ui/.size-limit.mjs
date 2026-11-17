@@ -42,10 +42,30 @@ const NAMED_LIMITS = [
   // Measured 31.05 kB (2026-11-16) with the lazy loaders of the place menu and its note, the
   // move to a namespace once the tree read after its creation arrives, and the quoted
   // environment of the deploy command; the limit holds.
-  { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
+  // Lowered to the measured 16.36 kB (2026-11-17) + 10 %: React Aria's Select, ListBox and Popover
+  // (the Sort by and Order menus) moved into a chunk the Catalog shares with the Queries screen's
+  // environment picker (format-, below).
+  { name: "Catalog", prefix: "CatalogScreen-", limit: "18 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
-  { name: "Queries", prefix: "QueriesScreen-", limit: "0.6 kB" },
+  // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected
+  // mark, Run that becomes Cancel, the run's polling (fast, then slow, three failures and Try
+  // again) without a cancel on leaving, the run's address, the error with Go to its line and
+  // column, the result's line with Show 100 more up to 1,000 rows, the editor's placeholder and
+  // the screen's strings. The grid and the menus come in the shared chunks below.
+  { name: "Queries", prefix: "QueriesScreen-", limit: "5.31 kB" },
+  // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
+  // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
+  // tab and the Queries screen share; loaded with the first of them.
+  { name: "the result grid", prefix: "ResultGrid-", limit: "23.52 kB" },
+  // Measured 16.54 kB (2026-11-17) + 10 %: React Aria's Select, ListBox and Popover with the
+  // catalog's numbers and sizes (catalog/format.ts, which names the chunk), shared by the
+  // Catalog's menus, the Queries screen's environment picker and result line, and the table
+  // page's tabs; never in the first load.
+  { name: "the menus and number formats", prefix: "format-", limit: "18.19 kB" },
+  // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
+  // shares with the screens that show a state.
+  { name: "the status label", prefix: "StatusLabel-", limit: "0.27 kB" },
   // Measured 125.08 kB (2026-11-17) + 10 %: the SQL editor, almost all of it CodeMirror 6 (state,
   // view, commands, language, lang-sql's grammar and keywords, autocomplete, lint) with the
   // Still Water theme, the run keys, the error mark and the sources' registry. It loads only when
@@ -150,7 +170,10 @@ const NAMED_LIMITS = [
   // Measured 22.73 kB (2026-11-17) with the grid in shell/ResultGrid.tsx, which the Queries screen
   // shares and which the bundler leaves in this chunk (22.55 kB before, with grid.en.json now in
   // it); the limit holds.
-  { name: "the Preview tab", prefix: "PreviewTab-", limit: "24.17 kB" },
+  // Lowered to the measured 1.79 kB (2026-11-17) + 10 %: the grid, its masked and cut lines and
+  // its strings moved into the chunk the Preview tab shares with the Queries screen (ResultGrid-,
+  // above).
+  { name: "the Preview tab", prefix: "PreviewTab-", limit: "1.97 kB" },
   // Measured 4.29 kB (2026-11-13) + 10 %: the Lineage tab, its layered layout of tables, assets
   // and connections with the merging of the two answers, the drawing with its links and the
   // boxes' titles, the list beside it, the steps kept in the address, the full-screen view and
@@ -197,6 +220,8 @@ const NAMED_LIMITS = [
   // Measured 870 B (the catalog's addresses: the list, a table and its tabs; Home's links import
   // them, so the chunk is shared by Home and the Catalog, 2026-11-13) + 10 %.
   // Raised to the measured 994 B (2026-11-16) + 10 % with an artifact's tabs and the tabs by kind.
+  // The Queries screen's addresses (queries/paths.ts, 102 B on 2026-11-17, shared by Home's links
+  // and the Queries screen) make a chunk of the same prefix, held to the same limit.
   { name: "the catalog's addresses", prefix: "paths-", limit: "1.09 kB" },
   // Measured 95 B (a person's address, which the Access area and the Health and Access tabs
   // share, 2026-11-13) + 10 %.
@@ -286,6 +311,10 @@ export default [
   // react-router in one chunk (codeSplitting.groups); it measures 208.57 kB, and the limit holds.
   // Measured 210.29 kB (2026-11-17) with the Queries area's loader in the routes (210.05 kB
   // before); CodeMirror stays in its own chunk, and the limit holds.
+  // Measured 210.93 kB (2026-11-17) with the Queries screen: React Aria's form validation left
+  // the text field's chunk for one of its own once the environment picker's Select shared it
+  // (+0.39 kB), and the entry names the screen's new shared chunks and keeps the focus on Run
+  // after its move to the run's address; the editor stays out of it, and the limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -317,6 +346,10 @@ export default [
   // (2026-11-14) + 10 %.
   // Measured 8.43 kB (2026-11-16) with the menu's separator and the note under a menu's items;
   // the limit holds.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "9.09 kB" },
+  // Raised to the measured 9.2 kB (2026-11-17) + 10 %: the Queries screen's rules (the toolbar
+  // and the result's line that wrap at 320 px, the editor's resizable host and its placeholder,
+  // the protected mark in the colour of danger and the alert's layout), and the shared grid's
+  // rules in a file of their own with the grid's chunk.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "10.12 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

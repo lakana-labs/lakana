@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Page } from "./Page";
 import type { AreaModule } from "./routes";
 
+import { queryRoutes } from "../test/queries";
 import { renderShell } from "../test/render";
 
 const shippedAreas = [
@@ -150,7 +151,7 @@ describe("appRoutes", () => {
   });
 
   it("/queries lazy-loads its screen, with the SQL editor in a shadow root", async () => {
-    renderShell("/queries");
+    renderShell("/queries", { routes: queryRoutes() });
 
     expect(await screen.findByRole("heading", { level: 1, name: "Queries" })).toBeInTheDocument();
     const host = await waitFor(() => {

@@ -70,6 +70,54 @@ export function pageCells(page: ResultPageOut, t: TFunction): PreviewText[][] {
   );
 }
 
+/** Properties of {@link ResultNotes}. */
+interface ResultNotesProps {
+  /** The page. */
+  readonly page: ResultPageOut;
+  /** The page's cells as text, from {@link pageCells}. */
+  readonly cells: readonly (readonly PreviewText[])[];
+  /**
+   * The dotted name of the table whose own masked columns are named alone (a preview's table);
+   * null for a query, whose masked columns are each named with their table.
+   */
+  readonly own: string | null;
+}
+
+/**
+ * The lines over the rows: the columns masked for the person, and that some values were too
+ * large to send and are marked cut. Each line shows only when it has something to say.
+ *
+ * @param props - The page, its cells and the table whose columns are named alone.
+ * @param props.page - The page.
+ * @param props.cells - The page's cells as text.
+ * @param props.own - The table whose masked columns are named alone, or null.
+ * @returns The lines.
+ */
+export function ResultNotes({ page, cells, own }: ResultNotesProps): JSX.Element {
+  const { t } = useTranslation();
+  const names = (page.masked_columns ?? []).map((masked) =>
+    masked.table === own
+      ? masked.column
+      : t("grid.maskedOf", { column: masked.column, table: masked.table }),
+  );
+  const more = page.masked_columns_cut;
+  const tail = more > 0 ? ` ${t("grid.maskedMore", { count: more })}` : "";
+  const anyCut =
+    page.row_cut.length > 0 ||
+    page.columns_cut > 0 ||
+    cells.some((row) => row.some((cell) => cell.cut));
+  return (
+    <>
+      {names.length > 0 && (
+        <p className="second">
+          <span>{t("grid.masked")}</span> <VisibleText text={names.join(", ") + tail} />
+        </p>
+      )}
+      {anyCut && <p className="second">{t("grid.cutNote")}</p>}
+    </>
+  );
+}
+
 /** Properties of {@link ResultGrid}. */
 interface ResultGridProps {
   /** The page. */
