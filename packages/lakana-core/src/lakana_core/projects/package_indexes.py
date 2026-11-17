@@ -32,7 +32,13 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
-from lakana_core.identifiers import is_secret_name, shown, validate_path_component
+from lakana_core.identifiers import (
+    is_secret_name,
+    refuse_hidden_characters,
+    refuse_outer_whitespace,
+    shown,
+    validate_path_component,
+)
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import AuditEventType, PackageIndex
 from lakana_core.projects.lookups import live_environment_names
@@ -279,7 +285,9 @@ class PackageIndexService:
             A `PermissionDenied`: `credential_secret` names a secret that is not bound to this
             index (unbound, bound elsewhere, or used by its environment).
         ValidationError
-            If the name, the URL or the secret name is invalid.
+            If the name, the URL or the secret name is invalid, or the name holds an invisible
+            or line-breaking character (`refuse_hidden_characters`) or starts or ends with a
+            space (`refuse_outer_whitespace`).
         AlreadyExistsError
             If the name or the URL is taken, including by a concurrent create.
         ConflictError
@@ -290,6 +298,8 @@ class PackageIndexService:
         self._authz.authorize(p, Action.MANAGE_PACKAGE_INDEX, Securable.instance_scope())
         require_step_up(p)
         _validate_name(name)
+        refuse_hidden_characters(name, what="Package index name")
+        refuse_outer_whitespace(name, what="Package index name")
         stored = normalize_index_url(url, credential=credential_secret is not None)
         _validate_secret_name(credential_secret)
         clash = self._clash(name, stored)
