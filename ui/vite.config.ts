@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { SHELL_CHUNK } from "./build/chunk-groups.ts";
 import { cspFile } from "./build/csp-file.ts";
 import { browserTargets } from "./build/targets.ts";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
@@ -39,6 +40,8 @@ export default defineConfig({
         // first load, with what they import. Settings' places, each loaded on its own, would
         // otherwise split them, React Aria's Link and its press and hover hooks into chunks of
         // their own, and the exports between them cost about 1.5 kB.
+        // The pattern (build/chunk-groups.ts) names a file inside react-aria-components; its test
+        // fails if an update moves it.
         codeSplitting: {
           groups: [
             {
@@ -47,7 +50,7 @@ export default defineConfig({
             },
             {
               name: "shell",
-              test: /src[\\/]shell[\\/](Page|NotFound)\.tsx|react-aria-components[\\/]dist[\\/]private[\\/]Button\.mjs/,
+              test: SHELL_CHUNK,
             },
           ],
         },

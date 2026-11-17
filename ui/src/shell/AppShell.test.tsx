@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, cleanup, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -67,6 +67,13 @@ describe("AppShell", () => {
   });
 
   it("leaves the focus alone when the first load is redirected", async () => {
+    // Status is opened once first, so that its chunk is cached: the redirect's focus would
+    // otherwise find no heading yet, and the test would pass without the guard.
+    const first = renderShell("/settings/status");
+    await screen.findByRole("heading", { level: 1, name: "Status" });
+    cleanup();
+    first.router.dispose();
+
     renderShell("/settings");
     const heading = await screen.findByRole("heading", { level: 1, name: "Status" });
     await act(async () => {
