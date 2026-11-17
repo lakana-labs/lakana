@@ -9,7 +9,7 @@ describe("links", () => {
     ["run", "prod", "8d2e4f60", "/jobs"],
     ["check", "prod", "8d2e4f60", "/jobs"],
     ["worker", null, "w-2", "/settings/status"],
-    ["recovery_link", null, "link-1", "/access/recovery-links"],
+    ["recovery_link", null, "link-1", "/settings/sign-in/recovery-links"],
   ] as const)(
     "opens a %s at its page or, until it has one, at its area",
     (kind, environment, ref, path) => {

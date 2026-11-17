@@ -7,14 +7,14 @@ import type { AreaModule } from "./routes";
 import { queryRoutes } from "../test/queries";
 import { renderShell } from "../test/render";
 
+// The area, its address and the heading it opens on: Settings opens on its first place, Status.
 const shippedAreas = [
-  ["Home", "/"],
-  ["Catalog", "/catalog"],
-  ["Queries", "/queries"],
-  ["Jobs", "/jobs"],
-  ["Connections", "/connections"],
-  ["Access", "/access"],
-  ["Settings", "/settings"],
+  ["Home", "/", "Home"],
+  ["Catalog", "/catalog", "Catalog"],
+  ["Queries", "/queries", "Queries"],
+  ["Jobs", "/jobs", "Jobs"],
+  ["Connections", "/connections", "Connections"],
+  ["Settings", "/settings", "Status"],
 ] as const;
 
 /**
@@ -31,13 +31,13 @@ function currentLinks(): string[] {
 }
 
 describe("appRoutes", () => {
-  it.each(shippedAreas)("%s has its own URL, heading and title", async (name, path) => {
+  it.each(shippedAreas)("%s has its own URL, heading and title", async (name, path, heading) => {
     renderShell(path);
 
-    expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
     // A screen loaded on demand renders outside act(), so its title effect may come a moment later.
     await waitFor(() => {
-      expect(document.title).toBe(`${name} · Lakana`);
+      expect(document.title).toBe(`${heading} · Lakana`);
     });
     expect(currentLinks()).toEqual([name]);
   });
@@ -172,5 +172,61 @@ describe("appRoutes", () => {
       await screen.findByRole("heading", { level: 1, name: "You cannot use Jobs" }),
     ).toBeInTheDocument();
     expect(load).not.toHaveBeenCalled();
+  });
+
+  describe("the old Access addresses", () => {
+    const PEOPLE = {
+      "GET /api/v1/principals/kim%20lee": {
+        status: 200,
+        body: { name: "kim lee", type: "USER", is_active: true, picture: null, held_admin: false },
+      },
+      "GET /api/v1/principals/kim%20lee/passkeys": { status: 200, body: [] },
+      "GET /api/v1/principals/kim%20lee/sessions": { status: 200, body: [] },
+    };
+
+    it("keeps the encoding, the search and the hash, and replaces the old entry", async () => {
+      const { router } = renderShell("/access/people/kim%20lee?from=mail#passkeys", {
+        routes: PEOPLE,
+      });
+
+      expect(await screen.findByRole("heading", { level: 1, name: "kim lee" })).toBeInTheDocument();
+      expect(router.state.location.pathname).toBe("/settings/access/people/kim%20lee");
+      expect(router.state.location.search).toBe("?from=mail");
+      expect(router.state.location.hash).toBe("#passkeys");
+      expect(router.state.historyAction).toBe("REPLACE");
+    });
+
+    it("an old address of a hidden place lands on the permission state", async () => {
+      const { router, server } = renderShell("/access/invites", { me: { admin: false } });
+
+      expect(
+        await screen.findByRole("heading", { level: 1, name: "You cannot use Invites" }),
+      ).toBeInTheDocument();
+      expect(router.state.location.pathname).toBe("/settings/sign-in/invites");
+      expect(server.sent.filter((request) => request.path === "/api/v1/invites")).toEqual([]);
+    });
+
+    it("a path that only begins with access is not found", async () => {
+      const { router } = renderShell("/accessibility");
+
+      expect(
+        await screen.findByRole("heading", { level: 1, name: "This page does not exist" }),
+      ).toBeInTheDocument();
+      expect(router.state.location.pathname).toBe("/accessibility");
+    });
+
+    it.each([
+      ["/access", "People"],
+      ["/access/recovery-links", "Recovery links"],
+    ])("%s lands on %s for an administrator", async (path, heading) => {
+      renderShell(path, {
+        routes: {
+          "GET /api/v1/principals": { status: 200, body: [] },
+          "GET /api/v1/recovery-links": { status: 200, body: [] },
+        },
+      });
+
+      expect(await screen.findByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
+    });
   });
 });

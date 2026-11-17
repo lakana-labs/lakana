@@ -11,8 +11,7 @@ a colleague gets one).
 The first time you sign in with access to the instance, a window says "Welcome to Lakana" and
 offers **Start the tour** or **Skip** (someone with no access yet gets it once an administrator
 has granted them a role). The tour shows the places in the menu on the left one at a time, in the menu's order:
-Home, Catalog, Queries, Jobs, Connections, Access and Settings (the last two only for an
-administrator, as in the menu), then Search and Help. Each step outlines its place and says in a
+Home, Catalog, Queries, Jobs, Connections and Settings, then Search and Help. Each step outlines its place and says in a
 sentence or two what you find there.
 
 - Nothing moves on by itself: **Next** and **Back** go through the steps, **Skip tour** or
@@ -44,7 +43,7 @@ shortcuts** too: type a few letters of either.
 ## Your profile picture
 
 Without a picture, a circle with your initials stands beside your name: at the bottom of the
-menu on the left, and in **Access** for administrators. To set one:
+menu on the left, and in **Settings → Access → People** for administrators. To set one:
 
 1. Select your name at the bottom of the menu and choose **Profile picture…**.
 2. **Choose a picture**: a JPEG, PNG or WebP image of up to 5 MB and 40 megapixels (for example
@@ -62,7 +61,7 @@ pixels are stored. Everyone with access to the instance sees it beside your name
   Choose it again once the first is saved.
 - **Remove picture** in the same window brings your initials back.
 
-An administrator can remove anyone's picture, for example an unsuitable one: **Access** → the
+An administrator can remove anyone's picture, for example an unsuitable one: **Settings → Access → People** → the
 person → **Remove picture**. The person can set a new one whenever they like.
 
 ## Keyboard shortcuts

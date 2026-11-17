@@ -1,47 +1,43 @@
 /**
- * The frame of every place in Settings: the area's heading and its tabs.
+ * The frame of every place in Settings: the place's own page, named after it.
  *
  * @packageDocumentation
  */
-import type { JSX, ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import type { JSX, ReactNode, Ref } from "react";
 
 import { Page } from "../shell/Page";
-import { SectionTabs } from "../shell/SectionTabs";
-
-/** The places of Settings, in tab order; each one is a first-level route of the Settings screen. */
-export const SETTINGS_PLACES = ["status", "sign-in", "repositories"] as const;
-
-const TAB_KEYS: Record<(typeof SETTINGS_PLACES)[number], string> = {
-  status: "settings.status.tab",
-  "sign-in": "settings.signIn.tab",
-  repositories: "settings.repositories.tab",
-};
 
 /** Properties of {@link SettingsFrame}. */
 export interface SettingsFrameProps {
+  /** The place's name: its heading and the document title. */
+  readonly title: string;
   /** The place's content. */
   readonly children: ReactNode;
+  /** The place's one primary action, top right beside the heading; none by default. */
+  readonly action?: ReactNode;
+  /** A ref to the heading, for a place that moves the focus there after a change; none by default. */
+  readonly headingRef?: Ref<HTMLHeadingElement>;
 }
 
 /**
- * Renders the heading, the tabs Status, Sign-in and Repositories, and the place.
+ * Renders the place as a page under its name. The list of places stands beside it, drawn by
+ * the Settings layout, so the page itself carries no tabs and no breadcrumb.
  *
- * @param props - The content.
+ * @param props - The name, the content, the action and the heading's ref.
+ * @param props.title - The place's name.
  * @param props.children - The place's content.
+ * @param props.action - The place's one primary action.
+ * @param props.headingRef - A ref to the heading.
  * @returns The page.
  */
-export function SettingsFrame({ children }: SettingsFrameProps): JSX.Element {
-  const { t } = useTranslation();
+export function SettingsFrame({
+  title,
+  children,
+  action,
+  headingRef,
+}: SettingsFrameProps): JSX.Element {
   return (
-    <Page title={t("areas.settings.name")}>
-      <SectionTabs
-        label={t("settings.tabs")}
-        tabs={SETTINGS_PLACES.map((place) => ({
-          to: `/settings/${place}`,
-          label: t(TAB_KEYS[place]),
-        }))}
-      />
+    <Page title={title} action={action} headingRef={headingRef}>
       {children}
     </Page>
   );

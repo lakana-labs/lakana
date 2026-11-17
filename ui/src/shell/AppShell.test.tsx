@@ -1,4 +1,4 @@
-import { act, screen, within } from "@testing-library/react";
+import { act, cleanup, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
@@ -64,6 +64,45 @@ describe("AppShell", () => {
     await act(() => router.navigate("/jobs"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
+  });
+
+  it("leaves the focus alone when the first load is redirected", async () => {
+    // Status is opened once first, so that its chunk is cached: the redirect's focus would
+    // otherwise find no heading yet, and the test would pass without the guard.
+    const first = renderShell("/settings/status");
+    await screen.findByRole("heading", { level: 1, name: "Status" });
+    cleanup();
+    first.router.dispose();
+
+    renderShell("/settings");
+    const heading = await screen.findByRole("heading", { level: 1, name: "Status" });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    expect(heading).not.toHaveFocus();
+  });
+
+  it("focuses the heading after a replacing move the person made on the first page", async () => {
+    // A page opened directly, then a person's action that replaces its entry (a list after a
+    // delete): only a redirect is part of the page opening, not every Replace.
+    const { router } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await act(() => router.navigate("/jobs", { replace: true }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
+  });
+
+  it("focuses the heading when a move to a redirecting address lands on its place", async () => {
+    const { router } = renderShell("/jobs");
+    await screen.findByRole("heading", { level: 1, name: "Jobs" });
+
+    await act(() => router.navigate("/settings"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Status" })).toHaveFocus();
   });
 
   it("focuses the heading again when returning to the first page", async () => {

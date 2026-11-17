@@ -53,7 +53,7 @@ describe("GetStarted", () => {
       "Connect a repository",
       "/settings/repositories/new",
     ],
-    ["invite_team", /Invite your colleagues/, "Invite your team", "/access/invites"],
+    ["invite_team", /Invite your colleagues/, "Invite your team", "/settings/sign-in/invites"],
     ["add_passkey", /Add a passkey, so/, "Add a passkey", "/account"],
     ["open_table", /Open a table in the Catalog/, "Open the Catalog", "/catalog"],
     ["run_query", /Run your first query/, "Open Queries", "/queries"],

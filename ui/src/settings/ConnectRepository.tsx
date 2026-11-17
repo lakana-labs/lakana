@@ -38,6 +38,7 @@ import { useAttempt } from "../sign-in/Attempt";
 import { problemText } from "../sign-in/messages";
 import { httpsForm, queryOrFragment, type RecognisedHost, recogniseHost } from "./hosts";
 import "./connect.css";
+import "./settingsStrings";
 
 /** How long a check runs before the page says what it waits for. */
 const SAY_AFTER_MS = 1000;
@@ -664,7 +665,7 @@ export function ConnectRepository(): JSX.Element {
       title={t("settings.connect.title")}
       trail={[
         { to: "/settings", label: t("areas.settings.name") },
-        { to: "/settings/repositories", label: t("settings.repositories.tab") },
+        { to: "/settings/repositories", label: t("settings.places.repositories") },
       ]}
     >
       <p className="page-purpose">{t("settings.connect.intro")}</p>

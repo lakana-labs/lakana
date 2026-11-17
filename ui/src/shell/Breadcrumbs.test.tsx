@@ -19,8 +19,8 @@ function renderTrail(title: string): void {
           <Page
             title={title}
             trail={[
-              { to: "/access", label: "Access" },
-              { to: "/access", label: "People" },
+              { to: "/settings/access", label: "Access" },
+              { to: "/settings/access/people", label: "People" },
             ]}
           >
             <p>Content</p>
@@ -28,7 +28,7 @@ function renderTrail(title: string): void {
         ),
       },
     ],
-    { initialEntries: ["/access/people/test1"] },
+    { initialEntries: ["/settings/access/people/test1"] },
   );
   render(<RouterProvider router={router} />);
 }
@@ -44,7 +44,7 @@ describe("Breadcrumbs", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => link.getAttribute("href")),
-    ).toEqual(["/access", "/access"]);
+    ).toEqual(["/settings/access", "/settings/access/people"]);
     const current = within(nav).getByText("test1");
     expect(current).toHaveAttribute("aria-current", "page");
     expect(current.tagName).not.toBe("A");

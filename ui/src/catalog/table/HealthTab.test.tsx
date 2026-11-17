@@ -333,7 +333,7 @@ describe("HealthTab", () => {
     const readers = await section("Readers");
     expect(within(readers).getByRole("link", { name: "kim.schulz" })).toHaveAttribute(
       "href",
-      "/access/people/kim.schulz",
+      "/settings/access/people/kim.schulz",
     );
     expect(rows(readers)).toEqual([
       ["kim.schulz", "4 reads", "2 hours ago"],
@@ -362,7 +362,7 @@ describe("HealthTab", () => {
     expect(within(readers).getByText("U+202E")).toHaveClass("char-mark");
     expect(within(readers).getByRole("link")).toHaveAttribute(
       "href",
-      "/access/people/kim%E2%80%AEschulz",
+      "/settings/access/people/kim%E2%80%AEschulz",
     );
   });
 

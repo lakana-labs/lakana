@@ -184,7 +184,7 @@ describe("UserMenu", () => {
     expect(server.sent.some((request) => request.path.endsWith("/picture"))).toBe(false);
   });
 
-  it("shows the picture in the user menu and on Access", async () => {
+  it("shows the picture in the user menu and on People", async () => {
     const { user } = renderShell("/", {
       me: { picture: "e1" },
       routes: {
@@ -203,7 +203,8 @@ describe("UserMenu", () => {
       expect(button.querySelector("img")?.getAttribute("src")).toMatch(/^blob:/);
     });
 
-    await user.click(screen.getByRole("link", { name: "Access" }));
+    await user.click(screen.getByRole("link", { name: "Settings" }));
+    await user.click(await screen.findByRole("link", { name: "People" }));
 
     const row = (await screen.findAllByRole("row"))[1] as HTMLElement;
     await waitFor(() => {

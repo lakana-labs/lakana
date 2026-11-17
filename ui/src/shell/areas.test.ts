@@ -13,7 +13,6 @@ describe("areas", () => {
       "Queries",
       "Jobs",
       "Connections",
-      "Access",
       "Settings",
     ]);
   });
@@ -39,19 +38,20 @@ describe("areas", () => {
     }
   });
 
-  it("gives Access and Settings to administrators only", () => {
-    expect([...areasFor(true, false)]).toEqual([...ALL_SHIPPED]);
-    expect([...areasFor(false, false)]).toEqual([
+  it("gives Settings to everyone signed in", () => {
+    expect([...areasFor(false)]).toEqual([...ALL_SHIPPED]);
+    expect([...areasFor(false)]).toEqual([
       "home",
       "catalog",
       "queries",
       "jobs",
       "connections",
+      "settings",
     ]);
   });
 
   it("hides the Catalog from a person with no access yet", () => {
-    expect([...areasFor(false, true)]).toEqual(["home", "queries", "jobs", "connections"]);
-    expect(areasFor(true, true).has("catalog")).toBe(false);
+    expect([...areasFor(true)]).toEqual(["home", "queries", "jobs", "connections", "settings"]);
+    expect(areasFor(true).has("catalog")).toBe(false);
   });
 });
