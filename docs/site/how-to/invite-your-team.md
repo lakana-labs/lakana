@@ -17,7 +17,7 @@ once, for 7 days, and the account it creates has no rights at all until you gran
 
 ## Invite someone
 
-1. Open **Access** in the sidebar, then the **Invites** tab, and choose **Invite someone**.
+1. Open **Settings → Sign-in → Invites** and choose **Invite someone**.
 2. Type the **name** the person will sign in as, such as `sam`, and if you like a **display
    name** (`Sam Kay`), which the interface shows instead of the name. A name another person or
    another open invite holds, in any letter case, is refused: choose another.
@@ -58,7 +58,7 @@ passkeys is recovered only by the operator, as the next section says.
 
 ## When someone loses their passkey
 
-Open **Access**, then **Recovery links**, and choose **Issue a recovery link**, or open the person
+Open **Settings → Sign-in → Recovery links** and choose **Issue a recovery link**, or open the person
 under **People** and choose the same action there. The link works once, for 1 hour; using it
 removes all of the person's passkeys, ends their sessions, and every administrator gets a notice.
 Send it only after you have confirmed, as above, that the person asked for it.
@@ -72,7 +72,7 @@ recovery.
 
 ## Look after a person's sign-in
 
-Open the person under **Access → People**. Their page lists their passkeys and their open browser
+Open the person under **Settings → Access → People**. Their page lists their passkeys and their open browser
 sessions, each named in plain words ("Firefox 158 on Ubuntu, from 192.0.2.1"; hold the pointer
 over it for exactly what the browser sent, which is also what a browser it does not recognise
 shows). A browser can name itself anything, so treat the name as a hint, not a proof. **End all sessions** signs them out in every browser, for example after a laptop was
