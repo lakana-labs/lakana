@@ -823,8 +823,8 @@ class QueryService:
         origin
             Only runs of one of these origins; none means any.
         since
-            The ended runs listed are those that ended at or after this time, of any age;
-            given, they are listed with or without `include_ended`. It must have a time zone.
+            The ended runs listed are those that ended at or after this time, of any age,
+            whether `include_ended` is set or not. A time zone is required.
         limit
             Most rows returned (1 to 200).
         cursor

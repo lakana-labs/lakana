@@ -25,7 +25,7 @@ Running queries come first, then queued ones in the order they will be taken, wi
 | `--status` | text, repeatable | none | Only queries in this status: queued, running, succeeded, failed or cancelled. Repeat the option or separate the values with commas. An ended status lists the ended queries of the last 24 hours (or since --since) without --all. |
 | `--submitter` | text | none | Only the queries this principal submitted. |
 | `--origin` | text, repeatable | none | Only queries from here: written, preview, check, write, maintenance or task. Repeat the option or separate the values with commas. |
-| `--since` | text | none | The ended queries are those that ended at or after this date or time (2026-10-18 or 2026-10-18T09:30:00Z), of any age, instead of the last 24 hours. |
+| `--since` | text | none | List the queries that ended at or after this date or time (2026-10-18 or 2026-10-18T09:30:00Z, local time without a zone), of any age, instead of the last 24 hours; implies --all. |
 | `--limit` | whole number, 1 to 200 | `100` | Most queries to list. |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
 

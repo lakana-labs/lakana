@@ -6,8 +6,8 @@ environment where you may run queries (the `ANALYST` role gives that right); see
 [Getting started](../tutorials/getting-started.md).
 
 A download is always the **whole result**, never the page you see on a screen. The server makes the
-CSV and the spreadsheet and sends them as they are made, so a large result does not have to fit in
-your computer's memory or in the server's.
+CSV and the spreadsheet from the stored result, writes the whole file on its own disk first, and
+then sends it in pieces, so a large result does not have to fit in your computer's memory.
 
 ## A whole result as CSV or a spreadsheet
 
@@ -69,10 +69,16 @@ ask again a moment later.
 A spreadsheet cell and a spreadsheet sheet have limits that a table does not. Lakana never writes a
 value that the spreadsheet would change without saying so, and never cuts one:
 
-- **Numbers a spreadsheet would round are written as text.** A whole number beyond ±9,007,199,254,740,991
-  (2⁵³−1), a decimal of more than 15 significant digits, and a floating-point number that needs 17
-  significant digits to be read back exactly are text in the cell. So are NaN and infinity. Text
-  keeps every digit; to calculate with it, convert it in the spreadsheet or take the CSV.
+- **Numbers a spreadsheet would round are written as text.** A whole number beyond
+  ±9,007,199,254,740,991 (2⁵³−1), a decimal of more than 15 significant digits, and a
+  floating-point number that needs 17 significant digits to be read back exactly are text in the
+  cell. So are NaN and infinity. Text keeps every digit; to calculate with it, convert it in the
+  spreadsheet or take the CSV. A 32-bit floating-point number (`FLOAT`) is the number its shortest
+  text names, as in the CSV: `0.1`, not `0.10000000149011612`.
+- **Dates beyond the calendar are text.** DuckDB's `infinity` and `-infinity`, a year after 9999
+  and a year before 1 have no date in a spreadsheet. A date or timestamp column that holds one is
+  written, in the CSV and the spreadsheet alike, as the text DuckDB prints: `infinity`,
+  `294247-01-10 04:00:54.775806`, `0006-03-04 (BC)`, a time zone's values in UTC with `+00`.
 - **Times are shown to the second.** A timestamp is a real date and time in the cell, shown as
   `yyyy-mm-dd hh:mm:ss`. The part of a second below that stays in the cell's value, but the cell
   does not show it. A timestamp with a time zone is in UTC and shows `UTC` after the time. A time of
@@ -127,21 +133,26 @@ export.
 
 ## Find your queries again
 
-To find a query again, list yours in every
-environment you may query, and add `--origin written` for the queries you typed yourself (a
-preview, a check and a task are other origins):
+To find a query again, list the queries of every environment you may query, and add
+`--origin written` for the queries typed by hand (a preview, a check and a task are other
+origins):
 
 <!-- source: docs/examples/download-a-query-result/run.sh#list -->
 ```bash
 lakana query list --all-environments --origin written --since 2026-01-01 --all
 ```
 
-`--since` takes a date or a date and time with a zone, and lists the queries that ended from then
-on, of any age; without it, `--all` lists those of the last 24 hours. The table has an
-`environment` column, and its first column is the id that `lakana query result` takes. Add
-`--env NAME` instead of `--all-environments` to see one environment.
+`--since` takes a date, or a date and time; without a zone it is read in your computer's local
+time. It lists the queries that ended from then on, of any age, and implies `--all`; without it,
+`--all` lists those of the last 24 hours. The table has an `environment` column, and its first
+column is the id that `lakana query result` takes. Add `--env NAME` instead of
+`--all-environments` to see one environment.
+
+You see your own queries, except where you hold `MANAGE_ENVIRONMENT`: there the list holds
+everyone's queries, and a page that shows someone else's is recorded in the audit log
+(`ACTIVITY_VIEWED`). Add `--submitter NAME`, with your own name, to list only yours.
 
 ## In the web interface
 
-The Queries screen of the web interface, which part 4 of the web interface adds, lets you download
-the whole result of a query you ran as CSV or a spreadsheet.
+Part 4 of the web interface will add a Queries screen that offers the same download of a whole
+result as CSV or a spreadsheet.

@@ -284,8 +284,28 @@ given its origin by the first of these rules that holds:
 
 A check run of a task from before the upgrade is therefore `task`; only new ones say `check`. The
 size and position of an old run stay empty. A run that a server or worker of the previous
-release records while the upgrade is under way is recorded as `written`. The migration runs with the others, and nothing else
-has to be done. Going back drops the new columns and the index.
+release records while the upgrade is under way is recorded as `written`. The migration gives the
+old runs their origin in one statement over every row of `query_runs`, which locks that table
+while it runs: on a large table, upgrade at a quiet time. It runs with the others, and nothing
+else has to be done. Going back drops the new columns and the index.
+
+### Query results as files: upgrade the server first
+
+The server now writes a result as CSV or a spreadsheet, and the CLI asks it for one:
+
+- **A new CLI needs a new server for CSV and xlsx.** `lakana query result`, `lakana sql` and
+  `lakana check rows` with `--format csv` or `--format xlsx` (or `--out` ending in `.csv` or
+  `.xlsx`) fetch the file the server makes. A server of the previous release answers them with
+  422, where the previous CLI wrote the CSV itself. Upgrade the server before the CLI.
+- **The CSV is written differently.** Every text value and every column name is in double
+  quotes, a nested value (a list, a struct, a map) is its JSON text, and binary is `\x` and
+  two hex digits per byte. `--format csv` without `--out` prints the CSV, not a table.
+- **`origin` and `since` need a new server.** `client.queries.list` and `list_page` with `origin=`
+  or `since=` send filters that a server of the previous release does not know: it ignores them
+  and lists every row it would list without them.
+- **An Arrow result has no `Content-Length`.** `GET …/queries/{id}/result` streams the stored
+  file and names its size in `X-Result-Arrow-Bytes` when the run recorded it. A client that
+  read `Content-Length` reads that header instead.
 
 ### `grant list` shows one `access` column
 

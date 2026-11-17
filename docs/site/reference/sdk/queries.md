@@ -24,7 +24,7 @@ With `SUBMIT_QUERY` you see the queries you submitted (a task token: its own); w
 | `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). An ended status lists the ended queries of the last 24 hours (or since `since`), with or without `include_ended`. |
 | `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
 | `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these (``written``, ``preview``, ``check``, ``write``, ``maintenance``, ``task``). |
-| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours. It needs a time zone. |
+| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours, with or without `include_ended`. It needs a time zone. |
 | `limit` | `int` | `100` | Most entries returned (1 to 200). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
 
@@ -49,7 +49,7 @@ List one page of the queries of an environment, with the cursor of the next page
 | `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). |
 | `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
 | `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these (``written``, ``preview``, ``check``, ``write``, ``maintenance``, ``task``). |
-| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours. It needs a time zone. |
+| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours, with or without `include_ended`. It needs a time zone. |
 | `limit` | `int` | `100` | Most entries returned (1 to 200). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
 
@@ -76,7 +76,7 @@ The environments are those where you hold `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`
 | `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). |
 | `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
 | `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these (``written``, ``preview``, ``check``, ``write``, ``maintenance``, ``task``). |
-| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours. It needs a time zone. |
+| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours, with or without `include_ended`. It needs a time zone. |
 | `limit` | `int` | `100` | Most entries returned (1 to 200). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same filters with every page. |
 
@@ -101,7 +101,7 @@ Yield every query of every environment you may query, fetching pages as needed.
 | `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these. |
 | `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
 | `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these. |
-| `since` | `datetime | None` | `None` | The queries that ended at or after this time, of any age. It needs a time zone. |
+| `since` | `datetime | None` | `None` | The queries that ended at or after this time, of any age, with or without `include_ended`. It needs a time zone. |
 | `page_size` | `int` | `100` | Entries per request (1 to 200). |
 
 Yields: `QueryListEntry`. Each entry, once, in the order of `list_all`.

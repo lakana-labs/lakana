@@ -20,7 +20,7 @@ Parameters:
 | `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. An ended status lists the ended queries of the last 24 hours (or since `since`), with or without `include_ended`. |
 | `submitter` | query | no | text or null | Only queries submitted by the principal with this name. |
 | `origin` | query | no | list of text | Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas. |
-| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours. |
+| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`. |
 | `limit` | query | no | whole number | Most rows returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
@@ -241,7 +241,7 @@ Parameters:
 | `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. |
 | `submitter` | query | no | text or null | Only queries submitted by the principal with this name. |
 | `origin` | query | no | list of text | Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas. |
-| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone, of any age, instead of those of the last 24 hours. |
+| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone, of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`. |
 | `limit` | query | no | whole number | Most rows returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
