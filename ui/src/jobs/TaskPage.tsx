@@ -20,7 +20,7 @@ import { LogView } from "./LogView";
 import { jobRunPath } from "./paths";
 import { Gone, isGone, PollProblem } from "./PollProblem";
 import { Reading } from "./Reading";
-import { taskStatusKind } from "./status";
+import { isActive, taskStatusKind } from "./status";
 import { EXPLAINED, TaskControls } from "./TaskRow";
 import { runTitle, runTrail, useRun } from "./useRun";
 import { useTaskLog } from "./useTaskLog";
@@ -80,9 +80,11 @@ function TaskFacts({ environment, run, task }: TaskFactsProps): JSX.Element {
         <Fact term={t("jobs.run.state")}>
           <StatusLabel kind={taskStatusKind(task.status)} />
         </Fact>
-        <Fact term={t("jobs.taskPage.attempt")}>
-          {t("jobs.taskPage.attemptOf", { n: task.attempt, max: task.max_attempts })}
-        </Fact>
+        {task.attempt > 0 && (
+          <Fact term={t("jobs.taskPage.attempt")}>
+            {t("jobs.taskPage.attemptOf", { n: task.attempt, max: task.max_attempts })}
+          </Fact>
+        )}
         {task.waiting_for !== null && (
           <Fact term={t("jobs.taskPage.waits")}>
             <VisibleText text={task.waiting_for.message} />
@@ -91,7 +93,13 @@ function TaskFacts({ environment, run, task }: TaskFactsProps): JSX.Element {
       </dl>
       {task.failure !== null && <FailureLine failure={task.failure} />}
       {EXPLAINED.includes(task.status) && (
-        <TaskControls environment={environment} run={run} task={task} withLog={false} />
+        <TaskControls
+          environment={environment}
+          run={run}
+          task={task}
+          withLog={false}
+          named={false}
+        />
       )}
     </>
   );
@@ -121,7 +129,9 @@ function TaskView({ environment, runId, asset }: TaskViewProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const poll = useRun(environment, runId);
-  const log = useTaskLog(environment, runId, asset);
+  const log = useTaskLog(environment, runId, asset, {
+    runEnded: poll.data !== undefined && !isActive(poll.data),
+  });
   const run = poll.data;
   const task = run?.tasks.find((each) => each.asset === asset);
   // A run that is gone says so once, above; a task that is gone in a run that is there, here.

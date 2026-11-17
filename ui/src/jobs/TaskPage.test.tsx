@@ -1,6 +1,6 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import i18next from "i18next";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { aFailure, aJobRun, anAttempt, aTask, aTaskLog, JOB_RUN_ID } from "../test/jobs";
 import { held } from "../test/pending";
@@ -34,7 +34,54 @@ function trail(): (string | null)[] {
     .map((link) => link.getAttribute("href"));
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("TaskPage", () => {
+  it("reads the log of an ended run once more and stops when the server cannot finish it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const run = aJobRun({ status: "failed", tasks: [FAILED] });
+    const { server } = renderShell(PAGE, {
+      routes: {
+        [`GET ${RUN}`]: { status: 200, body: run },
+        // The server answers 200, not complete and empty, when its storage failed.
+        [`GET ${LOG}`]: { status: 200, body: aTaskLog({ text: "", complete: false }) },
+      },
+    });
+    const reads = (): number =>
+      server.sent.filter((request) => request.path.endsWith("/log")).length;
+
+    expect(
+      await screen.findByText("The run has ended. This is all of the log that could be read."),
+    ).toBeInTheDocument();
+    const settled = reads();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(reads()).toBe(settled);
+    expect(screen.queryByText("Following the log…")).toBeNull();
+  });
+
+  it("leaves out the attempt of a task that has not started", async () => {
+    const waiting = aTask({
+      asset: "gold.sales",
+      status: "pending",
+      attempt: 0,
+      started_at: null,
+      finished_at: null,
+    });
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${RUN}`]: { status: 200, body: aJobRun({ tasks: [waiting] }) },
+        [`GET ${LOG}`]: { status: 200, body: aTaskLog() },
+      },
+    });
+
+    expect(await screen.findByText("Queued")).toBeInTheDocument();
+    expect(screen.queryByText("Attempt")).toBeNull();
+  });
+
   it("has the breadcrumb through the job and the run", async () => {
     const run = aJobRun({ status: "failed", tasks: [FAILED] });
     renderShell(PAGE, {

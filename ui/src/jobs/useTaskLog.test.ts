@@ -25,7 +25,7 @@ vi.mock("../shell/saveFile", async (original) => ({
  * @returns The view.
  */
 function Followed(): JSX.Element {
-  const log = useTaskLog("prod", JOB_RUN_ID, "silver.orders");
+  const log = useTaskLog("prod", JOB_RUN_ID, "silver.orders", { runEnded: false });
   return createElement(LogView, {
     environment: "prod",
     runId: JOB_RUN_ID,
@@ -82,8 +82,11 @@ function offsets(): number[] {
   return vi.mocked(getTaskLog).mock.calls.map((call) => call[3]);
 }
 
-function follow() {
-  return renderHook(() => useTaskLog("prod", JOB_RUN_ID, "silver.orders"));
+function follow(runEnded = false) {
+  return renderHook(
+    ({ ended }) => useTaskLog("prod", JOB_RUN_ID, "silver.orders", { runEnded: ended }),
+    { initialProps: { ended: runEnded } },
+  );
 }
 
 beforeEach(() => {
@@ -216,6 +219,41 @@ describe("useTaskLog", () => {
     expect(result.current.complete).toBe(true);
   });
 
+  it("starts the catch-up count again on a reset, even on the sixteenth piece", async () => {
+    const pieces: TaskLogOut[] = Array.from({ length: LOG_CATCHUP_PIECES - 1 }, (_, i) =>
+      running("old\n", 4 * (i + 1), true),
+    );
+    pieces.push(aTaskLog({ text: "", next_offset: 9, more: false, reset: true, complete: false }));
+    pieces.push(aTaskLog({ text: "new\n", next_offset: 13 }));
+    answer(...pieces);
+    const { result } = follow();
+
+    await tick(0);
+    expect(getTaskLog).toHaveBeenCalledTimes(LOG_CATCHUP_PIECES + 1);
+    expect(result.current.stopped).toBe(false);
+    expect(result.current.text).toBe("new\n");
+    expect(result.current.complete).toBe(true);
+  });
+
+  it("gives a rewritten log its own sixteen pieces after a reset during catch-up", async () => {
+    let call = 0;
+    vi.mocked(getTaskLog).mockImplementation(() => {
+      call += 1;
+      if (call === 5) {
+        return Promise.resolve(
+          aTaskLog({ text: "", next_offset: 0, more: true, reset: true, complete: false }),
+        );
+      }
+      return Promise.resolve(running("a\n", call * 2, true));
+    });
+    const { result } = follow();
+
+    await tick(0);
+    // Four pieces, the reset, then sixteen of the rewritten log.
+    expect(getTaskLog).toHaveBeenCalledTimes(4 + 1 + LOG_CATCHUP_PIECES);
+    expect(result.current.stopped).toBe(true);
+  });
+
   it("saves the whole rewritten log after a reset", async () => {
     const rewritten = "attempt 2 starts\nattempt 2 builds\n";
     answer(
@@ -286,6 +324,56 @@ describe("useTaskLog", () => {
     await tick(60_000);
     expect(getTaskLog).toHaveBeenCalledTimes(3);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reads once more when the run has ended, then stops, with the log not complete", async () => {
+    // The server answers 200 with complete: false and no text when its storage failed.
+    answer(running("a\n", 2), running("", 2));
+    const { result, rerender } = follow();
+    await tick(0);
+    expect(result.current.ended).toBe(false);
+
+    rerender({ ended: true });
+    await tick(2_000);
+    expect(getTaskLog).toHaveBeenCalledTimes(2);
+    expect(result.current.ended).toBe(true);
+    expect(result.current.complete).toBe(false);
+    expect(result.current.text).toBe("a\n");
+    await tick(60_000);
+    expect(getTaskLog).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reads a log of an ended run once on opening, then stops", async () => {
+    answer(running("", 0));
+    const { result } = follow(true);
+    await tick(0);
+    await tick(60_000);
+    expect(getTaskLog).toHaveBeenCalledTimes(1);
+    expect(result.current.ended).toBe(true);
+  });
+
+  it("keeps reading an ended run's log while each read brings text", async () => {
+    answer(running("a\n", 2), running("b\n", 4), aTaskLog({ text: "c\n", next_offset: 6 }));
+    const { result } = follow(true);
+
+    await tick(0);
+    await tick(2_000);
+    await tick(2_000);
+    expect(offsets()).toEqual([0, 2, 4]);
+    expect(result.current.text).toBe("a\nb\nc\n");
+    expect(result.current.complete).toBe(true);
+    expect(result.current.ended).toBe(false);
+  });
+
+  it("is not ended when its log is complete", async () => {
+    answer(aTaskLog({ text: "a\n", next_offset: 2 }));
+    const { result, rerender } = follow();
+    await tick(0);
+    rerender({ ended: true });
+    await tick(60_000);
+    expect(getTaskLog).toHaveBeenCalledTimes(1);
+    expect(result.current.ended).toBe(false);
   });
 
   it("pauses while the tab is hidden", async () => {

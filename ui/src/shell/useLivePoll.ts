@@ -72,14 +72,7 @@ export function useLivePoll<T>(
     const visible = (): boolean => document.visibilityState === "visible";
     const arm = (): void => {
       const wait = Math.min(everyMs * 2 ** failed, POLL_BACKOFF_MAX_MS);
-      timer = setTimeout(() => {
-        // A tab hidden without an event (a stubbed state, an odd browser) skips this turn.
-        if (visible()) {
-          read();
-        } else {
-          arm();
-        }
-      }, wait);
+      timer = setTimeout(read, wait);
     };
     const schedule = (): void => {
       if (latest && visible()) {

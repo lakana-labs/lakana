@@ -41,6 +41,44 @@ export interface TaskRowProps {
 export interface TaskControlsProps extends TaskRowProps {
   /** Whether Log is offered for a failed task; false on the task's own page. True by default. */
   readonly withLog?: boolean | undefined;
+  /**
+   * Whether each control's accessible name ends with the task's asset, so that a list of
+   * controls of several tasks tells them apart; false on the task's own page. True by default.
+   */
+  readonly named?: boolean | undefined;
+}
+
+/**
+ * A control's words, with the asset after them for screen readers when `named`.
+ *
+ * @param props - The words.
+ * @param props.text - What the control says.
+ * @param props.asset - The task's asset.
+ * @param props.named - Whether the asset is added.
+ * @returns The label.
+ */
+function Label({
+  text,
+  asset,
+  named,
+}: {
+  readonly text: string;
+  readonly asset: string;
+  readonly named: boolean;
+}): JSX.Element {
+  return (
+    <>
+      {text}
+      {named && (
+        <>
+          {" "}
+          <span className="visually-hidden">
+            <VisibleText text={asset} />
+          </span>
+        </>
+      )}
+    </>
+  );
 }
 
 /**
@@ -52,6 +90,7 @@ export interface TaskControlsProps extends TaskRowProps {
  * @param props.run - The run.
  * @param props.task - The task.
  * @param props.withLog - Whether Log is offered.
+ * @param props.named - Whether the controls' names end with the asset.
  * @returns The controls.
  */
 export function TaskControls({
@@ -59,6 +98,7 @@ export function TaskControls({
   run,
   task,
   withLog = true,
+  named = true,
 }: TaskControlsProps): JSX.Element {
   const { t } = useTranslation();
   const place = splitDotted(task.asset);
@@ -66,19 +106,19 @@ export function TaskControls({
     <div className="jobs-task-controls">
       {withLog && task.status === "failed" && (
         <Link className="button" to={taskPath(environment, run.id, task.asset)}>
-          {t("jobs.task.log")}
+          <Label text={t("jobs.task.log")} asset={task.asset} named={named} />
         </Link>
       )}
       {place !== null && task.kind === "asset" && (
         <SourceButton
           place={{ environment, ...place }}
-          label={t("jobs.task.showSource")}
+          label={<Label text={t("jobs.task.showSource")} asset={task.asset} named={named} />}
           className="button"
         />
       )}
       {place !== null && (
         <Link className="button" to={tablePath(environment, place.namespace, place.name)}>
-          {t("jobs.task.openTable")}
+          <Label text={t("jobs.task.openTable")} asset={task.asset} named={named} />
         </Link>
       )}
       {task.checks

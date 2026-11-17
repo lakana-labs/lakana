@@ -29,7 +29,7 @@ describe("Recent", () => {
     await within(list).findByText(/Nothing opened yet/);
     // Only the table page records an open so far: say so.
     expect(list).toHaveTextContent(
-      "Nothing opened yet. The tables you open will show here; queries, jobs and runs follow once their pages arrive in a later release.",
+      "Nothing opened yet. The tables, queries, jobs and runs you open will show here.",
     );
   });
 

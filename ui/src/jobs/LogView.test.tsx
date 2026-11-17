@@ -33,6 +33,7 @@ function aLog(over: Partial<TaskLog> = {}): TaskLog {
     complete: false,
     cut: false,
     stopped: false,
+    ended: false,
     error: null,
     gone: false,
     retry: vi.fn(),
@@ -153,6 +154,21 @@ describe("LogView", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("The log store is down.");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not say it is following while a read failed", () => {
+    render(view(aLog({ error: "The log store is down." })));
+
+    expect(screen.queryByText("Following the log…")).toBeNull();
+  });
+
+  it("says the run ended instead of following, when the log did not complete", () => {
+    render(view(aLog({ ended: true })));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "The run has ended. This is all of the log that could be read.",
+    );
+    expect(screen.queryByText("Following the log…")).toBeNull();
   });
 
   it("draws again only the lines at the end when the log grows", () => {

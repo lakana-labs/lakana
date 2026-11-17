@@ -47,26 +47,54 @@ export function locationOf(answer: TableDefinitionOut): Location | null {
   if (!defined || repository === null || path === null || commit === null || line === null) {
     return null;
   }
-  const link = browse !== null && browse.startsWith("https://") && URL.canParse(browse);
-  return { repository, path, commit, line, link: link ? browse : null };
+  return { repository, path, commit, line, link: httpsLink(browse) };
 }
 
 /**
- * The server's link to the line on the git host, opened in a new tab without an opener or a
- * referrer.
+ * A link of the server's, kept only when it is an HTTPS address.
+ *
+ * @param url - The server's link, or null.
+ * @returns The link, or null when there is none or it is not an HTTPS address.
+ */
+function httpsLink(url: string | null): string | null {
+  return url !== null && url.startsWith("https://") && URL.canParse(url) ? url : null;
+}
+
+/** Properties of {@link HostLink}. */
+export interface HostLinkProps {
+  /** The server's link, or null. */
+  readonly url: string | null;
+  /** What the link says, before its arrow. */
+  readonly label: string;
+  /** Text before the link, drawn only when the link is. */
+  readonly before?: string | undefined;
+}
+
+/**
+ * The server's link to the file on the git host, opened in a new tab without an opener or a
+ * referrer. Nothing is drawn unless the link is an HTTPS address.
  *
  * @param props - The link.
- * @param props.href - The server's HTTPS link.
- * @returns The link.
+ * @param props.url - The server's link, or null.
+ * @param props.label - What the link says.
+ * @param props.before - Text drawn before the link.
+ * @returns The link, or nothing.
  */
-export function HostLink({ href }: { readonly href: string }): JSX.Element {
+export function HostLink({ url, label, before }: HostLinkProps): JSX.Element | null {
   const { t } = useTranslation();
+  const href = httpsLink(url);
+  if (href === null) {
+    return null;
+  }
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer">
-      {t("table.definedIn.openHost")}
-      <span aria-hidden="true"> ↗</span>
-      <span className="visually-hidden"> {t("home.newTab")}</span>
-    </a>
+    <>
+      {before}
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {label}
+        <span aria-hidden="true"> ↗</span>
+        <span className="visually-hidden"> {t("home.newTab")}</span>
+      </a>
+    </>
   );
 }
 
@@ -192,7 +220,7 @@ function FileBody({ place }: FileBodyProps): JSX.Element {
       )}
       {where.link !== null && (
         <p>
-          <HostLink href={where.link} />
+          <HostLink url={where.link} label={t("table.definedIn.openHost")} />
         </p>
       )}
     </>

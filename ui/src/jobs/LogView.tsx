@@ -100,7 +100,7 @@ export interface LogViewProps {
  */
 export function LogView({ environment, runId, asset, log }: LogViewProps): JSX.Element {
   const { t } = useTranslation();
-  const { text, complete, cut, stopped } = log;
+  const { text, complete, cut, stopped, ended } = log;
   const parts = useMemo(() => partsOf(text), [text]);
   const region = useRef<HTMLPreElement>(null);
   const atEnd = useRef(true);
@@ -111,10 +111,19 @@ export function LogView({ environment, runId, asset, log }: LogViewProps): JSX.E
     }
   }, [text]);
   const command = `lakana runs logs ${shellQuote(runId)} --task ${shellQuote(asset)} --env ${shellQuote(environment)}`;
+  const statusLine = (): string => {
+    if (complete) {
+      return t("jobs.log.complete");
+    }
+    if (stopped || log.error !== null) {
+      return "";
+    }
+    return t(ended ? "jobs.log.ended" : "jobs.log.following");
+  };
   return (
     <>
       <p className="jobs-reading" role="status">
-        {complete ? t("jobs.log.complete") : stopped ? "" : t("jobs.log.following")}
+        {statusLine()}
       </p>
       {log.error !== null && <ReadFailed message={log.error} onRetry={log.retry} />}
       {(stopped || cut) && (

@@ -230,22 +230,6 @@ describe("useLivePoll", () => {
   });
 });
 
-describe("useLivePoll without a visibility event", () => {
-  it("skips a turn that falls in a hidden tab and reads on the next one once visible", async () => {
-    vi.useFakeTimers();
-    const load = vi.fn(() => Promise.resolve("a"));
-    const state = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
-    renderHook(() => useLivePoll(load, { everyMs: 1000, active: true }));
-    await tick(0);
-    state.mockReturnValue("hidden");
-    await tick(1000);
-    expect(load).toHaveBeenCalledTimes(1);
-    state.mockReturnValue("visible");
-    await tick(1000);
-    expect(load).toHaveBeenCalledTimes(2);
-  });
-});
-
 describe("useLivePoll with a read in flight", () => {
   it("drops a failure that arrives after it was stopped", async () => {
     vi.useFakeTimers();

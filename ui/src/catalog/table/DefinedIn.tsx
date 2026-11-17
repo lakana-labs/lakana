@@ -67,7 +67,7 @@ export function DefinedIn({ place }: DefinedInProps): JSX.Element | null {
         {where.link !== null && (
           <>
             {" "}
-            <HostLink href={where.link} />
+            <HostLink url={where.link} label={t("table.definedIn.openHost")} />
           </>
         )}
       </dd>

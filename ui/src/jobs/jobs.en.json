@@ -193,6 +193,7 @@
     "region": "Log of {{asset}}",
     "following": "Following the log…",
     "complete": "The log is complete.",
+    "ended": "The run has ended. This is all of the log that could be read.",
     "tooLong": "This log is too long to follow here.",
     "earlier": "Earlier lines are not shown here.",
     "empty": "The task wrote nothing to its log.",

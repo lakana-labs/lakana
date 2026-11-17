@@ -194,7 +194,7 @@
     },
     "recent": {
       "title": "Recently opened",
-      "none": "Nothing opened yet. The tables you open will show here; queries, jobs and runs follow once their pages arrive in a later release.",
+      "none": "Nothing opened yet. The tables, queries, jobs and runs you open will show here.",
       "toCatalog": "Find a table in the Catalog",
       "opened": "Opened",
       "queryName": "Query {{id}}",

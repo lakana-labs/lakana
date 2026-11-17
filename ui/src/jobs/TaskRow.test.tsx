@@ -53,13 +53,13 @@ describe("TaskRow", () => {
     expect(within(table).getAllByRole("row")).toHaveLength(2);
     const line = within(secondLine());
     expect(secondLine()).toHaveTextContent("Cause: The task failed with build_failed.");
-    expect(line.getByRole("link", { name: "Log" })).toHaveAttribute(
+    expect(line.getByRole("link", { name: "Log gold.sales" })).toHaveAttribute(
       "href",
       `/jobs/prod/runs/${JOB_RUN_ID}/tasks/gold.sales`,
     );
     // A button among buttons: the Catalog's link-button style is not loaded on the Jobs screen.
-    expect(line.getByRole("button", { name: "Show source" })).toHaveClass("button");
-    expect(line.getByRole("link", { name: "Open table" })).toHaveAttribute(
+    expect(line.getByRole("button", { name: "Show source gold.sales" })).toHaveClass("button");
+    expect(line.getByRole("link", { name: "Open table gold.sales" })).toHaveAttribute(
       "href",
       "/catalog/prod/gold/sales",
     );
@@ -72,12 +72,21 @@ describe("TaskRow", () => {
     expect(name.querySelectorAll("wbr")).toHaveLength(1);
   });
 
+  it("names each control by its task, so a list of them is not Log, Log, Log", () => {
+    renderTask(FAILED);
+
+    const line = within(secondLine());
+    expect(line.getByRole("link", { name: "Log gold.sales" })).toHaveTextContent("Log");
+    expect(line.getByRole("link", { name: "Open table gold.sales" })).toBeInTheDocument();
+    expect(line.getByRole("button", { name: "Show source gold.sales" })).toBeInTheDocument();
+  });
+
   it("a task that only checks a table has no Show source", () => {
     renderTask({ ...FAILED, kind: "source_check" });
 
-    expect(screen.queryByRole("button", { name: "Show source" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Open table" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Log" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show source gold.sales" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Open table gold.sales" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Log gold.sales" })).toBeInTheDocument();
   });
 
   it("a skipped task says upstream failed from the servers cause", () => {
@@ -99,7 +108,7 @@ describe("TaskRow", () => {
     expect(secondLine()).toHaveTextContent(
       "upstream_failed (opens in a new tab) · Cause: gold.sales did not succeed. Next step: Fix gold.sales, then resume the run.",
     );
-    expect(within(secondLine()).queryByRole("link", { name: "Log" })).toBeNull();
+    expect(within(secondLine()).queryByRole("link", { name: "Log gold.sales" })).toBeNull();
   });
 
   it("a pending task shows why it waits", () => {
@@ -140,8 +149,8 @@ describe("TaskRow", () => {
   it("offers no Open table for an asset that is not a dotted table", () => {
     renderTask({ ...FAILED, asset: "orders" });
 
-    expect(screen.queryByRole("link", { name: "Open table" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Show source" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Log" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /^Open table/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Show source/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "Log orders" })).toBeInTheDocument();
   });
 });

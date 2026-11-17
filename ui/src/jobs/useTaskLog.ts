@@ -36,6 +36,8 @@ export interface TaskLog {
   readonly cut: boolean;
   /** Whether following stopped because the log grew faster than the page may read it. */
   readonly stopped: boolean;
+  /** Whether the run ended and the log was read one last time without being complete. */
+  readonly ended: boolean;
   /** The server's sentence once the reads failed, as `PollProblem` would show it; else null. */
   readonly error: string | null;
   /** Whether the task is gone or hidden from the person (404 or 403); nothing more is read. */
@@ -104,14 +106,29 @@ function visible(): boolean {
  * beyond the end of a log written anew) drops the text and reads the log again from offset 0, at
  * once, as a fresh log. Nothing is read while the tab is hidden: a catch-up stops there, and the
  * reads go on when it shows. The reads fail and back off as `useLivePoll`'s do; a read that Try
- * again overtook is dropped. Mount it once per task (a `key`).
+ * again overtook is dropped. Once the run has ended, a read that brings no new text is the last,
+ * whatever the server says about the log: a log the server cannot finish is not read for ever. Mount it
+ * once per task (a `key`).
  *
  * @param environment - The run's environment.
  * @param runId - The run's id.
  * @param asset - The task's asset.
+ * @param options - How to follow.
+ * @param options.runEnded - Whether the task's run has ended; false until the run is read.
  * @returns The log.
  */
-export function useTaskLog(environment: string, runId: string, asset: string): TaskLog {
+export function useTaskLog(
+  environment: string,
+  runId: string,
+  asset: string,
+  options: { readonly runEnded: boolean },
+): TaskLog {
+  const { runEnded } = options;
+  // Read by the reads that are already scheduled, so that the run's end does not restart them.
+  const ended = useRef(runEnded);
+  useEffect(() => {
+    ended.current = runEnded;
+  }, [runEnded]);
   const followed = useRef(NOTHING_READ);
   const [shown, setShown] = useState(NOTHING_READ);
   // Each load takes the next number; a load whose number is no longer the latest (Try again
@@ -124,15 +141,24 @@ export function useTaskLog(environment: string, runId: string, asset: string): T
     },
     [],
   );
+  // Set by a read, once the run has ended, that found no new text: the server has no more to
+  // give (a complete log stops the reads by itself), so the log is not read again.
+  const [lastRead, setLastRead] = useState(false);
   const load = useCallback(async (): Promise<Followed> => {
     latest.current += 1;
     const mine = latest.current;
-    for (let pieces = 1; ; pieces += 1) {
+    let pieces = 0;
+    let grew = false;
+    for (;;) {
+      pieces = 1 + pieces;
       const piece = await getTaskLog(environment, runId, asset, followed.current.offset);
       if (mine !== latest.current) {
         break;
       }
       // A reset means the log was written anew: drop the text and read it from its start.
+      if (piece.reset) {
+        pieces = 0;
+      }
       const before = piece.reset ? NOTHING_READ : followed.current;
       const text = piece.reset ? "" : keep(before.text + piece.text);
       const more = piece.more || piece.reset;
@@ -145,18 +171,22 @@ export function useTaskLog(environment: string, runId: string, asset: string): T
         stopped: more && pieces >= LOG_CATCHUP_PIECES,
         read: true,
       };
+      grew ||= piece.text !== "";
       followed.current = next;
       setShown(next);
       if (!more || next.stopped || !visible()) {
         break;
       }
     }
+    if (ended.current && !grew && mine === latest.current) {
+      setLastRead(true);
+    }
     return followed.current;
   }, [environment, runId, asset]);
   const [gone, setGone] = useState(false);
   const poll = useLivePoll(load, {
     everyMs: LIVE_EVERY_MS,
-    active: !shown.complete && !shown.stopped && !gone,
+    active: !shown.complete && !shown.stopped && !gone && !lastRead,
   });
   if (!gone && !shown.read && isGone(poll)) {
     setGone(true);
@@ -168,6 +198,7 @@ export function useTaskLog(environment: string, runId: string, asset: string): T
     complete: shown.complete,
     cut: shown.cut,
     stopped: shown.stopped,
+    ended: lastRead && !shown.complete,
     error: failing ? poll.error : null,
     gone,
     retry: poll.reload,

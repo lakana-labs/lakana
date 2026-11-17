@@ -251,7 +251,7 @@ describe("RunDetail", () => {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     // What reads stays beside each failure: Show source, Log and Open table.
-    expect(screen.getAllByRole("button", { name: "Show source" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /^Show source / }).length).toBeGreaterThan(0);
   });
 
   it("offers Cancel for a running run the actions list, and no Resume", async () => {

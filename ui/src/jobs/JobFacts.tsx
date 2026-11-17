@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { JobOut, NotifyOut } from "../api/jobs";
+import { HostLink } from "../catalog/table/SourceButton";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import "./jobStrings";
@@ -105,31 +106,6 @@ function Schedule({ job }: { readonly job: JobOut }): JSX.Element {
   );
 }
 
-/**
- * The server's link to `lakana.yaml` on the git host, kept only when it is an HTTPS address, and
- * opened in a new tab without an opener or a referrer.
- *
- * @param props - The link.
- * @param props.url - The server's link, or null.
- * @returns The link, or nothing.
- */
-function HostLink({ url }: { readonly url: string | null }): JSX.Element | null {
-  const { t } = useTranslation();
-  if (url === null || !url.startsWith("https://") || !URL.canParse(url)) {
-    return null;
-  }
-  return (
-    <>
-      {" · "}
-      <a href={url} target="_blank" rel="noopener noreferrer">
-        {t("jobs.facts.openHost")}
-        <span aria-hidden="true"> ↗</span>
-        <span className="visually-hidden"> {t("home.newTab")}</span>
-      </a>
-    </>
-  );
-}
-
 /** Properties of {@link JobFacts}. */
 export interface JobFactsProps {
   /** The job's environment. */
@@ -178,7 +154,7 @@ export function JobFacts({ environment, job }: JobFactsProps): JSX.Element {
           <VisibleText text={job.repository} />
           {" · "}
           {t("jobs.facts.definedAt", { commit: job.commit_sha.slice(0, 7) })}
-          <HostLink url={job.source_url} />
+          <HostLink url={job.source_url} label={t("jobs.facts.openHost")} before=" · " />
         </Fact>
         <Fact term={t("jobs.facts.schedule")}>
           <Schedule job={job} />
