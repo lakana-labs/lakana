@@ -288,15 +288,16 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           isDisabled={readOnly}
           onPress={active ? query.cancel : run}
         >
-          {active ? (
-            t(query.cancelling ? "queries.cancelling" : "queries.cancel")
-          ) : (
-            <>
-              {t("queries.run")}
-              <kbd aria-hidden="true">{t(`queries.runKeys.${shortcutLabel(navigator)}`)}</kbd>
-            </>
-          )}
+          {active
+            ? t(query.cancelling ? "queries.cancelling" : "queries.cancel")
+            : t("queries.run")}
         </PendingButton>
+        {/* Beside Run, not in it: text inside a button belongs in its name (WCAG 2.5.3). */}
+        {!active && (
+          <kbd className="queries-run-keys" aria-hidden="true">
+            {t(`queries.runKeys.${shortcutLabel(navigator)}`)}
+          </kbd>
+        )}
       </div>
       {state?.note !== undefined && <QueryNote note={state.note} />}
       {savedError !== null && (

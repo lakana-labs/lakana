@@ -143,7 +143,9 @@ describe("the Queries screen's work", () => {
     type(await editor(), "select 1 as one");
     const run = screen.getByRole("button", { name: "Run" });
     expect(run).toHaveClass("button-primary");
-    expect(run).toHaveTextContent(/Run(Ctrl ↵|⌘↵)$/);
+    // The button's text is its whole name; the shortcut stands beside it (WCAG 2.5.3).
+    expect(run).toHaveTextContent(/^Run$/);
+    expect(run.nextElementSibling).toHaveTextContent(/^(Ctrl ↵|⌘↵)$/);
 
     await shell.user.click(run);
 

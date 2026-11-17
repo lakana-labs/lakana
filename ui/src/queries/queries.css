@@ -101,7 +101,8 @@
   color: var(--color-bad);
 }
 
-.queries-run kbd {
+.queries-run-keys {
+  color: var(--color-text-muted);
   font-family: var(--font-sans);
   font-size: var(--type-label-size);
   line-height: var(--type-label-line);
