@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { TableListPageOut, TableTreeOut } from "../../api/catalog";
 import { ApiError } from "../../api/client";
+import { fakeServer } from "../../test/server";
 import type { TableOut, TableRef } from "../../api/table";
 import { item, TREE } from "../../test/catalog";
 import { TABLE } from "../../test/table";
@@ -11,6 +12,7 @@ vi.mock("../../api/table", () => ({ getTable: vi.fn() }));
 
 // The module and its mocked calls, loaded again for each test: the cache lives for the page.
 let catalog: typeof import("./catalog");
+let client: typeof import("../../api/client");
 let getTableTree: ReturnType<typeof vi.fn<() => Promise<TableTreeOut>>>;
 let listCompletionTables: ReturnType<
   typeof vi.fn<(environment: string, q: string, cursor: string | null) => Promise<TableListPageOut>>
@@ -25,6 +27,7 @@ beforeEach(async () => {
   listCompletionTables = vi.mocked(api.listCompletionTables);
   getTable = vi.mocked(table.getTable);
   catalog = await import("./catalog");
+  client = await import("../../api/client");
   getTableTree.mockResolvedValue(TREE);
 });
 
@@ -238,4 +241,45 @@ describe("catalogCache", () => {
     await expect(prod.columns("gold", "station_ranking")).resolves.toBeNull();
     expect(getTable).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    [
+      "a sign-out",
+      (): Promise<void> => {
+        client.endSession();
+        return Promise.resolve();
+      },
+    ],
+    [
+      "a 401",
+      async (): Promise<void> => {
+        fakeServer({ "GET /api/v1/whoami": { status: 401, body: { detail: "Sign in again." } } });
+        await client.send("GET", "/api/v1/whoami").catch(() => undefined);
+      },
+    ],
+  ])(
+    "forgets the first person's catalog after %s, so the next person reads their own",
+    async (_, end) => {
+      const secret = { ...TABLE, name: "payroll" };
+      getTable.mockResolvedValue(secret);
+      listCompletionTables.mockResolvedValue(pageOf(["payroll"], null));
+      const first = catalog.catalogCache("prod");
+      expect(await first.namespaces()).toContain("gold.sales");
+      expect(await first.tables("gold", "")).toEqual(["payroll"]);
+      expect((await first.columns("gold", "payroll"))?.[0]?.name).toBe("sale_id");
+
+      await end();
+      getTableTree.mockResolvedValue({ count: 0, environments: [] });
+      listCompletionTables.mockResolvedValue(pageOf([], null));
+      getTable.mockRejectedValue(new ApiError(403, "Forbidden", "You may not read this table."));
+      const next = catalog.catalogCache("prod");
+
+      expect(next).not.toBe(first);
+      expect(await next.namespaces()).toEqual([]);
+      expect(await next.tables("gold", "")).toEqual([]);
+      expect(await next.columns("gold", "payroll")).toBeNull();
+      expect(getTableTree).toHaveBeenCalledTimes(2);
+      expect(listCompletionTables).toHaveBeenCalledTimes(2);
+      expect(getTable).toHaveBeenCalledTimes(2);
+    },
+  );
 });

@@ -8,10 +8,13 @@
  * {@link STALE_MS}. Only an environment with more than 1,000 tables is searched by the typed word,
  * after {@link SEARCH_AFTER_CHARS} characters and {@link SEARCH_QUIET_MS} of quiet, and each word
  * once. A read that fails, a refusal (403) included, answers nothing rather than an error: help in
- * the editor never stands in the way of writing SQL.
+ * the editor never stands in the way of writing SQL. Everything kept is what the signed-in person
+ * may read, so it is forgotten when the session ends (`onSessionEnd`): the next person to sign in
+ * in the same tab reads their own.
  * @packageDocumentation
  */
 import { getTableTree, listCompletionTables, type TableTreeOut } from "../../api/catalog";
+import { onSessionEnd } from "../../api/client";
 import { type ColumnOut, getTable } from "../../api/table";
 
 /** How long a read is kept before it is read again, in milliseconds (five minutes). */
@@ -61,6 +64,11 @@ interface Named {
 // The tree, read once for every environment.
 let tree: Kept<TableTreeOut | null> | undefined;
 const catalogs = new Map<string, CompletionCatalog>();
+
+onSessionEnd(() => {
+  tree = undefined;
+  catalogs.clear();
+});
 
 // The reads of columns that wait for a free place, and how many places are taken.
 const waiting: (() => void)[] = [];

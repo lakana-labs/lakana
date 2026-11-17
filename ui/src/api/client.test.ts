@@ -7,6 +7,8 @@ import {
   DownloadTooLong,
   WrongFileType,
   api,
+  endSession,
+  onSessionEnd,
   onUnauthorized,
   send,
   setCsrfToken,
@@ -259,6 +261,22 @@ describe("send", () => {
 
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0]?.[0]).toBeInstanceOf(ApiError);
+  });
+
+  it("ends the session on a 401 and on endSession, forgetting the token, until they stop listening", async () => {
+    fakeServer({ "GET /api/v1/things": { status: 401, body: { detail: "x", type: "y" } } });
+    const listener = vi.fn();
+    const stop = onSessionEnd(listener);
+
+    await send("GET", "/api/v1/things").catch(() => undefined);
+    expect(listener).toHaveBeenCalledTimes(1);
+    setCsrfToken("csrf-1");
+    endSession();
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+    stop();
+    endSession();
+    expect(listener).toHaveBeenCalledTimes(2);
   });
 });
 

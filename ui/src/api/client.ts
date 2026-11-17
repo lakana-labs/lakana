@@ -158,6 +158,36 @@ export function onUnauthorized(listener: (error: ApiError) => void): () => void 
   };
 }
 
+const sessionEndListeners = new Set<() => void>();
+
+/**
+ * Listens for the end of the session in this tab: a sign-out, a sign-out everywhere, or an
+ * answer of 401. What one person may see and the page keeps (pictures, the SQL editor's catalog)
+ * is forgotten here, so the next person to sign in in the same tab does not see it.
+ *
+ * @param listener - Called when the session ends.
+ * @returns A function that stops listening.
+ */
+export function onSessionEnd(listener: () => void): () => void {
+  sessionEndListeners.add(listener);
+  return () => {
+    sessionEndListeners.delete(listener);
+  };
+}
+
+/** Tells the listeners of {@link onSessionEnd} that the session ended. */
+function sessionEnded(): void {
+  for (const listener of sessionEndListeners) {
+    listener();
+  }
+}
+
+/** Ends the session in this tab: forgets the CSRF token and tells {@link onSessionEnd}. */
+export function endSession(): void {
+  setCsrfToken(null);
+  sessionEnded();
+}
+
 let stepUpCeremony: (() => Promise<void>) | null = null;
 
 /** The step-up ceremony under way, shared by every request that waits for it. */
@@ -310,6 +340,7 @@ async function exchangeWith(
       for (const listener of unauthorizedListeners) {
         listener(error);
       }
+      sessionEnded();
     }
     throw error;
   }
