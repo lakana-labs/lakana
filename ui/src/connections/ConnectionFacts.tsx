@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import type { ConnectionOut } from "../api";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { useWhen } from "../shell/useWhen";
+import { isKnownKind } from "./kinds";
 import words from "./connections.en.json";
 import "./connectionStrings";
 
@@ -127,8 +128,14 @@ export function ConnectionFacts({ connection }: ConnectionFactsProps): JSX.Eleme
         </h2>
         <dl className="connection-facts">
           <Fact term={t("connections.page.kind")}>
-            {t(`connections.kinds.${kind}.name`)}
-            <span className="second">{t(`connections.kinds.${kind}.line`)}</span>
+            {isKnownKind(kind) ? (
+              <>
+                {t(`connections.kinds.${kind}.name`)}
+                <span className="second">{t(`connections.kinds.${kind}.line`)}</span>
+              </>
+            ) : (
+              <VisibleText text={kind} />
+            )}
           </Fact>
           {Object.entries(address).map(([key, value]) => (
             <Setting key={`address ${key}`} name={key} value={value} />

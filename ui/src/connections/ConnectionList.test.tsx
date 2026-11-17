@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import type { ReactElement } from "react";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionEnvironmentOut, ConnectionLastTestOut, ConnectionOut } from "../api";
@@ -739,5 +740,43 @@ describe("ConnectionList", () => {
       expect(screen.getByRole("button", { name: "Test crm" })).toBeEnabled();
       expect(server.sent.filter((request) => request.method === "POST")).toHaveLength(1);
     });
+  });
+
+  it("shows a kind this build does not know as itself, marked, with no address", async () => {
+    fakeServer(
+      connectionRoutes([aConnection({ kind: "ftp\u202E" as ConnectionOut["kind"] })], MANAGER),
+    );
+    renderList();
+
+    const row = (await screen.findByRole("link", { name: "crm" })).closest("tr");
+    expect(row).toHaveTextContent("ftpU+202E");
+  });
+
+  it("shows the deleted note from the address's state and drops it from the address", async () => {
+    fakeServer(connectionRoutes([aConnection()], MANAGER));
+    /**
+     * Says the state of the address it is at.
+     *
+     * @returns The state, as text.
+     */
+    const Probe = (): ReactElement => (
+      <output data-testid="state">{JSON.stringify(useLocation().state)}</output>
+    );
+    render(
+      <MeContext value={ME}>
+        <MemoryRouter
+          initialEntries={[{ pathname: "/", state: { note: { kind: "deleted", name: "old" } } }]}
+        >
+          <Probe />
+          <ConnectionList />
+        </MemoryRouter>
+      </MeContext>,
+    );
+
+    expect(await screen.findByText("Deleted old.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("state")).toHaveTextContent("null");
+    });
+    expect(screen.getByText("Deleted old.")).toBeInTheDocument();
   });
 });

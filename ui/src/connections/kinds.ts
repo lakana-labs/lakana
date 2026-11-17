@@ -275,3 +275,13 @@ export function whereText(
       return `${a("root")}:${a("path")}`;
   }
 }
+
+/**
+ * Whether this build knows a kind: a newer server may have kinds it does not.
+ *
+ * @param kind - The kind, as the server sent it.
+ * @returns True for one of the nine kinds.
+ */
+export function isKnownKind(kind: string): boolean {
+  return (KIND_ORDER as readonly string[]).includes(kind);
+}

@@ -6,7 +6,7 @@
  */
 import "./connections.css";
 
-import { type JSX, useCallback, useMemo, useState } from "react";
+import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -63,6 +63,20 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
   const rows = useMemo(() => (connection === undefined ? [] : [connection]), [connection]);
   const follow = useOpenTests(rows, setAnswer);
   const [deleting, setDeleting] = useState(false);
+  // Held from the first render, then dropped from the address, so a reload or Back does not
+  // say it again.
+  const [note] = useState(() => pageNote(location.state, name));
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (note !== null) {
+      // The button that caused the note is gone; the heading holds the focus while the page
+      // reads the connection, and the note takes it once it shows.
+      heading.current?.focus();
+      void navigate(location.pathname, { replace: true, state: null });
+    }
+    // Once, for the note this visit arrived with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const key = testKey(environment, name);
   const trail = [{ to: CONNECTIONS_PATH, label: t("areas.connections.name") }];
 
@@ -78,7 +92,7 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
   }
   if (connection === undefined) {
     return (
-      <Page title={name} trail={trail}>
+      <Page title={name} trail={trail} headingRef={heading}>
         {resource.error === null ? (
           <ListSkeleton />
         ) : (
@@ -87,7 +101,6 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
       </Page>
     );
   }
-  const note = pageNote(location.state, name);
   const created = note?.kind === "created";
   return (
     <Page

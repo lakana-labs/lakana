@@ -1,15 +1,26 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router";
+import type { JSX } from "react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionOut } from "../api";
 import { aConnection } from "../test/connections";
+import { held } from "../test/pending";
 import { fakeServer } from "../test/server";
 import { ConnectionPage } from "./ConnectionPage";
 
 const CRM = "GET /api/v1/environments/prod/connections/crm";
 const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Says the state of the address it is at.
+ *
+ * @returns The state, as text.
+ */
+function Probe(): JSX.Element {
+  return <output data-testid="state">{JSON.stringify(useLocation().state)}</output>;
+}
 
 /**
  * Renders the page of `prod.crm`, as the screen's route does.
@@ -19,6 +30,7 @@ const DAY = 24 * 60 * 60 * 1000;
 function renderPage(state?: unknown): void {
   render(
     <MemoryRouter initialEntries={[{ pathname: "/connections/prod/crm", state }]}>
+      <Probe />
       <Routes>
         <Route
           path="/connections/prod/crm"
@@ -450,5 +462,77 @@ describe("ConnectionPage", () => {
 
     const test = await screen.findByRole("region", { name: "Last test" });
     expect(test.querySelector("time")).toHaveAttribute("datetime", finished);
+  });
+
+  it("holds the focus on the heading while it reads the connection after a create", async () => {
+    const answer = held();
+    fakeServer({ [CRM]: answer.route });
+    renderPage({ created: true });
+
+    const heading = await screen.findByRole("heading", { level: 1, name: "crm" });
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+
+    answer.release({ status: 200, body: aConnection({ last_test: null }) });
+
+    const note = await screen.findByText(/^Created crm\./);
+    await waitFor(() => {
+      expect(note).toHaveFocus();
+    });
+  });
+
+  it("drops the note from the address once it is shown, so a reload does not say it again", async () => {
+    showing(aConnection(), { created: true });
+
+    expect(await screen.findByText(/^Created crm\./)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId("state")).toHaveTextContent("null");
+    });
+    expect(screen.getByText(/^Created crm\./)).toBeInTheDocument();
+  });
+
+  it("shows a kind this build does not know as itself, marked", async () => {
+    showing(aConnection({ kind: "ftp\u202E" as ConnectionOut["kind"] }));
+
+    const facts = await screen.findByRole("region", { name: "Connection" });
+    expect(facts).toHaveTextContent("ftpU+202E");
+  });
+
+  it("marks a hidden character in every value it shows", async () => {
+    const mark = "\u202E";
+    showing(
+      aConnection({
+        name: "crm",
+        secret: `pw${mark}`,
+        created_by: `ana${mark}`,
+        settings: { ca_certificate: `sha256:ab${mark}` },
+        declared_by: [{ repository: `sales${mark}`, asset: `orders${mark}` }],
+        last_test: {
+          id: "t1",
+          state: "done",
+          outcome: "refused",
+          message: `boom${mark}`,
+          created_at: "2026-11-02T09:30:00Z",
+          finished_at: "2026-11-02T09:30:02Z",
+          requested_by: `bob${mark}`,
+        },
+      }),
+    );
+
+    await screen.findByRole("region", { name: "Last test" });
+    const text = document.body.textContent;
+    expect(text).not.toContain(mark);
+    for (const marked of [
+      "pwU+202E",
+      "anaU+202E",
+      "sha256:abU+202E",
+      "sales",
+      "boomU+202E",
+      "bobU+202E",
+    ]) {
+      expect(text).toContain(marked);
+    }
+    expect(text).toContain("sales" + "U+202E: orders" + "U+202E");
   });
 });

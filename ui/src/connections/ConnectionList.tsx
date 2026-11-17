@@ -6,9 +6,9 @@
  */
 import "./connections.css";
 
-import { type JSX, useCallback, useMemo, useState } from "react";
+import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 
 import {
   type ConnectionEnvironmentOut,
@@ -32,7 +32,7 @@ import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { ConnectionNote, listNote } from "./ConnectionNote";
-import { whereText } from "./kinds";
+import { isKnownKind, whereText } from "./kinds";
 import { connectionPath, NEW_CONNECTION_PATH } from "./paths";
 import { readFilter, writeFilter } from "./remember";
 import { TestAll } from "./TestAll";
@@ -162,7 +162,8 @@ function ConnectionTable({
       >
         {rows.map((row) => {
           const key = testKey(row.environment, row.name);
-          const where = whereText(row.kind, row.address);
+          const known = isKnownKind(row.kind);
+          const where = known ? whereText(row.kind, row.address) : "";
           const used = row.declared_by.length;
           const usedText =
             used === 0
@@ -184,7 +185,9 @@ function ConnectionTable({
                   <span className="second">{t("connections.follow.stuck")}</span>
                 )}
               </td>
-              <td>{t(`connections.kinds.${row.kind}.name`)}</td>
+              <td>
+                {known ? t(`connections.kinds.${row.kind}.name`) : <VisibleText text={row.kind} />}
+              </td>
               <td className="narrow-hide">
                 <VisibleText text={where} breakable />
               </td>
@@ -283,7 +286,18 @@ function ConnectionRows({
 export function ConnectionList(): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
-  const note = listNote(useLocation().state);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // Held from the first render, then dropped from the address, so a reload or Back does not
+  // say it again.
+  const [note] = useState(() => listNote(location.state));
+  useEffect(() => {
+    if (note !== null) {
+      void navigate(location.pathname, { replace: true, state: null });
+    }
+    // Once, for the note this visit arrived with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const load = useCallback(() => listConnectionEnvironments(), []);
   const resource = useResource(load);
   const [chosen, setChosen] = useState(() => readFilter(me.name));
