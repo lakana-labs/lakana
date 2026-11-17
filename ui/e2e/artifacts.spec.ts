@@ -209,7 +209,9 @@ for (const theme of ["light", "dark"] as const) {
         const dialog = page.getByRole("dialog", { name: /^Deleted? version 2 of ml\.model\??$/ });
         await expect(dialog).toBeVisible();
         // The dialog takes the focus as it opens; an Escape before that reaches the page behind it.
-        await expect(dialog.getByRole("button", { name: "Delete the version" })).toBeEnabled();
+        await expect
+          .poll(() => dialog.evaluate((node) => node.contains(document.activeElement)))
+          .toBe(true);
         await page.keyboard.press("Escape");
         await expect(dialog).toBeHidden();
         await expect(deleteButton).toBeFocused();
