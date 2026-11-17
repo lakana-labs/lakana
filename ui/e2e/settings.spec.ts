@@ -192,7 +192,13 @@ test("an encoded address to a hidden place says so and reads nothing", async ({ 
   await page.waitForLoadState("networkidle");
   expect(
     paths.filter((path) =>
-      ["/api/v1/invites", "/api/v1/recovery-links", "/api/v1/settings/sign-in"].includes(path),
+      [
+        "/api/v1/invites",
+        "/api/v1/recovery-links",
+        "/api/v1/settings/sign-in",
+        // People's list; nothing else on these pages asks for it.
+        "/api/v1/principals",
+      ].includes(path),
     ),
   ).toEqual([]);
   expect(errors).toEqual([]);
