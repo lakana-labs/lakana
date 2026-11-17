@@ -98,8 +98,9 @@ describe("columnHover", () => {
     const nested: CompletionCatalog = {
       namespaces: () => Promise.resolve(["gold", "gold.sales"]),
       tables: () => Promise.resolve([]),
-      columns: vi.fn(() => Promise.resolve(null)),
+      columns: () => Promise.resolve(null),
     };
+    const columns = vi.spyOn(nested, "columns");
     const pos = "select * from gold.sales.fact_sa".length;
     view = new EditorView({
       state: EditorState.create({ doc: "select * from gold.sales.fact_sales" }),
@@ -107,7 +108,7 @@ describe("columnHover", () => {
     });
 
     expect(await columnTooltip(nested)(view, pos, 1)).toBeNull();
-    expect(nested.columns).not.toHaveBeenCalled();
+    expect(columns).not.toHaveBeenCalled();
   });
 
   it("is an extension the editor takes", () => {
