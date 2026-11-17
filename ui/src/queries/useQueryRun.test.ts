@@ -217,6 +217,7 @@ describe("useQueryRun", () => {
     expect(polls()).toBe(3);
 
     expect(result.current.query.phase).toBe("failed");
+    expect(result.current.query.failedRows).toBe(false);
     expect((result.current.query.error as ApiError).status).toBe(503);
     await advance(30_000);
     expect(polls()).toBe(3);
@@ -446,6 +447,7 @@ describe("useQueryRun", () => {
     });
     await settle();
     expect(result.current.query.phase).toBe("failed");
+    expect(result.current.query.failedRows).toBe(true);
     expect(result.current.query.run?.status).toBe("SUCCEEDED");
 
     failing = false;

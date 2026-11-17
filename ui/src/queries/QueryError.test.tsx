@@ -71,6 +71,22 @@ describe("QueryError", () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it("says the rows could not be read when the state was read, and Try again reads them again", async () => {
+    const { onRetry, user } = show({
+      ...IDLE,
+      phase: "failed",
+      run: aRun(),
+      failedRows: true,
+      error: new ApiError(500, "InternalError", "Something broke."),
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "The rows of the result could not be read: Something broke.",
+    );
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+
   it("shows nothing while there is nothing wrong", () => {
     const { container } = show({ ...IDLE, phase: "done", run: aRun(), page: aPage() });
 

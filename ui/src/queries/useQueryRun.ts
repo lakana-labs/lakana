@@ -45,6 +45,11 @@ export interface QueryRunState {
   readonly page: ResultPageOut | null;
   /** Why the submit was refused or the run was lost; null otherwise. */
   readonly error: unknown;
+  /**
+   * In the phase `failed`: true when the run's state was read but its rows could not be, false
+   * (or absent) when the state could not be read.
+   */
+  readonly failedRows?: boolean;
 }
 
 /** The run of the page and what can be done with it. */
@@ -365,6 +370,7 @@ class Follower {
           ...view,
           phase: "failed",
           error,
+          failedRows: false,
           cancelling: false,
           cancelRefusal: null,
         }));
@@ -387,7 +393,7 @@ class Follower {
         if (error instanceof ApiError && error.status === 409) {
           this.#show((view) => ({ ...view, phase: "done", page: null }));
         } else {
-          this.#show((view) => ({ ...view, phase: "failed", error }));
+          this.#show((view) => ({ ...view, phase: "failed", error, failedRows: true }));
         }
       }),
     );

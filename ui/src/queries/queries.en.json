@@ -31,6 +31,7 @@
   "cancelled": "The query was cancelled.",
   "goTo": "Go to line {{line}}, column {{column}}",
   "lost": "The state of the query could not be read: {{problem}}",
+  "rowsLost": "The rows of the result could not be read: {{problem}}",
   "tryAgain": "Try again",
   "newQuery": "Start a new query",
   "cancelRefused": "The query was not cancelled and runs on: {{problem}} Press Cancel to try again.",

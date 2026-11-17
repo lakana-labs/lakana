@@ -1,7 +1,7 @@
 /**
  * What went wrong with a run, above the result: a refused submit in the server's words, a run
  * that failed or was cancelled with its message (and Go to its line and column), or a run whose
- * state could not be read, with Try again.
+ * state or rows could not be read, with Try again.
  *
  * @packageDocumentation
  */
@@ -61,7 +61,11 @@ export function QueryError({ state, onGoTo, onRetry }: QueryErrorProps): JSX.Ele
   if (phase === "failed") {
     return (
       <div role="alert" className="step-error queries-alert">
-        <p>{t("queries.lost", { problem: problemText(t, error) })}</p>
+        <p>
+          {t(state.failedRows === true ? "queries.rowsLost" : "queries.lost", {
+            problem: problemText(t, error),
+          })}
+        </p>
         <Button className="button" onPress={onRetry}>
           {t("queries.tryAgain")}
         </Button>
