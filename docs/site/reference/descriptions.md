@@ -123,14 +123,17 @@ change is not audited: it is a display preference that changes nothing anyone el
 | `lakana table describe NAME --column COLUMN --text TEXT --label LABEL` | Sets a column's description and label edits. |
 | `lakana table describe NAME [--column COLUMN] --reset` | Removes the edits of the description and the label. |
 | `lakana table describe NAME … --lang LANGUAGE` | Does the same in that language; without `--lang`, in the table's main language. |
+| `lakana table describe NAME [--column COLUMN] … --label LABEL --label-lang LANGUAGE` | Sets the label in its own language, apart from the description's `--lang`; with `--reset` instead of `--label`, resets the label in that language. |
 | `lakana table get NAME [--lang LANGUAGE]` | Shows the label, the description, the columns' labels and descriptions, and the coverage. |
 | `lakana table list NAMESPACE [--lang LANGUAGE]` | Lists the tables of the namespace; with `--output json`, their texts in that language. |
 | `lakana me set --language TAG` | Sets your own language; `--reset` removes it. |
 
 `--text`, `--label` or both set texts; `--reset` alone removes both edits. Anything else is
 refused with `Give --text TEXT and/or --label LABEL to set, or --reset to go back to the
-project's texts.` The command ends with the language it edited, such as
-`Described gold.sales in dev (fr)`.
+project's texts.` `--label-lang` needs `--label` or `--reset`; without either it is refused
+with `--label-lang names the language of --label; give --label LABEL or --reset with it.` The
+command ends with the language it edited, such as `Described gold.sales in dev (fr)`, or
+`Described gold.sales in dev (fr, the label in en)` with `--label-lang en`.
 
 An edit in a language other than the table's main language is a translation edit: it shows to a
 reader of that language, wins over that language's translation file, and a deploy never
@@ -140,9 +143,20 @@ A translation edit does not need a translation file; the language then appears i
 ## SDK
 
 `client.tables.describe(environment, "namespace.table", description, label=…, column=None,
-lang=None)` returns the `Table`, with its texts in `lang` (or your usual language). Pass
-`description`, `label` or both; a field left out stays as it is, and `None` resets its edit.
-Passing neither raises `ValueError("give description, label or both; None removes an edit")`.
+lang=None, label_language=None)` returns the `Table`, with its texts in `lang` (or your usual
+language). Pass `description`, `label` or both; a field left out stays as it is, and `None` resets
+its edit. Passing neither raises `ValueError("give description, label or both; None removes an
+edit")`. `label_language="en"` edits the label in that language while the description is edited in
+`lang`; without a `label` it raises `ValueError("label_language names the language of label; give
+label with it")`.
+
+`label_language` and `--label-lang` need a server of this release or later: an older server ignores
+the field and edits the label in the description's language. The SDK and the CLI check the
+answer, reading the label back in its language when the answer shows another, and raise
+`lakana.errors.InvalidResponse` (the CLI exits `1`) with `The server ignored label_language: it is
+older than this SDK, so the label was saved in fr, the description's language, not in en. …`, which
+also says how to undo the edit. A reset of a label that had no edit in `label_language` cannot be
+told apart this way: on an older server it removes the label's edit in the description's language.
 `Table.description`, `Table.description_source`, `Column.description` and
 `Column.description_source` hold what the server returned; they are `None` for an older server.
 
@@ -161,10 +175,15 @@ Under `/api/v1/environments/{env}/namespaces/{path}/tables/{name}`:
 
 | Route | Body | Answer |
 |---|---|---|
-| `PATCH …/{name}[?lang=fr]` | `{"description": "text", "label": "Sales"}`: one field or both, each a text or `null` | The table (`200`) |
+| `PATCH …/{name}[?lang=fr]` | `{"description": "text", "label": "Sales", "label_language": "en"}`: one text field or both, each a text or `null`; `label_language` optional | The table (`200`) |
 | `PUT …/{name}/columns/{column}/description[?lang=fr]` | the same | The table (`200`) |
 
-`lang` names the language edited; without it, the edit is in the table's main language. The
+`lang` names the language edited; without it, the edit is in the table's main language.
+`label_language` in the body edits the label in another language than `lang`'s, for a client that
+shows a label and a description in different languages; left out or `null`, the label is edited in
+`lang`'s language as before. It needs `label` in the same body (`422` with `label_language names
+the language of `label`; send `label` with it, or leave label_language out`), and one that is not a
+language tag is `422` (`label_language: …`), before anything is written. The
 answer shows the table's texts in the reader's language, as `GET` does: `lang` if given, else your
 profile's language, then `Accept-Language`, then the server's main language. A `lang` that is not
 a language tag is `422` before anything is written.
@@ -185,7 +204,7 @@ recorded as `AUTHORIZATION_DENIED`.
 
 | Event | When | `detail` |
 |---|---|---|
-| `TABLE_DESCRIBED` | A table's edits were set or reset | `table`, `language` (the language edited), `old_length` and `new_length` (length of the description's edit, `0` for none) when the description was sent, `label_old_length` and `label_new_length` when the label was sent, `reset` (every field sent was `null`) |
+| `TABLE_DESCRIBED` | A table's edits were set or reset | `table`, `language` (the language edited), `label_language` (the label's, only when the label was edited in another language), `old_length` and `new_length` (length of the description's edit, `0` for none) when the description was sent, `label_old_length` and `label_new_length` when the label was sent, `reset` (every field sent was `null`) |
 | `COLUMN_DESCRIBED` | A column's edits were set or reset | the same, and `column` |
 
 The text is not recorded: it may be long, and the table shows it to anyone who may read the table.

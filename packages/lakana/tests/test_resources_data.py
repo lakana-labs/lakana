@@ -54,7 +54,13 @@ from lakana._models import (
 )
 from lakana._routes import ROUTES, Route
 from lakana.client import Client
-from lakana.errors import Conflict, LakanaConnectionError, QueryFailed, ValidationError
+from lakana.errors import (
+    Conflict,
+    InvalidResponse,
+    LakanaConnectionError,
+    QueryFailed,
+    ValidationError,
+)
 from lakana.resources.checks import Checks
 from lakana.resources.environments import Environments
 from lakana.resources.namespaces import Namespaces
@@ -576,6 +582,168 @@ def test_tables_describe_with_a_column_puts_to_the_columns_route() -> None:
         "/api/v1/environments/dev/namespaces/bronze/tables/sales/columns/id/description",
     )
     assert json.loads(body) == {"description": "Key"}
+
+
+def test_tables_describe_sends_the_labels_own_language_in_the_body() -> None:
+    """`label_language` goes into the body beside `label`; `lang` stays the query parameter."""
+    seen: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method != "GET":
+            seen.append((str(request.url.query, "ascii"), json.loads(request.content)))
+        return httpx.Response(200, json=_labelled("Sales", "edited", "en"))
+
+    tables = Tables(_transport(handler))
+    tables.describe(
+        "dev", "bronze.sales", "Les ventes.", label="Sales", lang="fr", label_language="en"
+    )
+    tables.describe("dev", "bronze.sales", label=None, column="id", label_language="de")
+
+    assert seen == [
+        ("lang=fr", {"description": "Les ventes.", "label": "Sales", "label_language": "en"}),
+        ("", {"label": None, "label_language": "de"}),
+    ]
+
+
+def test_tables_describe_refuses_a_label_language_without_a_label() -> None:
+    """Nothing is sent: a label language without a label would change nothing."""
+    tables = Tables(_transport(lambda request: httpx.Response(500)))
+    with pytest.raises(ValueError, match="label_language names the language of label"):
+        tables.describe("dev", "bronze.sales", "Text", label_language="en")
+
+
+def _labelled(label: str | None, source: str | None, language: str | None) -> dict[str, Any]:
+    """Build a table answer whose own label is `label`, from `source`, in `language`.
+
+    Parameters
+    ----------
+    label
+        The label.
+    source
+        Where it comes from.
+    language
+        Its language.
+
+    Returns
+    -------
+    dict
+        The answer's JSON.
+    """
+    return {
+        "name": "sales",
+        "namespace": "bronze",
+        "uuid": "u1",
+        "schema": [],
+        "label": label,
+        "label_source": source,
+        "label_language": language,
+        "language": "fr",
+        "main_language": "en",
+    }
+
+
+def test_tables_describe_checks_the_label_in_its_language_when_the_answer_shows_another() -> None:
+    """The answer is in `lang`; the SDK reads the label back in its own language to confirm it."""
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, str(request.url.query, "ascii")))
+        if request.method == "PATCH":
+            return httpx.Response(200, json=_labelled("Ventes", "project", "fr"))
+        return httpx.Response(200, json=_labelled("Sales", "edited", "en"))
+
+    table = Tables(_transport(handler)).describe(
+        "dev", "bronze.sales", label=" Sales ", lang="fr", label_language="EN"
+    )
+
+    assert table.label == "Ventes"
+    assert seen == [("PATCH", "lang=fr"), ("GET", "lang=EN")]
+
+
+def test_tables_describe_trusts_an_answer_that_shows_the_label_in_its_language() -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.method)
+        return httpx.Response(200, json=_labelled("Sales", "edited", "en"))
+
+    Tables(_transport(handler)).describe(
+        "dev", "bronze.sales", label="Sales", lang="fr", label_language="en"
+    )
+
+    assert seen == ["PATCH"]
+
+
+def test_tables_describe_says_an_older_server_saved_the_label_in_the_descriptions_language() -> (
+    None
+):
+    """An older server ignores `label_language` and saves the label in `lang`: that is an error."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            return httpx.Response(200, json=_labelled("Sales", "edited", "fr"))
+        return httpx.Response(200, json=_labelled("Orders", "project", "en"))
+
+    with pytest.raises(InvalidResponse) as caught:
+        Tables(_transport(handler)).describe(
+            "dev", "bronze.sales", label="Sales", lang="fr", label_language="en"
+        )
+
+    assert str(caught.value) == (
+        "The server ignored label_language: it is older than this SDK, so the label was saved in "
+        "fr, the description's language, not in en. Upgrade the server to save a label in its own "
+        "language; to undo this edit, reset the label with label=None and lang='fr'."
+    )
+
+
+def test_tables_describe_says_an_older_server_reset_the_label_in_the_descriptions_language() -> (
+    None
+):
+    """A reset that leaves the label's edit in `label_language` in place is an error too."""
+
+    def column(label: str | None, source: str | None, language: str | None) -> dict[str, Any]:
+        texts = {"label": label, "label_source": source, "label_language": language}
+        return {
+            **_labelled(None, None, None),
+            "schema": [{"name": "id", "type": "long", "nullable": True, **texts}],
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PUT":
+            return httpx.Response(200, json=column(None, None, None))
+        return httpx.Response(200, json=column("Number", "edited", "en"))
+
+    with pytest.raises(InvalidResponse, match=r"so the label was reset in fr, the description's"):
+        Tables(_transport(handler)).describe(
+            "dev", "bronze.sales", label=None, column="id", lang="fr", label_language="en"
+        )
+
+
+def test_tables_describe_reads_nothing_back_when_both_languages_are_the_same() -> None:
+    """A `label_language` that is `lang` in another case needs no check: one language for both."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.method)
+        return httpx.Response(200, json=_labelled("Ventes", "edited", "fr"))
+
+    Tables(_transport(handler)).describe(
+        "dev", "bronze.sales", label="Ventes", lang="fr", label_language="FR"
+    )
+
+    assert seen == ["PATCH"]
+
+
+def test_tables_describe_without_lang_names_the_main_language_an_older_server_used() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            return httpx.Response(200, json=_labelled("Ventes", "edited", "en"))
+        return httpx.Response(200, json=_labelled(None, None, None))
+
+    with pytest.raises(InvalidResponse, match=r"saved in en, the table's main language, not in fr"):
+        Tables(_transport(handler)).describe(
+            "dev", "bronze.sales", label="Ventes", label_language="fr"
+        )
 
 
 def test_tables_delete_sends_a_delete() -> None:
