@@ -13,10 +13,12 @@ import { ListSkeleton } from "../catalog/ListSkeleton";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useAfter } from "../queries/useAfter";
 import { NotFound } from "../shell/NotFound";
+import { Page } from "../shell/Page";
 import { useResource } from "../shell/useResource";
 import { ConnectionList } from "./ConnectionList";
 import { ConnectionPage } from "./ConnectionPage";
 import { EditPage } from "./EditPage";
+import { CONNECTIONS_PATH } from "./paths";
 import "./connectionStrings";
 
 /** The Add and Edit form, a chunk of its own. */
@@ -89,9 +91,31 @@ function EditLoader({ environment, name }: EditLoaderProps): JSX.Element {
     );
   }
   return (
-    <Suspense fallback={<FormLoading />}>
-      <ConnectionForm mode="edit" connection={resource.data} />
-    </Suspense>
+    <EditPage environment={environment} name={name}>
+      <Suspense fallback={<FormLoading />}>
+        <ConnectionForm mode="edit" connection={resource.data} />
+      </Suspense>
+    </EditPage>
+  );
+}
+
+/**
+ * The Add page: its heading and trail stay in this chunk, so the heading the shell focuses is
+ * there while the form's chunk loads.
+ *
+ * @returns The page.
+ */
+function AddPage(): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <Page
+      title={t("connections.form.addTitle")}
+      trail={[{ to: CONNECTIONS_PATH, label: t("areas.connections.name") }]}
+    >
+      <Suspense fallback={<FormLoading />}>
+        <ConnectionForm mode="add" />
+      </Suspense>
+    </Page>
   );
 }
 
@@ -107,14 +131,7 @@ export function AreaScreen(): JSX.Element {
   return (
     <Routes>
       <Route index element={<ConnectionList />} />
-      <Route
-        path="new"
-        element={
-          <Suspense fallback={<FormLoading />}>
-            <ConnectionForm mode="add" />
-          </Suspense>
-        }
-      />
+      <Route path="new" element={<AddPage />} />
       <Route path=":environment/:name" element={<Connection />} />
       <Route path=":environment/:name/edit" element={<EditConnection />} />
       <Route path="*" element={<NotFound />} />

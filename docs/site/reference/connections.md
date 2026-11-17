@@ -339,7 +339,7 @@ a worker can reach it." with **Test now** as its primary action. A refusal, such
 shows above the form in the server's words and keeps what you typed.
 
 A secret's values live only in the form. Each is a password field that your browser neither shows
-nor remembers, it is sent once in the create request and in no other, it is never put in the
+nor remembers, it is sent only in the create request (again, unchanged, if a passkey touch is asked for first), it is never put in the
 address, in storage or in an error, and the form forgets it when you save. No page shows it again.
 
 ### Edit a connection

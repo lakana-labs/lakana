@@ -12,7 +12,6 @@ import { PendingButton } from "../shell/PendingButton";
 import { markedText } from "../shell/VisibleText";
 import { problemText } from "../sign-in/messages";
 import { STUCK_AFTER_MS } from "./useOpenTests";
-import { useNow } from "./useNow";
 import "./connectionStrings";
 
 /**
@@ -31,6 +30,8 @@ export interface TestButtonProps {
   readonly connection: ConnectionOut;
   /** Called with the connection and its open test once one is queued or found open. */
   readonly onStarted: (row: ConnectionOut) => void;
+  /** The present, in milliseconds since the epoch, from the screen's one clock. */
+  readonly at: number;
   /** Whether it is the page's one primary action; no by default, as in a row. */
   readonly primary?: boolean;
   /** Whether it says "Test now", as the page of a connection just created does; no by default. */
@@ -49,6 +50,7 @@ export interface TestButtonProps {
  * the focus stays beside it, never on the page.
  * @param props - The connection and what to call once its test is open.
  * @param props.connection - The connection.
+ * @param props.at - The present.
  * @param props.onStarted - Called with the connection and its open test.
  * @param props.primary - Whether it is the page's primary action.
  * @param props.now - Whether it says "Test now".
@@ -56,12 +58,12 @@ export interface TestButtonProps {
  */
 export function TestButton({
   connection,
+  at,
   onStarted,
   primary = false,
   now: soon = false,
 }: TestButtonProps): JSX.Element {
   const { t } = useTranslation();
-  const now = useNow();
   const [pending, setPending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   // Set when a press hands on an open test, so the disabled button's focus moves beside it.
@@ -69,7 +71,7 @@ export function TestButton({
   const holder = useRef<HTMLSpanElement>(null);
   const last = connection.last_test;
   const stuck =
-    last?.created_at !== undefined && now - Date.parse(last.created_at) >= STUCK_AFTER_MS;
+    last?.created_at !== undefined && at - Date.parse(last.created_at) >= STUCK_AFTER_MS;
   const open = isOpen(connection) && !stuck;
   useEffect(() => {
     if (open && started.current) {

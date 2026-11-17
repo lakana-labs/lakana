@@ -177,6 +177,7 @@
     "deleted": "Deleted {{name}}."
   },
   "form": {
+    "addTitle": "Add connection",
     "loading": "Loading the form…"
   },
   "delete": {

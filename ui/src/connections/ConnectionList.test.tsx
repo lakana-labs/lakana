@@ -416,6 +416,29 @@ describe("ConnectionList", () => {
       vi.useRealTimers();
     });
 
+    it("drops a row whose connection a read found deleted, instead of leaving it testing", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const running = aConnection({
+        last_test: { state: "running", outcome: null, finished_at: null },
+      } as unknown as Partial<ConnectionOut>);
+      fakeServer({
+        ...connectionRoutes([running], MANAGER),
+        "GET /api/v1/environments/prod/connections/crm": {
+          status: 404,
+          body: { detail: "No connection crm in prod.", type: "NotFound" },
+        },
+      });
+      renderList();
+
+      expect(await screen.findByText("testing…")).toBeInTheDocument();
+      await advance(1_000);
+
+      await waitFor(() => {
+        expect(screen.queryByRole("link", { name: "crm" })).not.toBeInTheDocument();
+      });
+      expect(screen.queryByText("testing…")).not.toBeInTheDocument();
+    });
+
     it.each([
       [
         "a manager",

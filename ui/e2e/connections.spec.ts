@@ -223,6 +223,8 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.getByRole("heading", { level: 1, name: SCRATCH })).toBeVisible();
         await tabTo(page, page.getByRole("link", { name: "Edit" }));
         await page.keyboard.press("Enter");
+        // The form's chunk is loaded now for the first time; the heading holds the focus meanwhile.
+        await expect(page.getByRole("heading", { level: 1, name: "Edit" })).toBeFocused();
         await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
         const path = page.getByRole("textbox", { name: "path" });
         await tabTo(page, path);
@@ -258,7 +260,7 @@ for (const theme of ["light", "dark"] as const) {
         // Add: a kind with the arrow keys, the fields and the secret typed, Save with Enter.
         await tabTo(page, page.getByRole("link", { name: "Add connection" }));
         await page.keyboard.press("Enter");
-        await expect(page.getByRole("heading", { level: 1, name: "Add connection" })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 1, name: "Add connection" })).toBeFocused();
         const kinds = page.getByRole("radiogroup", { name: "Kind" });
         await tabTo(page, kinds.getByRole("radio", { name: /^PostgreSQL/u }));
         await expect(kinds.getByRole("radio", { name: /^PostgreSQL/u })).toBeChecked();

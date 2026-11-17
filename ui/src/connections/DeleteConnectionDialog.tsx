@@ -29,8 +29,7 @@ export interface DeleteConnectionDialogProps {
  * Renders the question. A connection that assets still declare is not deleted from here: the
  * dialog names the assets, says to remove it from them in git, and only closes; nothing is sent.
  * Otherwise it asks, says that the secret stays in the environment, unbound, and deletes once.
- * From the browser the server asks for a passkey touch, which the request runs before it sends
- * again. A refusal, such as the 409 of an asset that declared it meanwhile, stays in the dialog
+ * A refusal, such as the 409 of an asset that declared it meanwhile, stays in the dialog
  * with the server's sentence. While the request is open, Escape and Cancel do nothing.
  *
  * @param props - The connection and the handlers.

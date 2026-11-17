@@ -16,6 +16,7 @@ import { ListSkeleton } from "../catalog/ListSkeleton";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { Page } from "../shell/Page";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { ConnectionFacts } from "./ConnectionFacts";
 import { ConnectionNote, pageNote } from "./ConnectionNote";
@@ -78,11 +79,21 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const key = testKey(environment, name);
+  const gone = follow.gone.has(key);
+  // Following found the connection deleted: the page swaps to not-found, so the heading holds
+  // the focus the page had.
+  useEffect(() => {
+    if (gone) {
+      heading.current?.focus();
+    }
+  }, [gone]);
+  // Try again goes away with the failure; focus stays in the panel it belongs to.
+  const { target: regionRef, arm: armRegion } = useFocusAfter<HTMLDivElement>(follow.failed);
   const trail = [{ to: CONNECTIONS_PATH, label: t("areas.connections.name") }];
 
-  if (resource.failure?.status === 404 || follow.gone.has(key)) {
+  if (resource.failure?.status === 404 || gone) {
     return (
-      <Page title={t("notFound.title")}>
+      <Page title={t("notFound.title")} headingRef={heading}>
         <p>{t("notFound.body")}</p>
         <Link className="button" to={CONNECTIONS_PATH}>
           {t("connections.page.back")}
@@ -110,7 +121,13 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
         <div className="connection-actions">
           <EnvironmentLabel environment={environment} />
           {connection.actions.includes("test") && (
-            <TestButton connection={connection} onStarted={setAnswer} primary now={created} />
+            <TestButton
+              connection={connection}
+              at={now}
+              onStarted={setAnswer}
+              primary
+              now={created}
+            />
           )}
           {connection.actions.includes("update") && (
             <Link className="button" to={editPath(environment, name)}>
@@ -133,15 +150,23 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
       <div className="connection-page">
         {note !== null && <ConnectionNote note={note} />}
         <ConnectionFacts connection={connection} />
-        <LastTest
-          connection={connection}
-          now={now}
-          queuedSince={follow.queuedSince.get(key)}
-          stuck={follow.stuck.has(key)}
-        />
-        {follow.failed && (
-          <ReadFailed message={t("connections.follow.failed")} onRetry={follow.retry} />
-        )}
+        <div ref={regionRef} tabIndex={-1}>
+          <LastTest
+            connection={connection}
+            now={now}
+            queuedSince={follow.queuedSince.get(key)}
+            stuck={follow.stuck.has(key)}
+          />
+          {follow.failed && (
+            <ReadFailed
+              message={t("connections.follow.failed")}
+              onRetry={() => {
+                armRegion();
+                follow.retry();
+              }}
+            />
+          )}
+        </div>
       </div>
       {deleting && (
         <DeleteConnectionDialog

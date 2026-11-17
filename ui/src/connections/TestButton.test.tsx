@@ -36,7 +36,7 @@ function Row({ start }: { readonly start: ConnectionOut }): JSX.Element {
   return (
     <div>
       <TestStatus connection={row} now={NOW} />
-      <TestButton connection={row} onStarted={setRow} />
+      <TestButton connection={row} at={NOW} onStarted={setRow} />
     </div>
   );
 }
@@ -127,6 +127,7 @@ describe("TestButton", () => {
     const server = fakeServer();
     render(
       <TestButton
+        at={Date.now()}
         connection={aConnection({
           last_test: { ...QUEUED, state: "queued" } as const,
         })}
@@ -143,6 +144,7 @@ describe("TestButton", () => {
   it("is enabled again for a test open for ten minutes, so Test again can close it", () => {
     render(
       <TestButton
+        at={Date.now()}
         connection={aConnection({
           last_test: {
             ...QUEUED,
@@ -156,5 +158,25 @@ describe("TestButton", () => {
 
     expect(screen.getByRole("button", { name: "Test crm" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Test crm" })).toHaveTextContent(/^Test$/);
+  });
+
+  it("takes the present from the screen: the same test is open or stuck by the clock it is given", () => {
+    const connection = aConnection({
+      last_test: { ...QUEUED, state: "running" } as const,
+    });
+    const created = Date.parse(QUEUED.created_at);
+    const { rerender } = render(
+      <TestButton connection={connection} at={created} onStarted={() => undefined} />,
+    );
+    expect(screen.getByRole("button", { name: "Testing… crm" })).toBeDisabled();
+
+    rerender(
+      <TestButton
+        connection={connection}
+        at={created + STUCK_AFTER_MS}
+        onStarted={() => undefined}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Test crm" })).toBeEnabled();
   });
 });

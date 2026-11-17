@@ -1,5 +1,4 @@
 {
-  "addTitle": "Add connection",
   "noCreate": "You may not add connections in any environment. Ask an administrator for MANAGE_CONNECTION.",
   "kind": "Kind",
   "name": "Name",
@@ -21,7 +20,7 @@
   "secretValues": "New values",
   "secretNamed": "An existing secret of {{environment}}",
   "secretName": "Secret name",
-  "secretHelp": "Save sends the values once; they are never shown again.",
+  "secretHelp": "The values go only in the request Save sends; they are never shown again.",
   "azureKey": "Credential",
   "azure": {
     "account_key": "Account key",

@@ -84,6 +84,8 @@ function ConnectionTable({
   const follow = useOpenTests(rows, replace);
   const region = useFocusAfter<HTMLDivElement>(follow.failed);
   const { stuck, gone, failed } = follow;
+  // A connection a read found deleted is no longer shown, rather than as "testing…" for good.
+  const shown = rows.filter((row) => !gone.has(testKey(row.environment, row.name)));
   const followed = useMemo(
     () => ({ answers, stuck, gone, failed }),
     [answers, stuck, gone, failed],
@@ -133,7 +135,7 @@ function ConnectionTable({
     <>
       <ViewList
         pages={pages}
-        rowCount={rows.length}
+        rowCount={shown.length}
         empty=""
         region={t("connections.list.region")}
         regionRef={region.target}
@@ -160,7 +162,7 @@ function ConnectionTable({
           </tr>
         }
       >
-        {rows.map((row) => {
+        {shown.map((row) => {
           const key = testKey(row.environment, row.name);
           const known = isKnownKind(row.kind);
           const where = known ? whereText(row.kind, row.address) : "";
@@ -202,7 +204,7 @@ function ConnectionTable({
               </td>
               <td>
                 {row.actions.includes("test") && (
-                  <TestButton connection={row} onStarted={replace} />
+                  <TestButton connection={row} at={now} onStarted={replace} />
                 )}
               </td>
               <td>

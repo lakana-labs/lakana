@@ -44,19 +44,22 @@ describe("the Connections screen", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows Add at its own address", async () => {
+  it("shows Add at its own address, its heading there before the form's chunk loads", async () => {
     renderAt("/new");
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Add connection" }),
-    ).toBeInTheDocument();
+    // At once, while the lazy form is still loading: the heading the shell focuses is mounted.
+    const heading = screen.getByRole("heading", { level: 1, name: "Add connection" });
+    expect(await screen.findByText(/You may not add connections/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Add connection" })).toBe(heading);
   });
 
   it("shows Edit of a connection at its own address", async () => {
     renderAt("/prod/crm/edit");
 
+    const heading = screen.getByRole("heading", { level: 1, name: "Edit" });
     expect(await screen.findByRole("textbox", { name: "host" })).toHaveValue("db.example.org");
-    expect(screen.getByRole("heading", { level: 1, name: "Edit" })).toBeInTheDocument();
+    // The same heading throughout, so the focus the shell gave it is kept.
+    expect(screen.getByRole("heading", { level: 1, name: "Edit" })).toBe(heading);
   });
 
   it("shows the not-found state for Edit of a connection that does not exist", async () => {

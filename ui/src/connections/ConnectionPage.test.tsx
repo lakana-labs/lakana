@@ -98,6 +98,9 @@ describe("ConnectionPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("region", { name: "Last test" })).toHaveTextContent(/OK · /);
     });
+    // The pressed button went away with the failure; focus is in the panel, not on the page.
+    expect(document.body).not.toHaveFocus();
+    expect(screen.getByRole("region", { name: "Last test" }).parentElement).toHaveFocus();
   });
 
   it("shows the address, settings, secret name, CA fingerprints, who created it and when", async () => {
@@ -449,6 +452,38 @@ describe("ConnectionPage", () => {
         { timeout: 4000 },
       ),
     ).toBeInTheDocument();
+  }, 8000);
+
+  it("puts the focus on the not-found heading when following finds the connection deleted", async () => {
+    let reads = 0;
+    fakeServer({
+      [CRM]: () => {
+        reads += 1;
+        return reads === 1
+          ? {
+              status: 200,
+              body: aConnection({
+                last_test: {
+                  id: "t1",
+                  state: "running",
+                  outcome: null,
+                  message: null,
+                  created_at: new Date().toISOString(),
+                  finished_at: null,
+                },
+              }),
+            }
+          : { status: 404, body: { detail: "No connection crm in prod.", type: "NotFound" } };
+      },
+    });
+    renderPage();
+
+    const heading = await screen.findByRole(
+      "heading",
+      { level: 1, name: "This page does not exist" },
+      { timeout: 4000 },
+    );
+    expect(heading).toHaveFocus();
   }, 8000);
 
   it("long past a test's start, the day is in the full date", async () => {

@@ -39,13 +39,11 @@ import { ListSkeleton } from "../catalog/ListSkeleton";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { EnvironmentPicker } from "../queries/EnvironmentPicker";
 import { useMe } from "../shell/me";
-import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { Fact, fingerprints } from "./ConnectionFacts";
-import { EditPage } from "./EditPage";
 import {
   type CaChoice,
   createBody,
@@ -436,11 +434,11 @@ function SaveRow({ busy, cancel }: SaveRowProps): JSX.Element {
 }
 
 /**
- * The Add page: the environments where the person may add a connection are read first. It
+ * The Add page's content, under the heading the screen's chunk holds: the environments where the person may add a connection are read first. It
  * starts in the list's filter when that is one of them, else in the first; with none, it says
  * who may add one and shows no form.
  *
- * @returns The page.
+ * @returns The content.
  */
 function AddConnection(): JSX.Element {
   const { t } = useTranslation();
@@ -463,14 +461,7 @@ function AddConnection(): JSX.Element {
     const start = creatable.find(({ name }) => name === filter) ?? creatable[0];
     body = <AddForm environments={creatable} start={start.name} />;
   }
-  return (
-    <Page
-      title={t("connections.form.addTitle")}
-      trail={[{ to: CONNECTIONS_PATH, label: t("areas.connections.name") }]}
-    >
-      {body}
-    </Page>
-  );
+  return body;
 }
 
 /**
@@ -488,7 +479,7 @@ export default function ConnectionForm(props: ConnectionFormProps): JSX.Element 
 }
 
 /**
- * The Edit page of a connection, with the trail Connections › name › Edit. Where the
+ * The Edit page's content, under the heading the screen's chunk holds. Where the
  * connection's `actions` lack `update`, it says who may edit it and links back to it, with no
  * form.
  *
@@ -500,7 +491,7 @@ function EditConnection({ connection }: EditFormProps): JSX.Element {
   const { t } = useTranslation();
   const { environment, name } = connection;
   return (
-    <EditPage environment={environment} name={name}>
+    <>
       {connection.actions.includes("update") ? (
         <EditForm connection={connection} />
       ) : (
@@ -511,6 +502,6 @@ function EditConnection({ connection }: EditFormProps): JSX.Element {
           </Link>
         </>
       )}
-    </EditPage>
+    </>
   );
 }
