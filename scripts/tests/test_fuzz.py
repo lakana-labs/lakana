@@ -337,6 +337,11 @@ def test_the_pull_request_run_is_short_and_the_nightly_run_is_an_hour() -> None:
     assert set(workflow["jobs"]) == {"pull-request", "nightly"}
     run = _step("pull-request", _CFLITE + "run_fuzzers@")
     assert (run["with"]["mode"], run["with"]["fuzz-seconds"]) == ("code-change", 300)
+    # Without it the action takes c++, and CIFuzz waits 30 s instead of 120 s for a crash to
+    # reproduce before it calls the crash unreproducible and passes the run.
+    assert run["with"]["language"] == "python"
+    for job in ("pull-request", "nightly"):
+        assert _step(job, _CFLITE + "build_fuzzers@")["with"]["language"] == "python"
     nightly = _step("nightly", ".clusterfuzzlite/nightly.sh")
     assert nightly["run"] == (
         '.clusterfuzzlite/nightly.sh build-out cifuzz-corpus out/artifacts "$FUZZ_SECONDS" '
@@ -381,7 +386,11 @@ def test_the_corpus_is_kept_in_main_s_cache_and_a_pull_request_only_reads_it() -
         }
     save = _step("nightly", _CACHE + "save@")
     assert save["with"] == {"path": "cifuzz-corpus", "key": key}
-    assert save["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
+    assert save["if"] == "${{ !cancelled() && steps.decide.outputs.save == 'true' }}"
+    decide = _step("nightly", 'if [ -n "$MATCHED" ]')
+    assert decide["id"] == "decide"
+    assert decide["env"]["MATCHED"] == "${{ steps.restore.outputs.cache-matched-key }}"
+    assert _step("nightly", _CACHE + "restore@")["id"] == "restore"
     steps = _workflow()["jobs"]["nightly"]["steps"]
     order = [
         steps.index(_step("nightly", p))
@@ -421,12 +430,83 @@ def test_the_fuzzing_jobs_run_on_github_s_runner_with_read_scopes_only() -> None
     for name, job in workflow["jobs"].items():
         assert job["runs-on"] == "ubuntu-latest", name
         assert "timeout-minutes" in job, name
-        assert job["permissions"] == {"contents": "read"}, name
         for step in job["steps"]:
             assert "github-token" not in step.get("with", {}), name
-            assert "token" not in str(step.get("env", {})).lower(), name
+            if str(step.get("uses", "")).startswith(_CFLITE):
+                assert "env" not in step, name
             if str(step.get("uses", "")).startswith("actions/checkout@"):
                 assert step["with"]["persist-credentials"] is False
+    assert workflow["jobs"]["pull-request"]["permissions"] == {"contents": "read"}
+    # The nightly job reads the cache list once, in the one step that has the token.
+    nightly = workflow["jobs"]["nightly"]
+    assert nightly["permissions"] == {"contents": "read", "actions": "read"}
+    with_token = [s for s in nightly["steps"] if "token" in str(s.get("env", {})).lower()]
+    assert [s.get("id") for s in with_token] == ["decide"]
+    for job in workflow["jobs"].values():
+        for step in job["steps"]:
+            assert "token" not in str(step.get("env", {})).lower() or step.get("id") == "decide"
+
+
+def _decide(tmp_path: Path, matched: str, listing: str, exit_code: int = 0) -> str:
+    """Run the nightly job's decision step with a fake ``gh``.
+
+    Parameters
+    ----------
+    tmp_path
+        A scratch directory.
+    matched
+        The restore step's ``cache-matched-key``.
+    listing
+        What ``gh cache list ... --jq length`` prints.
+    exit_code
+        What that ``gh`` exits with.
+
+    Returns
+    -------
+    str
+        What the step wrote to ``GITHUB_OUTPUT``, then its standard output.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh = bin_dir / "gh"
+    gh.write_text(f"#!/bin/bash\nprintf '%s' '{listing}'\nexit {exit_code}\n")
+    gh.chmod(0o755)
+    output = tmp_path / "output"
+    output.write_text("")
+    step = _step("nightly", 'if [ -n "$MATCHED" ]')
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "MATCHED": matched,
+            "GITHUB_OUTPUT": str(output),
+            "GITHUB_REPOSITORY": "lakana-labs/lakana",
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return output.read_text() + result.stdout
+
+
+@pytest.mark.parametrize(
+    ("matched", "listing", "exit_code", "save"),
+    [
+        ("fuzz-corpus-1-1", "", 0, True),  # restored: keep the grown corpus
+        ("", "", 0, True),  # main has none yet (gh prints nothing): the first
+        ("", "0", 0, True),
+        ("", "1", 0, False),  # one is kept but was not restored: keep it
+        ("", "", 1, False),  # the list failed: do not replace what may be there
+    ],
+)
+def test_the_nightly_job_saves_the_corpus_only_after_a_hit_or_as_the_first(
+    matched: str, listing: str, exit_code: int, save: bool, tmp_path: Path
+) -> None:
+    """A miss after a corpus was kept must not make a seeds-only corpus the newest."""
+    written = _decide(tmp_path, matched, listing, exit_code)
+    assert f"save={str(save).lower()}" in written
+    assert ("::warning::" in written) is not save
 
 
 def _fake_docker(tmp_path: Path, fails: str) -> Path:
@@ -438,6 +518,7 @@ def _fake_docker(tmp_path: Path, fails: str) -> Path:
         Where to write it.
     fails
         The text whose presence among the arguments makes it exit 1; empty never fails.
+        ``=<text>`` instead fails the call whose last argument is exactly ``<text>``.
 
     Returns
     -------
@@ -449,14 +530,17 @@ def _fake_docker(tmp_path: Path, fails: str) -> Path:
     docker = bin_dir / "docker"
     docker.write_text(
         "#!/bin/bash\n"
-        f'echo "$*" >> {tmp_path}/calls\n'
-        f'if [ -n "{fails}" ] && [[ "$*" == *"{fails}"* ]]; then exit 1; fi\n'
+        # One record per call, its arguments apart: a `bash -c` script holds line breaks.
+        f"printf '%s\\037' \"$@\" >> {tmp_path}/calls\n"
+        f"printf '\\036' >> {tmp_path}/calls\n"
+        f'if [[ -n "{fails}" && "{fails}" != =* && "$*" == *"{fails}"* ]]; then exit 1; fi\n'
+        f'if [ "=${{@: -1}}" = "{fails}" ]; then exit 1; fi\n'
     )
     docker.chmod(0o755)
     return bin_dir
 
 
-def _nightly(tmp_path: Path, fails: str = "") -> tuple[int, list[str]]:
+def _nightly(tmp_path: Path, fails: str = "") -> tuple[int, list[list[str]]]:
     """Run ``.clusterfuzzlite/nightly.sh`` over two fake fuzzers with a fake ``docker``.
 
     Parameters
@@ -468,8 +552,8 @@ def _nightly(tmp_path: Path, fails: str = "") -> tuple[int, list[str]]:
 
     Returns
     -------
-    tuple of int and list of str
-        The exit code and the ``docker`` command lines, in order.
+    tuple of int and list of list of str
+        The exit code and each ``docker`` call's arguments, in order.
     """
     out = tmp_path / "build-out"
     out.mkdir()
@@ -490,8 +574,43 @@ def _nightly(tmp_path: Path, fails: str = "") -> tuple[int, list[str]]:
         text=True,
         check=False,
     )
-    calls = (tmp_path / "calls").read_text().splitlines()
-    return result.returncode, calls
+    records = (tmp_path / "calls").read_text().split("\x1e")[:-1]
+    return result.returncode, [record.split("\x1f")[:-1] for record in records]
+
+
+def _after_image(call: list[str]) -> list[str]:
+    """Drop ``docker run``'s own options from a call.
+
+    Parameters
+    ----------
+    call
+        One call's arguments.
+
+    Returns
+    -------
+    list of str
+        What the container runs.
+    """
+    return call[call.index("runner@sha256:x") + 1 :]
+
+
+def _script(name: str) -> str:
+    """Read one of the ``bash -c`` scripts ``nightly.sh`` defines.
+
+    Parameters
+    ----------
+    name
+        The variable, ``FRESH`` or ``SWAP``.
+
+    Returns
+    -------
+    str
+        Its text.
+    """
+    text = (ROOT / ".clusterfuzzlite" / "nightly.sh").read_text()
+    match = re.search(rf"^{name}='([^']*)'$", text, re.MULTILINE)
+    assert match is not None
+    return match[1]
 
 
 def test_the_nightly_script_fuzzes_then_prunes_each_fuzzer_from_its_kept_corpus(
@@ -499,30 +618,83 @@ def test_the_nightly_script_fuzzes_then_prunes_each_fuzzer_from_its_kept_corpus(
 ) -> None:
     code, calls = _nightly(tmp_path)
     assert code == 0
-    commands = [c.split("runner@sha256:x ", 1)[1] for c in calls]
+    commands = [_after_image(call) for call in calls]
     assert commands[:4] == [
-        "run_fuzzer a_fuzzer -max_total_time=7 -artifact_prefix=/artifacts/a_fuzzer-",
-        "bash -c rm -rf /corpus/a_fuzzer.pruned && mkdir /corpus/a_fuzzer.pruned",
-        "run_fuzzer a_fuzzer -merge=1 -artifact_prefix=/artifacts/a_fuzzer-"
-        " /corpus/a_fuzzer.pruned",
-        "bash -c rm -rf /corpus/a_fuzzer && mv /corpus/a_fuzzer.pruned /corpus/a_fuzzer",
+        ["run_fuzzer", "a_fuzzer", "-max_total_time=7", "-artifact_prefix=/artifacts/a_fuzzer-"],
+        ["bash", "-c", _script("FRESH"), "_", "/corpus/a_fuzzer.pruned"],
+        [
+            "run_fuzzer",
+            "a_fuzzer",
+            "-merge=1",
+            "-artifact_prefix=/artifacts/a_fuzzer-",
+            "/corpus/a_fuzzer.pruned",
+        ],
+        ["bash", "-c", _script("SWAP"), "_", "/corpus/a_fuzzer"],
     ]
     assert len(commands) == 8
-    assert all(f"-v {tmp_path}/corpus:/corpus" in c for c in calls)
-    assert "-e CORPUS_DIR=/corpus/a_fuzzer" in calls[0]
+    assert all(f"{tmp_path}/corpus:/corpus" in call for call in calls)
+    assert "CORPUS_DIR=/corpus/a_fuzzer" in calls[0]
 
 
 def test_a_crash_fails_the_nightly_script_after_every_fuzzer_ran(tmp_path: Path) -> None:
     code, calls = _nightly(tmp_path, fails="run_fuzzer a_fuzzer -max_total_time")
     assert code == 1
-    assert any("run_fuzzer b_fuzzer -max_total_time" in c for c in calls)
+    assert any(_after_image(call)[:2] == ["run_fuzzer", "b_fuzzer"] for call in calls)
 
 
 def test_a_failed_pruning_keeps_the_corpus_and_fails_the_nightly_script(tmp_path: Path) -> None:
     code, calls = _nightly(tmp_path, fails="run_fuzzer a_fuzzer -merge=1")
     assert code == 1
-    assert not any("mv /corpus/a_fuzzer.pruned /corpus/a_fuzzer" in c for c in calls)
-    assert any("rm -rf /corpus/a_fuzzer.pruned" in c and "mv" not in c for c in calls)
+    commands = [_after_image(call) for call in calls]
+    assert ["bash", "-c", _script("SWAP"), "_", "/corpus/a_fuzzer"] not in commands
+    assert ["rm", "-rf", "/corpus/a_fuzzer.pruned"] in commands
+
+
+def test_a_failed_swap_fails_the_nightly_script(tmp_path: Path) -> None:
+    code, calls = _nightly(tmp_path, fails="=/corpus/a_fuzzer")
+    assert code == 1
+    # Only the swap failed: the fuzzing and the pruning of a_fuzzer ran to their end.
+    commands = [_after_image(call) for call in calls]
+    assert ["bash", "-c", _script("SWAP"), "_", "/corpus/a_fuzzer"] in commands
+    assert ["rm", "-rf", "/corpus/a_fuzzer.pruned"] not in commands
+    assert any(_after_image(call)[:2] == ["run_fuzzer", "b_fuzzer"] for call in calls)
+
+
+def _swap(corpus: Path) -> int:
+    """Run the script that puts a pruned corpus in place of the old one.
+
+    Parameters
+    ----------
+    corpus
+        The fuzzer's corpus directory.
+
+    Returns
+    -------
+    int
+        Its exit code.
+    """
+    return subprocess.run(["bash", "-c", _script("SWAP"), "_", str(corpus)], check=False).returncode
+
+
+def test_the_swap_puts_the_pruned_corpus_in_place(tmp_path: Path) -> None:
+    corpus = tmp_path / "a_fuzzer"
+    (corpus).mkdir()
+    (corpus / "old").write_text("")
+    (tmp_path / "a_fuzzer.pruned").mkdir()
+    (tmp_path / "a_fuzzer.pruned" / "new").write_text("")
+    assert _swap(corpus) == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a_fuzzer"]
+    assert [p.name for p in corpus.iterdir()] == ["new"]
+
+
+def test_a_swap_that_fails_keeps_the_old_corpus(tmp_path: Path) -> None:
+    corpus = tmp_path / "a_fuzzer"
+    corpus.mkdir()
+    (corpus / "old").write_text("")
+    # No pruned corpus to move: the second `mv` fails.
+    assert _swap(corpus) == 1
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["a_fuzzer"]
+    assert [p.name for p in corpus.iterdir()] == ["old"]
 
 
 def test_the_nightly_script_fails_without_a_fuzzer(tmp_path: Path) -> None:

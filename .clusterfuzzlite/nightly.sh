@@ -10,8 +10,8 @@
 # the workflow could not keep it with actions/cache. This runs the same base-runner image the
 # way ClusterFuzzLite does (`run_fuzzer`, which also unpacks each fuzzer's seed corpus).
 #
-# A crash's input goes to ARTIFACTS/<fuzzer>-crash-<hash>; a kept input that crashes now fails the
-# fuzzing, which runs every kept input first. Exits 1 when a fuzzer crashed or a pruning failed,
+# A crash's input goes to ARTIFACTS/<fuzzer>-crash-<hash>; a kept input that crashes now fails that
+# night's run, which runs every kept input first (the pruning then drops it). Exits 1 when a fuzzer crashed or a pruning failed,
 # after every fuzzer has run; a corpus whose pruning failed is kept as it was.
 set -uo pipefail
 shopt -s nullglob
@@ -34,6 +34,15 @@ run() {
     "$image" "$@"
 }
 
+# The names go to `bash -c` as arguments, never into its command text; the `$1` in these
+# scripts is the container's, hence the single quotes.
+# shellcheck disable=SC2016
+FRESH='rm -rf "$1" && mkdir "$1"'
+# Keeps the old corpus until the pruned one is in its place, and puts it back if that fails.
+# shellcheck disable=SC2016
+SWAP='mv "$1" "$1.old" || exit 1
+if mv "$1.pruned" "$1"; then rm -rf "$1.old"; else mv "$1.old" "$1"; exit 1; fi'
+
 failed=0
 fuzzers=0
 for package in "$out"/*_fuzzer.pkg; do
@@ -46,10 +55,11 @@ for package in "$out"/*_fuzzer.pkg; do
   echo "::endgroup::"
   echo "::group::Prune the corpus of $name"
   # -merge=1 TARGET CORPUS: copies into TARGET only the inputs of CORPUS that add coverage.
-  if run "$name" bash -c "rm -rf /corpus/$name.pruned && mkdir /corpus/$name.pruned" \
+  if run "$name" bash -c "$FRESH" _ "/corpus/$name.pruned" \
     && run "$name" run_fuzzer "$name" -merge=1 -artifact_prefix="/artifacts/$name-" \
       "/corpus/$name.pruned"; then
-    run "$name" bash -c "rm -rf /corpus/$name && mv /corpus/$name.pruned /corpus/$name"
+    run "$name" bash -c "$SWAP" _ "/corpus/$name" \
+      || { echo "::error::replacing the corpus of $name failed; its old corpus is kept"; failed=1; }
   else
     echo "::error::pruning $name failed; its corpus is kept unpruned"
     run "$name" rm -rf "/corpus/$name.pruned"

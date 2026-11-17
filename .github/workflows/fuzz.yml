@@ -80,6 +80,7 @@ jobs:
       - name: Fuzz for five minutes
         uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
         with:
+          language: python       # CIFuzz waits longer for a Python crash to reproduce
           mode: code-change
           fuzz-seconds: 300
           sanitizer: address
@@ -99,6 +100,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+      actions: read            # one request: whether main has kept a corpus before (see below)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -111,6 +113,7 @@ jobs:
           language: python
           sanitizer: address
       - name: Restore the kept corpus
+        id: restore
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: cifuzz-corpus
@@ -123,8 +126,29 @@ jobs:
           # Pinned by tag and digest. Dependabot does not read it: bump it by hand
           # (`docker buildx imagetools inspect gcr.io/oss-fuzz-base/base-runner:latest`).
           RUNNER_IMAGE: gcr.io/oss-fuzz-base/base-runner:latest@sha256:29e4fcca00f6b844d732ee7427e86dae478db7f78d3ef7128ba1505ea4ab7126
-      - name: Keep the corpus
+      # A miss after a corpus was kept (the cache service failed, or the entry was evicted) would
+      # save a corpus grown from the seeds alone as the newest, and every later night would
+      # start from it. So the corpus is saved only after a hit, or when main has none yet.
+      - name: Decide whether to keep the corpus
+        id: decide
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+        # `gh cache list` prints nothing at all when nothing matches, hence `${kept:-0}`.
+        run: |
+          if [ -n "$MATCHED" ]; then
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          elif kept=$(gh cache list --repo "$GITHUB_REPOSITORY" --ref refs/heads/main \
+              --key fuzz-corpus- --limit 1 --json key --jq length) && [ "${kept:-0}" = 0 ]; then
+            echo "No corpus kept yet: keeping this one as the first."
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::The kept corpus was not restored; not replacing it with this run's."
+            echo "save=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Keep the corpus
+        if: ${{ !cancelled() && steps.decide.outputs.save == 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
           path: cifuzz-corpus

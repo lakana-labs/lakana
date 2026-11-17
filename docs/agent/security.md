@@ -7143,8 +7143,13 @@ job restores the newest `fuzz-corpus-*` cache into `cifuzz-corpus/<fuzzer>`, fuz
 saves the result under a new key; a pull request's job restores the same cache read-only into the
 directory `run_fuzzers` fuzzes from, and never saves one. A cache written on `main` is readable by
 `main` and by pull requests, and nothing a pull request runs can write into `main`'s scope, so a
-pull request cannot change the corpus `main` fuzzes from. No ClusterFuzzLite action gets a token
-and no job has `actions: read`, because the GitHub Actions filestore is unsafe here twice over:
+pull request cannot change the corpus `main` fuzzes from. The nightly job saves only after its
+restore hit, or when `main` has no `fuzz-corpus-*` entry yet (one `gh cache list` request, the
+only use of its token and of its `actions: read`): after a miss with an entry there (the cache
+service failed, or the entry was evicted) it warns and keeps the old corpus, since a corpus grown
+from the seeds alone would otherwise become the newest and every later night would start from it.
+No ClusterFuzzLite action gets a token, because the GitHub Actions filestore is unsafe here twice
+over:
 
 - to find a corpus it pages through every artifact of the repository with the job's token, and
   when it finds none it keeps paging until the rate limit is spent. The repository's other
