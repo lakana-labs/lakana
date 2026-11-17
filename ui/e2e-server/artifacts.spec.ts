@@ -10,6 +10,7 @@ import {
   createNamespace,
   invitedPerson,
   makeAdministrator,
+  NO_PASSKEY,
   skipTheWelcome,
   uniqueName,
   uploadArtifact,
@@ -170,8 +171,9 @@ test("a local administrator without a passkey cannot delete a version: the dialo
   await page.getByRole("button", { name: "Delete version 1…" }).click();
   const dialog = page.getByRole("dialog", { name: "Delete version 1 of ml.model?" });
   await dialog.getByRole("button", { name: "Delete the version" }).click();
-  // The session has no passkey, so there is nothing to touch: the browser cannot answer.
-  await expect(dialog.getByRole("alert")).toContainText(/passkey/i);
+  // The session has no passkey, so there is nothing to touch: the server's 409 NoPasskeyError,
+  // in the interface's words for it.
+  await expect(dialog.getByRole("alert")).toContainText(NO_PASSKEY);
   await expect(dialog).toBeVisible();
   const state = await artifactState(request, environment, "ml.model");
   expect(state.versions.map((row) => [row.version, row.deleted_at])).toEqual([[1, null]]);

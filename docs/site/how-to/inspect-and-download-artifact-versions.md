@@ -137,7 +137,8 @@ never a whole version, so above the files the tab shows the command for the whol
   download, not the private ones the command gives.
 - If what arrived is not what the version recorded, or the connection broke on the way, nothing is
   saved and the tab says `<path> did not arrive whole, so nothing was saved. Download it again, or
-  use the command above.`
+  use the command above.` A file that goes on past the size the version recorded is not read to
+  the end: the browser stops at that size.
 - A file larger than 256 MiB has no **Download**. The tab says it is larger than the browser
   downloads; the command fetches it.
 - If the version was deleted after you opened the tab, the tab shows the server's sentence

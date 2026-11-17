@@ -43,6 +43,16 @@ describe("ExpiringView", () => {
     expect(row).toHaveTextContent("30 days after its last activity, set for the table by ana");
   });
 
+  it("opens the table from a plain click on its time, which sits above the row's link", async () => {
+    const { user } = renderShell(ADDRESS, { routes: manageRoutes() });
+
+    await screen.findByRole("region", { name: "Expiring tables" });
+    const time = rows()[0]?.querySelector("time") as HTMLElement;
+    await user.click(time);
+
+    expect(await screen.findByRole("heading", { level: 1, name: "fact_sales" })).toBeVisible();
+  });
+
   it("says Due now for a table already past its expiry", async () => {
     renderShell(ADDRESS, {
       routes: {

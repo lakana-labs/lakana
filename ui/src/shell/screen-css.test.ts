@@ -48,9 +48,28 @@ it("right-aligns numbers with tabular figures", () => {
   );
 });
 
-it("lifts what carries a title above the row's link in the Catalog list only", () => {
-  expect(screen).toMatch(/\.catalog-list \[title\]\s*{[^}]*position:\s*relative/);
+it("lifts what carries a title above the row's link only in the lists that forward its click", () => {
+  expect(screen).toMatch(
+    /\.catalog-list \[title\],\s*\.expiring-view \[title\]\s*{[^}]*position:\s*relative/,
+  );
   expect(screen).not.toMatch(/\.list \[title\]/);
+});
+
+it("keeps a row's button label on one line, whatever the cell's overflow-wrap", () => {
+  expect(screen).toMatch(
+    /\.list \.button\s*{[^}]*white-space:\s*nowrap;[^}]*overflow-wrap:\s*normal/,
+  );
+});
+
+it("draws only a link's row name in the accent; a name without a page in the text colour", () => {
+  expect(screen).toMatch(/(^|\n)\.row-name\s*{[^}]*color:\s*var\(--color-text\);/);
+  expect(screen).toMatch(/a\.row-name\s*{[^}]*color:\s*var\(--color-accent\);/);
+  expect(screen).not.toMatch(/(^|[^a])\.row-name\s*{[^}]*--color-accent/);
+});
+
+it("lays the row's overlay only from a link: a name without a page covers nothing", () => {
+  expect(screen).toMatch(/a\.row-name::after\s*{[^}]*position:\s*absolute/);
+  expect(screen).not.toMatch(/(^|[^a])\.row-name::after/m);
 });
 
 it("lays a horizontal radio group out in a row that wraps, with its label and texts above", () => {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BROWSER_DOWNLOAD_LIMIT,
@@ -11,6 +11,7 @@ import {
   listVersions,
   withdrawUpload,
 } from "./artifacts";
+import { api } from "./client";
 
 import {
   DELETED,
@@ -109,6 +110,19 @@ describe("artifacts api", () => {
 
     server.route({ [route]: { status: 200, blob: new Blob(["weightz"]) } });
     await expect(downloadFile(REF, 3, WEIGHTS)).rejects.toBeInstanceOf(DownloadMismatch);
+  });
+
+  it("reads no more of a body than the manifest's size, and refuses a longer one", async () => {
+    const server = fakeServer(artifactRoutes());
+    const route = `GET ${BASE}/versions/3/blobs/${WEIGHTS.sha256}`;
+    const read = vi.spyOn(api, "download");
+
+    server.route({ [route]: { status: 200, blob: new Blob(["weights and more"]) } });
+    const longer = downloadFile(REF, 3, WEIGHTS);
+    await expect(longer).rejects.toBeInstanceOf(DownloadMismatch);
+    await expect(longer).rejects.toThrow("models/model.pkl");
+
+    expect(read).toHaveBeenCalledWith(`${BASE}/versions/3/blobs/${WEIGHTS.sha256}`, WEIGHTS.size);
   });
 
   it("refuses a file larger than the browser downloads without asking the server", async () => {

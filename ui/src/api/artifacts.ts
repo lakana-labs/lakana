@@ -6,7 +6,7 @@
  *
  * @packageDocumentation
  */
-import { api, DownloadCut } from "./client";
+import { api, DownloadCut, DownloadTooLong } from "./client";
 import {
   artifactApiPath,
   breakGlassQuery,
@@ -261,7 +261,8 @@ async function sha256Hex(blob: Blob): Promise<string> {
  * @returns The file's bytes, the same size and SHA-256 as the manifest's.
  * @throws {RangeError} for a file larger than {@link BROWSER_DOWNLOAD_LIMIT}, before any request:
  *   `lakana artifact download` fetches it.
- * @throws {DownloadMismatch} when the size or the SHA-256 differs, or the body's stream breaks.
+ * @throws {DownloadMismatch} when the size or the SHA-256 differs, or the body's stream breaks;
+ *   a body longer than the manifest's size is not read past it.
  * @throws {ApiError} for a refusal; 404 for a version deleted meanwhile.
  */
 export async function downloadFile(
@@ -276,10 +277,14 @@ export async function downloadFile(
   try {
     blob = await api.download(
       artifactApiPath(ref, `/versions/${String(version)}/blobs/${encodeURIComponent(file.sha256)}`),
+      file.size,
     );
   } catch (error) {
-    // A body cut in the middle is a file that did not arrive whole; every other error is its own.
-    throw error instanceof DownloadCut ? new DownloadMismatch(file.path) : error;
+    // A body cut in the middle or longer than the manifest is a file that did not arrive whole;
+    // every other error is its own.
+    throw error instanceof DownloadCut || error instanceof DownloadTooLong
+      ? new DownloadMismatch(file.path)
+      : error;
   }
   if (blob.size !== file.size || (await sha256Hex(blob)) !== file.sha256) {
     throw new DownloadMismatch(file.path);
