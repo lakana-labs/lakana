@@ -90,6 +90,16 @@ _LOCAL_READ_FLAGS = (
 never blocking on a pipe someone put there."""
 
 
+UNBROWSABLE_MESSAGE = (
+    "This environment's storage cannot be browsed: only local and S3 storage list a folder one "
+    "page at a time. Type the location instead, such as raw/orders/*.csv."
+)
+"""Why `FsspecStorage.list_children_page` refuses a backend that is neither local nor S3."""
+
+_S3_PAGE_ROUNDS = 10
+"""How many `list_objects_v2` calls one page may take when a store answers short pages."""
+
+
 def _sync_directory(directory: str) -> None:
     """Write a directory's entries to disk, so that a rename in it survives a power loss.
 
@@ -946,9 +956,11 @@ class FsspecStorage:
     ) -> Sequence[ChildEntry]:
         """List one page of the entries directly beneath a prefix; see `Storage.list_children_page`.
 
-        The local backend reads the one directory's names and the size of the files it returns
-        only; S3 is asked for one page (`list_objects_v2` with a delimiter, `StartAfter` and
-        `MaxKeys`); any other backend lists the one directory and returns a page of it.
+        No backend reads a whole folder into memory for a page. The local backend streams the
+        one directory's names through a heap of `limit` entries and `stat`s only the files it
+        returns; S3 is asked for one page (`list_objects_v2` with a delimiter, `StartAfter` and
+        `MaxKeys`, following `IsTruncated` while a store answers short pages). Any other backend
+        has no listing that stops after a page, so it is refused (`UNBROWSABLE_MESSAGE`).
 
         Parameters
         ----------
@@ -962,39 +974,28 @@ class FsspecStorage:
         Returns
         -------
         list of ChildEntry
-            The page, sorted by key.
+            The page, sorted by key; never an entry with an empty name.
 
         Raises
         ------
         ValidationError
-            If the prefix contains a NUL byte, or escapes the configured storage root.
+            If the prefix contains a NUL byte, or escapes the configured storage root; or the
+            backend is neither local nor S3 (`UNBROWSABLE_MESSAGE`).
         """
         full = self._full(prefix)
         if isinstance(self._fs, LocalFileSystem):
             return self._local_children_page(full, after, limit)
         if "s3" in self._fs.protocol:
             return self._s3_children_page(full, after, limit)
-        self._fs.invalidate_cache(full)
-        if not self._fs.isdir(full):
-            return []
-        found = [
-            ChildEntry(
-                str(info["name"]).rstrip("/").rsplit("/", 1)[1],
-                info["type"] == "directory",
-                None if info["type"] == "directory" else int(info.get("size") or 0),
-            )
-            for info in self._fs.ls(full, detail=True)
-        ]
-        return heapq.nsmallest(
-            limit,
-            (entry for entry in found if after is None or entry.key > after),
-            key=lambda entry: entry.key,
-        )
+        raise ValidationError(UNBROWSABLE_MESSAGE)
 
     def _local_children_page(
         self, full: str, after: str | None, limit: int
     ) -> Sequence[ChildEntry]:
         """Read one page of a local directory, statting only the files returned.
+
+        The directory's entries are streamed through `heapq.nsmallest`, so memory stays in
+        proportion to `limit`, whatever the directory holds.
 
         Parameters
         ----------
@@ -1017,15 +1018,18 @@ class FsspecStorage:
         except (FileNotFoundError, NotADirectoryError):
             return []
         with scan:
-            names = [
+            keyed = (
                 (f"{entry.name}/" if entry.is_dir(follow_symlinks=False) else entry.name, entry)
                 for entry in scan
                 if not entry.is_symlink()
-            ]
+            )
+            chosen = heapq.nsmallest(
+                limit,
+                (pair for pair in keyed if after is None or pair[0] > after),
+                key=lambda pair: pair[0],
+            )
         page: list[ChildEntry] = []
-        for key, entry in heapq.nsmallest(
-            limit, (n for n in names if after is None or n[0] > after), key=lambda n: n[0]
-        ):
+        for key, entry in chosen:
             if key.endswith("/"):
                 page.append(ChildEntry(entry.name, True, None))
                 continue
@@ -1041,7 +1045,10 @@ class FsspecStorage:
 
         S3 answers a `StartAfter` that ends in a common prefix's own key (``…/orders/``) with
         that prefix again, since its objects sort after it; one more key is asked for, and the
-        repeated prefix dropped.
+        repeated prefix dropped. A folder marker (the object whose key is the prefix itself, as
+        consoles and Hadoop write it) and the empty name of a ``//`` are not entries. A store
+        that answers fewer keys than asked while `IsTruncated` is asked again with the
+        continuation token, at most `_S3_PAGE_ROUNDS` times.
 
         Parameters
         ----------
@@ -1067,19 +1074,22 @@ class FsspecStorage:
         }
         if after is not None:
             request["StartAfter"] = start + after
-        answer = self._fs.call_s3("list_objects_v2", **request)
-        found = [
-            ChildEntry(str(each["Prefix"])[len(start) :].rstrip("/"), True, None)
-            for each in answer.get("CommonPrefixes", [])
-        ] + [
-            ChildEntry(str(each["Key"])[len(start) :], False, int(each.get("Size") or 0))
-            for each in answer.get("Contents", [])
-        ]
-        page = sorted(
-            (entry for entry in found if after is None or entry.key > after),
-            key=lambda entry: entry.key,
-        )
-        return page[:limit]
+        found: list[ChildEntry] = []
+        for _ in range(_S3_PAGE_ROUNDS):
+            answer = self._fs.call_s3("list_objects_v2", **request)
+            found += [
+                ChildEntry(str(each["Prefix"])[len(start) :].rstrip("/"), True, None)
+                for each in answer.get("CommonPrefixes", [])
+            ] + [
+                ChildEntry(str(each["Key"])[len(start) :], False, int(each.get("Size") or 0))
+                for each in answer.get("Contents", [])
+            ]
+            found = [e for e in found if e.name and (after is None or e.key > after)]
+            token = answer.get("NextContinuationToken")
+            if len(found) >= limit or not answer.get("IsTruncated") or not token:
+                break
+            request["ContinuationToken"] = token
+        return sorted(found, key=lambda entry: entry.key)[:limit]
 
     def _list_local_objects(self, full: str) -> Iterator[StoredObject]:
         """List a local directory without ever following or reporting a symlink.

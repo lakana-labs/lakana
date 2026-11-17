@@ -251,8 +251,10 @@ from lakana_core.catalog.orphaned_locations import (
     target,
 )
 from lakana_core.catalog.raw_browse import (
-    RAW_CURSOR_KIND,
+    BROWSE_REFUSED,
     RawPage,
+    decode_raw_cursor,
+    encode_raw_cursor,
     may_browse_raw,
     raw_entries,
     read_children,
@@ -397,8 +399,6 @@ from lakana_core.pagination import (
     LIST_LIMIT_DEFAULT,
     LIST_LIMIT_MAX,
     Page,
-    decode_key_cursor,
-    encode_key_cursor,
     escape_like,
     instant_key,
     page_in_order,
@@ -2118,8 +2118,8 @@ class CatalogService:
         ValidationError
             For a path outside `raw/`, a limit out of range or a cursor of another list.
         PermissionDenied
-            If `p` may register an external table in no namespace of the environment (refused
-            by `CREATE_TABLE` on the environment); nothing is read from storage.
+            If `p` may register an external table in no existing namespace of the environment
+            (`BROWSE_REFUSED`); nothing is read from storage.
         NotFoundError
             If the environment does not exist.
         StorageRefusedError
@@ -2132,9 +2132,15 @@ class CatalogService:
         folder = parse_raw_folder(path)
         if not 1 <= limit <= LIST_LIMIT_MAX:
             raise ValidationError(f"limit must be between 1 and {LIST_LIMIT_MAX}; got {limit}.")
-        after = decode_key_cursor(RAW_CURSOR_KIND, cursor) if cursor is not None else None
+        after = decode_raw_cursor(cursor, folder) if cursor is not None else None
         if not may_browse_raw(self._session, self._authz, p, environment):
+            # The refusal is recorded (`AUTHORIZATION_DENIED`) when the environment-wide right is
+            # missing too; a holder of it in an environment without a namespace, or a task token
+            # whose declared namespaces do not exist, may register nowhere and is refused all the
+            # same.
             self._authz.authorize(p, Action.CREATE_TABLE, Securable.environment_scope(environment))
+            self._find_environment(environment)
+            raise PermissionDenied(BROWSE_REFUSED.format(environment=shown(environment)))
         env = self._find_environment(environment)
         claims = external_claims(self._session, env.id)
         resolved = self._storage.for_environment(environment)
@@ -2154,7 +2160,7 @@ class CatalogService:
             ),
             config=self._view_audit,
         )
-        next_cursor = encode_key_cursor(RAW_CURSOR_KIND, children[-1].key) if more else None
+        next_cursor = encode_raw_cursor(children[-1].key) if more else None
         return RawPage(path=folder, items=items, next_cursor=next_cursor)
 
     def environment_usage(self, p: PrincipalRef, name: str) -> EnvironmentUsage:

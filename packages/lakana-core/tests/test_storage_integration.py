@@ -119,3 +119,12 @@ def test_list_children_page_reads_one_page_at_a_time_from_s3(storage: FsspecStor
     rest = storage.list_children_page("pages", after=first[-1].key, limit=5)
     assert rest == [ChildEntry("b.csv", False, 2), ChildEntry("c", True, None)]
     assert storage.list_children_page("nope", after=None, limit=5) == []
+
+
+def test_list_children_page_on_s3_leaves_out_a_folder_marker(storage: FsspecStorage) -> None:
+    """A console writes `folder/` as an empty object; it is the folder, not a nameless file."""
+    storage._fs.call_s3("put_object", Bucket=BUCKET, Key="dev/marked/", Body=b"")
+    storage.write("marked/a.csv", b"1")
+    assert storage.list_children_page("marked", after=None, limit=5) == [
+        ChildEntry("a.csv", False, 1)
+    ]

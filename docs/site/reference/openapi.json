@@ -1220,7 +1220,7 @@
           "environments"
         ],
         "summary": "List one folder of `raw/`, to choose the location of an external table",
-        "description": "One level of one folder, one page at a time: its folders and files (with their sizes), in key order. An entry inside an external table's folder says so, and names the table when you may read it. Needs `CREATE_TABLE` on some namespace of the environment, the right to register an external table there; each folder read is recorded in the audit log (`ACTIVITY_VIEWED`, view `raw_files`), once per folder within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. Answers 403 without that right, 404 when the environment does not exist, 422 for a path that is not `raw` or a folder below it (no `..`, no leading `/`) or a cursor of another list, 502 when the storage refused the environment's credentials and 503 when it did not answer or the read could not be recorded.",
+        "description": "One level of one folder, one page at a time: its folders and files (with their sizes), in key order. An entry inside an external table's folder says so, and names the table when you may read it. Needs `CREATE_TABLE` on an existing namespace of the environment, the right to register an external table there; each folder read is recorded in the audit log (`ACTIVITY_VIEWED`, view `raw_files`), once per folder within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. Answers 403 without that right, 404 when the environment does not exist, 422 for a path that is not `raw` or a folder below it (no `..`, no leading `/`), a cursor of another list, or a storage that is neither local nor S3 (it cannot list one page without reading the whole folder), 502 when the storage refused the environment's credentials and 503 when it did not answer or the read could not be recorded.",
         "operationId": "list_raw_api_v1_environments__env__raw_get",
         "parameters": [
           {
@@ -1254,7 +1254,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 2048
+                  "maxLength": 4096
                 },
                 {
                   "type": "null"

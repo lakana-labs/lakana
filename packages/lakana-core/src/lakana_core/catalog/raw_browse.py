@@ -3,9 +3,12 @@
 New external table asks for a location under `raw/`; this lists what lies there, one page of
 one folder per call, so a person picks the location instead of typing it.
 
-- **Who may browse.** Whoever may register an external table in some namespace of the
+- **Who may browse.** Whoever may register an external table in an existing namespace of the
   environment (`CREATE_TABLE` on the namespace, the dialog's own right), asked in one
-  `permits_each` batch; anyone else is refused before storage is read.
+  `permits_each` batch, so a task token is narrowed to its declared namespaces as registration
+  narrows it; anyone else is refused before storage is read (`BROWSE_REFUSED`), and so is
+  everyone in an environment without a namespace. A protected environment does not change
+  this: browsing reads, so the write guard of registration (`ProtectedWriteGuard`) is not asked.
 - **Claims.** An entry inside an external table's claim (the claimed folder itself, a folder
   below it, or a file in one) cannot be chosen and says so; it names the table only to a reader
   who may read it (`READ_TABLE`), asked once per page. A folder above a claim stays open: a free
@@ -28,10 +31,11 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.catalog.external_location import ExternalClaim, claim_covers
-from lakana_core.errors import StorageRefusedError, StorageUnavailableError
+from lakana_core.errors import StorageRefusedError, StorageUnavailableError, ValidationError
 from lakana_core.identifiers import NamespacePath, shown
 from lakana_core.log_events import LogEvent, log_event
 from lakana_core.models import Environment, Namespace
+from lakana_core.pagination import decode_key_cursor, encode_key_cursor
 from lakana_core.storage.base import ChildEntry, Storage
 from lakana_core.storage.unavailable import (
     RAW_STORAGE_REFUSED,
@@ -43,6 +47,95 @@ logger = logging.getLogger(__name__)
 
 RAW_CURSOR_KIND = "raw"
 """The list a cursor of `CatalogService.list_raw` belongs to."""
+
+_MAX_KEY_BYTES = 1024
+"""The longest storage key a cursor may resume after: S3's own limit for a key, folder included."""
+
+BROWSE_REFUSED = (
+    "You may not browse raw/ in '{environment}': it needs CREATE_TABLE on one of its namespaces, "
+    "the right to register an external table there. Ask an administrator for that right, or "
+    "type the location if you know it."
+)
+"""Why `CatalogService.list_raw` refuses a caller who may register in no namespace."""
+
+
+def encode_raw_cursor(key: str) -> str:
+    """Write the key of a page's last entry as a cursor, whatever characters its name holds.
+
+    The key goes into the cursor as the hex of its UTF-8 bytes (a local name that is not UTF-8
+    keeps its bytes through ``surrogateescape``), so a name with a control character, which
+    `decode_key_cursor` refuses as text, still resumes the listing.
+
+    Parameters
+    ----------
+    key
+        The entry's `ChildEntry.key`.
+
+    Returns
+    -------
+    str
+        The cursor.
+    """
+    return encode_key_cursor(RAW_CURSOR_KIND, key.encode("utf-8", "surrogateescape").hex())
+
+
+def decode_raw_cursor(cursor: str, folder: str) -> str:
+    """Read a cursor of `encode_raw_cursor` back into the key to resume after.
+
+    Parameters
+    ----------
+    cursor
+        The value a client sent back.
+    folder
+        The folder listed, which the key follows in the storage key.
+
+    Returns
+    -------
+    str
+        The key.
+
+    Raises
+    ------
+    ValidationError
+        If the cursor is not one this list issued, or the folder and the key together are longer
+        than a storage key may be.
+    """
+    body = decode_key_cursor(RAW_CURSOR_KIND, cursor)
+    try:
+        raw = bytes.fromhex(body)
+    except ValueError:
+        raise ValidationError(RAW_BAD_CURSOR) from None
+    if len(folder.encode("utf-8")) + 1 + len(raw) > _MAX_KEY_BYTES:
+        raise ValidationError(RAW_BAD_CURSOR)
+    return raw.decode("utf-8", "surrogateescape")
+
+
+RAW_BAD_CURSOR = (
+    "The cursor is not valid for this folder. Start the listing again without `cursor`; pass the "
+    "`next_cursor` of a page only to continue that listing."
+)
+"""What a cursor that no listing of raw/ issued is refused with."""
+
+
+def shown_name(name: str) -> bool:
+    """Tell whether an entry's name can be shown: text, not a local name of undecodable bytes.
+
+    Parameters
+    ----------
+    name
+        The entry's name.
+
+    Returns
+    -------
+    bool
+        `False` for a name holding a lone surrogate (a local file name that is not UTF-8), which
+        no answer can carry; such an entry is left out, and no pattern could name it either.
+    """
+    try:
+        name.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -206,7 +299,8 @@ def raw_entries(
     Returns
     -------
     list of RawEntry
-        The entries; whether each claiming table may be read is asked once per page.
+        The entries that can be shown (`shown_name`), each claiming table named in its dotted
+        display form; whether it may be read is asked once per page.
     """
     own = next((c for c in claims if claim_covers(c.claim, folder)), None)
     holders = [
@@ -224,11 +318,7 @@ def raw_entries(
             for h in distinct
         ],
     )
-    named = {
-        h: f"{h.namespace.joined()}.{h.name}"
-        for h, ok in zip(distinct, readable, strict=True)
-        if ok
-    }
+    named = {h: f"{h.namespace}.{h.name}" for h, ok in zip(distinct, readable, strict=True) if ok}
     return [
         RawEntry(
             name=child.name,
@@ -238,4 +328,5 @@ def raw_entries(
             claimed_by=named.get(holder) if holder is not None else None,
         )
         for child, holder in zip(children, holders, strict=True)
+        if shown_name(child.name)
     ]

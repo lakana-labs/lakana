@@ -1,5 +1,6 @@
 """Tests for browsing `raw/` before an external table is registered (#672)."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,7 @@ from lakana_core.errors import (
 )
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEvent, AuditEventType
+from lakana_core.pagination import encode_key_cursor
 from lakana_core.storage import FsspecStorage, StorageResolver
 
 BRONZE = NamespacePath.from_parts(["bronze"])
@@ -65,8 +67,8 @@ class _Rights(AllowAllAuthorization):
         if securable.kind is SecurableKind.ENVIRONMENT or securable.namespace is None:
             return str(securable.environment)
         if securable.table is None:
-            return securable.namespace.joined()
-        return f"{securable.namespace.joined()}.{securable.table}"
+            return str(securable.namespace)
+        return f"{securable.namespace}.{securable.table}"
 
     def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
         """Answer from the listed rights.
@@ -242,12 +244,90 @@ def test_a_right_to_register_in_one_namespace_lists_one_level_in_key_order(
     assert page.next_cursor is None
 
 
-def test_a_right_to_register_on_the_whole_environment_lets_a_reader_browse(
-    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+def test_a_right_that_reaches_no_namespace_is_refused_with_the_next_step(
+    session: Session, lake: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    catalog.create_environment(principal, name="dev", storage=_config(tmp_path))
-    page = _browser(session, (Action.CREATE_TABLE, "dev")).list_raw(_reader(session), "dev")
-    assert page.items == []
+    """The environment-wide check passes, yet no namespace answers yes: nowhere to register."""
+    listed: list[str] = []
+    monkeypatch.setattr(
+        FsspecStorage, "list_children_page", lambda self, prefix, **kw: listed.append(prefix) or []
+    )
+    browser = _browser(session, (Action.CREATE_TABLE, "dev"))
+    with pytest.raises(PermissionDenied) as refused:
+        browser.list_raw(_reader(session), "dev")
+    assert str(refused.value) == (
+        "You may not browse raw/ in 'dev': it needs CREATE_TABLE on one of its namespaces, the "
+        "right to register an external table there. Ask an administrator for that right, or "
+        "type the location if you know it."
+    )
+    assert listed == []
+
+
+def test_a_claim_in_a_nested_namespace_is_named_with_dots(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, lake: Path
+) -> None:
+    sales = NamespacePath.from_parts(["gold", "sales"])
+    catalog.create_namespace(principal, "dev", sales)
+    catalog.create_external_table(
+        principal,
+        TableRef(environment="dev", namespace=sales, name="returns"),
+        location_pattern="raw/feeds/returns/*.csv",
+        format="csv",
+    )
+    browser = _browser(session, _MAY_REGISTER, (Action.READ_TABLE, "gold.sales.returns"))
+    page = browser.list_raw(_reader(session), "dev", path="raw/feeds")
+    returns = {e.name: e for e in page.items}["returns"]
+    assert returns.claimed_by == "gold.sales.returns"
+
+
+def test_a_name_with_a_control_character_ends_a_page_and_the_next_one_follows(
+    session: Session, lake: Path
+) -> None:
+    folder = lake / "raw" / "odd"
+    folder.mkdir()
+    for name in ("a\nb.csv", "a\rc.csv", "d.csv"):
+        (folder / name).write_text("id\n1\n")
+    browser = _browser(session, _MAY_REGISTER)
+    reader = _reader(session)
+    names: list[str] = []
+    cursor = None
+    while True:
+        page = browser.list_raw(reader, "dev", path="raw/odd", cursor=cursor, limit=1)
+        names += [e.name for e in page.items]
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+    assert names == ["a\nb.csv", "a\rc.csv", "d.csv"]
+
+
+def test_a_local_name_that_is_not_utf8_is_left_out_and_the_listing_goes_on(
+    session: Session, lake: Path
+) -> None:
+    folder = lake / "raw" / "bytes"
+    folder.mkdir()
+    for name in (b"a\xff.csv", b"b.csv"):
+        with open(os.path.join(os.fsencode(folder), name), "wb") as handle:
+            handle.write(b"id\n1\n")
+    browser = _browser(session, _MAY_REGISTER)
+    reader = _reader(session)
+    first = browser.list_raw(reader, "dev", path="raw/bytes", limit=1)
+    assert first.items == []
+    rest = browser.list_raw(reader, "dev", path="raw/bytes", cursor=first.next_cursor)
+    assert [e.name for e in rest.items] == ["b.csv"]
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        encode_key_cursor("raw", "not hex"),
+        encode_key_cursor("raw", "61" * 1021),
+    ],
+)
+def test_a_cursor_this_list_did_not_issue_is_refused(
+    session: Session, lake: Path, cursor: str
+) -> None:
+    with pytest.raises(ValidationError, match="The cursor is not valid for this folder"):
+        _browser(session, _MAY_REGISTER).list_raw(_reader(session), "dev", cursor=cursor)
 
 
 def test_a_missing_environment_is_not_found_for_who_may_register_everywhere(

@@ -21,6 +21,7 @@ from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.storage import FsspecStorage, build_file_io, build_storage
 from lakana_core.storage.base import ChildEntry, Storage
 from lakana_core.storage.fsspec_storage import (
+    UNBROWSABLE_MESSAGE,
     _modified_at,
     _RemoteStreamWriter,
     _translate_s3_options,
@@ -934,18 +935,57 @@ def test_list_children_page_skips_a_file_that_vanishes_while_it_is_read(
     assert found == [ChildEntry("keep.csv", False, 1)]
 
 
-def test_list_children_page_on_a_non_local_backend_sorts_one_folder() -> None:
+def test_list_children_page_refuses_a_backend_that_cannot_stop_after_a_page() -> None:
+    """Only local and S3 storage list a page without reading the whole folder."""
     storage = FsspecStorage("memory://children-page-lake", {})
     _child_tree(storage)
-    assert storage.list_children_page("raw", after=None, limit=3) == [
-        ChildEntry("a.csv", False, 5),
-        ChildEntry("a", True, None),
-        ChildEntry("b.csv", False, 3),
-    ]
-    assert storage.list_children_page("raw", after="b.csv", limit=3) == [
-        ChildEntry("c", True, None)
-    ]
-    assert storage.list_children_page("nope", after=None, limit=3) == []
+    with pytest.raises(ValidationError) as raised:
+        storage.list_children_page("raw", after=None, limit=3)
+    assert str(raised.value) == UNBROWSABLE_MESSAGE
+
+
+def test_list_children_page_of_a_huge_local_folder_keeps_only_a_page_in_memory(
+    config: StorageConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """200,000 entries pass through a heap of the page's size, never a list of them all."""
+    (tmp_path / "raw").mkdir()
+    total = 200_000
+
+    class _Entry:
+        def __init__(self, number: int) -> None:
+            self.name = f"d{number:06d}"
+            self.path = f"/nowhere/{self.name}"
+
+        def is_dir(self, *, follow_symlinks: bool = True) -> bool:
+            return True
+
+        def is_symlink(self) -> bool:
+            return False
+
+    class _Scan:
+        def __iter__(self) -> Iterator[_Entry]:
+            return (_Entry(n) for n in range(total - 1, -1, -1))
+
+        def __enter__(self) -> "_Scan":
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    real = os.scandir
+    monkeypatch.setattr(
+        os, "scandir", lambda path: _Scan() if str(path).endswith("/raw") else real(path)
+    )
+    storage = build_storage(config)
+    tracemalloc.start()
+    try:
+        page = storage.list_children_page("raw", after="d000009/", limit=3)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert [entry.name for entry in page] == ["d000010", "d000011", "d000012"]
+    # A list of 200,000 entries alone would take well over 10 MB.
+    assert peak < 2_000_000, peak
 
 
 def test_list_children_page_on_s3_asks_for_one_page_and_drops_the_repeated_prefix(
@@ -989,6 +1029,57 @@ def test_list_children_page_on_s3_asks_for_one_page_and_drops_the_repeated_prefi
         },
         {"Bucket": "lake", "Prefix": "dev/", "Delimiter": "/", "MaxKeys": 2},
     ]
+
+
+def test_list_children_page_on_s3_skips_the_folder_marker_and_follows_a_short_truncated_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A folder marker and the empty folder of `//` are no entries; a short page is followed.
+
+    A store that answers fewer keys than asked while truncated is asked again with its token.
+    """
+    storage = FsspecStorage("s3://lake/dev", {"s3.endpoint": "http://127.0.0.1:1"})
+    asked: list[dict[str, object]] = []
+    answers: list[dict[str, object]] = [
+        {
+            "CommonPrefixes": [{"Prefix": "dev/raw/orders//"}],
+            "Contents": [{"Key": "dev/raw/orders/", "Size": 0}],
+            "IsTruncated": True,
+            "NextContinuationToken": "t1",
+        },
+        {
+            "Contents": [{"Key": "dev/raw/orders/a.csv", "Size": 4}],
+            "IsTruncated": True,
+            "NextContinuationToken": "t2",
+        },
+        {"Contents": [{"Key": "dev/raw/orders/b.csv", "Size": 6}], "IsTruncated": False},
+    ]
+
+    def call_s3(method: str, **kwargs: object) -> dict[str, object]:
+        asked.append(kwargs)
+        return answers.pop(0)
+
+    monkeypatch.setattr(storage._fs, "call_s3", call_s3)
+    assert storage.list_children_page("raw/orders", after=None, limit=2) == [
+        ChildEntry("a.csv", False, 4),
+        ChildEntry("b.csv", False, 6),
+    ]
+    assert [a.get("ContinuationToken") for a in asked] == [None, "t1", "t2"]
+
+
+def test_list_children_page_on_s3_stops_after_a_few_rounds_of_empty_truncated_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = FsspecStorage("s3://lake/dev", {"s3.endpoint": "http://127.0.0.1:1"})
+    calls: list[str] = []
+
+    def call_s3(method: str, **kwargs: object) -> dict[str, object]:
+        calls.append(method)
+        return {"IsTruncated": True, "NextContinuationToken": "again"}
+
+    monkeypatch.setattr(storage._fs, "call_s3", call_s3)
+    assert storage.list_children_page("raw", after=None, limit=2) == []
+    assert len(calls) == 10
 
 
 def test_a_listing_drops_the_backends_cached_directories_first(

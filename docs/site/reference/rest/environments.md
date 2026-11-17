@@ -454,7 +454,7 @@ Answer fields: `OrphanedLocationsOut`
 
 List one folder of `raw/`, to choose the location of an external table
 
-One level of one folder, one page at a time: its folders and files (with their sizes), in key order. An entry inside an external table's folder says so, and names the table when you may read it. Needs `CREATE_TABLE` on some namespace of the environment, the right to register an external table there; each folder read is recorded in the audit log (`ACTIVITY_VIEWED`, view `raw_files`), once per folder within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. Answers 403 without that right, 404 when the environment does not exist, 422 for a path that is not `raw` or a folder below it (no `..`, no leading `/`) or a cursor of another list, 502 when the storage refused the environment's credentials and 503 when it did not answer or the read could not be recorded.
+One level of one folder, one page at a time: its folders and files (with their sizes), in key order. An entry inside an external table's folder says so, and names the table when you may read it. Needs `CREATE_TABLE` on an existing namespace of the environment, the right to register an external table there; each folder read is recorded in the audit log (`ACTIVITY_VIEWED`, view `raw_files`), once per folder within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. Answers 403 without that right, 404 when the environment does not exist, 422 for a path that is not `raw` or a folder below it (no `..`, no leading `/`), a cursor of another list, or a storage that is neither local nor S3 (it cannot list one page without reading the whole folder), 502 when the storage refused the environment's credentials and 503 when it did not answer or the read could not be recorded.
 
 Parameters:
 

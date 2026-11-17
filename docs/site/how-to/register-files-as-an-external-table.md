@@ -132,7 +132,10 @@ only holds another table's folder further down opens, so you can reach the free 
 it; registering that folder itself is refused, as the location rules say.
 
 Browsing needs the same right as registering: `CREATE_TABLE` on at least one namespace of the
-environment. Each folder you open is recorded in the audit log (see below).
+environment. In a protected environment you can browse without a reason; registering still asks
+for one. Each folder you open is recorded in the audit log (see below). Browsing works on local
+and S3 storage, which list a folder one page at a time; on other storage, such as Azure, it is
+refused with `This environment's storage cannot be browsed: ... Type the location instead`.
 
 ## Look under raw/ from the command line
 

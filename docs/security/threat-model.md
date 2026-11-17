@@ -1058,14 +1058,24 @@ there is no in-place migration for an existing table's location.
 `raw/`, never a file's contents. It is a listing of storage that the catalog does not describe, so
 it is held to these controls:
 
-- **Who.** Only a caller who may register an external table in some namespace of the environment
-  (`CREATE_TABLE` on a namespace, asked in one `permits_each` batch); anyone else is refused by
-  `CREATE_TABLE` on the environment (recorded as `AUTHORIZATION_DENIED`) before storage is read.
+- **Who.** Only a caller who may register an external table in an existing namespace of the
+  environment (`CREATE_TABLE` on a namespace, asked in one `permits_each` batch, so a task token
+  is narrowed to its declared namespaces as registration narrows it); anyone else is refused
+  before storage is read, recorded as `AUTHORIZATION_DENIED` when the environment-wide right is
+  missing too. Browsing only reads, so the protected-environment guard of registration
+  (`ProtectedWriteGuard`) is not asked: in a protected environment a holder of the right may list
+  `raw/` without a break-glass reason, which registering there still needs.
 - **Where.** The folder must be `raw` or a folder below it: no leading `/`, no empty, `.` or `..`
   part, no NUL, at most 1,024 characters (`parse_raw_folder`), then `confine_to_root` as the
-  registration does. One level of one folder and one page of it (at most 200 entries) per call;
-  on S3 one `ListObjectsV2` page, on the local backend the one directory's names with a `stat` of
-  the files returned only; a symlink is never listed.
+  registration does. One level of one folder per call, and at most 200 entries returned. No
+  backend holds the whole folder for a page: S3 is asked for one `ListObjectsV2` page (and, for a
+  store that answers short pages while truncated, at most ten); the local backend streams the
+  directory's names through a heap of the page's size, so memory stays bounded, though each page
+  still walks the directory's names once, and `stat`s only the files it returns; a symlink is
+  never listed. Any other backend (Azure among them) has no listing that stops after a page and
+  is refused with 422 ("type the location instead"). A cursor carries the last key as hex, so a
+  name with any character resumes the listing, and is refused when folder and key exceed
+  S3's 1,024-byte key; a local name that is not UTF-8 is left out.
 - **Claims.** An entry inside another external table's claim is marked; the table is named only
   to a reader with `READ_TABLE` on it. A folder that only holds a claim further down is not
   marked, so its free neighbours stay reachable; registering it is still refused by

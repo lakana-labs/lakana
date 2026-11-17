@@ -120,10 +120,30 @@ describe("RawBrowser", () => {
     expect(await screen.findByRole("button", { name: "feeds/" })).toBeInTheDocument();
   });
 
-  it("shows a name's hidden characters as marks", async () => {
-    renderBrowser(rawRoutes({ raw: [[rawFile("a​b.csv", 1), rawFolder("x‮y")]] }));
+  it("shows hidden characters as marks in names, the claiming table, the label and the empty sentence", async () => {
+    const { user } = renderBrowser(
+      rawRoutes({
+        raw: [
+          [
+            rawFile("a\u200bb.csv", 1),
+            rawFolder("x\u202ey"),
+            rawFolder("orders", "bronze.ord\u202eers"),
+            rawFolder("e\u202e"),
+          ],
+        ],
+        "raw/x\u202ey": [[rawFile("f.csv", 1)]],
+        "raw/e\u202e": [[]],
+      }),
+    );
 
     expect(await screen.findByRole("button", { name: "aU+200Bb.csv" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "xU+202Ey/" })).toBeInTheDocument();
+    expect(screen.getByText("in use by bronze.ordU+202Eers")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "xU+202Ey/" }));
+    expect(
+      await screen.findByRole("region", { name: "Folders and files in raw/xU+202Ey" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "raw" }));
+    await user.click(await screen.findByRole("button", { name: "eU+202E/" }));
+    expect(await screen.findByText("Nothing in raw/eU+202E.")).toBeInTheDocument();
   });
 });
