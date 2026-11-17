@@ -129,6 +129,17 @@ it("ships no string of the Queries screen in the first load, and importing it re
   );
 });
 
+it("ships no string of the Connections screen in the first load, and importing it registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("connections.list.add")).toBe(false);
+
+  await import("../connections/ConnectionsScreen");
+
+  expect(i18n.t("connections.list.add")).toBe("Add connection");
+  expect(i18n.t("connections.status.ok", { when: "2 hours ago" })).toBe("OK · 2 hours ago");
+});
+
 it("marks a hidden character in every interpolated value, and leaves other values as they are", () => {
   const i18n = initI18n();
   i18n.addResource(

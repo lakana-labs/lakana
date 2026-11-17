@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Page } from "./Page";
 import type { AreaModule } from "./routes";
 
+import { aConnection, connectionRoutes } from "../test/connections";
 import { queryRoutes } from "../test/queries";
 import { renderShell } from "../test/render";
 
@@ -162,6 +163,20 @@ describe("appRoutes", () => {
     expect(
       within(host?.shadowRoot as unknown as HTMLElement).getByRole("textbox", { name: "SQL" }),
     ).toBeInTheDocument();
+  });
+
+  it("/connections lazy-loads its screen", async () => {
+    renderShell("/connections", {
+      routes: connectionRoutes([aConnection()], [{ name: "prod", actions: ["create", "test"] }]),
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Connections" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "crm" })).toHaveAttribute(
+      "href",
+      "/connections/prod/crm",
+    );
   });
 
   it("never loads the page of an area outside the user's access", async () => {

@@ -1,0 +1,40 @@
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import { describe, expect, it } from "vitest";
+
+import { aConnection, connectionRoutes } from "../test/connections";
+import { fakeServer } from "../test/server";
+import { AreaScreen } from "./ConnectionsScreen";
+
+/**
+ * Renders the screen at an address below the area's path.
+ *
+ * @param path - The address.
+ */
+function renderAt(path: string): void {
+  fakeServer(connectionRoutes([aConnection()], [{ name: "prod", actions: ["test"] }]));
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <AreaScreen />
+    </MemoryRouter>,
+  );
+}
+
+describe("the Connections screen", () => {
+  it("shows the list at its own address", async () => {
+    renderAt("/");
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Connections" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "crm" })).toBeInTheDocument();
+  });
+
+  it("shows the not-found state for any other address", () => {
+    renderAt("/nowhere/at/all");
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "This page does not exist" }),
+    ).toBeInTheDocument();
+  });
+});

@@ -46,6 +46,11 @@ const NAMED_LIMITS = [
   // (the Sort by and Order menus) moved into a chunk the Catalog shares with the Queries screen's
   // environment picker (format-, below).
   { name: "Catalog", prefix: "CatalogScreen-", limit: "18 kB" },
+  // Measured 4.97 kB (2026-11-17) + 10 %: the Connections list (its table with the kind, where,
+  // environment, last test with its time and used by, the remembered environment filter, Test
+  // per row, the empty and no-environment states and the clock that ages "2 hours ago") and the
+  // screen's strings. The kinds' words and fields come with the form's chunk.
+  { name: "Connections", prefix: "ConnectionsScreen-", limit: "5.47 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
   // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected
@@ -77,7 +82,15 @@ const NAMED_LIMITS = [
   // catalog's numbers and sizes (catalog/format.ts, which names the chunk), shared by the
   // Catalog's menus, the Queries screen's environment picker and result line, and the table
   // page's tabs; never in the first load.
-  { name: "the menus and number formats", prefix: "format-", limit: "18.19 kB" },
+  // Lowered to the measured 10.25 kB (2026-11-17) + 10 %: with the Connections list, the bundler
+  // split the collection code that the Catalog, the table page and the result grid share into a
+  // chunk of its own (TreeDropTargetDelegate-, next); together they measure 17.28 kB.
+  { name: "the menus and number formats", prefix: "format-", limit: "11.28 kB" },
+  // Measured 7.03 kB (2026-11-17) + 10 %: React Aria's collection code (tree and list state, the
+  // load-more sentinel) that the Catalog, the table page and the result grid share, split off the
+  // menus' chunk (format-, above) once the Connections list joined its importers; never in the
+  // first load.
+  { name: "React Aria's collections", prefix: "TreeDropTargetDelegate-", limit: "7.74 kB" },
   // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
   // shares with the screens that show a state.
   { name: "the status label", prefix: "StatusLabel-", limit: "0.27 kB" },

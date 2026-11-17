@@ -99,5 +99,39 @@
     "basic": "basic",
     "api_key": "API key",
     "oauth2": "OAuth2 client credentials"
+  },
+  "status": {
+    "never": "never tested",
+    "queued": "queued",
+    "queuedNoWorker": "queued · no worker yet",
+    "running": "testing…",
+    "stale": "tested before the last change · {{when}}",
+    "ok": "OK · {{when}}",
+    "failed": "{{word}} · {{when}}",
+    "justNow": "just now"
+  },
+  "list": {
+    "add": "Add connection",
+    "environment": "Environment",
+    "all": "All environments",
+    "region": "Connections",
+    "name": "Name",
+    "kind": "Kind",
+    "where": "Where",
+    "status": "Status",
+    "usedBy": "Used by",
+    "used_one": "1 asset",
+    "used_other": "{{count}} assets",
+    "usedNone": "No assets",
+    "test": "Test",
+    "testNamed": "Test {{name}}",
+    "testing": "Testing…",
+    "none": "No connections yet.",
+    "noneIn": "No connections in {{environment}} yet.",
+    "noneCommand": "Add one from the command line:",
+    "copy": "Copy command",
+    "noEnvironment": "You may not read the connections of any environment yet. Ask an administrator for READ_ENVIRONMENT on one.",
+    "noEnvironmentCommand": "Then list them from the command line:",
+    "narrowSecond": "{{where}} · {{used}}"
   }
 }

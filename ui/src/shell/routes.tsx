@@ -36,6 +36,7 @@ const AREA_PAGES: AreaPages = {
   home: () => import("../home/HomeScreen"),
   catalog: () => import("../catalog/CatalogScreen"),
   queries: () => import("../queries/QueriesScreen"),
+  connections: () => import("../connections/ConnectionsScreen"),
   access: () => import("../access/AccessScreen"),
   settings: () => import("../settings/SettingsScreen"),
 };
