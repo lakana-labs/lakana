@@ -3916,3 +3916,101 @@ def test_0081_on_postgres() -> None:
             columns = {c["name"] for c in sqlalchemy.inspect(conn).get_columns("query_runs")}
         assert not {"origin", "result_rows", "result_bytes", "error_line", "error_column"} & columns
         engine.dispose()
+
+
+def test_0082_on_postgres() -> None:
+    """0082 creates `saved_queries`; deleting an owner keeps only their shared queries.
+
+    The check refuses a private row without its private owner. Deleting the owner's principal
+    row cascades through `private_owner_id` and sets `owner_id` to `NULL` on the shared row,
+    both actions firing on the private row without the check refusing either. The downgrade
+    drops the table.
+    """
+    revision_0081 = "d8e2f5a1c736"
+    revision_0082 = "e9f3a6b2d847"
+    now = datetime(2026, 11, 16, 9, 0, tzinfo=UTC)
+    owner, environment_id = uuid.uuid4(), uuid.uuid4()
+    private_id, shared_id = uuid.uuid4(), uuid.uuid4()
+    insert = sqlalchemy.text(
+        "INSERT INTO saved_queries (id, environment_id, name, sql_text, visibility, owner_id, "
+        "private_owner_id, created_at, updated_at) VALUES (:id, :env, :name, 'SELECT 1', "
+        ":visibility, :owner, :private_owner, :now, :now)"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0081)
+        engine = sqlalchemy.create_engine(url)
+        migrate.upgrade(url, revision_0082)
+        assert _alembic_version(engine) == revision_0082
+        keys = {
+            (tuple(k["constrained_columns"]), k["options"].get("ondelete"))
+            for k in sqlalchemy.inspect(engine).get_foreign_keys("saved_queries")
+        }
+        assert keys == {
+            (("environment_id",), "CASCADE"),
+            (("owner_id",), "SET NULL"),
+            (("private_owner_id",), "CASCADE"),
+        }
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+                    "VALUES (:id, 'USER', 'bob', true, :now, :now)"
+                ),
+                {"id": owner, "now": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO environments (id, name, storage_root, storage_options, "
+                    "is_protected, properties, created_at, updated_at) "
+                    "VALUES (:id, 'dev', 's3://bucket/dev', :options, false, :props, :now, :now)"
+                ),
+                {
+                    "id": environment_id,
+                    "options": json.dumps({}),
+                    "props": json.dumps({}),
+                    "now": now,
+                },
+            )
+            for row_id, name, visibility, private_owner in (
+                (private_id, "Draft", "private", owner),
+                (shared_id, "Revenue", "everyone", None),
+            ):
+                conn.execute(
+                    insert,
+                    {
+                        "id": row_id,
+                        "env": environment_id,
+                        "name": name,
+                        "visibility": visibility,
+                        "owner": owner,
+                        "private_owner": private_owner,
+                        "now": now,
+                    },
+                )
+        # pg8000 raises a check violation (23514) as a ProgrammingError, not an IntegrityError
+        with (
+            pytest.raises(DBAPIError, match="ck_saved_queries_private_owner"),
+            engine.begin() as conn,
+        ):
+            conn.execute(
+                insert,
+                {
+                    "id": uuid.uuid4(),
+                    "env": environment_id,
+                    "name": "No private owner",
+                    "visibility": "private",
+                    "owner": owner,
+                    "private_owner": None,
+                    "now": now,
+                },
+            )
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("DELETE FROM principals WHERE id = :id"), {"id": owner})
+        with engine.connect() as conn:
+            rows = conn.execute(sqlalchemy.text("SELECT id, owner_id FROM saved_queries")).all()
+        assert [tuple(r) for r in rows] == [(shared_id, None)]
+        migrate.downgrade(url, revision_0081)
+        assert _alembic_version(engine) == revision_0081
+        assert "saved_queries" not in sqlalchemy.inspect(engine).get_table_names()
+        engine.dispose()

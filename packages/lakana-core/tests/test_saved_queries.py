@@ -1,0 +1,564 @@
+"""Tests for `SavedQueryService`: who sees, changes and deletes a saved query (rulings S1 to S7)."""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Sequence
+from pathlib import Path
+
+import pytest
+from home_test_helpers import grant, person
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from lakana_core.auth import Action, PrincipalRef, Securable, TaskScope
+from lakana_core.catalog.saved_queries import (
+    SAVED_QUERY_LIST_DEFAULT,
+    SAVED_QUERY_LIST_MAX,
+    SAVED_QUERY_NAME_MAX,
+    SavedQueryService,
+    SavedQueryView,
+)
+from lakana_core.catalog.service import CatalogService
+from lakana_core.config import StorageConfig
+from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
+from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.grants.roles import Role
+from lakana_core.models import (
+    AuditEvent,
+    AuditEventType,
+    Grant,
+    Principal,
+    SavedQuery,
+    SavedQueryVisibility,
+)
+
+_SAVED_EVENTS = (
+    AuditEventType.SAVED_QUERY_CREATED,
+    AuditEventType.SAVED_QUERY_UPDATED,
+    AuditEventType.SAVED_QUERY_DELETED,
+)
+_UPDATE_REFUSED = (
+    "Only the owner of a saved query can change it; save a copy under your own name instead."
+)
+_DELETE_REFUSED = "Only the owner of a saved query or an administrator can delete it."
+_TASK_REFUSED = (
+    "Saved queries belong to people and service accounts; a task's token cannot read or change "
+    "them."
+)
+_NAME_REFUSED = "A saved query's name is one line of 1 to 200 visible characters."
+
+
+def _env(catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, name: str) -> None:
+    catalog.create_environment(
+        principal,
+        name=name,
+        storage=StorageConfig(scheme="file", root=f"file://{tmp_path / name}", options={}),
+    )
+
+
+def _service(session: Session) -> SavedQueryService:
+    return SavedQueryService(session, GrantAuthorization(session))
+
+
+def _querier(session: Session, name: str, *environments: str) -> PrincipalRef:
+    who = person(session, name)
+    for environment in environments:
+        grant(session, who, action=Action.SUBMIT_QUERY, environment_name=environment)
+    return who
+
+
+def _admin(session: Session, name: str = "root") -> PrincipalRef:
+    who = person(session, name)
+    grant(session, who, role=Role.ADMIN)
+    return who
+
+
+def _names(items: Sequence[SavedQueryView]) -> list[str]:
+    return [item.name for item in items]
+
+
+def _saved_events(session: Session) -> list[AuditEvent]:
+    return list(
+        session.execute(
+            select(AuditEvent).where(AuditEvent.event_type.in_(_SAVED_EVENTS))
+        ).scalars()
+    )
+
+
+@pytest.fixture
+def dev(catalog: CatalogService, principal: PrincipalRef, tmp_path: Path) -> str:
+    _env(catalog, principal, tmp_path, "dev")
+    return "dev"
+
+
+def test_the_limits_are_the_rulings(session: Session) -> None:
+    assert (SAVED_QUERY_NAME_MAX, SAVED_QUERY_LIST_DEFAULT, SAVED_QUERY_LIST_MAX) == (200, 50, 200)
+    assert [v.value for v in SavedQueryVisibility] == ["private", "everyone"]
+
+
+def test_create_then_get_returns_the_owners_view_with_sql_and_both_actions(
+    session: Session, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+
+    created = service.create(bob, dev, name="Revenue", sql="SELECT 1\n")
+    got = service.get(bob, dev, created.id)
+
+    assert got == created
+    assert got.environment == "dev"
+    assert got.name == "Revenue"
+    assert got.sql == "SELECT 1\n"
+    assert got.visibility == "private"
+    assert got.owner == "bob"
+    assert got.former_owner is False
+    assert got.actions == ("update", "delete")
+    row = session.get(SavedQuery, created.id)
+    assert row is not None
+    assert (row.owner_id, row.private_owner_id) == (bob.id, bob.id)
+
+
+def test_create_needs_submit_query_on_the_environment(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, dev: str
+) -> None:
+    _env(catalog, principal, tmp_path, "prod")
+    bob = _querier(session, "bob", "prod")
+
+    with pytest.raises(PermissionDenied):
+        _service(session).create(bob, dev, name="Revenue", sql="SELECT 1")
+    with pytest.raises(NotFoundError, match="No environment named 'nowhere'"):
+        _service(session).create(_admin(session), "nowhere", name="Revenue", sql="SELECT 1")
+    assert session.execute(select(SavedQuery)).first() is None
+
+
+def test_create_refuses_empty_sql_and_an_unknown_visibility(session: Session, dev: str) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+
+    with pytest.raises(ValidationError, match="empty"):
+        service.create(bob, dev, name="Revenue", sql=" \n\t ")
+    with pytest.raises(ValidationError, match="'private' or 'everyone'"):
+        service.create(bob, dev, name="Revenue", sql="SELECT 1", visibility="team")
+
+
+def test_a_private_query_is_404_for_another_person_who_may_query(
+    session: Session, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1")
+
+    with pytest.raises(NotFoundError) as hidden:
+        service.get(carol, dev, mine.id)
+    with pytest.raises(NotFoundError) as missing:
+        service.get(carol, dev, uuid.uuid4())
+
+    assert str(hidden.value) == f"No saved query {mine.id} in 'dev'."
+    assert str(missing.value).startswith("No saved query ")
+    assert service.list_page(carol, environment=dev).items == []
+    assert service.list_page(carol).items == []
+
+
+def test_an_everyone_query_is_seen_with_sql_by_those_who_may_query_there_only(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, dev: str
+) -> None:
+    _env(catalog, principal, tmp_path, "prod")
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    dave = _querier(session, "dave", "prod")
+    service = _service(session)
+    shared = service.create(bob, dev, name="Revenue", sql="SELECT 1", visibility="everyone")
+
+    seen = service.get(carol, dev, shared.id)
+    assert (seen.sql, seen.owner, seen.actions) == ("SELECT 1", "bob", ())
+    assert _names(service.list_page(carol, environment=dev).items) == ["Revenue"]
+    assert _names(service.list_page(carol).items) == ["Revenue"]
+
+    with pytest.raises(NotFoundError):
+        service.get(dave, dev, shared.id)
+    with pytest.raises(PermissionDenied):
+        service.list_page(dave, environment=dev)
+    assert service.list_page(dave).items == []
+
+
+def test_an_admin_sees_a_private_query_without_sql_and_may_only_delete(
+    session: Session, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    root = _admin(session)
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1")
+
+    seen = service.get(root, dev, mine.id)
+    assert (seen.name, seen.owner, seen.environment) == ("Revenue", "bob", "dev")
+    assert seen.sql is None
+    assert seen.actions == ("delete",)
+    for page in (service.list_page(root, environment=dev), service.list_page(root)):
+        assert [(i.id, i.sql, i.actions) for i in page.items] == [(mine.id, None, ("delete",))]
+
+    with pytest.raises(PermissionDenied, match="Only the owner"):
+        service.update(root, dev, mine.id, name="Mine now", sql="SELECT 2", visibility="private")
+    service.delete(root, dev, mine.id)
+    assert session.get(SavedQuery, mine.id) is None
+
+
+def test_an_admin_with_read_query_text_sees_the_sql(session: Session, dev: str) -> None:
+    bob = _querier(session, "bob", dev)
+    root = _admin(session)
+    grant(session, root, action=Action.READ_QUERY_TEXT)
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1")
+
+    assert service.get(root, dev, mine.id).sql == "SELECT 1"
+    assert [i.sql for i in service.list_page(root).items] == ["SELECT 1"]
+
+
+def test_only_the_owner_updates_and_only_owner_or_admin_deletes(session: Session, dev: str) -> None:
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    service = _service(session)
+    shared = service.create(bob, dev, name="Revenue", sql="SELECT 1", visibility="everyone")
+
+    with pytest.raises(PermissionDenied) as updated:
+        service.update(carol, dev, shared.id, name="Revenue", sql="SELECT 2", visibility="private")
+    with pytest.raises(PermissionDenied) as deleted:
+        service.delete(carol, dev, shared.id)
+    assert str(updated.value) == _UPDATE_REFUSED
+    assert str(deleted.value) == _DELETE_REFUSED
+
+    changed = service.update(
+        bob, dev, shared.id, name="Revenue by month", sql="SELECT 2", visibility="private"
+    )
+    assert (changed.name, changed.sql, changed.visibility) == (
+        "Revenue by month",
+        "SELECT 2",
+        "private",
+    )
+    row = session.get(SavedQuery, shared.id)
+    assert row is not None and row.private_owner_id == bob.id
+    shared_again = service.update(
+        bob, dev, shared.id, name="Revenue by month", sql="SELECT 2", visibility="everyone"
+    )
+    assert shared_again.visibility == "everyone"
+    session.refresh(row)
+    assert row.private_owner_id is None
+    service.delete(bob, dev, shared.id)
+    with pytest.raises(NotFoundError):
+        service.get(bob, dev, shared.id)
+
+
+def test_an_owner_without_the_right_still_sees_and_deletes_but_cannot_update(
+    session: Session, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    service = _service(session)
+    shared = service.create(bob, dev, name="Revenue", sql="SELECT 1", visibility="everyone")
+    private = service.create(bob, dev, name="Draft", sql="SELECT 2")
+    session.execute(delete(Grant).where(Grant.principal_id == bob.id))
+    session.commit()
+    service = _service(session)
+
+    assert service.get(carol, dev, shared.id).owner == "bob"
+    assert service.get(bob, dev, shared.id).sql == "SELECT 1"
+    assert _names(service.list_page(bob, environment=dev).items) == ["Draft", "Revenue"]
+    assert _names(service.list_page(bob).items) == ["Draft", "Revenue"]
+    assert service.get(bob, dev, private.id).actions == ("delete",)
+    with pytest.raises(PermissionDenied):
+        service.update(bob, dev, shared.id, name="Revenue", sql="SELECT 3", visibility="everyone")
+
+    service.delete(bob, dev, private.id)
+    assert _names(service.list_page(bob).items) == ["Revenue"]
+    grant(session, bob, action=Action.SUBMIT_QUERY, environment_name=dev)
+    assert service.get(bob, dev, shared.id).actions == ("update", "delete")
+    assert (
+        service.update(
+            bob, dev, shared.id, name="Revenue", sql="SELECT 3", visibility="everyone"
+        ).sql
+        == "SELECT 3"
+    )
+
+
+def test_deleting_a_principal_removes_their_private_queries_and_keeps_shared_ones_as_former_owner(
+    session: Session, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    root = _admin(session)
+    service = _service(session)
+    private = service.create(bob, dev, name="Draft", sql="SELECT 1")
+    shared = service.create(bob, dev, name="Revenue", sql="SELECT 2", visibility="everyone")
+    session.execute(delete(Grant).where(Grant.principal_id == bob.id))
+    session.execute(delete(Principal).where(Principal.id == bob.id))
+    session.commit()
+    session.expire_all()
+
+    assert session.get(SavedQuery, private.id) is None
+    for who, actions in ((root, ("delete",)), (carol, ())):
+        seen = service.get(who, dev, shared.id)
+        assert (seen.owner, seen.former_owner, seen.actions, seen.sql) == (
+            None,
+            True,
+            actions,
+            "SELECT 2",
+        )
+        assert [i.id for i in service.list_page(who).items] == [shared.id]
+    with pytest.raises(PermissionDenied):
+        service.delete(carol, dev, shared.id)
+    with pytest.raises(PermissionDenied):
+        service.update(root, dev, shared.id, name="Revenue", sql="SELECT 3", visibility="everyone")
+    service.delete(root, dev, shared.id)
+    assert session.get(SavedQuery, shared.id) is None
+
+
+def test_a_deleted_environment_hides_its_saved_queries_until_restored(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1", visibility="everyone")
+
+    catalog.delete_environment(principal, dev)
+    with pytest.raises(NotFoundError):
+        service.get(bob, dev, mine.id)
+    with pytest.raises(NotFoundError):
+        service.list_page(bob, environment=dev)
+    assert service.list_page(bob).items == []
+    with pytest.raises(NotFoundError):
+        service.delete(bob, dev, mine.id)
+
+    catalog.restore_environment(principal, dev)
+    assert service.get(bob, dev, mine.id) == mine
+    assert [i.id for i in service.list_page(bob).items] == [mine.id]
+
+
+@pytest.mark.parametrize(
+    ("typed", "stored"),
+    [
+        ("a\nb", None),
+        ("a​b", None),
+        ("x" * 201, None),
+        ("  Monthly revenue  ", "Monthly revenue"),
+    ],
+    ids=["line-break", "zero-width-space", "201-characters", "surrounding-spaces"],
+)
+def test_names_are_one_visible_line_and_unique_per_owner(
+    session: Session, dev: str, typed: str, stored: str | None
+) -> None:
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    service = _service(session)
+
+    if stored is None:
+        with pytest.raises(ValidationError) as refused:
+            service.create(bob, dev, name=typed, sql="SELECT 1")
+        assert str(refused.value) == _NAME_REFUSED
+        kept = service.create(bob, dev, name="Kept", sql="SELECT 1")
+        with pytest.raises(ValidationError, match="one line"):
+            service.update(bob, dev, kept.id, name=typed, sql="SELECT 1", visibility="private")
+        return
+
+    first = service.create(bob, dev, name=typed, sql="SELECT 1")
+    assert first.name == stored
+    with pytest.raises(AlreadyExistsError) as duplicate:
+        service.create(bob, dev, name=stored, sql="SELECT 2", visibility="everyone")
+    assert str(duplicate.value) == (
+        f"You already have a saved query named {stored!r} in 'dev' ({first.id}); choose another "
+        "name, or update that one."
+    )
+    other = service.create(bob, dev, name="Other", sql="SELECT 3")
+    with pytest.raises(AlreadyExistsError):
+        service.update(bob, dev, other.id, name=typed, sql="SELECT 3", visibility="private")
+    assert service.create(carol, dev, name=stored, sql="SELECT 4").name == stored
+    assert service.update(
+        bob, dev, first.id, name=stored, sql="SELECT 5", visibility="private"
+    ).sql == ("SELECT 5")
+
+
+def test_the_cross_environment_list_orders_by_name_and_pages_every_item_once(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, dev: str
+) -> None:
+    _env(catalog, principal, tmp_path, "prod")
+    bob = _querier(session, "bob", dev, "prod")
+    service = _service(session)
+    for environment, name in (
+        (dev, "beta"),
+        ("prod", "alpha"),
+        (dev, "gamma"),
+        ("prod", "Delta"),
+        (dev, "Alpha"),
+    ):
+        service.create(bob, environment, name=name, sql="SELECT 1")
+
+    seen: list[tuple[str, str]] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        page = service.list_page(bob, limit=2, cursor=cursor)
+        pages += 1
+        assert len(page.items) <= 2
+        seen.extend((i.name, i.environment) for i in page.items)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert pages == 3
+    assert seen == [
+        ("Alpha", "dev"),
+        ("alpha", "prod"),
+        ("beta", "dev"),
+        ("Delta", "prod"),
+        ("gamma", "dev"),
+    ]
+    assert _names(service.list_page(bob, environment="prod").items) == ["alpha", "Delta"]
+
+
+def test_a_cursor_of_one_list_is_refused_by_the_other(session: Session, dev: str) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+    for name in ("a", "b", "c"):
+        service.create(bob, dev, name=name, sql="SELECT 1")
+
+    every = service.list_page(bob, limit=1).next_cursor
+    one = service.list_page(bob, environment=dev, limit=1).next_cursor
+    assert every is not None and one is not None
+
+    with pytest.raises(ValidationError):
+        service.list_page(bob, environment=dev, cursor=every)
+    with pytest.raises(ValidationError):
+        service.list_page(bob, cursor=one)
+    with pytest.raises(ValidationError):
+        service.list_page(bob, limit=SAVED_QUERY_LIST_MAX + 1)
+
+
+class _CountingAuthorization:
+    """Grants, counting how often each question is asked.
+
+    Parameters
+    ----------
+    inner
+        The authorization answering.
+    """
+
+    def __init__(self, inner: GrantAuthorization) -> None:
+        self._inner = inner
+        self.batches = 0
+        self.single = 0
+
+    def authorize(self, principal: PrincipalRef, action: Action, securable: Securable) -> None:
+        self._inner.authorize(principal, action, securable)
+
+    def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+        self.single += 1
+        return self._inner.permits(principal, action, securable)
+
+    def permits_each(
+        self, principal: PrincipalRef, questions: Sequence[tuple[Action, Securable]]
+    ) -> list[bool]:
+        self.batches += 1
+        return self._inner.permits_each(principal, questions)
+
+
+@pytest.mark.parametrize("environments", [2, 9])
+def test_the_cross_environment_list_asks_the_rights_in_one_batch(
+    session: Session,
+    catalog: CatalogService,
+    principal: PrincipalRef,
+    tmp_path: Path,
+    environments: int,
+) -> None:
+    names = [f"env{n}" for n in range(environments)]
+    for name in names:
+        _env(catalog, principal, tmp_path, name)
+    bob = _querier(session, "bob", *names)
+    carol = _querier(session, "carol", *names)
+    for name in names:
+        _service(session).create(bob, name, name="Revenue", sql="SELECT 1", visibility="everyone")
+    spy = _CountingAuthorization(GrantAuthorization(session))
+
+    page = SavedQueryService(session, spy).list_page(carol)
+
+    assert len(page.items) == environments
+    assert (spy.batches, spy.single) == (1, 0)
+
+
+def test_a_task_token_is_refused_every_operation(session: Session, dev: str) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1")
+    task = PrincipalRef(
+        id=bob.id,
+        name=bob.name,
+        type=bob.type,
+        task_scope=TaskScope(environment=dev, asset_scope=[], token_id=uuid.uuid4()),
+    )
+
+    calls = (
+        lambda: service.create(task, dev, name="Other", sql="SELECT 1"),
+        lambda: service.get(task, dev, mine.id),
+        lambda: service.update(task, dev, mine.id, name="x", sql="SELECT 1", visibility="private"),
+        lambda: service.delete(task, dev, mine.id),
+        lambda: service.list_page(task, environment=dev),
+        lambda: service.list_page(task),
+    )
+    for call in calls:
+        with pytest.raises(PermissionDenied) as refused:
+            call()
+        assert str(refused.value) == _TASK_REFUSED
+    assert service.get(bob, dev, mine.id).name == "Revenue"
+
+
+def test_create_update_and_delete_write_their_audit_events_without_sql(
+    session: Session, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+    secret_sql = "SELECT 'a secret' AS s"
+
+    mine = service.create(bob, dev, name="Revenue", sql=secret_sql)
+    service.update(bob, dev, mine.id, name="Revenue 2", sql=secret_sql, visibility="everyone")
+    service.delete(bob, dev, mine.id)
+
+    by_type = {e.event_type: e for e in _saved_events(session)}
+    assert len(_saved_events(session)) == 3
+    events = [by_type[t] for t in _SAVED_EVENTS]
+    for event in events:
+        assert set(event.detail) == {"id", "name", "visibility", "owner"}
+        assert event.detail["id"] == str(mine.id)
+        assert event.detail["owner"] == "bob"
+        assert event.principal_id == bob.id
+        assert (event.securable_kind, event.securable_environment) == ("ENVIRONMENT", "dev")
+        assert "secret" not in str(event.detail)
+    assert [(e.detail["name"], e.detail["visibility"]) for e in events] == [
+        ("Revenue", "private"),
+        ("Revenue 2", "everyone"),
+        ("Revenue 2", "everyone"),
+    ]
+
+
+def test_a_refused_change_writes_no_saved_query_event(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, dev: str
+) -> None:
+    _env(catalog, principal, tmp_path, "prod")
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    dave = _querier(session, "dave", "prod")
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1", visibility="everyone")
+    session.execute(delete(AuditEvent))
+    session.commit()
+
+    refused = (
+        lambda: service.create(dave, dev, name="Other", sql="SELECT 1"),
+        lambda: service.create(bob, dev, name="Revenue", sql="SELECT 1"),
+        lambda: service.create(bob, dev, name="a\nb", sql="SELECT 1"),
+        lambda: service.update(carol, dev, mine.id, name="x", sql="SELECT 1", visibility="private"),
+        lambda: service.delete(carol, dev, mine.id),
+        lambda: service.delete(dave, dev, mine.id),
+    )
+    for call in refused:
+        with pytest.raises((PermissionDenied, NotFoundError, AlreadyExistsError, ValidationError)):
+            call()
+    assert _saved_events(session) == []
+    assert service.get(bob, dev, mine.id) == mine

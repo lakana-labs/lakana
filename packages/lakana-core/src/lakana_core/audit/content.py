@@ -152,6 +152,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # a namespace's dotted path (`NAMESPACE_CREATED`, `NAMESPACE_DROPPED`)
         "namespace",
         "operation",
+        # a saved query's owner: a principal's name, `null` once that principal is deleted
+        "owner",
         # a passkey's id (`lakana_core.identity.passkeys`), never its key or credential id
         "passkey_id",
         "path",
@@ -200,6 +202,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "version",
         # how a browser session began: setup, invite, recovery, local or passkey
         "via",
+        # a saved query's visibility: private or everyone
+        "visibility",
         "waits_for_run_id",
         # states, outcomes and fixed reasons
         "already_deleted",
