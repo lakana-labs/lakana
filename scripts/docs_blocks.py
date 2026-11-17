@@ -741,26 +741,30 @@ def comparable(line: str) -> str:
     return _PADDING.sub(" ", _RULE.sub("─", line)).rstrip()
 
 
-def console_width(root: Path, example: str) -> int | None:
+def console_width(root: Path, value: str) -> int | None:
     """Say how wide the console of an example is.
 
     Parameters
     ----------
     root
         The repository root.
-    example
-        The example's directory name under ``docs/examples``.
+    value
+        The marker's ``example#region``.
 
     Returns
     -------
     int or None
-        The last ``export COLUMNS=N`` of its ``run.sh``, else ``COLUMNS`` of the environment,
+        The last ``export COLUMNS=N`` of the example's ``run.sh`` above the region (so an export
+        applies to the regions after it), else ``COLUMNS`` of the environment,
         else ``None`` (the comparison then takes the longest line as the width).
     """
+    example, _, region = value.partition("#")
     try:
-        found = _COLUMNS.findall((root / EXAMPLES / example / "run.sh").read_text(encoding="utf-8"))
+        text = (root / EXAMPLES / example / "run.sh").read_text(encoding="utf-8")
     except OSError:
-        found = []
+        text = ""
+    start = re.search(rf"^\s*#\s*docs:start\s+{re.escape(region)}\s*$", text, re.MULTILINE)
+    found = _COLUMNS.findall(text[: start.start()] if start and region else text)
     if found:
         return int(found[-1])
     value = os.environ.get("COLUMNS", "")
@@ -772,8 +776,8 @@ def _group(lines: Sequence[str], width: int) -> list[list[int]]:
 
     A terminal wraps a long line at its width, and the masked parts of a line (a snapshot id,
     a time) differ in length from run to run, so the wrap point moves. Line ``n + 1`` joins
-    line ``n`` only if the terminal had to break there (``n``, a space and the first word of
-    ``n + 1`` do not fit in `width`), ``n + 1`` is not blank, has the indent of ``n`` and does
+    line ``n`` only if the terminal had to break there (``n`` fits in `width`, but with a space
+    and the first word of ``n + 1`` it would not), ``n + 1`` is not blank, has the indent of ``n`` and does
     not start a list item, and neither line is a table line. Blank lines, indentation and
     spacing inside a line still count.
 
@@ -799,7 +803,7 @@ def _group(lines: Sequence[str], width: int) -> list[list[int]]:
             and prev.strip()
             and not _is_structured(line)
             and not _is_structured(prev)
-            and len(prev) + 1 + len(words[0]) > width
+            and len(prev) <= width < len(prev) + 1 + len(words[0])
             and len(line) - len(line.lstrip()) == len(prev) - len(prev.lstrip())
             and not _ITEM.match(line)
         ):
@@ -850,6 +854,38 @@ def _width(lines: Sequence[str], columns: int | None) -> int:
     return max((len(x) for x in lines if not _is_structured(x)), default=0)
 
 
+def _compared(text: str) -> list[str]:
+    """Return the lines of an output that a comparison reads: no progress lines.
+
+    Parameters
+    ----------
+    text
+        Output as a page shows it or as an example printed it.
+
+    Returns
+    -------
+    list of str
+        The lines, as `_lines` returns them, without progress lines.
+    """
+    return [x for x in _lines(text) if not is_progress(x)]
+
+
+def _masked(lines: Sequence[str]) -> list[str]:
+    """Mask each line and collapse table padding, for a comparison and its diff.
+
+    Parameters
+    ----------
+    lines
+        Lines of one side.
+
+    Returns
+    -------
+    list of str
+        The lines as the comparison reads them.
+    """
+    return [comparable(mask(x)) for x in lines]
+
+
 def _same_output(shown: str, printed: str, columns: int | None = None) -> bool:
     """Say whether a block and a run match once masked, ignoring where lines wrap.
 
@@ -868,9 +904,8 @@ def _same_output(shown: str, printed: str, columns: int | None = None) -> bool:
         ``True`` if the masked lines are equal, or equal once the lines of a wrap are joined
         and masked as one text.
     """
-    page = [x for x in _lines(shown) if not is_progress(x)]
-    run = [x for x in _lines(printed) if not is_progress(x)]
-    if [comparable(mask(x)) for x in page] == [comparable(mask(x)) for x in run]:
+    page, run = _compared(shown), _compared(printed)
+    if _masked(page) == _masked(run):
         return True
     width = _width(page + run, columns)
     return _keys(page, _group(page, width)) == _keys(run, _group(run, width))
@@ -1080,8 +1115,7 @@ def _output_problem(
     """
     if _same_output(block.body, printed, columns):
         return None
-    page = [comparable(mask(x)) for x in _lines(block.body) if not is_progress(x)]
-    run = [comparable(mask(x)) for x in _lines(printed) if not is_progress(x)]
+    page, run = _masked(_compared(block.body)), _masked(_compared(printed))
     diff = "\n".join(
         difflib.unified_diff(page, run, "the page", f"the run ({value})", lineterm="", n=2)
     )
@@ -1257,7 +1291,7 @@ def _tied_problem(
             f"`LAKANA_DOCS_CAPTURE={captured} uv run bash scripts/run_docs_examples.sh {example}`."
         )
     tally["compared"] += 1
-    return _output_problem(where, block, value, printed, captured, console_width(root, example))
+    return _output_problem(where, block, value, printed, captured, console_width(root, value))
 
 
 def check(
@@ -1383,7 +1417,7 @@ def _wanted(root: Path, block: Block, captured: Path | None) -> str | None:
         return (
             None
             if printed is None
-            else _merge(block.body, printed, console_width(root, marker.value.partition("#")[0]))
+            else _merge(block.body, printed, console_width(root, marker.value))
         )
     if marker.kind != "source":
         return None

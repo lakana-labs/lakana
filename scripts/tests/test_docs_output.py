@@ -8,6 +8,7 @@ from scripts.docs_blocks import (
     MASKS,
     BlockError,
     check,
+    console_width,
     find_blocks,
     fix,
     is_progress,
@@ -117,7 +118,7 @@ def _tree(
     (site / "p.md").write_text(block.format(shown), encoding="utf-8")
     (tmp_path / "docs" / "examples" / "demo").mkdir(parents=True)
     (tmp_path / "docs" / "examples" / "demo" / "run.sh").write_text(
-        RUN_SH if columns is None else RUN_SH.replace("echo", f"export COLUMNS={columns}\necho"),
+        RUN_SH if columns is None else f"export COLUMNS={columns}\n" + RUN_SH,
         encoding="utf-8",
     )
     captures = tmp_path / "captures"
@@ -619,3 +620,32 @@ def test_a_line_that_fits_is_not_joined_to_the_next(tmp_path: Path) -> None:
     root, captures = _tree(tmp_path, BLOCK, shown, LONG + " next\n", 120)
     problems, _ = check(root, root / "docs/site", None, captures)
     assert problems
+
+
+def test_a_line_longer_than_the_width_is_never_joined(tmp_path: Path) -> None:
+    """The terminal does not wrap a line it printed too long, so a lost newline is a difference."""
+    shown = LONG + "\nHint: run it\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, LONG + " Hint: run it\n", 60)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_short_key_value_lines_stay_separate(tmp_path: Path) -> None:
+    """Two short fields on one line are a difference at a known width."""
+    root, captures = _tree(tmp_path, BLOCK, "status: ok\nrows: 3\n", "status: ok rows: 3\n", 120)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_the_width_is_the_export_above_the_region(tmp_path: Path) -> None:
+    """An export after a region does not apply to it."""
+    root, _ = _tree(tmp_path, BLOCK, "x\n", None)
+    run = root / "docs/examples/demo/run.sh"
+    run.write_text(
+        "# docs:start show\necho hi\n# docs:end show\nexport COLUMNS=120\n", encoding="utf-8"
+    )
+    assert console_width(root, "demo#show") is None
+    run.write_text(
+        "export COLUMNS=90\n# docs:start show\necho hi\n# docs:end show\n", encoding="utf-8"
+    )
+    assert console_width(root, "demo#show") == 90
