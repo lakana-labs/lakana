@@ -59,9 +59,9 @@ passkeys is recovered only by the operator, as the next section says.
 ## When someone loses their passkey
 
 Open **Settings → Sign-in → Recovery links** and choose **Issue a recovery link**, or open the person
-under **People** and choose the same action there. The link works once, for 1 hour; using it
-removes all of the person's passkeys, ends their sessions, and every administrator gets a notice.
-Send it only after you have confirmed, as above, that the person asked for it.
+under **Settings → Access → People** and choose the same action there. The link works once, for
+1 hour; using it removes all of the person's passkeys, ends their sessions, and every administrator
+gets a notice. Send it only after you have confirmed, as above, that the person asked for it.
 
 An administrator's account is recovered only by the **server operator**, the person who holds the
 instance's bootstrap token: for an administrator the interface shows the command to run where the
