@@ -568,7 +568,7 @@ def main() -> None:
         logger.info("Python assets: disabled: %s. To enable it: %s.", reason, python.fix())
     logger.info(_TAKES_LINES[settings.worker.takes])
     key_provider = EnvKeyProvider(
-        settings.secrets.master_key, accept_format_1=settings.secrets.accept_format_1
+        settings.secrets.master_key_text(), accept_format_1=settings.secrets.accept_format_1
     )
     if settings.secrets.accept_format_1:
         logger.warning(ACCEPT_FORMAT_1_WARNING)

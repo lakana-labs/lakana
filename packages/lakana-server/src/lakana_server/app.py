@@ -273,7 +273,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 lease_seconds=resolved_settings.run.lease_seconds,
                 environments=readiness.environments,
                 key_provider=EnvKeyProvider(
-                    resolved_settings.secrets.master_key,
+                    resolved_settings.secrets.master_key_text(),
                     accept_format_1=resolved_settings.secrets.accept_format_1,
                 ),
             ),
@@ -284,18 +284,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         try:
             with Session(engine) as session:
+                bootstrap_secret = resolved_settings.bootstrap_pat_secret
                 token = bootstrap_if_needed(
                     session,
                     resolved_settings.bootstrap_admin,
                     key_id=resolved_settings.bootstrap_pat_key_id,
-                    secret=resolved_settings.bootstrap_pat_secret,
+                    secret=(
+                        None if bootstrap_secret is None else bootstrap_secret.get_secret_value()
+                    ),
                     token_file=resolved_settings.bootstrap_token_file,
                 )
             if token is not None:
                 configured_key_id = resolved_settings.bootstrap_pat_key_id
-                if configured_key_id is not None and (
-                    resolved_settings.bootstrap_pat_secret is not None
-                ):
+                if configured_key_id is not None and (bootstrap_secret is not None):
                     # The caller (e.g. `lakana server start --local`, the Compose bundle)
                     # supplied this credential and already knows the full token. The normal
                     # first start of a local instance, and of a restored Compose instance:

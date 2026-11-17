@@ -834,7 +834,7 @@ def get_key_provider(request: Request) -> KeyProvider:
         operation is actually attempted with it.
     """
     secrets = request.app.state.settings.secrets
-    return EnvKeyProvider(secrets.master_key, accept_format_1=secrets.accept_format_1)
+    return EnvKeyProvider(secrets.master_key_text(), accept_format_1=secrets.accept_format_1)
 
 
 def get_undo_days(request: Request) -> int:

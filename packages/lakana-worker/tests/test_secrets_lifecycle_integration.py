@@ -23,6 +23,7 @@ import pyarrow.ipc
 import pyarrow.parquet as pq
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
 from worker_test_helpers import SeaweedFsContainer
@@ -79,7 +80,7 @@ def test_a_secret_created_via_the_api_backs_a_real_environments_storage() -> Non
             bootstrap_pat_key_id=_PAT_KEY_ID,
             bootstrap_pat_secret=_PAT_SECRET,
         )
-        settings.secrets.master_key = _master_key()
+        settings.secrets.master_key = SecretStr(_master_key())
         headers = {"Authorization": f"Bearer {_TOKEN}"}
 
         # Everything the exit criterion requires "created via the API"
@@ -127,7 +128,7 @@ def test_a_secret_created_via_the_api_backs_a_real_environments_storage() -> Non
         # hits this exact same limitation) -- done directly, but the
         # storage credentials it needs were created entirely over the wire
         # above, and are decrypted for real here via the same provider.
-        provider = EnvKeyProvider(settings.secrets.master_key)
+        provider = EnvKeyProvider(settings.secrets.master_key_text())
         with Session(engine) as session:
             admin = ensure_bootstrap_principal(session, settings.bootstrap_admin)
             catalog = CatalogService(

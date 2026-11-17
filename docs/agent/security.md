@@ -5061,7 +5061,7 @@ work.
   unconditionally (`__repr_args__`), never just ones matching a secret-looking key name;
   `scheme` and `root` stay visible. `DatabaseConfig.url` reprs with its password hidden via
   `sqlalchemy.engine.make_url(...).render_as_string(hide_password=True)`, falling back to
-  full redaction if the URL doesn't parse. `SecretsConfig.master_key` reprs as `***` when
+  full redaction if the URL doesn't parse. `SecretsConfig.master_key` is a `SecretStr` (read it with `master_key_text()`) and reprs as `***` when
   set, `None` when unset. Both `lakana_core.config.Settings` and `lakana_server.settings.Settings`
   inherit this through their nested fields with no override of their own — pydantic's default
   repr calls each nested model's own `__repr__`. `hide_input_in_errors=True` on

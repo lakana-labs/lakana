@@ -75,7 +75,7 @@ def test_secrets_master_key_reads_from_the_nested_env_var() -> None:
     env = {"LAKANA_DATABASE__URL": "sqlite://", "LAKANA_SECRETS__MASTER_KEY": "abc123"}
     with mock.patch.dict(os.environ, env, clear=True):
         settings = Settings()
-    assert settings.secrets.master_key == "abc123"
+    assert settings.secrets.master_key_text() == "abc123"
 
 
 def test_accept_format_1_is_off_by_default() -> None:
@@ -234,7 +234,19 @@ def test_secrets_config_repr_shows_asterisks_when_set() -> None:
     assert "dGhpc2lzYXNlY3JldGtleQ==" not in repr(config)
     assert "dGhpc2lzYXNlY3JldGtleQ==" not in str(config)
     assert "***" in repr(config)
-    assert config.master_key == "dGhpc2lzYXNlY3JldGtleQ=="
+    assert config.master_key_text() == "dGhpc2lzYXNlY3JldGtleQ=="
+
+
+def test_the_master_key_is_a_secret_str() -> None:
+    """The key is held as `SecretStr`; `master_key_text` gives its text, or `None`."""
+    from lakana_core.config import SecretsConfig
+
+    config = SecretsConfig(master_key="k")
+
+    assert isinstance(config.master_key, SecretStr)
+    assert config.master_key_text() == "k"
+    assert "'k'" not in repr(config)
+    assert SecretsConfig().master_key_text() is None
 
 
 def test_secrets_config_repr_shows_none_when_unset() -> None:
