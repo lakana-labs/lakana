@@ -22,6 +22,16 @@ export interface RawEntryOut {
   readonly claimed_by: { readonly table: string | null } | null;
 }
 
+/** One page of a folder of `raw/`, as the server answers it. */
+interface RawPageOut {
+  /** The folder listed. */
+  readonly path: string;
+  /** Its folders and files. */
+  readonly items: readonly RawEntryOut[];
+  /** The cursor of the next page; null on the last. */
+  readonly next_cursor: string | null;
+}
+
 /** One page of a folder of `raw/`. */
 export interface RawPage extends CursorPage<RawEntryOut> {
   /** The folder listed, such as `raw/orders`. */
@@ -44,10 +54,9 @@ export async function listRaw(
   cursor: string | null,
 ): Promise<RawPage> {
   const query = pageQuery(cursor, new URLSearchParams({ path }));
-  const body = await api.request<{
-    path: string;
-    items: readonly RawEntryOut[];
-    next_cursor: string | null;
-  }>("GET", withQuery(environmentPath(environment, "/raw"), query));
+  const body = await api.request<RawPageOut>(
+    "GET",
+    withQuery(environmentPath(environment, "/raw"), query),
+  );
   return { path: body.path, items: body.items, nextCursor: body.next_cursor };
 }

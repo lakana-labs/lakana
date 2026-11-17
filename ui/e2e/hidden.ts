@@ -91,6 +91,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["checks","days","hidden_checks","last_maintenance","readers","signals"]': "TableHealthOut",
   '["checks","grain","hidden_references","key","key_none","kind","measures","references"]':
     "TableModelOut",
+  '["claimed_by","kind","name","size"]': "RawEntryOut",
   '["column","column_type","kind","language","matched","snippet","translated"]': "TableMatchOut",
   '["column","table"]': "MaskedColumnOut",
   '["columns","columns_cut","duration_ms","masked_columns","masked_columns_cut","next_offset","preview","row_count","row_cut","rows"]':
@@ -134,6 +135,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["is_active","name","picture","type"]': "PrincipalOut",
   '["is_protected","name"]': "OwnerOut",
   '["item","others","state","text"]': "HealthSummaryOut",
+  '["items","next_cursor","path"]': "RawPageOut",
   '["items","next_cursor"]': "TableListPageOut",
   '["items","truncated"]': "AttentionOut",
   '["job","last_commit_at","seconds","source"]': "HealthObservedOut",
@@ -153,7 +155,9 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["path","sha256","size"]': "ArtifactFileOut",
   '["query_id","status"]': "QueryStatusOut",
   '["query_id"]': "QueryStatusOut",
-  '["table"]': "MaskedColumnOut",
+  // A preview's `{table}`: the one type whose fields it fills exactly is the claim of an entry of
+  // raw/ (#672); `table` is free text in both, so it carries the override either way.
+  '["table"]': "RawEntryOut.claimed_by",
   '["version"]': "InfoOut",
   "[]": "-",
 };
