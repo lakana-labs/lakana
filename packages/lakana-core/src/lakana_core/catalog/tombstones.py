@@ -39,6 +39,7 @@ from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.catalog.health_summary import refresh_health_key
 from lakana_core.catalog.locations import lock_location
 from lakana_core.catalog.translations import translation_rows
+from lakana_core.grants.duplicates import live_twin
 from lakana_core.grants.revocation import POLICY_MODELS, RevokedPolicy, revoke_attached
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
@@ -779,6 +780,7 @@ def restore_policies(
     table_id: uuid.UUID,
     namespace: str,
     name: str,
+    skipped: list[dict[str, str]],
 ) -> list[dict[str, str]]:
     """Un-revoke exactly the grants, row filters and column masks a drop revoked, uncommitted.
 
@@ -798,6 +800,9 @@ def restore_policies(
         The restored table's namespace, unit-separator-joined, for the display-only columns.
     name
         The restored table's name, likewise.
+    skipped
+        Gets ``{"id", "kept_grant_id"}`` of each grant left revoked because its twin is live
+        (`unrevoke`).
 
     Returns
     -------
@@ -818,7 +823,13 @@ def restore_policies(
         policy.namespace = namespace
         policy.table = name
 
-    return unrevoke(session, record.revoked_policy_ids, revoked_at=record.dropped_at, rebind=rebind)
+    return unrevoke(
+        session,
+        record.revoked_policy_ids,
+        revoked_at=record.dropped_at,
+        rebind=rebind,
+        skipped=skipped,
+    )
 
 
 def unrevoke(
@@ -826,13 +837,15 @@ def unrevoke(
     entries: Iterable[Mapping[str, str]],
     *,
     revoked_at: datetime,
+    skipped: list[dict[str, str]],
     rebind: Callable[[Grant | RowFilter | ColumnMask], None] | None = None,
 ) -> list[dict[str, str]]:
     """Un-revoke listed grants, row filters and column masks still as one revocation left them.
 
     Uncommitted. A row comes back only if it is still revoked at exactly `revoked_at`; one
     deleted since, or revoked again since, stays as it is, and an entry of an unknown kind is
-    ignored.
+    ignored. A grant whose twin is live (`lakana_core.grants.duplicates`) stays revoked too: the
+    access is there already, and the database holds one live grant of each twin set.
 
     Parameters
     ----------
@@ -842,6 +855,9 @@ def unrevoke(
         ``{"kind", "id"}`` objects (`RevokedPolicy.as_json`).
     revoked_at
         The time the revocation stamped.
+    skipped
+        Gets ``{"id", "kept_grant_id"}`` of each grant left revoked because its twin is live,
+        for the restore's audit event.
     rebind
         Called with each restored row before it is flushed, to point it somewhere new.
 
@@ -858,12 +874,18 @@ def unrevoke(
         policy = session.get(model, uuid.UUID(entry["id"]), populate_existing=True)
         if policy is None or policy.revoked_at is None or policy.revoked_at != revoked_at:
             continue
-        policy.revoked_at = None
-        policy.revoked_by = None
         if rebind is not None:
             rebind(policy)
+        twin = live_twin(session, policy) if isinstance(policy, Grant) else None
+        if twin is not None:
+            # A live grant gives the same access already (two copies from before #673, or
+            # one made since); bringing this one back would only duplicate it.
+            skipped.append({"id": entry["id"], "kept_grant_id": str(twin.id)})
+            continue
+        policy.revoked_at = None
+        policy.revoked_by = None
+        session.flush()
         restored.append({"kind": entry["kind"], "id": entry["id"]})
-    session.flush()
     return restored
 
 

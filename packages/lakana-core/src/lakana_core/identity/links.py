@@ -65,6 +65,7 @@ from lakana_core.grants.service import (
     held_admin_ids,
     lapsed_issuer_reason,
 )
+from lakana_core.identifiers import HIDDEN_CHARACTER_CATEGORIES
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.sessions import (
     SessionService,
@@ -403,10 +404,12 @@ def name_length_problem(name: str) -> str | None:
 def invisible_character_problem(name: str) -> str | None:
     """Say why a new principal name is refused for its characters, if it is.
 
-    Refused: control characters (Unicode category ``Cc``, such as a line break), format
-    characters (``Cf``: zero-width space, zero-width joiner, soft hyphen, direction marks) and
-    a combining mark (``Mn``, ``Mc``, ``Me``) as the first character. Each can make two names
-    look the same, or a name look like another.
+    Refused: the characters of `lakana_core.identifiers.HIDDEN_CHARACTER_CATEGORIES`, the ones a
+    new table or repository name may not hold either: control characters (Unicode category
+    ``Cc``, such as a line break), format characters (``Cf``: zero-width space, zero-width
+    joiner, soft hyphen, direction marks), surrogates and the line and paragraph separators
+    (``Zl``, ``Zp``); and a combining mark (``Mn``, ``Mc``, ``Me``) as the first character.
+    Each can make two names look the same, or a name look like another.
 
     Parameters
     ----------
@@ -420,7 +423,7 @@ def invisible_character_problem(name: str) -> str | None:
     """
     for position, character in enumerate(name):
         category = unicodedata.category(character)
-        if category in {"Cc", "Cf"} or (position == 0 and category.startswith("M")):
+        if category in HIDDEN_CHARACTER_CATEGORIES or (position == 0 and category.startswith("M")):
             return (
                 f"name: character {position + 1} (U+{ord(character):04X}) is invisible or "
                 "combines with the one before it, so the name could look like another. Type the "

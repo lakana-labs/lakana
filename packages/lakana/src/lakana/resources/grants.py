@@ -140,6 +140,10 @@ class Grants:
             If the given fields don't form a valid combination.
         lakana.errors.NotFound
             If the named principal, group, or securable does not exist.
+        lakana.errors.Conflict
+            If the principal or group already holds the same role or action on the same
+            securable (the message names that grant's id; nothing is created), or an access
+            file manages the scope.
         """
         response = self._transport.request(
             ROUTES["grants.create"],

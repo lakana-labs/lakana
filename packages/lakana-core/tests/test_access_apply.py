@@ -348,7 +348,7 @@ def test_apply_makes_the_plan_and_records_the_scopes(session: Session) -> None:
         session, AuditEventType.GRANT_CREATED
     )
     linked = [e for e in linked if "access_apply_id" in e.detail]
-    assert len(linked) == 3  # two copies revoked, one created
+    assert len(linked) == 2  # one revoked, one created
     assert {e.detail["access_apply_id"] for e in [*linked, *applied]} == {str(result.apply_id)}
     assert applied[0].detail == {
         "file_name": "access.yaml",
@@ -1246,3 +1246,31 @@ def test_a_fingerprint_of_one_file_does_not_apply_another(session: Session) -> N
         service.apply(world.admin, file_b, plan_fingerprint=plan_a.fingerprint)
     assert session.get(AccessManagedScope, "prod") is None
     assert not session.scalars(select(Grant).where(Grant.environment == "prod")).all()
+
+
+def test_a_file_that_lists_a_grant_made_by_hand_keeps_the_one_grant(session: Session) -> None:
+    """#673: a grant the file lists and the instance has is no create, so no refusal either."""
+    world = access_world(session)
+    seed_every_kind(session, world)
+    service = _service(session, world)
+    text = service.export(world.admin, ["prod"])
+
+    def add(document: dict[str, Any]) -> None:
+        """List the hand-made grant a second time.
+
+        Parameters
+        ----------
+        document
+            The loaded file.
+        """
+        document["grants"].append({"to": "group:finance", "role": "ANALYST", "on": "prod"})
+
+    refused = service.plan(world.admin, _edit(text, add))
+    assert any("repeats" in problem for problem in refused.problems)
+
+    plan = service.plan(world.admin, text)
+    result = service.apply(world.admin, text, plan_fingerprint=plan.fingerprint)
+
+    assert (result.created, result.changed, result.removed) == (0, 0, 0)
+    finance = session.scalars(select(Group.id).where(Group.name == "finance")).one()
+    assert _count(session, Grant, Grant.group_id == finance, Grant.revoked_at.is_(None)) == 1
