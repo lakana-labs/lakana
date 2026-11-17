@@ -444,6 +444,91 @@ describe("RunDetail", () => {
     expect(fact("State")).toHaveTextContent("Cancelled");
   });
 
+  it("takes no focus from a person who moved it away while Cancelling… shows", async () => {
+    const active = aJobRun({ status: "running", finished_at: null, actions: ["cancel"] });
+    let cancelled = false;
+    const server = renderRun(() => ({
+      status: 200,
+      body: { ...active, cancel_requested: cancelled },
+    }));
+    server.route({
+      [`POST /api/v1/environments/prod/runs/${JOB_RUN_ID}/cancel`]: () => {
+        cancelled = true;
+        return { status: 200, body: { ...active, cancel_requested: true } };
+      },
+    });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Cancel run" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel run" }),
+    );
+    const line = await screen.findByText("Cancelling…");
+    await waitFor(() => {
+      expect(line.closest(".jobs-control")).toHaveFocus();
+    });
+    const reads = server.sent.filter((request) => request.method === "GET").length;
+
+    // A click on a blank part of the page.
+    act(() => {
+      (document.activeElement as HTMLElement).blur();
+    });
+    await waitFor(
+      () => {
+        expect(server.sent.filter((request) => request.method === "GET").length).toBe(reads + 1);
+      },
+      { timeout: 5_000 },
+    );
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    expect(document.body).toHaveFocus();
+  });
+
+  it("forgets a control the person left for another", async () => {
+    const active = aJobRun({ status: "running", finished_at: null, actions: ["cancel"] });
+    renderRun({ status: 200, body: active });
+    const cancel = await screen.findByRole("button", { name: "Cancel run" });
+    const where = screen.getByLabelText("where");
+    where.tabIndex = -1;
+
+    act(() => {
+      cancel.focus();
+    });
+    act(() => {
+      where.focus();
+    });
+
+    expect(where).toHaveFocus();
+  });
+
+  it("keeps the control the focus went to right after leaving another for the page", async () => {
+    const active = aJobRun({
+      status: "running",
+      finished_at: null,
+      actions: ["cancel"],
+      tasks: [aTask({ asset: "gold.sales", status: "failed" })],
+    });
+    renderRun({ status: 200, body: active });
+    const cancel = await screen.findByRole("button", { name: "Cancel run" });
+    const logs = screen.getByRole("link", { name: "Logs" });
+
+    act(() => {
+      cancel.focus();
+      cancel.blur();
+      logs.focus();
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    expect(logs).toHaveFocus();
+  });
+
   it("says the server's sentence when the run cannot be read", async () => {
     renderRun({ status: 404, body: { type: "NotFoundError", detail: "No run r1 in prod." } });
 

@@ -409,6 +409,107 @@ describe("JobRuns", () => {
     expect(screen.getByRole("button", { name: "Show more" })).toBeInTheDocument();
   });
 
+  it("goes on reading the first page after a Show more that failed", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const { server } = renderRuns((request) =>
+      request.path.includes("cursor=")
+        ? { status: 503, body: { type: "Unavailable", detail: "The server is busy." } }
+        : {
+            status: 200,
+            body: [aJobRun({ id: "r2", tasks: [] })],
+            headers: { "X-Next-Cursor": "c2" },
+          },
+    );
+    await settle();
+    act(() => {
+      screen.getByRole("button", { name: "Show more" }).click();
+    });
+    await settle();
+    expect(screen.getByRole("alert")).toHaveTextContent("The server is busy.");
+    // The poll, paused while Show more read, starts again at once and then every 30 s.
+    expect(server.sent).toHaveLength(3);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    await settle();
+    expect(server.sent).toHaveLength(4);
+    expect(queries(server.sent).map((query) => query.get("cursor"))).toEqual([
+      null,
+      "c2",
+      null,
+      null,
+    ]);
+  });
+
+  it("starts a filter again from its first page, and drops a Show more of another filter", async () => {
+    let release: (() => void) | null = null;
+    const { server } = renderRuns(async (request) => {
+      const query = new URL(request.path, "http://localhost").searchParams;
+      if (query.has("cursor")) {
+        if (query.get("cursor") === "slow") {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return {
+          status: 200,
+          body: [aJobRun({ id: `more-${query.get("cursor") ?? ""}`, tasks: [] })],
+        };
+      }
+      const failed = query.get("status") === "failed";
+      return {
+        status: 200,
+        body: [aJobRun({ id: failed ? "f1" : "r2", tasks: [] })],
+        headers: { "X-Next-Cursor": failed ? "slow" : "c2" },
+      };
+    });
+    const user = userEvent.setup();
+    const choose = async (status: string): Promise<void> => {
+      await user.click(screen.getByRole("button", { name: /Status/ }));
+      await user.click(screen.getByRole("option", { name: status }));
+    };
+
+    // All: Show more reads a second page; Failed, then All again: its first page alone.
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(3);
+    });
+    await choose("Failed");
+    await waitFor(() => {
+      expect(screen.getByLabelText("where")).toHaveTextContent("?status=failed");
+    });
+    await choose("All");
+    await waitFor(() => {
+      expect(screen.getByLabelText("where")).toHaveTextContent(/^$/);
+    });
+    await screen.findByRole("button", { name: "Show more" });
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+
+    // Failed: a Show more still on its way when the filter goes to All is dropped.
+    await choose("Failed");
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+    await waitFor(() => {
+      expect(release).not.toBeNull();
+    });
+    await choose("All");
+    act(() => {
+      release?.();
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+    await choose("Failed");
+    await waitFor(() => {
+      expect(screen.getByLabelText("where")).toHaveTextContent("?status=failed");
+    });
+    await screen.findByRole("button", { name: "Show more" });
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(server.sent.filter((request) => request.path.includes("cursor="))).toHaveLength(2);
+  });
+
   it("reads nothing and starts no timer in a tab that opens hidden", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     vi.spyOn(document, "visibilityState", "get").mockImplementation(() => "hidden");

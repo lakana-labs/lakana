@@ -4,7 +4,16 @@
  *
  * @packageDocumentation
  */
-import { type JSX, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  type FocusEvent,
+  type JSX,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
@@ -265,15 +274,39 @@ function RunView({
   const when = useWhen();
   const heading = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
-  // A control that removes itself (Resume, which opens the new run; Cancel, once the run ends)
-  // would leave the focus on the page: the heading takes it instead.
-  const guarding = useRef(takeFocus);
+  // A run opened by Resume, whose button went with the old run: its heading takes the focus.
   useEffect(() => {
-    if (guarding.current && document.activeElement === document.body) {
-      guarding.current = false;
+    if (takeFocus && document.activeElement === document.body) {
+      headingRef.current?.focus();
+    }
+  }, [takeFocus]);
+  // The control of this run that holds the focus. When it goes (Cancel once the cancel was asked
+  // for, "Cancelling…" once the run ends), the heading takes the focus instead of the page; when
+  // the person moves the focus away themselves, it is forgotten, so nothing is taken from them.
+  const held = useRef<Element | null>(null);
+  useEffect(() => {
+    if (held.current?.isConnected === false && document.activeElement === document.body) {
+      held.current = null;
       headingRef.current?.focus();
     }
   });
+  const onControlsFocus = (event: FocusEvent): void => {
+    held.current = event.target;
+  };
+  const onControlsBlur = (event: FocusEvent): void => {
+    const { target, relatedTarget } = event;
+    if (relatedTarget === null) {
+      // Focus left for the page: a click on a blank part of it, or the control was removed. Only
+      // a control still in the page was left by the person.
+      setTimeout(() => {
+        if (held.current === target && target.isConnected) {
+          held.current = null;
+        }
+      });
+    } else if (relatedTarget.closest('[role="dialog"]') === null) {
+      held.current = null;
+    }
+  };
   const [ended, setEnded] = useState(false);
   const [changed, setChanged] = useState<Changed | null>(null);
   const load = useCallback(() => getRun(environment, runId), [environment, runId]);
@@ -309,13 +342,14 @@ function RunView({
         run={run}
         controls={
           <>
-            <div className="jobs-run-controls">
+            {/* Only listens to the focus of the controls inside; the div itself takes no focus. */}
+            {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+            <div className="jobs-run-controls" onFocus={onControlsFocus} onBlur={onControlsBlur}>
               <CancelRunButton
                 environment={environment}
                 run={run}
                 name={run.job ?? run.repository}
                 onChanged={(next) => {
-                  guarding.current = true;
                   setChanged({ run: next, over: read });
                 }}
               />
