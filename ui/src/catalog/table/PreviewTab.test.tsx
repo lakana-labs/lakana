@@ -386,7 +386,9 @@ describe("PreviewTab", () => {
     });
 
     const region = await screen.findByRole("region", { name: "Preview of fact_U+202Esales" });
-    expect(within(region).getByRole("grid", { name: "Preview of fact_U+202Esales, rows" })).toBeVisible();
+    expect(
+      within(region).getByRole("grid", { name: "Preview of fact_U+202Esales, rows" }),
+    ).toBeVisible();
   });
 
   it("says that values too large to send are marked cut", async () => {
