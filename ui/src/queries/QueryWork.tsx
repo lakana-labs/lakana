@@ -244,7 +244,14 @@ function Work({ environments, address }: WorkProps): JSX.Element {
         }}
       />
       {query.phase === "done" && query.run?.status === "SUCCEEDED" && (
-        <ResultPanel run={query.run} page={query.page} name={name} onMore={query.more} />
+        <ResultPanel
+          environment={runEnvironment ?? environment}
+          run={query.run}
+          page={query.page}
+          name={name}
+          saved={null}
+          onMore={query.more}
+        />
       )}
     </div>
   );

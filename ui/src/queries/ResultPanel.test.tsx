@@ -55,7 +55,16 @@ function growing(total: number, first: number) {
       });
       return Promise.resolve();
     });
-    return <ResultPanel run={aRun()} page={page} name="Daily sales" onMore={onMore} />;
+    return (
+      <ResultPanel
+        environment="prod"
+        run={aRun()}
+        page={page}
+        name="Daily sales"
+        saved={null}
+        onMore={onMore}
+      />
+    );
   }
   const user = userEvent.setup();
   render(<Holder />);
@@ -74,7 +83,16 @@ function show(
   run: QueryRunOut = aRun(),
   onMore: () => Promise<void> = vi.fn(),
 ): void {
-  render(<ResultPanel run={run} page={page} name="Daily sales" onMore={onMore} />);
+  render(
+    <ResultPanel
+      environment="prod"
+      run={run}
+      page={page}
+      name="Daily sales"
+      saved={null}
+      onMore={onMore}
+    />,
+  );
 }
 
 describe("ResultPanel", () => {
@@ -88,6 +106,13 @@ describe("ResultPanel", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1,234 rows · 1.0 s");
     expect(screen.getByRole("grid", { name: "Result of Daily sales, rows" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Show 100 more" })).not.toBeInTheDocument();
+  });
+
+  it("puts the downloads after the line", () => {
+    show(aPage());
+
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download spreadsheet" })).toBeInTheDocument();
   });
 
   it("says one row in the singular and leaves out a duration it cannot know", () => {

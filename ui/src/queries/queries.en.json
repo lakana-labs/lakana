@@ -30,6 +30,16 @@
   "lost": "The state of the query could not be read: {{problem}}",
   "tryAgain": "Try again",
   "cancelRefused": "The query was not cancelled and runs on: {{problem}} Press Cancel to try again.",
+  "download": {
+    "csv": "Download CSV",
+    "xlsx": "Download spreadsheet",
+    "tooLarge": "This result is too large to download in the browser ({{size}}). Use the command line:",
+    "copyCsv": "Copy the CSV command",
+    "copyXlsx": "Copy the spreadsheet command",
+    "tooManyRows": "Too many rows for a spreadsheet (more than {{limit}}); download CSV.",
+    "wrongType": "The server sent something other than the file; try again.",
+    "cut": "The download broke off; try again."
+  },
   "result": {
     "label": "Result of {{name}}",
     "summary_one": "{{rows}} row · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",

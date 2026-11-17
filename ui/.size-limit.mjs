@@ -55,7 +55,9 @@ const NAMED_LIMITS = [
   // the screen's strings. The grid and the menus come in the shared chunks below.
   // Measured 4.95 kB (2026-11-17) with the focus on Run after Try again and the alert of a
   // refused cancel; the limit holds.
-  { name: "Queries", prefix: "QueriesScreen-", limit: "5.31 kB" },
+  // Raised to the measured 5.86 kB (2026-11-17) + 10 % with the downloads (two buttons, the
+  // command for a result too large for the browser, the file name and their sentences).
+  { name: "Queries", prefix: "QueriesScreen-", limit: "6.45 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.

@@ -13,6 +13,7 @@ import { formatRows } from "../catalog/format";
 import { PendingButton } from "../shell/PendingButton";
 import { pageCells, ResultGrid, ResultNotes } from "../shell/ResultGrid";
 import { problemText } from "../sign-in/messages";
+import { Downloads } from "./Downloads";
 import "./queryStrings";
 
 /** The most rows the screen shows; beyond them, the whole result is a download. */
@@ -20,12 +21,16 @@ const SHOWN_AT_MOST = 1_000;
 
 /** Properties of {@link ResultPanel}. */
 export interface ResultPanelProps {
+  /** The run's environment, which the downloads ask in. */
+  readonly environment: string;
   /** The run, which succeeded. */
   readonly run: QueryRunOut;
   /** The rows read so far; null when the run's result is no longer kept. */
   readonly page: ResultPageOut | null;
   /** The query's name, which names the grid ("Result of Daily sales"). */
   readonly name: string;
+  /** The saved query's name, which names the downloaded file; null for a query not saved. */
+  readonly saved: string | null;
   /** Reads the next page and appends it; rejects with the refusal. */
   readonly onMore: () => Promise<void>;
 }
@@ -60,14 +65,23 @@ function summary(
 /**
  * Renders the result of a run that succeeded.
  *
- * @param props - The run, its rows, the query's name and the read of the next page.
+ * @param props - The environment, the run, its rows, the query's names and the read of the next page.
+ * @param props.environment - The run's environment.
  * @param props.run - The run.
  * @param props.page - The rows read so far, or null when the result is no longer kept.
  * @param props.name - The query's name.
+ * @param props.saved - The saved query's name, or null.
  * @param props.onMore - Reads the next page and appends it.
  * @returns The panel.
  */
-export function ResultPanel({ run, page, name, onMore }: ResultPanelProps): JSX.Element {
+export function ResultPanel({
+  environment,
+  run,
+  page,
+  name,
+  saved,
+  onMore,
+}: ResultPanelProps): JSX.Element {
   const { t, i18n } = useTranslation();
   const [reading, setReading] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -82,11 +96,11 @@ export function ResultPanel({ run, page, name, onMore }: ResultPanelProps): JSX.
   const more = page.next_offset !== null && page.rows.length < SHOWN_AT_MOST;
   return (
     <section className="queries-result">
-      {/* Task 5 puts the downloads in this bar, after the line. */}
       <div className="queries-result-bar">
         <p role="status" className="queries-result-line">
           {summary(run, page, t, i18n.language)}
         </p>
+        <Downloads environment={environment} run={run} name={saved} />
       </div>
       <ResultNotes page={page} cells={cells} own={null} />
       {page.row_count === 0 ? (
