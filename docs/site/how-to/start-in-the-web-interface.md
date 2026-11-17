@@ -91,10 +91,11 @@ The order is the same for everyone; what you may do changes what is inside the b
 2. **Get started**, while it has an open step and you have not hidden it. See
    [Get started](#get-started).
 3. **Status**: whether the instance works. See [Healthy, Degraded, Down](#healthy-degraded-down).
-4. **Needs your attention**: what failed, is late or waits for you, newest first. An
-   administrator sees failed runs anywhere, late tables, failed checks, open recovery links and
-   workers that are down. Everyone else sees failed checks and late tables among the tables they
-   read or opened recently, and their own failed queries. With nothing to report it says
+4. **Needs your attention**: what failed, is late or waits for you, newest first. Everyone sees
+   the jobs whose last run failed in the environments they may read. An administrator also sees
+   late tables, failed checks, open recovery links and workers that are down. Everyone else also
+   sees failed checks and late tables among the tables they read or opened recently, and their
+   own failed queries. With nothing to report it says
    "Nothing needs your attention."
 5. **Recently opened**: the tables you opened, kept on the server so the list follows you to
    another browser. A table's row opens its page. Queries, jobs and runs appear here once their

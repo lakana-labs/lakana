@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from lakana_core.db import db_now
 from lakana_core.models import Environment, Worker
+from tests.api.platform.test_runs import _failed_run
 from tests.api.platform.test_whoami import _new_person, _task_token_header
 from tests.conftest import AUTH_HEADER
 
@@ -72,3 +73,25 @@ def test_a_task_token_of_an_administrator_gets_no_home(client: TestClient) -> No
         assert "personal access token" in response.json()["detail"]
     status = client.get("/api/v1/status", headers=header)
     assert (status.status_code, status.json()["detail"]) == (200, None)
+
+
+def test_attention_lists_failed_runs_for_a_reader(client: TestClient) -> None:
+    run_id = _failed_run(client)
+    header = _new_person(client, "rita")
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "rita",
+            "action": "READ_ENVIRONMENT",
+            "kind": "ENVIRONMENT",
+            "environment": "dev",
+        },
+    )
+    assert granted.status_code in (200, 201), granted.text
+    body = client.get(_ATTENTION, headers=header).json()
+    assert [(item["kind"], item["environment"], item["ref"]) for item in body["items"]] == [
+        ("run_failed", "dev", run_id)
+    ]
+    failed = client.get("/api/v1/runs/failed", headers=header).json()
+    assert [row["run"]["id"] for row in failed["items"]] == [run_id]

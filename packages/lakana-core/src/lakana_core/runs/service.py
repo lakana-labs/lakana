@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, NamedTuple, cast
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -92,6 +92,7 @@ from lakana_core.runs.checks import (
     CheckResultView,
     view_of,
 )
+from lakana_core.runs.failed import FAILED_RUN_LIMIT, FAILED_RUN_WINDOW, failed_runs
 from lakana_core.runs.failures import Failure, attempt_failure, task_failure
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.instance_status import InstanceStatus, replaced_ids, status_from
@@ -453,6 +454,11 @@ class RunView:
     failed_tasks
         How many of its tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``), also
         in listings.
+    total_tasks
+        How many tasks it has, also in listings.
+    ended_tasks
+        How many of its tasks ended (``succeeded``, ``failed``, ``upstream_failed`` or
+        ``cancelled``), also in listings.
     """
 
     id: uuid.UUID
@@ -478,6 +484,46 @@ class RunView:
     missed: int = 0
     notifications: tuple[NotificationView, ...] = ()
     failed_tasks: int = 0
+    total_tasks: int = 0
+    ended_tasks: int = 0
+
+
+class TaskCounts(NamedTuple):
+    """How many tasks a run has, and how they stand.
+
+    Parameters
+    ----------
+    total
+        Every task.
+    ended
+        The tasks in a terminal status (`TERMINAL_TASK_STATUSES`).
+    failed
+        The tasks that ended ``failed`` themselves.
+    """
+
+    total: int
+    ended: int
+    failed: int
+
+
+@dataclass(frozen=True)
+class FailedRunView:
+    """A row of the failed runs list: a run, its first failed task and why it failed.
+
+    Parameters
+    ----------
+    run
+        The run, without tasks.
+    task
+        The asset of its first failed task: the earliest to end, then the smallest asset;
+        `None` when the run failed without a failed task (its `error_message` says why).
+    failure
+        That task's failure (``unknown`` for one without a stored code); `None` with `task`.
+    """
+
+    run: RunView
+    task: str | None
+    failure: Failure | None
 
 
 class PreparedStart(NamedTuple):
@@ -1075,8 +1121,8 @@ class RunService:
                 reasons[task.id] = reason
         return reasons
 
-    def _failed_tasks(self, run_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, int]:
-        """Count the tasks that ended ``failed``, per run, in one query.
+    def _task_counts(self, run_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, TaskCounts]:
+        """Count each run's tasks, the ended ones and the failed ones, in one query.
 
         Parameters
         ----------
@@ -1086,15 +1132,20 @@ class RunService:
         Returns
         -------
         dict
-            Run id to the count; 0 for a run with none.
+            Run id to its counts; all 0 for a run without tasks.
         """
-        counts = dict.fromkeys(run_ids, 0)
-        for run_id, count in self._session.execute(
-            select(TaskRun.run_id, func.count())
-            .where(TaskRun.run_id.in_(run_ids), TaskRun.status == TaskStatus.FAILED)
+        counts = dict.fromkeys(run_ids, TaskCounts(0, 0, 0))
+        for run_id, total, ended, failed in self._session.execute(
+            select(
+                TaskRun.run_id,
+                func.count(),
+                func.count(case((TaskRun.status.in_(TERMINAL_TASK_STATUSES), 1))),
+                func.count(case((TaskRun.status == TaskStatus.FAILED, 1))),
+            )
+            .where(TaskRun.run_id.in_(run_ids))
             .group_by(TaskRun.run_id)
         ):
-            counts[run_id] = count
+            counts[run_id] = TaskCounts(total, ended, failed)
         return counts
 
     def _view(
@@ -1104,7 +1155,7 @@ class RunService:
         reader: PrincipalRef,
         *,
         with_tasks: bool,
-        failed: int | None = None,
+        counts: TaskCounts | None = None,
     ) -> RunView:
         """Build a run's view.
 
@@ -1119,15 +1170,17 @@ class RunService:
             of its task's checks and counted (`ReferenceCheckFilter`).
         with_tasks
             Include the task runs.
-        failed
-            The run's failed-task count when the caller counted a page of runs in one query;
-            counted here when `None`.
+        counts
+            The run's task counts when the caller counted a page of runs in one query; counted
+            here when `None`.
 
         Returns
         -------
         RunView
             The view.
         """
+        if counts is None:
+            counts = self._task_counts([run.id])[run.id]
         repo = self._session.get(Repository, run.repository_id)
         version = self._session.get(JobVersion, run.job_version_id)
         tasks: tuple[TaskRunView, ...] = ()
@@ -1273,7 +1326,9 @@ class RunService:
             scheduled_for=run.scheduled_for,
             missed=run.missed,
             notifications=notifications,
-            failed_tasks=failed if failed is not None else self._failed_tasks([run.id])[run.id],
+            failed_tasks=counts.failed,
+            total_tasks=counts.total,
+            ended_tasks=counts.ended,
         )
 
     # -- start -------------------------------------------------------------
@@ -2167,9 +2222,108 @@ class RunService:
         next_cursor = None
         if len(runs) > limit:
             next_cursor = encode_cursor("runs", page[-1].created_at, page[-1].id)
-        failed = self._failed_tasks([run.id for run in page])
-        views = [self._view(run, env, p, with_tasks=False, failed=failed[run.id]) for run in page]
+        counts = self._task_counts([run.id for run in page])
+        views = [self._view(run, env, p, with_tasks=False, counts=counts[run.id]) for run in page]
         return views, next_cursor
+
+    def failed_page(
+        self, p: PrincipalRef, *, environment: str | None = None, limit: int = 50
+    ) -> tuple[list[FailedRunView], bool]:
+        """List the jobs whose newest finished run within seven days failed, with the first cause.
+
+        The rule is Home's (`lakana_core.runs.failed.failed_runs`): the newest finished run of
+        each job, or of each repository for runs outside a job, kept when it failed; a later
+        success or cancelled run hides an earlier failure. Everyone who may read the environment
+        (`READ_ENVIRONMENT`) sees its rows; without `environment` an environment the caller may
+        not read is left out, never refused.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environment
+            Only this environment's runs; `None` for every environment the caller may read.
+        limit
+            Most rows returned, 1 to `FAILED_RUN_LIMIT`.
+
+        Returns
+        -------
+        tuple of (list of FailedRunView, bool)
+            The rows, newest end first, without tasks; and whether the rule found more.
+
+        Raises
+        ------
+        PermissionDenied
+            With `environment`, without READ_ENVIRONMENT on it.
+        NotFoundError
+            With `environment`, if it does not exist.
+        ValidationError
+            If `limit` is outside 1 to `FAILED_RUN_LIMIT`.
+        """
+        environment_ids = None
+        if environment is not None:
+            self._authz.authorize(
+                p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment)
+            )
+            environment_ids = [self._environment(environment).id]
+        if not 1 <= limit <= FAILED_RUN_LIMIT:
+            raise ValidationError(f"limit must be between 1 and {FAILED_RUN_LIMIT}, got {limit}.")
+        since = db_now(self._session) - FAILED_RUN_WINDOW
+        found = failed_runs(
+            self._session,
+            self._authz,
+            p,
+            since=since,
+            environment_ids=environment_ids,
+            limit=limit + 1,
+        )
+        page = [row.run_id for row in found[:limit]]
+        if not page:
+            return [], False
+        runs = {run.id: run for run in self._session.scalars(select(Run).where(Run.id.in_(page)))}
+        envs = {
+            env.id: env
+            for env in self._session.scalars(
+                select(Environment).where(
+                    Environment.id.in_({run.environment_id for run in runs.values()})
+                )
+            )
+        }
+        first = (
+            select(
+                TaskRun.id,
+                func.row_number()
+                .over(
+                    partition_by=TaskRun.run_id,
+                    order_by=(TaskRun.finished_at.asc().nulls_last(), TaskRun.asset),
+                )
+                .label("position"),
+            )
+            .where(TaskRun.run_id.in_(page), TaskRun.status == TaskStatus.FAILED)
+            .subquery()
+        )
+        tasks = {
+            task.run_id: task
+            for task in self._session.scalars(
+                select(TaskRun).join(first, first.c.id == TaskRun.id).where(first.c.position == 1)
+            )
+        }
+        counts = self._task_counts(page)
+        rows = []
+        for run_id in page:
+            run = runs[run_id]
+            task = tasks.get(run_id)
+            view = self._view(
+                run, envs[run.environment_id], p, with_tasks=False, counts=counts[run_id]
+            )
+            rows.append(
+                FailedRunView(
+                    run=view,
+                    task=None if task is None else task.asset,
+                    failure=None if task is None else task_failure(task),
+                )
+            )
+        return rows, len(found) > limit
 
     # -- check results -------------------------------------------------------
 

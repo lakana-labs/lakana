@@ -25,6 +25,9 @@ from lakana_server.api.platform.schemas import (
     CheckResultOut,
     CheckResultPage,
     CheckRowsRequest,
+    FailedRunOut,
+    FailedRunsOut,
+    FailureOut,
     NotificationOut,
     QuerySubmitOut,
     RunCreate,
@@ -51,6 +54,12 @@ router = APIRouter(
 )
 scheduler_router = APIRouter(
     route_class=AuthenticateFirstRoute, prefix="/api/v1", tags=["runs"], responses=errors(401)
+)
+all_runs_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/runs",
+    tags=["runs"],
+    responses=errors(401),
 )
 
 
@@ -671,6 +680,59 @@ def list_workers(
         the memory it last reported.
     """
     return [worker_out(w) for w in service.list_workers(principal)]
+
+
+@all_runs_router.get("/failed", response_model=FailedRunsOut, responses=errors(403, 404))
+def list_failed_runs(
+    environment: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=50, ge=1, le=200),
+    principal: PrincipalRef = Depends(get_principal),
+    service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> FailedRunsOut:
+    """List the jobs whose newest finished run failed.
+
+    Lists, for every environment you may read (`READ_ENVIRONMENT`), each job whose newest
+    finished run within the last seven days failed (or, for runs outside a job, each
+    repository's), newest end first: the same rule as Home's Needs your attention, so the two
+    never disagree. A later success or a later cancelled run hides an earlier failure. Each row
+    names the run's first failed task and why it failed; a run that failed without a failed task
+    has `task` and `failure` null and says why in `run.error_message`. An environment you may
+    not read is left out, never refused. With `environment`, only its runs: 403 without
+    `READ_ENVIRONMENT` on it and 404 when it does not exist. Answers 422 for a `limit` outside
+    1 to 200. `truncated` says more rows were left out.
+
+    Parameters
+    ----------
+    environment
+        Only this environment's runs.
+    limit
+        Most rows returned (1 to 200).
+    principal
+        The authenticated caller.
+    service
+        The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
+
+    Returns
+    -------
+    FailedRunsOut
+        The rows and whether more were left out.
+    """
+    views, truncated = service.failed_page(principal, environment=environment, limit=limit)
+    words = run_words(authz, principal, [view.run.environment for view in views])
+    return FailedRunsOut(
+        items=[
+            FailedRunOut(
+                run=run_out(view.run, words[view.run.environment]),
+                task=view.task,
+                failure=None if view.failure is None else FailureOut(**view.failure.to_json()),
+            )
+            for view in views
+        ],
+        truncated=truncated,
+    )
 
 
 def worker_out(w: WorkerView) -> WorkerOut:

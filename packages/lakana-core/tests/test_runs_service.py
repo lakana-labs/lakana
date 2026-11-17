@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from core_test_helpers import ActionAllowList, _config, _prepared_catalog, python_task_run
+from home_test_helpers import finished_run
 from sqlalchemy import ClauseElement, delete, event, select, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session
@@ -2928,3 +2929,179 @@ def test_a_worker_restarted_on_its_host_marks_the_lost_row_replaced(
         1,
         2,
     )
+
+
+# -- the failed list ----------------------------------------------------------
+
+
+def _ended_run(
+    session: Session,
+    version: JobVersion,
+    *,
+    job: str | None,
+    hours_ago: float,
+    error_message: str | None = None,
+) -> Run:
+    """Persist a run of `analytics` that failed some hours ago, without tasks.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    version
+        The deployed version.
+    job
+        The job, or `None` for an ad-hoc run.
+    hours_ago
+        When it ended.
+    error_message
+        A run-level failure.
+
+    Returns
+    -------
+    Run
+        The row.
+    """
+    repo = session.get(Repository, version.repository_id)
+    assert repo is not None
+    return finished_run(
+        session,
+        repo,
+        version,
+        job=job,
+        status=RunStatus.FAILED,
+        finished_at=datetime.now(UTC) - timedelta(hours=hours_ago),
+        error_message=error_message,
+    )
+
+
+def _task(
+    session: Session,
+    run: Run,
+    asset: str,
+    status: TaskStatus,
+    *,
+    minutes_ago: float | None = None,
+    code: str | None = None,
+) -> None:
+    """Persist a task of a run.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run
+        The run.
+    asset
+        The task's asset.
+    status
+        Its status.
+    minutes_ago
+        When it ended; `None` for not yet.
+    code
+        Its stored failure code.
+    """
+    session.add(
+        TaskRun(
+            id=uuid.uuid4(),
+            run_id=run.id,
+            asset=asset,
+            status=status,
+            max_attempts=1,
+            timeout_seconds=60,
+            retry_delay_seconds=0,
+            finished_at=(
+                None if minutes_ago is None else datetime.now(UTC) - timedelta(minutes=minutes_ago)
+            ),
+            failure_code=code,
+            error_message=None if status is not TaskStatus.FAILED else "boom",
+        )
+    )
+    session.commit()
+
+
+def test_failed_page_names_the_first_failed_task_and_its_failure(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    run = _ended_run(session, version, job="nightly", hours_ago=1)
+    _task(session, run, "gold.daily", TaskStatus.FAILED, minutes_ago=70, code="memory")
+    _task(session, run, "gold.weekly", TaskStatus.FAILED, minutes_ago=90, code="timeout")
+    _task(session, run, "silver.clean", TaskStatus.SUCCEEDED, minutes_ago=100)
+
+    (row,), truncated = _service(session).failed_page(principal)
+
+    assert truncated is False
+    assert (row.run.id, row.run.job, row.task) == (run.id, "nightly", "gold.weekly")
+    assert row.failure == failure_of(FailureCode.TIMEOUT)
+    assert (row.run.total_tasks, row.run.ended_tasks, row.run.failed_tasks) == (3, 3, 2)
+
+
+def test_a_run_level_failure_has_no_task_and_keeps_its_message(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    run = _ended_run(session, version, job=None, hours_ago=1, error_message="code changed")
+    _task(session, run, "silver.clean", TaskStatus.CANCELLED, minutes_ago=60)
+
+    (row,), _ = _service(session).failed_page(principal, environment="dev")
+
+    assert (row.run.id, row.task, row.failure) == (run.id, None, None)
+    assert row.run.error_message == "code changed"
+
+
+def test_a_failure_without_a_stored_code_is_unknown(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    run = _ended_run(session, version, job="nightly", hours_ago=1)
+    _task(session, run, "gold.daily", TaskStatus.FAILED, minutes_ago=60)
+
+    (row,), _ = _service(session).failed_page(principal)
+
+    assert (row.task, row.failure) == ("gold.daily", UNKNOWN_FAILURE)
+
+
+def test_failed_page_with_an_environment_you_may_not_read_is_refused(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    _ended_run(session, version, job="nightly", hours_ago=1)
+    runner = _service(session, ActionAllowList(Action.RUN))
+    with pytest.raises(PermissionDenied):
+        runner.failed_page(principal, environment="dev")
+    assert runner.failed_page(principal) == ([], False)
+    with pytest.raises(NotFoundError):
+        _service(session).failed_page(principal, environment="ghost")
+
+
+def test_failed_page_says_truncated_past_the_limit(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    newer = _ended_run(session, version, job="nightly", hours_ago=1)
+    older = _ended_run(session, version, job="hourly", hours_ago=2)
+    service = _service(session)
+
+    page, truncated = service.failed_page(principal, limit=1)
+    assert ([row.run.id for row in page], truncated) == ([newer.id], True)
+    page, truncated = service.failed_page(principal, limit=2)
+    assert ([row.run.id for row in page], truncated) == ([newer.id, older.id], False)
+    with pytest.raises(ValidationError):
+        service.failed_page(principal, limit=0)
+
+
+def test_listings_count_total_and_ended_tasks(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    run = _ended_run(session, version, job="nightly", hours_ago=1)
+    for asset, status in (
+        ("a", TaskStatus.FAILED),
+        ("b", TaskStatus.SUCCEEDED),
+        ("c", TaskStatus.UPSTREAM_FAILED),
+        ("d", TaskStatus.PENDING),
+        ("e", TaskStatus.READY),
+        ("f", TaskStatus.RUNNING),
+        ("g", TaskStatus.PENDING),
+    ):
+        _task(session, run, asset, status, minutes_ago=60)
+
+    shown = _service(session).get(principal, "dev", run.id)
+    (listed,) = _service(session).list_runs(principal, "dev")
+    for view in (shown, listed):
+        assert (view.total_tasks, view.ended_tasks, view.failed_tasks) == (7, 3, 1)

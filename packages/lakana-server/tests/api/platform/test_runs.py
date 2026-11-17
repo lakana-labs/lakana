@@ -1014,3 +1014,84 @@ def test_run_actions_follow_the_callers_rights(client: TestClient) -> None:
         assert client.get(f"{_RUNS}/{started['id']}", headers=header).json()["actions"] == words
     cancelled = client.post(f"{_RUNS}/{started['id']}/cancel", headers=AUTH_HEADER)
     assert cancelled.json()["actions"] == ["cancel", "resume"]
+
+
+_FAILED = "/api/v1/runs/failed"
+
+
+def _failed_run(client: TestClient) -> str:
+    """Start a run of `analytics` in `dev` and let its one task fail with a timeout.
+
+    Parameters
+    ----------
+    client
+        The test client.
+
+    Returns
+    -------
+    str
+        The run's id.
+    """
+    from lakana_core.db import db_now
+
+    _deploy(client)
+    started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+    with Session(client.app.state.engine) as session:
+        run = session.get(Run, uuid.UUID(started["id"]))
+        assert run is not None
+        run.status = RunStatus.FAILED
+        run.finished_at = db_now(session)
+        task = session.query(TaskRun).filter(TaskRun.run_id == run.id).one()
+        task.status = TaskStatus.FAILED
+        task.failure_code = "timeout"
+        task.error_message = "timed out after 10 s"
+        task.finished_at = run.finished_at
+        session.commit()
+    return started["id"]
+
+
+def test_get_failed_runs_answers_items_with_task_failure_and_actions(client: TestClient) -> None:
+    """Each row carries its run with counts and actions, its first failed task and why."""
+    from lakana_core.runs.failures import FAILURES, FailureCode
+
+    run_id = _failed_run(client)
+    cause, next_step = FAILURES[FailureCode.TIMEOUT]
+    reader = _reader(client)
+    for header, words in ((AUTH_HEADER, ["cancel", "resume"]), (reader, [])):
+        answer = client.get(_FAILED, headers=header)
+        assert answer.status_code == 200, answer.text
+        body = answer.json()
+        assert body["truncated"] is False
+        (row,) = body["items"]
+        assert (row["run"]["id"], row["run"]["environment"], row["run"]["actions"]) == (
+            run_id,
+            "dev",
+            words,
+        )
+        assert (row["run"]["total_tasks"], row["run"]["ended_tasks"]) == (1, 1)
+        assert row["task"] == "silver.clean"
+        assert row["failure"] == {"code": "timeout", "cause": cause, "next_step": next_step}
+    scoped = client.get(_FAILED, headers=reader, params={"environment": "dev"}).json()
+    assert [row["run"]["id"] for row in scoped["items"]] == [run_id]
+    assert client.get(_FAILED).status_code == 401
+
+
+def test_get_failed_runs_without_any_right_is_an_empty_list(client: TestClient) -> None:
+    """A caller who may read no environment gets nothing, never a refusal; naming one is 403."""
+    _failed_run(client)
+    nobody = _token_for(client, "nobody")
+    answer = client.get(_FAILED, headers=nobody)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {"items": [], "truncated": False}
+    assert client.get(_FAILED, headers=nobody, params={"environment": "dev"}).status_code == 403
+
+
+def test_get_failed_runs_with_an_unknown_environment_is_404(client: TestClient) -> None:
+    answer = client.get(_FAILED, headers=AUTH_HEADER, params={"environment": "ghost"})
+    assert answer.status_code == 404, answer.text
+
+
+def test_get_failed_runs_limit_out_of_range_is_422(client: TestClient) -> None:
+    for limit in ("0", "201", "x"):
+        answer = client.get(_FAILED, headers=AUTH_HEADER, params={"limit": limit})
+        assert answer.status_code == 422, (limit, answer.text)

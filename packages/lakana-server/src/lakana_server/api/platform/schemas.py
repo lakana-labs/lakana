@@ -3154,8 +3154,8 @@ class AttentionItemOut(BaseModel):
     kind
         `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal
         fired), `check_failed` (a check's newest result failed or errored), `query_failed`
-        (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two,
-        and failed runs, only for administrators.
+        (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two
+        only for administrators, failed runs for everyone who may read the environment.
     environment
         The environment's name; `null` for a recovery link and a worker.
     title
@@ -4906,6 +4906,11 @@ class RunOut(BaseModel):
     failed_tasks
         How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in
         listings.
+    total_tasks
+        How many tasks the run has; also in listings.
+    ended_tasks
+        How many of its tasks ended (``succeeded``, ``failed``, ``upstream_failed`` or
+        ``cancelled``); also in listings, so a list can show a running run's progress.
     actions
         The words of what the caller's rights allow on it: ``cancel``, ``resume``. Rights
         only, as for a table's `actions`: offer a control only when the word is listed and the
@@ -4936,7 +4941,44 @@ class RunOut(BaseModel):
     missed: int = 0
     notifications: list[NotificationOut] = Field(default_factory=list)
     failed_tasks: int = 0
+    total_tasks: int = 0
+    ended_tasks: int = 0
     actions: list[str] = Field(default_factory=list)
+
+
+class FailedRunOut(BaseModel):
+    """A job whose newest finished run failed, with its first cause.
+
+    Parameters
+    ----------
+    run
+        The run, without tasks, with `actions`.
+    task
+        The asset of its first failed task (the earliest to end, then the smallest asset); null
+        when the run failed without a failed task, whose `run.error_message` says why.
+    failure
+        That task's failure; null with `task`.
+    """
+
+    run: RunOut
+    task: str | None
+    failure: FailureOut | None
+
+
+class FailedRunsOut(BaseModel):
+    """The failed runs list: the rule of Home's failed runs, everywhere the caller may read.
+
+    Parameters
+    ----------
+    items
+        One row per job (or per repository, for its runs of no job) whose newest finished run
+        within seven days failed, newest end first.
+    truncated
+        Whether more rows were left out; narrow with `environment`.
+    """
+
+    items: list[FailedRunOut]
+    truncated: bool
 
 
 class JobRunRequest(BaseModel):

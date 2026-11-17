@@ -382,6 +382,7 @@
 "GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2 }
 "GET /api/v1/row-filters":
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
+"GET /api/v1/runs/failed": { class: ui, part: 5 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
 "GET /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
