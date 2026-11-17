@@ -4,12 +4,29 @@
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
+import { type JSX, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import { Route, Routes, useParams } from "react-router";
 
+import { useAfter } from "../queries/useAfter";
 import { NotFound } from "../shell/NotFound";
 import { ConnectionList } from "./ConnectionList";
 import { ConnectionPage } from "./ConnectionPage";
+import "./connectionStrings";
+
+/** The Add and Edit form, a chunk of its own. */
+const ConnectionForm = lazy(() => import("./ConnectionForm"));
+
+/**
+ * What shows while the form's chunk loads: nothing in the first second, then words.
+ *
+ * @returns The status line.
+ */
+export function FormLoading(): JSX.Element {
+  const { t } = useTranslation();
+  const slow = useAfter();
+  return <p role="status">{slow ? t("connections.form.loading") : ""}</p>;
+}
 
 /**
  * Renders the page of the connection the address names, afresh for each connection.
@@ -23,8 +40,8 @@ function Connection(): JSX.Element {
 
 /**
  * The Connections screen: the list at `/connections`, a connection's page at
- * `/connections/{environment}/{name}`, and the not-found state for every other address until Add
- * and Edit arrive.
+ * `/connections/{environment}/{name}`, Add at `/connections/new` (its form loads on demand), and
+ * the not-found state for every other address until Edit arrives.
  *
  * @returns The place the address names.
  */
@@ -32,6 +49,14 @@ export function AreaScreen(): JSX.Element {
   return (
     <Routes>
       <Route index element={<ConnectionList />} />
+      <Route
+        path="new"
+        element={
+          <Suspense fallback={<FormLoading />}>
+            <ConnectionForm mode="add" />
+          </Suspense>
+        }
+      />
       <Route path=":environment/:name" element={<Connection />} />
       <Route path="*" element={<NotFound />} />
     </Routes>

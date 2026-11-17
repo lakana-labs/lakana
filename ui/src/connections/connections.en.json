@@ -175,6 +175,9 @@
     "saved": "Saved {{name}}.",
     "deleted": "Deleted {{name}}."
   },
+  "form": {
+    "loading": "Loading the form…"
+  },
   "delete": {
     "title": "Delete the connection {{name}} in {{environment}}?",
     "inUseTitle": "{{name}} is still in use",

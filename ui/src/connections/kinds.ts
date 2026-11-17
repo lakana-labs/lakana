@@ -49,6 +49,7 @@ interface Mirror {
           readonly byAuth?: boolean;
           readonly oneOf?: readonly string[];
           readonly free?: boolean;
+          readonly max?: number;
         } | null;
       }
     >
@@ -62,6 +63,7 @@ interface Mirror {
     readonly tlsStrength: readonly string[];
   };
   readonly outcomes: readonly ConnectionTestOutcome[];
+  readonly limits: { readonly caBytes: number; readonly secretValueBytes: number };
 }
 
 const MIRROR = mirror as unknown as Mirror;
@@ -71,6 +73,15 @@ export const KIND_ORDER: readonly ConnectionKind[] = MIRROR.order;
 
 /** The test outcomes in the order the reference lists them. */
 export const OUTCOMES: readonly ConnectionTestOutcome[] = MIRROR.outcomes;
+
+/** The largest CA certificate the server takes, in bytes. */
+export const CA_BYTES: number = MIRROR.limits.caBytes;
+
+/** The largest secret value the server takes, in bytes. */
+export const SECRET_VALUE_BYTES: number = MIRROR.limits.secretValueBytes;
+
+/** The most secret keys a `tcp` connection's person may name. */
+export const FREE_KEYS_MAX: number = (MIRROR.kinds.tcp.secret as { readonly max: number }).max;
 
 /**
  * The `http` auth a settings object holds.

@@ -1,0 +1,41 @@
+{
+  "addTitle": "Add connection",
+  "noCreate": "You may not add connections in any environment. Ask an administrator for MANAGE_CONNECTION.",
+  "kind": "Kind",
+  "name": "Name",
+  "nameRule": "Connection names are lower-case letters, digits and '-', start with a letter, and have at most 63 characters.",
+  "optional": "{{field}} (optional)",
+  "choice": "{{field}}: {{value}}",
+  "portDefault": "Leave it empty for {{port}}.",
+  "endpointDefault": "Leave it empty for the region's default.",
+  "apiKeyIn": {
+    "header": "In a header",
+    "query": "In the query"
+  },
+  "caHelp": "A PEM file (.pem, .crt or .cer). Save sends its text; it is never shown.",
+  "caRead": "A CA certificate is read; Save sends it.",
+  "caRemove": "Remove the CA certificate",
+  "caTooBig": "A CA certificate file holds at most 64 KiB.",
+  "unreadable": "The file could not be read; choose it again.",
+  "secret": "Secret",
+  "secretValues": "New values",
+  "secretNamed": "An existing secret of {{environment}}",
+  "secretName": "Secret name",
+  "secretHelp": "Save sends the values once; they are never shown again.",
+  "azureKey": "Credential",
+  "azure": {
+    "account_key": "Account key",
+    "sas_token": "SAS token"
+  },
+  "keyFile": "Read the key from a file…",
+  "keyFileTooBig": "A key file holds at most 64 KiB.",
+  "keyName": "Key name",
+  "keyValue": "Value",
+  "keyRule": "Key names are lower-case letters, digits and '_', start with a letter, and have at most 32 characters.",
+  "keyTwice": "Each key is named once.",
+  "addKey": "Add a key",
+  "removeKey": "Remove this key",
+  "keysMax": "A connection holds at most {{max}} secret keys.",
+  "save": "Save",
+  "saving": "Saving the connection…"
+}

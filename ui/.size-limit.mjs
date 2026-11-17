@@ -58,7 +58,15 @@ const NAMED_LIMITS = [
   // stopped, and the follower drops deleted connections.
   // Raised to the measured 9.58 kB (2026-11-17) + 10 %: a connection's page (its facts, the last
   // test with its cause and next step, the declaring assets) and Delete with its dialog.
+  // Measured 10.51 kB (2026-11-17) with the route to Add, loaded on demand, and its loading
+  // words; the limit holds.
   { name: "Connections", prefix: "ConnectionsScreen-", limit: "10.54 kB" },
+  // Measured 4.71 kB (2026-11-17) + 10 %: Add a connection, loaded on demand by its route: the
+  // environment and the nine kinds, the name checked on blur, each kind's fields (http's after
+  // its auth, the CA certificate read from a file), the secret as password fields or an existing
+  // secret's name (azure's choice, gcs's key file, tcp's own keys), Save with the passkey touch,
+  // and the form's strings.
+  { name: "Add a connection", prefix: "ConnectionForm-", limit: "5.18 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
   // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected
