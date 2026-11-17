@@ -14,7 +14,6 @@ const shippedAreas = [
   ["Queries", "/queries", "Queries"],
   ["Jobs", "/jobs", "Jobs"],
   ["Connections", "/connections", "Connections"],
-  ["Access", "/access", "Access"],
   ["Settings", "/settings", "Status"],
 ] as const;
 

@@ -5,7 +5,7 @@ import { type AreaAccess, areasFor } from "../shell/areas";
 import { renderShell } from "../test/render";
 
 /** Settings for a person who is not an administrator: the area given, the places not. */
-const MEMBER: AreaAccess = new Set([...areasFor(false, false), "settings"]);
+const MEMBER: AreaAccess = areasFor(false);
 
 /**
  * The names of the links in Settings' list of places, in order.
@@ -27,12 +27,19 @@ describe("SettingsScreen", () => {
     expect(router.state.location.pathname).toBe("/settings/status");
   });
 
-  it("lists Status, Repositories and Sign-in for an administrator and marks the current one", async () => {
+  it("lists every place for an administrator and marks the current one", async () => {
     renderShell("/settings/sign-in", {
       routes: { "GET /api/v1/settings/sign-in": { status: 404, body: {} } },
     });
 
-    expect(await placeNames()).toEqual(["Status", "Repositories", "Sign-in"]);
+    expect(await placeNames()).toEqual([
+      "Status",
+      "Repositories",
+      "People",
+      "Sign-in",
+      "Invites",
+      "Recovery links",
+    ]);
     const nav = screen.getByRole("navigation", { name: "Settings places" });
     expect(within(nav).getByRole("link", { name: "Sign-in" })).toHaveAttribute(
       "aria-current",
@@ -42,6 +49,38 @@ describe("SettingsScreen", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("indents People under Access and the Sign-in places under Sign-in", async () => {
+    renderShell("/settings/status");
+
+    const nav = await screen.findByRole("navigation", { name: "Settings places" });
+    expect(within(nav).queryByRole("link", { name: "Access" })).not.toBeInTheDocument();
+    const access = within(nav).getByText("Access").closest("li");
+    if (access === null) throw new Error("Access is not a list item");
+    expect(within(access).getByRole("link", { name: "People" })).toBeInTheDocument();
+    const signIn = within(nav).getByRole("link", { name: "Sign-in" }).closest("li");
+    if (signIn === null) throw new Error("Sign-in is not a list item");
+    expect(within(signIn).getByRole("link", { name: "Invites" })).toBeInTheDocument();
+    expect(within(signIn).getByRole("link", { name: "Recovery links" })).toBeInTheDocument();
+  });
+
+  it("/settings/access opens People for an administrator", async () => {
+    const { router } = renderShell("/settings/access", {
+      routes: { "GET /api/v1/principals": { status: 200, body: [] } },
+    });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "People" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings/access/people");
+  });
+
+  it("/settings/access with no Access place says so", async () => {
+    renderShell("/settings/access", { access: MEMBER, me: { admin: false } });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Access" }),
+    ).toBeInTheDocument();
+    expect(await placeNames()).toEqual(["Status"]);
   });
 
   it("lists only Status for a person who is not an administrator", async () => {

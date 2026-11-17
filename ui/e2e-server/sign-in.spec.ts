@@ -63,7 +63,7 @@ test.describe("the first administrator", () => {
     await page.getByRole("button", { name: "Add a passkey" }).click();
 
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Access" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
     // A first sign-in opens the welcome; Skip records on the server that it was seen.
     const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
     await expect(welcome).toBeVisible();

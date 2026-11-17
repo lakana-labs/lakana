@@ -8,6 +8,7 @@ import { type ComponentType, type JSX, lazy, type LazyExoticComponent, Suspense 
 import { Navigate, Route, Routes } from "react-router";
 
 import { NotFound } from "../shell/NotFound";
+import { GroupEntry } from "./GroupEntry";
 import { type PagePlaceId, PLACE_PAGES } from "./placePages";
 import { SETTINGS_PLACES, type SettingsPlace } from "./places";
 import { SettingsLayout } from "./SettingsLayout";
@@ -36,9 +37,13 @@ const REGISTRY: readonly SettingsPlace[] = SETTINGS_PLACES;
 /** The places with a page of their own, in registry order. */
 const PAGE_PLACES = REGISTRY.filter(hasPage);
 
+/** The groups, which have no page of their own: their address opens their first listed place. */
+const GROUPS = REGISTRY.filter((place) => !hasPage(place));
+
 /**
  * Renders the place the address names under `/settings`, inside the Settings layout;
- * `/settings` itself opens Status, where Home's "Details" goes.
+ * `/settings` itself opens Status, where Home's "Details" goes, and a group's address
+ * (`/settings/access`) its first listed place.
  *
  * @returns The place.
  */
@@ -62,6 +67,9 @@ export function AreaScreen(): JSX.Element {
             />
           );
         })}
+        {GROUPS.map((group) => (
+          <Route key={group.id} path={group.path} element={<GroupEntry group={group} />} />
+        ))}
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>

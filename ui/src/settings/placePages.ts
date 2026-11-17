@@ -29,9 +29,27 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    */
   repositories: async () => (await import("./RepositoriesRoutes")).RepositoriesRoutes,
   /**
+   * People, with a person's page below it.
+   *
+   * @returns The page.
+   */
+  people: async () => (await import("../access/PeopleRoutes")).PeopleRoutes,
+  /**
    * Sign-in: the session lengths.
    *
    * @returns The page.
    */
   "sign-in": async () => (await import("./SignInSettings")).SignInSettings,
+  /**
+   * Invites: the open invites and Invite someone.
+   *
+   * @returns The page.
+   */
+  invites: async () => (await import("../access/InvitesPage")).InvitesPage,
+  /**
+   * Recovery links: the open links and Issue a recovery link.
+   *
+   * @returns The page.
+   */
+  "recovery-links": async () => (await import("../access/RecoveryLinksPage")).RecoveryLinksPage,
 };

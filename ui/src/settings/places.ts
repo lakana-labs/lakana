@@ -9,7 +9,8 @@
 import type { AccessOut } from "../api";
 
 /** The id of a place. */
-export type SettingsPlaceId = "status" | "repositories" | "sign-in";
+export type SettingsPlaceId =
+  "status" | "repositories" | "access" | "people" | "sign-in" | "invites" | "recovery-links";
 
 /** What the rules know about the person: a part of what `GET /api/v1/whoami` answers. */
 export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet">;
@@ -62,10 +63,46 @@ export const SETTINGS_PLACES = [
     visible: (viewer) => viewer.admin,
   },
   {
+    id: "access",
+    path: "access",
+    label: "settings.places.access",
+    parent: null,
+    kind: "group",
+    below: false,
+    visible: () => true,
+  },
+  {
+    id: "people",
+    path: "access/people",
+    label: "settings.places.people",
+    parent: "access",
+    kind: "page",
+    below: true,
+    visible: (viewer) => viewer.admin,
+  },
+  {
     id: "sign-in",
     path: "sign-in",
     label: "settings.places.signIn",
     parent: null,
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "invites",
+    path: "sign-in/invites",
+    label: "settings.places.invites",
+    parent: "sign-in",
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "recovery-links",
+    path: "sign-in/recovery-links",
+    label: "settings.places.recoveryLinks",
+    parent: "sign-in",
     kind: "page",
     below: false,
     visible: (viewer) => viewer.admin,

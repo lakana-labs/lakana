@@ -3,5 +3,9 @@
   "picker": "Section",
   "status": "Status",
   "repositories": "Repositories",
-  "signIn": "Sign-in"
+  "access": "Access",
+  "people": "People",
+  "signIn": "Sign-in",
+  "invites": "Invites",
+  "recoveryLinks": "Recovery links"
 }

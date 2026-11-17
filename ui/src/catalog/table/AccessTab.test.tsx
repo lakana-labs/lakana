@@ -263,11 +263,11 @@ describe("AccessTab", () => {
     ]);
     expect(within(level).getByRole("link", { name: "kim.schulz" })).toHaveAttribute(
       "href",
-      "/access/people/kim.schulz",
+      "/settings/access/people/kim.schulz",
     );
     expect(within(level).getByRole("link", { name: "loader" })).toHaveAttribute(
       "href",
-      "/access/people/loader",
+      "/settings/access/people/loader",
     );
     expect(within(level).getAllByRole("link")).toHaveLength(2);
   });
@@ -427,7 +427,7 @@ describe("AccessTab", () => {
     expect(rows(masks)).toEqual([["kim.schulz", "customer_email", "sha256(customer_email)"]]);
     expect(within(masks).getByRole("link", { name: "kim.schulz" })).toHaveAttribute(
       "href",
-      "/access/people/kim.schulz",
+      "/settings/access/people/kim.schulz",
     );
     expect(within(filters).getByText("store_id IN (1, 2, 3)").closest("code")).not.toBeNull();
     expect(FILTERS).toHaveLength(1);

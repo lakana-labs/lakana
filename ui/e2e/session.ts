@@ -783,8 +783,9 @@ export const STUBBED = [
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
- * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture, the first screens of Access (the people) and
- * Settings (the session lengths), and no environment to run a query in (`stubQueries` adds two).
+ * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture,
+ * Settings' People (under Access) and Sign-in (the session lengths), and no environment to run a
+ * query in (`stubQueries` adds two).
  *
  * @param page - The page.
  */

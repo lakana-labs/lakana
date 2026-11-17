@@ -14,7 +14,6 @@ const AREAS = [
   ["Queries", "/queries", "Queries"],
   ["Jobs", "/jobs", "Jobs"],
   ["Connections", "/connections", "Connections"],
-  ["Access", "/access", "Access"],
   ["Settings", "/settings", "Status"],
 ] as const;
 
@@ -227,7 +226,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
       const order: string[] = [];
-      for (let stop = 0; stop < 11; stop += 1) {
+      for (let stop = 0; stop < 10; stop += 1) {
         await page.keyboard.press("Tab");
         order.push(await page.evaluate(() => document.activeElement?.textContent.trim() ?? ""));
       }
@@ -238,7 +237,6 @@ for (const theme of ["light", "dark"] as const) {
         "Queries",
         "Jobs",
         "Connections",
-        "Access",
         "Settings",
         "Help",
         // The user menu's text: "Signed in as" is visually hidden before the name.
@@ -362,7 +360,7 @@ for (const theme of ["light", "dark"] as const) {
         expect(overflow).toBeLessThanOrEqual(0);
 
         // On to the last step.
-        for (let index = 0; index < 8; index += 1) {
+        for (let index = 0; index < 7; index += 1) {
           await page.getByRole("button", { name: "Next" }).click();
         }
         const last = page.getByRole("dialog", {

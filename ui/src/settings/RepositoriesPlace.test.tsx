@@ -2,7 +2,9 @@ import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
-import { SETTINGS_PLACES } from "./places";
+import { entryPath, SETTINGS_PLACES } from "./places";
+
+const ADMIN = { admin: true, noAccessYet: false };
 
 describe("RepositoriesPlace", () => {
   it("shows the heading, the list of places, the intro and the way to connect", async () => {
@@ -42,15 +44,16 @@ describe("RepositoriesPlace", () => {
     );
   });
 
-  it.each(SETTINGS_PLACES.map((place) => place.path))(
-    "lists the place %s, marks it current, and the place renders",
-    async (path) => {
+  // A group (Access) has no page: its address opens its first place, which is marked current.
+  it.each(SETTINGS_PLACES.map((place) => [place.path, entryPath(place, ADMIN)]))(
+    "lists the place %s, marks %s current, and the place renders",
+    async (path, entry) => {
       renderShell(`/settings/${path}`);
 
       const places = await screen.findByRole("navigation", { name: "Settings places" });
-      expect(within(places).getByRole("link", { current: "page" })).toHaveAttribute(
+      expect(await within(places).findByRole("link", { current: "page" })).toHaveAttribute(
         "href",
-        `/settings/${path}`,
+        entry,
       );
       expect(screen.queryByText("This page does not exist")).not.toBeInTheDocument();
     },

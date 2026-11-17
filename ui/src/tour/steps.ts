@@ -8,15 +8,7 @@ import type { AreaId, ShippedArea } from "../shell/areas";
 
 /** One step of the tour; its words are `tour.steps.<id>` in `en.json`. */
 export type TourStepId =
-  | "home"
-  | "catalog"
-  | "queries"
-  | "jobs"
-  | "connections"
-  | "access"
-  | "settings"
-  | "search"
-  | "help";
+  "home" | "catalog" | "queries" | "jobs" | "connections" | "settings" | "search" | "help";
 
 /** The areas the tour has a step for. */
 const AREA_STEPS: ReadonlySet<AreaId> = new Set<AreaId>([
@@ -25,7 +17,6 @@ const AREA_STEPS: ReadonlySet<AreaId> = new Set<AreaId>([
   "queries",
   "jobs",
   "connections",
-  "access",
   "settings",
 ]);
 

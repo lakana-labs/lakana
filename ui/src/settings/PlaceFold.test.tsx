@@ -30,7 +30,7 @@ describe("PlaceFold", () => {
       within(dialog)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Status", "Repositories", "Sign-in"]);
+    ).toEqual(["Status", "Repositories", "People", "Sign-in", "Invites", "Recovery links"]);
     await user.click(within(dialog).getByRole("link", { name: "Sign-in" }));
 
     await waitFor(() => {

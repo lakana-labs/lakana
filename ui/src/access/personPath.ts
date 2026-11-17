@@ -1,5 +1,5 @@
 /**
- * The URLs of the Access area's objects.
+ * The URLs of the objects of Settings' Access places.
  *
  * @packageDocumentation
  */
@@ -11,5 +11,5 @@
  * @returns The path.
  */
 export function personPath(name: string): string {
-  return `/access/people/${encodeURIComponent(name)}`;
+  return `/settings/access/people/${encodeURIComponent(name)}`;
 }

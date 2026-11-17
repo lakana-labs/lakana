@@ -39,7 +39,11 @@ describe("places", () => {
     expect(listedPlaces(ADMIN).map((place) => place.id)).toEqual([
       "status",
       "repositories",
+      "access",
+      "people",
       "sign-in",
+      "invites",
+      "recovery-links",
     ]);
   });
 
@@ -61,6 +65,9 @@ describe("places", () => {
   it("finds the place of an address", () => {
     expect(placeAt("/settings/repositories/new")?.id).toBe("repositories");
     expect(placeAt("/settings/sign-in/")?.id).toBe("sign-in");
+    expect(placeAt("/settings/access/people/maria")?.id).toBe("people");
+    expect(placeAt("/settings/sign-in/invites")?.id).toBe("invites");
+    expect(placeAt("/settings/access/")?.id).toBe("access");
     expect(placeAt("/settings/statusx")).toBeNull();
     expect(placeAt("/settings")).toBeNull();
     expect(placeAt("/other/status")).toBeNull();
@@ -81,6 +88,19 @@ describe("places", () => {
   it("enters a group at its first listed child, or nowhere", () => {
     expect(entryPath(group, ADMIN, TREE)).toBe("/settings/grp/inside");
     expect(entryPath(group, KIM, TREE)).toBeNull();
+  });
+
+  it("enters Access at People for an administrator, and nowhere for anyone else", () => {
+    const access = placeAt("/settings/access");
+    if (access === null) throw new Error("no place");
+    expect(entryPath(access, ADMIN)).toBe("/settings/access/people");
+    expect(entryPath(access, KIM)).toBeNull();
+  });
+
+  it("leaves Access open to everyone, so only its places decide whether it is listed", () => {
+    const access = placeAt("/settings/access");
+    expect(access?.visible(KIM)).toBe(true);
+    expect(listedPlaces(KIM)).not.toContain(access);
   });
 
   it("names every place in the frame's strings", async () => {
