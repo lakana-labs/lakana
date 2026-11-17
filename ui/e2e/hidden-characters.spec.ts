@@ -7,13 +7,14 @@ import {
   apiPaths,
   expectMarked,
   expectNoRaw,
-  misreadObjects,
   poison,
   poisoned,
   rawOverrides,
   READ_AS,
+  readKey,
   RLO,
   STRING_CODES,
+  takeReads,
 } from "./hidden";
 import { MANAGE_STUBBED, stubGitOwned, stubManagement } from "./manage";
 import { PLACES_STUBBED, stubPlaces } from "./places";
@@ -60,6 +61,8 @@ const LITERAL_CODES: Record<string, string> = {
   GraphEdgeOut: "kind",
   GraphNodeOut: "kind",
   GrantOut: "kind role",
+  HealthBandOut: "basis weekday",
+  HealthObservedOut: "kind reason source",
   HealthSummaryOut: "state",
   InstanceStatusOut: "state",
   LastMaintenanceOut: "status",
@@ -87,11 +90,82 @@ test.beforeEach(({ browserName }) => {
   test.skip(browserName !== "chromium", "the check reads the DOM, the same in every browser");
 });
 
+/** The type each object of this file's own answers to `poison` is read as, as READ_AS pins those of the stubs. */
+const SYNTHETIC_READ_AS: Readonly<Record<string, string>> = {
+  '["action","allowed","reason","via"]': "PermissionOut",
+  '["capped","items","next_cursor"]': "TableListPageOut",
+  '["detail","type"]': "ErrorBody",
+  '["distance","id","kind","name"]': "GraphNodeOut",
+  '["edges","error","nodes","permissions"]': "GraphOut",
+  '["environment","health","kind","last_write_at","name","namespace","owner","state","uuid"]':
+    "TableListItemOut",
+  '["item","others","state","text"]': "HealthSummaryOut",
+  '["kind","name"]': "OwnerOut",
+  '["kind","source","target"]': "GraphEdgeOut",
+};
+
+/** The objects the stubs served in this worker, by {@link readKey}. */
+const served = new Set<string>();
+
+/** The walks of the screens, by title; filled as they are declared. */
+const WALKS: string[] = [];
+
+/** The walks that passed in this worker. */
+const walked = new Set<string>();
+
+/**
+ * The objects read as another type than the pins say, or not pinned.
+ *
+ * @param reads - The objects read ({@link takeReads}).
+ * @param pins - The pins.
+ * @returns One line for each: its keys, the type it was read as, and the one pinned.
+ */
+function misread(
+  reads: ReadonlyMap<string, string>,
+  pins: Readonly<Record<string, string>>,
+): string[] {
+  return [...reads]
+    .filter(([keys, name]) => pins[keys] !== name)
+    .map(([keys, name]) => `${JSON.stringify(keys)}: "${name}" (pinned: ${pins[keys] ?? "none"})`)
+    .sort();
+}
+
 // A fixture object read as another type would leave that type's codes alone, a free-text field
 // among them: each object is read as the type READ_AS pins.
 test.afterEach(() => {
-  expect(misreadObjects(), "each stubbed object read as the type READ_AS pins").toEqual([]);
+  const testInfo = test.info();
+  const reads = takeReads();
+  reads.forEach((_, keys) => served.add(keys));
+  if (testInfo.status === "passed") {
+    walked.add(testInfo.title);
+  }
+  expect(misread(reads, READ_AS), "each stubbed object read as the type READ_AS pins").toEqual([]);
 });
+
+/**
+ * Declares a walk of screens: it fails on an error the page throws and on a script or style of
+ * the build that did not load, which would otherwise show only as a value not found.
+ *
+ * @param title - The test's title.
+ * @param body - The walk.
+ */
+function walk(title: string, body: (fixtures: { page: Page }) => Promise<void>): void {
+  WALKS.push(title);
+  test(title, async ({ page }) => {
+    const broken: string[] = [];
+    page.on("pageerror", (error) => broken.push(`page error: ${error.message}`));
+    page.on("requestfailed", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/assets/")) {
+        broken.push(`${request.url()}: ${request.failure()?.errorText ?? "failed"}`);
+      }
+    });
+    try {
+      await body({ page });
+    } finally {
+      expect.soft(broken, "the page threw or missed a file of the build").toEqual([]);
+    }
+  });
+}
 
 /**
  * Requires that every API request went to a stubbed path: any other reached `vite preview` and
@@ -233,19 +307,23 @@ test("the answers carry the override in every text but each type's codes, ids an
     edges: [{ kind: "reads", source: "table:a", target: "table:a" }],
     error: { type: "StepUpRequired", detail: `Touch your passkey.${RLO}` },
   });
+  expect(misread(takeReads(), SYNTHETIC_READ_AS)).toEqual([]);
 });
 
-test("each object of the stubbed answers is read as the type READ_AS pins", () => {
+test("each object of the answers is read as the type READ_AS pins", () => {
   const types = apiTypes();
-  const picks = Object.fromEntries(
-    Object.keys(READ_AS).map((keys) => [
-      keys,
-      typeOf(types, keys === "" ? [] : keys.split(" "))?.name ?? "-",
-    ]),
-  );
+  const picks = (pins: Readonly<Record<string, string>>): Record<string, string> =>
+    Object.fromEntries(
+      Object.keys(pins).map((keys) => {
+        const parsed = JSON.parse(keys) as string[];
+        expect(readKey(parsed), "a key as readKey writes it").toBe(keys);
+        return [keys, typeOf(types, parsed)?.name ?? "-"];
+      }),
+    );
 
   // A change here changes which codes an object's fields are read as: check its free text.
-  expect(picks).toEqual(READ_AS);
+  expect(picks(READ_AS)).toEqual(READ_AS);
+  expect(picks(SYNTHETIC_READ_AS)).toEqual(SYNTHETIC_READ_AS);
 });
 
 test("the codes of each answer type are the ones src/api declares", () => {
@@ -320,7 +398,7 @@ async function stubAccounts(page: Page): Promise<void> {
   );
 }
 
-test("Home, the Catalog and Access mark hidden characters", async ({ page }) => {
+walk("Home, the Catalog and Access mark hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await signInAsAdmin(poisoned(page));
   await visit(page, "/", ["daily_sales"]);
@@ -336,59 +414,61 @@ test("Home, the Catalog and Access mark hidden characters", async ({ page }) => 
   expectOnlyStubbed(paths, STUBBED);
 });
 
-test("every tab of a table's page, its editors and its dialogs mark hidden characters", async ({
-  page,
-}) => {
-  const paths = apiPaths(page);
-  await signInAsAdmin(poisoned(page));
-  await visit(page, TABLE, ["Every sale in every store, one row per sale."]);
-  await visit(page, `${TABLE}/columns`, ["store_id"]);
-  await visit(page, `${TABLE}/lineage`, ["gold.sales.daily_sales"]);
-  await visit(page, `${TABLE}/references`, ["gold.dim_store"]);
-  await visit(page, `${TABLE}/health`, ["unique_sale_id"]);
-  await visit(page, `${TABLE}/access`, ["kim.schulz"]);
-  await visit(page, `${TABLE}/preview`, ["customer_email"]);
-  await page.getByRole("gridcell").nth(2).click();
-  await expectMarked(page, "the Value panel", ["and more "]);
+walk(
+  "every tab of a table's page, its editors and its dialogs mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await signInAsAdmin(poisoned(page));
+    await visit(page, TABLE, ["Every sale in every store, one row per sale."]);
+    await visit(page, `${TABLE}/columns`, ["store_id"]);
+    await visit(page, `${TABLE}/lineage`, ["gold.sales.daily_sales"]);
+    await visit(page, `${TABLE}/references`, ["gold.dim_store"]);
+    await visit(page, `${TABLE}/health`, ["unique_sale_id"]);
+    await visit(page, `${TABLE}/access`, ["kim.schulz"]);
+    await visit(page, `${TABLE}/preview`, ["customer_email"]);
+    await page.getByRole("gridcell").nth(2).click();
+    await expectMarked(page, "the Value panel", ["and more "]);
 
-  await visit(page, `${TABLE}/lineage`, ["gold.sales.daily_sales"]);
-  await page.getByRole("button", { name: "Full screen" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expectMarked(page, "the full-screen lineage", ["gold.sales.daily_sales"]);
-  await page.keyboard.press("Escape");
+    await visit(page, `${TABLE}/lineage`, ["gold.sales.daily_sales"]);
+    await page.getByRole("button", { name: "Full screen" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectMarked(page, "the full-screen lineage", ["gold.sales.daily_sales"]);
+    await page.keyboard.press("Escape");
 
-  await visit(page, TABLE, ["models/gold/fact_sales.sql"]);
-  await page.getByRole("button", { name: /fact_sales\.sql/ }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expectMarked(page, "the file of Defined in", ["models/gold/fact_sales.sql"]);
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await expectMarked(page, "the editor of the table's texts", ["fact_sales"]);
+    await visit(page, TABLE, ["models/gold/fact_sales.sql"]);
+    await page.getByRole("button", { name: /fact_sales\.sql/ }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectMarked(page, "the file of Defined in", ["models/gold/fact_sales.sql"]);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expectMarked(page, "the editor of the table's texts", ["fact_sales"]);
 
-  await visit(page, `${TABLE}/columns`, ["store_id"]);
-  await page.getByRole("button", { name: /^Edit store_id/ }).click();
-  await expectMarked(page, "the editor of a column's texts", ["store_id"]);
-  expectOnlyStubbed(paths, STUBBED);
-});
+    await visit(page, `${TABLE}/columns`, ["store_id"]);
+    await page.getByRole("button", { name: /^Edit store_id/ }).click();
+    await expectMarked(page, "the editor of a column's texts", ["store_id"]);
+    expectOnlyStubbed(paths, STUBBED);
+  },
+);
 
-test("a table's actions, the catalog's views and a git-owned table mark hidden characters", async ({
-  page,
-}) => {
-  const paths = apiPaths(page);
-  await stubManagement(poisoned(page));
-  await visit(page, `/catalog?env=${n("prod")}&view=dropped`, ["fact_returns"]);
-  await visit(page, `/catalog?env=${n("prod")}&view=expiring`, ["late_arrival"]);
-  await visit(page, `/catalog?env=${n("prod")}&view=orphans`, ["clean"]);
-  await visit(page, TABLE, ["fact_sales"]);
-  // Retention reads the table's rule; its title alone comes from the address.
-  await eachAction(page, /^Actions$/, ["fact_sales"], { "Retention…": ["ana"] });
-  await stubGitOwned(poisoned(page));
-  await visit(page, TABLE, ["fact_sales"]);
-  await eachAction(page, /^Actions$/, ["fact_sales"]);
-  expectOnlyStubbed(paths, MANAGE_STUBBED);
-});
+walk(
+  "a table's actions, the catalog's views and a git-owned table mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await stubManagement(poisoned(page));
+    await visit(page, `/catalog?env=${n("prod")}&view=dropped`, ["fact_returns"]);
+    await visit(page, `/catalog?env=${n("prod")}&view=expiring`, ["late_arrival"]);
+    await visit(page, `/catalog?env=${n("prod")}&view=orphans`, ["clean"]);
+    await visit(page, TABLE, ["fact_sales"]);
+    // Retention reads the table's rule; its title alone comes from the address.
+    await eachAction(page, /^Actions$/, ["fact_sales"], { "Retention…": ["ana"] });
+    await stubGitOwned(poisoned(page));
+    await visit(page, TABLE, ["fact_sales"]);
+    await eachAction(page, /^Actions$/, ["fact_sales"]);
+    expectOnlyStubbed(paths, MANAGE_STUBBED);
+  },
+);
 
-test("the place menu and its dialogs mark hidden characters", async ({ page }) => {
+walk("the place menu and its dialogs mark hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await stubPlaces(poisoned(page));
   await visit(page, `/catalog?env=${n("prod")}&ns=${n("bronze")}`, ["bronze"]);
@@ -400,7 +480,7 @@ test("the place menu and its dialogs mark hidden characters", async ({ page }) =
   expectOnlyStubbed(paths, PLACES_STUBBED);
 });
 
-test("an artifact's page marks hidden characters", async ({ page }) => {
+walk("an artifact's page marks hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await stubArtifacts(poisoned(page));
   await visit(page, ARTIFACT, ["ana.nowak"]);
@@ -416,21 +496,22 @@ test("an artifact's page marks hidden characters", async ({ page }) => {
   expectOnlyStubbed(paths, ARTIFACTS_STUBBED);
 });
 
-test("the Access area, one's account and a sign-in notice mark hidden characters", async ({
-  page,
-}) => {
-  const paths = apiPaths(page);
-  await signInAsAdmin(poisoned(page));
-  await stubAccounts(poisoned(page));
-  await visit(page, "/", ["kim.schulz"]);
-  await visit(page, "/access/invites", ["sam"]);
-  await visit(page, "/access/recovery-links", ["kim.schulz"]);
-  await visit(page, `/access/people/${n("admin")}`, ["Work laptop"]);
-  await visit(page, "/account", ["Work laptop"]);
-  expectOnlyStubbed(paths, [...STUBBED, ...ACCOUNTS]);
-});
+walk(
+  "the Access area, one's account and a sign-in notice mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await signInAsAdmin(poisoned(page));
+    await stubAccounts(poisoned(page));
+    await visit(page, "/", ["kim.schulz"]);
+    await visit(page, "/access/invites", ["sam"]);
+    await visit(page, "/access/recovery-links", ["kim.schulz"]);
+    await visit(page, `/access/people/${n("admin")}`, ["Work laptop"]);
+    await visit(page, "/account", ["Work laptop"]);
+    expectOnlyStubbed(paths, [...STUBBED, ...ACCOUNTS]);
+  },
+);
 
-test("an invite link marks hidden characters in the name it signs in as", async ({ page }) => {
+walk("an invite link marks hidden characters in the name it signs in as", async ({ page }) => {
   const paths = apiPaths(page);
   const stub = poisoned(page);
   await stub.route("**/api/v1/sign-in/session", (route) =>
@@ -445,7 +526,7 @@ test("an invite link marks hidden characters in the name it signs in as", async 
   expectOnlyStubbed(paths, ["/api/v1/sign-in/session", "/api/v1/sign-in/links/describe"]);
 });
 
-test("Connect a repository marks hidden characters in every step", async ({ page }) => {
+walk("Connect a repository marks hidden characters in every step", async ({ page }) => {
   const paths = apiPaths(page);
   await signInAsAdmin(poisoned(page));
   await stubConnect(poisoned(page));
@@ -471,7 +552,7 @@ test("Connect a repository marks hidden characters in every step", async ({ page
   expectOnlyStubbed(paths, [...STUBBED, ...ROUTES]);
 });
 
-test("the results of the catalog's actions mark hidden characters", async ({ page }) => {
+walk("the results of the catalog's actions mark hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await stubManagement(poisoned(page));
   await visit(page, TABLE, ["fact_sales"]);
@@ -489,7 +570,7 @@ test("the results of the catalog's actions mark hidden characters", async ({ pag
   expectOnlyStubbed(paths, MANAGE_STUBBED);
 });
 
-test("the notes and refusals of the place menu mark hidden characters", async ({ page }) => {
+walk("the notes and refusals of the place menu mark hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await stubPlaces(poisoned(page));
   await visit(page, `/catalog?env=${n("prod")}&ns=${n("bronze")}`, ["bronze"]);
@@ -517,4 +598,13 @@ test("the notes and refusals of the place menu mark hidden characters", async ({
   await expect(refused.getByRole("alert")).toBeVisible();
   await expectMarked(page, "a refused registration", ["No file matches 'raw/none/*.csv'."]);
   expectOnlyStubbed(paths, PLACES_STUBBED);
+});
+
+// Last, so that the walks before it have run in this worker: an entry no stub serves is stale.
+test("every object READ_AS pins is one a stub serves", () => {
+  test.skip(
+    WALKS.some((title) => !walked.has(title)),
+    "needs every walk to have passed in this worker",
+  );
+  expect(Object.keys(READ_AS).filter((keys) => !served.has(keys))).toEqual([]);
 });

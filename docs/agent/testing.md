@@ -1304,10 +1304,18 @@ in `ui (e2e smoke)` and `ui (e2e server)` beside it (the required check `ui` wai
   - **Which type each object is read as.** `typeOf` falls back to a partial fit and breaks ties
     by declaration order, so a new `src/api` type or a changed stub could move an object to a
     type whose codes include one of its free-text fields, which would then carry no override.
-    `READ_AS` in `hidden.ts` pins the pick for every object the stubs answer, by its sorted keys:
-    after each test the spec fails on an object read as another type or not listed (the message
-    gives the line to add, once its fields are checked), and a test fails when `typeOf` no longer
-    picks what an entry says.
+    `READ_AS` in `hidden.ts` pins the pick for every object the stubs answer, by its sorted keys
+    as JSON (`readKey`); the spec's own objects for `poison` have their table in the spec. After
+    each test the spec fails on an object read as another type or not listed (the message gives
+    the line to add, once its fields are checked); a test fails when `typeOf` no longer picks what
+    an entry says; and the last test, once every walk has passed in its worker, fails on an entry
+    no stub serves any more. A code inside a free-form field (a health signal's `observed` and
+    `band`) is typed too, in an interface that extends `Record<string, unknown>`, so the object
+    is read as a type. The lineage stubs are written `satisfies GraphOut`, so a kind outside the
+    unions fails the typecheck.
+  - **What else a walk fails on.** A walk (`walk(...)` in the spec) fails on an error the page
+    throws and on a file of the build (`/assets/`) that did not load, so a missing chunk shows as
+    the cause instead of a value not found.
   - **What each step asserts.** `expectMarked(page, label, values)` names one or more stubbed
     values the step's screen shows and requires each with its mark (`fact_salesU+202E`) inside
     the open dialog, or else `<main>`; the shell's own marks (the user menu's name) do not count.

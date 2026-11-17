@@ -7,6 +7,8 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 
+import type { GraphNodeOut, GraphOut } from "../src/api";
+
 /** The session of a signed-in administrator, as `GET /api/v1/sign-in/session` answers it. */
 export const ADMIN_SESSION = {
   name: "admin",
@@ -499,7 +501,7 @@ const LINEAGE_ROOT = {
   kind: "table",
   name: "gold.sales.fact_sales",
   distance: 0,
-};
+} satisfies GraphNodeOut;
 
 /** What feeds the table, as the server answers it: the asset that builds it, a table that asset reads, its job and its connection. */
 const LINEAGE_UP = {
@@ -537,7 +539,7 @@ const LINEAGE_UP = {
     },
   ],
   next_cursor: null,
-};
+} satisfies GraphOut;
 
 /** What the table feeds: an asset that reads it and the table that asset builds. */
 const LINEAGE_DOWN = {
@@ -557,7 +559,7 @@ const LINEAGE_DOWN = {
     { kind: "builds", source: "asset:analytics/gold.sales.daily_sales", target: "table:bbbb" },
   ],
   next_cursor: null,
-};
+} satisfies GraphOut;
 
 /**
  * What a lineage question answers.

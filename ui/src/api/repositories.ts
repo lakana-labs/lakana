@@ -26,11 +26,11 @@ export interface HostKeyOut {
 export interface RepositoryProbeOut {
   /** The check's id. */
   readonly id: string;
-  /** What it checks. */
+  /** What it checks. The server may add values: compare, and keep a fallback. */
   readonly kind: "host_keys" | "access";
-  /** Where it is. */
+  /** Where it is. The server may add values: compare, and keep a fallback. */
   readonly state: "queued" | "running" | "done";
-  /** What it found once done; null before. */
+  /** What it found once done; null before. The server may add values: compare, and keep a fallback. */
   readonly outcome:
     | "ok"
     | "host_key_changed"
