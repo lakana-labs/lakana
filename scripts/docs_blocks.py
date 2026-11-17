@@ -755,8 +755,9 @@ def console_width(root: Path, value: str) -> int | None:
     -------
     int or None
         The last ``export COLUMNS=N`` of the example's ``run.sh`` above the region (so an export
-        applies to the regions after it), else ``COLUMNS`` of the environment,
-        else ``None`` (the comparison then takes the longest line as the width).
+        applies to the regions after it), else ``None``
+        (the comparison then takes the longest line as the width; the environment of whoever
+        runs the check never counts).
     """
     example, _, region = value.partition("#")
     try:
@@ -767,8 +768,7 @@ def console_width(root: Path, value: str) -> int | None:
     found = _COLUMNS.findall(text[: start.start()] if start and region else text)
     if found:
         return int(found[-1])
-    value = os.environ.get("COLUMNS", "")
-    return int(value) if value.isdigit() else None
+    return None
 
 
 def _group(lines: Sequence[str], width: int) -> list[list[int]]:

@@ -17,6 +17,13 @@ from scripts.docs_blocks import (
     mask,
 )
 
+
+@pytest.fixture(autouse=True)
+def _no_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the runner's own ``COLUMNS`` out of every test: the width comes from the example."""
+    monkeypatch.delenv("COLUMNS", raising=False)
+
+
 RUN_SH = "#!/usr/bin/env bash\n# docs:start show\necho hi\n# docs:end show\n"
 BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
 
@@ -663,3 +670,12 @@ def test_the_width_is_the_export_above_the_region(tmp_path: Path) -> None:
         "export COLUMNS=90\n# docs:start show\necho hi\n# docs:end show\n", encoding="utf-8"
     )
     assert console_width(root, "demo#show") == 90
+
+
+def test_the_environments_columns_does_not_set_the_width(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the example's own export counts, never the environment of the checker."""
+    monkeypatch.setenv("COLUMNS", "80")
+    root, _ = _tree(tmp_path, BLOCK, "x\n", None)
+    assert console_width(root, "demo#show") is None
