@@ -8,7 +8,7 @@ import "./connections.css";
 
 import { type JSX, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import {
   type ConnectionEnvironmentOut,
@@ -31,6 +31,7 @@ import { shellQuote } from "../shell/shellQuote";
 import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
+import { ConnectionNote, listNote } from "./ConnectionNote";
 import { whereText } from "./kinds";
 import { connectionPath, NEW_CONNECTION_PATH } from "./paths";
 import { readFilter, writeFilter } from "./remember";
@@ -282,6 +283,7 @@ function ConnectionRows({
 export function ConnectionList(): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
+  const note = listNote(useLocation().state);
   const load = useCallback(() => listConnectionEnvironments(), []);
   const resource = useResource(load);
   const [chosen, setChosen] = useState(() => readFilter(me.name));
@@ -332,6 +334,7 @@ export function ConnectionList(): JSX.Element {
         ) : undefined
       }
     >
+      {note !== null && <ConnectionNote note={note} />}
       {body}
     </Page>
   );

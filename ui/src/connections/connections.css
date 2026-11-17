@@ -46,3 +46,77 @@
   align-items: center;
   gap: var(--space-3);
 }
+
+/* A connection's page: its panels stand apart by more space than lies inside them. */
+.connection-page {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.connection-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-line);
+  font-weight: var(--type-title-weight);
+}
+
+.connection-facts {
+  margin: 0;
+}
+
+.connection-fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.connection-fact dt {
+  flex: 0 0 140px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.connection-fact dd {
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A fingerprint is long and has no break of its own. */
+.connection-print {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  word-break: break-all;
+}
+
+.connection-list {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.connection-message {
+  overflow-wrap: anywhere;
+}
+
+/* The note after a create, a save or a delete takes the focus; its ring shows where it is. */
+.connection-note {
+  margin: 0;
+}
+
+.connection-note:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}

@@ -4,6 +4,9 @@
  * @packageDocumentation
  */
 
+/** The address of the Connections list. */
+export const CONNECTIONS_PATH = "/connections";
+
 /** The address of the page that adds a connection. */
 export const NEW_CONNECTION_PATH = "/connections/new";
 

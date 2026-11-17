@@ -31,6 +31,10 @@ export interface TestButtonProps {
   readonly connection: ConnectionOut;
   /** Called with the connection and its open test once one is queued or found open. */
   readonly onStarted: (row: ConnectionOut) => void;
+  /** Whether it is the page's one primary action; no by default, as in a row. */
+  readonly primary?: boolean;
+  /** Whether it says "Test now", as the page of a connection just created does; no by default. */
+  readonly now?: boolean;
 }
 
 /**
@@ -46,9 +50,16 @@ export interface TestButtonProps {
  * @param props - The connection and what to call once its test is open.
  * @param props.connection - The connection.
  * @param props.onStarted - Called with the connection and its open test.
+ * @param props.primary - Whether it is the page's primary action.
+ * @param props.now - Whether it says "Test now".
  * @returns The button and its refusal.
  */
-export function TestButton({ connection, onStarted }: TestButtonProps): JSX.Element {
+export function TestButton({
+  connection,
+  onStarted,
+  primary = false,
+  now: soon = false,
+}: TestButtonProps): JSX.Element {
   const { t } = useTranslation();
   const now = useNow();
   const [pending, setPending] = useState(false);
@@ -102,15 +113,21 @@ export function TestButton({ connection, onStarted }: TestButtonProps): JSX.Elem
   return (
     <span className="test-button" ref={holder} tabIndex={-1}>
       <PendingButton
-        className="button"
+        className={primary ? "button button-primary" : "button"}
         pending={pending}
         isDisabled={open}
-        aria-label={t("connections.list.testNamed", { name: markedText(connection.name) })}
+        {...(soon
+          ? {}
+          : {
+              "aria-label": t("connections.list.testNamed", { name: markedText(connection.name) }),
+            })}
         onPress={() => {
           void test();
         }}
       >
-        {open ? t("connections.list.testing") : t("connections.list.test")}
+        {open
+          ? t("connections.list.testing")
+          : t(soon ? "connections.page.testNow" : "connections.list.test")}
       </PendingButton>
       {refusal !== null && (
         <span className="step-error second" role="alert">

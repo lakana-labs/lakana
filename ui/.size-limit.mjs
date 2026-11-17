@@ -56,7 +56,9 @@ const NAMED_LIMITS = [
   // the environment's list in pages of 200).
   // Raised to the measured 7.22 kB (2026-11-17) + 10 %: Test all's line says when following
   // stopped, and the follower drops deleted connections.
-  { name: "Connections", prefix: "ConnectionsScreen-", limit: "7.95 kB" },
+  // Raised to the measured 9.58 kB (2026-11-17) + 10 %: a connection's page (its facts, the last
+  // test with its cause and next step, the declaring assets) and Delete with its dialog.
+  { name: "Connections", prefix: "ConnectionsScreen-", limit: "10.54 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
   // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected

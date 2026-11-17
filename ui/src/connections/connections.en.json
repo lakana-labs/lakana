@@ -147,5 +147,41 @@
   "follow": {
     "failed": "Could not read the test's progress.",
     "stuck": "No worker finished this test within 10 minutes; Test again closes it as failed and starts a new one."
+  },
+  "page": {
+    "back": "Back to Connections",
+    "testNow": "Test now",
+    "edit": "Edit",
+    "delete": "Delete…",
+    "factsHeading": "Connection",
+    "kind": "Kind",
+    "caCertificate": "CA certificate",
+    "secret": "Secret",
+    "secretNamed": "{{secret}} (its value is never shown)",
+    "secretNone": "none",
+    "created": "Created",
+    "createdBy": "{{who}}, {{when}}",
+    "updated": "Updated",
+    "usedByHeading": "Used by",
+    "declared": "{{repository}}: {{asset}}",
+    "notDeclared": "No deployed asset declares it.",
+    "lastTestHeading": "Last test",
+    "by": "by {{who}}",
+    "stale": "Tested before the last change; test it again.",
+    "noWorker": "No worker has taken this test yet. Check that a worker is running: docker compose ps worker, or the lakana local terminal."
+  },
+  "note": {
+    "created": "Created {{name}}. Test it now to see that a worker can reach it.",
+    "saved": "Saved {{name}}.",
+    "deleted": "Deleted {{name}}."
+  },
+  "delete": {
+    "title": "Delete the connection {{name}} in {{environment}}?",
+    "inUseTitle": "{{name}} is still in use",
+    "inUse": "Remove it from the asset's @asset(connections=[...]) in git and deploy, then delete it.",
+    "secret": "Its secret {{secret}} stays in the environment, unbound.",
+    "noSecret": "It has no secret.",
+    "confirm": "Delete",
+    "close": "Close"
   }
 }
