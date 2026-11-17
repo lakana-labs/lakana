@@ -1,0 +1,103 @@
+{
+  "kinds": {
+    "postgresql": {
+      "name": "PostgreSQL",
+      "line": "A PostgreSQL database, read with a user and password over TLS."
+    },
+    "mariadb": {
+      "name": "MariaDB",
+      "line": "A MariaDB or MySQL database, read with a user and password."
+    },
+    "sqlite-file": {
+      "name": "SQLite file",
+      "line": "A SQLite file under an ingestion root of the worker."
+    },
+    "http": {
+      "name": "HTTP API",
+      "line": "An HTTPS API, with no auth, a bearer token, basic auth, an API key or OAuth2."
+    },
+    "s3": {
+      "name": "S3",
+      "line": "An S3 bucket, or a store that speaks S3, with an access key."
+    },
+    "gcs": {
+      "name": "Google Cloud Storage",
+      "line": "A Google Cloud Storage bucket, with a service account key."
+    },
+    "azure": {
+      "name": "Azure Blob Storage",
+      "line": "An Azure Blob Storage container, with an account key or a SAS token."
+    },
+    "directory": {
+      "name": "Directory",
+      "line": "A directory of files under an ingestion root of the worker."
+    },
+    "tcp": {
+      "name": "TCP",
+      "line": "Any host and port, for your own client, with secret keys of your choice."
+    }
+  },
+  "outcomes": {
+    "ok": {
+      "word": "OK",
+      "cause": "The source can be reached."
+    },
+    "dns": {
+      "word": "host name",
+      "cause": "The host name did not resolve.",
+      "next": "Check the host name: Edit the connection."
+    },
+    "refused": {
+      "word": "refused",
+      "cause": "The host refused the connection.",
+      "next": "Check the port and the source's firewall."
+    },
+    "timeout": {
+      "word": "timeout",
+      "cause": "The connection did not answer in time.",
+      "next": "Check the host, the port and the network path between the worker and the source."
+    },
+    "tls": {
+      "word": "TLS",
+      "cause": "The TLS handshake failed: the server's certificate is not trusted, or the server offers only TLS older than 1.2.",
+      "next": "Give the connection your CA certificate (Edit), or upgrade the server to TLS 1.2 or newer."
+    },
+    "not_allowed": {
+      "word": "not allowed",
+      "cause": "The address is one a task may not reach.",
+      "next": "Use an address that can be reached from outside the Lakana stack."
+    },
+    "root_unavailable": {
+      "word": "root missing",
+      "cause": "The worker does not have the ingestion root.",
+      "next": "Check the root, or ask the operator to give it to the worker."
+    },
+    "not_found": {
+      "word": "not found",
+      "cause": "The path under the root, or the bucket or container, does not exist.",
+      "next": "Check the path, bucket or container: Edit the connection."
+    },
+    "credentials": {
+      "word": "credentials",
+      "cause": "The source refused the secret.",
+      "next": "Give the secret again: Edit the connection and enter new values."
+    },
+    "failed": {
+      "word": "failed",
+      "cause": "The check failed in another way, or no worker finished it within 10 minutes.",
+      "next": "Read the worker's log, then test again."
+    }
+  },
+  "tls": {
+    "verify-full": "encrypted, certificate checked",
+    "require": "encrypted, certificate not checked",
+    "disable": "not encrypted"
+  },
+  "auth": {
+    "none": "none",
+    "bearer": "bearer token",
+    "basic": "basic",
+    "api_key": "API key",
+    "oauth2": "OAuth2 client credentials"
+  }
+}
