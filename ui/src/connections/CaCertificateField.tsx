@@ -108,12 +108,12 @@ export function TextFileInput({
         onChange={read}
       />
       {description !== undefined && (
-        <span id={`${id}-text`} slot="description">
+        <span id={`${id}-text`} className="file-note">
           {description}
         </span>
       )}
       {error !== null && (
-        <span id={`${id}-error`} slot="errorMessage" role="alert">
+        <span id={`${id}-error`} className="file-note" role="alert">
           {error}
         </span>
       )}

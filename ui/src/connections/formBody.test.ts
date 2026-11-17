@@ -102,6 +102,39 @@ describe("createBody", () => {
     });
   });
 
+  it("an azure create sends one key even when the form holds both", () => {
+    const sent = (values: Record<string, string>): unknown =>
+      createBody(
+        form({
+          kind: "azure",
+          address: { account: "lakanadata", container: "landing" },
+          secret: { way: "values", values },
+        }),
+      ).secret_values;
+
+    expect(sent({ account_key: "a2V5", sas_token: "sv=2024&sig=abc" })).toEqual({
+      account_key: "a2V5",
+    });
+    expect(sent({ sas_token: "sv=2024&sig=abc" })).toEqual({ sas_token: "sv=2024&sig=abc" });
+  });
+
+  it("a tcp create sends at most 16 keys", () => {
+    const values = Object.fromEntries(
+      Array.from({ length: 17 }, (_, index) => [`key_${String(index + 1)}`, "v"]),
+    );
+
+    const sent = createBody(
+      form({
+        kind: "tcp",
+        address: { host: "ledger.internal", port: "7000" },
+        secret: { way: "values", values },
+      }),
+    ).secret_values;
+
+    expect(Object.keys(sent ?? {})).toHaveLength(16);
+    expect(sent).not.toHaveProperty("key_17");
+  });
+
   it("a tcp create sends the named keys", () => {
     expect(
       createBody(

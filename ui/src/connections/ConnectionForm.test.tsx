@@ -314,7 +314,7 @@ describe("ConnectionForm, add", () => {
     const kinds = await screen.findByRole("radiogroup", { name: "Kind" });
     // Every input of the secret but the radios, the key file and a tcp key's name.
     const passwordFields = (): HTMLElement[] => {
-      const names = screen.queryAllByRole("textbox", { name: "Key name" });
+      const names = screen.queryAllByRole("textbox", { name: /^Key \d+ name$/ });
       return [
         ...document.querySelectorAll<HTMLElement>(".secret-fields input:not([type=radio])"),
       ].filter((input) => input.getAttribute("type") !== "file" && !names.includes(input));
@@ -343,7 +343,7 @@ describe("ConnectionForm, add", () => {
     check(0);
     await user.click(screen.getByRole("button", { name: "Add a key" }));
     await user.click(screen.getByRole("button", { name: "Add a key" }));
-    expect(screen.getAllByRole("textbox", { name: "Key name" })).toHaveLength(2);
+    expect(screen.getAllByRole("textbox", { name: /^Key \d+ name$/ })).toHaveLength(2);
     // The key's name is not a secret; its value is.
     check(2);
   });
@@ -376,34 +376,40 @@ describe("ConnectionForm, add", () => {
     const add = screen.getByRole("button", { name: "Add a key" });
 
     await user.click(add);
-    const [key] = screen.getAllByRole("textbox", { name: "Key name" });
-    await user.type(key as HTMLElement, "Api-User");
+    const key = screen.getByRole("textbox", { name: "Key 1 name" });
+    // The new row takes the focus, so Add a key can be pressed again from the keyboard.
+    expect(key).toHaveFocus();
+    await user.type(key, "Api-User");
     await user.tab();
     expect(key).toHaveAccessibleDescription(
       "Key names are lower-case letters, digits and '_', start with a letter, and have at most 32 characters.",
     );
-    await user.clear(key as HTMLElement);
-    await user.type(key as HTMLElement, "api_user");
+    await user.clear(key);
+    await user.type(key, "api_user");
     await user.tab();
     expect(key).not.toHaveAttribute("aria-invalid");
-    await user.type(screen.getAllByLabelText("Value")[0] as HTMLElement, "loader");
+    await user.type(screen.getByLabelText("Key 1 value"), "loader");
 
-    for (let row = 1; row < 16; row += 1) {
-      await user.click(add);
+    for (let row = 2; row <= 16; row += 1) {
+      await user.click(screen.getByRole("button", { name: "Add a key" }));
+      expect(screen.getByRole("textbox", { name: `Key ${String(row)} name` })).toHaveFocus();
     }
-    expect(screen.getAllByRole("textbox", { name: "Key name" })).toHaveLength(16);
+    // Every row's fields and Remove have names of their own.
+    expect(screen.getByLabelText("Key 16 value")).toHaveAttribute("type", "password");
+    expect(screen.getByRole("button", { name: "Remove key 16" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add a key" })).not.toBeInTheDocument();
     expect(screen.getByText("A connection holds at most 16 secret keys.")).toBeInTheDocument();
+    expect(document.body).not.toHaveFocus();
 
-    const removes = screen.getAllByRole("button", { name: "Remove this key" });
-    for (const remove of removes.slice(1)) {
-      await user.click(remove);
+    for (let row = 16; row > 1; row -= 1) {
+      await user.click(screen.getByRole("button", { name: `Remove key ${String(row)}` }));
+      expect(screen.getByRole("button", { name: "Add a key" })).toHaveFocus();
     }
-    expect(screen.getAllByRole("textbox", { name: "Key name" })).toHaveLength(1);
+    expect(screen.getAllByRole("textbox", { name: /^Key \d+ name$/ })).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Add a key" }));
-    const second = screen.getAllByRole("textbox", { name: "Key name" })[1] as HTMLElement;
+    const second = screen.getByRole("textbox", { name: "Key 2 name" });
     await user.type(second, "api_user");
-    await user.type(screen.getAllByLabelText("Value")[1] as HTMLElement, "again");
+    await user.type(screen.getByLabelText("Key 2 value"), "again");
     await user.type(screen.getByRole("textbox", { name: "Name" }), "ledger");
     await user.type(screen.getByRole("textbox", { name: "host" }), "ledger.internal");
     await user.type(screen.getByRole("textbox", { name: "port" }), "7000");
@@ -412,7 +418,7 @@ describe("ConnectionForm, add", () => {
     expect(second).toHaveAccessibleDescription("Each key is named once.");
     expect(writes(server)).toEqual([]);
 
-    await user.click(screen.getAllByRole("button", { name: "Remove this key" })[1] as HTMLElement);
+    await user.click(screen.getByRole("button", { name: "Remove key 2" }));
     server.route({ "POST /api/v1/environments/dev/connections": created() });
     await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -455,7 +461,18 @@ describe("ConnectionForm, add", () => {
     expect(screen.queryByText("A CA certificate is read; Save sends it.")).not.toBeInTheDocument();
     expect(file).toHaveFocus();
 
+    // Another kind starts afresh: the file input shows no file the form no longer holds.
     await user.upload(file, new File([pem], "ca.pem"));
+    await screen.findByText("A CA certificate is read; Save sends it.");
+    await user.click(screen.getByRole("radio", { name: "MariaDB" }));
+    expect(screen.queryByText("A CA certificate is read; Save sends it.")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("ca_certificate (optional)")).toHaveValue("");
+    await user.click(screen.getByRole("radio", { name: "PostgreSQL" }));
+
+    await user.upload(
+      screen.getByLabelText("ca_certificate (optional)"),
+      new File([pem], "ca.pem"),
+    );
     await screen.findByText("A CA certificate is read; Save sends it.");
     await fillPostgres(user);
     server.route({ "POST /api/v1/environments/dev/connections": created() });

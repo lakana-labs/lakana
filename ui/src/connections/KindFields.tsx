@@ -204,7 +204,8 @@ export function KindFields({
         if (field.pem === true) {
           return (
             <CaCertificateField
-              key={field.key}
+              // Keyed by kind, so the file input empties when the form starts the kind afresh.
+              key={`${kind} ${field.key}`}
               label={fieldLabel(field, optional)}
               value={ca}
               onChange={onCa}

@@ -181,6 +181,12 @@
   margin: 0 0 var(--space-4);
 }
 
+/* The sentence under a file input, in the look of a field's description. */
+.file-note {
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+}
+
 .connection-form .file-input {
   max-width: 100%;
   padding: var(--space-1) var(--space-2);

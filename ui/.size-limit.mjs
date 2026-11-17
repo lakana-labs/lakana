@@ -66,6 +66,8 @@ const NAMED_LIMITS = [
   // its auth, the CA certificate read from a file), the secret as password fields or an existing
   // secret's name (azure's choice, gcs's key file, tcp's own keys), Save with the passkey touch,
   // and the form's strings.
+  // Measured 4.83 kB (2026-11-17) with numbered tcp key rows, the focus on a new row and one
+  // azure key and at most 16 tcp keys in the body; the limit holds.
   { name: "Add a connection", prefix: "ConnectionForm-", limit: "5.18 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.

@@ -7,7 +7,7 @@
  * @packageDocumentation
  */
 import type { ConnectionCreateIn, ConnectionKind } from "../api";
-import { type FieldSpec, kindFields, secretKeys, takesSecret } from "./kinds";
+import { FREE_KEYS_MAX, type FieldSpec, kindFields, secretKeys, takesSecret } from "./kinds";
 
 /**
  * The CA certificate: the stored one kept (on Add: none), a new one read from a file, or the
@@ -108,8 +108,8 @@ function part(
 }
 
 /**
- * The secret values to send: only the keys the kind and its settings take (any named key for
- * `tcp`), each with a value.
+ * The secret values to send: only the keys the kind and its settings take (for `azure` one of
+ * its two, for `tcp` at most 16 named keys), each with a value.
  *
  * @param form - The form.
  * @param values - The values typed, by key.
@@ -120,11 +120,17 @@ function sentValues(
   values: Readonly<Record<string, string>>,
 ): Record<string, string> | null {
   const { required, optional, oneOf, free } = secretKeys(form.kind, form.settings);
-  const allowed = new Set([...required, ...optional, ...(oneOf ?? [])]);
-  const sent = Object.fromEntries(
-    Object.entries(values).filter(([key, value]) => (free || allowed.has(key)) && value !== ""),
-  );
-  return Object.keys(sent).length === 0 ? null : sent;
+  const typed = Object.entries(values).filter(([, value]) => value !== "");
+  let kept: [string, string][];
+  if (free) {
+    kept = typed.slice(0, FREE_KEYS_MAX);
+  } else {
+    // Of the keys where exactly one is needed (`azure`), only the first with a value goes.
+    const one = oneOf?.find((key) => Boolean(values[key]));
+    const allowed = new Set([...required, ...optional, ...(one === undefined ? [] : [one])]);
+    kept = typed.filter(([key]) => allowed.has(key));
+  }
+  return kept.length === 0 ? null : Object.fromEntries(kept);
 }
 
 /**

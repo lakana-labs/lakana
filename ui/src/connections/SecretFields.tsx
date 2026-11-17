@@ -108,6 +108,8 @@ interface FreeKeysProps {
 /**
  * The keys of a `tcp` secret: 0 to 16 rows of a name and a value, with Add a key and Remove.
  * A name is checked when the field is left and on Save; a name given twice holds Save back.
+ * Each row's fields and Remove carry its number, so no two controls share a name. A new row's
+ * name takes the focus (Add a key goes once there are 16); after a Remove, Add a key takes it.
  *
  * @param props - Where the values go.
  * @param props.onChange - Called with the values by name.
@@ -118,7 +120,14 @@ function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
   const [rows, setRows] = useState<readonly Row[]>([]);
   const next = useRef(0);
   const add = useRef<HTMLButtonElement>(null);
+  const names = useRef(new Map<number, HTMLInputElement>());
   const [removed, setRemoved] = useState(0);
+  const [added, setAdded] = useState<number | null>(null);
+  useEffect(() => {
+    if (added !== null) {
+      names.current.get(added)?.focus();
+    }
+  }, [added]);
   useEffect(() => {
     if (removed > 0) {
       // The pressed Remove is gone with its row; Add a key holds the focus.
@@ -138,47 +147,58 @@ function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
   };
   return (
     <div className="connection-keys">
-      {rows.map((row, index) => (
-        <div className="connection-key" key={row.id}>
-          <TextField
-            className="field"
-            value={row.name}
-            isRequired
-            validate={(name) => {
-              if (!KEY_NAME.test(name)) {
-                return t("connections.form.keyRule");
-              }
-              return rows.slice(0, index).some((earlier) => earlier.name === name)
-                ? t("connections.form.keyTwice")
-                : null;
-            }}
-            onChange={(name) => {
-              update(row.id, { name });
-            }}
-          >
-            <Label>{t("connections.form.keyName")}</Label>
-            <Input />
-            <FieldError />
-          </TextField>
-          <PasswordField
-            label={t("connections.form.keyValue")}
-            required
-            value={row.value}
-            onChange={(value) => {
-              update(row.id, { value });
-            }}
-          />
-          <Button
-            className="button"
-            onPress={() => {
-              change(rows.filter(({ id }) => id !== row.id));
-              setRemoved((count) => count + 1);
-            }}
-          >
-            {t("connections.form.removeKey")}
-          </Button>
-        </div>
-      ))}
+      {rows.map((row, index) => {
+        const number = index + 1;
+        return (
+          <div className="connection-key" key={row.id}>
+            <TextField
+              className="field"
+              value={row.name}
+              isRequired
+              validate={(name) => {
+                if (!KEY_NAME.test(name)) {
+                  return t("connections.form.keyRule");
+                }
+                return rows.slice(0, index).some((earlier) => earlier.name === name)
+                  ? t("connections.form.keyTwice")
+                  : null;
+              }}
+              onChange={(name) => {
+                update(row.id, { name });
+              }}
+            >
+              <Label>{t("connections.form.keyName", { number })}</Label>
+              <Input
+                ref={(input) => {
+                  // A ref that returns its cleanup is never called with null (React 19).
+                  names.current.set(row.id, input as HTMLInputElement);
+                  return () => {
+                    names.current.delete(row.id);
+                  };
+                }}
+              />
+              <FieldError />
+            </TextField>
+            <PasswordField
+              label={t("connections.form.keyValue", { number })}
+              required
+              value={row.value}
+              onChange={(value) => {
+                update(row.id, { value });
+              }}
+            />
+            <Button
+              className="button"
+              onPress={() => {
+                change(rows.filter(({ id }) => id !== row.id));
+                setRemoved((count) => count + 1);
+              }}
+            >
+              {t("connections.form.removeKey", { number })}
+            </Button>
+          </div>
+        );
+      })}
       {rows.length < FREE_KEYS_MAX ? (
         <Button
           ref={add}
@@ -186,6 +206,7 @@ function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
           onPress={() => {
             next.current += 1;
             change([...rows, { id: next.current, name: "", value: "" }]);
+            setAdded(next.current);
           }}
         >
           {t("connections.form.addKey")}
