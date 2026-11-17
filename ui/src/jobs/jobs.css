@@ -173,3 +173,38 @@
   align-items: flex-start;
   gap: var(--space-2) var(--space-4);
 }
+
+.list-scroll.jobs-attempts-scroll .list {
+  min-width: 880px;
+}
+
+/* A task's log: wrapped, so a narrow screen never scrolls sideways, and scrolling in its own
+   focusable region, so a long log does not make the page endless. */
+.jobs-log {
+  max-height: 70vh;
+  margin: 0 0 var(--space-3);
+  padding: var(--space-3);
+  overflow: auto;
+  background: var(--color-sunk);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  line-height: var(--type-code-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.jobs-log:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Why the page does not show the whole log, with the command that prints it. */
+.jobs-log-note {
+  margin-bottom: var(--space-3);
+}
+
+.jobs-log-note p {
+  margin: 0 0 var(--space-2);
+}

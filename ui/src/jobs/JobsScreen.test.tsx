@@ -22,10 +22,7 @@ describe("the Jobs screen", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "silver.sales" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Run r1" })).toHaveAttribute(
-      "href",
-      "/jobs/prod/runs/r1",
-    );
+    expect(screen.getByRole("link", { name: "Run" })).toHaveAttribute("href", "/jobs/prod/runs/r1");
   });
 
   it("an unknown path under /jobs is not found", async () => {

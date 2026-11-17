@@ -38,7 +38,7 @@ function JobsIndex(): JSX.Element {
  * The Jobs screen: the area's page at `/jobs`, a job at `/jobs/{environment}/job/{repository}/{job}`,
  * a run at `/jobs/{environment}/runs/{id}`, a task at `/jobs/{environment}/runs/{id}/tasks/{asset}`,
  * and the not-found state for every other address. The segment counts keep the area's own tabs
- * (`/jobs/runs`) apart from the detail pages. While the job's or the run's chunk loads, its
+ * (`/jobs/runs`) apart from the detail pages. While the job's, the run's or the task's chunk loads, its
  * skeleton says what is loading after a second.
  *
  * @returns The place the address names.
@@ -65,7 +65,14 @@ export function AreaScreen(): JSX.Element {
             </Suspense>
           }
         />
-        <Route path=":env/runs/:id/tasks/:asset" element={<TaskPage />} />
+        <Route
+          path=":env/runs/:id/tasks/:asset"
+          element={
+            <Suspense fallback={<Reading label={t("jobs.loadingTask")} />}>
+              <TaskPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </Suspense>

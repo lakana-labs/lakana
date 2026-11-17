@@ -24,6 +24,32 @@ export function isGone(poll: LivePoll<unknown>): boolean {
   return poll.data === undefined && (status === 404 || status === 403);
 }
 
+/** Properties of {@link Gone}. */
+export interface GoneProps {
+  /** The server's sentence; null shows none. */
+  readonly message: string | null;
+}
+
+/**
+ * Says that something is gone or hidden from the person, in the server's sentence, with the way
+ * back to Jobs.
+ *
+ * @param props - The sentence.
+ * @param props.message - The server's sentence.
+ * @returns The sentence and the link.
+ */
+export function Gone({ message }: GoneProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <div className="read-failed">
+      <p role="alert">{message}</p>
+      <Link className="button" to="/jobs">
+        {t("jobs.toJobs")}
+      </Link>
+    </div>
+  );
+}
+
 /** Properties of {@link PollProblem}. */
 export interface PollProblemProps {
   /** The poll. */
@@ -40,19 +66,11 @@ export interface PollProblemProps {
  * @returns The sentence, or nothing.
  */
 export function PollProblem({ poll }: PollProblemProps): JSX.Element | null {
-  const { t } = useTranslation();
   if (poll.error === null || (poll.data !== undefined && poll.failures < POLL_FAILURES_SHOWN)) {
     return null;
   }
   if (isGone(poll)) {
-    return (
-      <div className="read-failed">
-        <p role="alert">{poll.error}</p>
-        <Link className="button" to="/jobs">
-          {t("jobs.toJobs")}
-        </Link>
-      </div>
-    );
+    return <Gone message={poll.error} />;
   }
   return <ReadFailed message={poll.error} onRetry={poll.reload} />;
 }

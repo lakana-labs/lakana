@@ -8,7 +8,6 @@ import {
   type FocusEvent,
   type JSX,
   type ReactNode,
-  useCallback,
   useEffect,
   useId,
   useRef,
@@ -17,9 +16,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
-import { getRun, type RunOut, type TaskRunOut } from "../api/jobs";
+import type { RunOut, TaskRunOut } from "../api/jobs";
 import { Page } from "../shell/Page";
-import { useLivePoll } from "../shell/useLivePoll";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { StatusLabel } from "../status/StatusLabel";
@@ -27,13 +25,13 @@ import { ControlNote, type ControlNoteValue } from "./ControlNote";
 import { formatDuration, secondsBetween } from "./format";
 import { Fact } from "./JobFacts";
 import "./jobStrings";
-import { jobPath, jobRunPath, taskPath } from "./paths";
-import { LIVE_EVERY_MS } from "./poll";
-import { isGone, PollProblem } from "./PollProblem";
+import { jobRunPath, taskPath } from "./paths";
+import { PollProblem } from "./PollProblem";
 import { Reading } from "./Reading";
 import { CancelRunButton, ResumeRunButton } from "./RunControls";
 import { isActive, runStatusKind } from "./status";
 import { TaskRow } from "./TaskRow";
+import { runTitle, runTrail, useRun } from "./useRun";
 
 /**
  * The task the run's Logs opens: the failed task that ended first, then by asset, as the server
@@ -249,16 +247,11 @@ function RunView({
       held.current = null;
     }
   };
-  const [ended, setEnded] = useState(false);
   const [changed, setChanged] = useState<Changed | null>(null);
-  const load = useCallback(() => getRun(environment, runId), [environment, runId]);
-  const poll = useLivePoll(load, { everyMs: LIVE_EVERY_MS, active: !ended });
+  // A run that ended, or one that is gone, is not read again.
+  const poll = useRun(environment, runId);
   const read = poll.data;
   const run = changed !== null && changed.over === read ? changed.run : read;
-  // A run that ended, or one that is gone, is not read again.
-  if (!ended && ((read !== undefined && !isActive(read)) || isGone(poll))) {
-    setEnded(true);
-  }
   const told = useRef("");
   useEffect(() => {
     const now = run === undefined ? "" : `${run.status} ${String(run.cancel_requested)}`;
@@ -268,12 +261,7 @@ function RunView({
     }
   }, [run, onRunChanged]);
 
-  const title =
-    run === undefined
-      ? t("jobs.run.untitled")
-      : run.job === null
-        ? t("jobs.run.titleOf", { when: when(run.created_at), repository: run.repository })
-        : t("jobs.run.title", { when: when(run.created_at) });
+  const title = runTitle(run, t, when);
   const logs = run === undefined ? undefined : firstFailed(run);
   const content =
     run === undefined ? (
@@ -310,17 +298,7 @@ function RunView({
 
   if (level === 1) {
     return (
-      <Page
-        title={title}
-        headingRef={headingRef}
-        trail={[
-          { to: "/jobs", label: t("areas.jobs.name") },
-          { to: "/jobs", label: environment },
-          ...(run === undefined || run.job === null
-            ? []
-            : [{ to: jobPath(environment, run.repository, run.job), label: run.job }]),
-        ]}
-      >
+      <Page title={title} headingRef={headingRef} trail={runTrail(environment, run, t)}>
         <PollProblem poll={poll} />
         {content}
       </Page>

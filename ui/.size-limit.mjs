@@ -75,7 +75,10 @@ const NAMED_LIMITS = [
   // Raised to the measured 2.68 kB (2026-11-17) + 10 %: the strings of the job and run pages
   // (facts, runs, a run's facts and tasks, the controls and their notes) and the skeleton that
   // says "Loading the job…" or "Loading the run…" while their chunks load.
-  { name: "Jobs", prefix: "JobsScreen-", limit: "2.95 kB" },
+  // Raised to the measured 3.16 kB (2026-11-17) + 10 %: the strings of the task page (its facts,
+  // the attempts' columns and outcomes, the log's status lines, notes and Save log) and the
+  // skeleton that says "Loading the task…" while its chunk loads.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "3.48 kB" },
   // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
   // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and
   // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
@@ -91,9 +94,21 @@ const NAMED_LIMITS = [
   // failed read with Try again.
   // Raised to the measured 5.34 kB (2026-11-17) + 10 % with a failed task's second line: the failure
   // with its code, cause and next step, Log, Open table and Show rows of each failed check.
-  { name: "a run", prefix: "RunDetail-", limit: "5.87 kB" },
+  // Lowered to the measured 2.14 kB (2026-11-17) + 10 %: the run's reads, its title and
+  // breadcrumb, a task's row with its failure line and controls moved into a chunk the run shares
+  // with the task page (useRun-, below).
+  { name: "a run", prefix: "RunDetail-", limit: "2.35 kB" },
+  // Measured 4.11 kB (2026-11-17) + 10 %: what a run and a task's page share: the run read every
+  // 2 s while active, its title and breadcrumb, a task's row, its failure line with the code,
+  // cause and next step, and the controls beside it (Log, Show source, Open table, Show rows),
+  // the failed read with Try again and the reading skeleton.
+  { name: "a run and a task", prefix: "useRun-", limit: "4.52 kB" },
   // Measured 324 B (2026-11-17) + 10 %: a task's page, for now its heading and breadcrumb.
-  { name: "the task page", prefix: "TaskPage-", limit: "0.36 kB" },
+  // Raised to the measured 2.7 kB (2026-11-17) + 10 %: the task's facts, its attempts (a table of
+  // ten columns with the outcomes in words) and its log, followed every 2 s from the byte offset,
+  // caught up at most 16 pieces in a row, kept to 2,000,000 characters cut at a line, drawn in
+  // memoised parts of 200 lines, with the command that prints it whole and Save log.
+  { name: "the task page", prefix: "TaskPage-", limit: "2.97 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.

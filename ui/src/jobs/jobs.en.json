@@ -1,8 +1,8 @@
 {
   "runNow": "Run now",
-  "runTitle": "Run {{id}}",
   "loadingJob": "Loading the job…",
   "loadingRun": "Loading the run…",
+  "loadingTask": "Loading the task…",
   "toJobs": "Go to Jobs",
   "duration": {
     "tenths": "{{n}} s",
@@ -156,5 +156,46 @@
   "resume": {
     "button": "Resume",
     "done": "Resumed the failed part in a new run."
+  },
+  "taskPage": {
+    "attempt": "Attempt",
+    "attemptOf": "{{n}} of {{max}}",
+    "waits": "Waits",
+    "attempts": "Attempts",
+    "log": "Log"
+  },
+  "attempts": {
+    "region": "Attempts of {{asset}}",
+    "none": "No attempt yet.",
+    "columns": {
+      "attempt": "Attempt",
+      "worker": "Worker",
+      "started": "Started",
+      "duration": "Duration",
+      "outcome": "Outcome",
+      "rows": "Rows",
+      "failure": "Failure",
+      "memory": "Peak memory",
+      "cpu": "Processor time",
+      "read": "Bytes read"
+    },
+    "outcomes": {
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "timed_out": "Timed out",
+      "lost": "Lost",
+      "released": "Released",
+      "cancelled": "Cancelled"
+    }
+  },
+  "log": {
+    "region": "Log of {{asset}}",
+    "following": "Following the log…",
+    "complete": "The log is complete.",
+    "tooLong": "This log is too long to follow here.",
+    "earlier": "Earlier lines are not shown here.",
+    "empty": "The task wrote nothing to its log.",
+    "save": "Save log"
   }
 }

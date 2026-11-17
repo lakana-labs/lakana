@@ -4,7 +4,14 @@
  *
  * @packageDocumentation
  */
-import type { FailureOut, JobOut, RunOut, TaskLogOut, TaskRunOut } from "../api/jobs";
+import type {
+  FailureOut,
+  JobOut,
+  RunOut,
+  TaskAttemptOut,
+  TaskLogOut,
+  TaskRunOut,
+} from "../api/jobs";
 
 /** The id of the run `aJobRun` answers for. */
 export const JOB_RUN_ID = "5d6e7f80-9a1b-4c2d-8e3f-405162738495";
@@ -135,6 +142,29 @@ export function aTaskLog(over: Partial<TaskLogOut> = {}): TaskLogOut {
     more: false,
     complete: true,
     reset: false,
+    ...over,
+  };
+}
+
+/**
+ * An attempt of `silver.orders` that succeeded on worker `w-7f3a`, with everything measured.
+ *
+ * @param over - The fields that differ.
+ * @returns The attempt.
+ */
+export function anAttempt(over: Partial<TaskAttemptOut> = {}): TaskAttemptOut {
+  return {
+    attempt: 1,
+    worker: "w-7f3a",
+    started_at: "2026-11-17T01:00:05Z",
+    finished_at: "2026-11-17T01:00:35Z",
+    outcome: "succeeded",
+    rows_written: 1200,
+    error_message: null,
+    failure: null,
+    peak_memory_bytes: 268_435_456,
+    cpu_seconds: 12,
+    bytes_read: 52_428_800,
     ...over,
   };
 }

@@ -22,7 +22,7 @@ import { ShowRowsButton } from "./ShowRowsButton";
 import { failureCode, taskStatusKind } from "./status";
 
 /** The states that get a second line: the task did not succeed, or never ran. */
-const EXPLAINED: readonly TaskStatus[] = ["failed", "upstream_failed", "cancelled"];
+export const EXPLAINED: readonly TaskStatus[] = ["failed", "upstream_failed", "cancelled"];
 
 /** How many cells a row has, which the second line spans. */
 const COLUMNS = 7;
@@ -37,6 +37,12 @@ export interface TaskRowProps {
   readonly task: TaskRunOut;
 }
 
+/** Properties of {@link TaskControls}. */
+export interface TaskControlsProps extends TaskRowProps {
+  /** Whether Log is offered for a failed task; false on the task's own page. True by default. */
+  readonly withLog?: boolean | undefined;
+}
+
 /**
  * The controls beside a failure: Log for a task that ran and failed, Show source for a task that
  * builds a table, Open table, and Show rows for each failed check.
@@ -45,14 +51,20 @@ export interface TaskRowProps {
  * @param props.environment - The run's environment.
  * @param props.run - The run.
  * @param props.task - The task.
+ * @param props.withLog - Whether Log is offered.
  * @returns The controls.
  */
-function TaskControls({ environment, run, task }: TaskRowProps): JSX.Element {
+export function TaskControls({
+  environment,
+  run,
+  task,
+  withLog = true,
+}: TaskControlsProps): JSX.Element {
   const { t } = useTranslation();
   const place = splitDotted(task.asset);
   return (
     <div className="jobs-task-controls">
-      {task.status === "failed" && (
+      {withLog && task.status === "failed" && (
         <Link className="button" to={taskPath(environment, run.id, task.asset)}>
           {t("jobs.task.log")}
         </Link>
