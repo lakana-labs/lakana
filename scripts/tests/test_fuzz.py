@@ -358,18 +358,28 @@ def test_a_crash_fails_the_run_and_uploads_its_input(job: str) -> None:
 
 
 def test_the_fuzzing_jobs_run_on_github_s_runner_with_read_scopes_only() -> None:
-    """A pull request's harnesses are its own code, and the actions run Docker."""
+    """A pull request's harnesses are its own code, and the actions run Docker.
+
+    Without a token, the filestore cannot page through the repository's artifacts, which once
+    spent the rate limit the other workflows share.
+    """
     workflow = _workflow()
     assert workflow["permissions"] == {"contents": "read"}
     for name, job in workflow["jobs"].items():
         assert job["runs-on"] == "ubuntu-latest", name
-        assert job["permissions"] == {"contents": "read", "actions": "read"}, name
         assert "timeout-minutes" in job, name
         for step in job["steps"]:
             uses = step.get("uses", "")
             if uses.startswith(_CFLITE + "build_fuzzers@"):
                 # The build clones a public repository: it needs no token.
                 assert "github-token" not in step["with"], name
+    # A pull request's run looks for no corpus, so it needs no token and no `actions: read`.
+    pull_request = workflow["jobs"]["pull-request"]
+    assert pull_request["permissions"] == {"contents": "read"}
+    for step in pull_request["steps"]:
+        assert "github-token" not in step.get("with", {})
+    for name in ("nightly", "prune"):
+        assert workflow["jobs"][name]["permissions"] == {"contents": "read", "actions": "read"}
 
 
 def test_the_builder_installs_lakana_core_s_dependencies_from_the_lock_with_hashes() -> None:

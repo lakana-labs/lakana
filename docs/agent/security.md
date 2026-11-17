@@ -7141,9 +7141,14 @@ artifact of that name from the whole repository, from any branch or workflow, an
 archive the fork chose. Its change is fuzzed by the nightly run after it is merged. To fuzz forks
 too, keep the corpus in a `storage-repo` that only the nightly job can write to (a deploy key in
 that job alone); pull requests then read it but cannot replace it. The nightly and pruning jobs run
-only on `main`, also when started by hand, so no other branch publishes a corpus. Every night `main`
-is fuzzed for an hour and the corpus is pruned; it is kept as an artifact of the workflow, so the
-next run, and a pull request's, starts from it. **A crash fails the run** and its input is
+only on `main`, also when started by hand, so no other branch publishes a corpus. A pull request's
+run gets no token, so it starts from the seeds and never reads that corpus. To find the corpus,
+the filestore pages through every artifact of the repository, and when it finds none it can keep
+paging until the token's rate limit is spent. The repository's other workflows share that limit:
+one pull-request run made about 5,000 requests in 21 minutes. The nightly run takes that risk
+only when no corpus artifact exists (the first night, or after one expired); a `storage-repo`
+would remove it. Every night `main` is fuzzed for an hour and the corpus is pruned; it is kept as
+an artifact of the workflow, so the next night starts from it. **A crash fails the run** and its input is
 uploaded as the artifact `fuzz-crash-pull-request` or `fuzz-crash-nightly` (ClusterFuzzLite's
 own `crashes-*` artifact holds it too). Reproduce it with
 `uv run --group fuzz python -m fuzz.<name>_fuzzer <crash file>` (Atheris has wheels only for
