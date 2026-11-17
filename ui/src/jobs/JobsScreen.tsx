@@ -1,0 +1,55 @@
+/**
+ * The Jobs area's screen, loaded on demand: a job, a run and a task of a run.
+ *
+ * @packageDocumentation
+ */
+import { type JSX, lazy, Suspense } from "react";
+import { Route, Routes } from "react-router";
+
+import { SHIPPED_AREAS } from "../shell/areas";
+import { AreaPage } from "../shell/AreaPage";
+import { NotFound } from "../shell/NotFound";
+import "./jobs.css";
+import "./jobStrings";
+
+// Each page is its own chunk, read only when its address opens.
+const JobPage = lazy(() => import("./JobPage").then((m) => ({ default: m.JobPage })));
+const RunPage = lazy(() => import("./RunPage").then((m) => ({ default: m.RunPage })));
+const TaskPage = lazy(() => import("./TaskPage").then((m) => ({ default: m.TaskPage })));
+
+/**
+ * The area's own page, until the list of jobs and runs arrives in a later change.
+ *
+ * @returns The page: the area's purpose and its command line.
+ */
+function JobsIndex(): JSX.Element {
+  return (
+    <>
+      {SHIPPED_AREAS.filter((area) => area.id === "jobs").map((area) => (
+        <AreaPage key={area.id} area={area} />
+      ))}
+    </>
+  );
+}
+
+/**
+ * The Jobs screen: the area's page at `/jobs`, a job at `/jobs/{environment}/job/{repository}/{job}`,
+ * a run at `/jobs/{environment}/runs/{id}`, a task at `/jobs/{environment}/runs/{id}/tasks/{asset}`,
+ * and the not-found state for every other address. The segment counts keep the area's own tabs
+ * (`/jobs/runs`) apart from the detail pages.
+ *
+ * @returns The place the address names.
+ */
+export function AreaScreen(): JSX.Element {
+  return (
+    <Suspense fallback={<></>}>
+      <Routes>
+        <Route index element={<JobsIndex />} />
+        <Route path=":env/job/:repository/:job" element={<JobPage />} />
+        <Route path=":env/runs/:id" element={<RunPage />} />
+        <Route path=":env/runs/:id/tasks/:asset" element={<TaskPage />} />
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
+  );
+}

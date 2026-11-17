@@ -69,6 +69,16 @@ const NAMED_LIMITS = [
   // which the screen now hands to the editor, so that the editor's chunk reaches no API module
   // (see the first load below); the limit holds.
   { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
+  // Measured 1.1 kB (2026-11-17) + 10 %: the Jobs area's screen, for now its routes (a job, a run and
+  // a task, each a page of its own below), the area's page at /jobs and the screen's strings. The
+  // lists, facts and logs come in the next changes.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "1.21 kB" },
+  // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
+  { name: "the job page", prefix: "JobPage-", limit: "0.31 kB" },
+  // Measured 288 B (2026-11-17) + 10 %: a run's page, for now its heading and breadcrumb.
+  { name: "the run page", prefix: "RunPage-", limit: "0.32 kB" },
+  // Measured 324 B (2026-11-17) + 10 %: a task's page, for now its heading and breadcrumb.
+  { name: "the task page", prefix: "TaskPage-", limit: "0.36 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.

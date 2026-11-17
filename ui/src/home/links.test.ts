@@ -5,9 +5,6 @@ import { ATTENTION_OBJECTS, isReleaseVersion, objectPath, releaseNotesUrl } from
 describe("links", () => {
   it.each([
     ["table", "prod", "gold.station_ranking", "/catalog/prod/gold/station_ranking"],
-    ["job", "prod", "analytics/daily_sales", "/jobs"],
-    ["run", "prod", "8d2e4f60", "/jobs"],
-    ["check", "prod", "8d2e4f60", "/jobs"],
     ["worker", null, "w-2", "/settings/status"],
     ["recovery_link", null, "link-1", "/access/recovery-links"],
   ] as const)(
@@ -16,6 +13,24 @@ describe("links", () => {
       expect(objectPath(kind, environment, ref)).toBe(path);
     },
   );
+
+  it("a job opens its page", () => {
+    expect(objectPath("job", "prod", "team/analytics/daily_sales")).toBe(
+      "/jobs/prod/job/team%2Fanalytics/daily_sales",
+    );
+    expect(objectPath("job", "prod", "daily_sales")).toBeNull();
+  });
+
+  it("a run and a check open the run's page", () => {
+    expect(objectPath("run", "prod", "8d2e4f60")).toBe("/jobs/prod/runs/8d2e4f60");
+    expect(objectPath("check", "prod", "8d2e4f60")).toBe("/jobs/prod/runs/8d2e4f60");
+  });
+
+  it("without an environment they open the Jobs area", () => {
+    expect(objectPath("job", null, "a/b")).toBe("/jobs");
+    expect(objectPath("run", null, "8d2e4f60")).toBe("/jobs");
+    expect(objectPath("check", null, "8d2e4f60")).toBe("/jobs");
+  });
 
   it("a query opens its run on the Queries screen", () => {
     expect(objectPath("query", "dev", "3f9c2a1b")).toBe("/queries/dev/runs/3f9c2a1b");

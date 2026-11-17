@@ -41,9 +41,9 @@ describe("Attention", () => {
   });
 
   it.each([
-    ["daily_sales", "Run failed", "prod", "/jobs"],
+    ["daily_sales", "Run failed", "prod", "/jobs/prod/runs/run-1"],
     ["gold.station_ranking", "Late", "prod", "/catalog/prod/gold/station_ranking"],
-    ["not_null_station_id", "Check failed", "dev", "/jobs"],
+    ["not_null_station_id", "Check failed", "dev", "/jobs/dev/runs/run-2"],
     ["Query 3f9c2a1b", "Query failed", "dev", "/queries/dev/runs/3f9c2a1b-q"],
     ["sam", "Recovery link open", "Instance", "/access/recovery-links"],
     ["worker-2.internal", "Worker down", "Instance", "/settings/status"],

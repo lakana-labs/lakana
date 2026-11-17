@@ -48,8 +48,8 @@ describe("Recent", () => {
   it.each([
     ["gold.station_ranking", "Table", "prod", "/catalog/prod/gold/station_ranking"],
     ["Query 3f9c2a1b", "Query", "dev", "/queries/dev/runs/3f9c2a1b-77d0-4c1e-9a55-0c4f5b2e8d11"],
-    ["analytics/daily_sales", "Job", "prod", "/jobs"],
-    ["Run 8d2e4f60", "Run", "prod", "/jobs"],
+    ["analytics/daily_sales", "Job", "prod", "/jobs/prod/job/analytics/daily_sales"],
+    ["Run 8d2e4f60", "Run", "prod", "/jobs/prod/runs/8d2e4f60-1b3a-4c5d-8e9f-a0b1c2d3e4f5"],
   ])("lists %s with its kind and environment, and opens it", async (name, kind, env, path) => {
     const { user, router, server } = renderShell("/", {
       routes: { "GET /api/v1/principals/admin/recent": { status: 200, body: RECENT } },

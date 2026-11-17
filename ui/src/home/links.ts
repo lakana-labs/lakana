@@ -6,6 +6,7 @@
  */
 import type { AttentionKind } from "../api";
 import { splitDotted, tablePath } from "../catalog/paths";
+import { jobPath, jobRunPath, splitJobRef } from "../jobs/paths";
 import { runPath } from "../queries/paths";
 
 /** Where the release notes of each version are. */
@@ -18,9 +19,11 @@ export type ObjectKind = "table" | "query" | "job" | "run" | "check" | "worker" 
  * The place each kind of object opens at, from its environment and reference; null for an
  * object that has no place (a table with no environment or no namespace in its name). A table
  * opens its page, and a query its run on the Queries screen (the Queries screen itself without
- * an environment); until an area's part brings its detail pages, the other kinds open the area's
- * own page, which names the command to use meanwhile; each later part changes its kinds' lines
- * here to the detail page (part 5 jobs, runs and checks, part 8 workers).
+ * an environment); a job opens its page (none for a reference without a `repository/` part; the Jobs area
+ * without an environment), and a run and a check the run's page (the Jobs area without an environment); until
+ * an area's part brings its detail pages, the other kinds open the area's own page, which names
+ * the command to use meanwhile; each later part changes its kinds' lines here to the detail page
+ * (part 8 workers).
  */
 const PLACES: Record<ObjectKind, (environment: string | null, ref: string) => string | null> = {
   table: (environment, ref) => {
@@ -30,9 +33,15 @@ const PLACES: Record<ObjectKind, (environment: string | null, ref: string) => st
       : tablePath(environment, place.namespace, place.name);
   },
   query: (environment, ref) => (environment === null ? "/queries" : runPath(environment, ref)),
-  job: () => "/jobs",
-  run: () => "/jobs",
-  check: () => "/jobs",
+  job: (environment, ref) => {
+    if (environment === null) {
+      return "/jobs";
+    }
+    const place = splitJobRef(ref);
+    return place === null ? null : jobPath(environment, place.repository, place.job);
+  },
+  run: (environment, ref) => (environment === null ? "/jobs" : jobRunPath(environment, ref)),
+  check: (environment, ref) => (environment === null ? "/jobs" : jobRunPath(environment, ref)),
   worker: () => "/settings/status",
   recovery_link: () => "/access/recovery-links",
 };

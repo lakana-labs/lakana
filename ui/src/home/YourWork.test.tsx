@@ -59,7 +59,7 @@ describe("YourWork", () => {
 
     await user.click(job);
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/jobs");
+      expect(router.state.location.pathname).toBe("/jobs/dev/job/analytics/daily_sales");
     });
   });
 

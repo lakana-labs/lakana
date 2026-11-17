@@ -1,0 +1,27 @@
+{
+  "runNow": "Run now",
+  "runTitle": "Run {{id}}",
+  "duration": {
+    "tenths": "{{n}} s",
+    "seconds": "{{n}} s",
+    "minutes": "{{n}} min",
+    "hours": "{{h}} h {{m}} min"
+  },
+  "schedule": {
+    "everyMinute": "every minute",
+    "hourly": "hourly at :{{minute}}",
+    "daily": "daily {{time}}",
+    "weekly": "weekly on {{day}} {{time}}",
+    "monthly": "monthly on day {{day}} {{time}}",
+    "inZone": "{{what}} {{zone}}",
+    "weekdays": {
+      "0": "Sunday",
+      "1": "Monday",
+      "2": "Tuesday",
+      "3": "Wednesday",
+      "4": "Thursday",
+      "5": "Friday",
+      "6": "Saturday"
+    }
+  }
+}

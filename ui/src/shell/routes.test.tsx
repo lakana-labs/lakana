@@ -164,6 +164,12 @@ describe("appRoutes", () => {
     ).toBeInTheDocument();
   });
 
+  it("/jobs lazy-loads its screen", async () => {
+    renderShell("/jobs/prod/runs/r1");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Run r1" })).toBeInTheDocument();
+  });
+
   it("never loads the page of an area outside the user's access", async () => {
     const load = vi.fn(() => Promise.resolve({ AreaScreen: () => <p>Loaded on demand</p> }));
     renderShell("/jobs", { access: new Set(["home"]), pages: { jobs: load } });

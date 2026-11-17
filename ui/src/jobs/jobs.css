@@ -1,0 +1,5 @@
+/* The Jobs screen's own rules: a cron expression shown as it is. */
+.jobs-verbatim {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
