@@ -147,6 +147,7 @@
     "lineage": "Lineage ›"
   },
   "preview": {
+    "label": "Preview of {{name}}",
     "first": "First {{count}} rows · read as you",
     "rows_one": "{{count}} row · read as you",
     "rows_other": "{{count}} rows · read as you",

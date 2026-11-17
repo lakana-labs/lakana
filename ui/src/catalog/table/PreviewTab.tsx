@@ -179,7 +179,7 @@ export function PreviewTab(): JSX.Element {
           {shown.row_count === 0 ? (
             <p className="empty">{t("table.preview.empty")}</p>
           ) : (
-            <ResultGrid page={shown} cells={cells} label={ref.name} />
+            <ResultGrid page={shown} cells={cells} label={t("table.preview.label", { name: markedText(ref.name) })} />
           )}
         </>
       )}

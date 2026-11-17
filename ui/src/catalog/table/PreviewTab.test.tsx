@@ -40,7 +40,7 @@ function sent(server: FakeServer, method: string, part: string): string[] {
  * @returns The grid.
  */
 async function grid(): Promise<HTMLElement> {
-  const table = await screen.findByRole("grid", { name: "fact_sales, rows" });
+  const table = await screen.findByRole("grid", { name: "Preview of fact_sales, rows" });
   // The grid can arrive a render before its rows do; under load a test read it in between.
   await waitFor(() => {
     expect(within(table).getAllByRole("row").length).toBeGreaterThan(0);
@@ -385,8 +385,8 @@ describe("PreviewTab", () => {
       },
     });
 
-    const region = await screen.findByRole("region", { name: "fact_U+202Esales" });
-    expect(within(region).getByRole("grid", { name: "fact_U+202Esales, rows" })).toBeVisible();
+    const region = await screen.findByRole("region", { name: "Preview of fact_U+202Esales" });
+    expect(within(region).getByRole("grid", { name: "Preview of fact_U+202Esales, rows" })).toBeVisible();
   });
 
   it("says that values too large to send are marked cut", async () => {
