@@ -2360,6 +2360,43 @@ class TaskTokenMintOut(BaseModel):
     token: str
 
 
+class TaskTokenOut(BaseModel):
+    """One listed task token: what it is for, never its value.
+
+    Parameters
+    ----------
+    key_id
+        The public lookup key, which revokes the token.
+    principal
+        The name of the principal the token signs in as.
+    environment
+        The one environment the token acts in.
+    asset_scope
+        The asset patterns the token may act on; empty for a token bound to a task, whose
+        scope its run's project version gives.
+    issued_at
+        When the token was minted.
+    expires_at
+        When the token stops working.
+    run_id
+        The run whose task the token was minted for, or `None` for a token minted over REST.
+    job
+        That run's job, or `None`.
+    asset
+        The asset of that task, or `None`.
+    """
+
+    key_id: str
+    principal: str
+    environment: str
+    asset_scope: list[str]
+    issued_at: datetime
+    expires_at: datetime
+    run_id: uuid.UUID | None = None
+    job: str | None = None
+    asset: str | None = None
+
+
 class GrantCreate(BaseModel):
     """Request body for creating a grant.
 

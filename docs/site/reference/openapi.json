@@ -12474,6 +12474,129 @@
       }
     },
     "/api/v1/task-tokens": {
+      "get": {
+        "tags": [
+          "task-tokens"
+        ],
+        "summary": "List the live task tokens",
+        "description": "Lists the task tokens that are neither revoked nor expired, newest first, each with the principal it signs in as, its environment and asset scope, its dates and, for a token a worker minted for a task, the run, job and asset. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. An `environment` no token names gives an empty list, not a 404.",
+        "operationId": "list_task_tokens_api_v1_task_tokens_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only the tokens of this environment; every environment when left out."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tokens returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `environment`."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskTokenOut"
+                  },
+                  "title": "Response List Task Tokens Api V1 Task Tokens Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "task-tokens"
@@ -36909,6 +37032,84 @@
         ],
         "title": "TaskTokenMintOut",
         "description": "Response body for a freshly minted task token.\n\nParameters\n----------\nkey_id\n    The public lookup key.\ntoken\n    The full token value. Shown here exactly once."
+      },
+      "TaskTokenOut": {
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "principal": {
+            "type": "string",
+            "title": "Principal"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "asset_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Asset Scope"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Issued At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
+          },
+          "asset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key_id",
+          "principal",
+          "environment",
+          "asset_scope",
+          "issued_at",
+          "expires_at"
+        ],
+        "title": "TaskTokenOut",
+        "description": "One listed task token: what it is for, never its value.\n\nParameters\n----------\nkey_id\n    The public lookup key, which revokes the token.\nprincipal\n    The name of the principal the token signs in as.\nenvironment\n    The one environment the token acts in.\nasset_scope\n    The asset patterns the token may act on; empty for a token bound to a task, whose\n    scope its run's project version gives.\nissued_at\n    When the token was minted.\nexpires_at\n    When the token stops working.\nrun_id\n    The run whose task the token was minted for, or `None` for a token minted over REST.\njob\n    That run's job, or `None`.\nasset\n    The asset of that task, or `None`."
       },
       "TaskTokenScopeOut": {
         "properties": {

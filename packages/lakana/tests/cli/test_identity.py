@@ -219,6 +219,53 @@ def test_token_list_limit_without_all_is_exit_2(tmp_path: Path, option: list[str
     assert "--limit and --cursor page the --all list." in result.stderr
 
 
+_TASK_TOKEN_ROW = {
+    "key_id": "t1",
+    "principal": "worker-1",
+    "environment": "dev",
+    "asset_scope": ["gold.*"],
+    "issued_at": "2026-11-01T09:00:00Z",
+    "expires_at": "2026-11-01T10:00:00Z",
+    "run_id": None,
+    "job": None,
+    "asset": None,
+}
+
+
+def test_task_token_list_without_env_lists_every_environment(tmp_path: Path) -> None:
+    """No `environment` query parameter is sent, though the profile has a default."""
+    api = FakeApi()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[_TASK_TOKEN_ROW], headers={"X-Next-Cursor": "n1"})
+
+    api.routes["GET", "/api/v1/task-tokens"] = respond
+
+    result = invoke(make_state(tmp_path, api), "task-token", "list", "--limit", "5")
+
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"limit": "5"}
+    assert "t1" in result.stdout
+    assert "worker-1" in result.stdout
+    assert "More results: lakana task-token list --limit 5 --cursor n1" in result.stdout
+
+
+def test_task_token_list_with_env(tmp_path: Path) -> None:
+    """`--env` filters, and the next page's command keeps it."""
+    api = FakeApi()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[_TASK_TOKEN_ROW], headers={"X-Next-Cursor": "n2"})
+
+    api.routes["GET", "/api/v1/task-tokens"] = respond
+
+    result = invoke(make_state(tmp_path, api), "task-token", "list", "--env", "dev")
+
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"environment": "dev"}
+    assert "More results: lakana task-token list --env dev --cursor n2" in result.stdout
+
+
 def test_task_token_mint_and_revoke(tmp_path: Path) -> None:
     """`mint` sends scope, TTL and the environment; `revoke` asks first."""
     api = FakeApi()

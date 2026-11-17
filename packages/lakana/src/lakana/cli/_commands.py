@@ -135,6 +135,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "sign-in setup-link": ("sign_in.setup_link",),
     "sign-in settings": ("sign_in_settings.get", "sign_in_settings.update"),
     "server start": ("environments.get", "environments.create", "sign_in.local_link"),
+    "task-token list": ("task_tokens.list", "task_tokens.list_page", "task_tokens.iter"),
     "task-token mint": ("task_tokens.mint",),
     "task-token revoke": ("task_tokens.revoke",),
     "grant create": ("grants.grant",),

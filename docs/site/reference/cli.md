@@ -32,7 +32,7 @@ Usage: `lakana [OPTIONS] COMMAND [ARGS]...`
 - [`lakana principal`](cli/lakana-principal.md): Manage principals.
 - [`lakana group`](cli/lakana-group.md): Manage groups.
 - [`lakana token`](cli/lakana-token.md): Manage personal access tokens.
-- [`lakana task-token`](cli/lakana-task-token.md): Mint and revoke task tokens.
+- [`lakana task-token`](cli/lakana-task-token.md): List, mint and revoke task tokens.
 - [`lakana invite`](cli/lakana-invite.md): Invite people by a link that creates their account (ADMIN).
 - [`lakana recovery`](cli/lakana-recovery.md): Recovery links for people who lost their passkeys (ADMIN).
 - [`lakana session`](cli/lakana-session.md): List and end browser sessions.

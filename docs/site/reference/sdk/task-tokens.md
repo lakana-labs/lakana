@@ -9,6 +9,57 @@ Part of the [Python SDK reference](index.md).
 
 The `task-tokens` resource of the platform API.
 
+### `client.task_tokens.list`
+
+Signature: `client.task_tokens.list(*, environment: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[TaskToken]`
+
+List the live task tokens, newest first. Needs the ADMIN role.
+
+The tokens of one page; `list_page` also returns the cursor of the next one, and `iter` walks every page. Revoked and expired tokens are left out.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment's tokens; every environment when `None`. |
+| `limit` | `int | None` | `None` | Most tokens returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `environment` with every page. |
+
+Returns: `list of TaskToken`. Newest first, each with its principal and, for a token bound to a task, its run.
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | If you do not hold the ADMIN role on the instance. |
+
+### `client.task_tokens.list_page`
+
+Signature: `client.task_tokens.list_page(*, environment: str | None = None, limit: int | None = None, cursor: str | None = None) -> TaskTokenPage`
+
+List one page of the live task tokens, with the cursor of the next page.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment's tokens; every environment when `None`. |
+| `limit` | `int | None` | `None` | Most tokens returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `environment` with every page. |
+
+Returns: `TaskTokenPage`. The tokens, and the cursor for the next page (`None` on the last).
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | If you do not hold the ADMIN role on the instance. |
+
+### `client.task_tokens.iter`
+
+Signature: `client.task_tokens.iter(*, environment: str | None = None, page_size: int = 100) -> Iterator[TaskToken]`
+
+Yield every live task token, newest first, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment's tokens; every environment when `None`. |
+| `page_size` | `int` | `100` | Tokens per request (1 to 200). |
+
+Returns: `Iterator of TaskToken`. Each token, once.
+
 ### `client.task_tokens.mint`
 
 Signature: `client.task_tokens.mint(principal: str, environment: str, asset_scope: list[str], ttl_seconds: int) -> MintedTaskToken`

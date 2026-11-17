@@ -374,6 +374,8 @@ _GUARDED = {
     "grants/service.py": ("MANAGE_GRANT", 4),
     "identity/groups.py": ("MANAGE_GROUP", 6),
     "identity/pats.py": ("MANAGE_TOKEN", 4),
+    # Listing task tokens is administering tokens; mint and revoke keep `MINT_TASK_TOKEN` rules.
+    "identity/task_tokens.py": ("MANAGE_TOKEN", 1),
     # A CI trust rule lets a CI job act as a service account: issuing it a token, in effect.
     "ci_oidc/rules.py": ("MANAGE_TOKEN", 8),
     # An access file names every kind of access: only an administrator may export, plan or

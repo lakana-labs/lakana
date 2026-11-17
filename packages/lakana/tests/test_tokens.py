@@ -8,8 +8,9 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport
-from lakana._models import Token
+from lakana._models import TaskToken, Token
 from lakana._tokens import mask_token
+from lakana.resources.task_tokens import TaskTokens
 from lakana.resources.tokens import Tokens, _token_from_json
 
 
@@ -134,3 +135,82 @@ def test_iter_all_follows_every_page() -> None:
 
     assert [t.key_id for t in tokens.iter_all(owner="bob", page_size=1)] == ["k1", "k2"]
     assert dict(seen[1].url.params) == {"owner": "bob", "limit": "1", "cursor": "p2"}
+
+
+_TASK_ROW: dict[str, Any] = {
+    "key_id": "t1",
+    "principal": "worker-1",
+    "environment": "dev",
+    "asset_scope": ["gold.*"],
+    "issued_at": "2026-11-01T09:00:00Z",
+    "expires_at": "2026-11-01T10:00:00Z",
+    "run_id": "9f3c1f4e-0000-4000-8000-000000000001",
+    "job": "nightly",
+    "asset": "gold.scores",
+}
+
+
+def _task_tokens(
+    pages: list[tuple[list[dict[str, Any]], str | None]], seen: list[httpx.Request]
+) -> TaskTokens:
+    """Build a `TaskTokens` resource whose server answers successive requests with successive pages.
+
+    Parameters
+    ----------
+    pages
+        The body and the `X-Next-Cursor` header (or `None`) of each answer; the last repeats.
+    seen
+        Where to record the requests.
+
+    Returns
+    -------
+    TaskTokens
+        The resource.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body, cursor = pages[min(len(seen), len(pages) - 1)]
+        seen.append(request)
+        headers = {} if cursor is None else {NEXT_CURSOR_HEADER: cursor}
+        return httpx.Response(200, json=body, headers=headers)
+
+    config = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=config.url)
+    return TaskTokens(HttpTransport(config, http_client=client))
+
+
+def test_task_tokens_list_sends_environment_and_reads_the_cursor_header() -> None:
+    """`list_page` asks `GET /api/v1/task-tokens` with the filters and keeps the next cursor."""
+    seen: list[httpx.Request] = []
+    tokens = _task_tokens([([_TASK_ROW, {**_TASK_ROW, "run_id": None}], "next-1")], seen)
+
+    page = tokens.list_page(environment="dev", limit=5, cursor="c0")
+
+    assert seen[0].url.path == "/api/v1/task-tokens"
+    assert dict(seen[0].url.params) == {"environment": "dev", "limit": "5", "cursor": "c0"}
+    assert page.next_cursor == "next-1"
+    first, bare = page.items
+    assert first == TaskToken(
+        key_id="t1",
+        principal="worker-1",
+        environment="dev",
+        asset_scope=["gold.*"],
+        issued_at=datetime(2026, 11, 1, 9, tzinfo=UTC),
+        expires_at=datetime(2026, 11, 1, 10, tzinfo=UTC),
+        run_id="9f3c1f4e-0000-4000-8000-000000000001",
+        job="nightly",
+        asset="gold.scores",
+    )
+    assert bare.run_id is None
+    assert [t.key_id for t in tokens.list()] == ["t1", "t1"]
+    assert "environment" not in dict(seen[-1].url.params)
+
+
+def test_task_tokens_iter_follows_every_page() -> None:
+    """`iter` fetches pages until the cursor runs out."""
+    seen: list[httpx.Request] = []
+    second = {**_TASK_ROW, "key_id": "t2"}
+    tokens = _task_tokens([([_TASK_ROW], "p2"), ([second], None)], seen)
+
+    assert [t.key_id for t in tokens.iter(environment="dev", page_size=1)] == ["t1", "t2"]
+    assert dict(seen[1].url.params) == {"environment": "dev", "limit": "1", "cursor": "p2"}

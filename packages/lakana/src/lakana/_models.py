@@ -1887,6 +1887,59 @@ class MintedTaskToken:
 
 
 @dataclass(frozen=True)
+class TaskToken:
+    """One listed task token: what it is for, never its value.
+
+    Parameters
+    ----------
+    key_id
+        The public lookup key, which `task_tokens.revoke` takes.
+    principal
+        The name of the principal the token signs in as.
+    environment
+        The one environment the token acts in.
+    asset_scope
+        The asset patterns it may act on; empty for a token bound to a task.
+    issued_at
+        When the token was minted.
+    expires_at
+        When the token stops working.
+    run_id
+        The run whose task the token was minted for; `None` for a token minted over REST.
+    job
+        That run's job, or `None`.
+    asset
+        The asset of that task, or `None`.
+    """
+
+    key_id: str
+    principal: str
+    environment: str
+    asset_scope: list[str]
+    issued_at: datetime
+    expires_at: datetime
+    run_id: str | None = None
+    job: str | None = None
+    asset: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskTokenPage:
+    """One page of the live task tokens, newest first.
+
+    Parameters
+    ----------
+    items
+        The tokens on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[TaskToken]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class SubjectPrincipal:
     """The principal a grant, row filter or column mask is for.
 

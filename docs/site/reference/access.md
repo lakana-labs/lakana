@@ -160,6 +160,21 @@ first, with an owner column, and prints the command for the next page when there
 `--limit` and `--cursor` page it, and a name together with `--all` is refused. An unknown owner
 is `404`; a person, or a task or CI token, gets `403`.
 
+### Task tokens
+
+`lakana task-token list` is for an administrator: it lists the task tokens that are neither revoked
+nor expired, newest first, across every environment unless `--env` names one. An environment no
+token names gives an empty list, not an error. A listed task token says its `key_id`, `principal`,
+`environment`, `asset_scope`, `issued_at` and `expires_at`, and for a token a worker minted for a
+task, the `run_id`, `job` and `asset` (all empty for a token minted over REST). It never says the
+token's value. `--limit` and `--cursor` page it, as with `token list --all`. Anyone who is not an
+administrator, and a task or CI token, gets `403`.
+
+An administrator may revoke any task token from the web interface, under Access, Tokens. A person
+may revoke only a task token minted for themselves over REST, as before. Minting stays with
+`lakana task-token mint`: a browser is refused (`403`, `TokenOnlyRoute`), so no task token is ever
+shown in the interface.
+
 ## Refusals
 
 | Cause | Answer |
