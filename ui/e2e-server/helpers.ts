@@ -699,7 +699,7 @@ export async function namespaceStatus(
 /**
  * Registers a repository through the API and records a project version of it that produced
  * tables, with no deployment after it, so those tables are orphans. A deploy needs a git host
- * and a worker, which this suite has neither of; the version row is one of two things written
+ * and a worker, which this suite has neither of; the version row is one of three things written
  * straight into the server's SQLite file (`ui/.e2e-server/lakana.db`), and the API reads it
  * back as it would a deployed one.
  *
@@ -748,6 +748,117 @@ export async function recordOrphanedVersion(
   }
 }
 
+/** A job of a deployed project, as {@link recordDeployedJob} records it. */
+export interface DeployedJob {
+  /** The job's name. */
+  readonly name: string;
+  /** The dotted table the project builds and the job runs. */
+  readonly table: string;
+  /** The job's cron expression, in `Europe/Berlin`. */
+  readonly cron: string;
+  /** The name of the secret that holds the job's Slack webhook. */
+  readonly secret: string;
+}
+
+/**
+ * The form SQLAlchemy writes a UTC time in on SQLite: no zone, six digits of a second.
+ *
+ * @param at - The time.
+ * @returns The text.
+ */
+function sqliteTime(at: Date): string {
+  return `${at.toISOString().slice(0, 23).replace("T", " ")}000`;
+}
+
+/**
+ * Registers a repository through the API and records it as deployed in an environment with one
+ * job: a project version whose manifest builds one table and declares the job (selecting that
+ * table, on a schedule, notifying Slack through a secret), the environment's pointer to that
+ * version, and the job's schedule row, as a deploy would leave them. A deploy needs a git host
+ * and a worker, which this suite has neither of; like {@link recordOrphanedVersion}, the rows
+ * are written straight into the server's SQLite file (`ui/.e2e-server/lakana.db`), the columns
+ * those of `JobVersion`, `EnvironmentDeployment` (`models/deploy.py`) and `JobSchedule`
+ * (`models/job.py`), and the API reads them back as it would a real deploy's. No run principal
+ * is bound, so a start by hand in an unprotected environment runs as the person who starts it.
+ *
+ * @param request - The request context.
+ * @param environment - The environment; unprotected.
+ * @param repository - The repository's name; unique in the run.
+ * @param job - The job.
+ * @returns Resolves once the deploy is recorded.
+ */
+export async function recordDeployedJob(
+  request: APIRequestContext,
+  environment: string,
+  repository: string,
+  job: DeployedJob,
+): Promise<void> {
+  await create(request, "/api/v1/repositories", {
+    name: repository,
+    kind: "https",
+    url: `https://github.com/acme/${repository}.git`,
+  });
+  const database = new DatabaseSync(resolve(import.meta.dirname, "..", ".e2e-server", "lakana.db"));
+  try {
+    const ids = (sql: string, name: string): string =>
+      (database.prepare(sql).get(name) as { id: string }).id;
+    const repositoryId = ids("SELECT id FROM repositories WHERE name = ?", repository);
+    const environmentId = ids("SELECT id FROM environments WHERE name = ?", environment);
+    const versionId = randomUUID().replaceAll("-", "");
+    const now = new Date();
+    const manifest = {
+      version: 1,
+      assets: [{ table: job.table, references: [] }],
+      edges: [],
+      external_inputs: [],
+      jobs: {
+        [job.name]: {
+          select: [job.table],
+          schedule: { cron: job.cron, timezone: "Europe/Berlin" },
+          notify: { webhook: job.secret, format: "slack" },
+        },
+      },
+    };
+    database
+      .prepare(
+        `INSERT INTO job_versions (id, repository_id, environment_id, commit_sha, manifest_json,
+           code_uri, code_sha256, created_at)
+         VALUES (?, ?, ?, ?, ?, 's3://bucket/code.tar.gz', ?, ?)`,
+      )
+      .run(
+        versionId,
+        repositoryId,
+        environmentId,
+        "b".repeat(40),
+        JSON.stringify(manifest),
+        "0".repeat(64),
+        sqliteTime(now),
+      );
+    database
+      .prepare(
+        `INSERT INTO environment_deployments (environment_id, repository_id,
+           current_job_version_id, run_as_principal_id, updated_at)
+         VALUES (?, ?, ?, NULL, ?)`,
+      )
+      .run(environmentId, repositoryId, versionId, sqliteTime(now));
+    // The scheduler would work the next time out; any time ahead does for a server with no worker.
+    database
+      .prepare(
+        `INSERT INTO job_schedules (id, environment_id, repository_id, job, next_fire_at, paused)
+         VALUES (?, ?, ?, ?, ?, 0)`,
+      )
+      .run(
+        randomUUID().replaceAll("-", ""),
+        environmentId,
+        repositoryId,
+        job.name,
+        sqliteTime(new Date(now.getTime() + 86_400_000)),
+      );
+  } finally {
+    database.close();
+  }
+}
+
 /**
  * Moves a person's last passkey touch an hour into the past on every open session, so the next
  * action that needs a recent touch meets `StepUpRequired`, as after 15 minutes of work without
@@ -757,8 +868,7 @@ export async function recordOrphanedVersion(
  * @param name - The person's name.
  */
 export function ageThePasskeyTouch(name: string): void {
-  // The form SQLAlchemy writes a UTC time in on SQLite: no zone, six digits of a second.
-  const anHourAgo = `${new Date(Date.now() - 3_600_000).toISOString().slice(0, 23).replace("T", " ")}000`;
+  const anHourAgo = sqliteTime(new Date(Date.now() - 3_600_000));
   const database = new DatabaseSync(resolve(import.meta.dirname, "..", ".e2e-server", "lakana.db"));
   try {
     const changed = database

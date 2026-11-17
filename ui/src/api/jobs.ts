@@ -41,28 +41,37 @@ export interface NotifyOut {
   readonly secret?: string;
 }
 
-/** One way a job starts. A client ignores a `kind` it does not know. */
-export type TriggerOut =
-  | {
-      /** A schedule. */
-      readonly kind: "schedule";
-      /** The cron expression. */
-      readonly cron: string;
-      /** The schedule's IANA zone. */
-      readonly timezone: string;
-      /** Whether the schedule is paused. */
-      readonly paused: boolean;
-      /** The next scheduled time (UTC); null for a paused schedule. */
-      readonly next_run_at: string | null;
-    }
-  | {
-      /** After each deploy that changes the project. */
-      readonly kind: "deploy";
-    }
-  | {
-      /** Through the API, the SDK or the CLI. */
-      readonly kind: "on_demand";
-    };
+/** A job's schedule, as one of its triggers. */
+interface ScheduleTriggerOut {
+  /** A schedule. */
+  readonly kind: "schedule";
+  /** The cron expression. */
+  readonly cron: string;
+  /** The schedule's IANA zone. */
+  readonly timezone: string;
+  /** Whether the schedule is paused. */
+  readonly paused: boolean;
+  /** The next scheduled time (UTC); null for a paused schedule. */
+  readonly next_run_at: string | null;
+}
+
+/** A job that starts after each deploy that changes the project. */
+interface DeployTriggerOut {
+  /** After each deploy. */
+  readonly kind: "deploy";
+}
+
+/** A job that starts through the API, the SDK or the CLI. */
+interface OnDemandTriggerOut {
+  /** On demand. */
+  readonly kind: "on_demand";
+}
+
+/**
+ * One way a job starts. A client ignores a `kind` it does not know. Each is an interface of its
+ * own, so the hidden-character check (`e2e/api-types.ts`) reads each `kind` as the code it is.
+ */
+export type TriggerOut = ScheduleTriggerOut | DeployTriggerOut | OnDemandTriggerOut;
 
 /** Why something waits: a stable code and one sentence. */
 export interface WaitingOut {
