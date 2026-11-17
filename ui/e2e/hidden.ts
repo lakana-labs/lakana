@@ -20,35 +20,181 @@ const RLO_ENCODED = /%E2%80%AE/gi;
 const API_TYPES = apiTypes();
 
 /**
- * Fields `src/api` types as `string` but documents as a code, by type: the interface translates
- * them (`item`, `causes`, `via`, a check's `outcome`) or compares them (a lineage node's or
- * edge's `kind`, a probe's `kind`, `state` and `outcome`, a link's `kind` and `state`, a search
- * hit's `kind` and `matched`). An override in one sends the screen down a branch the server never
- * takes, which the named values of a step then miss. Every other `string` field carries an
- * override, even where the same name is a code in another type.
+ * Fields `src/api` types as `string` but documents as a code the interface translates (`item`,
+ * `causes`, `via`, a check's `outcome`), by type. An override in one sends the screen down a
+ * branch the server never takes, which the named values of a step then miss. A code the interface
+ * compares is a union of string literals in `src/api`, which the check finds by type. Every other
+ * `string` field carries an override, even where the same name is a code in another type.
  */
 export const STRING_CODES: Readonly<Record<string, readonly string[]>> = {
   BrowserSessionOut: ["via"],
   CheckHealthOut: ["outcome"],
-  GraphEdgeOut: ["kind"],
-  GraphNodeOut: ["kind"],
   HealthSummaryOut: ["item"],
   InstanceStatusOut: ["causes"],
-  LinkDescriptionOut: ["kind", "state"],
-  RepositoryProbeOut: ["kind", "outcome", "state"],
   SessionOut: ["via"],
-  TableMatchOut: ["kind", "matched"],
 };
 
 /**
+ * The type each object of the stubbed answers is read as, by its keys ({@link readKey}): the pick
+ * of {@link typeOf}, `-` for none. `typeOf` falls back to a partial fit and breaks ties by
+ * declaration order, so a new type in `src/api` or a changed stub can move an object to a type
+ * whose codes include one of its free-text fields, which would then carry no override.
+ * `hidden-characters.spec.ts` fails on an object a stub serves that is read as another type or
+ * not listed ({@link takeReads}), on an entry `typeOf` no longer picks, and on an entry no stub
+ * serves.
+ */
+export const READ_AS: Readonly<Record<string, string>> = {
+  '["absolute_expires_at","browser","created_at","current","id","last_seen_at","peer","user_agent","via"]':
+    "BrowserSessionOut",
+  '["absolute_expires_at","display_name","name","needs_passkey","offer_passkey","step_up_until","type","via"]':
+    "SessionOut",
+  '["action","allowed","reason","via"]': "PermissionOut",
+  '["action","environment","granted_at","granted_by","group","group_id","id","kind","namespace","note","principal","principal_id","role","table"]':
+    "GrantOut",
+  '["actions","commit_sha","created_at","created_by","deleted_at","deleted_by","deleted_versions","file_count","files","is_directory","manifest_sha256","project_version_id","run_id","size_bytes","task_run_id","version"]':
+    "ArtifactVersionOut",
+  '["actions","count","name","namespaces"]': "TableTreeOut.environments",
+  '["actions","count","path"]': "TableTreeOut.environments.namespaces",
+  '["actions","created_at","current_version","defined_by","keep_versions","kind","name","namespace","size_bytes","uuid","versions"]':
+    "ArtifactOut",
+  '["actions","created_at","defined_by","description","description_language","description_source","expires_at","expires_soon","file_count","health","health_missing","health_never_judged","health_summary","hidden_references","kind","label","label_language","label_source","language","last_read_at","last_write_at","main_language","metadata_location","model","name","namespace","owner","readers_7d","references","row_count","schema","size_bytes","snapshot_id","sql","state","state_message","terms","translations","uuid"]':
+    "TableOut",
+  '["actions","dropped_at","kind","name","namespace","purge_after","restorable","uuid"]':
+    "DroppedTableOut",
+  '["actions","exists","kind","repository","table"]': "OrphanOut",
+  '["active","note","permissions","principal","scope"]': "PermissionsOut",
+  '["admin","ci_token","has_access","language","may_deploy","name","picture","task_token","type"]':
+    "WhoamiOut",
+  '["alert","band","column","effect","id","last_fired_at","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
+    "HealthSignalOut",
+  '["alert","band","column","effect","id","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
+    "HealthSignalOut",
+  '["artifact","created_at","expires_at","upload_id"]': "ArtifactUploadOut",
+  '["at","column","id","table","target","target_column","target_exists"]': "ModelReferenceOut",
+  '["at","environment","kind","ref","title"]': "AttentionItemOut",
+  '["audience","complete","hidden","local","steps"]': "GetStartedOut",
+  '["backup_eligible","created_at","disabled_reason","id","last_used_at","name","usable_here"]':
+    "PasskeyOut",
+  '["binary"]': "-",
+  '["bound","column","created_at","created_by","environment","expression","group","group_id","id","namespace","principal","principal_id","table"]':
+    "ColumnMaskOut",
+  '["bound","created_at","created_by","environment","expression","group","group_id","id","namespace","principal","principal_id","table"]':
+    "PolicyOut",
+  '["browse_url","bytes","commit","content","defined","deployed_at","line","message","path","project_version_id","reason","repository"]':
+    "TableDefinitionFileOut",
+  '["browse_url","commit","defined","deployed_at","line","path","project_version_id","repository"]':
+    "TableDefinitionOut",
+  '["capped","items","next_cursor"]': "TableListPageOut",
+  '["causes","detail","state","workers_alive","workers_total"]': "InstanceStatusOut",
+  '["check","error","failing_rows","finished_at","kept","name","not_published","on_failure","outcome","rollback_outcome","run_id"]':
+    "CheckHealthOut",
+  '["checks","days","hidden_checks","last_maintenance","readers","signals"]': "TableHealthOut",
+  '["checks","grain","hidden_references","key","key_none","kind","measures","references"]':
+    "TableModelOut",
+  '["column","column_type","kind","language","matched","snippet","translated"]': "TableMatchOut",
+  '["column","table"]': "MaskedColumnOut",
+  '["columns","columns_cut","duration_ms","masked_columns","masked_columns_cut","next_offset","preview","row_count","row_cut","rows"]':
+    "ResultPageOut",
+  '["connection_kind","distance","id","kind","name"]': "GraphNodeOut",
+  '["count","environments"]': "TableTreeOut",
+  '["created_at","display_name","expires_at","id","name"]': "OpenInviteOut",
+  '["created_at","environment","health_summary","kind","last_read_at","last_write_at","match","model_kind","name","namespace","owner","readers_7d","row_count","size_bytes","state","uuid"]':
+    "TableListItemOut",
+  '["created_at","expires_at","id","name"]': "OpenRecoveryLinkOut",
+  '["created_at","finished_at","host_keys","id","kind","message","outcome","state"]':
+    "RepositoryProbeOut",
+  '["created_at","id","kind","subject"]': "NoticeOut",
+  '["days","expires_at","kept","last_activity_at","name","namespace","never","on","set_at","set_by","source","uuid"]':
+    "TableRetentionOut",
+  '["description","description_language","description_source","label","label_language","label_source","name","nullable","terms","type"]':
+    "ColumnOut",
+  '["detail","type"]': "ErrorBody",
+  '["detail"]': "ErrorBody",
+  '["display_name","kind","name","state"]': "LinkDescriptionOut",
+  '["distance","id","kind","name","repository"]': "GraphNodeOut",
+  '["distance","id","kind","name","table_type"]': "GraphNodeOut",
+  '["distance","id","kind","name"]': "GraphNodeOut",
+  '["done","id"]': "GetStartedStepOut",
+  '["edges","next_cursor","nodes"]': "GraphOut",
+  '["environment","fingerprint","made","public_key"]': "DeployKeyMadeOut",
+  '["environment","job","last_run_at","last_run_status","repository"]': "WorkJobOut",
+  '["environment","kind","namespace","table"]': "ScopeOut",
+  '["environment","kind","opened_at","ref"]': "RecentOut",
+  '["environment","last_deploy_at","last_deploy_status"]': "WorkEnvironmentOut",
+  '["environments","name"]': "WorkRepositoryOut",
+  '["fingerprint","line","type"]': "HostKeyOut",
+  '["get_started_hidden","tour_seen","update_note_seen"]': "InterfaceStateOut",
+  '["grant_id","group","kind","role","scope"]': "ViaOut",
+  '["hidden","next_cursor","orphans"]': "-",
+  '["hidden_incoming","hidden_outgoing","incoming","outgoing","table"]': "TableReferencesOut",
+  '["high","low","max","min"]': "HealthBandOut",
+  '["high","low","median"]': "HealthBandOut",
+  '["high"]': "HealthBandOut",
+  '["id","name","principal_type"]': "SubjectPrincipalOut",
+  '["is_active","name","picture","type"]': "PrincipalOut",
+  '["is_protected","name"]': "OwnerOut",
+  '["item","others","state","text"]': "HealthSummaryOut",
+  '["items","next_cursor"]': "TableListPageOut",
+  '["items","truncated"]': "AttentionOut",
+  '["job","last_commit_at","seconds","source"]': "HealthObservedOut",
+  '["jobs","repositories"]': "WorkOut",
+  '["keys","notes","replaced","secret","skipped"]': "DeployKeyOut",
+  '["kind","lower","upper"]': "HealthObservedOut",
+  '["kind","name"]': "OwnerOut",
+  '["kind","source","target"]': "GraphEdgeOut",
+  '["last_read_at","principal","read_count"]': "ReaderOut",
+  '["memory_limit_bytes","memory_used_bytes","slots_busy","slots_total","workers"]':
+    "StatusDetailOut",
+  '["name","type"]': "ResultColumnOut",
+  '["name"]': "OwnerOut",
+  '["nulls","rate","values"]': "HealthObservedOut",
+  '["path","properties"]': "NamespaceOut",
+  '["path","repository"]': "DefinedByOut",
+  '["path","sha256","size"]': "ArtifactFileOut",
+  '["query_id","status"]': "QueryStatusOut",
+  '["query_id"]': "QueryStatusOut",
+  '["table"]': "MaskedColumnOut",
+  '["version"]': "InfoOut",
+  "[]": "-",
+};
+
+/**
+ * An object's keys as {@link READ_AS} holds them: sorted, as JSON, as a key that comes from data
+ * (in `observed` or `properties`) may hold any character.
+ *
+ * @param keys - The object's keys.
+ * @returns The key.
+ */
+export function readKey(keys: readonly string[]): string {
+  return JSON.stringify([...keys].sort());
+}
+
+/** The objects `poison` read since {@link takeReads} last ran: their keys, and the type. */
+const reads = new Map<string, string>();
+
+/**
+ * The objects `poison` read since the last call, each with the type it read it as; then forgets
+ * them.
+ *
+ * @returns The type's name by {@link readKey}, `-` for none.
+ */
+export function takeReads(): ReadonlyMap<string, string> {
+  const taken = new Map(reads);
+  reads.clear();
+  return taken;
+}
+
+/**
  * The fields of an answer's object that hold codes: those of its type ({@link typeOf}) whose
- * type is a union of string literals, and its {@link STRING_CODES}.
+ * type is a union of string literals, and its {@link STRING_CODES}. Records the pick for
+ * {@link takeReads}.
  *
  * @param keys - The object's keys.
  * @returns The fields.
  */
 function codeFields(keys: readonly string[]): ReadonlySet<string> {
   const type = typeOf(API_TYPES, keys);
+  reads.set(readKey(keys), type?.name ?? "-");
   return type === undefined
     ? new Set()
     : new Set([...type.literal, ...(STRING_CODES[type.name] ?? [])]);
@@ -356,6 +502,8 @@ export async function expectMarked(
   values: readonly [string, ...string[]],
 ): Promise<void> {
   await page.waitForLoadState("networkidle");
+  // The scope is chosen once: wait until the interface has mounted one.
+  await expect(page.locator("main, [role=dialog]").first()).toBeAttached();
   const dialog = page.getByRole("dialog");
   const scope: Locator = (await dialog.count()) > 0 ? dialog.last() : page.locator("main");
   for (const value of values) {

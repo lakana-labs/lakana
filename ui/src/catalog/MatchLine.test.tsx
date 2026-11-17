@@ -97,7 +97,13 @@ describe("MatchLine", () => {
   });
 
   it("falls back to the field's own name for a field it has no word for", () => {
-    const container = line({ kind: "table", matched: "owner", column: null, snippet: "kim" });
+    const container = line({
+      kind: "table",
+      // A field newer than this interface.
+      matched: "owner" as TableMatchOut["matched"],
+      column: null,
+      snippet: "kim",
+    });
 
     expect(container).toHaveTextContent("owner · kim");
   });
@@ -141,7 +147,7 @@ describe("MatchLine", () => {
   it("marks hidden characters in a translation's language and in a field it has no word for", () => {
     const container = line({
       kind: "table",
-      matched: "foot\u202Enote",
+      matched: "foot\u202Enote" as TableMatchOut["matched"],
       column: null,
       column_type: null,
       snippet: "Every sale",

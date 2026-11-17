@@ -529,6 +529,70 @@ export function listColumnMasks(ref: TableRef): Promise<readonly ColumnMaskOut[]
   return api.request<readonly ColumnMaskOut[]>("GET", `/api/v1/column-masks?${tableQuery(ref)}`);
 }
 
+/**
+ * What a health signal observed: the fields of each signal's shape (freshness, volume, empty
+ * values, range, schema), or the reason it recorded none. The server may add fields and values:
+ * read each with a fallback.
+ */
+interface HealthObservedOut extends Readonly<Record<string, unknown>> {
+  /** Why it recorded no values. The server may add values: compare, and keep a fallback. */
+  readonly reason?: "not_finite" | "not_recorded" | "no_rows" | "paused";
+  /** Freshness: seconds since the last commit. */
+  readonly seconds?: number;
+  /** Freshness: when the last commit was. */
+  readonly last_commit_at?: string;
+  /** Freshness: what set the limit; null without enough history. The server may add values: compare, and keep a fallback. */
+  readonly source?: "schedule" | "history" | null;
+  /** Freshness: the job whose schedule set the limit. */
+  readonly job?: string | null;
+  /** Volume: the rows the last load added; schema: the columns added. */
+  readonly added?: number | readonly unknown[];
+  /** Volume: false when the last commit loaded nothing. */
+  readonly loaded?: boolean;
+  /** Volume: the table's rows. */
+  readonly total?: number;
+  /** Empty values: how many. */
+  readonly nulls?: number;
+  /** Empty values: of how many values. */
+  readonly values?: number;
+  /** Empty values: their share. */
+  readonly rate?: number;
+  /** Range: the lowest value. */
+  readonly lower?: number;
+  /** Range: the highest value. */
+  readonly upper?: number;
+  /** Range: what the bounds count. The server may add values: compare, and keep a fallback. */
+  readonly kind?: "integer" | "number" | "date" | "timestamp";
+  /** Schema: the columns. */
+  readonly columns?: readonly unknown[];
+  /** Schema: the columns dropped. */
+  readonly dropped?: readonly unknown[];
+  /** Schema: the columns whose type changed. */
+  readonly retyped?: readonly unknown[];
+}
+
+/**
+ * The usual band a health signal was judged against. The server may add fields and values: read
+ * each with a fallback.
+ */
+interface HealthBandOut extends Readonly<Record<string, unknown>> {
+  /** The lowest usual value. */
+  readonly low?: number;
+  /** The highest usual value. */
+  readonly high?: number;
+  /** The median. */
+  readonly median?: number;
+  /** Range: the lowest lower bound seen. */
+  readonly min?: number;
+  /** Range: the highest upper bound seen. */
+  readonly max?: number;
+  /** Volume: whether the band is of one weekday or of all days. The server may add values: compare, and keep a fallback. */
+  readonly basis?: "weekday" | "all";
+  /** Volume: the weekday it is of. The server may add values: compare, and keep a fallback. */
+  readonly weekday?:
+    "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
+}
+
 /** One health signal of a table, as the caller may see it. */
 interface HealthSignalOut {
   /** The observation's id. */
@@ -546,9 +610,9 @@ interface HealthSignalOut {
   /** When it was recorded. */
   readonly observed_at: string;
   /** What was observed; null when hidden. */
-  readonly observed: Readonly<Record<string, unknown>> | null;
+  readonly observed: HealthObservedOut | null;
   /** The usual band it was judged against; null when hidden or none. */
-  readonly band: Readonly<Record<string, unknown>> | null;
+  readonly band: HealthBandOut | null;
   /** The server's sentence for a fired signal; null when it did not fire or its values are hidden. */
   readonly alert: string | null;
   /** Whether a column mask or row filter left out `observed`, `band` and `alert`. */
@@ -625,8 +689,19 @@ export function getTableHealth(
 export interface GraphNodeOut {
   /** Its stable id, such as `table:<uuid>`. */
   readonly id: string;
-  /** `table`, `job`, `connection` and others. */
-  readonly kind: string;
+  /** What it is. The server may add values: compare, and keep a fallback. */
+  readonly kind:
+    | "table"
+    | "column"
+    | "asset"
+    | "reference"
+    | "measure"
+    | "term"
+    | "check"
+    | "row_filter"
+    | "column_mask"
+    | "job"
+    | "connection";
   /** A name to read: a dotted table name for a table. */
   readonly name: string;
   /** Steps from the start. */
@@ -645,8 +720,19 @@ export interface GraphNodeOut {
 
 /** An edge of the metadata graph, from `source` to `target`. */
 interface GraphEdgeOut {
-  /** `reads`, `builds`, `references` and others. */
-  readonly kind: string;
+  /** What it says, from `source` to `target`. The server may add values: compare, and keep a fallback. */
+  readonly kind:
+    | "builds"
+    | "checks"
+    | "filters"
+    | "has_column"
+    | "links"
+    | "masks"
+    | "measures"
+    | "reads"
+    | "references"
+    | "runs"
+    | "uses";
   /** The node it leaves. */
   readonly source: string;
   /** The node it reaches. */
