@@ -774,9 +774,10 @@ def get_query_result(
     result, never a page; it is streamed, so no `Content-Length` is promised. It names itself
     in `Content-Disposition` (`query-ID.arrow`, `.csv`, `.xlsx`) and carries the run's row
     count and Arrow size as `X-Result-Rows` and `X-Result-Arrow-Bytes` when the run recorded
-    them. Each download of a file is audited as `QUERY_RESULT_EXPORTED`, except by a token
-    bound to a task attempt. With `format=json` it returns one page as JSON: at most `limit`
-    rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows.
+    them. Each download of a file is audited as `QUERY_RESULT_EXPORTED`, except an Arrow
+    download by a token bound to a task attempt. With `format=json` it returns one page as
+    JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at
+    most its 100 rows.
     The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked;
     it names the columns masked for you and, for a preview, the table; it is not audited as an
     export. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result;

@@ -232,7 +232,8 @@ accepted for M5c2b.
   another principal's run, a manager's view of it and a task token's run of another token are the
   same 404 as the status read, and nothing is recorded. Every download of the whole result writes
   `QUERY_RESULT_EXPORTED` (query id, format, rows, Arrow size) before the first byte; a JSON page,
-  a refused download and a token bound to a task attempt write none. The event records the start of
+  a refused download and an Arrow download by a token bound to a task attempt write none (that
+  token's CSV or spreadsheet download is recorded). The event records the start of
   a download, not that it finished. A CSV is written verbatim: a value starting with `=` is not
   escaped against formula injection; the spreadsheet format writes every text as text.
 - **A holder of `WRITE_TABLE` can block uploads to the artifact and can fill storage.** The cap of 16

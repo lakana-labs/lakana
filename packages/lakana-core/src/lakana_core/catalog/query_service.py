@@ -511,9 +511,10 @@ class QueryService:
 
         The caller has already read the run with `get_query_run` and decided every refusal,
         and calls this before the first byte is sent. A JSON page is not an export and is never
-        recorded. Nor is a download by a token bound to a task attempt, as for
+        recorded. Nor is an Arrow download by a token bound to a task attempt, as for
         `ARTIFACT_DOWNLOADED`: a pipeline task reads its inputs as Arrow on every run, which
-        is not a person exporting data.
+        is not a person exporting data. That token's CSV or spreadsheet download is recorded
+        like anyone's.
 
         Parameters
         ----------
@@ -532,7 +533,7 @@ class QueryService:
             The stored Arrow file's length, from the run or else from the file read; `None` if
             neither is known.
         """
-        if p.task_scope is not None and p.task_scope.bound is not None:
+        if result_format == "arrow" and p.task_scope is not None and p.task_scope.bound is not None:
             return
         AuditService(self._session).record(
             p.id,

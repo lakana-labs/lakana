@@ -1917,7 +1917,9 @@ def test_a_download_of_another_principals_run_is_404_and_writes_no_export_event(
     assert _exports(client) == []
 
 
-def test_a_bound_task_token_writes_no_export_event(client: TestClient) -> None:
+def test_a_bound_task_token_writes_an_export_event_for_a_file_but_not_for_arrow(
+    client: TestClient,
+) -> None:
     from lakana_core.auth import BoundTask, PrincipalRef, TaskScope
     from lakana_core.models import PrincipalType
     from lakana_server.deps import get_principal
@@ -1936,12 +1938,19 @@ def test_a_bound_task_token_writes_no_export_event(client: TestClient) -> None:
     bound = PrincipalRef(id=admin, name="admin", type=PrincipalType.USER, task_scope=scope)
     client.app.dependency_overrides[get_principal] = lambda: bound
     try:
-        for result_format in ("arrow", "csv", "xlsx"):
+        arrow = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+        assert arrow.status_code == 200, arrow.text
+        assert _exports(client) == []
+        for result_format in ("csv", "xlsx"):
             got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
             assert got.status_code == 200, (result_format, got.text)
     finally:
         del client.app.dependency_overrides[get_principal]
-    assert _exports(client) == []
+    detail = {"query_id": qid, "rows": 3, "size_bytes": _arrow_size(THREE_ROWS)}
+    assert _exports(client) == [
+        (admin, {**detail, "format": "csv"}),
+        (admin, {**detail, "format": "xlsx"}),
+    ]
 
 
 def test_an_xlsx_refusal_is_422_with_the_sentence_and_writes_no_export_event(

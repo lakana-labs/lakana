@@ -128,8 +128,8 @@ Each download of a whole result as Arrow, CSV or a spreadsheet writes one `QUERY
 event to the audit log, before the first byte is sent. It names the environment, the query, the
 format, the number of rows and the size of the stored result. A refused download writes none. The
 JSON pages that the web interface shows are not downloads and write none. A pipeline task that reads
-its inputs through its own token is not audited either, since that is how a task runs, not an
-export.
+its inputs as Arrow through its own token is not audited either, since that is how a task runs, not
+an export. The same token downloading CSV or a spreadsheet is audited like anyone else.
 
 ## Find your queries again
 

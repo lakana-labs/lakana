@@ -2772,7 +2772,7 @@ def test_an_export_is_recorded_on_the_environment_with_its_format_and_size(
     assert len(_exports(session)) == 2, "the event is committed before the first byte"
 
 
-def test_an_export_by_a_token_bound_to_a_task_attempt_is_not_recorded(
+def test_only_an_arrow_export_by_a_token_bound_to_a_task_attempt_goes_unrecorded(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:
     run = _queued(session, principal, tmp_path)
@@ -2786,6 +2786,9 @@ def test_an_export_by_a_token_bound_to_a_task_attempt_is_not_recorded(
     service = QueryService(session, SUBMITTER)
     service.record_export(bound, "dev", run, "arrow", rows=1, size_bytes=10)
     assert _exports(session) == []
+    for result_format in ("csv", "xlsx"):
+        service.record_export(bound, "dev", run, result_format, rows=1, size_bytes=10)
+    assert [e.detail["format"] for e in _exports(session)] == ["csv", "xlsx"]
     unbound = dataclasses.replace(principal, task_scope=dataclasses.replace(scope, bound=None))
     service.record_export(unbound, "dev", run, "arrow", rows=1, size_bytes=10)
-    assert len(_exports(session)) == 1
+    assert [e.detail["format"] for e in _exports(session)] == ["csv", "xlsx", "arrow"]
