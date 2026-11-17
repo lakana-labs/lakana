@@ -27,6 +27,8 @@ describe("locationForFolder", () => {
     expect(locationForFolder("raw/a", ["x.txt", "y.json"])).toBe("raw/a/*.json");
     expect(locationForFolder("raw/a", ["x.txt", "y.log"])).toBe("raw/a/*.log");
     expect(locationForFolder("raw/a", ["x.parquet", "y.csv"])).toBe("raw/a/*.csv");
+    expect(locationForFolder("raw/a", ["y.log", "x.txt"])).toBe("raw/a/*.log");
+    expect(locationForFolder("raw/a", ["y.csv", "x.parquet"])).toBe("raw/a/*.csv");
   });
 
   it("matches every file when the files have no ending, and nothing without files", () => {

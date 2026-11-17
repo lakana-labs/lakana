@@ -156,19 +156,21 @@ export default function RawBrowser({ environment, onChoose }: RawBrowserProps): 
           </tr>
         ))}
       </ViewList>
-      {!atRoot && (
-        <Button
-          className="button"
-          isDisabled={whole === null}
-          onPress={() => {
-            if (whole !== null) {
+      {!atRoot &&
+        (whole === null ? (
+          <Button className="button" isDisabled>
+            {t("catalog.places.external.useFolder")}
+          </Button>
+        ) : (
+          <Button
+            className="button"
+            onPress={() => {
               onChoose(whole);
-            }
-          }}
-        >
-          {t("catalog.places.external.useFolder")}
-        </Button>
-      )}
+            }}
+          >
+            {t("catalog.places.external.useFolder")}
+          </Button>
+        ))}
     </section>
   );
 }
