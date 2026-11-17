@@ -100,12 +100,58 @@ def test_create_with_sql_longer_than_the_statement_limit_is_422(client: TestClie
 
     created = client.post(_ENV_URL, headers=bob, json={"name": "Long", "sql": too_long})
     updated = client.put(
-        f"{_ENV_URL}/{saved['id']}", headers=bob, json={"name": "Revenue", "sql": too_long}
+        f"{_ENV_URL}/{saved['id']}",
+        headers=bob,
+        json={"name": "Revenue", "sql": too_long, "visibility": "private"},
     )
 
     assert created.status_code == updated.status_code == 422
     assert "LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS" in created.json()["detail"]
     assert client.get(_ENV_URL, headers=bob).json()["items"][0]["sql"] == "SELECT 1"
+
+
+def test_a_name_is_checked_after_stripping_with_the_s4_sentence(client: TestClient) -> None:
+    """A 200-character name padded with blanks is kept stripped; 201 characters or none is 422."""
+    bob = _analyst(client)
+    longest = "n" * 200
+    sentence = "A saved query's name is one line of 1 to 200 visible characters."
+
+    padded = client.post(
+        _ENV_URL, headers=bob, json={"name": f"   {longest}   ", "sql": "SELECT 1"}
+    )
+    too_long = client.post(_ENV_URL, headers=bob, json={"name": "n" * 201, "sql": "SELECT 1"})
+    empty = client.post(_ENV_URL, headers=bob, json={"name": "", "sql": "SELECT 1"})
+    blank = client.post(_ENV_URL, headers=bob, json={"name": "   ", "sql": "SELECT 1"})
+
+    assert padded.status_code == 201, padded.text
+    assert padded.json()["name"] == longest
+    assert too_long.status_code == empty.status_code == blank.status_code == 422
+    assert too_long.json()["detail"] == empty.json()["detail"] == blank.json()["detail"] == sentence
+
+
+def test_a_put_without_visibility_is_422_and_changes_nothing(client: TestClient) -> None:
+    """A PUT replaces every field, so a missing `visibility` never makes a shared query private."""
+    bob = _analyst(client)
+    shared = _save(client, bob, visibility="everyone")
+    url = f"{_ENV_URL}/{shared['id']}"
+
+    put = client.put(url, headers=bob, json={"name": "Revenue", "sql": "SELECT 2"})
+
+    assert put.status_code == 422
+    assert client.get(url, headers=bob).json() == shared
+
+
+def test_another_persons_private_query_is_404_with_the_sentence(client: TestClient) -> None:
+    """Someone who may query the environment gets the 404 of a missing query for a private one."""
+    bob = _analyst(client)
+    carol = person(client, "carol", "ANALYST")
+    saved = _save(client, bob)
+
+    hidden = client.get(f"{_ENV_URL}/{saved['id']}", headers=carol)
+
+    assert hidden.status_code == 404
+    assert hidden.json()["detail"] == f"No saved query {saved['id']} in 'dev'."
+    assert client.get(_ENV_URL, headers=carol).json()["items"] == []
 
 
 def test_a_duplicate_name_is_409_naming_the_existing_id(client: TestClient) -> None:
@@ -116,7 +162,9 @@ def test_a_duplicate_name_is_409_naming_the_existing_id(client: TestClient) -> N
 
     again = client.post(_ENV_URL, headers=bob, json={"name": "Revenue", "sql": "SELECT 2"})
     renamed = client.put(
-        f"{_ENV_URL}/{other['id']}", headers=bob, json={"name": "Revenue", "sql": "SELECT 2"}
+        f"{_ENV_URL}/{other['id']}",
+        headers=bob,
+        json={"name": "Revenue", "sql": "SELECT 2", "visibility": "private"},
     )
 
     assert again.status_code == renamed.status_code == 409
@@ -159,7 +207,9 @@ def test_put_by_someone_else_is_403_with_the_sentence(client: TestClient) -> Non
     shared = _save(client, bob, visibility="everyone")
     url = f"{_ENV_URL}/{shared['id']}"
 
-    put = client.put(url, headers=carol, json={"name": "Mine", "sql": "SELECT 2"})
+    put = client.put(
+        url, headers=carol, json={"name": "Mine", "sql": "SELECT 2", "visibility": "everyone"}
+    )
     delete = client.delete(url, headers=carol)
 
     assert put.status_code == delete.status_code == 403
@@ -198,7 +248,9 @@ def test_an_admin_deletes_a_private_query_and_it_is_gone(client: TestClient) -> 
     url = f"{_ENV_URL}/{saved['id']}"
 
     assert (
-        client.put(url, headers=AUTH_HEADER, json={"name": "X", "sql": "SELECT 2"}).status_code
+        client.put(
+            url, headers=AUTH_HEADER, json={"name": "X", "sql": "SELECT 2", "visibility": "private"}
+        ).status_code
         == 403
     )
     assert client.delete(url, headers=AUTH_HEADER).status_code == 204
@@ -284,7 +336,7 @@ def test_a_task_token_gets_403_on_every_route(client: TestClient) -> None:
     assert minted.status_code == 201, minted.text
     token = {"Authorization": f"Bearer {minted.json()['token']}"}
     item = f"{_ENV_URL}/{saved['id']}"
-    body = {"name": "x", "sql": "SELECT 1"}
+    body = {"name": "x", "sql": "SELECT 1", "visibility": "private"}
 
     answers = [
         client.get(_ENV_URL, headers=token),
@@ -305,7 +357,7 @@ def test_saved_query_routes_need_a_credential(client: TestClient) -> None:
     bob = _analyst(client)
     saved = _save(client, bob)
     item = f"{_ENV_URL}/{saved['id']}"
-    body = {"name": "x", "sql": "SELECT 1"}
+    body = {"name": "x", "sql": "SELECT 1", "visibility": "private"}
 
     answers = [
         client.get(_ENV_URL),

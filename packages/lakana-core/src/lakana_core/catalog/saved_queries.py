@@ -14,7 +14,10 @@ Who sees a saved query in a live environment:
 Anyone else gets the same 404 as for a missing one. A deleted environment hides its saved
 queries, a restore shows them again, and a purge removes them. Only the owner updates, and only
 while they hold `SUBMIT_QUERY` there; the owner or an administrator deletes. A task's token is
-refused everything. Each change is audited in its own transaction, never with the SQL.
+refused everything. Each change is audited in its own transaction, never with the SQL. An
+administrator's read that shows someone else's private saved query is recorded as
+`ACTIVITY_VIEWED` (`View.SAVED_QUERIES`, the environment as scope) before it is returned, once
+per window, and refused if it cannot be (`record_view`).
 """
 
 from __future__ import annotations
@@ -30,7 +33,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
+from lakana_core.audit.views import View, ViewDetail, record_view, sessions_like
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
+from lakana_core.config import ViewAuditConfig
 from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.admin import acts_as_instance_admin
 from lakana_core.identifiers import hidden_character
@@ -64,6 +69,9 @@ NAME_REFUSED = "A saved query's name is one line of 1 to 200 visible characters.
 
 SQL_EMPTY = "A saved query needs SQL; the text sent is empty."
 """Why SQL that is empty after stripping is refused."""
+
+SQL_NUL = "A saved query's SQL cannot hold a NUL character."
+"""Why SQL holding U+0000 is refused: no database stores it in text."""
 
 ONLY_OWNER_UPDATES = (
     "Only the owner of a saved query can change it; save a copy under your own name instead."
@@ -194,6 +202,21 @@ class _Reader:
             )
         )
 
+    def others_private(self, row: SavedQuery) -> bool:
+        """Say whether a saved query is someone else's private one, seen only as administrator.
+
+        Parameters
+        ----------
+        row
+            The saved query.
+
+        Returns
+        -------
+        bool
+            Whether it is private and not the caller's.
+        """
+        return row.owner_id != self.p.id and row.visibility == SavedQueryVisibility.PRIVATE
+
     def view(self, row: SavedQuery, environment: str, owner: str | None) -> SavedQueryView:
         """Show a saved query the caller sees.
 
@@ -213,7 +236,11 @@ class _Reader:
             someone else's private query.
         """
         own = row.owner_id == self.p.id
-        shows_sql = own or row.visibility == SavedQueryVisibility.EVERYONE or self._text_right()
+        shows_sql = (
+            own
+            or row.visibility == SavedQueryVisibility.EVERYONE
+            or (self.admin and self._text_right())
+        )
         if own:
             actions = _OWNER_ACTIONS if row.environment_id in self.queryable else _DELETE_ONLY
         else:
@@ -293,11 +320,13 @@ def _checked_fields(name: str, sql: str, visibility: str) -> tuple[str, SavedQue
     ------
     ValidationError
         If the name is not one line of 1 to 200 visible characters, the SQL is empty after
-        stripping, or the visibility is another word.
+        stripping or holds a NUL character, or the visibility is another word.
     """
     stripped = _checked_name(name)
     if not sql.strip():
         raise ValidationError(SQL_EMPTY)
+    if "\x00" in sql:
+        raise ValidationError(SQL_NUL)
     try:
         chosen = SavedQueryVisibility(visibility)
     except ValueError:
@@ -333,11 +362,21 @@ class SavedQueryService:
         Database session. Each change commits on success, with its audit event.
     authz
         Authorization service consulted before every operation.
+    view_audit
+        Whether and how often an administrator's read of someone else's private saved query is
+        audited (`LAKANA_VIEW_AUDIT__*`); the defaults when `None`.
     """
 
-    def __init__(self, session: Session, authz: AuthorizationService) -> None:
+    def __init__(
+        self,
+        session: Session,
+        authz: AuthorizationService,
+        *,
+        view_audit: ViewAuditConfig | None = None,
+    ) -> None:
         self._session = session
         self._authz = authz
+        self._view_audit = view_audit or ViewAuditConfig()
 
     def create(
         self,
@@ -412,11 +451,17 @@ class SavedQueryService:
         NotFoundError
             If the environment does not exist, or holds no such saved query that the caller
             sees.
+        AuditUnavailableError
+            If an administrator's read of someone else's private saved query could not be
+            recorded (`_audit_view`); nothing is returned.
         """
         _refuse_task_token(p)
         env = self._environment(environment)
         row, owner, reader = self._seen(p, env, saved_query_id)
-        return reader.view(row, env.name, owner)
+        view = reader.view(row, env.name, owner)
+        if reader.others_private(row):
+            self._audit_view(p, env.name, [view], {view.id: row.owner_id}, limit=None)
+        return view
 
     def update(
         self,
@@ -547,6 +592,9 @@ class SavedQueryService:
             If the named environment does not exist.
         ValidationError
             If `limit` is out of range, or `cursor` is malformed or from the other list.
+        AuditUnavailableError
+            If the page holds someone else's private saved query (an administrator's list) and
+            the view could not be recorded (`_audit_view`); nothing is returned.
         """
         _refuse_task_token(p)
         conditions: list[ColumnElement[bool]] = [LIVE_ENVIRONMENT]
@@ -569,12 +617,73 @@ class SavedQueryService:
             .outerjoin(Principal, Principal.id == SavedQuery.owner_id)
             .where(*conditions, reader.visible())
         ).all()
-        return page_in_order(
+        others_private = {row.id: row.owner_id for row, _, _ in rows if reader.others_private(row)}
+        page = page_in_order(
             [reader.view(row, env_name, owner) for row, env_name, owner in rows],
             kind=kind,
             key_of=lambda v: (v.name.casefold(), v.environment, str(v.id)),
             limit=limit,
             cursor=cursor,
+        )
+        if others_private:
+            for env_name in sorted({v.environment for v in page.items}):
+                self._audit_view(
+                    p,
+                    env_name,
+                    [v for v in page.items if v.environment == env_name],
+                    others_private,
+                    limit=limit,
+                )
+        return page
+
+    def _audit_view(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        shown: list[SavedQueryView],
+        others_private: Mapping[uuid.UUID, uuid.UUID | None],
+        *,
+        limit: int | None,
+    ) -> None:
+        """Record an administrator's read that shows someone else's private saved query.
+
+        One `ACTIVITY_VIEWED` row (`View.SAVED_QUERIES`, the environment as scope) per viewer
+        and environment within the window (`record_view`); an answer that shows no one else's
+        private saved query writes nothing. The detail holds the counts and the page size, never
+        a name, an id or SQL.
+
+        Parameters
+        ----------
+        p
+            The reader.
+        environment
+            The environment whose saved queries are shown.
+        shown
+            The saved queries of that environment in the answer.
+        others_private
+            The owners of the other people's private saved queries the read found, by id.
+        limit
+            The page size of a list, `None` for a read of one saved query.
+
+        Raises
+        ------
+        AuditUnavailableError
+            If the row could not be written; the answer is not returned.
+        """
+        owners = [others_private[v.id] for v in shown if v.id in others_private]
+        record_view(
+            sessions_like(self._session),
+            p,
+            View.SAVED_QUERIES,
+            Securable.environment_scope(environment),
+            None,
+            ViewDetail(
+                filters={} if limit is None else {"limit": limit},
+                rows_shown=len(shown),
+                others_shown=len(owners),
+                distinct_others=len(set(owners)),
+            ),
+            config=self._view_audit,
         )
 
     def _environment(self, environment: str) -> Environment:
@@ -785,6 +894,8 @@ class SavedQueryService:
         try:
             self._session.flush()
         except IntegrityError:
+            # A failed flush leaves the session unusable until it is rolled back, and the lookup
+            # below must read the row the concurrent request committed.
             self._session.rollback()
             self._refuse_duplicate(p, env, name, keeps_name)
             raise

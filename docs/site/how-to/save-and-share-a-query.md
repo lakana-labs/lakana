@@ -37,7 +37,7 @@ a second one under a name you already use is refused with a sentence that names 
 so you can update it instead. Another person may use the same name for theirs.
 
 A new saved query is **private**: only you see it. The SQL is stored as you sent it, up to the same
-length as a query you submit.
+length as a query you submit; SQL holding a NUL character is refused.
 
 ## Share it with the environment
 
@@ -89,6 +89,8 @@ lakana query saved show "$id" --env dev --sql | lakana sql - --env dev
 ```
 
 The query runs as a query of yours, with your rights, and is in your list of queries like any other.
+If the SQL holds a control or invisible character, `--sql` prints nothing and exits with status 1,
+since the escaped text it could print would be another query; read it with `--output json`.
 
 ## Change and delete
 
@@ -126,6 +128,11 @@ reads it only if they also hold `READ_QUERY_TEXT`, a right that no role holds, n
 no `sql` key; the SDK reads `None`), `lakana query saved show` prints `You may not read the SQL of
 this query.`, and with `--sql` it prints that sentence as an error and exits with status 1. A shared
 saved query's SQL is not hidden from an administrator.
+
+Seeing someone else's private saved query, by id or in a list, is itself recorded in the audit log
+(an `ACTIVITY_VIEWED` event with `view` `saved_queries`, once per administrator and environment
+an hour, never with the name or the SQL; see [Lists](../reference/lists.md#audit)). If that event
+cannot be written, the read is refused with 503 and shows nothing.
 
 ## When the owner leaves
 

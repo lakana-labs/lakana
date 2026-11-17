@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from home_test_helpers import grant, person
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef, Securable, TaskScope
@@ -21,7 +21,13 @@ from lakana_core.catalog.saved_queries import (
 )
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
-from lakana_core.errors import AlreadyExistsError, NotFoundError, PermissionDenied, ValidationError
+from lakana_core.errors import (
+    AlreadyExistsError,
+    AuditUnavailableError,
+    NotFoundError,
+    PermissionDenied,
+    ValidationError,
+)
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.models import (
@@ -72,6 +78,16 @@ def _admin(session: Session, name: str = "root") -> PrincipalRef:
     who = person(session, name)
     grant(session, who, role=Role.ADMIN)
     return who
+
+
+def _views(session: Session) -> list[AuditEvent]:
+    return list(
+        session.execute(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == AuditEventType.ACTIVITY_VIEWED)
+            .order_by(AuditEvent.occurred_at)
+        ).scalars()
+    )
 
 
 def _names(items: Sequence[SavedQueryView]) -> list[str]:
@@ -142,6 +158,23 @@ def test_create_refuses_empty_sql_and_an_unknown_visibility(session: Session, de
         service.create(bob, dev, name="Revenue", sql=" \n\t ")
     with pytest.raises(ValidationError, match="'private' or 'everyone'"):
         service.create(bob, dev, name="Revenue", sql="SELECT 1", visibility="team")
+
+
+def test_sql_with_a_nul_character_is_refused(session: Session, dev: str) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+    kept = service.create(bob, dev, name="Revenue", sql="SELECT 1")
+
+    for refused in (
+        lambda: service.create(bob, dev, name="Nul", sql="SELECT '\x00'"),
+        lambda: service.update(
+            bob, dev, kept.id, name="Revenue", sql="SELECT 1\x00", visibility="private"
+        ),
+    ):
+        with pytest.raises(ValidationError) as raised:
+            refused()
+        assert str(raised.value) == "A saved query's SQL cannot hold a NUL character."
+    assert service.get(bob, dev, kept.id).sql == "SELECT 1"
 
 
 def test_a_private_query_is_404_for_another_person_who_may_query(
@@ -215,6 +248,87 @@ def test_an_admin_with_read_query_text_sees_the_sql(session: Session, dev: str) 
 
     assert service.get(root, dev, mine.id).sql == "SELECT 1"
     assert [i.sql for i in service.list_page(root).items] == ["SELECT 1"]
+
+
+def test_an_admins_read_of_someone_elses_private_query_is_audited_without_sql(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, dev: str
+) -> None:
+    _env(catalog, principal, tmp_path, "prod")
+    bob = _querier(session, "bob", dev, "prod")
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT secret")
+    service.create(bob, "prod", name="Costs", sql="SELECT secret")
+    one, listed, every = _admin(session, "one"), _admin(session, "listed"), _admin(session, "every")
+
+    service.get(one, dev, mine.id)
+    service.get(one, dev, mine.id)
+    service.list_page(listed, environment=dev, limit=10)
+    service.list_page(every)
+
+    rows = _views(session)
+    assert [(r.principal_id, r.securable_environment) for r in rows] == [
+        (one.id, "dev"),
+        (listed.id, "dev"),
+        (every.id, "dev"),
+        (every.id, "prod"),
+    ]
+    assert rows[0].detail == {
+        "view": "saved_queries",
+        "filters": {},
+        "rows_shown": 1,
+        "others_shown": 1,
+        "distinct_others": 1,
+        "targeting_key": None,
+    }
+    assert rows[1].detail["filters"] == {"limit": 10}
+    assert all(r.securable_kind == Securable.environment_scope("dev").kind for r in rows)
+    assert not any("secret" in str(r.detail) or "Revenue" in str(r.detail) for r in rows)
+
+
+def test_reads_without_someone_elses_private_query_are_not_audited(
+    session: Session, dev: str
+) -> None:
+    bob = _querier(session, "bob", dev)
+    carol = _querier(session, "carol", dev)
+    root = _admin(session)
+    grant(session, root, action=Action.SUBMIT_QUERY, environment_name=dev)
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1")
+    shared = service.create(carol, dev, name="Costs", sql="SELECT 2", visibility="everyone")
+    own = service.create(root, dev, name="Own", sql="SELECT 3")
+
+    service.get(bob, dev, mine.id)
+    service.list_page(bob, environment=dev)
+    service.list_page(bob)
+    service.get(root, dev, shared.id)
+    service.get(root, dev, own.id)
+    # The first page holds only the shared query; Revenue, bob's private one, is on a later page.
+    page = service.list_page(root, environment=dev, limit=2)
+    assert _names(page.items) == ["Costs", "Own"]
+    assert _views(session) == []
+
+
+def test_an_admins_read_that_cannot_be_audited_returns_nothing(session: Session, dev: str) -> None:
+    bob = _querier(session, "bob", dev)
+    root = _admin(session)
+    service = _service(session)
+    mine = service.create(bob, dev, name="Revenue", sql="SELECT 1")
+    session.execute(
+        text(
+            "CREATE TRIGGER refuse_views BEFORE INSERT ON audit_events "
+            "WHEN NEW.event_type = 'ACTIVITY_VIEWED' "
+            "BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END"
+        )
+    )
+    session.commit()
+
+    with pytest.raises(AuditUnavailableError, match="could not be recorded in the audit log"):
+        service.get(root, dev, mine.id)
+    with pytest.raises(AuditUnavailableError):
+        service.list_page(root, environment=dev)
+    with pytest.raises(AuditUnavailableError):
+        service.list_page(root)
+    assert service.get(bob, dev, mine.id).sql == "SELECT 1"
 
 
 def test_only_the_owner_updates_and_only_owner_or_admin_deletes(session: Session, dev: str) -> None:

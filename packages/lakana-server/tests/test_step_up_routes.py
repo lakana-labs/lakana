@@ -1009,7 +1009,10 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     (
         "PUT",
         "/api/v1/environments/{env}/saved-queries/{saved_query_id}",
-    ): "changes the owner's own text",
+    ): (
+        "changes the owner's own text, and may widen who reads it (private to everyone); the "
+        "text runs with each runner's own rights and grants nothing, and a session can read it"
+    ),
     (
         "DELETE",
         "/api/v1/environments/{env}/saved-queries/{saved_query_id}",

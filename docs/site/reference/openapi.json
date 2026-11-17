@@ -2713,7 +2713,7 @@
           "saved-queries"
         ],
         "summary": "List the saved queries of an environment you see",
-        "description": "You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. An administrator sees the `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the item has no `sql` key. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.",
+        "description": "You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. An administrator sees the `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the item has no `sql` key. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.",
         "operationId": "list_saved_queries_api_v1_environments__env__saved_queries_get",
         "parameters": [
           {
@@ -2809,6 +2809,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2946,7 +2956,7 @@
           "saved-queries"
         ],
         "summary": "Read one saved query",
-        "description": "You read your own, a shared one if you hold `SUBMIT_QUERY` on its environment, and, as an instance administrator with a personal token or a session, any. An administrator reads the `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the answer has no `sql` key. Answers 404 for a saved query that does not exist and for one you may not see, in the same words, and 403 for a task's token.",
+        "description": "You read your own, a shared one if you hold `SUBMIT_QUERY` on its environment, and, as an instance administrator with a personal token or a session, any. An administrator reads the `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the answer has no `sql` key. Reading someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and shows nothing. Answers 404 for a saved query that does not exist and for one you may not see, in the same words, and 403 for a task's token.",
         "operationId": "get_saved_query_api_v1_environments__env__saved_queries__saved_query_id__get",
         "parameters": [
           {
@@ -3030,6 +3040,16 @@
               }
             }
           },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -3047,7 +3067,7 @@
           "saved-queries"
         ],
         "summary": "Replace a saved query's name, SQL and visibility",
-        "description": "A whole replacement: send every field. Only the owner may change a saved query, and only while they hold `SUBMIT_QUERY` on its environment; an administrator who is not the owner may only delete it, and nobody may change one whose owner is gone. The environment never changes: saving in another one is a new `POST`. Answers 403 for anyone but the owner (with a pointer to saving a copy), without the right and for a task's token, 404 for a saved query that does not exist or that you may not see, 409 for a name you already use for another saved query there, and 422 for a refused field.",
+        "description": "A whole replacement: send every field, `visibility` included. Only the owner may change a saved query, and only while they hold `SUBMIT_QUERY` on its environment; an administrator who is not the owner may only delete it, and nobody may change one whose owner is gone. The environment never changes: saving in another one is a new `POST`. Answers 403 for anyone but the owner (with a pointer to saving a copy), without the right and for a task's token, 404 for a saved query that does not exist or that you may not see, 409 for a name you already use for another saved query there, and 422 for a refused field or a missing one.",
         "operationId": "update_saved_query_api_v1_environments__env__saved_queries__saved_query_id__put",
         "parameters": [
           {
@@ -3095,7 +3115,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SavedQueryIn"
+                "$ref": "#/components/schemas/SavedQueryUpdateIn"
               }
             }
           }
@@ -3264,7 +3284,7 @@
           "saved-queries"
         ],
         "summary": "List the saved queries of every environment you see",
-        "description": "Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. An administrator sees the `sql` of someone else's private query only with `READ_QUERY_TEXT`; without it the item has no `sql` key. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
+        "description": "Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. An administrator sees the `sql` of someone else's private query only with `READ_QUERY_TEXT`; without it the item has no `sql` key. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
         "operationId": "list_all_saved_queries_api_v1_saved_queries_get",
         "parameters": [
           {
@@ -3368,6 +3388,16 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -33565,8 +33595,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "maxLength": 200,
-            "minLength": 1,
+            "maxLength": 1000,
             "title": "Name"
           },
           "sql": {
@@ -33589,7 +33618,7 @@
           "sql"
         ],
         "title": "SavedQueryIn",
-        "description": "The body that creates a saved query or replaces one.\n\nParameters\n----------\nname\n    The name, 1 to 200 characters after stripping, on one line of visible characters; unique\n    among the owner's saved queries in the environment.\nsql\n    The SQL, stored as sent; not empty, and at most `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS`\n    characters.\nvisibility\n    ``private`` (only you; the default) or ``everyone`` (whoever may query the environment)."
+        "description": "The body that creates a saved query.\n\nParameters\n----------\nname\n    The name, 1 to 200 characters after stripping, on one line of visible characters; unique\n    among the owner's saved queries in the environment. The service checks it after\n    stripping; the bound here only caps what the request carries.\nsql\n    The SQL, stored as sent; not empty, without a NUL character, and at most\n    `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` characters.\nvisibility\n    ``private`` (only you; the default) or ``everyone`` (whoever may query the environment)."
       },
       "SavedQueryOut": {
         "properties": {
@@ -33704,6 +33733,35 @@
         ],
         "title": "SavedQueryPageOut",
         "description": "One page of saved queries.\n\nParameters\n----------\nitems\n    The saved queries of the page, by name in any letter case, then environment, then id.\nnext_cursor\n    Pass back as `cursor` for the next page; `null` on the last."
+      },
+      "SavedQueryUpdateIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Name"
+          },
+          "sql": {
+            "type": "string",
+            "title": "Sql"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "everyone"
+            ],
+            "title": "Visibility"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "sql",
+          "visibility"
+        ],
+        "title": "SavedQueryUpdateIn",
+        "description": "The body that replaces a saved query: every field, none left to a default.\n\nParameters\n----------\nname\n    The name, 1 to 200 characters after stripping, on one line of visible characters; unique\n    among the owner's saved queries in the environment. The service checks it after\n    stripping; the bound here only caps what the request carries.\nsql\n    The SQL, stored as sent; not empty, without a NUL character, and at most\n    `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` characters.\nvisibility\n    ``private`` (only you) or ``everyone`` (whoever may query the environment); required,\n    so that leaving it out never makes a shared query private."
       },
       "ScheduleTriggerOut": {
         "properties": {

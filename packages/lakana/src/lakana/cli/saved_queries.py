@@ -35,6 +35,11 @@ _SHOW_COLUMNS = [
     "updated_at",
 ]
 _NO_SQL = "You may not read the SQL of this query."
+_HIDDEN_IN_SQL = (
+    "This saved query holds control or invisible characters; read it with --output json."
+)
+"""Why `show --sql` prints nothing: printing the text exactly could drive the terminal, and
+escaping it would hand `lakana sql -` another query."""
 
 
 def _owner(saved: SavedQuery) -> str:
@@ -207,7 +212,9 @@ def show(
     """Show a saved query: its fields, then its SQL.
 
     With --sql only the SQL is printed, so 'lakana query saved show ID --sql | lakana sql -'
-    runs it. An administrator may not read the SQL of someone else's private query without
+    runs it. If the SQL holds control or invisible characters, --sql prints nothing and exits
+    1, as printing it escaped would run another query; read it with --output json. An
+    administrator may not read the SQL of someone else's private query without
     READ_QUERY_TEXT; the command then says so.
 
     Parameters
@@ -224,15 +231,17 @@ def show(
     Raises
     ------
     CliError
-        With `--sql`, if the SQL may not be read (exit 1).
+        With `--sql`, if the SQL may not be read, or holds a control or invisible character
+        (exit 1).
     """
     state = state_of(ctx)
     saved = state.client().saved_queries.get(resolve_environment(state, env), saved_query_id)
     if sql:
         if saved.sql is None:
             raise CliError(_NO_SQL, exit_code=1, kind="PermissionDenied")
-        text = saved.sql if saved.sql.endswith("\n") else saved.sql + "\n"
-        sys.stdout.write(_output.safe_source(text))
+        if _output.safe_source(saved.sql) != saved.sql:
+            raise CliError(_HIDDEN_IN_SQL, exit_code=1, kind="ValidationError")
+        sys.stdout.write(saved.sql if saved.sql.endswith("\n") else saved.sql + "\n")
         return
     _output.emit(
         state,

@@ -18,7 +18,12 @@ from lakana_core.catalog.saved_queries import (
     SavedQueryService,
     SavedQueryView,
 )
-from lakana_server.api.platform.schemas import SavedQueryIn, SavedQueryOut, SavedQueryPageOut
+from lakana_server.api.platform.schemas import (
+    SavedQueryIn,
+    SavedQueryOut,
+    SavedQueryPageOut,
+    SavedQueryUpdateIn,
+)
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import check_statement, get_principal, get_saved_query_service
@@ -73,7 +78,7 @@ def _out(view: SavedQueryView) -> SavedQueryOut:
     "",
     response_model=SavedQueryPageOut,
     response_model_exclude_unset=True,
-    responses=errors(403, 404),
+    responses=errors(403, 404, 503),
 )
 def list_saved_queries(
     env: str,
@@ -88,10 +93,12 @@ def list_saved_queries(
     ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance
     administrator with a personal token or a session, every one. An administrator sees the
     `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the
-    item has no `sql` key. Each item's `actions` says what you may do with it. The order is the
-    name in any letter case, then the id. Answers 403 if you may not query the environment, own
-    no saved query there and are not an administrator, 404 if it does not exist, and 403 for a
-    task's token. Send `next_cursor` back as `cursor` for the next page.
+    item has no `sql` key. A page that shows someone else's private query is recorded in the
+    audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's
+    `actions` says what you may do with it. The order is the name in any letter case, then the
+    id. Answers 403 if you may not query the environment, own no saved query there and are not
+    an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor`
+    back as `cursor` for the next page.
 
     Parameters
     ----------
@@ -120,6 +127,9 @@ def list_saved_queries(
         Mapped to 404, if the environment does not exist.
     lakana_core.errors.ValidationError
         Mapped to 422, for a malformed cursor or a cursor of the other list.
+    lakana_core.errors.AuditUnavailableError
+        Mapped to 503, if the page shows someone else's private query and that could not be
+        recorded in the audit log.
     """
     page = service.list_page(principal, environment=env, limit=limit, cursor=cursor)
     return SavedQueryPageOut(items=[_out(v) for v in page.items], next_cursor=page.next_cursor)
@@ -177,7 +187,7 @@ def create_saved_query(
         Mapped to 409, if you already have a saved query of that name there.
     lakana_core.errors.ValidationError
         Mapped to 422, for a name that is not one visible line of 1 to 200 characters, empty or
-        too long SQL.
+        too long SQL, or SQL holding a NUL character.
     """
     check_statement(request, body.sql)
     view = service.create(principal, env, name=body.name, sql=body.sql, visibility=body.visibility)
@@ -188,7 +198,7 @@ def create_saved_query(
     "/{saved_query_id}",
     response_model=SavedQueryOut,
     response_model_exclude_unset=True,
-    responses=errors(403, 404),
+    responses=errors(403, 404, 503),
 )
 def get_saved_query(
     env: str,
@@ -201,8 +211,10 @@ def get_saved_query(
     You read your own, a shared one if you hold `SUBMIT_QUERY` on its environment, and, as an
     instance administrator with a personal token or a session, any. An administrator reads the
     `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the
-    answer has no `sql` key. Answers 404 for a saved query that does not exist and for one you
-    may not see, in the same words, and 403 for a task's token.
+    answer has no `sql` key. Reading someone else's private query is recorded in the audit log
+    (`ACTIVITY_VIEWED`); if that fails the answer is 503 and shows nothing. Answers 404 for a
+    saved query that does not exist and for one you may not see, in the same words, and 403 for
+    a task's token.
 
     Parameters
     ----------
@@ -227,6 +239,9 @@ def get_saved_query(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the environment does not exist, or holds no such saved query that you
         see.
+    lakana_core.errors.AuditUnavailableError
+        Mapped to 503, if it is someone else's private query and the read could not be recorded
+        in the audit log.
     """
     return _out(service.get(principal, env, saved_query_id))
 
@@ -240,20 +255,20 @@ def get_saved_query(
 def update_saved_query(
     env: str,
     saved_query_id: uuid.UUID,
-    body: SavedQueryIn,
+    body: SavedQueryUpdateIn,
     request: Request,
     principal: PrincipalRef = Depends(get_principal),
     service: SavedQueryService = Depends(get_saved_query_service),
 ) -> SavedQueryOut:
     """Replace a saved query's name, SQL and visibility.
 
-    A whole replacement: send every field. Only the owner may change a saved query, and only
-    while they hold `SUBMIT_QUERY` on its environment; an administrator who is not the owner may
-    only delete it, and nobody may change one whose owner is gone. The environment never
-    changes: saving in another one is a new `POST`. Answers 403 for anyone but the owner (with a
-    pointer to saving a copy), without the right and for a task's token, 404 for a saved query
-    that does not exist or that you may not see, 409 for a name you already use for another
-    saved query there, and 422 for a refused field.
+    A whole replacement: send every field, `visibility` included. Only the owner may change a
+    saved query, and only while they hold `SUBMIT_QUERY` on its environment; an administrator
+    who is not the owner may only delete it, and nobody may change one whose owner is gone.
+    The environment never changes: saving in another one is a new `POST`. Answers 403 for
+    anyone but the owner (with a pointer to saving a copy), without the right and for a task's
+    token, 404 for a saved query that does not exist or that you may not see, 409 for a name you
+    already use for another saved query there, and 422 for a refused field or a missing one.
 
     Parameters
     ----------
@@ -287,7 +302,7 @@ def update_saved_query(
         Mapped to 409, if you already have another saved query of that name there.
     lakana_core.errors.ValidationError
         Mapped to 422, for a name that is not one visible line of 1 to 200 characters, empty or
-        too long SQL.
+        too long SQL, or SQL holding a NUL character.
     """
     check_statement(request, body.sql)
     view = service.update(
@@ -349,7 +364,7 @@ def delete_saved_query(
     "",
     response_model=SavedQueryPageOut,
     response_model_exclude_unset=True,
-    responses=errors(403, 404),
+    responses=errors(403, 404, 503),
 )
 def list_all_saved_queries(
     environment: str | None = Query(default=None, max_length=255),
@@ -365,7 +380,9 @@ def list_all_saved_queries(
     administrator with a personal token or a session, every one. An environment where you see
     nothing contributes nothing, so this is never a 403 or a 404, except for a task's token.
     An administrator sees the `sql` of someone else's private query only with
-    `READ_QUERY_TEXT`; without it the item has no `sql` key. With `environment` it is the list
+    `READ_QUERY_TEXT`; without it the item has no `sql` key. A page that shows someone else's
+    private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment
+    shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list
     of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404.
     Each item names its `environment`. The order is the name in any letter case, then the
     environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of
@@ -398,6 +415,9 @@ def list_all_saved_queries(
         Mapped to 404, if the named environment does not exist.
     lakana_core.errors.ValidationError
         Mapped to 422, for a malformed cursor or a cursor of the other list.
+    lakana_core.errors.AuditUnavailableError
+        Mapped to 503, if the page shows someone else's private query and that could not be
+        recorded in the audit log.
     """
     page = service.list_page(principal, environment=environment, limit=limit, cursor=cursor)
     return SavedQueryPageOut(items=[_out(v) for v in page.items], next_cursor=page.next_cursor)

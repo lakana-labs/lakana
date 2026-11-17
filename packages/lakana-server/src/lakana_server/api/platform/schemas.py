@@ -5348,23 +5348,46 @@ class QueryListPageOut(BaseModel):
 
 
 class SavedQueryIn(BaseModel):
-    """The body that creates a saved query or replaces one.
+    """The body that creates a saved query.
 
     Parameters
     ----------
     name
         The name, 1 to 200 characters after stripping, on one line of visible characters; unique
-        among the owner's saved queries in the environment.
+        among the owner's saved queries in the environment. The service checks it after
+        stripping; the bound here only caps what the request carries.
     sql
-        The SQL, stored as sent; not empty, and at most `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS`
-        characters.
+        The SQL, stored as sent; not empty, without a NUL character, and at most
+        `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` characters.
     visibility
         ``private`` (only you; the default) or ``everyone`` (whoever may query the environment).
     """
 
-    name: str = Field(min_length=1, max_length=200)
+    name: str = Field(max_length=1000)
     sql: str
     visibility: Literal["private", "everyone"] = "private"
+
+
+class SavedQueryUpdateIn(BaseModel):
+    """The body that replaces a saved query: every field, none left to a default.
+
+    Parameters
+    ----------
+    name
+        The name, 1 to 200 characters after stripping, on one line of visible characters; unique
+        among the owner's saved queries in the environment. The service checks it after
+        stripping; the bound here only caps what the request carries.
+    sql
+        The SQL, stored as sent; not empty, without a NUL character, and at most
+        `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` characters.
+    visibility
+        ``private`` (only you) or ``everyone`` (whoever may query the environment); required,
+        so that leaving it out never makes a shared query private.
+    """
+
+    name: str = Field(max_length=1000)
+    sql: str
+    visibility: Literal["private", "everyone"]
 
 
 class SavedQueryOut(BaseModel):
