@@ -5340,6 +5340,22 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   `reason: secret_unreadable` (`decrypt_secret_row` logs why, without a value). The S1 binding
   rules above decide which secret that can be; their tests are in `test_connection_service.py`,
   and `test_connection_fetch.py` pins that a moved or revoked secret is never sent.
+- **What a reader sees of a test.** `last_test` on a connection answer (`ConnectionOut`, every
+  route that answers one, and `GET /api/v1/connections`) carries `state`, `outcome` and
+  `finished_at` for anyone with `READ_ENVIRONMENT`. Its `message`, `id`, time requested
+  (`created_at`) and `requested_by` are absent, not `null`, for a caller without
+  `MANAGE_CONNECTION` on the environment: `ConnectionService._view` leaves them unset, and the
+  routes answer with `response_model_exclude_unset=True`, so a field cannot come back as `null`
+  by default. Why: the message can name paths under an ingestion root, the hosts and ports the
+  worker reached and the server's own words (threat model, "Malicious or compromised task
+  code"), while the outcome is a fixed word whose cause and next step are public
+  (`docs/site/reference/connections.md`). Test all
+  (`POST /api/v1/environments/{env}/connection-tests`) is the same probe once per connection of a
+  page: it needs `MANAGE_CONNECTION` and no passkey touch, as a single test does, and writes the
+  same `CONNECTION_TESTED` events (`state: queued`) per connection it queues; a stuck test it
+  closes first (open over 10 minutes) also writes one, `state: done` and `outcome: failed`, as
+  `ConnectionTestQueue.close` records it for the test's requester; a connection with an open test
+  under 10 minutes old gets that test back and writes nothing.
 - **The answer.** `TaskConnectionOut` carries the settings with a `ca_certificate` in full (the
   helper needs it) and `endpoints` from `connections.endpoints.endpoints`, the list the worker's
   egress grants and the binding's audit `url` use too. `Cache-Control: no-store`,

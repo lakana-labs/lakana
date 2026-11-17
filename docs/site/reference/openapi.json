@@ -14867,7 +14867,7 @@
           "connections"
         ],
         "summary": "List the connections of an environment",
-        "description": "Lists one page of connections, newest first, with the assets that declare each. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
+        "description": "Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
         "operationId": "list_connections_api_v1_environments__environment_name__connections_get",
         "parameters": [
           {
@@ -14990,7 +14990,7 @@
           "connections"
         ],
         "summary": "Show a connection",
-        "description": "Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret and the assets that declare it. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Answers 404 when the environment or the connection does not exist; the answer names no other connection.",
+        "description": "Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret, the assets that declare it, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment or the connection does not exist; the answer names no other connection.",
         "operationId": "get_connection_api_v1_environments__environment_name__connections__connection_name__get",
         "parameters": [
           {
@@ -15512,6 +15512,346 @@
           },
           "404": {
             "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "List the connections of every environment you may read",
+        "description": "Without `environment`, lists one page of the connections of every environment where you hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An environment where you do not hold it is left out, so this is never a 404, and never a 403 but for a task token, which is refused as every connection read is. With `environment`, it answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers, with its 403 and 404. Each connection carries its last test and what you may do with it (`actions`), as in that list: the last test's `id`, `created_at`, `message` and `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
+        "operationId": "list_all_connections_api_v1_connections_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most connections returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connections/environments": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "List the environments whose connections you may read, and what you may do there",
+        "description": "Every environment where you hold `READ_ENVIRONMENT`, sorted by name, with its `actions`: `create` and `test` where you hold `MANAGE_CONNECTION`, and `name_secret` (naming an existing secret for a connection) where you hold `MANAGE_SECRET` too. Empty when there is none. A task token is refused with 403, as every connection read is.",
+        "operationId": "list_connection_environments_api_v1_connections_environments_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectionEnvironmentOut"
+                  },
+                  "title": "Response List Connection Environments Api V1 Connections Environments Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{environment_name}/connection-tests": {
+      "post": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Queue a test of every connection of an environment (Test all), a page at a time",
+        "description": "Takes one page of the environment's connection list, newest first (`limit` 1 to 200, default 200), and handles each connection in turn: a connection whose test is queued or running and under 10 minutes old is not queued again, and that test is returned with `queued: false`; an older open test is finished as failed first; every other connection gets a new test with `queued: true`. An open test is never a 409. Poll each test with `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as `cursor` for the next page; it takes the cursors of `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422. Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the environment does not exist, and 409 when a connection changed at the same time: the connections before it stay queued, and sending the request again returns their tests with `queued: false`.",
+        "operationId": "request_connection_tests_api_v1_environments__environment_name__connection_tests_post",
+        "parameters": [
+          {
+            "name": "environment_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Environment Name"
+            },
+            "description": "The environment."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            },
+            "description": "Most connections tested (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionQueuedTestPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
             "content": {
               "application/json": {
                 "schema": {
@@ -27901,6 +28241,135 @@
         "title": "ConnectionCreate",
         "description": "Request body for creating a connection.\n\n`kind`, `address` and `settings` are judged by the service after the right is checked, so a\ncaller without `MANAGE_CONNECTION` learns nothing from a 422.\n\nParameters\n----------\nname\n    Lower-case letters, digits and ``-``, starting with a letter, at most 63; unique in\n    the environment. Never changes.\nkind\n    ``postgresql``, ``mariadb``, ``sqlite-file``, ``http``, ``s3``, ``gcs``, ``azure``,\n    ``directory`` or ``tcp``. Never changes.\naddress\n    Where the source is, by kind (``host``, ``port``, ``database``; ``base_url``; ...).\nsettings\n    How to reach it, by kind (``user``, ``tls``, ``ca_certificate``; ``auth``; ...).\nsecret\n    The name of an existing secret of the environment to use.\nsecret_values\n    Values of a new secret ``<name>-connection`` (or the next free\n    ``<name>-connection-N``), born bound to the connection. Never echoed. At most one of\n    `secret` and `secret_values`."
       },
+      "ConnectionEnvironmentOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "create",
+                "test",
+                "name_secret"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "actions"
+        ],
+        "title": "ConnectionEnvironmentOut",
+        "description": "An environment whose connections the caller may read, and what they may do there.\n\nParameters\n----------\nname\n    The environment's name.\nactions\n    What the caller's rights allow there: ``create`` and ``test`` with\n    `MANAGE_CONNECTION`, and ``name_secret`` (naming an existing secret for a connection)\n    with `MANAGE_SECRET` too; `[]` for a reader. The server decides every request again."
+      },
+      "ConnectionLastTestOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done"
+            ],
+            "title": "State"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "dns",
+                  "refused",
+                  "timeout",
+                  "tls",
+                  "credentials",
+                  "not_found",
+                  "not_allowed",
+                  "root_unavailable",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "outcome",
+          "finished_at"
+        ],
+        "title": "ConnectionLastTestOut",
+        "description": "The newest test of a connection, of any state.\n\nEvery reader of the connection gets `state`, `outcome` and `finished_at`. Only a holder of\n`MANAGE_CONNECTION` on the environment gets `id`, `created_at`, `message` and\n`requested_by`; for anyone else those four keys are absent, not `null`, because the message\ncan name paths, hosts and ports the worker reached.\n\nParameters\n----------\nstate\n    ``queued``, ``running`` or ``done``.\noutcome\n    What it found once ``done``; `null` before. Each outcome's cause and next step are\n    public; the message is not.\nfinished_at\n    When it was done; `null` before.\nid\n    The test's id; with `GET .../tests/{test_id}` it shows the test.\ncreated_at\n    When it was requested.\nmessage\n    What it found, redacted; `null` before it is done.\nrequested_by\n    The name of the principal who asked for it; `null` when that principal is gone."
+      },
       "ConnectionOut": {
         "properties": {
           "name": {
@@ -27952,6 +28421,33 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "last_test": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionLastTestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "test",
+                "update",
+                "delete",
+                "name_secret"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -27964,10 +28460,13 @@
           "declared_by",
           "created_by",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "environment",
+          "last_test",
+          "actions"
         ],
         "title": "ConnectionOut",
-        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed."
+        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed.\nenvironment\n    The name of its environment.\nlast_test\n    Its newest test of any state (queued, running or done), or `null` if it was never\n    tested. A change keeps it: a test that finished before `updated_at` tested the\n    connection as it was. Every reader gets its `state`, `outcome` and `finished_at`; its\n    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` on\n    the environment, and for anyone else those keys are absent.\nactions\n    What the caller's rights allow on it: ``test``, ``update`` and ``delete`` with\n    `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound\n    to it, or a change that could send its secret somewhere new without new values) with\n    `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again."
       },
       "ConnectionPage": {
         "properties": {
@@ -27996,7 +28495,61 @@
           "next_cursor"
         ],
         "title": "ConnectionPage",
-        "description": "One page of an environment's connections, newest first.\n\nParameters\n----------\nitems\n    The connections of this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `null` on the last page."
+        "description": "One page of connections, of one environment or of all you may read, newest first.\n\nParameters\n----------\nitems\n    The connections of this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `null` on the last page."
+      },
+      "ConnectionQueuedTestOut": {
+        "properties": {
+          "connection": {
+            "type": "string",
+            "title": "Connection"
+          },
+          "test_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Test Id"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection",
+          "test_id",
+          "queued"
+        ],
+        "title": "ConnectionQueuedTestOut",
+        "description": "What Test all did for one connection.\n\nParameters\n----------\nconnection\n    The connection's name.\ntest_id\n    The test's id; read it with `GET .../connections/{connection}/tests/{test_id}`.\nqueued\n    `true` when this request queued the test; `false` when the connection already had an\n    open test under 10 minutes old, which is the one returned."
+      },
+      "ConnectionQueuedTestPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionQueuedTestOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ConnectionQueuedTestPage",
+        "description": "One page of Test all: a test for each connection of a page of the environment's list.\n\nParameters\n----------\nitems\n    One entry per connection, newest connection first.\nnext_cursor\n    Pass back as `?cursor=` to test the next page; `null` on the last page."
       },
       "ConnectionTestOut": {
         "properties": {

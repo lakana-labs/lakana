@@ -274,6 +274,8 @@ ROUTES: dict[str, Route] = {
     ),
     "connections.create": Route("POST", "/api/v1/environments/{environment_name}/connections"),
     "connections.list": Route("GET", "/api/v1/environments/{environment_name}/connections"),
+    "connections.list_all": Route("GET", "/api/v1/connections"),
+    "connections.environments": Route("GET", "/api/v1/connections/environments"),
     "connections.get": Route(
         "GET", "/api/v1/environments/{environment_name}/connections/{connection_name}"
     ),
@@ -289,6 +291,9 @@ ROUTES: dict[str, Route] = {
     "connections.test_get": Route(
         "GET",
         "/api/v1/environments/{environment_name}/connections/{connection_name}/tests/{test_id}",
+    ),
+    "connections.test_all": Route(
+        "POST", "/api/v1/environments/{environment_name}/connection-tests"
     ),
     "task_connections.get": Route("GET", "/api/v1/tasks/self/connections/{name}"),
     "repositories.create": Route("POST", "/api/v1/repositories"),
