@@ -7088,6 +7088,22 @@ to `main` and weekly; both upload SARIF to code scanning. OpenSSF Scorecard (`sc
 on every push to `main`, weekly and on a branch-protection change, and publishes its score for the
 README badge; read the results at <https://scorecard.dev/viewer/?uri=github.com/lakana-labs/lakana>.
 
+**An npm advisory may be let through only for a dev dependency, until a date, tracked by an
+issue.** The `npm audit` job runs `scripts/npm_audit.py ui tools/jscpd`, which runs
+`npm audit --json` in each directory and fails on every advisory (severity `low` and above) except
+one listed in `scripts/npm-audit-allowlist.toml`. Each `[[advisory]]` entry names the GHSA id, the
+package, the reason, the tracking issue and an `until` date, and the script fails when an entry's
+`until` has come (from that day on, as osv-scanner's `ignoreUntil`), when its package appears
+anywhere in the production tree (`npm ls --package-lock-only --omit=dev --all`, any version), and
+when no audited lock reports it any more, so the entry goes when the fix lands. osv-scanner, which
+reads the `osv-scanner.toml` next to each lock it scans, ignores the same advisory with
+`[[IgnoredVulns]]`, the same `ignoreUntil` and a reason naming the issue;
+`scripts/tests/test_npm_audit.py` keeps the two lists equal. The job's probe also requires the
+script to fail on lodash 4.17.20 with `ui/` audited beside it, so the allowlist swallows nothing
+else. Add an entry only on the maintainer's decision, with a tracking issue that says why it is
+acceptable; the first is GHSA-fc5q-39xc-vjpf in `picomatch` (dev tooling of `ui/`, until
+2026-12-01, #709).
+
 ### Image scan
 
 `security-deep.yml` also builds the server image (`Dockerfile`) and the four task images
