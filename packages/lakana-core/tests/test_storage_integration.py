@@ -7,7 +7,7 @@ import pytest
 from core_test_helpers import SeaweedFsContainer
 
 from lakana_core.errors import NotFoundError
-from lakana_core.storage import FsspecStorage
+from lakana_core.storage import ChildEntry, FsspecStorage
 
 pytestmark = pytest.mark.integration
 
@@ -107,3 +107,15 @@ def test_a_multipart_stream_commits_replaces_and_aborts_cleanly(
     gc.collect()
     assert storage.exists("multi/y") is False
     assert _open_uploads(storage) == []
+
+
+def test_list_children_page_reads_one_page_at_a_time_from_s3(storage: FsspecStorage) -> None:
+    """Pages of a real bucket follow the key order and never repeat a folder after a cursor."""
+    for path in ("pages/a.csv", "pages/a/x.csv", "pages/a/y.csv", "pages/b.csv", "pages/c/z"):
+        storage.write(path, b"12345"[: len(path) % 5 + 1])
+
+    first = storage.list_children_page("pages", after=None, limit=2)
+    assert first == [ChildEntry("a.csv", False, 2), ChildEntry("a", True, None)]
+    rest = storage.list_children_page("pages", after=first[-1].key, limit=5)
+    assert rest == [ChildEntry("b.csv", False, 2), ChildEntry("c", True, None)]
+    assert storage.list_children_page("nope", after=None, limit=5) == []

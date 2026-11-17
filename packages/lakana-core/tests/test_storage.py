@@ -19,6 +19,7 @@ from pyiceberg.io.pyarrow import PyArrowFileIO
 from lakana_core.config import StorageConfig
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.storage import FsspecStorage, build_file_io, build_storage
+from lakana_core.storage.base import ChildEntry
 from lakana_core.storage.fsspec_storage import (
     _modified_at,
     _RemoteStreamWriter,
@@ -869,6 +870,125 @@ def test_list_children_on_a_non_local_backend_uses_the_backends_listing() -> Non
     assert sorted(storage.list_children("artifacts")) == [("aa", True), ("stray.txt", False)]
     assert list(storage.list_children("nope")) == []
     assert list(storage.list_children("artifacts/stray.txt")) == []
+
+
+def _child_tree(storage: FsspecStorage) -> None:
+    """Write `raw/` with two folders and two files beside them, named to test the order.
+
+    Parameters
+    ----------
+    storage
+        The storage to write to.
+    """
+    storage.write("raw/a.csv", b"12345")
+    storage.write("raw/a/x.csv", b"1")
+    storage.write("raw/b.csv", b"123")
+    storage.write("raw/c/d/y.csv", b"1")
+
+
+def test_list_children_page_sorts_by_key_and_pages_after_a_key(config: StorageConfig) -> None:
+    """A folder's key is its name and a slash, as S3 orders it: `a.csv` before `a/`."""
+    storage = build_storage(config)
+    _child_tree(storage)
+
+    first = storage.list_children_page("raw", after=None, limit=2)
+    assert first == [ChildEntry("a.csv", False, 5), ChildEntry("a", True, None)]
+    rest = storage.list_children_page("raw", after="a/", limit=5)
+    assert rest == [ChildEntry("b.csv", False, 3), ChildEntry("c", True, None)]
+    assert storage.list_children_page("raw", after="c/", limit=5) == []
+    assert storage.list_children_page("nope", after=None, limit=5) == []
+    assert storage.list_children_page("raw/a.csv", after=None, limit=5) == []
+
+
+def test_list_children_page_skips_symlinks_and_reads_nothing_below_one(
+    config: StorageConfig, tmp_path: Path
+) -> None:
+    storage = build_storage(config)
+    storage.write("raw/keep.csv", b"1")
+    outside = tmp_path.parent / "outside-children-page"
+    outside.mkdir(exist_ok=True)
+    (outside / "secret.csv").write_bytes(b"x")
+    os.symlink(outside, tmp_path / "raw" / "linked")
+    os.symlink(outside / "secret.csv", tmp_path / "raw" / "linked.csv")
+    assert storage.list_children_page("raw", after=None, limit=10) == [
+        ChildEntry("keep.csv", False, 1)
+    ]
+    assert storage.list_children_page("raw/linked", after=None, limit=10) == []
+
+
+def test_list_children_page_skips_a_file_that_vanishes_while_it_is_read(
+    config: StorageConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = build_storage(config)
+    storage.write("raw/keep.csv", b"1")
+    storage.write("raw/gone.csv", b"2")
+    real = os.stat
+
+    def stat(path: str, *, follow_symlinks: bool = True) -> os.stat_result:
+        if str(path).endswith("/gone.csv"):
+            raise FileNotFoundError(path)
+        return real(path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(os, "stat", stat)
+    found = storage.list_children_page("raw", after=None, limit=10)
+    assert found == [ChildEntry("keep.csv", False, 1)]
+
+
+def test_list_children_page_on_a_non_local_backend_sorts_one_folder() -> None:
+    storage = FsspecStorage("memory://children-page-lake", {})
+    _child_tree(storage)
+    assert storage.list_children_page("raw", after=None, limit=3) == [
+        ChildEntry("a.csv", False, 5),
+        ChildEntry("a", True, None),
+        ChildEntry("b.csv", False, 3),
+    ]
+    assert storage.list_children_page("raw", after="b.csv", limit=3) == [
+        ChildEntry("c", True, None)
+    ]
+    assert storage.list_children_page("nope", after=None, limit=3) == []
+
+
+def test_list_children_page_on_s3_asks_for_one_page_and_drops_the_repeated_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S3 answers `StartAfter="…/a/"` with the prefix `a/` again: it is not shown twice."""
+    storage = FsspecStorage("s3://lake/dev", {"s3.endpoint": "http://127.0.0.1:1"})
+    asked: list[dict[str, object]] = []
+
+    def call_s3(method: str, **kwargs: object) -> dict[str, object]:
+        assert method == "list_objects_v2"
+        asked.append(kwargs)
+        at = str(kwargs["Prefix"])
+        if kwargs.get("StartAfter") is None:
+            return {
+                "CommonPrefixes": [{"Prefix": f"{at}a/"}],
+                "Contents": [{"Key": f"{at}a.csv", "Size": 5}],
+            }
+        return {
+            "CommonPrefixes": [{"Prefix": f"{at}a/"}, {"Prefix": f"{at}c/"}],
+            "Contents": [{"Key": f"{at}b.csv", "Size": 3}],
+        }
+
+    monkeypatch.setattr(storage._fs, "call_s3", call_s3)
+    assert storage.list_children_page("raw", after=None, limit=2) == [
+        ChildEntry("a.csv", False, 5),
+        ChildEntry("a", True, None),
+    ]
+    assert storage.list_children_page("raw/", after="a/", limit=1) == [
+        ChildEntry("b.csv", False, 3)
+    ]
+    assert storage.list_children_page("", after=None, limit=1) == [ChildEntry("a.csv", False, 5)]
+    assert asked == [
+        {"Bucket": "lake", "Prefix": "dev/raw/", "Delimiter": "/", "MaxKeys": 3},
+        {
+            "Bucket": "lake",
+            "Prefix": "dev/raw/",
+            "Delimiter": "/",
+            "MaxKeys": 2,
+            "StartAfter": "dev/raw/a/",
+        },
+        {"Bucket": "lake", "Prefix": "dev/", "Delimiter": "/", "MaxKeys": 2},
+    ]
 
 
 def test_a_listing_drops_the_backends_cached_directories_first(

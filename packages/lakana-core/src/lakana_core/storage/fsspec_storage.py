@@ -2,6 +2,7 @@
 
 import contextlib
 import errno
+import heapq
 import io
 import logging
 import os
@@ -27,6 +28,7 @@ from lakana_core.storage.base import (
     PART_SUFFIX,
     STREAM_BLOCK_BYTES,
     STREAM_CHUNK_BYTES,
+    ChildEntry,
     Storage,
     StoredObject,
     StreamWriter,
@@ -902,11 +904,8 @@ class FsspecStorage:
         """
         full = self._full(prefix)
         if isinstance(self._fs, LocalFileSystem):
-            walked = self._base
-            for part in [p for p in full[len(self._base) :].split("/") if p]:
-                walked = f"{walked}/{part}"
-                if os.path.islink(walked):
-                    return
+            if self._linked_on_the_way(full):
+                return
             try:
                 scan = os.scandir(full)
             except (FileNotFoundError, NotADirectoryError):
@@ -921,6 +920,162 @@ class FsspecStorage:
             return
         for info in self._fs.ls(full, detail=True):
             yield str(info["name"]).rstrip("/").rsplit("/", 1)[1], info["type"] == "directory"
+
+    def _linked_on_the_way(self, full: str) -> bool:
+        """Check whether a local path, or a directory between the root and it, is a symlink.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root.
+
+        Returns
+        -------
+        bool
+            ``True`` when a listing must report nothing, as nothing outside the root is listed.
+        """
+        walked = self._base
+        for part in [p for p in full[len(self._base) :].split("/") if p]:
+            walked = f"{walked}/{part}"
+            if os.path.islink(walked):
+                return True
+        return False
+
+    def list_children_page(self, prefix: str, *, after: str | None, limit: int) -> list[ChildEntry]:
+        """List one page of the entries directly beneath a prefix; see `Storage.list_children_page`.
+
+        The local backend reads the one directory's names and the size of the files it returns
+        only; S3 is asked for one page (`list_objects_v2` with a delimiter, `StartAfter` and
+        `MaxKeys`); any other backend lists the one directory and returns a page of it.
+
+        Parameters
+        ----------
+        prefix
+            Root-relative prefix.
+        after
+            The key of the last entry of the previous page; `None` for the first.
+        limit
+            Most entries returned.
+
+        Returns
+        -------
+        list of ChildEntry
+            The page, sorted by key.
+
+        Raises
+        ------
+        ValidationError
+            If the prefix contains a NUL byte, or escapes the configured storage root.
+        """
+        full = self._full(prefix)
+        if isinstance(self._fs, LocalFileSystem):
+            return self._local_children_page(full, after, limit)
+        if "s3" in self._fs.protocol:
+            return self._s3_children_page(full, after, limit)
+        self._fs.invalidate_cache(full)
+        if not self._fs.isdir(full):
+            return []
+        found = [
+            ChildEntry(
+                str(info["name"]).rstrip("/").rsplit("/", 1)[1],
+                info["type"] == "directory",
+                None if info["type"] == "directory" else int(info.get("size") or 0),
+            )
+            for info in self._fs.ls(full, detail=True)
+        ]
+        return heapq.nsmallest(
+            limit,
+            (entry for entry in found if after is None or entry.key > after),
+            key=lambda entry: entry.key,
+        )
+
+    def _local_children_page(self, full: str, after: str | None, limit: int) -> list[ChildEntry]:
+        """Read one page of a local directory, statting only the files returned.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root.
+        after
+            The key to start after, or `None`.
+        limit
+            Most entries returned.
+
+        Returns
+        -------
+        list of ChildEntry
+            The page; empty below a symlink or for a path that is no directory.
+        """
+        if self._linked_on_the_way(full):
+            return []
+        try:
+            scan = os.scandir(full)
+        except (FileNotFoundError, NotADirectoryError):
+            return []
+        with scan:
+            names = [
+                (f"{entry.name}/" if entry.is_dir(follow_symlinks=False) else entry.name, entry)
+                for entry in scan
+                if not entry.is_symlink()
+            ]
+        page: list[ChildEntry] = []
+        for key, entry in heapq.nsmallest(
+            limit, (n for n in names if after is None or n[0] > after), key=lambda n: n[0]
+        ):
+            if key.endswith("/"):
+                page.append(ChildEntry(entry.name, True, None))
+                continue
+            try:
+                size = os.stat(entry.path, follow_symlinks=False).st_size
+            except FileNotFoundError:
+                continue  # removed since the directory was read: not there any more
+            page.append(ChildEntry(entry.name, False, size))
+        return page
+
+    def _s3_children_page(self, full: str, after: str | None, limit: int) -> list[ChildEntry]:
+        """Ask S3 for one page of the keys and common prefixes directly beneath a path.
+
+        S3 answers a `StartAfter` that ends in a common prefix's own key (``…/orders/``) with
+        that prefix again, since its objects sort after it; one more key is asked for, and the
+        repeated prefix dropped.
+
+        Parameters
+        ----------
+        full
+            The backend path, ``bucket/key``, already confined to the root.
+        after
+            The key to start after, or `None`.
+        limit
+            Most entries returned.
+
+        Returns
+        -------
+        list of ChildEntry
+            The page, sorted by key.
+        """
+        bucket, key, _ = self._fs.split_path(full)
+        start = f"{key}/" if key else ""
+        request: dict[str, object] = {
+            "Bucket": bucket,
+            "Prefix": start,
+            "Delimiter": "/",
+            "MaxKeys": limit + 1,
+        }
+        if after is not None:
+            request["StartAfter"] = start + after
+        answer = self._fs.call_s3("list_objects_v2", **request)
+        found = [
+            ChildEntry(str(each["Prefix"])[len(start) :].rstrip("/"), True, None)
+            for each in answer.get("CommonPrefixes", [])
+        ] + [
+            ChildEntry(str(each["Key"])[len(start) :], False, int(each.get("Size") or 0))
+            for each in answer.get("Contents", [])
+        ]
+        page = sorted(
+            (entry for entry in found if after is None or entry.key > after),
+            key=lambda entry: entry.key,
+        )
+        return page[:limit]
 
     def _list_local_objects(self, full: str) -> Iterator[StoredObject]:
         """List a local directory without ever following or reporting a symlink.
