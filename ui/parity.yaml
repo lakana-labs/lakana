@@ -275,6 +275,8 @@
 "GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "GET /api/v1/column-masks":
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
+"GET /api/v1/connections": { class: ui, part: 6 }
+"GET /api/v1/connections/environments": { class: ui, part: 6 }
 "GET /api/v1/environments": { class: ui, part: 8 }
 "GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}": { class: ui, part: 6 }
@@ -446,6 +448,7 @@
 "POST /api/v1/ci-trust-rules/{rule_id}/enable": { class: ui, part: 7 }
 "POST /api/v1/column-masks": { class: ui, part: 7 }
 "POST /api/v1/environments": { class: ui, part: 8 }
+"POST /api/v1/environments/{environment_name}/connection-tests": { class: ui, part: 6 }
 "POST /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
 "POST /api/v1/environments/{environment_name}/connections/{connection_name}/tests":
   { class: ui, part: 6 }

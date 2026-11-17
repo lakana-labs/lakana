@@ -975,6 +975,9 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/environments/{environment_name}/connections/{connection_name}/tests"): (
         "tests an existing connection; changes nothing"
     ),
+    ("POST", "/api/v1/environments/{environment_name}/connection-tests"): (
+        "tests the existing connections, as one test does; changes nothing"
+    ),
     ("DELETE", "/api/v1/package-indexes/{name}"): "removing an index removes a source",
     ("DELETE", "/api/v1/repositories/{name}"): "removing a repository removes a source",
     ("POST", "/api/v1/repository-probes"): (

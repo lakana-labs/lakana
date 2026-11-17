@@ -80,11 +80,14 @@ class ConnectionTest(Base):
     """
 
     __tablename__ = "connection_tests"
-    __table_args__ = (Index("ix_connection_tests_claim", "state", "lease_expires_at"),)
+    __table_args__ = (
+        Index("ix_connection_tests_claim", "state", "lease_expires_at"),
+        Index("ix_connection_tests_connection_id_created_at", "connection_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     connection_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("connections.id", ondelete="CASCADE"), index=True
+        ForeignKey("connections.id", ondelete="CASCADE")
     )
     environment_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("environments.id", ondelete="CASCADE")

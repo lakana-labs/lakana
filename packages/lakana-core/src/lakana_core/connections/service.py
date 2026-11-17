@@ -19,6 +19,15 @@ give it which secret is split by case:
 When a connection takes a secret, every other secret bound to it is let go (unbound), so that
 "keep the bound secret" can only ever mean the one it uses. No method decrypts a secret, and no
 view, message or audit event holds a secret value or the text of a CA certificate.
+
+Every view says what its reader may do with the connection (`CONNECTION_ACTIONS`) and its last
+test. Every reader sees the test's state, outcome and finish time; only a holder of
+`MANAGE_CONNECTION` on the environment sees its id, request time, message and requester, because
+the message can name paths, hosts and ports the worker reached. The rights of a page are asked in
+one `permits_each` batch, which writes no audit event.
+
+Test all (`request_tests`) queues a test of each connection on one page of the list, one
+connection per transaction, and returns a connection's open test instead of refusing it.
 """
 
 from __future__ import annotations
@@ -28,14 +37,14 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.connections.kinds import (
     NAME,
     ConnectionKind,
@@ -102,7 +111,131 @@ _TEST_STUCK = (
     "no worker finished this test within 10 minutes; check that a worker is running and read its "
     "log (`docker compose logs worker`, or the `lakana local` terminal)"
 )
+TEST_ALL_MAX = 200
+"""The most connections one Test all request queues (`ConnectionService.request_tests`)."""
 _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a credential
+ConnectionAction = Literal["test", "update", "delete", "name_secret"]
+"""A word of a connection's `actions`."""
+CONNECTION_ACTIONS: tuple[ConnectionAction, ...] = ("test", "update", "delete", "name_secret")
+"""The words a connection's `actions` may hold, in this order.
+
+``test``, ``update`` and ``delete`` need `MANAGE_CONNECTION` on the environment. ``name_secret``
+needs `MANAGE_SECRET` there too: the right to name a secret not bound to the connection, or to make
+a change that could send its secret somewhere new without new values. They are rights only: the
+server decides every request again.
+"""
+EnvironmentAction = Literal["create", "test", "name_secret"]
+"""A word of an environment's `actions` (`ConnectionService.environments`)."""
+ENVIRONMENT_ACTIONS: tuple[EnvironmentAction, ...] = ("create", "test", "name_secret")
+"""The words an environment's `actions` may hold, in this order.
+
+``create`` and ``test`` need `MANAGE_CONNECTION` on the environment; ``name_secret`` needs
+`MANAGE_SECRET` there too, as a connection's ``name_secret`` does.
+"""
+
+
+@dataclass(frozen=True)
+class LastTestDetail:
+    """What only a holder of `MANAGE_CONNECTION` on the environment sees of a last test.
+
+    Parameters
+    ----------
+    id
+        The test's id.
+    created_at
+        When it was requested.
+    message
+        What the check found, redacted; `None` until it is done.
+    requested_by
+        The name of the principal who asked, or `None` if that principal is gone.
+    """
+
+    id: uuid.UUID
+    created_at: datetime
+    message: str | None
+    requested_by: str | None
+
+
+@dataclass(frozen=True)
+class LastTest:
+    """The newest test of a connection, of any state.
+
+    Parameters
+    ----------
+    state
+        `queued`, `running` or `done`.
+    outcome
+        The outcome, `None` until it is done.
+    finished_at
+        When it finished, `None` until it is done.
+    detail
+        The id, time, message and requester; `None` for a caller without `MANAGE_CONNECTION`
+        on the environment.
+    """
+
+    state: ConnectionTestState
+    outcome: ConnectionTestOutcome | None
+    finished_at: datetime | None
+    detail: LastTestDetail | None
+
+
+def last_tests(
+    session: Session, connection_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, tuple[ConnectionTest, str | None]]:
+    """Read the newest test of each connection, with its requester's name, in one statement.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    connection_ids
+        The connections to read.
+
+    Returns
+    -------
+    dict
+        For each tested connection its newest test (by `created_at`, equal times by the larger
+        `id`) and the name of who requested it, `None` when that principal is gone. A connection
+        never tested is absent.
+    """
+    if not connection_ids:
+        return {}
+    ranked = (
+        select(
+            ConnectionTest.id.label("test_id"),
+            func.row_number()
+            .over(
+                partition_by=ConnectionTest.connection_id,
+                order_by=(ConnectionTest.created_at.desc(), ConnectionTest.id.desc()),
+            )
+            .label("position"),
+        )
+        .where(ConnectionTest.connection_id.in_(list(connection_ids)))
+        .subquery()
+    )
+    rows = session.execute(
+        select(ConnectionTest, Principal.name)
+        .join(ranked, ranked.c.test_id == ConnectionTest.id)
+        .outerjoin(Principal, Principal.id == ConnectionTest.requested_by)
+        .where(ranked.c.position == 1)
+    ).all()
+    return {test.connection_id: (test, name) for test, name in rows}
+
+
+@dataclass(frozen=True)
+class ConnectionEnvironment:
+    """An environment whose connections the caller may read (`ConnectionService.environments`).
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    actions
+        What the caller's rights allow there, drawn from `ENVIRONMENT_ACTIONS` in that order.
+    """
+
+    name: str
+    actions: tuple[EnvironmentAction, ...]
 
 
 @dataclass(frozen=True)
@@ -129,6 +262,12 @@ class ConnectionView:
         When it was created.
     updated_at
         When it was last changed.
+    environment
+        The name of its environment.
+    last_test
+        Its newest test of any state, or `None` if it was never tested.
+    actions
+        What the caller's rights allow on it, drawn from `CONNECTION_ACTIONS` in that order.
     """
 
     name: str
@@ -140,6 +279,29 @@ class ConnectionView:
     created_by: str
     created_at: datetime
     updated_at: datetime
+    environment: str
+    last_test: LastTest | None
+    actions: tuple[ConnectionAction, ...]
+
+
+@dataclass(frozen=True)
+class QueuedTest:
+    """What Test all did for one connection (`ConnectionService.request_tests`).
+
+    Parameters
+    ----------
+    connection
+        The connection's name.
+    test
+        The test queued for it, or the open test it already had.
+    queued
+        `True` when the test was queued by this request; `False` when an open test, at most
+        `TEST_STUCK_AFTER` old, was returned instead.
+    """
+
+    connection: str
+    test: ConnectionTest
+    queued: bool
 
 
 def missing_connections(
@@ -501,10 +663,80 @@ class ConnectionService:
             )
         return row
 
+    def _rights(self, p: PrincipalRef, environments: Iterable[str]) -> dict[str, tuple[bool, bool]]:
+        """Ask what a caller may do with the connections of some environments, in one batch.
+
+        Two questions per environment, `MANAGE_CONNECTION` and `MANAGE_SECRET`, go in one
+        `permits_each` call. Like every visibility question, it writes no audit event.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environments
+            The environments' names; one may repeat.
+
+        Returns
+        -------
+        dict of str to tuple of (bool, bool)
+            Each environment's name to whether the caller holds `MANAGE_CONNECTION` and
+            `MANAGE_SECRET` there.
+        """
+        names = sorted(set(environments))
+        questions = [
+            (action, Securable.environment_scope(name))
+            for name in names
+            for action in (Action.MANAGE_CONNECTION, Action.MANAGE_SECRET)
+        ]
+        answers = permits_each(self._authz, p, questions) if questions else []
+        return {
+            name: (answers[2 * index], answers[2 * index + 1]) for index, name in enumerate(names)
+        }
+
+    def _readable_environments(
+        self, p: PrincipalRef
+    ) -> dict[uuid.UUID, tuple[Environment, tuple[bool, bool]]]:
+        """Find the live environments whose connections a caller may read, with their rights.
+
+        Three questions per environment, `READ_ENVIRONMENT`, `MANAGE_CONNECTION` and
+        `MANAGE_SECRET`, go in one `permits_each` call, which writes no audit event. An
+        environment without `READ_ENVIRONMENT` is left out.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        dict
+            Each readable environment's id to its row and its entry of `_rights` (whether the
+            caller holds `MANAGE_CONNECTION` and `MANAGE_SECRET` there), by name.
+        """
+        envs = builtins.list(
+            self._session.execute(
+                select(Environment).where(LIVE_ENVIRONMENT).order_by(Environment.name)
+            ).scalars()
+        )
+        questions = [
+            (action, Securable.environment_scope(env.name))
+            for env in envs
+            for action in (Action.READ_ENVIRONMENT, Action.MANAGE_CONNECTION, Action.MANAGE_SECRET)
+        ]
+        answers = iter(permits_each(self._authz, p, questions) if questions else [])
+        readable: dict[uuid.UUID, tuple[Environment, tuple[bool, bool]]] = {}
+        for env in envs:
+            reads, manages, manages_secrets = next(answers), next(answers), next(answers)
+            if reads:
+                readable[env.id] = (env, (manages, manages_secrets))
+        return readable
+
     def _view(
         self,
         row: Connection,
         env: Environment,
+        last: tuple[ConnectionTest, str | None] | None,
+        rights: tuple[bool, bool],
         declarations: Mapping[str, builtins.list[tuple[str, str]]] | None = None,
     ) -> ConnectionView:
         """Turn a row into what a caller sees.
@@ -515,6 +747,11 @@ class ConnectionService:
             The connection.
         env
             Its environment.
+        last
+            Its entry of `last_tests`, `None` if it was never tested.
+        rights
+            Its environment's entry of `_rights`: whether the caller holds `MANAGE_CONNECTION`
+            and `MANAGE_SECRET` there.
         declarations
             `_declarations` of the environment, when the caller read it already.
 
@@ -530,6 +767,10 @@ class ConnectionService:
             settings["ca_certificate"] = fingerprint(settings["ca_certificate"])
         secret = self._used_secret(row)
         creator = self._session.get(Principal, row.created_by)
+        manages, manages_secrets = rights
+        actions: tuple[ConnectionAction, ...] = ()
+        if manages:
+            actions = CONNECTION_ACTIONS if manages_secrets else CONNECTION_ACTIONS[:3]
         return ConnectionView(
             name=row.name,
             kind=row.kind,
@@ -540,7 +781,58 @@ class ConnectionService:
             created_by=creator.name if creator is not None else "",
             created_at=row.created_at,
             updated_at=row.updated_at,
+            environment=env.name,
+            last_test=None if last is None else self._last_test(*last, manages=manages),
+            actions=actions,
         )
+
+    @staticmethod
+    def _last_test(test: ConnectionTest, requested_by: str | None, *, manages: bool) -> LastTest:
+        """Turn a test row into the last test of a connection, as its caller may see it.
+
+        Parameters
+        ----------
+        test
+            The newest test.
+        requested_by
+            The name of who asked, `None` if that principal is gone.
+        manages
+            Whether the caller holds `MANAGE_CONNECTION` on the environment.
+
+        Returns
+        -------
+        LastTest
+            Its state, outcome and time; the detail only for a caller who `manages`.
+        """
+        detail = None
+        if manages:
+            detail = LastTestDetail(
+                id=test.id,
+                created_at=test.created_at,
+                message=test.message,
+                requested_by=requested_by,
+            )
+        return LastTest(
+            state=test.state,
+            outcome=test.outcome,
+            finished_at=test.finished_at,
+            detail=detail,
+        )
+
+    def _last_of(self, row: Connection) -> tuple[ConnectionTest, str | None] | None:
+        """Read the newest test of one connection.
+
+        Parameters
+        ----------
+        row
+            The connection.
+
+        Returns
+        -------
+        tuple or None
+            Its entry of `last_tests`, `None` if it was never tested.
+        """
+        return last_tests(self._session, [row.id]).get(row.id)
 
     def declared_by(self, environment_id: uuid.UUID, name: str) -> builtins.list[tuple[str, str]]:
         """List the assets whose deployed version declares a connection.
@@ -707,7 +999,7 @@ class ConnectionService:
                 },
             )
             self._commit(env, name)
-        return self._view(row, env)
+        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
 
     def list(
         self, p: PrincipalRef, environment: str, *, limit: int = 100, cursor: str | None = None
@@ -755,7 +1047,113 @@ class ConnectionService:
             cursor=cursor,
         )
         declarations = self._declarations(env.id)
-        return Page([self._view(row, env, declarations) for row in page.items], page.next_cursor)
+        found = last_tests(self._session, [row.id for row in page.items])
+        rights = self._rights(p, [env.name])[env.name]
+        return Page(
+            [self._view(row, env, found.get(row.id), rights, declarations) for row in page.items],
+            page.next_cursor,
+        )
+
+    def list_all(
+        self,
+        p: PrincipalRef,
+        *,
+        environment: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> Page[ConnectionView]:
+        """List the connections of every environment the caller may read, one page at a time.
+
+        With `environment`, this is `list` of that environment: its rows, its cursor and its
+        refusals. Without it, the environments are every live one where the caller holds
+        `READ_ENVIRONMENT`, asked with the page's rights in one `permits_each` batch; one
+        without the right is left out, so the list is never refused but for a task token. The
+        rows are newest first over all of them, equal times by id, read in one statement; the
+        cursor belongs to the ``all-connections`` list, so a cursor of `list` is refused.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Only this environment, with the answers and refusals of `list`.
+        limit
+            Most connections returned.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of ConnectionView
+            The connections, each naming its environment, and the cursor of the next page.
+
+        Raises
+        ------
+        PermissionDenied
+            For a task token (`_refuse_task`); with `environment`, also without
+            `READ_ENVIRONMENT` there.
+        NotFoundError
+            With `environment` only, if it does not exist.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for this list.
+        """
+        _refuse_task(p)
+        if environment is not None:
+            return self.list(p, environment, limit=limit, cursor=cursor)
+        readable = self._readable_environments(p)
+        page = newest_first(
+            self._session,
+            select(Connection).where(Connection.environment_id.in_(builtins.list(readable))),
+            kind="all-connections",
+            at=Connection.created_at,
+            row_id=Connection.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
+        declarations = {
+            env_id: self._declarations(env_id)
+            for env_id in {row.environment_id for row in page.items}
+        }
+        found = last_tests(self._session, [row.id for row in page.items])
+        views = []
+        for row in page.items:
+            env, rights = readable[row.environment_id]
+            views.append(
+                self._view(row, env, found.get(row.id), rights, declarations[row.environment_id])
+            )
+        return Page(views, page.next_cursor)
+
+    def environments(self, p: PrincipalRef) -> builtins.list[ConnectionEnvironment]:
+        """List the environments whose connections the caller may read, and what they may do.
+
+        Every live environment where the caller holds `READ_ENVIRONMENT`, with its actions
+        (`ENVIRONMENT_ACTIONS`): ``create`` and ``test`` with `MANAGE_CONNECTION`, and
+        ``name_secret`` with `MANAGE_SECRET` too. One `permits_each` batch answers it.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+
+        Returns
+        -------
+        list of ConnectionEnvironment
+            The environments, sorted by name; empty when there is none.
+
+        Raises
+        ------
+        PermissionDenied
+            For a task token (`_refuse_task`).
+        """
+        _refuse_task(p)
+        found = []
+        for env, (manages, manages_secrets) in self._readable_environments(p).values():
+            actions: tuple[EnvironmentAction, ...] = ()
+            if manages:
+                actions = ENVIRONMENT_ACTIONS if manages_secrets else ENVIRONMENT_ACTIONS[:2]
+            found.append(ConnectionEnvironment(name=env.name, actions=actions))
+        return found
 
     def get(self, p: PrincipalRef, environment: str, name: str) -> ConnectionView:
         """Show one connection.
@@ -785,7 +1183,8 @@ class ConnectionService:
         _refuse_task(p)
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         env = self._environment(environment)
-        return self._view(self._find(env, name), env)
+        row = self._find(env, name)
+        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
 
     def update(
         self,
@@ -884,7 +1283,7 @@ class ConnectionService:
                 self._session.rollback()
                 raise
             self._commit(env, row.name)
-        return self._view(row, env)
+        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
 
     def _change(
         self,
@@ -1078,49 +1477,177 @@ class ConnectionService:
         env = self._environment(environment)
         with refuse_concurrent_change(self._session, f"connection `{shown(name)}`"):
             row = self._find(env, name, lock=True)
-            open_test = self._session.execute(
-                select(ConnectionTest)
-                .where(
-                    ConnectionTest.connection_id == row.id,
-                    ConnectionTest.state.in_(
-                        (ConnectionTestState.QUEUED, ConnectionTestState.RUNNING)
-                    ),
-                )
-                .with_for_update()
-            ).scalar_one_or_none()
+            open_test = self._open_test(row, env)
             if open_test is not None:
-                if utcnow() - open_test.created_at <= TEST_STUCK_AFTER:
-                    state = open_test.state.value
-                    self._session.rollback()
-                    raise ConflictError(
-                        f"a test of `{shown(name)}` is already "
-                        f"{'queued' if state == 'queued' else 'running'}; see it with "
-                        f"lakana connection test {shown(name)} --env {shown(env.name)} "
-                        f"--id {open_test.id}"
-                    )
-                ConnectionTestQueue(self._session).close(
-                    open_test, row.name, env.name, ConnectionTestOutcome.FAILED, _TEST_STUCK
+                state = open_test.state.value
+                self._session.rollback()
+                raise ConflictError(
+                    f"a test of `{shown(name)}` is already "
+                    f"{'queued' if state == 'queued' else 'running'}; see it with "
+                    f"lakana connection test {shown(name)} --env {shown(env.name)} "
+                    f"--id {open_test.id}"
                 )
-            test = ConnectionTest(
-                id=uuid.uuid4(),
-                connection_id=row.id,
-                environment_id=env.id,
-                requested_by=p.id,
-                state=ConnectionTestState.QUEUED,
-            )
-            self._session.add(test)
-            AuditService(self._session).record(
-                p.id,
-                AuditEventType.CONNECTION_TESTED,
-                securable=scope,
-                detail={
-                    "connection": row.name,
-                    "environment": env.name,
-                    "test_id": str(test.id),
-                    "state": ConnectionTestState.QUEUED.value,
-                },
-            )
+            test = self._queue_test(p, env, row, scope)
             self._session.commit()
+        return test
+
+    def request_tests(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        limit: int = TEST_ALL_MAX,
+        cursor: str | None = None,
+    ) -> Page[QueuedTest]:
+        """Queue a test of every connection on one page of an environment's list (Test all).
+
+        The page is the one `list` gives for the same `limit` and `cursor`. Each connection is
+        handled in page order, in its own transaction: its row is locked, an open test older than
+        `TEST_STUCK_AFTER` is finished as failed, a younger one is returned as it is, and
+        otherwise a test is queued and audited as `request_test` does; then it commits, so no two
+        connections are locked at once.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            The environment's name.
+        limit
+            Most connections handled, from 1 to `TEST_ALL_MAX`.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of QueuedTest
+            What was done for each connection, newest connection first, and the cursor of the
+            next page.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `MANAGE_CONNECTION` on the environment.
+        NotFoundError
+            If the environment does not exist.
+        ValidationError
+            If `limit` is outside 1 to `TEST_ALL_MAX`, or `cursor` is not one this server issued
+            for the environment's connection list.
+        ConflictError
+            If a connection changed at the same time (the ones before it stay queued).
+        """
+        scope = Securable.environment_scope(environment)
+        self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
+        env = self._environment(environment)
+        if limit > TEST_ALL_MAX:
+            raise ValidationError(f"limit must be at most {TEST_ALL_MAX}")
+        page = newest_first(
+            self._session,
+            select(Connection).where(Connection.environment_id == env.id),
+            kind="connections",
+            at=Connection.created_at,
+            row_id=Connection.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
+        found = [(row.id, row.name) for row in page.items]
+        items: builtins.list[QueuedTest] = []
+        for row_id, name in found:
+            with refuse_concurrent_change(self._session, f"connection `{shown(name)}`"):
+                try:
+                    row = lock_row(self._session, Connection, row_id)
+                    if row is None:
+                        self._session.rollback()
+                        continue
+                    open_test = self._open_test(row, env)
+                    item = (
+                        QueuedTest(name, self._queue_test(p, env, row, scope), True)
+                        if open_test is None
+                        else QueuedTest(name, open_test, False)
+                    )
+                    # Written, then detached: the commit leaves the answer's test as it is, so
+                    # it is not read again, nor lost when the connection is deleted meanwhile.
+                    self._session.flush()
+                    self._session.expunge(item.test)
+                    self._session.commit()
+                    items.append(item)
+                except BaseException:
+                    self._session.rollback()
+                    raise
+        return Page(items, page.next_cursor)
+
+    def _open_test(self, row: Connection, env: Environment) -> ConnectionTest | None:
+        """Read a connection's open test under a lock, finishing it as failed when it is stuck.
+
+        Parameters
+        ----------
+        row
+            The connection, locked by the caller.
+        env
+            Its environment.
+
+        Returns
+        -------
+        ConnectionTest or None
+            The queued or running test, at most `TEST_STUCK_AFTER` old; `None` when there is
+            none, or the one there was is older and was just finished as failed (uncommitted).
+        """
+        open_test = self._session.execute(
+            select(ConnectionTest)
+            .where(
+                ConnectionTest.connection_id == row.id,
+                ConnectionTest.state.in_((ConnectionTestState.QUEUED, ConnectionTestState.RUNNING)),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if open_test is None or utcnow() - open_test.created_at <= TEST_STUCK_AFTER:
+            return open_test
+        ConnectionTestQueue(self._session).close(
+            open_test, row.name, env.name, ConnectionTestOutcome.FAILED, _TEST_STUCK
+        )
+        return None
+
+    def _queue_test(
+        self, p: PrincipalRef, env: Environment, row: Connection, scope: Securable
+    ) -> ConnectionTest:
+        """Add a queued test of a connection and its `CONNECTION_TESTED` event; the caller commits.
+
+        Parameters
+        ----------
+        p
+            The acting principal, recorded as the requester.
+        env
+            The connection's environment.
+        row
+            The connection, locked by the caller.
+        scope
+            The environment's securable, for the audit event.
+
+        Returns
+        -------
+        ConnectionTest
+            The new test, not yet committed.
+        """
+        test = ConnectionTest(
+            id=uuid.uuid4(),
+            connection_id=row.id,
+            environment_id=env.id,
+            requested_by=p.id,
+            state=ConnectionTestState.QUEUED,
+        )
+        self._session.add(test)
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.CONNECTION_TESTED,
+            securable=scope,
+            detail={
+                "connection": row.name,
+                "environment": env.name,
+                "test_id": str(test.id),
+                "state": ConnectionTestState.QUEUED.value,
+            },
+        )
         return test
 
     def test_result(
