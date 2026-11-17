@@ -53,14 +53,14 @@ describe("TestButton", () => {
     answer.release({ status: 202, body: QUEUED });
 
     expect(await screen.findByText("queued")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Test crm" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Test crm" })).toHaveTextContent("Testing…");
+    expect(screen.getByRole("button", { name: "Testing… crm" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Testing… crm" })).toHaveTextContent("Testing…");
     expect(server.sent).toEqual([
       expect.objectContaining({ method: "POST", path: TESTS.slice(5) }),
     ]);
     // The disabled button lost the focus; it stays beside it, never on the page.
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Test crm" }).closest(".test-button"),
+      screen.getByRole("button", { name: "Testing… crm" }).closest(".test-button"),
     );
   });
 
@@ -79,7 +79,7 @@ describe("TestButton", () => {
 
     expect(await screen.findByText("testing…")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Test crm" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Testing… crm" })).toBeDisabled();
     expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([TESTS, CRM]);
   });
 
@@ -134,7 +134,7 @@ describe("TestButton", () => {
       />,
     );
 
-    const button = screen.getByRole("button", { name: "Test crm" });
+    const button = screen.getByRole("button", { name: "Testing… crm" });
     expect(button).toBeDisabled();
     expect(button).toHaveTextContent("Testing…");
     expect(server.sent).toHaveLength(0);

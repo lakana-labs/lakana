@@ -116,10 +116,16 @@ export function TestButton({
         className={primary ? "button button-primary" : "button"}
         pending={pending}
         isDisabled={open}
-        {...(soon
+        {...(soon && !open
           ? {}
           : {
-              "aria-label": t("connections.list.testNamed", { name: markedText(connection.name) }),
+              // The name holds the visible words: "Test x", and "Testing… x" while it waits.
+              "aria-label": t(
+                open ? "connections.list.testingNamed" : "connections.list.testNamed",
+                {
+                  name: markedText(connection.name),
+                },
+              ),
             })}
         onPress={() => {
           void test();

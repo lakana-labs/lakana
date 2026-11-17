@@ -126,6 +126,7 @@
     "test": "Test",
     "testNamed": "Test {{name}}",
     "testing": "Testing…",
+    "testingNamed": "Testing… {{name}}",
     "none": "No connections yet.",
     "noneIn": "No connections in {{environment}} yet.",
     "noneCommand": "Add one from the command line:",

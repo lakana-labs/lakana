@@ -17,7 +17,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { QueryEnvironmentOut } from "../api/queries";
-import { VisibleText } from "../shell/VisibleText";
+import { markedText, VisibleText } from "../shell/VisibleText";
 import "./queryStrings";
 
 /** Properties of {@link EnvironmentName}. */
@@ -162,7 +162,7 @@ export function EnvironmentPicker({
               key={environment.name}
               id={environment.name}
               className="menu-item"
-              textValue={environment.name}
+              textValue={markedText(environment.name)}
             >
               <span className="menu-check" aria-hidden="true" />
               <EnvironmentName environment={environment} />

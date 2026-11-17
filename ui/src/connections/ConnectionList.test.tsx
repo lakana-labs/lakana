@@ -352,8 +352,10 @@ describe("ConnectionList", () => {
       await waitFor(() => {
         expect(within(row).getByText("queued")).toBeInTheDocument();
       });
-      expect(within(row).getByRole("button", { name: "Test crm" })).toBeDisabled();
-      expect(within(row).getByRole("button", { name: "Test crm" })).toHaveTextContent("Testing…");
+      expect(within(row).getByRole("button", { name: "Testing… crm" })).toBeDisabled();
+      expect(within(row).getByRole("button", { name: "Testing… crm" })).toHaveTextContent(
+        "Testing…",
+      );
       expect(server.sent.filter((request) => request.method === "POST")).toHaveLength(1);
     });
 
@@ -366,7 +368,7 @@ describe("ConnectionList", () => {
       );
       renderList();
 
-      expect(await screen.findByRole("button", { name: "Test crm" })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: "Testing… crm" })).toBeDisabled();
       expect(screen.getByText("testing…")).toBeInTheDocument();
       expect(server.sent.some((request) => request.method === "POST")).toBe(false);
     });
@@ -453,7 +455,7 @@ describe("ConnectionList", () => {
         const row = (await screen.findAllByRole("row"))[1] as HTMLElement;
         expect(within(row).getByText("testing…")).toBeInTheDocument();
         expect(row.querySelector(".status-glyph-running")).not.toBeNull();
-        const test = within(row).queryByRole("button", { name: "Test crm" });
+        const test = within(row).queryByRole("button", { name: "Testing… crm" });
         if (running.actions.includes("test")) {
           expect(test).toBeDisabled();
           expect(test).toHaveTextContent("Testing…");
@@ -553,8 +555,8 @@ describe("ConnectionList", () => {
         expect(status).toHaveTextContent("Testing 3 connections in dev…");
       });
       expect(screen.getAllByText("queued")).toHaveLength(2);
-      expect(screen.getByRole("button", { name: "Test a" })).toBeDisabled();
-      expect(screen.getByRole("button", { name: "Test b" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Testing… a" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Testing… b" })).toBeDisabled();
 
       await advance(1_000);
       await waitFor(() => {
