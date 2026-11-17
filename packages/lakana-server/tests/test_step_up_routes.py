@@ -1002,6 +1002,21 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/environments/{env}/runs/{run_id}/checks/rows"): "reads a run's failing rows",
     ("POST", "/api/v1/environments/{env}/queries"): "a query runs with the caller's own rights",
     ("POST", "/api/v1/environments/{env}/queries/{query_id}/cancel"): "operates existing work",
+    (
+        "POST",
+        "/api/v1/environments/{env}/saved-queries",
+    ): "keeps text; it runs nothing and grants nothing",
+    (
+        "PUT",
+        "/api/v1/environments/{env}/saved-queries/{saved_query_id}",
+    ): (
+        "changes the owner's own text, and may widen who reads it (private to everyone); the "
+        "text runs with each runner's own rights and grants nothing, and a session can read it"
+    ),
+    (
+        "DELETE",
+        "/api/v1/environments/{env}/saved-queries/{saved_query_id}",
+    ): "removes text; the owner or an administrator",
     ("POST", "/api/v1/environments/{env}/namespaces"): "data operation under existing rights",
     (
         "POST",

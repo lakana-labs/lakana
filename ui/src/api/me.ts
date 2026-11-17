@@ -96,12 +96,12 @@ export async function getInfo(): Promise<InfoOut> {
  * @param person - The person's own principal name.
  * @param kind - What was opened.
  * @param environment - Its environment.
- * @param ref - The object: a dotted table name.
+ * @param ref - The object: a dotted table name, or a query run's id.
  * @returns Nothing.
  */
 export async function recordOpened(
   person: string,
-  kind: "table",
+  kind: "table" | "query",
   environment: string,
   ref: string,
 ): Promise<void> {

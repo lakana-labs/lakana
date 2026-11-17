@@ -137,6 +137,7 @@ route with its parameters, its request body and its answers.
 - [Environments](rest/environments.md): 13 routes
 - [Namespaces](rest/namespaces.md): 4 routes
 - [Queries](rest/queries.md): 7 routes
+- [Saved queries](rest/saved-queries.md): 6 routes
 - [Tables](rest/tables.md): 27 routes
 - [Search](rest/search.md): 1 route
 - [Catalog](rest/catalog.md): 2 routes

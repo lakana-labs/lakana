@@ -206,6 +206,16 @@ ROUTES: dict[str, Route] = {
     "queries.cancel": Route("POST", "/api/v1/environments/{env}/queries/{query_id}/cancel"),
     "queries.list_all": Route("GET", "/api/v1/queries"),
     "queries.environments": Route("GET", "/api/v1/queries/environments"),
+    "saved_queries.list_all": Route("GET", "/api/v1/saved-queries"),
+    "saved_queries.list": Route("GET", "/api/v1/environments/{env}/saved-queries"),
+    "saved_queries.create": Route("POST", "/api/v1/environments/{env}/saved-queries"),
+    "saved_queries.get": Route("GET", "/api/v1/environments/{env}/saved-queries/{saved_query_id}"),
+    "saved_queries.update": Route(
+        "PUT", "/api/v1/environments/{env}/saved-queries/{saved_query_id}"
+    ),
+    "saved_queries.delete": Route(
+        "DELETE", "/api/v1/environments/{env}/saved-queries/{saved_query_id}"
+    ),
     "principals.create": Route("POST", "/api/v1/principals"),
     "principals.get": Route("GET", "/api/v1/principals/{name}"),
     "principals.list": Route("GET", "/api/v1/principals"),

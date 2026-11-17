@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, type ReactNode, useId } from "react";
+import { type JSX, type ReactNode, type Ref, useId } from "react";
 import { Button, type ButtonProps, ProgressBar } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -13,6 +13,8 @@ export interface PendingButtonProps extends Omit<ButtonProps, "isPending" | "chi
   readonly children: ReactNode;
   /** Whether the request this button started is still open. */
   readonly pending: boolean;
+  /** The button element, for a screen that moves the focus to it; none by default. */
+  readonly ref?: Ref<HTMLButtonElement>;
 }
 
 /**

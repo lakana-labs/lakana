@@ -22,11 +22,11 @@ import { shellQuote } from "../../shell/shellQuote";
 import { useResource } from "../../shell/useResource";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import { problemText } from "../../sign-in/messages";
-import { ReadFailed } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 import { formatBytes } from "../format";
 import { ListSkeleton } from "../ListSkeleton";
 import "./artifactStrings";
-import { fileName, saveBlob } from "./saveFile";
+import { fileName, saveBlob } from "../../shell/saveFile";
 import { ShowMore, useShowMore } from "./ShowMore";
 
 /** Properties of {@link VersionFiles}. */

@@ -55,6 +55,7 @@ from lakana.resources.raw import Raw
 from lakana.resources.repositories import Repositories
 from lakana.resources.row_filters import RowFilters
 from lakana.resources.runs import Runs, Scheduler, Workers, worker_info
+from lakana.resources.saved_queries import SavedQueries
 from lakana.resources.secrets import Secrets
 from lakana.resources.sign_in import (
     Invites,
@@ -118,6 +119,7 @@ class Client:
         self.catalog = Catalog(self._transport)
         self.artifacts = Artifacts(self._transport)
         self.queries = Queries(self._transport)
+        self.saved_queries = SavedQueries(self._transport)
         self.principals = Principals(self._transport)
         self.groups = Groups(self._transport)
         self.tokens = Tokens(self._transport)

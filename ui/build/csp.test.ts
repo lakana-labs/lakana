@@ -7,7 +7,9 @@ import { describe, expect, it } from "vitest";
 import { CONTENT_SECURITY_POLICY, LIBRARY_STYLE_HASHES } from "../csp";
 
 const MODULES = resolve(import.meta.dirname, "../node_modules");
-// The shipped libraries that could insert a <style> element at run time.
+// The shipped libraries that could insert a <style> element at run time. style-mod (CodeMirror's
+// styles) is not among them: the SQL editor mounts in an open shadow root, where style-mod takes
+// its constructed-stylesheet branch and inserts no <style>; the third test below pins that branch.
 const LIBRARIES = ["react-aria", "react-aria-components", "react-stately", "react-router"];
 const STYLE_ELEMENT = /createElement\(\s*['"`]style['"`]\s*\)/g;
 
@@ -69,6 +71,19 @@ describe("the content security policy and the libraries' own styles", () => {
       const hash = `'sha256-${createHash("sha256").update(text).digest("base64")}'`;
       expect(LIBRARY_STYLE_HASHES, text).toContain(hash);
     }
+  });
+
+  it("CodeMirror's styles mount as constructed sheets in a shadow root", () => {
+    const styleMod = readFileSync(join(MODULES, "style-mod/src/style-mod.js"), "utf8");
+
+    // A root without a <head> (a shadow root) that has adoptedStyleSheets gets a constructed
+    // CSSStyleSheet; only a document (it has a head) falls to the <style> element.
+    expect(styleMod).toContain("if (!root.head && root.adoptedStyleSheets && win.CSSStyleSheet) {");
+    expect(styleMod).toContain("this.sheet = new win.CSSStyleSheet");
+    expect(styleMod).toContain(
+      "root.adoptedStyleSheets = [this.sheet, ...root.adoptedStyleSheets]",
+    );
+    expect(styleMod.match(STYLE_ELEMENT)).toHaveLength(1);
   });
 
   it("puts the hashes into style-src and nothing looser", () => {

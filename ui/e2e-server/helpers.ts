@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -20,6 +21,7 @@ import {
   type Page,
 } from "@playwright/test";
 
+import serverConfig from "../playwright.server.config";
 import { CSRF_STORAGE_KEY } from "../src/api/client";
 
 /** The bootstrap administrator's token, as `playwright.server.config.ts` fixes it. */
@@ -777,3 +779,126 @@ export function ageThePasskeyTouch(name: string): void {
 /** What the page says for the server's 409 `NoPasskeyError`: the account has no passkey to touch. */
 export const NO_PASSKEY =
   "Your account has no passkey yet, and this action needs a passkey touch. Add one first under Passkeys and sessions, in the menu under your name, then try again.";
+
+/**
+ * The saved queries a signed-in page's person sees in an environment, read with the page's
+ * session and CSRF token.
+ *
+ * @param page - The page, signed in.
+ * @param environment - The environment.
+ * @returns The answer's status, and the names it lists (none for a refusal).
+ */
+export async function savedQueriesAs(
+  page: Page,
+  environment: string,
+): Promise<{ status: number; names: string[] }> {
+  const response = await page.request.get(`/api/v1/saved-queries?environment=${environment}`, {
+    headers: await sessionHeaders(page),
+  });
+  if (!response.ok()) {
+    return { status: response.status(), names: [] };
+  }
+  const { items } = (await response.json()) as { items: { name: string }[] };
+  return { status: response.status(), names: items.map((item) => item.name) };
+}
+
+/**
+ * How many workers the server counts as alive, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @returns The count of workers whose heartbeat is younger than the lease.
+ */
+async function workersAlive(request: APIRequestContext): Promise<number> {
+  const response = await request.get("/api/v1/status", {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  await ensureOk("GET /api/v1/status", response);
+  return ((await response.json()) as { workers_alive: number }).workers_alive;
+}
+
+/**
+ * Starts a worker on the e2e server's database, with the server's own settings from
+ * `playwright.server.config.ts`, and waits until the server counts it alive. The suite runs no
+ * worker otherwise (Home's status box, a preview that stays queued); only a file whose queries
+ * must run starts one, in its `beforeAll`, and stops it in its `afterAll`. Stopped with SIGTERM,
+ * the worker drains and removes its own heartbeat, so the server counts none again.
+ *
+ * `uv` starts `lakana-worker` as its child, so both run in a process group of their own
+ * (`detached`), and every signal goes to the group: a SIGKILL after 30 s, or when the runner exits
+ * without stopping it (an aborted run), ends the worker too, not only `uv`. A worker left behind
+ * would take the next run's queued queries.
+ *
+ * @param request - The request context.
+ * @returns A function that stops the worker and resolves once it has exited.
+ * @throws {Error} when the worker cannot start, exits or is not alive within 90 s, with the end
+ *   of its log.
+ */
+export async function startWorker(request: APIRequestContext): Promise<() => Promise<void>> {
+  const server = serverConfig.webServer;
+  const settings = (Array.isArray(server) ? server[0] : server)?.env ?? {};
+  const worker = spawn("uv", ["run", "--frozen", "--python", "3.14", "lakana-worker"], {
+    cwd: resolve(import.meta.dirname, "..", ".."),
+    env: { ...process.env, ...settings },
+    stdio: ["ignore", "ignore", "pipe"],
+    detached: true,
+  });
+  let log = "";
+  worker.stderr.on("data", (chunk: Buffer) => {
+    log = `${log}${chunk.toString()}`.slice(-4_000);
+  });
+  // A spawn that fails (no `uv`) emits "error" and never "exit".
+  let failed: Error | null = null;
+  const exited = new Promise<void>((done) => {
+    worker.once("exit", () => {
+      done();
+    });
+    worker.once("error", (error) => {
+      failed = error;
+      done();
+    });
+  });
+  const group = worker.pid;
+  const signal = (name: NodeJS.Signals): void => {
+    if (group === undefined) {
+      return;
+    }
+    try {
+      process.kill(-group, name);
+    } catch {
+      // The group has gone already.
+    }
+  };
+  const reap = (): void => {
+    signal("SIGKILL");
+  };
+  process.once("exit", reap);
+  const stop = async (): Promise<void> => {
+    signal("SIGTERM");
+    const hard = setTimeout(reap, 30_000);
+    await exited;
+    clearTimeout(hard);
+    // `uv` waits for its child, but a child it left would still be in the group.
+    reap();
+    process.off("exit", reap);
+  };
+  try {
+    await expect
+      .poll(
+        () => {
+          if (failed !== null) {
+            throw new Error(`The worker could not start: ${failed.message}`);
+          }
+          if (worker.exitCode !== null) {
+            throw new Error(`The worker stopped with ${String(worker.exitCode)}: ${log}`);
+          }
+          return workersAlive(request);
+        },
+        { timeout: 90_000, intervals: [500] },
+      )
+      .toBeGreaterThan(0);
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+  return stop;
+}

@@ -73,6 +73,8 @@ person → **Remove picture**. The person can set a new one whenever they like.
 | **Esc** | Close a menu, a window or the tour. |
 | **Tab**, **Shift Tab** | Move to the next or the previous control. |
 | **Enter** | Open the row that has focus. |
+| **Ctrl Enter** (**⌘ Enter** on a Mac) | In the editor of **Queries**: run the query. |
+| **Esc** in the editor of **Queries** | Close the completion list or a tooltip; with none open, cancel the running query. |
 
 Home shows everything you may see across all environments; each row carries a small label with
 its environment (`dev`, `prod`), or `Instance` for something that belongs to the whole instance,
@@ -81,6 +83,21 @@ administrator." until an administrator grants them a role.
 
 The **Catalog** appears in the menu once you have any access at all; before that, it is not
 there.
+
+## Queries
+
+**Queries** in the menu opens a SQL editor. Choose the environment under **Environment** (only
+those where you may run queries are listed, and a protected one says so: "● prod · protected"),
+write the SQL and press **Run**, or **Ctrl Enter**. While the query waits or runs, **Run** becomes
+**Cancel**, and **Esc** in the editor cancels too ([Stop a query](stop-a-query.md)). The result is a
+grid under the editor, with **Download CSV** and **Download spreadsheet**
+([Download a query result](download-a-query-result.md#in-the-web-interface)). A query that fails
+says why; when the server knows where in the SQL, the editor underlines the place, marks its line,
+and **Go to line …, column …** puts the cursor there. The names of namespaces, tables and columns
+complete as you type, pointing at a column shows its type and description, and **Format** lays the
+SQL out. Leaving the screen lets the query run on; **Recent**, beside the editor, opens it again,
+and **Saved** holds the queries you keep ([Save and share a query](save-and-share-a-query.md#in-the-web-interface)).
+Someone who may not run queries anywhere yet sees why, and the command to use meanwhile.
 
 ## The boxes, top to bottom
 
@@ -97,15 +114,15 @@ The order is the same for everyone; what you may do changes what is inside the b
    read or opened recently, and their own failed queries. With nothing to report it says
    "Nothing needs your attention."
 5. **Recently opened**: the tables you opened, kept on the server so the list follows you to
-   another browser. A table's row opens its page. Queries, jobs and runs appear here once their
-   pages arrive in a later release; until then only tables fill it.
+   another browser. A table's row opens its page, and a query's its run on the Queries screen.
+   Jobs and runs appear here once their pages arrive in a later release.
 6. **Your work**, only if you may deploy: your jobs with their last run, and the repositories
    you connected or deployed with the last deploy in each environment.
 
-A row opens its object when you click anywhere on it. A table opens its page; a table whose
-environment or namespace is not known shows its name without a link. Until the screens for
-queries and jobs arrive in a later release, their rows open that area's page, which names the
-command to use meanwhile.
+A row opens its object when you click anywhere on it. A table opens its page, and a query its run
+on the Queries screen; a table whose environment or namespace is not known shows its name without
+a link. Until the screen for jobs arrives in a later release, a job's row opens that area's page,
+which names the command to use meanwhile.
 
 Home reads the status every 30 seconds and Needs your attention every minute, and only while
 its browser tab is visible. These reads do not count as activity, so a Home left open does not

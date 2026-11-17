@@ -1,7 +1,8 @@
 """The audit of a privileged view of other people's activity (`ACTIVITY_VIEWED`).
 
-A manager's listing of other people's queries, the readers of a table and a read of the audit
-log (`AuditService.query`) show what other principals did; a listing of `raw/` shows files other
+A manager's listing of other people's queries, the readers of a table, a read of the audit
+log (`AuditService.query`) and an administrator's read of someone else's private saved query
+(`SavedQueryService`) show what other principals did; a listing of `raw/` shows files other
 systems and people put there. `record_view` writes one
 `ACTIVITY_VIEWED` row for such a view, on a session of its own that commits before the caller
 builds its answer, and at most one per viewer, view, scope and targeting key within
@@ -53,6 +54,7 @@ class View(enum.StrEnum):
     AUDIT_LOG = "audit_log"
     RAW_FILES = "raw_files"
     """A folder of `raw/`, browsed to register an external table (`CatalogService.list_raw`)."""
+    SAVED_QUERIES = "saved_queries"
 
 
 @dataclass(frozen=True)

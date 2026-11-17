@@ -171,17 +171,6 @@
   color: var(--color-text-muted);
 }
 
-/* A data table is the exception to reflow (WCAG 1.4.10): it scrolls inside its own region, and
-   the page never scrolls sideways. */
-.list-scroll {
-  overflow-x: auto;
-}
-
-.list-scroll:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
 /* No narrower than this, so names do not break into pieces on a narrow screen; still below the
    777 px the list has beside the tree in a 1280 px window with a classic scrollbar. */
 .list-scroll .list {
@@ -201,10 +190,6 @@
 /* Four columns, a name and two times and a button: they need less than the Catalog's eight. */
 .list-scroll.dropped-scroll .list {
   min-width: 480px;
-}
-
-.list-scroll .row-name {
-  overflow-wrap: anywhere;
 }
 
 /* A column header that sorts: text that looks like the header, with the arrow of the sorted one. */
@@ -249,24 +234,6 @@ th[aria-sort] .sort-head {
 
 .health-more {
   font-size: var(--type-dense-size);
-}
-
-/* Static blocks, no motion: the rows' height, so nothing jumps when the page arrives. */
-.skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.skeleton-row {
-  height: var(--row-height);
-  border-radius: var(--radius-control);
-  background: var(--color-sunk);
-}
-
-.menu-item[aria-selected="true"] .menu-check::before {
-  content: "✓";
-  color: var(--color-accent);
 }
 
 /* The link in an empty state: the accent, underlined on hover, as on Home. Unstyled it is the

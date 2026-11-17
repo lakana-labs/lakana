@@ -35,7 +35,7 @@ A how-to guide solves one task by the shortest path, for someone who knows what 
 - [Deploy from GitLab CI without a stored secret](deploy-from-gitlab-ci.md): the same for a GitLab pipeline, and how one job submits twice.
 - [Run a job on a schedule](run-a-job-on-a-schedule.md): declare a job and its cron schedule, bind a run principal, pause it, start it from CI, and what happens when the project is busy or the platform was down.
 - [Find a run, a query or a deploy](find-a-run.md): filter the lists by status, trigger, job, time, submitter or repository, and page through a long one.
-- [Stop a query](stop-a-query.md): cancel one with Ctrl-C or a command, who may, and what else ends a query.
+- [Stop a query](stop-a-query.md): cancel one with Ctrl-C, a command or Cancel in the web interface, who may, and what else ends a query.
 - [Why is my query or task waiting?](why-is-it-waiting.md): read the reason a query or a task has not started and what to do about it.
 
 ## Access and security
@@ -51,11 +51,12 @@ A how-to guide solves one task by the shortest path, for someone who knows what 
 
 ## The catalog and the web interface
 
-- [Start in the web interface](start-in-the-web-interface.md): what Home's boxes tell you, what Healthy, Degraded and Down mean, the Get started list and hiding it, and the update note after an upgrade.
+- [Start in the web interface](start-in-the-web-interface.md): what Home's boxes tell you, the Queries screen in a paragraph, what Healthy, Degraded and Down mean, the Get started list and hiding it, and the update note after an upgrade.
 - [Find a table](find-a-table.md): search tables, columns, descriptions, runs and people from one text, and what you are allowed to see.
 - [Open a table](open-a-table.md): open a table's page from the Catalog or from Home, read its columns and preview, and see what the page says when you may not read the table.
 - [Preview a table](preview-a-table.md): look at the first rows of a table in one command or on its page in the web interface, without writing SQL, and what a preview hides.
-- [Download a query result](download-a-query-result.md): save the whole result of a query as a CSV file or a spreadsheet, as Parquet or Arrow, or from Python, what a spreadsheet cannot hold, and how to find your queries again.
+- [Download a query result](download-a-query-result.md): save the whole result of a query as a CSV file or a spreadsheet, as Parquet or Arrow, or from Python, what a spreadsheet cannot hold, how to find your queries again, and the same downloads on the Queries screen.
+- [Save and share a query](save-and-share-a-query.md): keep SQL under a name, share it with everyone who may run queries in the environment, find it again, change and delete it, what an administrator sees of a private one, the Python API, and the Queries screen's Saved and Recent.
 - [See where a table is defined](see-where-a-table-is-defined.md): find the file, line and commit in git that define a table, and read that file in the terminal or the web interface.
 - [Drop and restore a table](drop-and-restore-a-table.md): drop a table, restore it with its data and access rules during the undo period, or delete its files now; delete and restore a whole environment the same way.
 - [Let tables expire](let-tables-expire.md): let a development table, or every table of an environment, be dropped once nobody has used it for a while; see what expires soon, and keep a table.

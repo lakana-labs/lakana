@@ -1363,6 +1363,66 @@ class QueryListEntry:
 
 
 @dataclass(frozen=True)
+class SavedQuery:
+    """A saved query: SQL kept under a name in an environment, private or shared.
+
+    Running it is an ordinary query by whoever runs it, with their rights.
+
+    Parameters
+    ----------
+    id
+        The saved query's id.
+    environment
+        The name of its environment.
+    name
+        Its name; unique among its owner's saved queries in the environment.
+    sql
+        Its SQL; `None` when the server left it out because you may not read it (an
+        administrator without `READ_QUERY_TEXT` on someone else's private query).
+    visibility
+        ``private`` (only the owner) or ``everyone`` (whoever may query the environment).
+    owner
+        The owner's name; `None` once the owner's principal is deleted.
+    former_owner
+        Whether the owner's principal is deleted; nobody may then update it.
+    actions
+        What you may do with it: ``update`` and ``delete`` for the owner, ``delete`` for an
+        administrator who is not the owner, none otherwise.
+    created_at
+        When it was created.
+    updated_at
+        When it was last changed.
+    """
+
+    id: str
+    environment: str
+    name: str
+    sql: str | None
+    visibility: str
+    owner: str | None
+    former_owner: bool
+    actions: tuple[str, ...]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class SavedQueryPage:
+    """One page of saved queries, of an environment or of every environment you see.
+
+    Parameters
+    ----------
+    items
+        The saved queries on this page, by name in any letter case, then environment, then id.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[SavedQuery]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class QueryEnvironment:
     """An environment where you may submit a query (`client.queries.environments`).
 

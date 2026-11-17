@@ -915,7 +915,7 @@ interface ResultColumnOut {
 }
 
 /** A column a mask was applied to for the reader, as the worker recorded it. */
-export interface MaskedColumnOut {
+interface MaskedColumnOut {
   /** The masked table's dotted name: for a view, the table the view reads. */
   readonly table: string;
   /** The column, named as in the read. */

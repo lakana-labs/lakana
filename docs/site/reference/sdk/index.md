@@ -25,6 +25,7 @@ Every name the `lakana` package exports and every resource of its client, with t
 | `lakana.QueryFailed` | error | [Errors](errors.md) |
 | `lakana.ResultFileFormat` | value |  |
 | `lakana.RunFailed` | error | [Errors](errors.md) |
+| `lakana.SavedQuery` | class |  |
 | `lakana.ServerError` | error | [Errors](errors.md) |
 | `lakana.ValidationError` | error | [Errors](errors.md) |
 | `lakana.__version__` | version text |  |
@@ -41,6 +42,7 @@ Every name the `lakana` package exports and every resource of its client, with t
 | `client.catalog` | [Catalog](catalog.md) | Every table you may read, across environments and namespaces. |
 | `client.artifacts` | [Artifacts](artifacts.md) | Versioned files and directories, stored in the catalog next to tables. |
 | `client.queries` | [Queries](queries.md) | The `queries` resource of the platform API. |
+| `client.saved_queries` | [Saved queries](saved-queries.md) | Saved queries: SQL kept under a name, private or shared with the environment. |
 | `client.principals` | [Principals](principals.md) | The `principals` resource of the platform API. |
 | `client.groups` | [Groups](groups.md) | The `groups` resource of the platform API. |
 | `client.tokens` | [Tokens](tokens.md) | The `tokens` (PAT) resource of the platform API, nested under a principal. |

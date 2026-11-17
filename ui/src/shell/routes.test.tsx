@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Page } from "./Page";
 import type { AreaModule } from "./routes";
 
+import { queryRoutes } from "../test/queries";
 import { renderShell } from "../test/render";
 
 const shippedAreas = [
@@ -147,6 +148,20 @@ describe("appRoutes", () => {
     arrive({ AreaScreen: () => <p>Loaded on demand</p> });
 
     expect(await screen.findByText("Loaded on demand")).toBeInTheDocument();
+  });
+
+  it("/queries lazy-loads its screen, with the SQL editor in a shadow root", async () => {
+    renderShell("/queries", { routes: queryRoutes() });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Queries" })).toBeInTheDocument();
+    const host = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(".sql-editor");
+      expect(found?.shadowRoot).toBeTruthy();
+      return found;
+    });
+    expect(
+      within(host?.shadowRoot as unknown as HTMLElement).getByRole("textbox", { name: "SQL" }),
+    ).toBeInTheDocument();
   });
 
   it("never loads the page of an area outside the user's access", async () => {

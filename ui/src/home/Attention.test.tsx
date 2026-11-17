@@ -44,11 +44,11 @@ describe("Attention", () => {
     ["daily_sales", "Run failed", "prod", "/jobs"],
     ["gold.station_ranking", "Late", "prod", "/catalog/prod/gold/station_ranking"],
     ["not_null_station_id", "Check failed", "dev", "/jobs"],
-    ["Query 3f9c2a1b", "Query failed", "dev", "/queries"],
+    ["Query 3f9c2a1b", "Query failed", "dev", "/queries/dev/runs/3f9c2a1b-q"],
     ["sam", "Recovery link open", "Instance", "/access/recovery-links"],
     ["worker-2.internal", "Worker down", "Instance", "/settings/status"],
   ])(
-    "labels every row with its environment and opens its placeholder (%s)",
+    "labels every row with its environment and opens its place (%s)",
     async (title, kind, env, path) => {
       const { user, router } = renderShell("/", {
         routes: {

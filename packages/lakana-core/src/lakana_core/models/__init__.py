@@ -21,6 +21,7 @@ from lakana_core.models.query_run import (
     QueryRunStatus,
     WriteMode,
 )
+from lakana_core.models.saved_query import SavedQuery, SavedQueryVisibility
 from lakana_core.models.table import Table, TableType
 from lakana_core.models.table_column import TableColumn
 from lakana_core.models.declared_reference import DeclaredReference
@@ -166,6 +167,8 @@ __all__ = [
     "RunKind",
     "RunStatus",
     "RunTrigger",
+    "SavedQuery",
+    "SavedQueryVisibility",
     "SchedulerLease",
     "Secret",
     "SecretUseKind",

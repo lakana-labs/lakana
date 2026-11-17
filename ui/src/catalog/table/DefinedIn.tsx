@@ -17,7 +17,7 @@ import {
 } from "../../api";
 import { useResource } from "../../shell/useResource";
 import { markedText, VisibleText } from "../../shell/VisibleText";
-import { ReadFailed } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 
 /** How many characters of the commit the fact shows; the dialog shows all of it. */
 const SHORT_COMMIT = 7;

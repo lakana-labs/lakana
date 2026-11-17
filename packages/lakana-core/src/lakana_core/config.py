@@ -990,8 +990,9 @@ class ViewAuditConfig(BaseModel):
     enabled
         Record an `ACTIVITY_VIEWED` event when someone sees other people's activity: a manager's
         listing of other people's queries (`lakana query list`), the readers of a table
-        (`lakana table health`) and a page of the audit log with other people's events
-        (`lakana audit list`) (default true). If the event cannot be written, the read is
+        (`lakana table health`), a page of the audit log with other people's events
+        (`lakana audit list`) and an administrator's read of someone else's private saved
+        query (`lakana query saved`) (default true). If the event cannot be written, the read is
         refused with 503. Turn it off only if you do not need to know who looked at whose
         activity. It never turns off `SOURCE_VIEWED`: a read of a deployed file is always
         recorded.

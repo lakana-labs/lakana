@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StatusGlyph } from "../src/status/StatusGlyph";
 import { MACHADO_2009 } from "../src/test/colour-vision";
 import { STATUS_KINDS } from "../src/status/status";
+import { showInColour, showInGreyscale } from "./colour-vision";
 
 const SRC = resolve(import.meta.dirname, "../src");
 const STYLES = ["styles/tokens.css", "status/status.css"]
@@ -50,9 +51,9 @@ for (const scheme of ["light", "dark"] as const) {
     expect(boxes).toEqual(STATUS_KINDS.map(() => [12, 12]));
 
     await page.screenshot({ path: `test-results/glyphs-12px-${scheme}.png` });
-    await page.addStyleTag({ content: "html { filter: grayscale(1) }" });
+    await showInGreyscale(page);
     await page.screenshot({ path: `test-results/glyphs-12px-${scheme}-grey.png` });
-    await page.addStyleTag({ content: "html { filter: none }" });
+    await showInColour(page);
 
     // The numbers are checked in src/status/colour-vision.test.ts; these are for the eye.
     for (const [vision, matrix] of Object.entries(MACHADO_2009)) {

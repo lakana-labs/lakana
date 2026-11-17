@@ -104,6 +104,7 @@ nav:
           - how-to/open-a-table.md
           - how-to/preview-a-table.md
           - how-to/download-a-query-result.md
+          - how-to/save-and-share-a-query.md
           - how-to/see-where-a-table-is-defined.md
           - how-to/drop-and-restore-a-table.md
           - how-to/let-tables-expire.md
@@ -223,6 +224,7 @@ nav:
               - reference/rest/environments.md
               - reference/rest/namespaces.md
               - reference/rest/queries.md
+              - reference/rest/saved-queries.md
               - reference/rest/tables.md
               - reference/rest/search.md
               - reference/rest/catalog.md
@@ -281,6 +283,7 @@ nav:
               - reference/sdk/repositories.md
               - reference/sdk/row-filters.md
               - reference/sdk/runs.md
+              - reference/sdk/saved-queries.md
               - reference/sdk/secrets.md
               - reference/sdk/sign-in.md
               - reference/sdk/tables.md

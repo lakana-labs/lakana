@@ -18,11 +18,9 @@ import type { ShippedArea } from "../shell/areas";
 import { DOCS_URL, HOW_TO_URL, TUTORIAL_URL } from "../shell/docs";
 import { useInterfaceState } from "../shell/InterfaceState";
 import { shortcutLabel } from "../shell/shortcut";
+import { useFolded } from "../shell/useFolded";
 import { useResource } from "../shell/useResource";
 import { type TourStepId, tourSteps, tourTarget } from "./steps";
-
-/** Below this width the sidebar is folded behind its Menu button (shell.css). */
-const FOLDED = "(max-width: 639.98px)";
 
 /** The name of a step that is not an area (an area's is `areas.<id>.name`, as in the sidebar). */
 const PLACE_NAMES: Partial<Record<TourStepId, string>> = {
@@ -36,31 +34,6 @@ const READING = [
   ["howTo", HOW_TO_URL],
   ["docs", DOCS_URL],
 ] as const;
-
-/**
- * Whether the sidebar is folded, following the window as it changes.
- *
- * @returns True below 640 px.
- */
-function useFolded(): boolean {
-  const [folded, setFolded] = useState(
-    () => typeof window.matchMedia === "function" && window.matchMedia(FOLDED).matches,
-  );
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") {
-      return undefined;
-    }
-    const media = window.matchMedia(FOLDED);
-    const onChange = (event: { readonly matches: boolean }): void => {
-      setFolded(event.matches);
-    };
-    media.addEventListener("change", onChange);
-    return () => {
-      media.removeEventListener("change", onChange);
-    };
-  }, []);
-  return folded;
-}
 
 /** Properties of {@link NextStep}. */
 interface NextStepProps {

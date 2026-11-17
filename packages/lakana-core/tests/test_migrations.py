@@ -6464,3 +6464,94 @@ def test_0081_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -
         assert "ix_query_runs_principal_id_finished_at" not in index_names()
     finally:
         engine.dispose()
+
+
+_REVISION_0082 = "e9f3a6b2d847"
+_SAVED_QUERY_COLUMNS = {
+    "id",
+    "environment_id",
+    "name",
+    "sql_text",
+    "visibility",
+    "owner_id",
+    "private_owner_id",
+    "created_at",
+    "updated_at",
+}
+
+
+def test_0082_creates_saved_queries_with_both_owner_keys_and_the_check(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0082`: the saved queries, two keys to their owner, and the check binding them.
+
+    The environment's key and the private owner's key cascade, the owner's key sets `NULL`; a
+    name is unique per environment and owner; a private row needs its owner in both columns and
+    a shared one leaves `private_owner_id` empty. The downgrade drops the table.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0081)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    insert = sa.text(
+        "INSERT INTO saved_queries (id, environment_id, name, sql_text, visibility, owner_id, "
+        "private_owner_id, created_at, updated_at) VALUES (:id, :env, :name, 'SELECT 1', "
+        ":visibility, :owner, :private_owner, :now, :now)"
+    )
+    owner, other = uuid.uuid4().hex, uuid.uuid4().hex
+
+    def row(name: str, visibility: str, private_owner: str | None) -> dict[str, str | None]:
+        return {
+            "id": uuid.uuid4().hex,
+            "env": uuid.uuid4().hex,
+            "name": name,
+            "visibility": visibility,
+            "owner": owner,
+            "private_owner": private_owner,
+            "now": _utc_text(),
+        }
+
+    try:
+        assert "saved_queries" not in inspect(engine).get_table_names()
+        command.upgrade(config, _REVISION_0082)
+        inspector = inspect(engine)
+        assert {c["name"] for c in inspector.get_columns("saved_queries")} == _SAVED_QUERY_COLUMNS
+        keys = {
+            (tuple(k["constrained_columns"]), k["referred_table"], k["options"].get("ondelete"))
+            for k in inspector.get_foreign_keys("saved_queries")
+        }
+        assert keys == {
+            (("environment_id",), "environments", "CASCADE"),
+            (("owner_id",), "principals", "SET NULL"),
+            (("private_owner_id",), "principals", "CASCADE"),
+        }
+        assert [
+            (u["name"], u["column_names"])
+            for u in inspector.get_unique_constraints("saved_queries")
+        ] == [("uq_saved_queries_environment_owner_name", ["environment_id", "owner_id", "name"])]
+        assert {i["name"] for i in inspector.get_indexes("saved_queries")} >= {
+            "ix_saved_queries_environment_id",
+            "ix_saved_queries_owner_id",
+            "ix_saved_queries_private_owner_id",
+        }
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(insert, row("mine", "private", owner))
+            connection.execute(insert, row("ours", "everyone", None))
+        for refused in (
+            row("no private owner", "private", None),
+            row("another private owner", "private", other),
+            row("shared with a private owner", "everyone", owner),
+            row("unknown", "team", None),
+        ):
+            with pytest.raises(IntegrityError), engine.begin() as connection:
+                connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+                connection.execute(insert, refused)
+        command.downgrade(config, _REVISION_0081)
+        assert "saved_queries" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()

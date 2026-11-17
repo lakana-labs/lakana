@@ -191,3 +191,27 @@ export function listTables(query: ListTablesQuery): Promise<TableListPageOut> {
 export function getTableTree(): Promise<TableTreeOut> {
   return api.request<TableTreeOut>("GET", "/api/v1/tables/tree");
 }
+
+/**
+ * Reads one page of table names for completion in the editor: 200 a page, by name.
+ *
+ * @param environment - The environment.
+ * @param q - The typed word; empty for every table.
+ * @param cursor - Where the page starts; null for the first.
+ * @returns The page.
+ * @throws {ApiError} for a refusal.
+ */
+export function listCompletionTables(
+  environment: string,
+  q: string,
+  cursor: string | null,
+): Promise<TableListPageOut> {
+  const params = new URLSearchParams({ environment, sort: "name", order: "asc", limit: "200" });
+  if (q !== "") {
+    params.set("q", q);
+  }
+  if (cursor !== null) {
+    params.set("cursor", cursor);
+  }
+  return api.request<TableListPageOut>("GET", `/api/v1/tables?${params.toString()}`);
+}
