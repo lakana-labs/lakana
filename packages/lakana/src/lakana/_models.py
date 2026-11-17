@@ -1439,7 +1439,7 @@ class QueryStatus:
         Line, from 1, of the submitted SQL where an `invalid_query` failure of a `written` or
         `write` run points; `None` when unknown.
     error_column
-        Column, from 1, within `error_line`.
+        Column within `error_line`, counted in characters (Unicode code points) from 1.
     peak_memory_bytes
         Highest resident memory of the query's process in bytes; `None` if it was not measured
         and from a server that predates the field.

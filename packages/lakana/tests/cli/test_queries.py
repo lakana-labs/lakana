@@ -342,6 +342,75 @@ def test_query_result_format_csv_saves_the_servers_bytes(tmp_path: Path) -> None
     assert [p.name for p in tmp_path.iterdir() if p.suffix == ".part"] == []
 
 
+def _counted_file_api(content: bytes, result_rows: int | None) -> FakeApi:
+    """Build `_file_api` whose run's status names how many rows its result has.
+
+    Parameters
+    ----------
+    content
+        The body of the result route.
+    result_rows
+        The run's `result_rows`, or `None` for a run from before the server recorded it.
+
+    Returns
+    -------
+    FakeApi
+        The fake, with a succeeded run `q1`.
+    """
+    api = FakeApi()
+    run = {**_status_body("SUCCEEDED"), "result_rows": result_rows}
+    api.on("POST", _Q, status=202, json=run)
+    api.on("GET", f"{_Q}/q1", json=run)
+    api.on("GET", f"{_Q}/q1/result", content=content)
+    return api
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("query", "result", "q1"),
+        ("sql", "SELECT 1"),
+    ],
+)
+def test_a_servers_file_reports_the_runs_rows_and_its_size(
+    tmp_path: Path, command: tuple[str, ...]
+) -> None:
+    """`--output json` keeps `rows` (from the run) and adds `size_bytes`; the line names rows."""
+    out = tmp_path / "one.csv"
+    api = _counted_file_api(_CSV, 1)
+
+    as_json = invoke(
+        make_state(tmp_path, api), "--output", "json", *command, "--env", "dev", "--out", str(out)
+    )
+    human = invoke(make_state(tmp_path, api), *command, "--env", "dev", "--out", str(out))
+
+    assert as_json.exit_code == 0, as_json.stderr
+    assert json.loads(as_json.stdout) == {"rows": 1, "path": str(out), "size_bytes": len(_CSV)}
+    assert human.exit_code == 0, human.stderr
+    assert f"Wrote 1 rows ({len(_CSV)} bytes) to" in human.stdout
+
+
+def test_a_servers_file_of_a_run_without_recorded_rows_reports_null_rows(tmp_path: Path) -> None:
+    out = tmp_path / "one.csv"
+    api = _counted_file_api(_CSV, None)
+
+    as_json = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "query",
+        "result",
+        "q1",
+        "--env",
+        "dev",
+        "--out",
+        str(out),
+    )
+
+    assert as_json.exit_code == 0, as_json.stderr
+    assert json.loads(as_json.stdout) == {"rows": None, "path": str(out), "size_bytes": len(_CSV)}
+
+
 def test_query_result_xlsx_from_the_extension(tmp_path: Path) -> None:
     """`--out x.xlsx` means `--format xlsx` and saves the server's file."""
     api = _file_api(_XLSX)
@@ -374,6 +443,48 @@ def test_query_result_format_csv_without_out_prints_the_csv(tmp_path: Path) -> N
     assert result.exit_code == 0, result.stderr
     assert result.stdout_bytes == _CSV  # CRLF as the server sent it, not translated
     assert _asked_format(api) == "csv"
+
+
+def test_query_result_csv_into_a_closed_pipe_ends_quietly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`lakana query result ID --format csv | head` stops when `head` has its lines: exit 0."""
+    from lakana.resources.queries import QueryRun
+
+    def closed_pipe(self: QueryRun, target: object, *, format: str) -> int:
+        """Fail as a write into a pipe whose reader has gone does.
+
+        Parameters
+        ----------
+        self
+            The run.
+        target
+            Ignored.
+        format
+            Ignored.
+
+        Raises
+        ------
+        BrokenPipeError
+            Always.
+        """
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(QueryRun, "write_file", closed_pipe)
+    result = invoke(
+        make_state(tmp_path, _file_api(_CSV)),
+        "query",
+        "result",
+        "q1",
+        "--env",
+        "dev",
+        "--format",
+        "csv",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr == ""
+    assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
 def test_query_result_format_xlsx_without_out_is_exit_2_with_the_sentence(tmp_path: Path) -> None:
@@ -1312,6 +1423,21 @@ def test_a_cursor_is_sent_and_a_filter_that_finds_nothing_says_so(tmp_path: Path
     named = invoke(state, "query", "list", "--env", "dev", "--submitter", "bob")
     assert "No queries in dev match." in named.stdout
     assert api.requests[-1].url.params["submitter"] == "bob"
+
+
+@pytest.mark.parametrize("where", [("--env", "dev"), ("--all-environments",)])
+def test_query_list_since_implies_all(tmp_path: Path, where: tuple[str, ...]) -> None:
+    """`--since` asks for the queries that ended since then, so it lists them without --all."""
+    api = FakeApi()
+    api.on("GET", "/api/v1/queries", json={"items": [], "next_cursor": None})
+    api.on("GET", "/api/v1/environments/dev/queries", json=[])
+    result = invoke(
+        make_state(tmp_path, api), "query", "list", *where, "--since", "2026-10-01T00:00:00Z"
+    )
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.params["include_ended"] == "true"
+    assert "No queries in" in result.stdout
+    assert "since 2026-10-01T00:00:00Z" in result.stdout
 
 
 def test_query_list_all_environments_adds_the_environment_column(tmp_path: Path) -> None:

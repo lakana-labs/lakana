@@ -681,7 +681,7 @@ class Queries:
             ``write``, ``maintenance``, ``task``).
         since
             List the queries that ended at or after this time, of any age, instead of those
-            of the last 24 hours. It needs a time zone.
+            of the last 24 hours, with or without `include_ended`. It needs a time zone.
         limit
             Most entries returned (1 to 200).
         cursor
@@ -743,7 +743,7 @@ class Queries:
             ``write``, ``maintenance``, ``task``).
         since
             List the queries that ended at or after this time, of any age, instead of those
-            of the last 24 hours. It needs a time zone.
+            of the last 24 hours, with or without `include_ended`. It needs a time zone.
         limit
             Most entries returned (1 to 200).
         cursor
@@ -811,7 +811,7 @@ class Queries:
             ``write``, ``maintenance``, ``task``).
         since
             List the queries that ended at or after this time, of any age, instead of those
-            of the last 24 hours. It needs a time zone.
+            of the last 24 hours, with or without `include_ended`. It needs a time zone.
         limit
             Most entries returned (1 to 200).
         cursor
@@ -869,7 +869,8 @@ class Queries:
         origin
             Only queries of this origin or one of these.
         since
-            The queries that ended at or after this time, of any age. It needs a time zone.
+            The queries that ended at or after this time, of any age, with or without
+            `include_ended`. It needs a time zone.
         page_size
             Entries per request (1 to 200).
 

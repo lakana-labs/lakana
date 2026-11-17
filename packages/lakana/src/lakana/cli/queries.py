@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import shlex
 import sys
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import pyarrow as pa
 import typer
@@ -169,8 +170,9 @@ class Written:
     Parameters
     ----------
     rows
-        Rows written, when the CLI wrote them itself (Parquet, Arrow); `None` for a file the
-        server made, whose rows the CLI does not count.
+        Rows written: counted by the CLI for a file it wrote itself (Parquet, Arrow), and the
+        run's `result_rows` for a file the server made (CSV, xlsx); `None` only when the
+        server has no count for the run (one from before it recorded them).
     path
         The file written.
     size_bytes
@@ -257,14 +259,38 @@ def _render(
     )
 
 
+def _reader_gone() -> NoReturn:
+    """End quietly when the reader of standard output has gone (``… | head``).
+
+    Standard output is pointed at the null device first, so that the interpreter's last
+    flush at exit cannot fail on the closed pipe again and print a traceback, as Python's
+    documentation on SIGPIPE advises.
+
+    Raises
+    ------
+    typer.Exit
+        Always, with status 0: the reader took what it wanted.
+    """
+    with contextlib.suppress(OSError):
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            with contextlib.suppress(OSError, ValueError):  # no file descriptor under a test
+                os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
+    raise typer.Exit(0)
+
+
 def _deliver(
     state: CliState, run: QueryRun, out: Path | None, fmt: str | None, max_rows: int
 ) -> None:
     """Print a finished run's result, or save it to `out`.
 
     CSV and spreadsheet files are made by the server (always the whole result, and audited
-    there) and saved as they come; without `--out`, CSV is streamed to standard output. Every
-    other output is made from the Arrow result.
+    there) and saved as they come, reported with the run's row count and the file's bytes;
+    without `--out`, CSV is streamed to standard output, and a reader that stops early
+    (``| head``) ends it quietly with status 0. Every other output is made from the Arrow
+    result.
 
     Parameters
     ----------
@@ -283,14 +309,20 @@ def _deliver(
         _render(state, run.result(), out, fmt, max_rows)
         return
     if out is None:
-        run.write_file(sys.stdout.buffer, format=fmt)
-        sys.stdout.buffer.flush()
+        try:
+            run.write_file(sys.stdout.buffer, format=fmt)
+            sys.stdout.buffer.flush()
+        except BrokenPipeError:
+            _reader_gone()
         return
     size = run.download(out, format=fmt)
+    # The server made the file; the run says how many rows its result has.
+    rows = run.status().result_rows
+    shown = f"{size} bytes" if rows is None else f"{rows} rows ({size} bytes)"
     _output.done(
         state,
-        f"Wrote {size} bytes to {_output.inline(str(out))}",
-        Written(rows=None, path=str(out), size_bytes=size),
+        f"Wrote {shown} to {_output.inline(str(out))}",
+        Written(rows=rows, path=str(out), size_bytes=size),
     )
 
 
@@ -936,8 +968,9 @@ def list_queries(
         str | None,
         typer.Option(
             "--since",
-            help="The ended queries are those that ended at or after this date or time "
-            "(2026-10-18 or 2026-10-18T09:30:00Z), of any age, instead of the last 24 hours.",
+            help="List the queries that ended at or after this date or time "
+            "(2026-10-18 or 2026-10-18T09:30:00Z, local time without a zone), of any age, "
+            "instead of the last 24 hours; implies --all.",
         ),
     ] = None,
     limit: Annotated[
@@ -975,7 +1008,8 @@ def list_queries(
     origin
         Origin filter.
     since
-        The oldest end time of a listed ended query.
+        The oldest end time of a listed ended query; given, the ended queries are listed
+        without `--all`.
     limit
         Most queries listed (1 to 200).
     cursor
@@ -990,6 +1024,7 @@ def list_queries(
     if all_environments and env is not None:
         raise CliError("--all-environments lists every environment; leave out --env.")
     after = parse_since(since)
+    all_ = all_ or after is not None  # --since asks for the queries that ended since then
     queries = state.client().queries
     environment = None if all_environments else resolve_environment(state, env)
     if environment is None:
