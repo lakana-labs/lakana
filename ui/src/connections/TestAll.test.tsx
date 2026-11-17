@@ -44,6 +44,7 @@ function byCursor(
  * @param props.answers - The connections read, by key.
  * @param props.onQueued - Called with what was queued.
  * @param props.stuck - The keys whose test is stuck.
+ * @param props.gone - The keys of connections found deleted.
  * @param props.failed - Whether following stopped after failed reads.
  * @returns The button with its lines.
  */
@@ -51,15 +52,17 @@ function InDev({
   answers,
   onQueued = () => undefined,
   stuck = new Set(),
+  gone = new Set(),
   failed = false,
 }: {
   readonly answers: ReadonlyMap<string, ConnectionOut>;
   readonly onQueued?: (items: readonly ConnectionQueuedTestOut[]) => void;
   readonly stuck?: ReadonlySet<string>;
+  readonly gone?: ReadonlySet<string>;
   readonly failed?: boolean;
 }): JSX.Element {
   return (
-    <FollowedAnswers value={{ answers, stuck, failed }}>
+    <FollowedAnswers value={{ answers, stuck, gone, failed }}>
       <TestAll environment="dev" onQueued={onQueued} />
     </FollowedAnswers>
   );
@@ -156,6 +159,23 @@ describe("TestAll", () => {
       <InDev answers={answers} stuck={new Set([testKey("dev", "b"), testKey("dev", "c")])} />,
     );
     expect(status).toHaveTextContent("Stopped following 2 tests in dev; see the rows.");
+
+    // A deleted connection's test ends with no outcome, like a stuck one.
+    rerender(
+      <InDev
+        answers={answers}
+        stuck={new Set([testKey("dev", "b")])}
+        gone={new Set([testKey("dev", "c")])}
+      />,
+    );
+    expect(status).toHaveTextContent("Stopped following 2 tests in dev; see the rows.");
+    rerender(
+      <InDev
+        answers={read(done("a", "ok"), done("b", "ok"))}
+        gone={new Set([testKey("dev", "c")])}
+      />,
+    );
+    expect(status).toHaveTextContent("Stopped following 1 test in dev; see the rows.");
 
     rerender(<InDev answers={read(done("a", "ok"), done("b", "ok"))} failed />);
     expect(status).toHaveTextContent("Stopped following 1 test in dev; see the rows.");

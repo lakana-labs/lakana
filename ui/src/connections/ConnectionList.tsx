@@ -82,8 +82,11 @@ function ConnectionTable({
   );
   const follow = useOpenTests(rows, replace);
   const region = useFocusAfter<HTMLDivElement>(follow.failed);
-  const { stuck, failed } = follow;
-  const followed = useMemo(() => ({ answers, stuck, failed }), [answers, stuck, failed]);
+  const { stuck, gone, failed } = follow;
+  const followed = useMemo(
+    () => ({ answers, stuck, gone, failed }),
+    [answers, stuck, gone, failed],
+  );
 
   const queued = (environment: string, items: readonly ConnectionQueuedTestOut[]): void => {
     // Every named connection's earlier answer is replaced by the new test, so only this run's

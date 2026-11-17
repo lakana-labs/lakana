@@ -29,8 +29,8 @@ export interface TestAllProps {
  * The status line is always mounted, so each change of it is announced: "Testing 3 connections
  * in dev…", then, once {@link FollowedAnswers} holds every one of them done, "Tested 3
  * connections in dev: 2 OK, 1 not OK.". When following stops before then (the reads failed, or
- * every test still open is stuck), it says so and points to the rows, so it never looks live
- * when it is not. A refusal shows `problemText` beside the button.
+ * every test still open is stuck or its connection was deleted), it says so and points to the
+ * rows, so it never looks live when it is not. A refusal shows `problemText` beside the button.
  * @param props - The environment and what to call with the queued tests.
  * @param props.environment - The environment.
  * @param props.onQueued - Called with what was queued.
@@ -38,7 +38,7 @@ export interface TestAllProps {
  */
 export function TestAll({ environment, onQueued }: TestAllProps): JSX.Element {
   const { t } = useTranslation();
-  const { answers, stuck, failed } = useContext(FollowedAnswers);
+  const { answers, stuck, gone, failed } = useContext(FollowedAnswers);
   const [pending, setPending] = useState(false);
   const [queued, setQueued] = useState<readonly ConnectionQueuedTestOut[] | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -65,7 +65,8 @@ export function TestAll({ environment, onQueued }: TestAllProps): JSX.Element {
     const ended = tests.filter((test) => test?.state === "done");
     const open = keys.filter((_, at) => tests[at]?.state !== "done");
     const count = queued.length;
-    if (open.length > 0 && (failed || open.every((key) => stuck.has(key)))) {
+    const followed = open.filter((key) => !stuck.has(key) && !gone.has(key));
+    if (open.length > 0 && (failed || followed.length === 0)) {
       line = t("connections.testAll.stopped", { count: open.length, environment: shown });
     } else {
       line =
