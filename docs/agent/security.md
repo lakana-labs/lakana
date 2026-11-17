@@ -7131,26 +7131,34 @@ walker's), and a `MemoryError` never. For the two file parsers it is `Validation
 that earlier guard-fuzzing runs collected, one per sequence of token types
 (`fuzz/seeds/*.json`; `fuzz/seed_corpus.py` writes them out).
 
-A pull request from a branch of this repository that changes a module the harnesses load fuzzes
-for about five minutes (the path filter in `fuzz.yml`; the test fails when a module the seeds load
-is missing from it). **A pull request from a fork is not fuzzed**: the fuzzers run in
-`run_fuzzers`' container, which holds `ACTIONS_RUNTIME_TOKEN`, so the pull request's harness code
-could upload an artifact named like the corpus; the GitHub Actions filestore takes the newest
-artifact of that name from the whole repository, from any branch or workflow, and unpacks it with
-`tarfile.extractall`, so the next nightly run on `main` would fuzz from, or unpack files out of, an
-archive the fork chose. Its change is fuzzed by the nightly run after it is merged. To fuzz forks
-too, keep the corpus in a `storage-repo` that only the nightly job can write to (a deploy key in
-that job alone); pull requests then read it but cannot replace it. The nightly and pruning jobs run
-only on `main`, also when started by hand, so no other branch publishes a corpus. A pull request's
-run gets no token, so it starts from the seeds and never reads that corpus. To find the corpus,
-the filestore pages through every artifact of the repository, and when it finds none it can keep
-paging until the token's rate limit is spent. The repository's other workflows share that limit:
-one pull-request run made about 5,000 requests in 21 minutes. The nightly run takes that risk
-only when no corpus artifact exists (the first night, or after one expired); a `storage-repo`
-would remove it. Every night `main` is fuzzed for an hour and the corpus is pruned; it is kept as
-an artifact of the workflow, so the next night starts from it. **A crash fails the run** and its input is
-uploaded as the artifact `fuzz-crash-pull-request` or `fuzz-crash-nightly` (ClusterFuzzLite's
-own `crashes-*` artifact holds it too). Reproduce it with
+A pull request from a branch of this repository that changes a module the harnesses load is
+fuzzed for about five minutes by ClusterFuzzLite's `run_fuzzers` (the path filter in `fuzz.yml`;
+the test fails when a module the seeds load is missing from it). Every night `main` is fuzzed for
+an hour, 20 minutes per fuzzer, and each corpus is then pruned to the inputs that add coverage
+(`.clusterfuzzlite/nightly.sh`, which runs ClusterFuzzLite's build with the pinned `base-runner`
+image as `run_fuzzer` does).
+
+**The corpus is kept with `actions/cache`, never with ClusterFuzzLite's filestore.** The nightly
+job restores the newest `fuzz-corpus-*` cache into `cifuzz-corpus/<fuzzer>`, fuzzes from it and
+saves the result under a new key; a pull request's job restores the same cache read-only into the
+directory `run_fuzzers` fuzzes from, and never saves one. A cache written on `main` is readable by
+`main` and by pull requests, and nothing a pull request runs can write into `main`'s scope, so a
+pull request cannot change the corpus `main` fuzzes from. No ClusterFuzzLite action gets a token
+and no job has `actions: read`, because the GitHub Actions filestore is unsafe here twice over:
+
+- to find a corpus it pages through every artifact of the repository with the job's token, and
+  when it finds none it keeps paging until the rate limit is spent. The repository's other
+  workflows share that limit: one pull-request run made about 5,000 requests in 21 minutes;
+- it takes the newest artifact of the corpus's name from any branch or workflow and unpacks it with
+  `tarfile.extractall`. The fuzzers run where `ACTIONS_RUNTIME_TOKEN` is, so a pull request's
+  harness code could have uploaded one, and the nightly run on `main` would have unpacked it.
+
+Without a token its own corpus lookup fails at once (a 401 in the log, expected) and leaves the
+restored corpus in place. Its `run_fuzzers` deletes the corpus after a batch or pruning run, which
+is why the nightly job does not use it. **A pull request from a fork is not fuzzed**: its harness
+code would still run where `ACTIONS_RUNTIME_TOKEN` is. Its change is fuzzed by the nightly run
+once it is merged. The nightly job runs only on `main`, also when started by hand. **A crash fails the run** and its input is
+uploaded as the artifact `fuzz-crash-pull-request` or `fuzz-crash-nightly`. Reproduce it with
 `uv run --group fuzz python -m fuzz.<name>_fuzzer <crash file>` (Atheris has wheels only for
 CPython 3.12 to 3.14 on x86-64 Linux), then fix the parser, not the harness, and add the input
 to the parser's tests. A failed nightly run opens an issue like the other scheduled security

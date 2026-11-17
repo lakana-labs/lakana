@@ -2,22 +2,20 @@ name: Fuzzing
 
 # ClusterFuzzLite runs the Atheris harnesses in fuzz/ (docs/agent/security.md, "Fuzzing"):
 # about five minutes on a pull request that changes what they parse with, and an hour every night
-# on main, which keeps the corpus as an artifact of this workflow for the next night to start from.
-# A crash fails the run and uploads its input as the `fuzz-crash-*` artifact.
+# on main, followed by pruning. The corpus is kept with actions/cache, written only by the nightly
+# job on main. A crash fails the run and uploads its input as the `fuzz-crash-*` artifact.
 #
-# A pull request's run gets no token, so it starts from the seeds, never from that corpus: to
-# find the corpus, the GitHub Actions filestore pages through every artifact of the repository,
-# and when it finds none it can keep paging until the token's rate limit, which the repository's
-# other workflows share (one run made about 5,000 requests in 21 minutes).
+# No ClusterFuzzLite action gets a token, so none uses its GitHub Actions filestore: to find a
+# corpus, that filestore pages through every artifact of the repository and, finding none, keeps
+# paging until the token's rate limit, which the repository's other workflows share (one run made
+# about 5,000 requests in 21 minutes). It also takes the newest artifact of the corpus's name from
+# any branch or workflow and unpacks it with tarfile.extractall.
 #
-# Only a pull request from a branch of this repository is fuzzed, and only `main` runs the
-# nightly and pruning jobs (also when started by hand). The fuzzers run inside run_fuzzers'
-# container, which holds ACTIONS_RUNTIME_TOKEN, so a pull request's harness code could upload an
-# artifact named like the corpus; the GitHub Actions filestore takes the newest artifact of that
-# name from the whole repository, whatever branch or workflow made it, and unpacks it with
-# tarfile.extractall. A fork's change is fuzzed by the nightly run once it is merged; a
-# storage-repo that only the nightly job can write to would let forks be fuzzed too
-# (docs/agent/security.md, "Fuzzing").
+# Only a pull request from a branch of this repository is fuzzed, and only `main` runs the nightly
+# job (also when started by hand). The fuzzers run where ACTIONS_RUNTIME_TOKEN is, so a fork's
+# harness code could write artifacts and caches in its pull request's scope; main never reads
+# either, but a fork's run should not hold the token at all. A fork's change is fuzzed by the
+# nightly run once it is merged (docs/agent/security.md, "Fuzzing").
 #
 # On GitHub's runner, never `CI_RUNNER`: the actions build and run Docker images, and a pull
 # request's harnesses are its own code. The actions clone the repository themselves (a public
@@ -70,7 +68,15 @@ jobs:
         with:
           language: python
           sanitizer: address
-      # No token (see the top): its corpus download fails at once with the same 401, expected.
+      # Read-only: a pull request starts from main's corpus and never saves one.
+      - name: Restore the corpus main keeps
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: cifuzz-corpus
+          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-
+      # No token (see the top): its own corpus download fails at once with the same 401, as
+      # expected, and leaves the restored corpus in cifuzz-corpus/<fuzzer>, where it fuzzes from.
       - name: Fuzz for five minutes
         uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
         with:
@@ -84,56 +90,48 @@ jobs:
           name: fuzz-crash-pull-request
           path: ./out/artifacts
 
+  # Fuzzes main for an hour and prunes the corpus (.clusterfuzzlite/nightly.sh), which actions/cache
+  # keeps under a new key each night. A cache written on main is readable by main and by pull
+  # requests, and nothing a pull request runs can write into main's scope.
   nightly:
     if: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
       contents: read
-      actions: read            # download the corpus the previous run kept
     steps:
-      # Without a token the build logs "ERROR - Could not get coverage" (a 401 on the artifacts
-      # API) while it looks for a coverage report. Expected: no job makes one, so every fuzzer
-      # is kept.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+      # The 401 "Could not get coverage" error in this step's log is expected, as above.
       - name: Build the fuzzers
         id: build
         uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
         with:
           language: python
           sanitizer: address
-      - name: Fuzz for an hour and keep the corpus
-        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
+      - name: Restore the kept corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
         with:
-          github-token: ${{ github.token }}
-          mode: batch
-          fuzz-seconds: 3600
-          sanitizer: address
+          path: cifuzz-corpus
+          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz for an hour, then prune the corpus
+        run: .clusterfuzzlite/nightly.sh build-out cifuzz-corpus out/artifacts "$FUZZ_SECONDS" "$RUNNER_IMAGE"
+        env:
+          FUZZ_SECONDS: "1200"     # per fuzzer; three fuzzers
+          # Pinned by tag and digest. Dependabot does not read it: bump it by hand
+          # (`docker buildx imagetools inspect gcr.io/oss-fuzz-base/base-runner:latest`).
+          RUNNER_IMAGE: gcr.io/oss-fuzz-base/base-runner:latest@sha256:29e4fcca00f6b844d732ee7427e86dae478db7f78d3ef7128ba1505ea4ab7126
+      - name: Keep the corpus
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
+        with:
+          path: cifuzz-corpus
+          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload the input that crashed
         if: ${{ failure() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: fuzz-crash-nightly
           path: ./out/artifacts
-
-  # ClusterFuzzLite requires pruning beside batch fuzzing: it drops the inputs that add no
-  # coverage, so the kept corpus does not grow without bound.
-  prune:
-    needs: nightly
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      actions: read            # download the corpus to prune
-    steps:
-      # The 401 "Could not get coverage" error in this step's log is expected, as above.
-      - name: Build the fuzzers
-        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
-        with:
-          language: python
-      - name: Prune the corpus
-        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1  # v1
-        with:
-          github-token: ${{ github.token }}
-          mode: prune
-          fuzz-seconds: 600

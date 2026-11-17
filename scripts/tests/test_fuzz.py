@@ -6,6 +6,7 @@ import ast
 import builtins
 import inspect
 import json
+import os
 import re
 import subprocess
 import sys
@@ -310,29 +311,47 @@ def test_a_pull_request_that_changes_what_a_harness_loads_runs_the_fuzzers() -> 
         assert any(p.fullmatch(own) for p in paths), own
 
 
-def test_the_pull_request_run_is_short_and_the_nightly_run_keeps_the_corpus() -> None:
+def _step(job: str, prefix: str) -> dict:
+    """Find the one step of a fuzzing job that uses an action or runs a command.
+
+    Parameters
+    ----------
+    job
+        The job's key.
+    prefix
+        The start of the step's ``uses`` or ``run``.
+
+    Returns
+    -------
+    dict
+        The step.
+    """
+    steps = _workflow()["jobs"][job]["steps"]
+    (step,) = [s for s in steps if str(s.get("uses", s.get("run", ""))).startswith(prefix)]
+    return step
+
+
+def test_the_pull_request_run_is_short_and_the_nightly_run_is_an_hour() -> None:
     workflow = _workflow()
     assert set(workflow[True]) == {"pull_request", "schedule", "workflow_dispatch"}
-    jobs = workflow["jobs"]
-    modes = {}
-    for name, job in jobs.items():
-        run = next(
-            s for s in job["steps"] if s.get("uses", "").startswith(_CFLITE + "run_fuzzers@")
-        )
-        modes[name] = (run["with"]["mode"], run["with"]["fuzz-seconds"])
-    assert modes == {
-        "pull-request": ("code-change", 300),
-        "nightly": ("batch", 3600),
-        "prune": ("prune", 600),
-    }
+    assert set(workflow["jobs"]) == {"pull-request", "nightly"}
+    run = _step("pull-request", _CFLITE + "run_fuzzers@")
+    assert (run["with"]["mode"], run["with"]["fuzz-seconds"]) == ("code-change", 300)
+    nightly = _step("nightly", ".clusterfuzzlite/nightly.sh")
+    assert nightly["run"] == (
+        '.clusterfuzzlite/nightly.sh build-out cifuzz-corpus out/artifacts "$FUZZ_SECONDS" '
+        '"$RUNNER_IMAGE"'
+    )
+    fuzzers = len(list(FUZZ.glob("*_fuzzer.py")))
+    assert int(nightly["env"]["FUZZ_SECONDS"]) * fuzzers == 3600
+    assert re.fullmatch(
+        r"gcr\.io/oss-fuzz-base/base-runner:latest@sha256:[0-9a-f]{64}",
+        nightly["env"]["RUNNER_IMAGE"],
+    )
 
 
 def test_only_this_repository_s_pull_requests_and_main_are_fuzzed() -> None:
-    """A fork's harness code could upload an artifact the nightly run on `main` takes as corpus.
-
-    The fuzzers run where `ACTIONS_RUNTIME_TOKEN` is, and the filestore takes the newest corpus
-    artifact of the repository, from any branch, and unpacks it with `tarfile.extractall`.
-    """
+    """A fork's run would hold `ACTIONS_RUNTIME_TOKEN`; only `main` keeps the corpus."""
     jobs = _workflow()["jobs"]
     assert jobs["pull-request"]["if"] == (
         "${{ github.event_name == 'pull_request'"
@@ -341,45 +360,190 @@ def test_only_this_repository_s_pull_requests_and_main_are_fuzzed() -> None:
     assert jobs["nightly"]["if"] == (
         "${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}"
     )
-    assert jobs["prune"]["if"] == (
-        "${{ !cancelled() && github.event_name != 'pull_request'"
-        " && github.ref == 'refs/heads/main' }}"
+
+
+_CACHE = "actions/cache/"
+
+
+def test_the_corpus_is_kept_in_main_s_cache_and_a_pull_request_only_reads_it() -> None:
+    """A cache written on main is readable by main and pull requests; no pull request writes one.
+
+    Both jobs name the same path, which is part of the cache's version, and the directory
+    ClusterFuzzLite's run_fuzzers fuzzes from (``cifuzz-corpus/<fuzzer>``).
+    """
+    key = "fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}"
+    for job in ("pull-request", "nightly"):
+        restore = _step(job, _CACHE + "restore@")
+        assert restore["with"] == {
+            "path": "cifuzz-corpus",
+            "key": key,
+            "restore-keys": "fuzz-corpus-",
+        }
+    save = _step("nightly", _CACHE + "save@")
+    assert save["with"] == {"path": "cifuzz-corpus", "key": key}
+    assert save["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
+    steps = _workflow()["jobs"]["nightly"]["steps"]
+    order = [
+        steps.index(_step("nightly", p))
+        for p in (
+            _CFLITE + "build_fuzzers@",
+            _CACHE + "restore@",
+            ".clusterfuzzlite/nightly.sh",
+            _CACHE + "save@",
+        )
+    ]
+    assert order == sorted(order)
+    pull_request = _workflow()["jobs"]["pull-request"]["steps"]
+    assert not any(str(s.get("uses", "")).startswith(_CACHE + "save@") for s in pull_request)
+    assert not any(str(s.get("uses", "")).startswith("actions/cache@") for s in pull_request)
+    assert pull_request.index(_step("pull-request", _CACHE + "restore@")) < pull_request.index(
+        _step("pull-request", _CFLITE + "run_fuzzers@")
     )
 
 
 @pytest.mark.parametrize("job", ["pull-request", "nightly"])
 def test_a_crash_fails_the_run_and_uploads_its_input(job: str) -> None:
-    steps = _workflow()["jobs"][job]["steps"]
-    upload = steps[-1]
-    assert upload["uses"].startswith("actions/upload-artifact@")
+    upload = _step(job, "actions/upload-artifact@")
+    assert _workflow()["jobs"][job]["steps"][-1] == upload
     assert upload["if"] == "${{ failure() && steps.build.outcome == 'success' }}"
     assert upload["with"]["path"] == "./out/artifacts"
-    assert steps[0]["id"] == "build"
+    assert _step(job, _CFLITE + "build_fuzzers@")["id"] == "build"
 
 
 def test_the_fuzzing_jobs_run_on_github_s_runner_with_read_scopes_only() -> None:
     """A pull request's harnesses are its own code, and the actions run Docker.
 
-    Without a token, the filestore cannot page through the repository's artifacts, which once
-    spent the rate limit the other workflows share.
+    No ClusterFuzzLite action gets a token, so none pages through the repository's artifacts
+    looking for a corpus, which once spent the rate limit the other workflows share.
     """
     workflow = _workflow()
     assert workflow["permissions"] == {"contents": "read"}
     for name, job in workflow["jobs"].items():
         assert job["runs-on"] == "ubuntu-latest", name
         assert "timeout-minutes" in job, name
+        assert job["permissions"] == {"contents": "read"}, name
         for step in job["steps"]:
-            uses = step.get("uses", "")
-            if uses.startswith(_CFLITE + "build_fuzzers@"):
-                # The build clones a public repository: it needs no token.
-                assert "github-token" not in step["with"], name
-    # A pull request's run looks for no corpus, so it needs no token and no `actions: read`.
-    pull_request = workflow["jobs"]["pull-request"]
-    assert pull_request["permissions"] == {"contents": "read"}
-    for step in pull_request["steps"]:
-        assert "github-token" not in step.get("with", {})
-    for name in ("nightly", "prune"):
-        assert workflow["jobs"][name]["permissions"] == {"contents": "read", "actions": "read"}
+            assert "github-token" not in step.get("with", {}), name
+            assert "token" not in str(step.get("env", {})).lower(), name
+            if str(step.get("uses", "")).startswith("actions/checkout@"):
+                assert step["with"]["persist-credentials"] is False
+
+
+def _fake_docker(tmp_path: Path, fails: str) -> Path:
+    """Write a ``docker`` that records its arguments and fails when they contain `fails`.
+
+    Parameters
+    ----------
+    tmp_path
+        Where to write it.
+    fails
+        The text whose presence among the arguments makes it exit 1; empty never fails.
+
+    Returns
+    -------
+    pathlib.Path
+        The directory to put first on ``PATH``.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker = bin_dir / "docker"
+    docker.write_text(
+        "#!/bin/bash\n"
+        f'echo "$*" >> {tmp_path}/calls\n'
+        f'if [ -n "{fails}" ] && [[ "$*" == *"{fails}"* ]]; then exit 1; fi\n'
+    )
+    docker.chmod(0o755)
+    return bin_dir
+
+
+def _nightly(tmp_path: Path, fails: str = "") -> tuple[int, list[str]]:
+    """Run ``.clusterfuzzlite/nightly.sh`` over two fake fuzzers with a fake ``docker``.
+
+    Parameters
+    ----------
+    tmp_path
+        A scratch directory.
+    fails
+        Passed to `_fake_docker`.
+
+    Returns
+    -------
+    tuple of int and list of str
+        The exit code and the ``docker`` command lines, in order.
+    """
+    out = tmp_path / "build-out"
+    out.mkdir()
+    for name in ("a_fuzzer", "b_fuzzer"):
+        (out / f"{name}.pkg").write_text("")
+    env = {**os.environ, "PATH": f"{_fake_docker(tmp_path, fails)}:{os.environ['PATH']}"}
+    result = subprocess.run(
+        [
+            ROOT / ".clusterfuzzlite" / "nightly.sh",
+            out,
+            tmp_path / "corpus",
+            tmp_path / "artifacts",
+            "7",
+            "runner@sha256:x",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    calls = (tmp_path / "calls").read_text().splitlines()
+    return result.returncode, calls
+
+
+def test_the_nightly_script_fuzzes_then_prunes_each_fuzzer_from_its_kept_corpus(
+    tmp_path: Path,
+) -> None:
+    code, calls = _nightly(tmp_path)
+    assert code == 0
+    commands = [c.split("runner@sha256:x ", 1)[1] for c in calls]
+    assert commands[:4] == [
+        "run_fuzzer a_fuzzer -max_total_time=7 -artifact_prefix=/artifacts/a_fuzzer-",
+        "bash -c rm -rf /corpus/a_fuzzer.pruned && mkdir /corpus/a_fuzzer.pruned",
+        "run_fuzzer a_fuzzer -merge=1 -artifact_prefix=/artifacts/a_fuzzer-"
+        " /corpus/a_fuzzer.pruned",
+        "bash -c rm -rf /corpus/a_fuzzer && mv /corpus/a_fuzzer.pruned /corpus/a_fuzzer",
+    ]
+    assert len(commands) == 8
+    assert all(f"-v {tmp_path}/corpus:/corpus" in c for c in calls)
+    assert "-e CORPUS_DIR=/corpus/a_fuzzer" in calls[0]
+
+
+def test_a_crash_fails_the_nightly_script_after_every_fuzzer_ran(tmp_path: Path) -> None:
+    code, calls = _nightly(tmp_path, fails="run_fuzzer a_fuzzer -max_total_time")
+    assert code == 1
+    assert any("run_fuzzer b_fuzzer -max_total_time" in c for c in calls)
+
+
+def test_a_failed_pruning_keeps_the_corpus_and_fails_the_nightly_script(tmp_path: Path) -> None:
+    code, calls = _nightly(tmp_path, fails="run_fuzzer a_fuzzer -merge=1")
+    assert code == 1
+    assert not any("mv /corpus/a_fuzzer.pruned /corpus/a_fuzzer" in c for c in calls)
+    assert any("rm -rf /corpus/a_fuzzer.pruned" in c and "mv" not in c for c in calls)
+
+
+def test_the_nightly_script_fails_without_a_fuzzer(tmp_path: Path) -> None:
+    (tmp_path / "build-out").mkdir()
+    env = {**os.environ, "PATH": f"{_fake_docker(tmp_path, '')}:{os.environ['PATH']}"}
+    result = subprocess.run(
+        [
+            ROOT / ".clusterfuzzlite" / "nightly.sh",
+            tmp_path / "build-out",
+            tmp_path / "corpus",
+            tmp_path / "artifacts",
+            "7",
+            "runner@sha256:x",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "no fuzzer" in result.stdout
 
 
 def test_the_builder_installs_lakana_core_s_dependencies_from_the_lock_with_hashes() -> None:
