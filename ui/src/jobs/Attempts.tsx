@@ -79,7 +79,9 @@ export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
         </thead>
         <tbody>
           {attempts.map((attempt) => (
-            <tr key={attempt.attempt}>
+            // A released claim gives its number back, so two attempts may share it; their
+            // starts tell them apart.
+            <tr key={`${String(attempt.attempt)} ${attempt.started_at}`}>
               <td className="number">{attempt.attempt}</td>
               <td>
                 <VisibleText text={attempt.worker} />

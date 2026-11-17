@@ -101,9 +101,10 @@ function visible(): boolean {
  * Follows a task's log. It reads from offset 0, then at once each next piece while the server
  * has more (at most {@link LOG_CATCHUP_PIECES} in a row; past that it stops following), then
  * every two seconds until the log is complete, and never again after. A `reset` (the offset lay
- * beyond the end of a log written anew) drops the text and goes on from `next_offset`. Nothing is
- * read while the tab is hidden: a catch-up stops there, and the reads go on when it shows. The
- * reads fail and back off as `useLivePoll`'s do. Mount it once per task (a `key`).
+ * beyond the end of a log written anew) drops the text and reads the log again from offset 0, at
+ * once, as a fresh log. Nothing is read while the tab is hidden: a catch-up stops there, and the
+ * reads go on when it shows. The reads fail and back off as `useLivePoll`'s do; a read that Try
+ * again overtook is dropped. Mount it once per task (a `key`).
  *
  * @param environment - The run's environment.
  * @param runId - The run's id.
@@ -113,30 +114,40 @@ function visible(): boolean {
 export function useTaskLog(environment: string, runId: string, asset: string): TaskLog {
   const followed = useRef(NOTHING_READ);
   const [shown, setShown] = useState(NOTHING_READ);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
+  // Each load takes the next number; a load whose number is no longer the latest (Try again
+  // started another, or the page was left) drops what it read and stops, so two loads never
+  // append the same piece.
+  const latest = useRef(0);
+  useEffect(
+    () => () => {
+      latest.current += 1;
+    },
+    [],
+  );
   const load = useCallback(async (): Promise<Followed> => {
-    for (let pieces = 1; mounted.current; pieces += 1) {
+    latest.current += 1;
+    const mine = latest.current;
+    for (let pieces = 1; ; pieces += 1) {
       const piece = await getTaskLog(environment, runId, asset, followed.current.offset);
+      if (mine !== latest.current) {
+        break;
+      }
+      // A reset means the log was written anew: drop the text and read it from its start.
       const before = piece.reset ? NOTHING_READ : followed.current;
-      const text = keep(before.text + piece.text);
+      const text = piece.reset ? "" : keep(before.text + piece.text);
+      const more = piece.more || piece.reset;
       const next: Followed = {
         text,
         attempts: piece.attempts,
-        offset: piece.next_offset,
-        complete: piece.complete,
+        offset: piece.reset ? 0 : piece.next_offset,
+        complete: piece.complete && !piece.reset,
         cut: before.cut || text.length < before.text.length + piece.text.length,
-        stopped: piece.more && pieces >= LOG_CATCHUP_PIECES,
+        stopped: more && pieces >= LOG_CATCHUP_PIECES,
         read: true,
       };
       followed.current = next;
       setShown(next);
-      if (!piece.more || next.stopped || !visible()) {
+      if (!more || next.stopped || !visible()) {
         break;
       }
     }

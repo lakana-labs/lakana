@@ -1,15 +1,38 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { createElement, type JSX } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../api";
 import { getTaskLog, type TaskLogOut } from "../api/jobs";
+import { saveBlob } from "../shell/saveFile";
 import { anAttempt, aTaskLog, JOB_RUN_ID } from "../test/jobs";
+import { LogView } from "./LogView";
 import { LOG_CATCHUP_PIECES, LOG_KEEP_CHARS, useTaskLog } from "./useTaskLog";
 
 vi.mock("../api/jobs", async (original) => ({
   ...(await original<typeof import("../api/jobs")>()),
   getTaskLog: vi.fn(),
 }));
+
+vi.mock("../shell/saveFile", async (original) => ({
+  ...(await original<typeof import("../shell/saveFile")>()),
+  saveBlob: vi.fn(),
+}));
+
+/**
+ * The log of `silver.orders` as its page shows it, followed by the hook.
+ *
+ * @returns The view.
+ */
+function Followed(): JSX.Element {
+  const log = useTaskLog("prod", JOB_RUN_ID, "silver.orders");
+  return createElement(LogView, {
+    environment: "prod",
+    runId: JOB_RUN_ID,
+    asset: "silver.orders",
+    log,
+  });
+}
 
 let visibility: "visible" | "hidden" = "visible";
 
@@ -71,6 +94,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.mocked(getTaskLog).mockReset();
+  vi.mocked(saveBlob).mockReset();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -167,19 +191,86 @@ describe("useTaskLog", () => {
   });
 
   it("starts again on reset", async () => {
+    // As the server answers a reset: no text, next_offset at the end of the rewritten log, no
+    // more after it (lakana-core runs/service.py, log_window).
+    const rewritten = "attempt 2 starts\nattempt 2 builds\n";
     answer(
-      running("old\n", 4),
-      aTaskLog({ text: "", next_offset: 2, more: true, complete: false, reset: true }),
-      running("new\n", 6),
+      running("attempt 1 starts a longer line\n", 31),
+      aTaskLog({
+        text: "",
+        next_offset: rewritten.length,
+        more: false,
+        complete: false,
+        reset: true,
+      }),
+      aTaskLog({ text: rewritten, next_offset: rewritten.length }),
     );
     const { result } = follow();
 
     await tick(0);
-    expect(result.current.text).toBe("old\n");
+    expect(result.current.text).toBe("attempt 1 starts a longer line\n");
     await tick(2_000);
-    expect(offsets()).toEqual([0, 4, 2]);
-    expect(result.current.text).toBe("new\n");
+    expect(offsets()).toEqual([0, 31, 0]);
+    expect(result.current.text).toBe(rewritten);
     expect(result.current.cut).toBe(false);
+    expect(result.current.complete).toBe(true);
+  });
+
+  it("saves the whole rewritten log after a reset", async () => {
+    const rewritten = "attempt 2 starts\nattempt 2 builds\n";
+    answer(
+      running("attempt 1 starts a longer line\n", 31),
+      aTaskLog({
+        text: "",
+        next_offset: rewritten.length,
+        more: false,
+        complete: false,
+        reset: true,
+      }),
+      aTaskLog({ text: rewritten, next_offset: rewritten.length }),
+    );
+    render(createElement(Followed));
+
+    await tick(0);
+    await tick(2_000);
+    expect(screen.getByRole("region", { name: "Log of silver.orders" }).textContent).toBe(
+      rewritten,
+    );
+    expect(screen.queryByText("Earlier lines are not shown here.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save log" }));
+    const [blob] = vi.mocked(saveBlob).mock.calls[0] as [Blob, string];
+    expect(await blob.text()).toBe(rewritten);
+  });
+
+  it("does not double the text when Try again is pressed while a read is pending", async () => {
+    vi.mocked(getTaskLog).mockRejectedValueOnce(
+      new ApiError(500, "InternalError", "The log store is down."),
+    );
+    const { result } = follow();
+    await tick(0);
+    expect(result.current.error).toBe("The log store is down.");
+
+    const pending: ((piece: TaskLogOut) => void)[] = [];
+    vi.mocked(getTaskLog).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    // The backed-off read starts, and Try again is pressed while it is pending.
+    await tick(4_000);
+    act(() => {
+      result.current.retry();
+    });
+    await tick(0);
+    expect(offsets()).toEqual([0, 0, 0]);
+    for (const resolve of pending) {
+      resolve(running("a\n", 2));
+    }
+    await tick(0);
+    expect(result.current.text).toBe("a\n");
+    await tick(2_000);
+    expect(offsets()).toEqual([0, 0, 0, 2]);
   });
 
   it("reads every two seconds until complete and then stops", async () => {

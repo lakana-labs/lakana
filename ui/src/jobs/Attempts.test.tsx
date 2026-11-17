@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { aFailure, anAttempt } from "../test/jobs";
 import { Attempts } from "./Attempts";
@@ -101,5 +101,20 @@ describe("Attempts", () => {
 
     expect(screen.getByText("No attempt yet.")).toBeInTheDocument();
     expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("lists two attempts that share a number, a released claim and its retry", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const attempts = [
+      anAttempt({ outcome: "released", finished_at: "2026-11-17T01:00:06Z", rows_written: null }),
+      anAttempt({ started_at: "2026-11-17T01:00:10Z", worker: "w-9b2c" }),
+    ];
+    const { rerender } = render(<Attempts asset="silver.orders" attempts={attempts} />);
+    rerender(<Attempts asset="silver.orders" attempts={[...attempts].reverse()} />);
+
+    expect(cells(0)[1]).toHaveTextContent("w-9b2c");
+    expect(cells(1)[4]).toHaveTextContent("Released");
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 });
