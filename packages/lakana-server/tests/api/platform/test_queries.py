@@ -2021,7 +2021,81 @@ def test_a_second_file_of_the_same_person_at_once_is_503_with_retry_after(
     assert _exports(client) == []
 
 
-def test_the_file_slot_is_given_back_when_the_body_ends_and_when_preparing_fails(
+_OPEN_FILES_HELD = (
+    "You already have 2 result files being downloaded; finish or cancel one, then try again."
+)
+
+
+def _open_files_free(client: TestClient, key: object) -> bool:
+    """Say whether `key` holds none of its open result files, leaving the count as it was.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    key
+        The principal id.
+
+    Returns
+    -------
+    bool
+        Whether both of the principal's open-file places could be taken.
+    """
+    lim = client.app.state.open_result_file_limiter
+    taken = 0
+    while taken < 2 and lim.try_acquire(key) is None:
+        taken += 1
+    for _ in range(taken):
+        lim.release(key)
+    return taken == 2
+
+
+def test_a_third_open_file_of_the_same_person_is_503_and_writes_no_export_event(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    open_files = client.app.state.open_result_file_limiter
+    # Two files still being downloaded: prepared, their bodies not yet ended.
+    assert open_files.try_acquire(admin) is None
+    assert open_files.try_acquire(admin) is None
+    for result_format in ("csv", "xlsx"):
+        busy = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert (busy.status_code, busy.headers["Retry-After"], busy.json()) == (
+            503,
+            "1",
+            {"detail": _OPEN_FILES_HELD, "type": "ResultFileLimitError"},
+        )
+    assert _exports(client) == []
+    # Arrow is streamed from storage and opens no temporary file.
+    assert client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER).status_code == 200
+    # The preparation slot was never taken by the refused requests.
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None
+    client.app.state.result_file_limiter.release(admin)
+    open_files.release(admin)
+    got = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert got.status_code == 200, got.text
+    open_files.release(admin)
+    assert _open_files_free(client, admin)
+
+
+def test_another_persons_open_files_do_not_hold_up_yours(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    open_files = client.app.state.open_result_file_limiter
+    other = uuid.uuid4()
+    assert open_files.try_acquire(other) is None
+    assert open_files.try_acquire(other) is None
+    for result_format in ("csv", "xlsx"):
+        got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert got.status_code == 200, (result_format, got.text)
+    assert _open_files_free(client, admin)
+    assert open_files.try_acquire(other) == "own"
+
+
+def test_the_file_slot_and_open_file_are_given_back_when_the_body_ends_or_preparing_fails(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _environment(client)
@@ -2033,6 +2107,7 @@ def test_the_file_slot_is_given_back_when_the_body_ends_and_when_preparing_fails
         assert got.status_code == 200, (result_format, got.text)
         assert lim.try_acquire(admin) is None, result_format
         lim.release(admin)
+        assert _open_files_free(client, admin), result_format
     exported = len(_exports(client))
     # A conversion that fails on a value fails while the file is prepared: before the 200
     # and before the export is recorded.
@@ -2043,6 +2118,7 @@ def test_the_file_slot_is_given_back_when_the_body_ends_and_when_preparing_fails
         assert failed.status_code == 500, result_format
         assert lim.try_acquire(admin) is None, result_format
         lim.release(admin)
+        assert _open_files_free(client, admin), result_format
     assert len(_exports(client)) == exported
 
 
@@ -2088,8 +2164,9 @@ def _download_over_asgi(
     Returns
     -------
     tuple
-        Whether the caller's file slot was free when the response started, and the types of
-        the messages sent before the failure.
+        Whether, when the response started, the caller's file slot was free and the file was
+        counted as one of the caller's open files (one more could be opened, not two), and
+        the types of the messages sent before the failure.
     """
     import asyncio
     import contextlib
@@ -2133,7 +2210,12 @@ def _download_over_asgi(
             free = lim.try_acquire(admin) is None
             if free:
                 lim.release(admin)
-            free_at_start.append(free)
+            open_files = client.app.state.open_result_file_limiter
+            one_more = open_files.try_acquire(admin) is None
+            two_more = one_more and open_files.try_acquire(admin) is None
+            for _ in range(int(one_more) + int(two_more)):
+                open_files.release(admin)
+            free_at_start.append(free and one_more and not two_more)
         if message["type"] == fail_on:
             raise OSError("the client went away")
         sent.append(message["type"])
@@ -2152,7 +2234,7 @@ def _download_over_asgi(
 def test_a_file_streams_without_a_slot_and_its_temporary_file_closes_when_the_client_goes(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, result_format: str, fail_on: str
 ) -> None:
-    """A paused or vanished reader holds no file slot; the spooled file closes on every path."""
+    """A paused or vanished reader holds no file slot; its file closes and stops counting."""
     _environment(client)
     qid = _sized(client)
     admin = query_run_columns(client, qid, "principal_id")["principal_id"]
@@ -2164,6 +2246,7 @@ def test_a_file_streams_without_a_slot_and_its_temporary_file_closes_when_the_cl
     assert len(spooled.files) == 1
     assert spooled.files[0].closed
     assert client.app.state.result_file_limiter.try_acquire(admin) is None
+    assert _open_files_free(client, admin)
 
 
 def test_a_result_without_recorded_sizes_downloads_without_the_size_headers(

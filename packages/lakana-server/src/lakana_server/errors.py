@@ -77,11 +77,13 @@ class ResultPageLimitError(LakanaError):
 
 
 class ResultFileLimitError(LakanaError):
-    """Too many result files are being prepared in this process, or one already for the caller.
+    """Too many result files are being prepared or held open: in this process, or by the caller.
 
     Server-only, like `ResultPageLimitError`: an HTTP-layer cap on CSV and spreadsheet files,
     each of which holds a whole result in memory while it is written to a temporary file (the
-    finished file is sent without a slot). Mapped to 503 with a `Retry-After: 1` header.
+    finished file is sent without a slot), and on the temporary files one principal keeps until
+    their responses close them (`OPEN_RESULT_FILES_PER_PRINCIPAL`). Mapped to 503 with a
+    `Retry-After: 1` header.
     """
 
 

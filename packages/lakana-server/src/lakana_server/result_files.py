@@ -1137,7 +1137,8 @@ class ResultFileResponse(StreamingResponse):
     the route does not count the bytes of a CSV or spreadsheet file it prepared. The response
     takes no file slot: the route gives it back once the file is prepared. It closes what it
     read from exactly once, when the body ends, fails, or is never sent because the client
-    went away.
+    went away; for a prepared file, `close` also stops counting it as one of the caller's open
+    result files.
 
     Parameters
     ----------

@@ -127,6 +127,11 @@ RESULT_FILES_PER_PROCESS = 2
 RESULT_FILES_PER_PRINCIPAL = 1
 """The most CSV or spreadsheet result files one principal has prepared at once, in one process."""
 
+OPEN_RESULT_FILES_PER_PRINCIPAL = 2
+"""The most prepared CSV or spreadsheet result files one principal holds open at once, in one
+process: each is a temporary file about the size of the result, counted from its preparation
+until its response closes it, so this bounds the room one person takes in TMPDIR."""
+
 
 class ThreadSafeConcurrencyLimiter:
     """A non-blocking limiter with a cap in total and a cap per key, safe across threads.
@@ -138,12 +143,12 @@ class ThreadSafeConcurrencyLimiter:
     Parameters
     ----------
     max_concurrent
-        The most slots taken at once, across all keys.
+        The most slots taken at once, across all keys, or `None` for no cap in total.
     per_key
         The most slots one key holds at once.
     """
 
-    def __init__(self, max_concurrent: int, per_key: int) -> None:
+    def __init__(self, max_concurrent: int | None, per_key: int) -> None:
         self._max_concurrent = max_concurrent
         self._max_per_key = per_key
         self._lock: contextlib.AbstractContextManager[object] = threading.Lock()
@@ -169,7 +174,7 @@ class ThreadSafeConcurrencyLimiter:
             held = self._per_key.get(key, 0)
             if held >= self._max_per_key:
                 return "own"
-            if self._taken >= self._max_concurrent:
+            if self._max_concurrent is not None and self._taken >= self._max_concurrent:
                 return "all"
             self._taken += 1
             self._per_key[key] = held + 1

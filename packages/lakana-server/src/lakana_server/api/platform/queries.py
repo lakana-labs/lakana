@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import tempfile
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import IO, Any, Literal
 
 import pyarrow as pa
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -37,7 +38,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.concurrency import ThreadSafeConcurrencyLimiter
+from lakana_server.concurrency import OPEN_RESULT_FILES_PER_PRINCIPAL, ThreadSafeConcurrencyLimiter
 from lakana_server.deps import (
     check_statement,
     get_key_provider,
@@ -556,6 +557,10 @@ _OWN_PAGE_BUSY = "You already have a result page being prepared; wait for it, th
 _ALL_PAGES_BUSY = "The server is preparing other result pages; try again in a moment."
 _OWN_FILE_BUSY = "You already have a result file being prepared; wait for it, then try again."
 _ALL_FILES_BUSY = "The server is preparing other result files; try again in a moment."
+_OPEN_FILES_HELD = (
+    f"You already have {OPEN_RESULT_FILES_PER_PRINCIPAL} result files being downloaded; finish "
+    "or cancel one, then try again."
+)
 
 
 def _duration_ms(run: QueryRun) -> int | None:
@@ -615,6 +620,39 @@ def _nothing() -> None:
     """Do nothing: the Arrow result takes no file slot and has nothing of its own to close."""
 
 
+def _closer(
+    target: IO[bytes], open_files: ThreadSafeConcurrencyLimiter, key: uuid.UUID
+) -> Callable[[], None]:
+    """Make the one function that closes a prepared result file and stops counting it as open.
+
+    Parameters
+    ----------
+    target
+        The temporary file.
+    open_files
+        The open result files, per principal.
+    key
+        The principal the file counts against.
+
+    Returns
+    -------
+    callable
+        Closes `target`, then gives back its place in `open_files`; a second call does nothing.
+    """
+    done: list[bool] = []
+
+    def close() -> None:
+        if done:
+            return
+        done.append(True)
+        try:
+            target.close()
+        finally:
+            open_files.release(key)
+
+    return close
+
+
 def _whole_result(
     run: QueryRun,
     env: str,
@@ -622,6 +660,7 @@ def _whole_result(
     *,
     storage: Storage,
     limiter: ThreadSafeConcurrencyLimiter,
+    open_files: ThreadSafeConcurrencyLimiter,
     principal: PrincipalRef,
     queries: QueryService,
 ) -> ResultFileResponse:
@@ -632,8 +671,10 @@ def _whole_result(
     no file slot. CSV and xlsx read the stored file whole, as a JSON page does (the worker
     bounds its size), and are written whole into a temporary file while they hold one of the
     caller's file slots; the slot is given back once the file is written, and the finished
-    file is then sent from disk in pieces without one. The temporary file is closed when the
-    body ends, fails or is never sent.
+    file is then sent from disk in pieces without one. Each such file also counts as one of
+    the caller's open result files (`OPEN_RESULT_FILES_PER_PRINCIPAL`), from before it is read
+    until the temporary file is closed: when the body ends, fails or is never sent, or when
+    preparing it fails. That bounds what one person keeps in TMPDIR.
 
     Parameters
     ----------
@@ -647,6 +688,8 @@ def _whole_result(
         The environment's storage.
     limiter
         The file slots.
+    open_files
+        The open result files per principal.
     principal
         The caller.
     queries
@@ -660,7 +703,8 @@ def _whole_result(
     Raises
     ------
     ResultFileLimitError
-        If the caller already has a file being prepared, or every slot is taken.
+        If the caller already holds `OPEN_RESULT_FILES_PER_PRINCIPAL` open result files, or
+        already has a file being prepared, or every slot is taken; before any read or audit.
     lakana_server.result_files.XlsxRefused
         If one sheet cannot hold the result whole.
     lakana_server.result_files.ResultFileRefused
@@ -689,8 +733,11 @@ def _whole_result(
             arrow_bytes=run.result_bytes,
             close=_nothing,
         )
+    if open_files.try_acquire(principal.id) is not None:
+        raise ResultFileLimitError(_OPEN_FILES_HELD)
     busy = limiter.try_acquire(principal.id)
     if busy is not None:
+        open_files.release(principal.id)
         raise ResultFileLimitError(_OWN_FILE_BUSY if busy == "own" else _ALL_FILES_BUSY)
     target = None
     try:
@@ -715,8 +762,11 @@ def _whole_result(
             size_bytes=len(content) if run.result_bytes is None else run.result_bytes,
         )
     except BaseException:
-        if target is not None:
-            target.close()
+        try:
+            if target is not None:
+                target.close()
+        finally:
+            open_files.release(principal.id)
         raise
     finally:
         # The slot bounds the memory of preparing a file; a finished file is sent from disk
@@ -728,7 +778,7 @@ def _whole_result(
         file_name=name,
         rows=run.result_rows,
         arrow_bytes=run.result_bytes,
-        close=target.close,
+        close=_closer(target, open_files, principal.id),
     )
 
 
@@ -788,7 +838,8 @@ def get_query_result(
     16,384 columns or with a value longer than 32,767 characters, naming the CSV download
     instead, and for a CSV or spreadsheet of a column whose type no file holds, naming the
     Arrow download. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or
-    spreadsheet file being prepared, or the server is preparing as many as it allows at once.
+    spreadsheet file being prepared, while 2 of your CSV or spreadsheet files are still being
+    downloaded, or while the server is preparing as many as it allows at once.
 
     Parameters
     ----------
@@ -853,10 +904,12 @@ def get_query_result(
         prepared, or every slot of this process is taken. The slot is given back once the
         page's bytes are built, before they are sent.
     lakana_server.errors.ResultFileLimitError
-        Mapped to 503 with `Retry-After: 1`: the caller already has a CSV or spreadsheet file
-        being prepared (one at a time), or this process prepares two already. The slot is held
-        while the file is written to a temporary file and given back before its first byte is
-        sent, so a slow reader holds none.
+        Mapped to 503 with `Retry-After: 1`, before any read or audit: the caller already has
+        a CSV or spreadsheet file being prepared (one at a time), or this process prepares two
+        already. The slot is held while the file is written to a temporary file and given back
+        before its first byte is sent, so a slow reader holds none. Also when the caller
+        already holds 2 prepared files whose responses have not closed them yet (being
+        downloaded, or not yet started), which bounds the temporary files one person keeps.
     """
     run = queries.get_query_run(principal, env, query_id)
     if run.status != QueryRunStatus.SUCCEEDED:
@@ -878,6 +931,7 @@ def get_query_result(
             result_format,
             storage=StorageResolver(session, key_provider).for_environment(env).storage,
             limiter=request.app.state.result_file_limiter,
+            open_files=request.app.state.open_result_file_limiter,
             principal=principal,
             queries=queries,
         )

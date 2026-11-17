@@ -149,6 +149,8 @@ id, the format, the rows and the size. A JSON page is not. A pipeline task that 
 as Arrow writes none; its CSV or spreadsheet download is recorded.
 
 Making a CSV or a spreadsheet costs the server memory, so it prepares two at a time per server and
-one at a time per person, held until the file is sent. Another is answered `503` with
-`Retry-After: 1` and the type `ResultFileLimitError`. The Arrow file is sent from storage as it is
-and is never refused for this.
+one at a time per person, until the file is written; it is then sent without holding either. The
+prepared file takes disk space until its download ends, so one person has at most two CSV or
+spreadsheet downloads under way at once. Another is answered `503` with `Retry-After: 1` and the
+type `ResultFileLimitError`. The Arrow file is sent from storage as it is and is never refused for
+this.

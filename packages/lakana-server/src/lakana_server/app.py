@@ -89,6 +89,7 @@ from lakana_server.browser_guard import BrowserGuard
 from lakana_server.concurrency import (
     JSON_PAGES_PER_PRINCIPAL,
     JSON_PAGES_PER_PROCESS,
+    OPEN_RESULT_FILES_PER_PRINCIPAL,
     RESULT_FILES_PER_PRINCIPAL,
     RESULT_FILES_PER_PROCESS,
     AppendConcurrencyLimiter,
@@ -252,6 +253,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.result_file_limiter = ThreadSafeConcurrencyLimiter(
             RESULT_FILES_PER_PROCESS, RESULT_FILES_PER_PRINCIPAL
+        )
+        app.state.open_result_file_limiter = ThreadSafeConcurrencyLimiter(
+            None, OPEN_RESULT_FILES_PER_PRINCIPAL
         )
         readiness = resolved_settings.readiness
         app.state.readiness = ReadinessCheck(
