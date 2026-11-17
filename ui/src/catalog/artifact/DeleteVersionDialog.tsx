@@ -19,6 +19,7 @@ import { ActionDialog } from "../../shell/ActionDialog";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
+import { needsPasskey } from "../../sign-in/messages";
 import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
 import { useProtected } from "../actions/useProtected";
@@ -36,7 +37,10 @@ export interface DeleteVersionDialogProps {
   readonly onDone: () => void;
   /** Closes the dialog without deleting anything. */
   readonly onCancel: () => void;
-  /** Called when the server says the version is gone or deleted already (404, 409). */
+  /**
+   * Called when the server says the version is gone or deleted already (404, 409); not for the
+   * step-up's 409 of an account without a passkey (`NoPasskeyError`).
+   */
   readonly onGone?: () => void;
 }
 
@@ -83,7 +87,12 @@ export function DeleteVersionDialog({
         armFocus();
         setDeleted(answer);
       } catch (error: unknown) {
-        if (error instanceof ApiError && (error.status === 404 || error.status === 409)) {
+        // The step-up's 409 for an account without a passkey says nothing about the version.
+        if (
+          error instanceof ApiError &&
+          (error.status === 404 || error.status === 409) &&
+          !needsPasskey(error)
+        ) {
           onGone?.();
         }
         throw error;

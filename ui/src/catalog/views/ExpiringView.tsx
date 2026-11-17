@@ -9,7 +9,7 @@ import { Link } from "react-router";
 
 import { listExpiring } from "../../api/manage";
 import { markedText, VisibleText } from "../../shell/VisibleText";
-import { When } from "../cells";
+import { openFromCell, When } from "../cells";
 import { tablePath } from "../paths";
 import { retentionWords } from "../retention";
 import { useCursorPages } from "./useCursorPages";
@@ -59,7 +59,12 @@ export function ExpiringView({ environment, namespace }: ExpiringViewProps): JSX
         }
       >
         {rows.map((row) => (
-          <tr key={row.uuid}>
+          <tr
+            key={row.uuid}
+            // The time sits above the row's link overlay so the pointer reaches its hover text; a
+            // plain click on it is handed to the link. The keyboard has the link.
+            onClick={openFromCell}
+          >
             <td>
               <Link className="row-name" to={tablePath(environment, row.namespace, row.name)}>
                 <VisibleText text={row.name} />

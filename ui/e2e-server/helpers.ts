@@ -773,3 +773,7 @@ export function ageThePasskeyTouch(name: string): void {
     database.close();
   }
 }
+
+/** What the page says for the server's 409 `NoPasskeyError`: the account has no passkey to touch. */
+export const NO_PASSKEY =
+  "Your account has no passkey yet, and this action needs a passkey touch. Add one first under Passkeys and sessions, in the menu under your name, then try again.";
