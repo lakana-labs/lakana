@@ -59,8 +59,8 @@ How the larger pieces are meant to work:
   tested asset for each kind of source, or a whole star schema (`--template medallion`). An administrator registers a source's address
   and credentials once under a name in an environment (a named connection, #85); a Python asset
   declares the connections it uses, fetches their credentials at run time, and an ingestion task
-  reaches only those (#308). Connections are managed through the CLI and the API, and in the web
-  interface once that exists. This is built (M6). The platform does not run connectors of its own: a connection
+  reaches only those (#308). Connections are managed through the CLI, the API and the web
+  interface (the Connections screen). This is built (M6). The platform does not run connectors of its own: a connection
   is a named address and secret, and the asset's helper does the reading. Configuring a
   recurring load without writing an asset (no-code loads, #86) is an idea for after v1.0.0
   only.

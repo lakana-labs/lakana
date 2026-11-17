@@ -54,6 +54,14 @@ A database or an API needs its password or token too. `--password-stdin` reads i
 input, so it never appears in your shell's history. The examples further down show both, and
 [Connections](../reference/connections.md) lists every kind and its options.
 
+In the web interface, the same connection is **Connections** in the menu, then **Add connection**
+(you need `MANAGE_CONNECTION` on `dev`, as the `ADMIN` and `DATA_ENGINEER` roles have). Choose the
+environment `dev` and the kind **Directory**, name it `exports`, give it the root `landing` and the
+path `exports`, and press **Save**. A database or an API asks for its password or token in
+password fields of the same form; they are sent once and never shown again. The page that opens
+offers **Test now**, which asks for the check below. [Connections](../reference/connections.md#in-the-web-interface)
+describes each step, and who sees what.
+
 Test the connection before you write code that reads it. A worker checks that it can reach the
 source and, for a source with a secret, that the source accepts the secret:
 
