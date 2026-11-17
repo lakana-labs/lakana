@@ -74,4 +74,16 @@ describe("recordOpened", () => {
 
     expect(server.sent[0]?.body).toEqual({ kind: "query", environment: "prod", ref: "0b1c" });
   });
+
+  it("records an opened job and run", async () => {
+    const server = fakeServer({ "POST /api/v1/principals/kim lee/recent": { status: 204 } });
+
+    await recordOpened("kim lee", "job", "prod", "analytics/nightly_sales");
+    await recordOpened("kim lee", "run", "prod", "5d6e");
+
+    expect(server.sent.map((request) => request.body)).toEqual([
+      { kind: "job", environment: "prod", ref: "analytics/nightly_sales" },
+      { kind: "run", environment: "prod", ref: "5d6e" },
+    ]);
+  });
 });
