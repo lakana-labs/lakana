@@ -139,10 +139,11 @@ Deactivating the principal stops every token it has.
 | Create a token for yourself | only from a browser session, after a passkey touch in the last 15 minutes |
 | Create a token for anyone else | an administrator |
 
-No token (personal, task or CI) of a person who is not an administrator can create a token, so
-a stolen token cannot mint replacements. The refusal is `403` and is recorded in the audit log:
+No token (personal, task or CI) of a person who is not an administrator can create a personal
+token, so a stolen token cannot mint a replacement. The refusal of a personal token is `403`, reads
 "A token cannot create a token. Create your own token in the web interface, under your name,
-after touching your passkey; or ask an administrator: lakana token issue NAME LABEL". An
+after touching your passkey; or ask an administrator: lakana token issue NAME LABEL" and is recorded in the audit log; a task or CI token gets the
+authorization's own refusal. An
 administrator may still create tokens with a token, as `lakana token issue` does. About someone
 else's tokens, anyone who is not an administrator gets the same `403` whether or not that person
 exists. A task or CI token has no say over its owner's tokens.

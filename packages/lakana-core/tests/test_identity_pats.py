@@ -570,7 +570,6 @@ def test_a_token_cannot_create_its_owners_token(session: Session) -> None:
     with pytest.raises(PermissionDenied):
         service.issue(_ci_ref(bob), "bob", name="mine")
     assert _tokens_of(session, bob) == []
-    assert OWN_TOKEN_FROM_BROWSER.startswith("A token cannot create a token.")
 
 
 def test_a_person_creates_their_own_token_from_a_fresh_session_only(session: Session) -> None:
@@ -655,6 +654,7 @@ def test_someone_elses_tokens_are_403_whether_or_not_they_exist(
                 call()
             messages.add(str(refused.value))
     assert len(messages) == 1
+    assert not any(name in text for text in messages for name in ("ada", "nobody"))
     if holds_the_action:
         assert messages == {admin_only_message(Action.MANAGE_TOKEN)}
 

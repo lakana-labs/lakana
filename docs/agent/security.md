@@ -5885,7 +5885,7 @@ fuller text of each part where it already lives.
   no step-up, since revoking removes access. They create one only with `p.session` and after the
   step-up. Any other credential is refused with `OWN_TOKEN_FROM_BROWSER`, audited as
   `AUTHORIZATION_DENIED` (`operation: issue_token`, `reason: not_from_a_browser`). Why: a stolen
-  token cannot mint replacements for itself. An administrator's token still may issue (R1, for
+  token cannot mint a replacement personal token. An administrator's token still may issue (R1, for
   review): the CLI and the bootstrap need it, and it was the rule before. Everyone else, about
   anyone else's tokens, goes through `authorize_admin_only` before any lookup, so the refusal
   never says whether the principal exists. A token has exactly its owner's rights, and
@@ -5894,6 +5894,18 @@ fuller text of each part where it already lives.
   `test_a_person_creates_their_own_token_from_a_fresh_session_only`,
   `test_someone_elses_tokens_are_403_whether_or_not_they_exist`,
   `test_a_self_made_token_stops_when_its_owner_is_deactivated`), `test_tokens.py`.
+
+- **Scope of the rule.** It is "no token can create a personal token": a stolen token cannot
+  mint a replacement personal token. A personal token whose owner holds `MINT_TASK_TOKEN` can still
+  mint a task token (`TaskTokenService.mint`), bounded by `max_ttl_seconds`. That is an accepted
+  residual: minting task tokens stays in the CLI by the spec, and `MINT_TASK_TOKEN` is granted
+  separately.
+- **The denial row** (`not_from_a_browser`) is written unconditionally, as `TaskTokenService.mint`
+  and `revoke` do, not through `DenialAuditLimiter`.
+- **Local mode.** A stolen non-administrator personal token could mint a local sign-in link, enrol
+  a first passkey within `FIRST_PASSKEY_WINDOW` and then create a personal token. Local mode is
+  single-machine and that passkey is already a persistent credential; this is as before and
+  unchanged here.
 
 ## Governed table creation and append (M4a)
 
