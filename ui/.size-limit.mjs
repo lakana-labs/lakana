@@ -79,11 +79,15 @@ const NAMED_LIMITS = [
   { name: "the place menu", prefix: "PlaceActions-", limit: "2.6 kB" },
   // Measured 1.23 kB (2026-11-16) + 10 %: New external table's form (name, location, format and
   // the format read from the location's ending), loaded when it is chosen.
-  { name: "New external table", prefix: "ExternalTableDialog-", limit: "1.35 kB" },
+  // Raised to the measured 1.92 kB (2026-11-17) + 10 %: Browse… beside Location, the loader of
+  // the listing of raw/ with the list of chunks it preloads, and the field's input with a button
+  // beside it (#672). The listing itself loads on demand (RawBrowser-, within ON_DEMAND_LIMIT).
+  { name: "New external table", prefix: "ExternalTableDialog-", limit: "2.11 kB" },
   // Measured 653 B (2026-11-16) + 10 %: the strings of the places, shared by the place menu, New
   // external table's form and the place note.
   // Raised to the measured 725 B (2026-11-16) + 10 % with the note after an artifact's drop.
-  { name: "the strings of the places", prefix: "placeStrings-", limit: "0.8 kB" },
+  // Raised to the measured 921 B (2026-11-17) + 10 % with the strings of Browse… (#672).
+  { name: "the strings of the places", prefix: "placeStrings-", limit: "1.01 kB" },
   // Measured 2.67 kB (2026-11-16) + 10 %: React Aria's radio group, which the Retention dialog and
   // New external table's form share; loaded with the first of them.
   { name: "the radio group", prefix: "RadioGroup-", limit: "2.94 kB" },

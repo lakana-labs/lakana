@@ -123,8 +123,7 @@
 "query status": { class: ui, part: 4 }
 "query submit": { class: ui, part: 4 }
 "query wait": { class: ui, part: 4 }
-"raw ls":
-  { class: ui, part: 3, done: true, note: "Browse… beside Location in New external table" }
+"raw ls": { class: ui, part: 3, done: true, note: "Browse… beside Location in New external table" }
 "recovery create": { class: ui, part: 1 }
 "recovery list": { class: ui, part: 1 }
 "recovery withdraw": { class: ui, part: 1 }
