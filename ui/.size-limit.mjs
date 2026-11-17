@@ -410,12 +410,12 @@ export default [
   // chunk of its own (-0.17 kB). What is left is the Queries area's loader with the list of chunks
   // it preloads, the focus kept on Run after its move, and the download's type check in the API
   // client.
-  // Measured 209.74 kB (2026-11-18; 209.84 kB on main in the same build) with the Connections
+  // Measured 209.75 kB (2026-11-18; 209.84 kB on main in the same build) with the Connections
   // area's loader and the list of chunks it preloads (+0.17 kB). The environment picker's Select,
   // which the Connections list imports, uses React Aria's form validation but not its text field,
   // and split their chunk of the first load in two (+0.39 kB); vite.config.ts's `form` chunk group
   // keeps them in one (build/chunk-groups.test.ts fails if an update moves one of its files), and
-  // with the small Text chunk it takes in, the first load ends 0.1 kB below main's.
+  // with the small Text chunk it takes in, the first load ends 0.09 kB below main's.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
