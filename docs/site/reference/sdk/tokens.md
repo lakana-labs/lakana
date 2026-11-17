@@ -25,6 +25,7 @@ Returns: `IssuedToken`. The full token value — shown here exactly once.
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal of this name exists. |
+| `lakana.PermissionDenied` | If the call is refused: anyone may list or revoke their own tokens, and a non-administrator creates their own only in the web interface after the passkey touch (`issue` with a token raises this); administrators manage anyone's. |
 
 ### `client.tokens.list`
 
@@ -41,6 +42,7 @@ Returns: `list of Token`. Every PAT for that principal.
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal of this name exists. |
+| `lakana.PermissionDenied` | If the call is refused: anyone may list or revoke their own tokens, and a non-administrator creates their own only in the web interface after the passkey touch (`issue` with a token raises this); administrators manage anyone's. |
 
 ### `client.tokens.list_all`
 
@@ -109,3 +111,4 @@ Revoke a PAT.
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal or PAT of these identifiers exists. |
+| `lakana.PermissionDenied` | If the call is refused: anyone may list or revoke their own tokens, and a non-administrator creates their own only in the web interface after the passkey touch (`issue` with a token raises this); administrators manage anyone's. |

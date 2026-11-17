@@ -93,6 +93,10 @@ class Tokens:
         ------
         lakana.errors.NotFound
             If no principal of this name exists.
+        lakana.errors.PermissionDenied
+            If the call is refused: anyone may list or revoke their own tokens, and a
+            non-administrator creates their own only in the web interface after the passkey
+            touch (`issue` with a token raises this); administrators manage anyone's.
         """
         response = self._transport.request(
             ROUTES["tokens.issue"], path_params={"name": principal}, json={"name": name}
@@ -117,6 +121,10 @@ class Tokens:
         ------
         lakana.errors.NotFound
             If no principal of this name exists.
+        lakana.errors.PermissionDenied
+            If the call is refused: anyone may list or revoke their own tokens, and a
+            non-administrator creates their own only in the web interface after the passkey
+            touch (`issue` with a token raises this); administrators manage anyone's.
         """
         response = self._transport.request(ROUTES["tokens.list"], path_params={"name": principal})
         return [_token_from_json(item) for item in response.json()]
@@ -219,6 +227,10 @@ class Tokens:
         ------
         lakana.errors.NotFound
             If no principal or PAT of these identifiers exists.
+        lakana.errors.PermissionDenied
+            If the call is refused: anyone may list or revoke their own tokens, and a
+            non-administrator creates their own only in the web interface after the passkey
+            touch (`issue` with a token raises this); administrators manage anyone's.
         """
         self._transport.request(
             ROUTES["tokens.revoke"], path_params={"name": principal, "key_id": key_id}

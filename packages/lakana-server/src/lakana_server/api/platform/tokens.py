@@ -110,8 +110,7 @@ def list_tokens(
     owner and its creation, last-use, expiry and revocation times. The token values are never
     included. Anyone may list their own with a personal token or a web session; anyone else's
     needs the `ADMIN` role on the instance, and is refused alike whether or not the principal
-    exists.
-    Answers 404 when there is no such principal.
+    exists. Answers 404 when there is no such principal.
 
     Parameters
     ----------

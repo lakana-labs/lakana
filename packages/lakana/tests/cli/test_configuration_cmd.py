@@ -61,7 +61,8 @@ def test_configuration_prints_secret_set_and_not_set(tmp_path: Path) -> None:
     assert "LAKANA_RUN__INDEX_URL (secret, not set) default" in out
     assert "LAKANA_PORT 8000 set" in out
     assert "LAKANA_HOST 127.0.0.1 default" in out
-    assert "null" in out
+    assert "(not set)" in out
+    assert "null" not in out
     assert '["/a"]' in out
 
 

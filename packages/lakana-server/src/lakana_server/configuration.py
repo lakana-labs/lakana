@@ -12,7 +12,7 @@ import typing
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, JsonValue, SecretStr
+from pydantic import BaseModel, JsonValue, SecretStr, TypeAdapter
 
 from lakana_server.settings import Settings
 
@@ -94,7 +94,9 @@ def _walk(
         found.append(
             ConfiguredSetting(
                 name=variable,
-                value=None if secret else model.model_dump(mode="json", include={name})[name],
+                value=None
+                if secret
+                else TypeAdapter(field.annotation or Any).dump_python(value, mode="json"),
                 secret=secret,
                 has_value=value is not None,
                 source="set" if given else "default",

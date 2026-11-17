@@ -15,7 +15,8 @@ def show_configuration(ctx: typer.Context) -> None:
 
     One row per setting with its environment variable, its value and whether the server's
     environment set it (`set`) or it is the default. A secret shows only `(secret, set)` or
-    `(secret, not set)`, never its value. Needs the ADMIN role.
+    `(secret, not set)`, never its value. A setting with no value shows `(not set)` (JSON
+    output keeps `null`). Needs the ADMIN role.
 
     Parameters
     ----------
@@ -34,6 +35,8 @@ def show_configuration(ctx: typer.Context) -> None:
                     item.name,
                     ("(secret, set)" if item.has_value else "(secret, not set)")
                     if item.secret
+                    else "(not set)"
+                    if item.value is None
                     else item.value
                     if isinstance(item.value, str)
                     else json.dumps(item.value),

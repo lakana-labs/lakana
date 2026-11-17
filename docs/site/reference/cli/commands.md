@@ -85,7 +85,7 @@ Usage: `lakana configuration [OPTIONS]`
 
 Show the running server's configuration (admin only).
 
-One row per setting with its environment variable, its value and whether the server's environment set it (`set`) or it is the default. A secret shows only `(secret, set)` or `(secret, not set)`, never its value. Needs the ADMIN role.
+One row per setting with its environment variable, its value and whether the server's environment set it (`set`) or it is the default. A secret shows only `(secret, set)` or `(secret, not set)`, never its value. A setting with no value shows `(not set)` (JSON output keeps `null`). Needs the ADMIN role.
 
 ## `lakana deploy`
 
