@@ -58,7 +58,7 @@ SAVED_QUERY_LIST_DEFAULT = 50
 SAVED_QUERY_LIST_MAX = 200
 """The largest page size of a saved-query list."""
 
-TASK_TOKEN_REFUSED = (
+TASK_TOKEN_REFUSED = (  # nosec B105 -- a refusal sentence, not a credential
     "Saved queries belong to people and service accounts; a task's token cannot read or change "
     "them."
 )
