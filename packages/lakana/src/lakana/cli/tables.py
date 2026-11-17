@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 import lakana
+from lakana._languages import canonical_language
 from lakana._models import (
     CheckHealth,
     Column,
@@ -1437,6 +1438,14 @@ def describe(
             help="The language you write in, such as fr; without it, the table's main language.",
         ),
     ] = None,
+    label_lang: Annotated[
+        str | None,
+        typer.Option(
+            "--label-lang",
+            help="The label's language, when it is not --lang's, such as en; needs --label or "
+            "--reset.",
+        ),
+    ] = None,
     reset: Annotated[
         bool,
         typer.Option(
@@ -1449,7 +1458,8 @@ def describe(
 
     The texts you set are shown instead of the asset header's `description:` and `label:` (or a
     translation file's, with `--lang`), and a deploy never replaces them. `--reset` goes back to
-    the project's texts in that language. You need to own the table, or hold the right to drop it.
+    the project's texts in that language. `--label-lang` sets or resets the label in another
+    language than the description. You need to own the table, or hold the right to drop it.
 
     Parameters
     ----------
@@ -1465,6 +1475,8 @@ def describe(
         The new label.
     lang
         The language edited; the table's main language without it.
+    label_lang
+        The label's language, when it is not `lang`.
     reset
         Remove the edits of the description and the label.
     env
@@ -1473,7 +1485,8 @@ def describe(
     Raises
     ------
     CliError
-        If neither `--text`, `--label` nor `--reset` is given, or `--reset` with a text.
+        If neither `--text`, `--label` nor `--reset` is given, `--reset` with a text, or
+        `--label-lang` without `--label` or `--reset`.
     """
     if (reset and (text is not None or label is not None)) or (
         not reset and text is None and label is None
@@ -1482,13 +1495,22 @@ def describe(
             "Give --text TEXT and/or --label LABEL to set, or --reset to go back to the project's "
             "texts."
         )
+    if label_lang is not None and label is None and not reset:
+        raise CliError(
+            "--label-lang names the language of --label; give --label LABEL or --reset with it."
+        )
     state = state_of(ctx)
     environment = resolve_environment(state, env)
     sent = {"description": text, "label": label}
     fields = sent if reset else {key: value for key, value in sent.items() if value is not None}
-    table = state.client().tables.describe(environment, name, column=column, lang=lang, **fields)
+    table = state.client().tables.describe(
+        environment, name, column=column, lang=lang, label_language=label_lang, **fields
+    )
     target = f"{_output.inline(name)}" + (f" column {_output.inline(column)}" if column else "")
-    where = f"{_output.inline(environment)} ({_output.inline(lang or table.main_language)})"
+    languages = _output.inline(lang or table.main_language)
+    if label_lang is not None:
+        languages += f", the label in {_output.inline(canonical_language(label_lang))}"
+    where = f"{_output.inline(environment)} ({languages})"
     if not reset:
         _output.done(state, f"Described {target} in {where}", table)
         return
