@@ -456,9 +456,9 @@ class PatService:
             If no principal has `principal_name`, or it has no PAT with
             that `key_id`.
         PermissionDenied
-            If the principal is someone else and the acting principal does not hold the
-            `ADMIN` role on the instance (`MANAGE_TOKEN` works only with it); or the call
-            is made with a task or CI token.
+            If the PAT is someone else's and the acting principal lacks the `ADMIN` role on
+            the instance (`MANAGE_TOKEN` works only with it), or the call is made with a task
+            or CI token.
         """
         if not self._own(p, principal_name):
             authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)

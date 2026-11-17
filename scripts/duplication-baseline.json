@@ -1,5 +1,5 @@
 {
-  "duplicated_lines": 1132,
+  "duplicated_lines": 1126,
   "clones": 59,
   "pairs": {
     "lakana/_artifact_manifest.py ↔ lakana_core/artifacts/manifest.py": {
@@ -64,7 +64,7 @@
     },
     "lakana_core/grants/service.py ↔ lakana_core/identity/pats.py": {
       "clones": 1,
-      "lines": 32
+      "lines": 26
     },
     "lakana_core/grants/service.py ↔ lakana_core/policy/column_masks.py": {
       "clones": 1,

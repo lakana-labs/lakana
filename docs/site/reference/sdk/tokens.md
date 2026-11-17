@@ -42,7 +42,7 @@ Returns: `list of Token`. Every PAT for that principal.
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal of this name exists. |
-| `lakana.PermissionDenied` | If the call is refused: anyone may list or revoke their own tokens, and a non-administrator creates their own only in the web interface after the passkey touch (`issue` with a token raises this); administrators manage anyone's. |
+| `lakana.PermissionDenied` | If the call is refused: anyone may list their own tokens, but only an administrator lists those of another principal. |
 
 ### `client.tokens.list_all`
 

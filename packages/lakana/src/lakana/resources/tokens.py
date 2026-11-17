@@ -122,9 +122,8 @@ class Tokens:
         lakana.errors.NotFound
             If no principal of this name exists.
         lakana.errors.PermissionDenied
-            If the call is refused: anyone may list or revoke their own tokens, and a
-            non-administrator creates their own only in the web interface after the passkey
-            touch (`issue` with a token raises this); administrators manage anyone's.
+            If the call is refused: anyone may list their own tokens, but only an
+            administrator lists those of another principal.
         """
         response = self._transport.request(ROUTES["tokens.list"], path_params={"name": principal})
         return [_token_from_json(item) for item in response.json()]

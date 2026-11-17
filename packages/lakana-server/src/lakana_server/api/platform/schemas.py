@@ -2547,9 +2547,9 @@ class HeldGrantOut(BaseModel):
     id
         The grant's id.
     role
-        The role template granted, or `None` if a raw action was granted.
+        The role template the caller holds, or `None` if a raw action was granted.
     action
-        The raw action granted, or `None` if a role was granted.
+        The raw action the caller holds, or `None` if a role was granted.
     kind
         Which tier of the securable hierarchy this grant applies to.
     environment
