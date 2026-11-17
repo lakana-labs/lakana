@@ -1,7 +1,7 @@
 # Stop a query
 
-After this guide you can find your queries, stop one that you started, with Ctrl-C or with a
-command, and you know what else ends a query and what cancelling does not reach. You need the
+After this guide you can find your queries, stop one that you started, with Ctrl-C, with a
+command or in the web interface, and you know what else ends a query and what cancelling does not reach. You need the
 query's id only for the command; Ctrl-C needs nothing.
 
 Every query runs in a process of its own, which the worker starts and can end. A cancel asks the
@@ -151,6 +151,20 @@ print(status.status)  # CANCELLED, RUNNING, or the status a finished query ended
 `QueryRun.wait()` raises `QueryFailed` for a cancelled query, with `cause == "cancelled"`. The SDK
 does not cancel when you interrupt it: `client.sql` leaves the query running unless your code calls
 `cancel()`.
+
+### Cancel in the web interface
+
+On the **Queries** screen, **Run** becomes **Cancel** while the query is queued or running. Press
+**Cancel**, or **Esc** in the editor. When the completion list or a tooltip is open, the first
+**Esc** closes it and the query runs on; the next **Esc** cancels. The button says "Cancelling…"
+until the query has ended, and the line under the editor then says Cancelled, or the result
+appears when the cancel came too late (see the table above). A cancel the server refuses shows its sentence: "The
+query was not cancelled and runs on: … Press Cancel to try again." It is the same cancel as
+`lakana query cancel`, and the same people may send it.
+
+Leaving the screen, closing the tab or opening another query does **not** cancel: the query runs
+on. **Recent**, beside the editor, lists your queries of the last 30 days with their state; one
+opens on its own address, where **Cancel** reaches it again while it runs.
 
 ## What else ends a query
 

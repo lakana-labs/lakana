@@ -35,6 +35,7 @@ export type AreaPages = Partial<Record<AreaId, () => Promise<AreaModule>>>;
 const AREA_PAGES: AreaPages = {
   home: () => import("../home/HomeScreen"),
   catalog: () => import("../catalog/CatalogScreen"),
+  queries: () => import("../queries/QueriesScreen"),
   access: () => import("../access/AccessScreen"),
   settings: () => import("../settings/SettingsScreen"),
 };

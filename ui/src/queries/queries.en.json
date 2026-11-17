@@ -1,0 +1,98 @@
+{
+  "sql": "SQL",
+  "untitled": "Untitled query",
+  "runName": "Query {{id}}",
+  "run": "Run",
+  "runKeys": {
+    "mac": "⌘↵",
+    "other": "Ctrl ↵"
+  },
+  "cancel": "Cancel",
+  "cancelling": "Cancelling…",
+  "format": "Format",
+  "formatUnreadable": "Format could not read this SQL; run it to see the server's reason.",
+  "formatUnloaded": "Format could not load; reload the page.",
+  "loadingEditor": "Loading the editor…",
+  "environment": {
+    "label": "Environment",
+    "trigger": "{{label}}: {{environment}}",
+    "triggerProtected": "{{label}}: {{environment}}, protected",
+    "protected": "protected"
+  },
+  "noEnvironment": "You may not run queries in any environment yet. Ask an administrator for the right to run queries (SUBMIT_QUERY).",
+  "noEnvironmentCli": "Meanwhile, run a query from the command line:",
+  "copy": "Copy command",
+  "state": {
+    "submitting": "Submitting the query…",
+    "starting": "Starting the query…",
+    "reading": "Reading the rows…"
+  },
+  "failed": "The query failed.",
+  "cancelled": "The query was cancelled.",
+  "goTo": "Go to line {{line}}, column {{column}}",
+  "lost": "The state of the query could not be read: {{problem}}",
+  "rowsLost": "The rows of the result could not be read: {{problem}}",
+  "tryAgain": "Try again",
+  "newQuery": "Start a new query",
+  "cancelRefused": "The query was not cancelled and runs on: {{problem}} Press Cancel to try again.",
+  "download": {
+    "csv": "Download CSV",
+    "xlsx": "Download spreadsheet",
+    "tooLarge": "This result is too large to download in the browser ({{size}}). Use the command line:",
+    "copyCsv": "Copy the CSV command",
+    "copyXlsx": "Copy the spreadsheet command",
+    "tooManyRows": "Too many rows for a spreadsheet (more than {{limit}}); download CSV.",
+    "wrongType": "The server sent something other than the file; try again.",
+    "cut": "The download broke off; try again."
+  },
+  "result": {
+    "label": "Result of {{name}}",
+    "summary_one": "{{rows}} row · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
+    "summary_other": "{{rows}} rows · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
+    "rows_one": "{{rows}} row",
+    "rows_other": "{{rows}} rows",
+    "limit": "Showing the first {{shown}} of {{rows}} rows; download the whole result.",
+    "more": "Show 100 more",
+    "empty": "The query returned no rows.",
+    "gone": "This run's result is no longer kept."
+  },
+  "library": {
+    "label": "Saved and recent queries",
+    "fold": "Queries",
+    "filter": "Show",
+    "all": "All environments",
+    "saved": "Saved",
+    "recent": "Recent",
+    "savedRegion": "Saved queries",
+    "recentRegion": "Recent queries",
+    "name": "Name",
+    "when": "When",
+    "state": "State",
+    "noSaved": "No saved queries yet. Save… keeps the query in the editor.",
+    "noRecent": "No queries in the last {{days}} days.",
+    "everyone": "everyone",
+    "by": "by {{owner}}",
+    "formerOwner": "former owner",
+    "seconds": "{{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s"
+  },
+  "save": {
+    "open": "Save…",
+    "title": "Save the query",
+    "name": "Name",
+    "visibility": "Who may run it",
+    "private": "Only me",
+    "everyone": "Everyone who can run queries in {{environment}}",
+    "environment": "It is saved in {{environment}}.",
+    "update": "Save",
+    "create": "Save as new"
+  },
+  "delete": {
+    "open": "Delete…",
+    "title": "Delete the saved query {{name}}?",
+    "text": "The SQL stays in the editor, and its runs stay in Recent.",
+    "confirm": "Delete",
+    "done": "Deleted {{name}}."
+  },
+  "notReadable": "You may not read the SQL of this query.",
+  "notAllowed": "You may not run queries in {{environment}}."
+}

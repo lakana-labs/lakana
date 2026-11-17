@@ -103,6 +103,32 @@ it("ships no string of an artifact's versions in the first load, and importing V
   );
 });
 
+it("ships no string of the result grid in the first load, and importing ResultGrid registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("grid.valueHint")).toBe(false);
+
+  await import("../shell/ResultGrid");
+
+  expect(i18n.t("grid.valueHint")).toBe(
+    "Move to a cell with the arrow keys, or click one, to see its whole value here.",
+  );
+});
+
+it("ships no string of the Queries screen in the first load, and importing it registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("queries.run")).toBe(false);
+
+  await import("../queries/QueriesScreen");
+
+  expect(i18n.t("queries.run")).toBe("Run");
+  expect(i18n.t("queries.result.label", { name: "Daily sales" })).toBe("Result of Daily sales");
+  expect(i18n.t("grid.valueHint")).toBe(
+    "Move to a cell with the arrow keys, or click one, to see its whole value here.",
+  );
+});
+
 it("marks a hidden character in every interpolated value, and leaves other values as they are", () => {
   const i18n = initI18n();
   i18n.addResource(

@@ -1,0 +1,180 @@
+/* The Queries screen: the library of saved and recent queries, and the work column with its
+   toolbar, the editor and the result. Below 640 px the library is not rendered (useFolded), and
+   the work takes the whole width. */
+.queries {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-5);
+}
+
+.queries-library {
+  flex: 0 0 18rem;
+  min-width: 0;
+}
+
+.queries-library-lists {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.queries-library-lists h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+/* The lists fit the library's column; a long name wraps (.list-scroll .row-name) rather than
+   widen the table, and the Catalog's wider minimum (catalog.css) does not reach them. */
+.list-scroll.queries-list-scroll .list {
+  min-width: 0;
+  margin: 0;
+}
+
+/* The library behind Queries ▾ on a narrow screen: as wide as the window allows. */
+.queries-fold {
+  width: min(288px, 100%);
+}
+
+.queries-fold-dialog {
+  padding: var(--space-3);
+}
+
+.queries-saved-facts {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The note after a delete takes the focus; its ring shows where it is. */
+.queries-note {
+  margin: 0;
+}
+
+.queries-note:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* A flex item's minimum width is its content's: without this, a wide result would push the page
+   sideways at 320 px instead of scrolling inside its own region. */
+.queries-work {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* The query's name, the environment and Run; it wraps at 320 px. */
+.queries-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.queries-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.env-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.env-picker .button,
+.env-picker .menu-item {
+  gap: var(--space-1);
+}
+
+/* A protected environment's mark: the colour of danger beside the word, never alone. */
+.env-protected {
+  color: var(--color-bad);
+}
+
+.queries-run-keys {
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+}
+
+/* The editor's host: the browser's own handle makes it taller or shorter. */
+.queries-editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 12rem;
+  overflow: auto;
+  resize: vertical;
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+}
+
+/* The editor's own element fills the host; CodeMirror's root inside it does too (theme.ts). */
+.sql-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.queries-editor-skeleton {
+  padding: var(--space-3);
+  color: var(--color-text-muted);
+}
+
+.queries-run-line,
+.queries-result-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+/* Laid out over the shared .step-error, which gives the alert its look. */
+.queries-alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.queries-alert p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.queries-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* The rows and duration, and the downloads after them; it wraps at 320 px. */
+.queries-result-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.queries-result-more {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}

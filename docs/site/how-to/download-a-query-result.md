@@ -1,7 +1,7 @@
 # Download a query result
 
 After this guide you can save the whole result of a query as a CSV file or a spreadsheet, as a
-Parquet or Arrow file, or from Python, and you know what a spreadsheet cannot hold. You need an
+Parquet or Arrow file, from Python, or in the web interface, and you know what a spreadsheet cannot hold. You need an
 environment where you may run queries (the `ANALYST` role gives that right); see
 [Getting started](../tutorials/getting-started.md).
 
@@ -154,5 +154,35 @@ everyone's queries, and a page that shows someone else's is recorded in the audi
 
 ## In the web interface
 
-Part 4 of the web interface will add a Queries screen that offers the same download of a whole
-result as CSV or a spreadsheet.
+The **Queries** screen downloads the same whole result, through the same server route:
+
+1. Choose the environment under **Environment**, write the query and press **Run** (or **Ctrl
+   Enter**, **⌘ Enter** on a Mac).
+2. When it has succeeded, the line above the result says how many rows it has and how long it
+   ran, such as "3 rows · 2.4 s", and offers **Download CSV** and **Download spreadsheet**.
+3. Press one. The button shows that it waits until the whole file has arrived; then your browser
+   saves it. The file is named after the saved query you opened, or `query-` and the query's id,
+   followed by the day it finished: `Orders-by-status-2026-11-17.xlsx`,
+   `query-7f3c…-2026-11-17.csv`.
+
+The grid shows the first 100 rows, and **Show 100 more** up to 1,000; a download always holds every
+row of the result, never only the rows on the screen.
+
+When the server refuses the file, its sentence shows next to the buttons and nothing is saved, as
+for a spreadsheet over one of the limits above, or a server busy with other files ("try again").
+"The server sent something other than the file; try again." means the answer was not the file (a
+proxy's page, for example), and "The download broke off; try again." that it stopped half way. The
+button can be pressed again at once.
+
+Two results are not offered as a download in the browser:
+
+- **More than 1,048,575 rows**: the spreadsheet button is replaced by "Too many rows for a
+  spreadsheet (more than 1,048,575); download CSV."
+- **Larger than 256 MB**: neither button shows. The screen says "This result is too large to
+  download in the browser (…). Use the command line:" and gives the `lakana query result` command
+  for a CSV and for a spreadsheet, each with its own copy button (**Copy the CSV command**, **Copy
+  the spreadsheet command**).
+
+To download a result of a query you ran earlier, open it under **Recent**, beside the editor (on a
+narrow window, behind **Queries ▾**): it lists the queries you wrote in the last 30 days. A result
+the server no longer keeps says "This run's result is no longer kept."
