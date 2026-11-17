@@ -2,6 +2,7 @@
 
 import io
 import math
+import struct
 import uuid
 import zipfile
 from datetime import UTC, date, datetime
@@ -245,6 +246,15 @@ def test_xlsx_writes_a_float32_as_the_number_its_shortest_text_names() -> None:
     table = pa.table({"f": pa.array([0.1, 2.5, 1.3], pa.float32())})
     assert read_back(table).to_pylist() == [{"f": 0.1}, {"f": 2.5}, {"f": 1.3}]
     assert csv_text(table) == b'"f"\r\n0.1\r\n2.5\r\n1.3\r\n'
+
+
+def test_xlsx_writes_the_largest_float32_as_its_number() -> None:
+    """A short text for the largest float32 rounds past it; the next precision names it."""
+    largest = struct.unpack("f", struct.pack("I", 0x7F7FFFFF))[0]
+    table = pa.table({"f": pa.array([largest, -largest], pa.float32())})
+    read = [row["f"] for row in read_back(table).to_pylist()]
+    assert [struct.unpack("f", struct.pack("f", value))[0] for value in read] == [largest, -largest]
+    assert read == [3.4028235e38, -3.4028235e38], "the number its shortest text names"
 
 
 INFINITY_US = 2**63 - 1

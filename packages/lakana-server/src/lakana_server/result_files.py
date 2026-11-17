@@ -835,7 +835,11 @@ def _float32_text(value: float) -> str:
     """
     for digits in range(1, FLOAT32_DIGITS):
         text = f"{value:.{digits}g}"
-        if struct.unpack("f", struct.pack("f", float(text)))[0] == value:
+        try:
+            read_back = struct.unpack("f", struct.pack("f", float(text)))[0]
+        except OverflowError:  # a short text near the largest float32 rounds past it
+            continue
+        if read_back == value:
             return text
     return f"{value:.{FLOAT32_DIGITS}g}"
 
