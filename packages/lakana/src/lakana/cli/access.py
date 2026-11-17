@@ -142,6 +142,46 @@ def explain(
         typer.echo(_output.safe_text(answer.note))
 
 
+@access_app.command("grants")
+def grants(
+    ctx: typer.Context,
+    principal: Annotated[
+        str | None, typer.Argument(help="Whose grants to list; yours when left out.")
+    ] = None,
+) -> None:
+    """Show the grants PRINCIPAL holds, directly and through groups; yourself when left out.
+
+    One row per live grant, newest first. `group` names the group the grant comes through and
+    is empty for a grant made to the principal itself. You may list your own grants with a
+    personal token; listing someone else's needs the `ADMIN` role on the instance.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    principal
+        The principal; yourself when omitted.
+    """
+    state = state_of(ctx)
+    client = state.client()
+    who = principal if principal is not None else client.whoami().name
+    _output.emit(
+        state,
+        client.principals.grants(who),
+        columns=[
+            "group",
+            "role",
+            "action",
+            "kind",
+            "environment",
+            "namespace",
+            "table",
+            "granted_at",
+        ],
+        derived={"group": lambda held: held.group or ""},
+    )
+
+
 def register(app: typer.Typer) -> None:
     """Add the `access` group to the root app.
 

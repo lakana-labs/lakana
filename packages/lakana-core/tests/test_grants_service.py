@@ -1,26 +1,32 @@
 """Tests for GrantService: CRUD and the admin-lockout guard."""
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from core_test_helpers import _catalog_with
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from lakana_core.audit.authorization import AuditingAuthorization
+from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.auth import (
     Action,
     AllowAllAuthorization,
     PrincipalRef,
     Securable,
     SecurableKind,
+    TaskScope,
 )
-from lakana_core.errors import ConflictError, NotFoundError, ValidationError
+from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
+from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService, assert_admin_headroom
 from lakana_core.identifiers import NamespacePath
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.principals import PrincipalService
-from lakana_core.models import Grant, Principal, PrincipalType
+from lakana_core.models import Grant, Group, GroupMembership, Principal, PrincipalType
 
 
 def _admin() -> PrincipalRef:
@@ -480,3 +486,137 @@ def test_revoke_records_the_namespace_and_subject_role_in_its_audit_event(
     assert event.detail["group_id"] is None
     assert event.detail["role"] == "VIEWER"
     assert event.detail["action"] is None
+
+
+def _held_fixture(session: Session) -> tuple[PrincipalRef, PrincipalRef, uuid.UUID]:
+    """Persist an administrator and bob, with a direct grant and a group grant for bob.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    tuple
+        Bob's reference, the administrator's reference and the `analysts` group's id.
+    """
+    ada = PrincipalRef(id=uuid.uuid4(), name="ada", type=PrincipalType.USER)
+    bob = PrincipalRef(id=uuid.uuid4(), name="bob", type=PrincipalType.USER)
+    group_id = uuid.uuid4()
+    for ref in (ada, bob):
+        session.add(Principal(id=ref.id, type=ref.type, name=ref.name, is_active=True))
+    session.add(Group(id=group_id, name="analysts"))
+    session.flush()
+    session.add(GroupMembership(group_id=group_id, principal_id=bob.id))
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            principal_id=ada.id,
+            role=Role.ADMIN,
+            kind=SecurableKind.INSTANCE,
+            granted_by=ada.id,
+            granted_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            principal_id=bob.id,
+            role=Role.ANALYST,
+            kind=SecurableKind.ENVIRONMENT,
+            environment="dev",
+            granted_by=ada.id,
+            granted_at=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+    )
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            group_id=group_id,
+            role=Role.DATA_SCIENTIST,
+            kind=SecurableKind.NAMESPACE,
+            environment="dev",
+            namespace="sales",
+            granted_by=ada.id,
+            granted_at=datetime(2026, 3, 1, tzinfo=UTC),
+        )
+    )
+    session.commit()
+    return bob, ada, group_id
+
+
+def _auditing(session: Session) -> AuditingAuthorization:
+    """Build the production pairing: grants, wrapped to audit denials.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    AuditingAuthorization
+        The wrapper around `GrantAuthorization`.
+    """
+    return AuditingAuthorization(GrantAuthorization(session), session, DenialAuditLimiter(10_000))
+
+
+def test_held_grants_lists_direct_and_group_grants_with_the_group_name(session: Session) -> None:
+    """Bob's own and his group's grants come newest first, the group's with its name."""
+    bob, _, _ = _held_fixture(session)
+    held = GrantService(session, _auditing(session)).held_grants(bob, "bob")
+    assert [(h.grant.role, h.group) for h in held] == [
+        (Role.DATA_SCIENTIST, "analysts"),
+        (Role.ANALYST, None),
+    ]
+
+
+def test_a_revoked_grant_and_a_left_group_are_not_held(session: Session) -> None:
+    """A revoked grant and a group the person left drop out of the list."""
+    bob, ada, group_id = _held_fixture(session)
+    direct = session.scalars(select(Grant).where(Grant.principal_id == bob.id)).one()
+    direct.revoked_at = datetime(2026, 4, 1, tzinfo=UTC)
+    direct.revoked_by = ada.id
+    session.commit()
+    service = GrantService(session, _auditing(session))
+    assert [h.group for h in service.held_grants(bob, "bob")] == ["analysts"]
+    session.execute(delete(GroupMembership).where(GroupMembership.group_id == group_id))
+    session.commit()
+    assert service.held_grants(bob, "bob") == []
+
+
+def test_someone_elses_grants_are_403_whether_or_not_they_exist(session: Session) -> None:
+    """The refusal comes before any lookup: one text for a real and an unknown principal."""
+    bob, _, _ = _held_fixture(session)
+    service = GrantService(session, _auditing(session))
+    messages = set()
+    for name in ("ada", "nobody"):
+        with pytest.raises(PermissionDenied) as caught:
+            service.held_grants(bob, name)
+        messages.add(str(caught.value))
+    assert len(messages) == 1
+    assert not any(name in text for text in messages for name in ("ada", "nobody"))
+
+
+def test_an_administrator_asks_about_anyone_and_404s_an_unknown_name(session: Session) -> None:
+    """An administrator reads bob's grants; an unknown name is 404 for them."""
+    _, ada, _ = _held_fixture(session)
+    service = GrantService(session, _auditing(session))
+    assert len(service.held_grants(ada, "bob")) == 2
+    with pytest.raises(NotFoundError):
+        service.held_grants(ada, "nobody")
+
+
+def test_a_task_token_may_not_ask_even_about_its_own_principal(session: Session) -> None:
+    """A task or CI token is refused about its own principal too."""
+    bob, _, _ = _held_fixture(session)
+    task = PrincipalRef(
+        id=bob.id,
+        name=bob.name,
+        type=bob.type,
+        task_scope=TaskScope(environment="dev", asset_scope=["gold.*"], token_id=uuid.uuid4()),
+    )
+    service = GrantService(session, _auditing(session))
+    with pytest.raises(PermissionDenied, match="Task tokens"):
+        service.held_grants(task, "bob")

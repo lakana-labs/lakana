@@ -11309,6 +11309,102 @@
         }
       }
     },
+    "/api/v1/principals/{name}/grants": {
+      "get": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "List the grants a principal holds",
+        "description": "The live grants naming the principal and those of every group it belongs to now, newest first, each with the group's name (`null` for a direct grant). A caller may ask about itself with a session or a personal token, with no right at all; about anyone else it needs the `ADMIN` role on the instance, and a task or CI token may not ask even about its own principal. The refusal comes before any lookup, so it never says whether the principal exists; an administrator gets 404 for one that does not. It carries nothing about other people: no `granted_by`, no principal id.",
+        "operationId": "list_held_grants_api_v1_principals__name__grants_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The principal asked about."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HeldGrantOut"
+                  },
+                  "title": "Response List Held Grants Api V1 Principals  Name  Grants Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/groups": {
       "post": {
         "tags": [
@@ -29923,6 +30019,111 @@
         ],
         "title": "HealthSummaryOut",
         "description": "A table's health in one word.\n\nParameters\n----------\nstate\n    ``failing``, ``warning``, ``healthy`` or ``not_judged``.\nitem\n    The word's name.\ntext\n    The word as it is shown.\nothers\n    How many other findings the word leaves out."
+      },
+      "HeldGrantOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Action"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SecurableKind"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Granted At"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "action",
+          "kind",
+          "environment",
+          "namespace",
+          "table",
+          "granted_at"
+        ],
+        "title": "HeldGrantOut",
+        "description": "Response body for a grant the caller holds, directly or through a group.\n\nIt carries nothing about other people: no `granted_by` and no principal id.\n\nParameters\n----------\nid\n    The grant's id.\nrole\n    The role template granted, or `None` if a raw action was granted.\naction\n    The raw action granted, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant of\n    `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`; `None` otherwise.\ngroup\n    The name of the group the grant is held through, or `None` for a direct grant."
       },
       "HistoryOut": {
         "properties": {

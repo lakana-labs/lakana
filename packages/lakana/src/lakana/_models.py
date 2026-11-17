@@ -2236,6 +2236,49 @@ class Permissions:
     note: str | None
 
 
+@dataclass(frozen=True)
+class HeldGrant:
+    """A live grant a principal holds, directly or through a group.
+
+    It names nobody else: not who granted it, not an id of the holder.
+
+    Parameters
+    ----------
+    id
+        The grant's id.
+    role
+        The role granted, or `None` for a single action.
+    action
+        The single action granted, or `None` for a role.
+    kind
+        ``INSTANCE``, ``ENVIRONMENT``, ``NAMESPACE`` or ``TABLE``.
+    environment
+        The environment, below the instance.
+    namespace
+        The dot-joined namespace, for a namespace or a table.
+    table
+        The table, for a table.
+    granted_at
+        When the grant was made.
+    note
+        ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant that works only
+        with the `ADMIN` role; `None` otherwise.
+    group
+        The name of the group the grant is held through, or `None` for a direct grant.
+    """
+
+    id: str
+    role: str | None
+    action: str | None
+    kind: str
+    environment: str | None
+    namespace: str | None
+    table: str | None
+    granted_at: datetime
+    note: str | None
+    group: str | None
+
+
 # jscpd:ignore-end
 
 

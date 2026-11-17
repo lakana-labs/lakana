@@ -1,8 +1,16 @@
 """Tests for the principals resource of the platform API."""
 
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import (
+    create_environment,
+    create_namespace,
+    session_headers,
+    signed_in,
+)
 
 
 def _create(client: TestClient, name: str, kind: str = "USER") -> None:
@@ -162,3 +170,86 @@ def test_a_lone_surrogate_in_a_body_is_a_422_that_does_not_echo_it(client: TestC
     assert refused.status_code == 422, refused.text
     assert [tuple(error["loc"]) for error in refused.json()["detail"]] == [("body", "type")]
     assert "input" not in refused.text
+
+
+_OWN_KEYS = {
+    "id",
+    "role",
+    "action",
+    "kind",
+    "environment",
+    "namespace",
+    "table",
+    "granted_at",
+    "note",
+    "group",
+}
+
+
+def _hold_grants(client: TestClient) -> None:
+    """Make bob, a group of his, a direct grant and a group grant on a dotted namespace.
+
+    Parameters
+    ----------
+    client
+        The client.
+    """
+    _create(client, "bob")
+    create_environment(client, "dev")
+    made = client.post("/api/v1/groups", headers=AUTH_HEADER, json={"name": "analysts"})
+    assert made.status_code == 201, made.text
+    added = client.put("/api/v1/groups/analysts/members/bob", headers=AUTH_HEADER)
+    assert added.status_code == 204, added.text
+    direct = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "bob", "role": "ANALYST", "kind": "ENVIRONMENT", "environment": "dev"},
+    )
+    assert direct.status_code == 201, direct.text
+
+
+def test_get_own_grants_has_no_other_persons_id(client: TestClient) -> None:
+    """The raw items have exactly the documented keys: nobody else's id, no `granted_by`."""
+    _hold_grants(client)
+    bob = _token(client, "bob")
+    response = client.get("/api/v1/principals/bob/grants", headers=bob)
+    assert response.status_code == 200, response.text
+    items = response.json()
+    assert len(items) == 1
+    assert set(items[0]) == _OWN_KEYS
+    assert (items[0]["role"], items[0]["environment"], items[0]["group"]) == (
+        "ANALYST",
+        "dev",
+        None,
+    )
+    for denied in ("/api/v1/principals/admin/grants", "/api/v1/principals/nobody/grants"):
+        refused = client.get(denied, headers=bob)
+        assert refused.status_code == 403, refused.text
+    admin = client.get("/api/v1/principals/bob/grants", headers=AUTH_HEADER)
+    assert admin.status_code == 200
+    assert client.get("/api/v1/principals/nobody/grants", headers=AUTH_HEADER).status_code == 404
+
+
+def test_get_own_grants_from_a_browser_session(browser_client: TestClient) -> None:
+    """A person's session reads their own grants, the dotted namespace included."""
+    _hold_grants(browser_client)
+    create_namespace(browser_client, "dev", "sales.eu")
+    granted = browser_client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "group": "analysts",
+            "role": "DATA_SCIENTIST",
+            "kind": "NAMESPACE",
+            "environment": "dev",
+            "namespace": "sales.eu",
+        },
+    )
+    assert granted.status_code == 201, granted.text
+    name, value, csrf = signed_in(browser_client, "bob", touched_at=datetime.now(UTC))
+    response = browser_client.get(
+        "/api/v1/principals/bob/grants", headers=session_headers(name, value, csrf)
+    )
+    assert response.status_code == 200, response.text
+    items = response.json()
+    assert [(i["group"], i["namespace"]) for i in items] == [("analysts", "sales.eu"), (None, None)]

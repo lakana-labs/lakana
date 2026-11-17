@@ -530,3 +530,75 @@ def test_a_role_and_an_action_share_one_column_that_stays_whole_at_80_columns(
     assert "access" in header and header.split("┃")[3].strip() == "access"
     assert any(_ANALYST_GRANT in line and "MANAGE_GRANT" in line for line in lines), result.stdout
     assert any(_ENGINEER_GRANT in line and "DATA_ENGINEER" in line for line in lines)
+
+
+def _held(grant_id: str, group: str | None, **more: str | None) -> dict[str, object]:
+    """Build a grant as `GET /principals/{name}/grants` answers it.
+
+    Parameters
+    ----------
+    grant_id
+        The grant's id.
+    group
+        The group it is held through, or `None` for a direct grant.
+    **more
+        Fields that replace the defaults.
+
+    Returns
+    -------
+    dict
+        The `HeldGrantOut` body.
+    """
+    return {
+        "id": grant_id,
+        "role": "ANALYST",
+        "action": None,
+        "kind": "ENVIRONMENT",
+        "environment": "dev",
+        "namespace": None,
+        "table": None,
+        "granted_at": "2026-02-01T00:00:00Z",
+        "note": None,
+        "group": group,
+        **more,
+    }
+
+
+def test_access_grants_without_a_name_asks_about_yourself(tmp_path: Path) -> None:
+    """The name comes from `whoami`."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/whoami",
+        json={"name": "bob", "type": "USER", "task_token": None, "ci_token": None},
+    )
+    api.on("GET", "/api/v1/principals/bob/grants", json=[_held(_ANALYST_GRANT, None)])
+
+    result = invoke(make_state(tmp_path, api), "access", "grants")
+
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.path == "/api/v1/principals/bob/grants"
+    assert "ANALYST" in result.stdout
+
+
+def test_access_grants_shows_the_group_column_empty_for_a_direct_grant(tmp_path: Path) -> None:
+    """A name is asked as given; a direct grant has an empty `group` cell."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/principals/alice/grants",
+        json=[
+            _held(_GROUP_GRANT, "analysts", kind="NAMESPACE", namespace="sales.eu"),
+            _held(_ANALYST_GRANT, None),
+        ],
+    )
+
+    result = invoke(make_state(tmp_path, api), "access", "grants", "alice", env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, result.stderr
+    lines = result.stdout.splitlines()
+    header = next(line for line in lines if "group" in line and "role" in line)
+    assert header.split()[1] == "group"
+    assert "analysts" in result.stdout and "sales.eu" in result.stdout
+    direct = next(line for line in lines if "ANALYST" in line and "analysts" not in line)
+    assert [cell.strip() for cell in direct.split("│")[1:3]] == ["", "ANALYST"]

@@ -21,6 +21,7 @@
 "PUT /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4, done: true }
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
 "access explain": { class: ui, part: 7 }
+"access grants": { class: read, part: 7 }
 "access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
 "access plan": { class: git, reason: "pre-commit validation of an access file" }
 "access status": { class: read, part: 7 }
@@ -385,6 +386,7 @@
 "GET /api/v1/principals/{name}":
   { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
 "GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
+"GET /api/v1/principals/{name}/grants": { class: read, part: 7 }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
   {

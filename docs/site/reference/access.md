@@ -19,6 +19,7 @@ instance administrator overrides it ([Changes outside the file](access-file.md#c
 |---|---|---|---|
 | Grants | `lakana grant list` | `GET /api/v1/grants` | the `ADMIN` role on the instance |
 | A principal's permissions | `lakana access explain` | `GET /api/v1/principals/{name}/permissions` | nothing, about yourself; the `ADMIN` role on the instance, about anyone else |
+| The grants a principal holds, directly and through groups | `lakana access grants [NAME]` | `GET /api/v1/principals/{name}/grants` | nothing, about yourself, with a personal token or a browser session; the `ADMIN` role on the instance, about anyone else |
 | Tokens of a principal | `lakana token list [NAME]` | `GET /api/v1/principals/{name}/tokens` | nothing, about yourself, with a personal token or a browser session; the `ADMIN` role on the instance, about anyone else |
 | Every owner's live tokens | `lakana token list --all` | `GET /api/v1/tokens` | the `ADMIN` role on the instance |
 | Principals | `lakana principal list` | `GET /api/v1/principals` | `MANAGE_PRINCIPAL` on the instance |
@@ -103,6 +104,12 @@ What the answer takes into account:
   A task's token never has it.
 - **`MINT_TASK_TOKEN`** is the right to mint a task token for oneself. Minting one for another
   principal needs the `ADMIN` role on the instance too.
+- **`lakana access grants [NAME]`** lists the live grants a principal holds, newest first: those
+  made to it and those of every group it belongs to now, one row each, with the columns `group`,
+  `role`, `action`, `kind`, `environment`, `namespace`, `table` and `granted_at`. `group` is the
+  name of the group the grant comes through, and empty for a grant made to the principal itself;
+  a revoked grant, or one of a group the principal has left, is not listed. Without a name it asks
+  about you. The list says nothing about anyone else: not who made a grant, not an id.
 - **Task tokens** may not ask, not even about their own principal: a task's token can do less
   than its principal, and the answer is about the principal's grants.
 - **An object that does not exist** is `404` for an administrator. A principal asking about
@@ -197,6 +204,7 @@ shown in the interface.
 |---|---|---|
 | Grants | `client.grants.list(...)`; `client.grants.list_page(...)` also returns the cursor; `client.grants.iter(...)` every grant | `GET /api/v1/grants?principal_name=&group_name=&action=&environment=&namespace=&table=&limit=&cursor=` |
 | Permissions | `client.principals.permissions(name, environment=, namespace=, table=)` | `GET /api/v1/principals/{name}/permissions?environment=&namespace=&table=` |
+| Grants a principal holds | `client.principals.grants(name)` | `GET /api/v1/principals/{name}/grants` |
 | Principals | `client.principals.list(search=)`, `list_page`, `iter` | `GET /api/v1/principals?q=&limit=&cursor=` |
 | Groups | `client.groups.list(search=)`, `list_page`, `iter` | `GET /api/v1/groups?q=&limit=&cursor=` |
 | Every owner's live tokens | `client.tokens.list_all(owner=)`, `list_all_page`, `iter_all` | `GET /api/v1/tokens?owner=&limit=&cursor=` |

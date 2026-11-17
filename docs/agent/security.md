@@ -4001,8 +4001,8 @@ carries any of the three, and a grant below instance scope never satisfied these
 - **Tokens of someone else** stay administrator-only: issuing, listing and revoking a personal
   access token for another principal needs `MANAGE_TOKEN` and the `ADMIN` role. One's own tokens
   follow "Settings and Access: tokens, configuration, own grants (M7 parts 7 and 8)".
-- **Call sites.** `test_admin_only_call_sites.py` enumerates the thirteen call sites (four in
-  `grants/service.py`, six in `identity/groups.py`, three in `identity/pats.py`) and fails on
+- **Call sites.** `test_admin_only_call_sites.py` enumerates the fifteen call sites (five in
+  `grants/service.py`, six in `identity/groups.py`, four in `identity/pats.py`) and fails on
   any other module that names one of the three actions. A new call site must go through the
   helper and into that test's `_GUARDED`.
 - **Not covered by the rule** (accepted, see "What is explicitly not defended"): a holder of
@@ -5937,6 +5937,16 @@ fuller text of each part where it already lives.
   secret, the database password and the index URL; none in `response.text`) and the guard
   `test_every_secret_looking_setting_is_masked_or_reviewed` (a new setting whose name looks like a
   credential fails until it is a `SecretStr` or goes in `REVIEWED_NOT_SECRET` with its reason).
+- **One's own grants (`GrantService.held_grants`, `GET /api/v1/principals/{name}/grants`).** The
+  rule of `explain` (R8): asking about oneself (`principal_name == p.name`, no task or CI scope)
+  needs no right at all; anyone else, and a task or CI token even about its own principal, goes
+  through `authorize_admin_only(MANAGE_GRANT)` before any lookup, so the 403 has one text for a
+  principal that exists and one that does not (`test_someone_elses_grants_are_403_whether_or_not_they_exist`);
+  an administrator gets 404 for an unknown name. The rows are the principal's unrevoked grants and
+  those of every group it belongs to now, in one statement. The answer is `HeldGrantOut`, not
+  `GrantOut`: it leaves out `granted_by` and `principal_id`, the ids of other people, so the route
+  tells a person nothing about anyone else (`test_get_own_grants_has_no_other_persons_id` pins the
+  exact keys). The group appears by name only.
 
 ## Governed table creation and append (M4a)
 

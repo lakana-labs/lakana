@@ -371,7 +371,7 @@ def test_the_holder_of_manage_token_cannot_issue_with_a_token_for_itself_or_an_a
 
 
 _GUARDED = {
-    "grants/service.py": ("MANAGE_GRANT", 4),
+    "grants/service.py": ("MANAGE_GRANT", 5),
     "identity/groups.py": ("MANAGE_GROUP", 6),
     "identity/pats.py": ("MANAGE_TOKEN", 4),
     # Listing task tokens is administering tokens; mint and revoke keep `MINT_TASK_TOKEN` rules.
