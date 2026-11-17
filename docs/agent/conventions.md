@@ -335,6 +335,10 @@ build the same as strong copyleft. `scripts/check_licenses.py` runs in `security
 every PR, over an environment with every dependency group **and every extra of every
 workspace package** (`uv run --all-groups --all-extras --all-packages pip-licenses`): a
 dependency only `lakana[assets]` pulls in is judged like any other.
+A Python package whose metadata names no licence (`pip-licenses` reports `UNKNOWN`, or the text is empty, `none` or `n/a`; the same on the npm
+side) fails too, unless it has an entry in `UNKNOWN_PYTHON_LICENCES`, keyed by name and version, that records the licence read from its own
+files and where it was checked (`atheris` 3.1.0: Apache-2.0, the bundled `LICENSE` file). Another version fails until checked
+again, and an entry whose package is no longer unknown or installed fails as stale.
 It matches license metadata case-insensitively against ten copyleft families (short ids match
 as whole tokens, so `Simplified BSD` is not MPL), with
 each family's more specific needle checked before a more general one that would also match
