@@ -57,11 +57,19 @@ describe("TaskRow", () => {
       "href",
       `/jobs/prod/runs/${JOB_RUN_ID}/tasks/gold.sales`,
     );
-    expect(line.getByRole("button", { name: "Show source" })).toBeInTheDocument();
+    // A button among buttons: the Catalog's link-button style is not loaded on the Jobs screen.
+    expect(line.getByRole("button", { name: "Show source" })).toHaveClass("button");
     expect(line.getByRole("link", { name: "Open table" })).toHaveAttribute(
       "href",
       "/catalog/prod/gold/sales",
     );
+  });
+
+  it("breaks a task's name after its dots, not inside a word", () => {
+    const table = renderTask(FAILED);
+
+    const name = within(table).getByRole("link", { name: "gold.sales" });
+    expect(name.querySelectorAll("wbr")).toHaveLength(1);
   });
 
   it("a task that only checks a table has no Show source", () => {

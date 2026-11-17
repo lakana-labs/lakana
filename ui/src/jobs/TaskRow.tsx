@@ -70,7 +70,11 @@ export function TaskControls({
         </Link>
       )}
       {place !== null && task.kind === "asset" && (
-        <SourceButton place={{ environment, ...place }} label={t("jobs.task.showSource")} />
+        <SourceButton
+          place={{ environment, ...place }}
+          label={t("jobs.task.showSource")}
+          className="button"
+        />
       )}
       {place !== null && (
         <Link className="button" to={tablePath(environment, place.namespace, place.name)}>
@@ -109,7 +113,7 @@ export function TaskRow({ environment, run, task }: TaskRowProps): JSX.Element {
         </td>
         <td>
           <Link className="row-name" to={taskPath(environment, run.id, task.asset)}>
-            <VisibleText text={task.asset} />
+            <VisibleText text={task.asset} breakable />
           </Link>
         </td>
         <td className="number">

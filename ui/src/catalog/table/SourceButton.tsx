@@ -205,6 +205,11 @@ export interface SourceButtonProps {
   readonly place: TableRef;
   /** What the button says. */
   readonly label: ReactNode;
+  /**
+   * The button's class: `link-button` (a link in a sentence, as Defined in shows it) by default,
+   * `button` beside other buttons, as a task's controls show it.
+   */
+  readonly className?: "link-button" | "button";
 }
 
 /**
@@ -214,13 +219,18 @@ export interface SourceButtonProps {
  * @param props - The table and the button's label.
  * @param props.place - The table.
  * @param props.label - What the button says.
+ * @param props.className - The button's class.
  * @returns The button and its dialog.
  */
-export function SourceButton({ place, label }: SourceButtonProps): JSX.Element {
+export function SourceButton({
+  place,
+  label,
+  className = "link-button",
+}: SourceButtonProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <DialogTrigger>
-      <Button className="link-button">{label}</Button>
+      <Button className={className}>{label}</Button>
       <ModalOverlay className="palette-overlay" isDismissable>
         <Modal className="float dialog source-dialog">
           <Dialog className="palette-dialog">

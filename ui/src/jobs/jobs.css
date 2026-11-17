@@ -153,6 +153,12 @@
   min-width: 640px;
 }
 
+/* A task's table breaks after a dot or an underscore (`VisibleText` with `breakable`), never
+   inside a word. */
+.list-scroll.jobs-tasks-scroll .row-name {
+  overflow-wrap: normal;
+}
+
 /* A task's second line: why it failed, and the controls beside it. */
 .jobs-task-why td {
   padding-block: var(--space-2) var(--space-3);
