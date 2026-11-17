@@ -4965,6 +4965,21 @@ class FailedRunOut(BaseModel):
     failure: FailureOut | None
 
 
+class RunPageOut(BaseModel):
+    """One page of the runs of every environment the caller may read, newest first.
+
+    Parameters
+    ----------
+    items
+        The runs of the page, without tasks; each names its `environment`.
+    next_cursor
+        Pass back as `cursor` with the same filters for the next page; `null` on the last.
+    """
+
+    items: list[RunOut]
+    next_cursor: str | None
+
+
 class FailedRunsOut(BaseModel):
     """The failed runs list: the rule of Home's failed runs, everywhere the caller may read.
 

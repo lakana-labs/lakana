@@ -4014,3 +4014,27 @@ def test_0082_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0081
         assert "saved_queries" not in sqlalchemy.inspect(engine).get_table_names()
         engine.dispose()
+
+
+def test_0083_on_postgres() -> None:
+    """0083 creates the two run-list indexes; the downgrade drops them."""
+    revision_0082 = "e9f3a6b2d847"
+    revision_0083 = "f6b1d4e8a273"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0082)
+        engine = sqlalchemy.create_engine(url)
+        query = sqlalchemy.text("SELECT indexname FROM pg_indexes WHERE tablename = 'runs'")
+        with engine.connect() as conn:
+            before = {row[0] for row in conn.execute(query)}
+        assert not {"ix_runs_created_at_id", "ix_runs_finished_at"} & before
+        migrate.upgrade(url, revision_0083)
+        assert _alembic_version(engine) == revision_0083
+        with engine.connect() as conn:
+            after = {row[0] for row in conn.execute(query)}
+        assert {"ix_runs_created_at_id", "ix_runs_finished_at"} <= after
+        migrate.downgrade(url, revision_0082)
+        assert _alembic_version(engine) == revision_0082
+        with engine.connect() as conn:
+            assert {row[0] for row in conn.execute(query)} == before
+        engine.dispose()

@@ -1095,3 +1095,56 @@ def test_get_failed_runs_limit_out_of_range_is_422(client: TestClient) -> None:
     for limit in ("0", "201", "x"):
         answer = client.get(_FAILED, headers=AUTH_HEADER, params={"limit": limit})
         assert answer.status_code == 422, (limit, answer.text)
+
+
+_ALL = "/api/v1/runs"
+
+
+def test_get_all_runs_answers_items_and_next_cursor(client: TestClient) -> None:
+    """Runs come newest first with their environment and actions, paged with one cursor."""
+    _deploy(client)
+    ids = []
+    for _ in range(3):
+        started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+        ids.append(started["id"])
+        with Session(client.app.state.engine) as session:
+            run = session.get(Run, uuid.UUID(started["id"]))
+            assert run is not None
+            run.status = RunStatus.SUCCEEDED
+            session.commit()
+    first = client.get(_ALL, headers=AUTH_HEADER, params={"limit": 2})
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert [r["id"] for r in body["items"]] == ids[:0:-1]
+    assert {r["environment"] for r in body["items"]} == {"dev"}
+    assert body["items"][0]["tasks"] == []
+    assert body["items"][0]["actions"] == ["cancel", "resume"]
+    assert body["next_cursor"] is not None
+    rest = client.get(_ALL, headers=AUTH_HEADER, params={"limit": 2, "cursor": body["next_cursor"]})
+    assert rest.status_code == 200, rest.text
+    assert [r["id"] for r in rest.json()["items"]] == [ids[0]]
+    assert rest.json()["next_cursor"] is None
+    per_environment = client.get(_RUNS, headers=AUTH_HEADER, params={"limit": 1})
+    refused = client.get(
+        _ALL,
+        headers=AUTH_HEADER,
+        params={"cursor": per_environment.headers["X-Next-Cursor"]},
+    )
+    assert refused.status_code == 422, refused.text
+    assert client.get(_ALL).status_code == 401
+
+
+def test_get_all_runs_without_any_right_is_an_empty_page(client: TestClient) -> None:
+    """A caller who may read no environment gets an empty page; naming one is 403."""
+    _deploy(client)
+    client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"})
+    nobody = _token_for(client, "nobody")
+    answer = client.get(_ALL, headers=nobody)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {"items": [], "next_cursor": None}
+    assert client.get(_ALL, headers=nobody, params={"environment": "dev"}).status_code == 403
+
+
+def test_get_all_runs_with_an_unknown_environment_is_404(client: TestClient) -> None:
+    answer = client.get(_ALL, headers=AUTH_HEADER, params={"environment": "ghost"})
+    assert answer.status_code == 404, answer.text

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, NamedTuple, cast
@@ -92,7 +92,12 @@ from lakana_core.runs.checks import (
     CheckResultView,
     view_of,
 )
-from lakana_core.runs.failed import FAILED_RUN_LIMIT, FAILED_RUN_WINDOW, failed_runs
+from lakana_core.runs.failed import (
+    FAILED_RUN_LIMIT,
+    FAILED_RUN_WINDOW,
+    failed_runs,
+    run_environments,
+)
 from lakana_core.runs.failures import Failure, attempt_failure, task_failure
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.instance_status import InstanceStatus, replaced_ids, status_from
@@ -2184,6 +2189,171 @@ class RunService:
             `cursor` is not one this server issued for the runs list.
         """
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
+        env = self._environment(environment)
+        page, next_cursor = self._runs_page(
+            "runs",
+            [env.id],
+            repository=repository,
+            status=status,
+            trigger=trigger,
+            job=job,
+            since=since,
+            limit=limit,
+            cursor=cursor,
+        )
+        counts = self._task_counts([run.id for run in page])
+        views = [self._view(run, env, p, with_tasks=False, counts=counts[run.id]) for run in page]
+        return views, next_cursor
+
+    # A public method states its own parameters: these are those of `list_runs_page`, with an
+    # optional `environment`.
+    # jscpd:ignore-start
+    def list_all_runs_page(
+        self,
+        p: PrincipalRef,
+        *,
+        environment: str | None = None,
+        repository: str | None = None,
+        status: Sequence[str] = (),
+        trigger: Sequence[str] = (),
+        job: str | None = None,
+        since: datetime | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[RunView], str | None]:
+        # jscpd:ignore-end
+        """List the runs of every environment the caller may read, one page at a time.
+
+        With `environment`, this is `list_runs_page` of that environment: its rows, its cursor
+        and its refusals. Without it, the environments are the live ones where the caller holds
+        `READ_ENVIRONMENT`, asked in one `permits_each` batch (`run_environments`); one where
+        the caller does not is left out, so the list is never refused. The filters, the order
+        and the page are those of `list_runs_page`, over all those environments together, in
+        one statement; the cursor belongs to the ``all-runs`` list, so a cursor of the
+        per-environment list is refused.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environment
+            Only this environment, with the answers and refusals of `list_runs_page`.
+        repository
+            Narrow to the runs of this repository.
+        status
+            Narrow to these statuses, as `list_runs_page` names them; none means any.
+        trigger
+            Narrow to these triggers, as `list_runs_page` names them; none means any.
+        job
+            Narrow to the runs of this job.
+        since
+            Narrow to runs created at or after this moment, which needs a time zone.
+        limit
+            Page size, at least 1.
+        cursor
+            What the previous page returned as its `next_cursor`, sent with the same filters.
+
+        Returns
+        -------
+        tuple of (list of RunView, str or None)
+            The page, without tasks, and the cursor of the next one, or `None` on the last.
+
+        Raises
+        ------
+        PermissionDenied
+            With `environment` only, without READ_ENVIRONMENT.
+        NotFoundError
+            If `environment` or the repository does not exist.
+        ValidationError
+            If `limit` is below 1, a status or trigger is unknown, `since` has no time zone, or
+            `cursor` is not one this server issued for this list.
+        """
+        if environment is not None:
+            return self.list_runs_page(
+                p,
+                environment,
+                repository=repository,
+                status=status,
+                trigger=trigger,
+                job=job,
+                since=since,
+                limit=limit,
+                cursor=cursor,
+            )
+        names = run_environments(self._session, self._authz, p)
+        page, next_cursor = self._runs_page(
+            "all-runs",
+            list(names),
+            repository=repository,
+            status=status,
+            trigger=trigger,
+            job=job,
+            since=since,
+            limit=limit,
+            cursor=cursor,
+        )
+        envs = {
+            env.id: env
+            for env in self._session.scalars(
+                select(Environment).where(Environment.id.in_({run.environment_id for run in page}))
+            )
+        }
+        counts = self._task_counts([run.id for run in page])
+        views = [
+            self._view(run, envs[run.environment_id], p, with_tasks=False, counts=counts[run.id])
+            for run in page
+        ]
+        return views, next_cursor
+
+    def _runs_page(
+        self,
+        kind: str,
+        environment_ids: Collection[uuid.UUID],
+        *,
+        repository: str | None,
+        status: Sequence[str],
+        trigger: Sequence[str],
+        job: str | None,
+        since: datetime | None,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[Run], str | None]:
+        """Read one page of the runs of some environments, newest first, in one statement.
+
+        Parameters
+        ----------
+        kind
+            The list the cursor belongs to (``runs`` or ``all-runs``).
+        environment_ids
+            The environments listed; the caller has already checked the right on each.
+        repository
+            Only this repository's runs.
+        status
+            Only runs in one of these statuses; none means any.
+        trigger
+            Only runs started by one of these; none means any.
+        job
+            Only runs of this job.
+        since
+            Only runs created at or after this time (timezone-aware).
+        limit
+            Most runs returned.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        tuple of (list of Run, str or None)
+            The page, and the cursor of the next one, or `None` on the last.
+
+        Raises
+        ------
+        NotFoundError
+            If the repository does not exist.
+        ValidationError
+            If `limit` is below 1, a status or trigger is unknown, `since` has no time zone, or
+            `cursor` is not one this server issued for `kind`.
+        """
         if limit < 1:
             raise ValidationError(f"limit must be at least 1, got {limit}.")
         statuses = parse_choices("status", status, RunStatus)
@@ -2193,9 +2363,8 @@ class RunService:
                 "`since` has no time zone. Write it with one, for example 2026-10-18T00:00:00Z "
                 "or 2026-10-18T00:00:00+02:00."
             )
-        position = None if cursor is None else decode_cursor("runs", cursor)
-        env = self._environment(environment)
-        query = select(Run).where(Run.environment_id == env.id)
+        position = None if cursor is None else decode_cursor(kind, cursor)
+        query = select(Run).where(Run.environment_id.in_(environment_ids))
         if repository is not None:
             query = query.where(Run.repository_id == self._repository(repository).id)
         if statuses:
@@ -2221,10 +2390,8 @@ class RunService:
         page = runs[:limit]
         next_cursor = None
         if len(runs) > limit:
-            next_cursor = encode_cursor("runs", page[-1].created_at, page[-1].id)
-        counts = self._task_counts([run.id for run in page])
-        views = [self._view(run, env, p, with_tasks=False, counts=counts[run.id]) for run in page]
-        return views, next_cursor
+            next_cursor = encode_cursor(kind, page[-1].created_at, page[-1].id)
+        return page, next_cursor
 
     def failed_page(
         self, p: PrincipalRef, *, environment: str | None = None, limit: int = 50

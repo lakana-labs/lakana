@@ -32,6 +32,7 @@ from lakana_server.api.platform.schemas import (
     QuerySubmitOut,
     RunCreate,
     RunOut,
+    RunPageOut,
     SchedulerOut,
     TaskAttemptOut,
     TaskHistoryEntryOut,
@@ -680,6 +681,84 @@ def list_workers(
         the memory it last reported.
     """
     return [worker_out(w) for w in service.list_workers(principal)]
+
+
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_runs`, with `environment`.
+# jscpd:ignore-start
+@all_runs_router.get("", response_model=RunPageOut, responses=errors(403, 404))
+def list_all_runs(
+    environment: str | None = Query(default=None, max_length=255),
+    repository: str | None = Query(default=None, max_length=255),
+    status: list[str] = Query(default=[], max_length=16),
+    trigger: list[str] = Query(default=[], max_length=16),
+    job: str | None = Query(default=None, max_length=255),
+    since: datetime | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> RunPageOut:
+    # jscpd:ignore-end
+    """List the runs of every environment you may read.
+
+    Without `environment`, lists the runs of every environment where you hold
+    `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left
+    out, so this is never a 403 or a 404. With `environment`, it answers exactly what
+    `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run
+    names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with
+    the same filters for the next page; a cursor of the list of one environment is refused with
+    422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to
+    200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server
+    did not issue for this list.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    repository
+        Narrow to this repository.
+    status
+        Narrow to these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`); repeat
+        the parameter or write them comma-separated.
+    trigger
+        Narrow to these triggers (`schedule`, `api`, `manual`, `deploy`), given as `status` is.
+    job
+        Narrow to this job.
+    since
+        Narrow to runs created at or after this ISO 8601 time; a time zone is required.
+    limit
+        Page size (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
+
+    Returns
+    -------
+    RunPageOut
+        The runs and the cursor of the next page (`null` on the last).
+    """
+    views, next_cursor = service.list_all_runs_page(
+        principal,
+        environment=environment,
+        repository=repository,
+        status=split_values(status),
+        trigger=split_values(trigger),
+        job=job,
+        since=since,
+        limit=limit,
+        cursor=cursor,
+    )
+    words = run_words(authz, principal, [view.environment for view in views])
+    return RunPageOut(
+        items=[run_out(view, words[view.environment]) for view in views], next_cursor=next_cursor
+    )
 
 
 @all_runs_router.get("/failed", response_model=FailedRunsOut, responses=errors(403, 404))

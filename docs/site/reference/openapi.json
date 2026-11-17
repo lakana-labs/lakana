@@ -19794,6 +19794,221 @@
         }
       }
     },
+    "/api/v1/runs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List the runs of every environment you may read",
+        "description": "Without `environment`, lists the runs of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server did not issue for this list.",
+        "operationId": "list_all_runs_api_v1_runs_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "repository",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            },
+            "description": "Narrow to this repository."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "default": [],
+              "title": "Status"
+            },
+            "description": "Narrow to these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`); repeat the parameter or write them comma-separated."
+          },
+          {
+            "name": "trigger",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "default": [],
+              "title": "Trigger"
+            },
+            "description": "Narrow to these triggers (`schedule`, `api`, `manual`, `deploy`), given as `status` is."
+          },
+          {
+            "name": "job",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job"
+            },
+            "description": "Narrow to this job."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            },
+            "description": "Narrow to runs created at or after this ISO 8601 time; a time zone is required."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runs/failed": {
       "get": {
         "tags": [
@@ -33792,6 +34007,35 @@
         ],
         "title": "RunOut",
         "description": "One run.\n\nParameters\n----------\nid\n    Run id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nproject_version_id\n    The project version it runs.\ncommit_sha\n    Its commit.\nkind\n    ``full``, ``selection`` or ``resume``.\nstatus\n    Run status.\ncancel_requested\n    Whether a cancel was requested.\ntriggered_by\n    Who started it.\nrun_as\n    Who it writes as.\nresumed_from_run_id\n    The run a resume continues.\nselection\n    Patterns and flags.\nerror_message\n    Run-level failure.\ncreated_at\n    Created.\nstarted_at\n    Started.\nfinished_at\n    Finished.\ntasks\n    Task runs (empty in listings).\njob\n    The job the run belongs to; null for an ad-hoc run.\ntrigger\n    ``schedule``, ``api`` (a service account called the API), ``manual`` or ``deploy`` (a\n    deploy started the job as its deployer); null for an ad-hoc run.\nscheduled_for\n    For a scheduled run, the time the schedule named.\nmissed\n    How many earlier scheduled times this run stands in for.\nnotifications\n    The notifications the run queued, oldest first (empty in listings).\nfailed_tasks\n    How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in\n    listings.\ntotal_tasks\n    How many tasks the run has; also in listings.\nended_tasks\n    How many of its tasks ended (``succeeded``, ``failed``, ``upstream_failed`` or\n    ``cancelled``); also in listings, so a list can show a running run's progress.\nactions\n    The words of what the caller's rights allow on it: ``cancel``, ``resume``. Rights\n    only, as for a table's `actions`: offer a control only when the word is listed and the\n    run's state allows it (Cancel for a queued or running run, Resume for a finished one\n    that did not succeed); the server decides every request again."
+      },
+      "RunPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "RunPageOut",
+        "description": "One page of the runs of every environment the caller may read, newest first.\n\nParameters\n----------\nitems\n    The runs of the page, without tasks; each names its `environment`.\nnext_cursor\n    Pass back as `cursor` with the same filters for the next page; `null` on the last."
       },
       "SavedQueryIn": {
         "properties": {

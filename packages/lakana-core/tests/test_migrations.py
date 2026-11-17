@@ -6555,3 +6555,36 @@ def test_0082_creates_saved_queries_with_both_owner_keys_and_the_check(
         assert "saved_queries" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
+
+
+_REVISION_0083 = "f6b1d4e8a273"
+
+
+def test_0083_adds_the_run_list_indexes_and_drops_them_on_downgrade(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0083`: two indexes on `runs`, for the lists of every environment.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0082)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def indexes() -> dict[str | None, list[str | None]]:
+        return {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("runs")}
+
+    try:
+        assert "ix_runs_created_at_id" not in indexes()
+        assert "ix_runs_finished_at" not in indexes()
+        command.upgrade(config, _REVISION_0083)
+        assert indexes()["ix_runs_created_at_id"] == ["created_at", "id"]
+        assert indexes()["ix_runs_finished_at"] == ["finished_at"]
+        command.downgrade(config, _REVISION_0082)
+        assert "ix_runs_created_at_id" not in indexes()
+        assert "ix_runs_finished_at" not in indexes()
+    finally:
+        engine.dispose()
