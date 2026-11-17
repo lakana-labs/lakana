@@ -1,5 +1,6 @@
 """Tests for comparing a page's output blocks with what the examples printed."""
 
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -589,20 +590,33 @@ def test_fix_keeps_the_pages_wrap_where_only_the_wrap_differs(tmp_path: Path) ->
     assert fix(root, root / "docs/site", None, captures) == []
 
 
-def test_a_wrap_inside_a_masked_alert_time_passes(tmp_path: Path) -> None:
-    """A mask with a space in it matches across the line break."""
-    shown = "Fired: schema changed (snapshot 5033228317085625887, 05 Nov 00:33 UTC);\ncheck it\n"
-    printed = "Fired: schema changed (snapshot 5033228317085625887, 05 Nov\n00:33 UTC); check it\n"
-    root, captures = _tree(tmp_path, BLOCK, shown, printed, 62)
-    assert check(root, root / "docs/site", None, captures) == ([], 0)
+FIRED = (
+    "Fired: silver.orders: schema changed: added amount (snapshot {}, 05 Nov 00:33 UTC); "
+    "check that what reads silver.orders still works"
+)
 
 
-def test_a_continuation_that_starts_with_a_word_and_colon_passes(tmp_path: Path) -> None:
-    """A wrap before `changed:` is a wrap, not a new `key: value` line."""
-    text = "Fired: silver.orders: schema" + " x" * 30
-    root, captures = _tree(
-        tmp_path, BLOCK, text + "\nchanged: added\n", text + " changed:\nadded\n", len(text) + 4
-    )
+@pytest.mark.parametrize("width", range(30, 90, 3))
+def test_the_fired_line_passes_wrapped_at_any_width(tmp_path: Path, width: int) -> None:
+    """A wrap inside the alert time, or before `changed:` or `silver.orders:`, is no difference."""
+
+    def wrapped(snapshot: str) -> str:
+        """Wrap the sentence the way a terminal of `width` columns does.
+
+        Parameters
+        ----------
+        snapshot
+            The snapshot id in the sentence.
+
+        Returns
+        -------
+        str
+            The wrapped lines.
+        """
+        lines = textwrap.wrap(FIRED.format(snapshot), width, break_long_words=False)
+        return "\n".join(lines) + "\n"
+
+    root, captures = _tree(tmp_path, BLOCK, wrapped(LONG_ID), wrapped(SHORT_ID), width)
     assert check(root, root / "docs/site", None, captures) == ([], 0)
 
 

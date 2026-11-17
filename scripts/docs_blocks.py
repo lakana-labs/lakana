@@ -777,9 +777,9 @@ def _group(lines: Sequence[str], width: int) -> list[list[int]]:
     A terminal wraps a long line at its width, and the masked parts of a line (a snapshot id,
     a time) differ in length from run to run, so the wrap point moves. Line ``n + 1`` joins
     line ``n`` only if the terminal had to break there (``n`` fits in `width`, but with a space
-    and the first word of ``n + 1`` it would not), ``n + 1`` is not blank, has the indent of ``n`` and does
-    not start a list item, and neither line is a table line. Blank lines, indentation and
-    spacing inside a line still count.
+    and the first word of ``n + 1`` it would not), ``n + 1`` is not blank, has the indent of
+    ``n`` and does not start a list item, and neither line is a table line. Blank lines,
+    indentation and spacing inside a line still count.
 
     Parameters
     ----------
