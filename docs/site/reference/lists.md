@@ -120,7 +120,7 @@ the page shows someone else's events or filters on someone else with `--principa
 | principal | who looked |
 | object | the environment of the query list, the table whose readers were shown, or the instance for the audit log |
 | `detail.view` | `queries`, `table_readers` or `audit_log` |
-| `detail.filters` | the filters of the first look: `include_ended`, `status` and `limit` for queries, `days` for readers, `event_type`, `environment`, `since`, `until` and `limit` for the audit log |
+| `detail.filters` | the filters of the first look: `include_ended` (true when `since` listed the ended runs), `status`, `origin`, `since` (UTC, only when given) and `limit` for queries, `days` for readers, `event_type`, `environment`, `since`, `until` and `limit` for the audit log |
 | `detail.rows_shown` | how many rows the answer showed |
 | `detail.others_shown` | how many of them were other people's (a deleted principal's, and an event of nobody, such as a failed sign-in, included) |
 | `detail.distinct_others` | how many other people those rows belong to |

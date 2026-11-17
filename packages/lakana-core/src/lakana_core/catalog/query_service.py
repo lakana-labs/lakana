@@ -771,9 +771,7 @@ class QueryService:
             visible += _own_runs(p)
         rows, next_cursor, now = self._read_list(filters, visible)
         if manager:
-            self._audit_listing(
-                p, environment, rows, include_ended, filters.statuses, submitter, limit
-            )
+            self._audit_listing(p, environment, rows, filters, submitter)
         return self._list_items(rows, now, p), next_cursor
 
     # A public method states its own parameters: these are those of `list_queries_page`, plus
@@ -881,13 +879,7 @@ class QueryService:
         rows, next_cursor, now = self._read_list(filters, [or_(*shown)])
         for env_id, name in managed.items():
             self._audit_listing(
-                p,
-                name,
-                [row for row in rows if row.environment_id == env_id],
-                include_ended,
-                filters.statuses,
-                submitter,
-                limit,
+                p, name, [row for row in rows if row.environment_id == env_id], filters, submitter
             )
         return self._list_items(rows, now, p), next_cursor
 
@@ -1103,10 +1095,8 @@ class QueryService:
         p: PrincipalRef,
         environment: str,
         rows: Sequence[Any],
-        include_ended: bool,
-        statuses: Sequence[QueryRunStatus],
+        filters: _ListFilters,
         submitter: str | None,
-        limit: int,
     ) -> None:
         """Record a manager's page of the query list that shows or targets someone else.
 
@@ -1122,14 +1112,12 @@ class QueryService:
             The environment listed.
         rows
             The rows of the page, with their `principal_id`.
-        include_ended
-            The `include_ended` filter.
-        statuses
-            The parsed status filter.
+        filters
+            The parsed filters of the page. The detail records what the page shows: the
+            effective `include_ended` (true when `since` widened it), the statuses, the origins,
+            `since` in ISO 8601 UTC (left out when none) and the page size.
         submitter
             The submitter filter; the targeting key unless it names the manager.
-        limit
-            The page size.
 
         Raises
         ------
@@ -1137,6 +1125,14 @@ class QueryService:
             If the row could not be written; the page is not returned.
         """
         others = [row.principal_id for row in rows if row.principal_id != p.id]
+        shown: dict[str, object] = {
+            "include_ended": filters.include_ended,
+            "status": [status.value for status in filters.statuses],
+            "origin": [origin.value for origin in filters.origins],
+        }
+        if filters.since is not None:
+            shown["since"] = filters.since.isoformat()
+        shown["limit"] = filters.limit
         record_view(
             sessions_like(self._session),
             p,
@@ -1144,11 +1140,7 @@ class QueryService:
             Securable.environment_scope(environment),
             None if submitter is None or submitter == p.name else {"submitter": submitter},
             ViewDetail(
-                filters={
-                    "include_ended": include_ended,
-                    "status": [status.value for status in statuses],
-                    "limit": limit,
-                },
+                filters=shown,
                 rows_shown=len(rows),
                 others_shown=len(others),
                 distinct_others=len(set(others)),
