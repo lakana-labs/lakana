@@ -114,8 +114,8 @@ const NAMED_LIMITS = [
   { name: "the menus and number formats", prefix: "format-", limit: "18.19 kB" },
   // Measured 7.03 kB (2026-11-17) + 10 %: React Aria's collection code (tree and list state, the
   // load-more sentinel) that the Catalog, the table page and the result grid share, split off the
-  // menus' chunk (format-, above) once the Connections list joined its importers; never in the
-  // first load.
+  // menus' chunk (format-, above) once the environment picker's Select, which the Connections
+  // list imports, joined its importers; never in the first load.
   { name: "React Aria's collections", prefix: "TreeDropTargetDelegate-", limit: "7.74 kB" },
   // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
   // shares with the screens that show a state.
@@ -410,6 +410,12 @@ export default [
   // chunk of its own (-0.17 kB). What is left is the Queries area's loader with the list of chunks
   // it preloads, the focus kept on Run after its move, and the download's type check in the API
   // client.
+  // Measured 209.74 kB (2026-11-18; 209.84 kB on main in the same build) with the Connections
+  // area's loader and the list of chunks it preloads (+0.17 kB). The environment picker's Select,
+  // which the Connections list imports, uses React Aria's form validation but not its text field,
+  // and split their chunk of the first load in two (+0.39 kB); vite.config.ts's `form` chunk group
+  // keeps them in one (build/chunk-groups.test.ts fails if an update moves one of its files), and
+  // with the small Text chunk it takes in, the first load ends 0.1 kB below main's.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -448,6 +454,10 @@ export default [
   // Measured 9.32 kB (2026-11-17) with the library beside the editor, its lists and the popover
   // of a narrow screen; the list frame's rules moved from the Catalog's stylesheets into
   // screen.css, so they apply wherever the frame is used. The limit holds.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "10.12 kB" },
+  // Raised to the measured 10.57 kB (2026-11-18) + 10 %: the Connections screen's rules (the
+  // list's narrow columns, a status's glyph beside its words, Test all's row, a connection's
+  // page with its facts and fingerprints, the form's single column, the secret's group and the
+  // tcp key rows wrapping at 320 px) on top of Settings' frame (9.85 kB on main).
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.63 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];
