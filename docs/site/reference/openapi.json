@@ -33761,7 +33761,7 @@
           "visibility"
         ],
         "title": "SavedQueryUpdateIn",
-        "description": "The body that replaces a saved query: every field, none left to a default.\n\nParameters\n----------\nname\n    The name, 1 to 200 characters after stripping, on one line of visible characters; unique\n    among the owner's saved queries in the environment. The service checks it after\n    stripping; the bound here only caps what the request carries.\nsql\n    The SQL, stored as sent; not empty, without a NUL character, and at most\n    `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` characters.\nvisibility\n    ``private`` (only you) or ``everyone`` (whoever may query the environment); required,\n    so that leaving it out never makes a shared query private."
+        "description": "The body that replaces a saved query: every field, none left to a default.\n\nParameters\n----------\nvisibility\n    Required here, unlike on create, so that leaving it out never makes a shared query\n    private."
       },
       "ScheduleTriggerOut": {
         "properties": {

@@ -5368,25 +5368,16 @@ class SavedQueryIn(BaseModel):
     visibility: Literal["private", "everyone"] = "private"
 
 
-class SavedQueryUpdateIn(BaseModel):
+class SavedQueryUpdateIn(SavedQueryIn):
     """The body that replaces a saved query: every field, none left to a default.
 
     Parameters
     ----------
-    name
-        The name, 1 to 200 characters after stripping, on one line of visible characters; unique
-        among the owner's saved queries in the environment. The service checks it after
-        stripping; the bound here only caps what the request carries.
-    sql
-        The SQL, stored as sent; not empty, without a NUL character, and at most
-        `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` characters.
     visibility
-        ``private`` (only you) or ``everyone`` (whoever may query the environment); required,
-        so that leaving it out never makes a shared query private.
+        Required here, unlike on create, so that leaving it out never makes a shared query
+        private.
     """
 
-    name: str = Field(max_length=1000)
-    sql: str
     visibility: Literal["private", "everyone"]
 
 
