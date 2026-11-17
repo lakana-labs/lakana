@@ -7109,7 +7109,68 @@ layer fails the run. Fix it at the root, strictest first:
   with the file, the reason and a review date per entry) only when the code it names is not in
   the image or cannot be reached; there is no such entry today.
 
-A failed scheduled run of `security-deep.yml` (and of `canary.yml`, `codeql.yml` and
+A failed scheduled run of `security-deep.yml` (and of `canary.yml`, `codeql.yml`, `fuzz.yml` and
 `scorecard.yml`) opens an issue `Scheduled run failed: <workflow>` labelled `type:security` and
 assigned to the maintainer, or comments on the one still open (`scheduled-failure.yml`,
 `docs/agent/testing.md`). Close it once a scheduled run passes again.
+
+### Fuzzing
+
+ClusterFuzzLite (`.clusterfuzzlite/`, `.github/workflows/fuzz.yml`) runs three Atheris harnesses
+(`fuzz/*_fuzzer.py`), each over one parser that takes untrusted text:
+
+- `query_guard`: `check_blacklist`, then `extract_table_refs` and `extract_lineage`, then
+  `rewrite_query` with a source for every table (a plain read, one with a row filter and a column
+  mask, an empty one), as the query path calls them;
+- `project_files`: an asset file's `/* lakana */` front-matter and `lakana.yaml`;
+- `access_file`: the access file (#46).
+
+What each checks is in `fuzz/targets.py`: the parser accepts the text or refuses it with an
+expected exception, and nothing else. `_fail_closed` turns any exception but its own list into a
+refusal, which would hide a bug, so the harness calls the functions under it. Its refusals are
+narrower than that list (`GUARD_REFUSALS`): `LakanaError`, `ParseError` and `TokenError`; a
+`RecursionError` only when parsing the text alone raises it too (the parser's nesting limit, not a
+walker's), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
+(`scripts/tests/test_fuzz.py`) reads `_fail_closed`'s list from its source and compares it with
+`FAIL_CLOSED_PASSES`, and runs every seed on every pull request. The guard's seeds are the statements of its own tests
+that earlier guard-fuzzing runs collected, one per sequence of token types
+(`fuzz/seeds/*.json`; `fuzz/seed_corpus.py` writes them out).
+
+A pull request from a branch of this repository that changes a module the harnesses load is
+fuzzed for about five minutes by ClusterFuzzLite's `run_fuzzers` (the path filter in `fuzz.yml`;
+the test fails when a module the seeds load is missing from it). Every night `main` is fuzzed for
+an hour, 20 minutes per fuzzer, and each corpus is then pruned to the inputs that add coverage
+(`.clusterfuzzlite/nightly.sh`, which runs ClusterFuzzLite's build with the pinned `base-runner`
+image as `run_fuzzer` does).
+
+**The corpus is kept with `actions/cache`, never with ClusterFuzzLite's filestore.** The nightly
+job restores the newest `fuzz-corpus-*` cache into `cifuzz-corpus/<fuzzer>`, fuzzes from it and
+saves the result under a new key; a pull request's job restores the same cache read-only into the
+directory `run_fuzzers` fuzzes from, and never saves one. A cache written on `main` is readable by
+`main` and by pull requests, and nothing a pull request runs can write into `main`'s scope, so a
+pull request cannot change the corpus `main` fuzzes from. The nightly job saves only after its
+restore hit, or when `main` has no `fuzz-corpus-*` entry yet (one `gh cache list` request, the
+only use of its token and of its `actions: read`): after a miss with an entry there (the cache
+service failed, or the entry was evicted) it warns and keeps the old corpus, since a corpus grown
+from the seeds alone would otherwise become the newest and every later night would start from it.
+No ClusterFuzzLite action gets a token, because the GitHub Actions filestore is unsafe here twice
+over:
+
+- to find a corpus it pages through every artifact of the repository with the job's token, and
+  when it finds none it keeps paging until the rate limit is spent. The repository's other
+  workflows share that limit: one pull-request run made about 5,000 requests in 21 minutes;
+- it takes the newest artifact of the corpus's name from any branch or workflow and unpacks it with
+  `tarfile.extractall`. The fuzzers run where `ACTIONS_RUNTIME_TOKEN` is, so a pull request's
+  harness code could have uploaded one, and the nightly run on `main` would have unpacked it.
+
+Without a token its own corpus lookup fails at once (a 401 in the log, expected) and leaves the
+restored corpus in place. Its `run_fuzzers` deletes the corpus after a batch or pruning run, which
+is why the nightly job does not use it. **A pull request from a fork is not fuzzed**: its harness
+code would still run where `ACTIONS_RUNTIME_TOKEN` is. Its change is fuzzed by the nightly run
+once it is merged. The nightly job runs only on `main`, also when started by hand. **A crash fails the run** and its input is
+uploaded as the artifact `fuzz-crash-pull-request` or `fuzz-crash-nightly`. Reproduce it with
+`uv run --group fuzz python -m fuzz.<name>_fuzzer <crash file>` (Atheris has wheels only for
+CPython 3.12 to 3.14 on x86-64 Linux), then fix the parser, not the harness, and add the input
+to the parser's tests. A failed nightly run opens an issue like the other scheduled security
+workflows. Atheris comes from the builder image in CI and from the `fuzz` dependency group locally;
+nothing else depends on it.

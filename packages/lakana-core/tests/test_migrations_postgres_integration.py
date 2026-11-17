@@ -3732,9 +3732,116 @@ def test_0079_on_postgres() -> None:
 
 
 def test_0080_on_postgres() -> None:
-    """0080 gives old runs their origin by the rule and indexes `(principal_id, finished_at)`."""
+    """0080 revokes the newer copies of identical live grants, with an event each, then refuses one.
+
+    Instance grants only, as they need no environment or table rows: a person's role twice and a
+    group's action twice. The downgrade drops the four indexes.
+    """
     revision_0079 = "c4e8a1f2d937"
-    revision_0080 = "d8e2f5a1c736"
+    revision_0080 = "15081774c52d"
+    tess, eng = uuid.uuid4(), uuid.uuid4()
+    insert = sqlalchemy.text(
+        "INSERT INTO grants (id, principal_id, group_id, role, action, kind, granted_by, "
+        "granted_at) VALUES (:id, :p, :g, :role, :action, 'INSTANCE', :by, :t)"
+    )
+    indexes = sqlalchemy.text(
+        "SELECT indexname FROM pg_indexes WHERE tablename = 'grants' "
+        "AND indexname LIKE 'ux\\_grants\\_live\\_%'"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0079)
+        engine = sqlalchemy.create_engine(url)
+        now = datetime.now(UTC)
+        ids = [uuid.uuid4() for _ in range(4)]
+        with engine.begin() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+                    "VALUES (:id, 'USER', 'tess', true, :t, :t)"
+                ),
+                {"id": tess, "t": now},
+            )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO groups (id, name, created_at, updated_at) "
+                    "VALUES (:id, 'eng', :t, :t)"
+                ),
+                {"id": eng, "t": now},
+            )
+            for n, (grant_id, person, group, role, action) in enumerate(
+                [
+                    (ids[0], tess, None, "VIEWER", None),
+                    (ids[1], tess, None, "VIEWER", None),
+                    (ids[2], None, eng, None, "READ_TABLE"),
+                    (ids[3], None, eng, None, "READ_TABLE"),
+                ]
+            ):
+                conn.execute(
+                    insert,
+                    {
+                        "id": grant_id,
+                        "p": person,
+                        "g": group,
+                        "role": role,
+                        "action": action,
+                        "by": tess,
+                        "t": now + timedelta(seconds=n),
+                    },
+                )
+        migrate.upgrade(url, revision_0080)
+        assert _alembic_version(engine) == revision_0080
+        with engine.connect() as conn:
+            live = set(
+                conn.execute(
+                    sqlalchemy.text("SELECT id FROM grants WHERE revoked_at IS NULL")
+                ).scalars()
+            )
+            events = conn.execute(
+                sqlalchemy.text(
+                    "SELECT principal_id, securable_kind, securable_environment, detail "
+                    "FROM audit_events WHERE event_type = 'GRANT_REVOKED'"
+                )
+            ).all()
+            assert len(conn.execute(indexes).all()) == 4
+        assert live == {ids[0], ids[2]}
+        details = {}
+        for event in events:
+            assert (event.principal_id, event.securable_kind, event.securable_environment) == (
+                None,
+                "INSTANCE",
+                None,
+            )
+            detail = event.detail if isinstance(event.detail, dict) else json.loads(event.detail)
+            details[detail["grant_id"]] = (detail["kept_grant_id"], detail["reason"])
+        assert details == {
+            str(ids[1]): (str(ids[0]), "duplicate"),
+            str(ids[3]): (str(ids[2]), "duplicate"),
+        }
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(
+                insert,
+                {
+                    "id": uuid.uuid4(),
+                    "p": tess,
+                    "g": None,
+                    "role": "VIEWER",
+                    "action": None,
+                    "by": tess,
+                    "t": now,
+                },
+            )
+        migrate.downgrade(url, revision_0079)
+        assert _alembic_version(engine) == revision_0079
+        with engine.connect() as conn:
+            assert conn.execute(indexes).all() == []
+        engine.dispose()
+
+
+def test_0081_on_postgres() -> None:
+    """0081 gives old runs their origin by the rule and indexes `(principal_id, finished_at)`."""
+    revision_0080 = "15081774c52d"
+    revision_0081 = "d8e2f5a1c736"
     insert = sqlalchemy.text(
         "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at, updated_at, "
         "preview_table_id, check_result_id, task_run_id, task_token_id, write_mode) VALUES "
@@ -3753,7 +3860,7 @@ def test_0080_on_postgres() -> None:
     ids = {name: uuid.uuid4() for name in rows}
     with PostgresContainer("postgres:16", driver="pg8000") as pg:
         url = pg.get_connection_url()
-        migrate.upgrade(url, revision_0079)
+        migrate.upgrade(url, revision_0080)
         engine = sqlalchemy.create_engine(url)
         with engine.begin() as conn:
             conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
@@ -3776,8 +3883,8 @@ def test_0080_on_postgres() -> None:
                         ),
                     },
                 )
-        migrate.upgrade(url, revision_0080)
-        assert _alembic_version(engine) == revision_0080
+        migrate.upgrade(url, revision_0081)
+        assert _alembic_version(engine) == revision_0081
         index = sqlalchemy.text(
             "SELECT indexdef FROM pg_indexes WHERE tablename = 'query_runs' "
             "AND indexname = 'ix_query_runs_principal_id_finished_at'"
@@ -3802,8 +3909,8 @@ def test_0080_on_postgres() -> None:
                 ).scalar_one()
                 == "written"
             )
-        migrate.downgrade(url, revision_0079)
-        assert _alembic_version(engine) == revision_0079
+        migrate.downgrade(url, revision_0080)
+        assert _alembic_version(engine) == revision_0080
         with engine.connect() as conn:
             assert conn.execute(index).all() == []
             columns = {c["name"] for c in sqlalchemy.inspect(conn).get_columns("query_runs")}

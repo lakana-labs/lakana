@@ -34,6 +34,12 @@ def extract_lineage(sql: str, dialect: str = "duckdb") -> dict[str, list[dict[st
         source column (for example a `COALESCE`). A computed column with no
         traceable source (a literal, an aggregate with no single source
         column) maps to an empty list.
+
+    Raises
+    ------
+    ValueError
+        If sqlglot's lineage fails with a `ValueError` other than its "Could not find ..."
+        for a column it cannot trace.
     """
     # parse_one's declared return type is the base Expression; .selects is
     # only defined on the Query subtype, which a SELECT statement always
@@ -56,6 +62,17 @@ def extract_lineage(sql: str, dialect: str = "duckdb") -> dict[str, list[dict[st
             # "no traceable source" case this function documents, not a bug,
             # so the column maps to an empty list and the remaining columns
             # are still traced. Verified against sqlglot 30.18.0.
+            result[column_name] = []
+            continue
+        except ValueError as error:
+            # A union whose branches name the column differently (`SELECT a ...
+            # UNION ALL SELECT id ...`, read as `id`) is the same case: sqlglot
+            # looks for `id` in every branch and raises its one plain
+            # `ValueError`, "Could not find id in ...", which failed the whole
+            # query run (found by the query guard's fuzz harness). Any other
+            # `ValueError` is a fault, not an untraceable column.
+            if not str(error).startswith("Could not find "):
+                raise
             result[column_name] = []
             continue
         sources = []

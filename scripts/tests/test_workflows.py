@@ -149,7 +149,11 @@ def test_dependabot_watches_the_docker_image_pins() -> None:
     """The base image and the pinned uv image in the Dockerfile get update pull requests."""
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
     docker = [u for u in config["updates"] if u["package-ecosystem"] == "docker"]
-    assert [u["directory"] for u in docker] == ["/", "/packages/lakana-worker/tests/sshd"]
+    assert [u["directory"] for u in docker] == [
+        "/",
+        "/packages/lakana-worker/tests/sshd",
+        "/.clusterfuzzlite",
+    ]
     # A directory that does not hold a Dockerfile would be watched for nothing.
     for update in docker:
         assert (ROOT / update["directory"].lstrip("/") / "Dockerfile").is_file()
@@ -179,7 +183,8 @@ _BASE_IMAGE = re.compile(r"^FROM (?P<image>[\w./-]+:[\w.-]+)@sha256:[0-9a-f]{64}
 
 
 @pytest.mark.parametrize(
-    "dockerfile", ["Dockerfile", "packages/lakana-worker/tests/sshd/Dockerfile"]
+    "dockerfile",
+    ["Dockerfile", "packages/lakana-worker/tests/sshd/Dockerfile", ".clusterfuzzlite/Dockerfile"],
 )
 def test_every_base_image_is_pinned_by_tag_and_digest(dockerfile: str) -> None:
     """A tag moves; a digest does not. Dependabot's docker ecosystem bumps both together."""
@@ -2926,7 +2931,7 @@ def test_the_required_docs_examples_check_collects_every_shard_and_compares_the_
 # The scheduled workflows whose failure nobody would see otherwise: a red scheduled run notifies
 # only the last person to edit its cron, and the weekly image scan failed silently for three
 # weeks (19 Oct to 8 Nov 2026). `scheduled-failure.yml` turns each failure into an issue.
-_REPORTED = ("canary.yml", "codeql.yml", "scorecard.yml", "security-deep.yml")
+_REPORTED = ("canary.yml", "codeql.yml", "fuzz.yml", "scorecard.yml", "security-deep.yml")
 _NOT_REPORTED = {"mutation.yml": "test quality, not security: its score is read by hand"}
 
 

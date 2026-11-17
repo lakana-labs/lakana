@@ -41,6 +41,10 @@ _REVISION_0010 = "a3f7c2e9b4d1"
 MigratedDb = Callable[[str], Path]
 
 
+# Alembic cannot compare SQLite's expression indexes; the 0080 test compares their SQL instead.
+@pytest.mark.filterwarnings(
+    "ignore:autogenerate skipping metadata-specified expression-based index 'ux_grants_live_"
+)
 def test_upgraded_schema_matches_the_orm_models(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1587,7 +1591,7 @@ def test_0021_adds_cancel_requested_and_its_downgrade_turns_cancelled_runs_into_
         values = ":id, :env, 'SELECT 1', :status, :now, :now"
         if cancel:
             names, values = names + ", cancel_requested", values + ", 1"
-        if "origin" in columns():  # from revision 0080 on, a run names where it came from
+        if "origin" in columns():  # from revision 0081 on, a run names where it came from
             names, values = names + ", origin", values + ", 'written'"
         connection.execute(
             sa.text(f"INSERT INTO query_runs ({names}) VALUES ({values})"),
@@ -6046,7 +6050,317 @@ def test_0079_indexes_the_artifact_rows_other_rows_point_at_and_downgrade_drops_
     assert present() == {}
 
 
-_REVISION_0080 = "d8e2f5a1c736"
+_REVISION_0080 = "15081774c52d"
+
+
+def _live_grant_index_sql(engine: Engine) -> dict[str, str]:
+    """Read the SQL of the unique indexes of live grants that exist.
+
+    Parameters
+    ----------
+    engine
+        The SQLite database.
+
+    Returns
+    -------
+    dict
+        Index name → its `CREATE` statement, spaces collapsed.
+    """
+    with engine.connect() as connection:
+        rows = connection.execute(
+            sa.text(
+                "SELECT name, sql FROM sqlite_master WHERE type = 'index' "
+                "AND name LIKE 'ux_grants_live_%'"
+            )
+        ).all()
+    return {name: " ".join(sql.split()) for name, sql in rows}
+
+
+def test_0080_keeps_the_oldest_of_identical_live_grants_and_adds_the_unique_indexes(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0080`: one live grant of each identical set stays, and no more can come (#673).
+
+    For each kind (an instance role, an environment role held by a person and by a group, a
+    namespace role, a table action) the oldest live copy stays and the others are revoked, each
+    with a `GRANT_REVOKED` event that names the kept one and the copy's own target. Grants that
+    differ in the target, a revoked copy, and two copies whose environment row is gone are left
+    alone (no environment or table rows are written: this connection does not enforce foreign
+    keys). The indexes are the ones the models declare; the downgrade drops them and the revoked
+    copies stay revoked.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0079)
+    config = Config(str(ALEMBIC_INI))
+    tess, eng, dev, prod, orders, customers = (uuid.uuid4().hex for _ in range(6))
+    gold, silver = "gold", "silver"
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def grant(
+        granted_at: str,
+        *,
+        group: bool = False,
+        kind: str = "ENVIRONMENT",
+        role: str | None = "ANALYST",
+        action: str | None = None,
+        environment_id: str | None = dev,
+        namespace: str | None = None,
+        table_id: str | None = None,
+        revoked_at: str | None = None,
+    ) -> str:
+        """Insert a grant for `tess`, or for `eng`.
+
+        Parameters
+        ----------
+        granted_at
+            When it was made.
+        group
+            Whether it is `eng`'s.
+        kind
+            Its kind.
+        role
+            Its role, or `None`.
+        action
+            Its action, or `None`.
+        environment_id
+            The environment's id, or `None` (on the instance, or when its row is gone).
+        namespace
+            Its namespace, or `None`.
+        table_id
+            The table's id, or `None`.
+        revoked_at
+            When it was revoked, or `None`.
+
+        Returns
+        -------
+        str
+            Its id.
+        """
+        grant_id = uuid.uuid4().hex
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO grants (id, principal_id, group_id, role, action, kind, "
+                    'environment, namespace, "table", environment_id, table_id, granted_by, '
+                    "granted_at, revoked_at) VALUES (:id, :p, :g, :role, :action, :kind, :env, "
+                    ":ns, :table, :env_id, :table_id, :by, :t, :revoked)"
+                ),
+                {
+                    "id": grant_id,
+                    "p": None if group else tess,
+                    "g": eng if group else None,
+                    "role": role,
+                    "action": action,
+                    "kind": kind,
+                    "env": None if kind == "INSTANCE" else "dev",
+                    "ns": namespace,
+                    "table": "orders" if kind == "TABLE" else None,
+                    "env_id": None if kind == "INSTANCE" else environment_id,
+                    "table_id": table_id,
+                    "by": tess,
+                    "t": granted_at,
+                    "revoked": revoked_at,
+                },
+            )
+        return grant_id
+
+    try:
+        with engine.begin() as connection:
+            now = _utc_text()
+            connection.execute(
+                sa.text(
+                    "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+                    "VALUES (:id, 'USER', 'tess', 1, :t, :t)"
+                ),
+                {"id": tess, "t": now},
+            )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO groups (id, name, created_at, updated_at) "
+                    "VALUES (:id, 'eng', :t, :t)"
+                ),
+                {"id": eng, "t": now},
+            )
+        second = grant("2026-01-02 00:00:00")
+        oldest = grant("2026-01-01 00:00:00")
+        third = grant("2026-01-03 00:00:00")
+        revoked = grant("2025-12-01 00:00:00", revoked_at="2025-12-02 00:00:00")
+        other_env = grant("2026-01-04 00:00:00", environment_id=prod)
+        gone = [grant("2026-01-06 00:00:00", environment_id=None) for _ in range(2)]
+        by_group = grant("2026-01-05 00:00:00", group=True)
+        by_group_again = grant("2026-01-07 00:00:00", group=True)
+        on_instance = grant("2026-01-01 00:00:00", kind="INSTANCE", role="VIEWER")
+        on_instance_again = grant("2026-01-02 00:00:00", kind="INSTANCE", role="VIEWER")
+        on_gold = grant("2026-01-01 00:00:00", kind="NAMESPACE", namespace=gold)
+        on_gold_again = grant("2026-01-02 00:00:00", kind="NAMESPACE", namespace=gold)
+        on_silver = grant("2026-01-03 00:00:00", kind="NAMESPACE", namespace=silver)
+        on_orders, on_orders_again, on_customers = (
+            grant(
+                at,
+                kind="TABLE",
+                role=None,
+                action="READ_TABLE",
+                namespace=gold,
+                table_id=table_id,
+            )
+            for at, table_id in (
+                ("2026-01-01 00:00:00", orders),
+                ("2026-01-02 00:00:00", orders),
+                ("2026-01-03 00:00:00", customers),
+            )
+        )
+
+        command.upgrade(config, _REVISION_0080)
+
+        with engine.connect() as connection:
+            live = set(
+                connection.execute(
+                    sa.text("SELECT id FROM grants WHERE revoked_at IS NULL")
+                ).scalars()
+            )
+            events = connection.execute(
+                sa.text(
+                    "SELECT principal_id, securable_kind, securable_environment, "
+                    "securable_namespace, securable_table, detail "
+                    "FROM audit_events WHERE event_type = 'GRANT_REVOKED'"
+                )
+            ).all()
+        assert live == {
+            oldest,
+            other_env,
+            *gone,
+            by_group,
+            on_instance,
+            on_gold,
+            on_silver,
+            on_orders,
+            on_customers,
+        }
+        assert revoked not in live
+
+        def hyphenated(hex_id: str) -> str:
+            """Write an id as the events do.
+
+            Parameters
+            ----------
+            hex_id
+                The id as stored on SQLite.
+
+            Returns
+            -------
+            str
+                The hyphenated form.
+            """
+            return str(uuid.UUID(hex_id))
+
+        person, group_ = hyphenated(tess), hyphenated(eng)
+        seen = {
+            json.loads(e.detail)["grant_id"]: (
+                e.principal_id,
+                e.securable_kind,
+                e.securable_environment,
+                e.securable_namespace,
+                e.securable_table,
+                {k: v for k, v in json.loads(e.detail).items() if k != "grant_id"},
+            )
+            for e in events
+        }
+
+        def revoked_as(
+            kept: str,
+            kind: str,
+            namespace: str | None,
+            table_name: str | None,
+            role: str | None,
+            action: str | None,
+            *,
+            group: bool = False,
+        ) -> tuple[object, ...]:
+            """Say what the event of a revoked copy holds.
+
+            Parameters
+            ----------
+            kept
+                The kept grant.
+            kind
+                Its kind.
+            namespace
+                Its namespace.
+            table_name
+                Its table.
+            role
+                Its role.
+            action
+                Its action.
+            group
+                Whether it is `eng`'s.
+
+            Returns
+            -------
+            tuple
+                As `seen` holds it.
+            """
+            return (
+                None,
+                kind,
+                None if kind == "INSTANCE" else "dev",
+                namespace,
+                table_name,
+                {
+                    "principal_id": None if group else person,
+                    "group_id": group_ if group else None,
+                    "role": role,
+                    "action": action,
+                    "reason": "duplicate",
+                    "kept_grant_id": hyphenated(kept),
+                },
+            )
+
+        assert seen == {
+            hyphenated(second): revoked_as(oldest, "ENVIRONMENT", None, None, "ANALYST", None),
+            hyphenated(third): revoked_as(oldest, "ENVIRONMENT", None, None, "ANALYST", None),
+            hyphenated(by_group_again): revoked_as(
+                by_group, "ENVIRONMENT", None, None, "ANALYST", None, group=True
+            ),
+            hyphenated(on_instance_again): revoked_as(
+                on_instance, "INSTANCE", None, None, "VIEWER", None
+            ),
+            hyphenated(on_gold_again): revoked_as(
+                on_gold, "NAMESPACE", gold, None, "ANALYST", None
+            ),
+            hyphenated(on_orders_again): revoked_as(
+                on_orders, "TABLE", gold, "orders", None, "READ_TABLE"
+            ),
+        }
+
+        with pytest.raises(IntegrityError):
+            grant("2026-02-01 00:00:00")
+
+        declared = create_engine("sqlite://")
+        try:
+            Base.metadata.create_all(declared)
+            assert _live_grant_index_sql(engine) == _live_grant_index_sql(declared)
+            assert len(_live_grant_index_sql(declared)) == 4
+        finally:
+            declared.dispose()
+
+        command.downgrade(config, _REVISION_0079)
+        assert _live_grant_index_sql(engine) == {}
+        with engine.connect() as connection:
+            assert {second, third}.isdisjoint(
+                connection.execute(
+                    sa.text("SELECT id FROM grants WHERE revoked_at IS NULL")
+                ).scalars()
+            )
+    finally:
+        engine.dispose()
+
+
+_REVISION_0081 = "d8e2f5a1c736"
 _RUN_ORIGIN_COLUMNS = ("origin", "result_rows", "result_bytes", "error_line", "error_column")
 _OLD_RUN_ORIGINS: tuple[tuple[str, str, str], ...] = (
     # (name, extra columns, expected origin); one row per line of the rule, in its order
@@ -6060,8 +6374,8 @@ _OLD_RUN_ORIGINS: tuple[tuple[str, str, str], ...] = (
 )
 
 
-def test_0080_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -> None:
-    """Revision `0080`: an old run's origin follows the rule; the new columns stay empty.
+def test_0081_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -> None:
+    """Revision `0081`: an old run's origin follows the rule; the new columns stay empty.
 
     Seven runs, one per line of the rule, are given their origin, in the rule's order; the
     size and position columns are nullable and `NULL`; the downgrade drops the five columns and
@@ -6072,7 +6386,7 @@ def test_0080_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -
     migrated_db
         Copies the file migrated to the revision the test starts from.
     """
-    db_path = migrated_db(_REVISION_0079)
+    db_path = migrated_db(_REVISION_0080)
     config = Config(str(ALEMBIC_INI))
     engine = create_engine(f"sqlite:///{db_path}")
     ids = {name: uuid.uuid4().hex for name, _, _ in _OLD_RUN_ORIGINS}
@@ -6108,7 +6422,7 @@ def test_0080_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -
                     ),
                     {"id": ids[name], "env": uuid.uuid4().hex, "now": _utc_text()},
                 )
-        command.upgrade(config, _REVISION_0080)
+        command.upgrade(config, _REVISION_0081)
         columns = {c["name"]: c for c in inspect(engine).get_columns("query_runs")}
         assert columns["origin"]["nullable"] is False
         assert "written" in str(columns["origin"]["default"])
@@ -6145,7 +6459,7 @@ def test_0080_gives_old_runs_their_origin_by_the_rule(migrated_db: MigratedDb) -
                 ).scalar_one()
                 == 1
             )
-        command.downgrade(config, _REVISION_0079)
+        command.downgrade(config, _REVISION_0080)
         assert not set(_RUN_ORIGIN_COLUMNS) & column_names()
         assert "ix_query_runs_principal_id_finished_at" not in index_names()
     finally:

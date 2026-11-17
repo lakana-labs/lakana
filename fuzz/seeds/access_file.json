@@ -1,0 +1,7 @@
+[
+ "ci_trust:\n  - issuer: github\n    repository: analytics\n    as: service:etl-bot\n    on: prod\n    conditions:\n      repository_id: \"123456789\"\n      ref: refs/heads/main\n",
+ "groups:\n  finance:\n    members: [alice]\ngrants:\n  - to: group:finance\n    role: ANALYST\n    on: dev\npolicies:\n  - kind: column_mask\n    table: dev.gold.customers\n    column: email\n    expression: \"'***'\"\n    to: group:finance\n",
+ "version: 1\nmanages: [instance]\n",
+ "version: 1\nmanages: [instance]\n\ngroups:\n  finance:\n    members: [alice, bob]\n  engineers:\n    members: [carol]\n\nservice_accounts:\n  - etl-bot\n\ngrants:\n  - {to: group:engineers, role: ADMIN, on: instance}\n  - {to: group:finance, role: ANALYST, on: prod}\n  - {to: group:finance, role: VIEWER, on: prod.gold.sales}\n  - {to: service:etl-bot, role: DATA_ENGINEER, on: prod}\n  - {to: user:alice, action: READ_TABLE, table: prod.gold.sales.orders}\n\npolicies:\n  - kind: row_filter\n    table: prod.gold.sales.orders\n    expression: \"region = 'EU'\"\n    to: group:finance\n  - kind: column_mask\n    table: prod.gold.sales.orders\n    column: email\n    expression: \"'***'\"\n    to: group:finance\n\nci_trust:\n  - issuer: github\n    repository: analytics\n    as: service:etl-bot\n    on: prod\n    conditions:\n      repository_id: \"123456789\"\n      ref: refs/heads/main\n",
+ "version: 1\nmanages: [prod, staging]\ngrants:\n  - {to: group:finance, role: ANALYST, on: prod}\n  - {to: user:bob, action: READ_TABLE, table: staging.gold.sales.orders}\n"
+]
