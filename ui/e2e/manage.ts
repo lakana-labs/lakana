@@ -78,7 +78,7 @@ const ORPHANS = {
     },
     {
       repository: "analytics",
-      table: "silver.gone",
+      table: "gold.sales.fact_returns",
       kind: "TABLE",
       exists: false,
       actions: ["drop"],

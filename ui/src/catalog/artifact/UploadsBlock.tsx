@@ -29,14 +29,16 @@ import "./artifactStrings";
 const NONE: CursorPage<ArtifactUploadOut> = { items: [], nextCursor: null };
 
 /**
- * Reads a page of the reader's open uploads of one artifact. A 403 reads as no upload: the page
- * is about the artifact, not about uploads, so a reader who may not list them sees nothing.
+ * Reads a page of the reader's open uploads of one artifact. A 403 on the first page reads as no
+ * upload: the page is about the artifact, not about uploads, so a reader who may not list them
+ * sees nothing. A 403 on a later page is thrown like any refusal: the list says why and keeps
+ * Show more, instead of ending as if it were complete.
  *
  * @param environment - The environment.
  * @param artifact - The artifact, as `namespace.name`.
  * @param cursor - The cursor of the page, or null for the first.
  * @returns The page.
- * @throws {ApiError} for any other refusal.
+ * @throws {ApiError} for any other refusal, and for a 403 on a later page.
  */
 async function readUploads(
   environment: string,
@@ -46,7 +48,7 @@ async function readUploads(
   try {
     return await listUploads(environment, artifact, cursor);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 403) {
+    if (cursor === null && error instanceof ApiError && error.status === 403) {
       return NONE;
     }
     throw error;

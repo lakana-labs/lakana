@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BROWSER_DOWNLOAD_LIMIT, type ArtifactFileOut, type TableRef } from "../../api";
-import { api } from "../../api/client";
+import { api, DownloadCut, DownloadTooLong } from "../../api/client";
 import { artifactRoutes, version, WEIGHTS } from "../../test/artifacts";
 import { fakeServer } from "../../test/server";
 import { saveBlob } from "./saveFile";
@@ -181,9 +181,12 @@ describe("VersionFiles", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("says the file did not arrive whole when the connection breaks in the middle", async () => {
+  it.each([
+    ["the connection breaks in the middle", new DownloadCut()],
+    ["the body is longer than the manifest", new DownloadTooLong()],
+  ])("says the file did not arrive whole when %s", async (_, error) => {
     fakeServer(artifactRoutes());
-    vi.spyOn(Response.prototype, "blob").mockRejectedValue(new TypeError("network error"));
+    vi.spyOn(api, "download").mockRejectedValue(error);
     const { user } = renderFiles();
 
     await user.click(await screen.findByRole("button", { name: "Download models/model.pkl" }));

@@ -209,7 +209,9 @@ for (const theme of ["light", "dark"] as const) {
         const dialog = page.getByRole("dialog", { name: /^Deleted? version 2 of ml\.model\??$/ });
         await expect(dialog).toBeVisible();
         // The dialog takes the focus as it opens; an Escape before that reaches the page behind it.
-        await expect(dialog.getByRole("button", { name: "Delete the version" })).toBeEnabled();
+        await expect
+          .poll(() => dialog.evaluate((node) => node.contains(document.activeElement)))
+          .toBe(true);
         await page.keyboard.press("Escape");
         await expect(dialog).toBeHidden();
         await expect(deleteButton).toBeFocused();
@@ -385,6 +387,29 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+test.describe("an artifact's facts at desktop widths", () => {
+  for (const width of [1280, 1440]) {
+    test(`each fact, Current version too, is one line at ${String(width)} px`, async ({ page }) => {
+      await stubArtifacts(page);
+      await page.setViewportSize({ width, height: 900 });
+      await openArtifact(page);
+      const facts = page.locator(".facts .fact");
+      await expect(facts.filter({ hasText: "Current version" })).toBeVisible();
+      const heights = await facts.evaluateAll((rows) =>
+        rows.map((row) => {
+          const term = row.querySelector("dt");
+          return [term?.textContent ?? "", term?.getBoundingClientRect().height ?? 0] as const;
+        }),
+      );
+      const owner = heights[0]?.[1] ?? 0;
+      for (const [term, height] of heights) {
+        // The owner's line holds a 24 px picture; every other term is one line of text.
+        expect(height, term).toBeLessThanOrEqual(owner);
+      }
+    });
+  }
+});
 
 test.describe("Delete a version with the passkey in real Chromium", () => {
   test.skip(({ browserName }) => browserName !== "chromium", "the virtual authenticator is CDP");

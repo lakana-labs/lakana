@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX, MouseEvent } from "react";
+import type { JSX } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -13,7 +13,7 @@ import { TABLE_SORTS } from "../api";
 import type { TableListItemOut, TableSort } from "../api";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { markedText, VisibleText } from "../shell/VisibleText";
-import { kindWord, OwnerName, RowCount, Unknown, When } from "./cells";
+import { kindWord, openFromCell, OwnerName, RowCount, Unknown, When } from "./cells";
 import { formatBytes } from "./format";
 import { HealthWord } from "./HealthWord";
 import { MatchLine, showsMatch } from "./MatchLine";
@@ -23,27 +23,6 @@ import type { CatalogView } from "./view";
 // Created sorts the list but is not a column.
 const COLUMNS = TABLE_SORTS.filter((sort) => sort !== "created");
 const NUMBERS: readonly TableSort[] = ["rows", "size"];
-
-/**
- * Hands a plain primary click on a row's cell to the row's link, so the cells that carry hover
- * text open the table page like the rest of the row. A click on the link or a button, one with
- * a modifier key, a middle click and the end of a text selection are left alone.
- *
- * @param event - The click on the row.
- */
-function openFromCell(event: MouseEvent<HTMLTableRowElement>): void {
-  const plain =
-    event.button === 0 && !(event.ctrlKey || event.metaKey || event.shiftKey || event.altKey);
-  const selecting = window.getSelection()?.isCollapsed === false;
-  if (
-    plain &&
-    !selecting &&
-    !event.defaultPrevented &&
-    !(event.target as Element).closest("a, button")
-  ) {
-    event.currentTarget.querySelector<HTMLAnchorElement>("a.row-name")?.click();
-  }
-}
 
 /** Properties of {@link TableList}. */
 export interface TableListProps {
