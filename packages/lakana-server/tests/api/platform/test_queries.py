@@ -1864,6 +1864,26 @@ def test_csv_result_streams_with_disposition_and_size_headers(client: TestClient
     assert response.content == b'"name","n"\r\n"a,b",1\r\n"\xc3\xa9",2\r\n,3\r\n'
 
 
+def test_a_csv_larger_than_one_piece_downloads_whole_through_the_route(
+    client: TestClient,
+) -> None:
+    """A body of several `FILE_PIECE_BYTES` pieces arrives whole and in order."""
+    from lakana_server.result_files import FILE_PIECE_BYTES, csv_pieces
+
+    _environment(client)
+    rows = 100_000
+    table = pa.table(
+        {"i": pa.array(range(rows), pa.int64()), "s": [f"value {n:08d}" for n in range(rows)]}
+    )
+    expected = b"".join(csv_pieces(table))
+    assert len(expected) > 2 * FILE_PIECE_BYTES
+    qid = _sized(client, table)
+    response = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert response.headers["x-result-rows"] == str(rows)
+    assert response.content == expected
+
+
 def test_xlsx_result_is_a_zip_with_the_spreadsheet_media_type(client: TestClient) -> None:
     _environment(client)
     qid = _sized(client)

@@ -343,13 +343,50 @@ def test_xlsx_refuses_more_rows_than_a_sheet_holds(monkeypatch: pytest.MonkeyPat
     assert xlsx_bytes(pa.table({"i": list(range(3))})).startswith(b"PK\x03\x04")
 
 
-def test_xlsx_refuses_more_columns_than_a_sheet_holds(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(result_files, "XLSX_MAX_COLUMNS", 2)
-    with pytest.raises(XlsxRefused) as refused:
-        xlsx_bytes(pa.table({"a": [1], "b": [1], "c": [1]}))
-    assert str(refused.value) == (
-        "This result has 3 columns; a spreadsheet holds at most 2. " + instead()
+def test_xlsx_writes_every_row_in_order_across_the_10000_row_batches() -> None:
+    rows = 2 * result_files.CSV_BATCH_ROWS + 5_000
+    table = pa.table(
+        {"i": pa.array(range(rows), pa.int64()), "s": [f"row {n}" for n in range(rows)]}
     )
+    back = read_back(table)
+    assert back.num_rows == rows
+    assert back.column("i").to_pylist() == list(range(rows))
+    assert back.column("s").to_pylist() == [f"row {n}" for n in range(rows)]
+
+
+def test_xlsx_refuses_one_row_more_than_a_sheet_holds_without_writing_it() -> None:
+    """The real limit, unpatched: the refusal is decided before a row is written."""
+    rows = result_files.XLSX_MAX_ROWS + 1
+    target = io.BytesIO()
+    with pytest.raises(XlsxRefused) as refused:
+        write_xlsx(
+            pa.table({"i": pa.nulls(rows, pa.int8())}), target, query_id=QID, environment="dev"
+        )
+    assert str(refused.value) == (
+        "This result has 1,048,576 rows; a spreadsheet holds at most 1,048,575 below its "
+        "header row. " + instead()
+    )
+    assert target.getvalue() == b""
+
+
+def test_xlsx_refuses_one_column_more_than_a_sheet_holds_and_writes_the_widest_it_holds() -> None:
+    """The real limit, unpatched: 16,385 columns are refused, 16,384 are written."""
+    one = pa.array([1], pa.int8())
+    wide = pa.Table.from_arrays(
+        [one] * (result_files.XLSX_MAX_COLUMNS + 1),
+        names=[f"c{n}" for n in range(result_files.XLSX_MAX_COLUMNS + 1)],
+    )
+    target = io.BytesIO()
+    with pytest.raises(XlsxRefused) as refused:
+        write_xlsx(wide, target, query_id=QID, environment="dev")
+    assert str(refused.value) == (
+        "This result has 16,385 columns; a spreadsheet holds at most 16,384. " + instead()
+    )
+    assert target.getvalue() == b""
+    widest = read_back(wide.drop_columns(["c16384"]))
+    assert widest.num_columns == result_files.XLSX_MAX_COLUMNS
+    assert widest.column_names[-1] == "c16383"
+    assert widest.to_pylist() == [dict.fromkeys(widest.column_names, 1)]
 
 
 def test_xlsx_refuses_a_value_longer_than_a_cell() -> None:
