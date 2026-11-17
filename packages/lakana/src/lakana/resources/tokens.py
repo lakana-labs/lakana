@@ -60,7 +60,8 @@ class Tokens:
         principal
             The principal the PAT authenticates as.
         name
-            A human label for this PAT (e.g. `"laptop"`, `"CI"`).
+            A human label for this PAT (e.g. `"laptop"`, `"CI"`); no control or format
+            character, no line separator and no space at either end.
 
         Returns
         -------

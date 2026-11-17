@@ -274,10 +274,11 @@ def hidden_character(name: str) -> tuple[int, str] | None:
 def refuse_hidden_characters(name: str, *, what: str) -> None:
     """Refuse a new name that holds an invisible or line-breaking character.
 
-    Only the places that create a namespace, table, view or column name call this (through
-    `check_new_name` for namespaces and tables, and the column checks of
-    `catalog.metadata` and `CatalogService.create_or_replace_view`). Names stored by an older
-    release are never judged: they are loaded, matched and renamed away as before.
+    Only the places that create a name call this: a namespace, table, view or column name
+    (through `check_new_name` for namespaces and tables, and the column checks of
+    `catalog.metadata` and `CatalogService.create_or_replace_view`), an artifact name, and a new
+    repository, package index, group, secret or token name. Names stored by an older release
+    are never judged: they are loaded, matched, renamed away and deleted as before.
 
     Parameters
     ----------

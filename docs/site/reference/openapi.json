@@ -28611,7 +28611,7 @@
           "name"
         ],
         "title": "GroupCreate",
-        "description": "Request body for creating a group.\n\nParameters\n----------\nname\n    Unique group name."
+        "description": "Request body for creating a group.\n\nParameters\n----------\nname\n    Unique group name; no control or format character, no line separator and no space\n    at either end."
       },
       "GroupOut": {
         "properties": {
@@ -30665,7 +30665,7 @@
           "url"
         ],
         "title": "PackageIndexCreate",
-        "description": "Request body for registering a package index.\n\nParameters\n----------\nname\n    Unique name; no dots.\nurl\n    ``https://host/path`` of the index, without a user name or password.\ncredential_secret\n    Name of the secret that holds ``username`` and ``password``, per environment."
+        "description": "Request body for registering a package index.\n\nParameters\n----------\nname\n    Unique name; no dots, no control or format character, no line separator and no\n    space at either end.\nurl\n    ``https://host/path`` of the index, without a user name or password.\ncredential_secret\n    Name of the secret that holds ``username`` and ``password``, per environment."
       },
       "PackageIndexOut": {
         "properties": {
@@ -31994,7 +31994,7 @@
           "url"
         ],
         "title": "RepositoryCreate",
-        "description": "Request body for registering a repository.\n\nParameters\n----------\nname\n    Unique name; no dots.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    ``https://…``, ``ssh://…``, ``[user@]host:path``, or an absolute path.\ncredential_secret\n    Secret name resolved in the target environment at deploy time.\ncredential_username\n    HTTPS username; default ``oauth2``.\nssh_known_hosts\n    ``known_hosts`` lines; required for ``ssh``.\ndefault_ref\n    Ref deployed when none is given."
+        "description": "Request body for registering a repository.\n\nParameters\n----------\nname\n    Unique name; no dots, no control or format character, no line separator and no\n    space at either end.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    ``https://…``, ``ssh://…``, ``[user@]host:path``, or an absolute path.\ncredential_secret\n    Secret name resolved in the target environment at deploy time.\ncredential_username\n    HTTPS username; default ``oauth2``.\nssh_known_hosts\n    ``known_hosts`` lines; required for ``ssh``.\ndefault_ref\n    Ref deployed when none is given."
       },
       "RepositoryDeployKeyOut": {
         "properties": {
@@ -36072,7 +36072,7 @@
           "name"
         ],
         "title": "TokenIssueIn",
-        "description": "Request body for issuing a PAT.\n\nParameters\n----------\nname\n    A human label for this PAT (e.g. \"laptop\", \"CI\")."
+        "description": "Request body for issuing a PAT.\n\nParameters\n----------\nname\n    A human label for this PAT (e.g. \"laptop\", \"CI\"); no control or format character,\n    no line separator and no space at either end."
       },
       "TokenIssueOut": {
         "properties": {
