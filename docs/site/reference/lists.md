@@ -112,17 +112,19 @@ query list shows someone else's query, or filters on someone else with `--submit
 one `ACTIVITY_VIEWED` event (a page of `--all-environments` one for each environment you manage
 where the page shows someone else's query or `--submitter` names someone else), and so does seeing
 the readers of a table
-([table health](table-health.md#audit)) and reading the audit log itself (`lakana audit list`) when
-the page shows someone else's events or filters on someone else with `--principal-id`:
+([table health](table-health.md#audit)), reading the audit log itself (`lakana audit list`) when
+the page shows someone else's events or filters on someone else with `--principal-id`, and an
+administrator's read of someone else's private saved query (`lakana query saved list` or `show`;
+[Save and share a query](../how-to/save-and-share-a-query.md)), one event per environment shown:
 
 | Field | Value |
 |---|---|
 | principal | who looked |
-| object | the environment of the query list, the table whose readers were shown, or the instance for the audit log |
-| `detail.view` | `queries`, `table_readers` or `audit_log` |
-| `detail.filters` | the filters of the first look: `include_ended` (true when `since` listed the ended runs), `status`, `origin`, `since` (UTC, only when given) and `limit` for queries, `days` for readers, `event_type`, `environment`, `since`, `until` and `limit` for the audit log |
+| object | the environment of the query list or of the saved queries, the table whose readers were shown, or the instance for the audit log |
+| `detail.view` | `queries`, `table_readers`, `audit_log` or `saved_queries` |
+| `detail.filters` | the filters of the first look: `include_ended` (true when `since` listed the ended runs), `status`, `origin`, `since` (UTC, only when given) and `limit` for queries, `days` for readers, `event_type`, `environment`, `since`, `until` and `limit` for the audit log, `limit` for a list of saved queries (none for one saved query) |
 | `detail.rows_shown` | how many rows the answer showed |
-| `detail.others_shown` | how many of them were other people's (a deleted principal's, and an event of nobody, such as a failed sign-in, included) |
+| `detail.others_shown` | how many of them were other people's (a deleted principal's, and an event of nobody, such as a failed sign-in, included); for saved queries, other people's private ones |
 | `detail.distinct_others` | how many other people those rows belong to |
 | `detail.targeting_key` | `{"submitter": "NAME"}` when the query list was filtered on someone else, `{"principal_id": "ID"}` when the audit log was, else `null` |
 

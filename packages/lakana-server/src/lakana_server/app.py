@@ -62,6 +62,10 @@ from lakana_server.api.platform.repository_probes import router as repository_pr
 from lakana_server.api.platform.row_filters import router as row_filters_router
 from lakana_server.api.platform.runs import router as runs_router
 from lakana_server.api.platform.runs import scheduler_router
+from lakana_server.api.platform.saved_queries import (
+    environment_router as saved_queries_environment_router,
+)
+from lakana_server.api.platform.saved_queries import router as saved_queries_router
 from lakana_server.api.platform.search import router as search_router
 from lakana_server.api.platform.secrets import router as secrets_router
 from lakana_server.api.platform.sessions import router as sessions_router
@@ -108,6 +112,8 @@ ROUTERS = (
     namespaces_router,
     queries_router,
     queries_all_router,
+    saved_queries_environment_router,
+    saved_queries_router,
     tables_router,
     dropped_tables_router,
     environment_dropped_tables_router,

@@ -6,6 +6,12 @@
 # done: true (ui and read only) = the interface already shows it; set by the PR that builds it.
 # Rule: docs/agent/conventions.md, "The ui/ project".
 
+"DELETE /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4 }
+"GET /api/v1/environments/{env}/saved-queries": { class: ui, part: 4 }
+"GET /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4 }
+"GET /api/v1/saved-queries": { class: ui, part: 4 }
+"POST /api/v1/environments/{env}/saved-queries": { class: ui, part: 4 }
+"PUT /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4 }
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
 "access explain": { class: ui, part: 7 }
 "access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
@@ -120,6 +126,11 @@
 "query cancel": { class: ui, part: 4 }
 "query list": { class: ui, part: 4 }
 "query result": { class: ui, part: 4 }
+"query saved create": { class: ui, part: 4 }
+"query saved delete": { class: ui, part: 4 }
+"query saved list": { class: ui, part: 4 }
+"query saved show": { class: ui, part: 4 }
+"query saved update": { class: ui, part: 4 }
 "query status": { class: ui, part: 4 }
 "query submit": { class: ui, part: 4 }
 "query wait": { class: ui, part: 4 }
