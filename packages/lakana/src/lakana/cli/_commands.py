@@ -160,7 +160,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "connection show": ("connections.get",),
     "connection update": ("connections.get", "connections.update"),
     "connection delete": ("connections.delete",),
-    "connection test": ("connections.test",),
+    "connection test": ("connections.test", "connections.queue_tests", "connections.test_all"),
     "term list": ("terms.list", "terms.iter"),
     "term get": ("terms.get",),
     "graph lineage": ("graph.lineage",),

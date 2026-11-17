@@ -4096,6 +4096,40 @@ class ConnectionTestOut(BaseModel):
     finished_at: datetime | None
 
 
+class ConnectionQueuedTestOut(BaseModel):
+    """What Test all did for one connection.
+
+    Parameters
+    ----------
+    connection
+        The connection's name.
+    test_id
+        The test's id; read it with `GET .../connections/{connection}/tests/{test_id}`.
+    queued
+        `true` when this request queued the test; `false` when the connection already had an
+        open test under 10 minutes old, which is the one returned.
+    """
+
+    connection: str
+    test_id: uuid.UUID
+    queued: bool
+
+
+class ConnectionQueuedTestPage(BaseModel):
+    """One page of Test all: a test for each connection of a page of the environment's list.
+
+    Parameters
+    ----------
+    items
+        One entry per connection, newest connection first.
+    next_cursor
+        Pass back as `?cursor=` to test the next page; `null` on the last page.
+    """
+
+    items: list[ConnectionQueuedTestOut]
+    next_cursor: str | None
+
+
 class RepositoryProbeIn(BaseModel):
     """Request body that queues a repository check; a worker runs it.
 

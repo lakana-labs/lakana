@@ -33,10 +33,11 @@ from lakana_core.models import (
 )
 from tests.api.platform.test_artifacts_delete import _task_headers
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import create_environment
+from tests.server_test_helpers import create_environment, session_headers, signed_in
 
 _BASE = "/api/v1/environments/prod/connections"
 _ALL = "/api/v1/connections"
+_TEST_ALL = "/api/v1/environments/prod/connection-tests"
 _VALUE = "s3cr3t-value"
 _PG = {
     "name": "crm-db",
@@ -1098,3 +1099,72 @@ def test_a_task_token_may_not_list_all_connections_or_their_environments(
             assert response.json()["detail"] == (
                 "a task token cannot list or show connections; read them with your own token"
             )
+
+
+def test_post_connection_tests_is_202_with_items_and_next_cursor(client_as: ClientAs) -> None:
+    """Test all: a page of the list, newest first; an open test comes back with `queued: false`."""
+    engineer = client_as("data_engineer")
+    _directories(client_as("admin"), "prod", ["p-1", "p-2", "p-3"])
+    single = engineer.post(f"{_BASE}/p-3/tests").json()
+
+    first = engineer.post(_TEST_ALL, params={"limit": 2})
+    second = engineer.post(_TEST_ALL, params={"cursor": first.json()["next_cursor"]})
+
+    assert (first.status_code, second.status_code) == (202, 202), first.text
+    assert set(first.json()) == {"items", "next_cursor"}
+    items = first.json()["items"]
+    assert [set(item) for item in items] == [{"connection", "test_id", "queued"}] * 2
+    assert [(item["connection"], item["queued"]) for item in items] == [
+        ("p-3", False),
+        ("p-2", True),
+    ]
+    assert items[0]["test_id"] == single["id"]
+    assert [(item["connection"], item["queued"]) for item in second.json()["items"]] == [
+        ("p-1", True)
+    ]
+    assert second.json()["next_cursor"] is None
+    shown = engineer.get(f"{_BASE}/p-2/tests/{items[1]['test_id']}")
+    assert shown.status_code == 200 and shown.json()["state"] == "queued"
+    assert engineer.post(_TEST_ALL, params={"limit": 0}).status_code == 422
+    assert engineer.post(_TEST_ALL, params={"limit": 201}).status_code == 422
+    for who in ("analyst", "viewer", "other"):
+        assert client_as(who).post(_TEST_ALL).status_code == 403, who
+
+
+def test_post_connection_tests_needs_no_passkey_touch(ui_client: TestClient) -> None:
+    """A browser session touched 16 minutes ago tests them all, as it tests one."""
+    create_environment(ui_client, "prod")
+    _directories(_As(ui_client, AUTH_HEADER), "prod", ["p-1"])
+    stale = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=16)
+    name, value, csrf = signed_in(ui_client, "admin", touched_at=stale)
+    headers = session_headers(name, value, csrf)
+
+    single = ui_client.post(f"{_BASE}/p-1/tests", headers=headers)
+    every = ui_client.post(_TEST_ALL, headers=headers)
+
+    assert (single.status_code, every.status_code) == (202, 202), every.text
+    assert every.json()["items"] == [
+        {"connection": "p-1", "test_id": single.json()["id"], "queued": False}
+    ]
+
+
+def test_post_connection_tests_of_an_unknown_environment_is_404(client_as: ClientAs) -> None:
+    answer = client_as("admin").post("/api/v1/environments/nowhere/connection-tests")
+
+    assert answer.status_code == 404
+    assert answer.json()["detail"] == "No environment named 'nowhere'."
+
+
+def test_post_connection_tests_with_a_cursor_of_the_cross_environment_list_is_422(
+    client_as: ClientAs,
+) -> None:
+    """Test all pages by the environment's list; the cross-environment list's cursor is not it."""
+    admin = client_as("admin")
+    _directories(admin, "prod", ["p-1", "p-2"])
+    across = admin.get(_ALL, params={"limit": 1}).json()["next_cursor"]
+    assert across is not None
+
+    answer = admin.post(_TEST_ALL, params={"cursor": across})
+
+    assert answer.status_code == 422, answer.text
+    assert admin.get(_BASE).json()["items"][0]["last_test"] is None

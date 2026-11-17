@@ -11,7 +11,13 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
-from lakana._models import Connection, ConnectionEnvironment, DeclaringAsset, LastConnectionTest
+from lakana._models import (
+    Connection,
+    ConnectionEnvironment,
+    DeclaringAsset,
+    LastConnectionTest,
+    QueuedConnectionTest,
+)
 from lakana.errors import InvalidResponse, NotFound
 from lakana.resources.connections import Connections
 from lakana.resources.task_connections import TaskConnections
@@ -536,3 +542,186 @@ def test_an_older_server_without_the_routes_says_to_upgrade() -> None:
         resource.environments()
     with pytest.raises(NotFound, match="No environment named 'nowhere'"):
         resource.list_all(environment="nowhere")
+
+
+_TEST_ALL_PATH = "/api/v1/environments/prod/connection-tests"
+
+
+def _queued(connection: str, test_id: str, *, queued: bool = True) -> dict[str, Any]:
+    """Build one item of a `ConnectionQueuedTestPage` body.
+
+    Parameters
+    ----------
+    connection
+        The connection's name.
+    test_id
+        The test's id.
+    queued
+        Whether the request queued it.
+
+    Returns
+    -------
+    dict
+        The item.
+    """
+    return {"connection": connection, "test_id": test_id, "queued": queued}
+
+
+def test_queue_tests_sends_limit_and_cursor() -> None:
+    sent: list[httpx.Request] = []
+    answer = {
+        "items": [_queued("crm-db", "t-1"), {**_queued("files", "t-2", queued=False), "new": 1}],
+        "next_cursor": "n1",
+    }
+    resource = _connections(answer, sent)
+
+    page = resource.queue_tests("prod", limit=2, cursor="c0")
+    resource.queue_tests("prod")
+
+    assert page.items == [
+        QueuedConnectionTest(connection="crm-db", test_id="t-1", queued=True),
+        QueuedConnectionTest(connection="files", test_id="t-2", queued=False),
+    ]
+    assert page.next_cursor == "n1"
+    assert [(r.method, r.url.path) for r in sent] == [("POST", _TEST_ALL_PATH)] * 2
+    assert [dict(r.url.params) for r in sent] == [{"limit": "2", "cursor": "c0"}, {}]
+    for odd in (b"[]", b'{"items": [{"connection": "a"}], "next_cursor": null}'):
+        with pytest.raises(InvalidResponse):
+            _connections(odd, []).queue_tests("prod")
+
+
+def _test_all_api(
+    monkeypatch: pytest.MonkeyPatch,
+    pages: dict[str | None, dict[str, Any]],
+    reads: dict[str, list[dict[str, Any]]],
+    sent: list[httpx.Request],
+) -> tuple[Connections, _Clock]:
+    """Build the resource over a fake Test all: pages of queued tests, then each test's reads.
+
+    Parameters
+    ----------
+    monkeypatch
+        Replaces the clock.
+    pages
+        The POST answer for each cursor.
+    reads
+        Each connection's GET answers in turn; the last repeats.
+    sent
+        Receives every request.
+
+    Returns
+    -------
+    tuple
+        The resource and its clock.
+    """
+    clock = _Clock()
+    monkeypatch.setattr("lakana.resources.connections.time.sleep", clock.sleep)
+    monkeypatch.setattr("lakana.resources.connections.time.monotonic", clock.monotonic)
+    left = {name: list(answers) for name, answers in reads.items()}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if request.method == "POST":
+            return httpx.Response(202, json=pages[request.url.params.get("cursor")])
+        name = request.url.path.split("/")[6]
+        answers = left[name]
+        return httpx.Response(200, json=answers.pop(0) if len(answers) > 1 else answers[0])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    return Connections(HttpTransport(_CONFIG, http_client=client)), clock
+
+
+def _read(state: str, test_id: str, outcome: str | None = None) -> dict[str, Any]:
+    """Build a `ConnectionTestOut` body of a given id.
+
+    Parameters
+    ----------
+    state
+        ``queued``, ``running`` or ``done``.
+    test_id
+        The test's id.
+    outcome
+        The outcome once done.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    return {**_test_body(state, outcome, outcome and f"{outcome}!"), "id": test_id}
+
+
+def test_test_all_walks_the_pages_and_waits_for_each(monkeypatch: pytest.MonkeyPatch) -> None:
+    pages: dict[str | None, dict[str, Any]] = {
+        None: {"items": [_queued("a", "t-a")], "next_cursor": "c1"},
+        "c1": {"items": [_queued("b", "t-b", queued=False)], "next_cursor": None},
+    }
+    reads = {
+        "a": [_read("queued", "t-a"), _read("running", "t-a"), _read("done", "t-a", "ok")],
+        "b": [_read("done", "t-b", "refused")],
+    }
+    sent: list[httpx.Request] = []
+    connections, clock = _test_all_api(monkeypatch, pages, reads, sent)
+
+    found = connections.test_all("prod")
+
+    assert {name: (t.id, t.state, t.outcome) for name, t in found.items()} == {
+        "a": ("t-a", "done", "ok"),
+        "b": ("t-b", "done", "refused"),
+    }
+    assert [(r.method, r.url.path) for r in sent] == [
+        ("POST", _TEST_ALL_PATH),
+        ("POST", _TEST_ALL_PATH),
+        ("GET", "/api/v1/environments/prod/connections/a/tests/t-a"),
+        ("GET", "/api/v1/environments/prod/connections/b/tests/t-b"),
+        ("GET", "/api/v1/environments/prod/connections/a/tests/t-a"),
+        ("GET", "/api/v1/environments/prod/connections/a/tests/t-a"),
+    ]
+    assert [dict(r.url.params) for r in sent[:2]] == [{}, {"cursor": "c1"}]
+    assert clock.sleeps == [0.5, 1.0]
+
+    sent.clear()
+    reads["a"] = [_read("queued", "t-a")]
+    connections, clock = _test_all_api(monkeypatch, pages, reads, sent)
+    once = connections.test_all("prod", wait=False)
+    assert {name: t.state for name, t in once.items()} == {"a": "queued", "b": "done"}
+    assert [r.method for r in sent] == ["POST", "POST", "GET", "GET"]
+    assert clock.sleeps == []
+
+
+def test_test_all_times_out_naming_the_open_ones(monkeypatch: pytest.MonkeyPatch) -> None:
+    pages: dict[str | None, dict[str, Any]] = {
+        None: {
+            "items": [_queued("c", "t-c"), _queued("b", "t-b"), _queued("a", "t-a")],
+            "next_cursor": None,
+        }
+    }
+    reads = {
+        "a": [_read("queued", "t-a")],
+        "b": [_read("running", "t-b")],
+        "c": [_read("done", "t-c", "ok")],
+    }
+    connections, _ = _test_all_api(monkeypatch, pages, reads, [])
+
+    with pytest.raises(TimeoutError) as raised:
+        connections.test_all("prod", timeout=10.0)
+
+    assert str(raised.value) == (
+        "2 connection tests are not done after 10s: `a` is still queued (look again with "
+        "lakana connection test a --env prod --id t-a), `b` is still running (look again with "
+        "lakana connection test b --env prod --id t-b). No worker has taken a queued test: "
+        "check that a worker of either runner is running (`docker compose ps worker`, or the "
+        "`lakana local` terminal). A worker took a running test: read the worker's log "
+        "(`docker compose logs worker`, or the `lakana local` terminal)."
+    )
+
+    one, _ = _test_all_api(
+        monkeypatch,
+        {None: {"items": [_queued("a", "t-a")], "next_cursor": None}},
+        {"a": [_read("queued", "t-a")]},
+        [],
+    )
+    with pytest.raises(TimeoutError) as alone:
+        one.test_all("prod", timeout=60.0)
+    assert str(alone.value).startswith("the test of `a` is still queued after 60s: no worker")
+    assert str(alone.value).endswith("lakana connection test a --env prod --id t-a")

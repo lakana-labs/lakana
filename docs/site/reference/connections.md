@@ -183,9 +183,20 @@ log to read (`docker compose logs launcher`). A connection with a secret needs t
 key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). The command waits
 up to 120 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
 runs at a time; asking again meanwhile is refused (409), naming the open test and the command
-that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running
-after 10 minutes is stuck: the next request finishes it as `failed` ("no worker finished this
-test within 10 minutes; …", naming the worker's log to read) and queues a new one.
+that shows it (`lakana connection test NAME --env ENV --id ID`). Test all (below) never answers
+409. A test still queued or running after 10 minutes is stuck: the next request finishes it as
+`failed` ("no worker finished this test within 10 minutes; …", naming the worker's log to read)
+and queues a new one.
+
+`lakana connection test --all --env prod` tests every connection of the environment at once
+(`MANAGE_CONNECTION`, as for one). It queues a test of each, waits up to 120 seconds for all of
+them, prints one line per connection, sorted by name (`crm-db: refused: <message>`), with each
+outcome's next step on standard error, and exits 1 unless every outcome is `ok`. A connection
+whose test is already queued or running, and under 10 minutes old, is not queued again: its open
+test is the one waited for. A wait that runs out names every connection still open and the
+`lakana connection test NAME --env ENV --id ID` that looks at its test. With `--no-wait` it
+prints `<name>: queued <id>` or `<name>: already open <id>` and exits 0. It asks the server 200
+connections at a time; NAME, and `--id`, are refused with `--all`.
 
 `--no-wait` queues the test and prints its id; `--id ID` shows that test later (or the one a
 timed-out wait named). A test nobody takes within the wait ends with an error that says whether a
@@ -354,6 +365,7 @@ what to do next on standard error.
 | `PATCH /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION`, and `MANAGE_SECRET` as above | the connection |
 | `DELETE /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION` | 204; 409 while a deployed project version declares it |
 | `POST /api/v1/environments/{env}/connections/{name}/tests` | `MANAGE_CONNECTION` | 202 and the test `{"id", "state", "outcome", "message", "created_at", "finished_at"}` (`state` is `queued`, `running` or `done`; `outcome` and `message` are `null` until done); 409 (naming the open test's id) while a test of the connection is queued or running and less than 10 minutes old; an older one is finished as `failed` first |
+| `POST /api/v1/environments/{env}/connection-tests?limit=&cursor=` | `MANAGE_CONNECTION` | 202 and `{"items": [{"connection", "test_id", "queued"}], "next_cursor"}`: Test all of one page of the environment's connections, newest first (`limit` 1 to 200, default 200; the list's cursor). A connection with an open test under 10 minutes old gets that test with `queued: false`, never a 409; an older one is finished as `failed` first; every other connection gets a new test with `queued: true`. 404 for an unknown environment, 422 for a cursor of another list |
 | `GET /api/v1/environments/{env}/connections/{name}/tests/{test_id}` | `MANAGE_CONNECTION` | the test; 404 for a test of another connection |
 | `GET /api/v1/audit-events?kind=connection` | `READ_AUDIT_LOG` | every `CONNECTION_*` event; combines with the other filters |
 | `GET /api/v1/tasks/self/connections/{name}` | the token of a running task whose asset declares `name` | `{"name", "kind", "address", "settings", "endpoints": [{"host", "port", "role"}], "secret"}`, with `Cache-Control: no-store`; 403 otherwise (below), 401 for a token whose attempt has ended or was claimed again. For the helpers of `lakana.ingest`; the SDK's `client.task_connections.get(name)` returns the body as it is |
@@ -440,6 +452,14 @@ it is done or `timeout` (120 s) passes, and returns a `ConnectionTest` with `id`
 `outcome`, `message`, `created_at` and `finished_at`. `wait=False` returns it as queued;
 `test_id=` looks at an earlier test. A test nobody finished in time raises `TimeoutError`, naming
 the state, the worker log to read and the command that looks again.
+
+`client.connections.test_all("prod")` tests every connection of the environment: it queues a test
+of each, page by page, then polls them as `test` does until every one is done, and returns a
+`dict` of each connection's name to its `ConnectionTest`. A connection with an open test gets that
+test. `wait=False` reads each test once; a wait that runs out raises `TimeoutError` naming every
+connection still open. `queue_tests("prod", limit=, cursor=)` is one page of it, as
+`POST .../connection-tests` answers: a `QueuedConnectionTestPage` of `QueuedConnectionTest`s
+(`connection`, `test_id`, `queued`) and `next_cursor`.
 
 ## How a task gets its credential
 

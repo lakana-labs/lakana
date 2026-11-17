@@ -1041,3 +1041,141 @@ def test_list_all_environments_with_env_is_exit_2(tmp_path: Path) -> None:
     assert result.exit_code == 2
     assert "--all-environments lists every environment; leave out --env." in result.stderr
     assert api.requests == []
+
+
+_TEST_ALL = "/api/v1/environments/prod/connection-tests"
+
+
+def _test_all_api(outcomes: dict[str, str], *, open_ones: tuple[str, ...] = ()) -> FakeApi:
+    """Build a fake Test all of the given connections, each test already done.
+
+    Parameters
+    ----------
+    outcomes
+        Each connection's name to its test's outcome, newest connection first.
+    open_ones
+        The connections whose open test is returned instead of a new one.
+
+    Returns
+    -------
+    FakeApi
+        The fake.
+    """
+    api = FakeApi()
+    items = [
+        {"connection": name, "test_id": f"t-{name}", "queued": name not in open_ones}
+        for name in outcomes
+    ]
+    api.on("POST", _TEST_ALL, status=202, json={"items": items, "next_cursor": None})
+    for name, outcome in outcomes.items():
+        body = {**_test_body("done", outcome, f"{name} said {outcome}"), "id": f"t-{name}"}
+        api.on("GET", f"{_BASE}/{name}/tests/t-{name}", json=body)
+    return api
+
+
+def test_test_all_prints_one_line_per_connection_and_exits_1_unless_all_ok(
+    tmp_path: Path,
+) -> None:
+    api = _test_all_api({"crm-db": "refused", "billing": "ok", "files": "ok"})
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "--all", "--env", "prod")
+
+    assert result.exit_code == 1, result.output
+    assert result.stdout.splitlines() == [
+        "billing: ok: billing said ok",
+        "crm-db: refused: crm-db said refused",
+        "files: ok: files said ok",
+    ]
+    assert "refused: Check the port and the source's firewall." in result.stderr
+    assert [(r.method, r.url.path) for r in api.requests] == [
+        ("POST", _TEST_ALL),
+        *[("GET", f"{_BASE}/{name}/tests/t-{name}") for name in ("crm-db", "billing", "files")],
+    ]
+
+    every_ok = _test_all_api({"billing": "ok", "files": "ok"})
+    passed = invoke(make_state(tmp_path, every_ok), "connection", "test", "--all", "--env", "prod")
+    assert passed.exit_code == 0, passed.output
+    assert passed.stderr == ""
+
+
+def test_test_all_no_wait_prints_queued_and_already_open_ids(tmp_path: Path) -> None:
+    api = _test_all_api({"files": "ok", "crm-db": "ok"}, open_ones=("crm-db",))
+
+    result = invoke(
+        make_state(tmp_path, api), "connection", "test", "--all", "--env", "prod", "--no-wait"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.splitlines() == ["crm-db: already open t-crm-db", "files: queued t-files"]
+    assert "lakana connection test NAME --env prod --id ID" in result.stderr
+    assert [r.method for r in api.requests] == ["POST"]
+
+
+def test_test_all_times_out_naming_the_open_ones_and_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("lakana.resources.connections.time.sleep", lambda _s: None)
+    ticks = iter(range(0, 1000, 30))
+    monkeypatch.setattr("lakana.resources.connections.time.monotonic", lambda: next(ticks))
+    api = _test_all_api({"crm-db": "ok", "files": "ok"})
+    for name in ("crm-db", "files"):
+        api.on(
+            "GET",
+            f"{_BASE}/{name}/tests/t-{name}",
+            json={**_test_body("queued"), "id": f"t-{name}"},
+        )
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "--all", "--env", "prod")
+
+    assert result.exit_code == 1
+    error = " ".join(result.stderr.split())
+    assert "2 connection tests are not done after 120s" in error
+    for name in ("crm-db", "files"):
+        assert f"lakana connection test {name} --env prod --id t-{name}" in error
+
+
+def test_test_all_of_an_environment_without_connections_says_so(tmp_path: Path) -> None:
+    api = _test_all_api({})
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "--all", "--env", "prod")
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.strip() == "Environment prod has no connections."
+
+
+def _refused(tmp_path: Path, *args: str) -> str:
+    """Run ``connection test`` with arguments it refuses, and check that nothing was sent.
+
+    Parameters
+    ----------
+    tmp_path
+        A directory for the CLI's state.
+    *args
+        The arguments after ``connection test``.
+
+    Returns
+    -------
+    str
+        Its standard error.
+    """
+    api = FakeApi()
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", *args, "--env", "prod")
+
+    assert result.exit_code == 2
+    assert api.requests == []
+    return result.stderr
+
+
+def test_test_without_name_or_all_is_exit_2(tmp_path: Path) -> None:
+    assert "Give a connection NAME, or --all for every connection of the environment." in (
+        _refused(tmp_path)
+    )
+
+
+def test_test_with_name_and_all_is_exit_2(tmp_path: Path) -> None:
+    assert "Give a connection NAME or --all, not both." in _refused(tmp_path, "crm-db", "--all")
+
+
+def test_test_all_with_id_is_exit_2(tmp_path: Path) -> None:
+    assert "--id shows one test; leave out --all." in _refused(tmp_path, "--all", "--id", _TEST_ID)

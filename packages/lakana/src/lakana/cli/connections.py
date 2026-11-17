@@ -18,9 +18,10 @@ from typing import Annotated, Any
 
 import typer
 
+from lakana._http import every_page
 from lakana._models import Connection, ConnectionTest, LastConnectionTest
 from lakana.cli import _output
-from lakana.cli._state import CliError, confirm, resolve_environment, state_of
+from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.secrets import read_stdin, read_values
 
 connection_app = typer.Typer(
@@ -911,8 +912,13 @@ def _test_line(test: ConnectionTest) -> str:
 @connection_app.command("test")
 def test(
     ctx: typer.Context,
-    name: str,
+    name: Annotated[
+        str | None, typer.Argument(help="The connection; leave it out with --all.")
+    ] = None,
     env: _ENV = None,
+    all_connections: Annotated[
+        bool, typer.Option("--all", help="Test every connection of the environment.")
+    ] = False,
     no_wait: Annotated[
         bool, typer.Option("--no-wait", help="Queue the test and print its id; don't wait.")
     ] = False,
@@ -921,33 +927,47 @@ def test(
         typer.Option("--id", help="Show an earlier test of NAME instead of starting one."),
     ] = None,
 ) -> None:
-    """Test connection NAME: a worker checks that its host can be reached.
+    """Test connection NAME, or with --all every connection: a worker checks each host.
 
     Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the
-    outcome is ``ok``. Waits up to 120 seconds for a worker.
+    outcome is ``ok``. With --all, prints ``<name>: <outcome>: <message>`` for each connection,
+    sorted by name, and exits 1 unless every outcome is ``ok``; a connection whose test is
+    already open gets that test. Waits up to 120 seconds for a worker.
 
     Parameters
     ----------
     ctx
         The Typer context.
     name
-        The connection's name.
+        The connection's name; not with `--all`.
     env
         The environment.
+    all_connections
+        Test every connection of the environment instead of one.
     no_wait
         Print the test's id without waiting for the outcome.
     test_id
-        Show this earlier test instead of starting one.
+        Show this earlier test instead of starting one; not with `--all`.
 
     Raises
     ------
     CliError
-        If a worker did not finish the test in time (exit 1).
+        If neither or both of NAME and `--all` are given, or `--id` with `--all` (exit 2); if a
+        worker did not finish the test in time (exit 1).
     typer.Exit
         With code 1 when the outcome is not ``ok``.
     """
+    if name is not None and all_connections:
+        raise CliError("Give a connection NAME or --all, not both.")
+    if name is None and not all_connections:
+        raise CliError("Give a connection NAME, or --all for every connection of the environment.")
+    if all_connections and test_id is not None:
+        raise CliError("--id shows one test; leave out --all.")
     state = state_of(ctx)
     environment = resolve_environment(state, env)
+    if name is None:
+        _test_all(state, environment, no_wait=no_wait)
+        return
     try:
         result = state.client().connections.test(
             environment, name, wait=not no_wait, test_id=test_id
@@ -970,6 +990,82 @@ def test(
     if advice:
         _output.next_step(state, advice)
     raise typer.Exit(1)
+
+
+def _test_all(state: CliState, environment: str, *, no_wait: bool) -> None:
+    """Test every connection of an environment and print one line per connection, by name.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment.
+    no_wait
+        Print each test's id (``queued`` or ``already open``) without waiting.
+
+    Raises
+    ------
+    CliError
+        If a worker did not finish every test in time (exit 1); the message names the open ones.
+    typer.Exit
+        With code 1 when an outcome is not ``ok``.
+    """
+    resource = state.client().connections
+    if no_wait:
+        queued = sorted(
+            every_page(lambda cursor: resource.queue_tests(environment, cursor=cursor)),
+            key=lambda item: item.connection,
+        )
+        if state.output == "json":
+            _output.print_json(queued)
+            return
+        for item in queued:
+            how = "queued" if item.queued else "already open"
+            line = f"{_output.inline(item.connection)}: {how} {_output.inline(item.test_id)}"
+            sys.stdout.write(_output.safe_text(line) + "\n")
+        if queued:
+            _output.next_step(
+                state,
+                "Look at one with lakana connection test NAME "
+                f"--env {_output.inline(environment)} --id ID",
+            )
+        else:
+            _no_connections(state, environment)
+        return
+    try:
+        tests = resource.test_all(environment)
+    except TimeoutError as exc:
+        raise CliError(str(exc), 1, kind="ConnectionTestTimeout") from exc
+    if state.output == "json":
+        _output.print_json(dict(sorted(tests.items())))
+    elif not tests:
+        _no_connections(state, environment)
+    else:
+        for connection, result in sorted(tests.items()):
+            line = f"{_output.inline(connection)}: {_test_line(result)}"
+            sys.stdout.write(_output.safe_text(line) + "\n")
+    failed = sorted({result.outcome or "failed" for result in tests.values()} - {"ok"})
+    for outcome in failed:
+        advice = next_step(outcome)
+        if advice:
+            _output.next_step(state, f"{_output.inline(outcome)}: {advice}")
+    if failed:
+        raise typer.Exit(1)
+
+
+def _no_connections(state: CliState, environment: str) -> None:
+    """Say that an environment has no connection to test.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment.
+    """
+    if state.output != "json":
+        sys.stdout.write(f"Environment {_output.inline(environment)} has no connections.\n")
 
 
 def register(app: typer.Typer) -> None:

@@ -152,7 +152,7 @@ route with its parameters, its request body and its answers.
 - [Row filters](rest/row-filters.md): 3 routes
 - [Column masks](rest/column-masks.md): 3 routes
 - [Secrets](rest/secrets.md): 5 routes
-- [Connections](rest/connections.md): 10 routes
+- [Connections](rest/connections.md): 11 routes
 - [Repositories](rest/repositories.md): 8 routes
 - [Package indexes](rest/package-indexes.md): 5 routes
 - [Deploys](rest/deploys.md): 9 routes

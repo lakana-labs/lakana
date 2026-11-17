@@ -336,6 +336,38 @@ Answers:
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
+## `POST /api/v1/environments/{environment_name}/connection-tests`
+
+Queue a test of every connection of an environment (Test all), a page at a time
+
+Takes one page of the environment's connection list, newest first (`limit` 1 to 200, default 200), and handles each connection in turn: a connection whose test is queued or running and under 10 minutes old is not queued again, and that test is returned with `queued: false`; an older open test is finished as failed first; every other connection gets a new test with `queued: true`. It never answers 409. Poll each test with `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as `cursor` for the next page; it takes the cursors of `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422. Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the environment does not exist.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment_name` | path | yes | text | The environment. |
+| `limit` | query | no | whole number | Most connections tested (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `202` | Successful Response | `ConnectionQueuedTestPage` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `ConnectionQueuedTestPage`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `ConnectionQueuedTestOut` | yes |  |
+| `next_cursor` | text or null | yes |  |
+
 ## `GET /api/v1/tasks/self/connections/{name}`
 
 Fetch a connection the running task's asset declares, with its secret

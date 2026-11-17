@@ -15386,6 +15386,129 @@
         }
       }
     },
+    "/api/v1/environments/{environment_name}/connection-tests": {
+      "post": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "Queue a test of every connection of an environment (Test all), a page at a time",
+        "description": "Takes one page of the environment's connection list, newest first (`limit` 1 to 200, default 200), and handles each connection in turn: a connection whose test is queued or running and under 10 minutes old is not queued again, and that test is returned with `queued: false`; an older open test is finished as failed first; every other connection gets a new test with `queued: true`. It never answers 409. Poll each test with `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as `cursor` for the next page; it takes the cursors of `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422. Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the environment does not exist.",
+        "operationId": "request_connection_tests_api_v1_environments__environment_name__connection_tests_post",
+        "parameters": [
+          {
+            "name": "environment_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Environment Name"
+            },
+            "description": "The environment."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            },
+            "description": "Most connections tested (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionQueuedTestPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/tasks/self/connections/{name}": {
       "get": {
         "tags": [
@@ -27897,6 +28020,60 @@
         ],
         "title": "ConnectionPage",
         "description": "One page of connections, of one environment or of all you may read, newest first.\n\nParameters\n----------\nitems\n    The connections of this page.\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `null` on the last page."
+      },
+      "ConnectionQueuedTestOut": {
+        "properties": {
+          "connection": {
+            "type": "string",
+            "title": "Connection"
+          },
+          "test_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Test Id"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued"
+          }
+        },
+        "type": "object",
+        "required": [
+          "connection",
+          "test_id",
+          "queued"
+        ],
+        "title": "ConnectionQueuedTestOut",
+        "description": "What Test all did for one connection.\n\nParameters\n----------\nconnection\n    The connection's name.\ntest_id\n    The test's id; read it with `GET .../connections/{connection}/tests/{test_id}`.\nqueued\n    `true` when this request queued the test; `false` when the connection already had an\n    open test under 10 minutes old, which is the one returned."
+      },
+      "ConnectionQueuedTestPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionQueuedTestOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ConnectionQueuedTestPage",
+        "description": "One page of Test all: a test for each connection of a page of the environment's list.\n\nParameters\n----------\nitems\n    One entry per connection, newest connection first.\nnext_cursor\n    Pass back as `?cursor=` to test the next page; `null` on the last page."
       },
       "ConnectionTestOut": {
         "properties": {

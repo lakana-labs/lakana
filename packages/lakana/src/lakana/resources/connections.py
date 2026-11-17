@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +15,8 @@ from lakana._models import (
     ConnectionTest,
     DeclaringAsset,
     LastConnectionTest,
+    QueuedConnectionTest,
+    QueuedConnectionTestPage,
 )
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
@@ -27,7 +29,11 @@ _LIST_ALL_INSTEAD = "list one environment with `lakana connection list --env ENV
 _ENVIRONMENTS_INSTEAD = "see the environments with `lakana env list`"
 """What to do instead of `Connections.environments` against a server without that route."""
 
+_TEST_ALL_INSTEAD = "test one connection at a time with `lakana connection test NAME --env ENV`"
+"""What to do instead of `Connections.queue_tests` against a server without that route."""
+
 _EnvironmentList = list[ConnectionEnvironment]
+_Tests = dict[str, ConnectionTest]
 
 
 def _when(value: object) -> datetime | None:
@@ -237,6 +243,45 @@ def _environments_from_json(data: object) -> list[ConnectionEnvironment]:
         raise InvalidResponse(_ODD_ANSWER.format(what="the environments")) from None
 
 
+def _queued_page_from_json(data: dict[str, Any]) -> QueuedConnectionTestPage:
+    """Build a `QueuedConnectionTestPage` from a `ConnectionQueuedTestPage` body.
+
+    A field this SDK does not know is ignored.
+
+    Parameters
+    ----------
+    data
+        The decoded object.
+
+    Returns
+    -------
+    QueuedConnectionTestPage
+        The page.
+
+    Raises
+    ------
+    InvalidResponse
+        If the object has no list of items, an item lacks a field, or its cursor is not text.
+    """
+    try:
+        items, cursor = data["items"], data["next_cursor"]
+        assert isinstance(items, list)  # nosec B101 -- an untrusted answer; caught just below
+        assert cursor is None or isinstance(cursor, str)  # nosec B101 -- as above
+        return QueuedConnectionTestPage(
+            items=[
+                QueuedConnectionTest(
+                    connection=str(item["connection"]),
+                    test_id=str(item["test_id"]),
+                    queued=bool(item["queued"]),
+                )
+                for item in items
+            ],
+            next_cursor=cursor,
+        )
+    except (AssertionError, KeyError, TypeError):
+        raise InvalidResponse(_ODD_ANSWER.format(what="the queued tests")) from None
+
+
 def _still(environment: str, name: str, test: ConnectionTest, timeout: float) -> str:
     """Write the message of a test that is not done in time.
 
@@ -270,6 +315,51 @@ def _still(environment: str, name: str, test: ConnectionTest, timeout: float) ->
             f"`lakana local` terminal). {again}"
         )
     return f"the test of `{name}` is still {test.state} after {timeout:g}s: {found}"
+
+
+def _still_all(environment: str, open_tests: Mapping[str, ConnectionTest], timeout: float) -> str:
+    """Write the message of a Test all whose tests are not all done in time.
+
+    Parameters
+    ----------
+    environment
+        The environment.
+    open_tests
+        Each connection whose test is not done, to its test as last seen.
+    timeout
+        The seconds waited.
+
+    Returns
+    -------
+    str
+        Each open connection's state and how to look at its test again, then who runs tests
+        (for a queued one) and which worker log to read (for a running one); for a single
+        connection, the message of a single test.
+    """
+    if len(open_tests) == 1:
+        ((name, test),) = open_tests.items()
+        return _still(environment, name, test, timeout)
+    each = ", ".join(
+        f"`{name}` is still {test.state} (look again with lakana connection test {name} "
+        f"--env {environment} --id {test.id})"
+        for name, test in sorted(open_tests.items())
+    )
+    states = {test.state for test in open_tests.values()}
+    hints = []
+    if "queued" in states:
+        hints.append(
+            "No worker has taken a queued test: check that a worker of either runner is running "
+            "(`docker compose ps worker`, or the `lakana local` terminal)."
+        )
+    if states - {"queued"}:
+        hints.append(
+            "A worker took a running test: read the worker's log (`docker compose logs worker`, "
+            "or the `lakana local` terminal)."
+        )
+    return (
+        f"{len(open_tests)} connection tests are not done after {timeout:g}s: {each}. "
+        + " ".join(hints)
+    )
 
 
 class Connections:
@@ -641,22 +731,177 @@ class Connections:
         path_params = {"environment_name": environment, "connection_name": name}
         if test_id is None:
             response = self._transport.request(ROUTES["connections.test"], path_params=path_params)
+            test = _connection_test_from_json(_object(response, "a connection test"))
         else:
-            response = self._transport.request(
-                ROUTES["connections.test_get"], path_params={**path_params, "test_id": test_id}
-            )
-        test = _connection_test_from_json(_object(response, "a connection test"))
+            test = self._read_test(environment, name, test_id)
         if not wait:
             return test
+        return self._until_done(
+            environment,
+            {name: test},
+            timeout,
+            lambda open_tests: _still(environment, name, open_tests[name], timeout),
+        )[name]
+
+    def queue_tests(
+        self, environment: str, *, limit: int | None = None, cursor: str | None = None
+    ) -> QueuedConnectionTestPage:
+        """Queue a test of every connection on one page of an environment's list (Test all).
+
+        Needs `MANAGE_CONNECTION` in the environment. The page is the one `list` gives for the
+        same `limit` and `cursor`, newest first. A connection whose test is queued or running and
+        under 10 minutes old is not queued again: its open test is named, with ``queued`` false,
+        so this is never refused for an open test. `test_all` walks every page and waits.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        limit
+            Most connections tested (1 to 200); `None` leaves it to the server (200).
+        cursor
+            A previous page's `next_cursor`, of this call or of `list`.
+
+        Returns
+        -------
+        QueuedConnectionTestPage
+            A test for each connection of the page, and the cursor of the next (`None` on the
+            last).
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            Without `MANAGE_CONNECTION` in the environment.
+        lakana.errors.NotFound
+            If the environment does not exist; or, with a sentence saying so, if the server is
+            older than this package and has no Test all.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200 or `cursor` is not one the server issued for the
+            environment's connection list.
+        """
+        with _route_of_a_newer_server(
+            "POST /api/v1/environments/{environment_name}/connection-tests", _TEST_ALL_INSTEAD
+        ):
+            response = self._transport.request(
+                ROUTES["connections.test_all"],
+                path_params={"environment_name": environment},
+                params=query_params(limit=limit, cursor=cursor),
+            )
+        return _queued_page_from_json(_object(response, "the queued tests"))
+
+    def test_all(
+        self, environment: str, *, wait: bool = True, timeout: float = 120.0
+    ) -> dict[str, ConnectionTest]:
+        """Test every connection of an environment, and wait for every test.
+
+        Calls `queue_tests` for every page, then reads each test, polling with the growing pause
+        of `test` (0.5 s up to 2 s) until every one is done. A connection that already had an
+        open test gets that test, not a new one.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        wait
+            Poll until every test is done; `False` reads each test once.
+        timeout
+            Seconds to keep polling, for all of them together.
+
+        Returns
+        -------
+        dict of str to ConnectionTest
+            Each connection's name to its test, newest connection first; empty when the
+            environment has none.
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            Without `MANAGE_CONNECTION` in the environment.
+        lakana.errors.NotFound
+            If the environment does not exist, or the server has no Test all.
+        TimeoutError
+            If a test is not done after `timeout` seconds; the message names every connection
+            still open and how to look at its test again.
+        """
+        queued = list(every_page(lambda cursor: self.queue_tests(environment, cursor=cursor)))
+        tests = {
+            item.connection: self._read_test(environment, item.connection, item.test_id)
+            for item in queued
+        }
+        if not wait:
+            return tests
+        return self._until_done(
+            environment,
+            tests,
+            timeout,
+            lambda open_tests: _still_all(environment, open_tests, timeout),
+        )
+
+    def _read_test(self, environment: str, name: str, test_id: str) -> ConnectionTest:
+        """Read a test of a connection.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        name
+            The connection's name.
+        test_id
+            The test's id.
+
+        Returns
+        -------
+        ConnectionTest
+            The test as it is now.
+        """
+        response = self._transport.request(
+            ROUTES["connections.test_get"],
+            path_params={
+                "environment_name": environment,
+                "connection_name": name,
+                "test_id": test_id,
+            },
+        )
+        return _connection_test_from_json(_object(response, "a connection test"))
+
+    def _until_done(
+        self,
+        environment: str,
+        tests: _Tests,
+        timeout: float,
+        still: Callable[[_Tests], str],
+    ) -> _Tests:
+        """Read the tests that are not done, with a growing pause, until every one is.
+
+        Parameters
+        ----------
+        environment
+            The environment.
+        tests
+            Each connection's name to its test as last read.
+        timeout
+            Seconds to keep polling.
+        still
+            Writes the timeout's message from the tests that are not done.
+
+        Returns
+        -------
+        dict of str to ConnectionTest
+            The same connections, in the same order, each with its done test.
+
+        Raises
+        ------
+        TimeoutError
+            If a test is not done after `timeout` seconds, with `still`'s message.
+        """
+        tests = dict(tests)
         deadline = time.monotonic() + timeout
         interval = 0.5
-        while test.state != "done":
+        while open_tests := {name: t for name, t in tests.items() if t.state != "done"}:
             if time.monotonic() >= deadline:
-                raise TimeoutError(_still(environment, name, test, timeout))
+                raise TimeoutError(still(open_tests))
             time.sleep(interval)
             interval = min(interval * 2, 2.0)
-            response = self._transport.request(
-                ROUTES["connections.test_get"], path_params={**path_params, "test_id": test.id}
-            )
-            test = _connection_test_from_json(_object(response, "a connection test"))
-        return test
+            for name, test in open_tests.items():
+                tests[name] = self._read_test(environment, name, test.id)
+        return tests

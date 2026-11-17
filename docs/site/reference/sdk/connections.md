@@ -187,3 +187,47 @@ Returns: `ConnectionTest`. The test; ``state == "done"`` when waited for, with i
 | `lakana.Conflict` | If a test of this connection is already queued or running. |
 | `lakana.NotFound` | If the environment, the connection or the test does not exist. |
 | `TimeoutError` | If the test is not done after `timeout` seconds; the message says whether a worker took it and how to look again. |
+
+### `client.connections.queue_tests`
+
+Signature: `client.connections.queue_tests(environment: str, *, limit: int | None = None, cursor: str | None = None) -> QueuedConnectionTestPage`
+
+Queue a test of every connection on one page of an environment's list (Test all).
+
+Needs `MANAGE_CONNECTION` in the environment. The page is the one `list` gives for the same `limit` and `cursor`, newest first. A connection whose test is queued or running and under 10 minutes old is not queued again: its open test is named, with ``queued`` false, so this is never refused for an open test. `test_all` walks every page and waits.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str` | required | The environment. |
+| `limit` | `int | None` | `None` | Most connections tested (1 to 200); `None` leaves it to the server (200). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`, of this call or of `list`. |
+
+Returns: `QueuedConnectionTestPage`. A test for each connection of the page, and the cursor of the next (`None` on the last).
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | Without `MANAGE_CONNECTION` in the environment. |
+| `lakana.NotFound` | If the environment does not exist; or, with a sentence saying so, if the server is older than this package and has no Test all. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200 or `cursor` is not one the server issued for the environment's connection list. |
+
+### `client.connections.test_all`
+
+Signature: `client.connections.test_all(environment: str, *, wait: bool = True, timeout: float = 120.0) -> dict[str, ConnectionTest]`
+
+Test every connection of an environment, and wait for every test.
+
+Calls `queue_tests` for every page, then reads each test, polling with the growing pause of `test` (0.5 s up to 2 s) until every one is done. A connection that already had an open test gets that test, not a new one.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str` | required | The environment. |
+| `wait` | `bool` | `True` | Poll until every test is done; `False` reads each test once. |
+| `timeout` | `float` | `120.0` | Seconds to keep polling, for all of them together. |
+
+Returns: `dict of str to ConnectionTest`. Each connection's name to its test, newest connection first; empty when the environment has none.
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | Without `MANAGE_CONNECTION` in the environment. |
+| `lakana.NotFound` | If the environment does not exist, or the server has no Test all. |
+| `TimeoutError` | If a test is not done after `timeout` seconds; the message names every connection still open and how to look at its test again. |

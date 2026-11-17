@@ -2619,6 +2619,42 @@ class ConnectionTest:
 
 
 @dataclass(frozen=True)
+class QueuedConnectionTest:
+    """What Test all did for one connection (`client.connections.queue_tests`).
+
+    Parameters
+    ----------
+    connection
+        The connection's name.
+    test_id
+        The test's id; read it with `client.connections.test(..., test_id=...)`.
+    queued
+        `True` when the request queued the test; `False` when the connection already had an
+        open test under 10 minutes old, which is the one named.
+    """
+
+    connection: str
+    test_id: str
+    queued: bool
+
+
+@dataclass(frozen=True)
+class QueuedConnectionTestPage:
+    """One page of Test all: a test for each connection of a page of the environment's list.
+
+    Parameters
+    ----------
+    items
+        One entry per connection, newest connection first.
+    next_cursor
+        Pass back as `cursor=` to test the next page; `None` on the last page.
+    """
+
+    items: list[QueuedConnectionTest]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class HostKey:
     """One SSH host key a repository check found.
 

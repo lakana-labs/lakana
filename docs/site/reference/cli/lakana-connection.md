@@ -131,15 +131,16 @@ Its secret stays in the environment, unbound.
 
 ## `lakana connection test`
 
-Usage: `lakana connection test [OPTIONS] {name}`
+Usage: `lakana connection test [OPTIONS] [name]`
 
-Test connection NAME: a worker checks that its host can be reached.
+Test connection NAME, or with --all every connection: a worker checks each host.
 
-Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the outcome is ``ok``. Waits up to 120 seconds for a worker.
+Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the outcome is ``ok``. With --all, prints ``<name>: <outcome>: <message>`` for each connection, sorted by name, and exits 1 unless every outcome is ``ok``; a connection whose test is already open gets that test. Waits up to 120 seconds for a worker.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `NAME` | text | required |  |
+| `NAME` | text | none | The connection; leave it out with --all. |
 | `--env` | text | none | Environment (default: the profile's). |
+| `--all` | flag | off | Test every connection of the environment. |
 | `--no-wait` | flag | off | Queue the test and print its id; don't wait. |
 | `--id` | text | none | Show an earlier test of NAME instead of starting one. |

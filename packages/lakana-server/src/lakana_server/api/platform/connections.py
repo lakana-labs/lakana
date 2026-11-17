@@ -4,7 +4,8 @@ A connection is addressed through its environment (`/api/v1/environments/{name}/
 it lives there as a secret does. `MANAGE_CONNECTION` creates, changes and deletes;
 `READ_ENVIRONMENT` lists and shows. No answer carries a secret value or a CA certificate.
 `/api/v1/connections` lists the connections of every environment the caller may read, and those
-environments.
+environments; `/api/v1/environments/{name}/connection-tests` tests every connection of one
+environment (Test all).
 
 Every route that answers a connection leaves unset fields out (`response_model_exclude_unset`),
 so that the fields of `last_test` a reader may not see are absent, not `null`; every other field
@@ -19,7 +20,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import SecretStr
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.connections.service import ConnectionService, ConnectionView
+from lakana_core.connections.service import TEST_ALL_MAX, ConnectionService, ConnectionView
 from lakana_core.models import ConnectionTest
 from lakana_server.api.platform.schemas import (
     ConnectionCreate,
@@ -27,6 +28,8 @@ from lakana_server.api.platform.schemas import (
     ConnectionLastTestOut,
     ConnectionOut,
     ConnectionPage,
+    ConnectionQueuedTestOut,
+    ConnectionQueuedTestPage,
     ConnectionTestOut,
     ConnectionUpdate,
     DeclaringAssetOut,
@@ -49,6 +52,17 @@ all_router = APIRouter(
     responses=errors(401),
 )
 """The connections of every environment the caller may read, and those environments."""
+
+tests_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/environments/{environment_name}/connection-tests",
+    tags=["connections"],
+    responses=errors(401),
+)
+"""Test all: a test of every connection of an environment, a page at a time.
+
+Not `.../connections/tests`, which would read as the tests of a connection named ``tests``.
+"""
 
 
 def _to_out(view: ConnectionView) -> ConnectionOut:
@@ -411,6 +425,62 @@ def request_connection_test(
         The queued test.
     """
     return _test_out(service.request_test(principal, environment_name, connection_name))
+
+
+@tests_router.post(
+    "",
+    response_model=ConnectionQueuedTestPage,
+    status_code=202,
+    responses=errors(403, 404),
+)
+def request_connection_tests(
+    environment_name: str,
+    limit: int = Query(default=TEST_ALL_MAX, ge=1, le=TEST_ALL_MAX),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> ConnectionQueuedTestPage:
+    """Queue a test of every connection of an environment (Test all), a page at a time.
+
+    Takes one page of the environment's connection list, newest first (`limit` 1 to 200,
+    default 200), and handles each connection in turn: a connection whose test is queued or
+    running and under 10 minutes old is not queued again, and that test is returned with
+    `queued: false`; an older open test is finished as failed first; every other connection
+    gets a new test with `queued: true`. It never answers 409. Poll each test with
+    `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as
+    `cursor` for the next page; it takes the cursors of
+    `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422.
+    Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the
+    environment does not exist.
+
+    Parameters
+    ----------
+    environment_name
+        The environment.
+    limit
+        Most connections tested (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    ConnectionQueuedTestPage
+        A test for each connection of this page, and the cursor of the next.
+    """
+    page = service.request_tests(principal, environment_name, limit=limit, cursor=cursor)
+    return ConnectionQueuedTestPage(
+        items=[
+            ConnectionQueuedTestOut(
+                connection=item.connection, test_id=item.test.id, queued=item.queued
+            )
+            for item in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )
 
 
 @router.get(

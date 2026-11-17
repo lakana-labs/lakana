@@ -25,6 +25,9 @@ test. Every reader sees the test's state, outcome and finish time; only a holder
 `MANAGE_CONNECTION` on the environment sees its id, request time, message and requester, because
 the message can name paths, hosts and ports the worker reached. The rights of a page are asked in
 one `permits_each` batch, which writes no audit event.
+
+Test all (`request_tests`) queues a test of each connection on one page of the list, one
+connection per transaction, and returns a connection's open test instead of refusing it.
 """
 
 from __future__ import annotations
@@ -108,6 +111,8 @@ _TEST_STUCK = (
     "no worker finished this test within 10 minutes; check that a worker is running and read its "
     "log (`docker compose logs worker`, or the `lakana local` terminal)"
 )
+TEST_ALL_MAX = 200
+"""The most connections one Test all request queues (`ConnectionService.request_tests`)."""
 _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a credential
 ConnectionAction = Literal["test", "update", "delete", "name_secret"]
 """A word of a connection's `actions`."""
@@ -277,6 +282,26 @@ class ConnectionView:
     environment: str
     last_test: LastTest | None
     actions: tuple[ConnectionAction, ...]
+
+
+@dataclass(frozen=True)
+class QueuedTest:
+    """What Test all did for one connection (`ConnectionService.request_tests`).
+
+    Parameters
+    ----------
+    connection
+        The connection's name.
+    test
+        The test queued for it, or the open test it already had.
+    queued
+        `True` when the test was queued by this request; `False` when an open test, at most
+        `TEST_STUCK_AFTER` old, was returned instead.
+    """
+
+    connection: str
+    test: ConnectionTest
+    queued: bool
 
 
 def missing_connections(
@@ -1452,49 +1477,177 @@ class ConnectionService:
         env = self._environment(environment)
         with refuse_concurrent_change(self._session, f"connection `{shown(name)}`"):
             row = self._find(env, name, lock=True)
-            open_test = self._session.execute(
-                select(ConnectionTest)
-                .where(
-                    ConnectionTest.connection_id == row.id,
-                    ConnectionTest.state.in_(
-                        (ConnectionTestState.QUEUED, ConnectionTestState.RUNNING)
-                    ),
-                )
-                .with_for_update()
-            ).scalar_one_or_none()
+            open_test = self._open_test(row, env)
             if open_test is not None:
-                if utcnow() - open_test.created_at <= TEST_STUCK_AFTER:
-                    state = open_test.state.value
-                    self._session.rollback()
-                    raise ConflictError(
-                        f"a test of `{shown(name)}` is already "
-                        f"{'queued' if state == 'queued' else 'running'}; see it with "
-                        f"lakana connection test {shown(name)} --env {shown(env.name)} "
-                        f"--id {open_test.id}"
-                    )
-                ConnectionTestQueue(self._session).close(
-                    open_test, row.name, env.name, ConnectionTestOutcome.FAILED, _TEST_STUCK
+                state = open_test.state.value
+                self._session.rollback()
+                raise ConflictError(
+                    f"a test of `{shown(name)}` is already "
+                    f"{'queued' if state == 'queued' else 'running'}; see it with "
+                    f"lakana connection test {shown(name)} --env {shown(env.name)} "
+                    f"--id {open_test.id}"
                 )
-            test = ConnectionTest(
-                id=uuid.uuid4(),
-                connection_id=row.id,
-                environment_id=env.id,
-                requested_by=p.id,
-                state=ConnectionTestState.QUEUED,
-            )
-            self._session.add(test)
-            AuditService(self._session).record(
-                p.id,
-                AuditEventType.CONNECTION_TESTED,
-                securable=scope,
-                detail={
-                    "connection": row.name,
-                    "environment": env.name,
-                    "test_id": str(test.id),
-                    "state": ConnectionTestState.QUEUED.value,
-                },
-            )
+            test = self._queue_test(p, env, row, scope)
             self._session.commit()
+        return test
+
+    def request_tests(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        limit: int = TEST_ALL_MAX,
+        cursor: str | None = None,
+    ) -> Page[QueuedTest]:
+        """Queue a test of every connection on one page of an environment's list (Test all).
+
+        The page is the one `list` gives for the same `limit` and `cursor`. Each connection is
+        handled in page order, in its own transaction: its row is locked, an open test older than
+        `TEST_STUCK_AFTER` is finished as failed, a younger one is returned as it is, and
+        otherwise a test is queued and audited as `request_test` does; then it commits, so no two
+        connections are locked at once.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            The environment's name.
+        limit
+            Most connections handled, from 1 to `TEST_ALL_MAX`.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of QueuedTest
+            What was done for each connection, newest connection first, and the cursor of the
+            next page.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `MANAGE_CONNECTION` on the environment.
+        NotFoundError
+            If the environment does not exist.
+        ValidationError
+            If `limit` is outside 1 to `TEST_ALL_MAX`, or `cursor` is not one this server issued
+            for the environment's connection list.
+        ConflictError
+            If a connection changed at the same time (the ones before it stay queued).
+        """
+        scope = Securable.environment_scope(environment)
+        self._authz.authorize(p, Action.MANAGE_CONNECTION, scope)
+        env = self._environment(environment)
+        if limit > TEST_ALL_MAX:
+            raise ValidationError(f"limit must be at most {TEST_ALL_MAX}")
+        page = newest_first(
+            self._session,
+            select(Connection).where(Connection.environment_id == env.id),
+            kind="connections",
+            at=Connection.created_at,
+            row_id=Connection.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
+        found = [(row.id, row.name) for row in page.items]
+        items: builtins.list[QueuedTest] = []
+        for row_id, name in found:
+            with refuse_concurrent_change(self._session, f"connection `{shown(name)}`"):
+                try:
+                    row = lock_row(self._session, Connection, row_id)
+                    if row is None:
+                        self._session.rollback()
+                        continue
+                    open_test = self._open_test(row, env)
+                    item = (
+                        QueuedTest(name, self._queue_test(p, env, row, scope), True)
+                        if open_test is None
+                        else QueuedTest(name, open_test, False)
+                    )
+                    # Written, then detached: the commit leaves the answer's test as it is, so
+                    # it is not read again, nor lost when the connection is deleted meanwhile.
+                    self._session.flush()
+                    self._session.expunge(item.test)
+                    self._session.commit()
+                    items.append(item)
+                except BaseException:
+                    self._session.rollback()
+                    raise
+        return Page(items, page.next_cursor)
+
+    def _open_test(self, row: Connection, env: Environment) -> ConnectionTest | None:
+        """Read a connection's open test under a lock, finishing it as failed when it is stuck.
+
+        Parameters
+        ----------
+        row
+            The connection, locked by the caller.
+        env
+            Its environment.
+
+        Returns
+        -------
+        ConnectionTest or None
+            The queued or running test, at most `TEST_STUCK_AFTER` old; `None` when there is
+            none, or the one there was is older and was just finished as failed (uncommitted).
+        """
+        open_test = self._session.execute(
+            select(ConnectionTest)
+            .where(
+                ConnectionTest.connection_id == row.id,
+                ConnectionTest.state.in_((ConnectionTestState.QUEUED, ConnectionTestState.RUNNING)),
+            )
+            .with_for_update()
+        ).scalar_one_or_none()
+        if open_test is None or utcnow() - open_test.created_at <= TEST_STUCK_AFTER:
+            return open_test
+        ConnectionTestQueue(self._session).close(
+            open_test, row.name, env.name, ConnectionTestOutcome.FAILED, _TEST_STUCK
+        )
+        return None
+
+    def _queue_test(
+        self, p: PrincipalRef, env: Environment, row: Connection, scope: Securable
+    ) -> ConnectionTest:
+        """Add a queued test of a connection and its `CONNECTION_TESTED` event; the caller commits.
+
+        Parameters
+        ----------
+        p
+            The acting principal, recorded as the requester.
+        env
+            The connection's environment.
+        row
+            The connection, locked by the caller.
+        scope
+            The environment's securable, for the audit event.
+
+        Returns
+        -------
+        ConnectionTest
+            The new test, not yet committed.
+        """
+        test = ConnectionTest(
+            id=uuid.uuid4(),
+            connection_id=row.id,
+            environment_id=env.id,
+            requested_by=p.id,
+            state=ConnectionTestState.QUEUED,
+        )
+        self._session.add(test)
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.CONNECTION_TESTED,
+            securable=scope,
+            detail={
+                "connection": row.name,
+                "environment": env.name,
+                "test_id": str(test.id),
+                "state": ConnectionTestState.QUEUED.value,
+            },
+        )
         return test
 
     def test_result(
