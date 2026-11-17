@@ -946,6 +946,8 @@ def test_the_list_never_contains_sql(client: TestClient) -> None:
     for row in rows:
         assert set(row) == {
             "id",
+            "environment",
+            "origin",
             "submitter",
             "kind",
             "target",
@@ -1626,3 +1628,108 @@ def test_the_status_of_a_failed_query_has_its_error_position(client: TestClient)
     body = client.get(f"/api/v1/environments/st5/queries/{query_id}", headers=AUTH_HEADER).json()
 
     assert (body["error_line"], body["error_column"]) == (2, 3)
+
+
+# -- the list across environments ------------------------------------
+
+_ALL = "/api/v1/queries"
+
+
+def test_get_all_queries_answers_items_and_next_cursor(client: TestClient) -> None:
+    """The cross-environment list has the body of a new paged list, not the header."""
+    _environment(client)
+    _environment(client, "other")
+    first = _submit(client)
+    second = _submit(client, env="other")
+    third = _submit(client)
+    page = client.get(_ALL, params={"limit": 2}, headers=AUTH_HEADER)
+    assert page.status_code == 200, page.text
+    assert "X-Next-Cursor" not in page.headers
+    body = page.json()
+    assert set(body) == {"items", "next_cursor"}
+    assert [row["id"] for row in body["items"]] == [first, second]
+    assert body["next_cursor"] is not None
+    rest = client.get(
+        _ALL, params={"limit": 2, "cursor": body["next_cursor"]}, headers=AUTH_HEADER
+    ).json()
+    assert ([row["id"] for row in rest["items"]], rest["next_cursor"]) == ([third], None)
+    only = client.get(_ALL, params={"environment": "other"}, headers=AUTH_HEADER).json()
+    assert [row["id"] for row in only["items"]] == [second]
+    per_env = client.get(_list_url(), params={"limit": 1}, headers=AUTH_HEADER)
+    refused = client.get(
+        _ALL, params={"cursor": per_env.headers["X-Next-Cursor"]}, headers=AUTH_HEADER
+    )
+    assert refused.status_code == 422
+
+
+def test_get_all_queries_with_an_unknown_environment_is_404(client: TestClient) -> None:
+    response = client.get(_ALL, params={"environment": "nowhere"}, headers=AUTH_HEADER)
+    assert response.status_code == 404
+
+
+def test_get_all_queries_without_any_right_is_an_empty_page(client: TestClient) -> None:
+    """A caller with no right anywhere gets an empty page, never a 403 or a 404."""
+    _environment(client)
+    _environment(client, "other")
+    _submit(client)
+    reader = person(client, "reader", "VIEWER")
+    listed = client.get(_ALL, headers=reader)
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == {"items": [], "next_cursor": None}
+    assert client.get(f"{_ALL}/environments", headers=reader).json() == []
+    assert client.get(_ALL).status_code == 401
+
+
+def test_rows_carry_environment_and_origin(client: TestClient) -> None:
+    _environment(client)
+    written = _submit(client)
+    task = _submit(client)
+    _edit_run(client, task, origin=QueryOrigin.TASK)
+    rows = client.get(_list_url(), headers=AUTH_HEADER).json()
+    assert [(row["id"], row["environment"], row["origin"]) for row in rows] == [
+        (written, "dev", "written"),
+        (task, "dev", "task"),
+    ]
+    across = client.get(_ALL, params={"origin": "task"}, headers=AUTH_HEADER).json()["items"]
+    assert [(row["id"], row["environment"], row["origin"]) for row in across] == [
+        (task, "dev", "task")
+    ]
+    by_origin = client.get(_list_url(), params={"origin": "written,task"}, headers=AUTH_HEADER)
+    assert len(by_origin.json()) == 2
+    unknown = client.get(_list_url(), params={"origin": "typed"}, headers=AUTH_HEADER)
+    assert unknown.status_code == 422
+    assert "`origin` must be one of written, preview" in unknown.text
+    _put_status(client, written, "SUCCEEDED")
+    _edit_run(client, written, finished_at=datetime.now(UTC) - timedelta(days=3))
+    params = {"include_ended": "true", "status": "succeeded"}
+    assert client.get(_list_url(), params=params, headers=AUTH_HEADER).json() == []
+    week = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    old = client.get(_ALL, params={**params, "since": week}, headers=AUTH_HEADER).json()
+    assert [row["id"] for row in old["items"]] == [written]
+    naive = client.get(_list_url(), params={"since": "2026-10-18T09:30:00"}, headers=AUTH_HEADER)
+    assert naive.status_code == 422
+    assert "`since` has no time zone" in naive.text
+
+
+def test_get_query_environments(client: TestClient) -> None:
+    """The environments where the caller may submit a query, by name, with their protection."""
+    _environment(client, "prod")
+    _environment(client)
+    _environment(client, "stage")
+    from lakana_core.models import Environment
+
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        prod = session.query(Environment).filter_by(name="prod").one()
+        prod.is_protected = True
+        session.commit()
+    answer = client.get(f"{_ALL}/environments", headers=AUTH_HEADER)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == [
+        {"name": "dev", "protected": False},
+        {"name": "prod", "protected": True},
+        {"name": "stage", "protected": False},
+    ]
+    analyst = person(client, "ana", "ANALYST", env="stage")
+    assert client.get(f"{_ALL}/environments", headers=analyst).json() == [
+        {"name": "stage", "protected": False}
+    ]

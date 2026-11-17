@@ -9,16 +9,18 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List the queries of an environment
 
-Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.
+Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist, and 422 for an unknown status or origin or a `since` without a time zone. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.
 
 Parameters:
 
 | Name | In | Required | Type | Description |
 |---|---|---|---|---|
 | `env` | path | yes | text | Environment name. |
-| `include_ended` | query | no | true or false | Also list the queries that ended in the last 24 hours. |
-| `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. An ended status lists the ended queries of the last 24 hours, with or without `include_ended`. |
+| `include_ended` | query | no | true or false | Also list the queries that ended in the last 24 hours (or since `since`). |
+| `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. An ended status lists the ended queries of the last 24 hours (or since `since`), with or without `include_ended`. |
 | `submitter` | query | no | text or null | Only queries submitted by the principal with this name. |
+| `origin` | query | no | list of text | Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas. |
+| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours. |
 | `limit` | query | no | whole number | Most rows returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
@@ -223,3 +225,61 @@ Answer fields: `ResultPageOut`
 | `next_offset` | whole number or null | yes |  |
 | `duration_ms` | whole number or null | yes |  |
 | `preview` | `PreviewOut` or null | yes |  |
+
+## `GET /api/v1/queries`
+
+List the queries of every environment you may query
+
+Without `environment`, lists the queries of every environment where you hold `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`, in the order of the list of one environment: running, then queued, then (when asked) ended. Where you hold `MANAGE_ENVIRONMENT` you see everyone's queries, elsewhere your own; a task's token sees its own. An environment where you hold neither is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/queries` answers, with its 403 and 404, in this body. Each row names its `environment`. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only this environment. |
+| `include_ended` | query | no | true or false | Also list the queries that ended in the last 24 hours (or since `since`). |
+| `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. |
+| `submitter` | query | no | text or null | Only queries submitted by the principal with this name. |
+| `origin` | query | no | list of text | Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas. |
+| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone, of any age, instead of those of the last 24 hours. |
+| `limit` | query | no | whole number | Most rows returned (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `QueryListPageOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `503` | The server cannot do this right now; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `QueryListPageOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `QueryListOut` | yes |  |
+| `next_cursor` | text or null | yes |  |
+
+## `GET /api/v1/queries/environments`
+
+List the environments where you may submit a query
+
+Every environment where you hold `SUBMIT_QUERY`, sorted by name, and whether it is protected. Empty when there is none; never a 403.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `QueryEnvironmentOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |

@@ -18,7 +18,7 @@ import typer
 from lakana._models import QueryListEntry, QueryStatus, ResultPage, WaitingFor
 from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
-from lakana.cli._paging import more_results
+from lakana.cli._paging import more_results, parse_since
 from lakana.cli._state import CliError, CliState, resolve_environment, state_of
 from lakana.cli._waiting import WAIT_LINE_LIMIT, WaitLine, clock
 from lakana.errors import (
@@ -64,6 +64,8 @@ _EVOLVE_SCHEMA = Annotated[
 ]
 _WRITE_MODES = ("create", "replace", "append", "view")
 _LIST_COLUMNS = ["id", "submitter", "kind", "status", "age", "waiting_for"]
+_ALL_COLUMNS = ["id", "environment", "submitter", "kind", "status", "age", "waiting_for"]
+"""The columns of `query list --all-environments`: the environment follows the id."""
 _LIST_DROPPABLE = ["age", "kind", "submitter"]
 """What `query list` leaves out first on a narrow terminal: the id, status and reason stay."""
 _LIST_MOST = 200
@@ -828,9 +830,18 @@ def _waiting(entry: QueryListEntry) -> str:
 def list_queries(
     ctx: typer.Context,
     env: _ENV = None,
+    all_environments: Annotated[
+        bool,
+        typer.Option(
+            "--all-environments",
+            help="The queries of every environment you may query, with an environment column.",
+        ),
+    ] = False,
     all_: Annotated[
         bool,
-        typer.Option("--all", help="Also the queries that ended in the last 24 hours."),
+        typer.Option(
+            "--all", help="Also the queries that ended in the last 24 hours (or since --since)."
+        ),
     ] = False,
     status: Annotated[
         list[str] | None,
@@ -838,12 +849,28 @@ def list_queries(
             "--status",
             help="Only queries in this status: queued, running, succeeded, failed or cancelled. "
             "Repeat the option or separate the values with commas. An ended status lists the "
-            "ended queries of the last 24 hours without --all.",
+            "ended queries of the last 24 hours (or since --since) without --all.",
         ),
     ] = None,
     submitter: Annotated[
         str | None,
         typer.Option("--submitter", help="Only the queries this principal submitted."),
+    ] = None,
+    origin: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--origin",
+            help="Only queries from here: written, preview, check, write, maintenance or task. "
+            "Repeat the option or separate the values with commas.",
+        ),
+    ] = None,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="The ended queries are those that ended at or after this date or time "
+            "(2026-10-18 or 2026-10-18T09:30:00Z), of any age, instead of the last 24 hours.",
+        ),
     ] = None,
     limit: Annotated[
         int, typer.Option("--limit", min=1, max=_LIST_MOST, help="Most queries to list.")
@@ -857,9 +884,10 @@ def list_queries(
 
     Running queries come first, then queued ones in the order they will be taken, with the
     reason each waits. You see your own queries; with MANAGE_ENVIRONMENT on the environment,
-    everyone's, and --submitter narrows them to one principal's. The SQL and the error text are
-    not listed: read them with 'lakana query status ID'. A long list prints a "More results"
-    line with the command that shows the next page.
+    everyone's, and --submitter narrows them to one principal's. --all-environments lists
+    every environment you may query at once. The SQL and the error text are not listed: read
+    them with 'lakana query status ID'. A long list prints a "More results" line with the
+    command that shows the next page.
 
     Parameters
     ----------
@@ -867,42 +895,67 @@ def list_queries(
         The Typer context.
     env
         The environment.
+    all_environments
+        List every environment you may query instead of one; not with `--env`.
     all_
-        Add the queries that ended in the last 24 hours, newest first, after the others.
+        Add the queries that ended in the last 24 hours (or since `--since`), newest first,
+        after the others.
     status
         Status filter.
     submitter
         Submitter filter.
+    origin
+        Origin filter.
+    since
+        The oldest end time of a listed ended query.
     limit
         Most queries listed (1 to 200).
     cursor
         The cursor of the page to show.
+
+    Raises
+    ------
+    CliError
+        If `--all-environments` is given with `--env`.
     """
     state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    page = state.client().queries.list_page(
-        environment,
-        include_ended=all_,
-        status=status,
-        submitter=submitter,
-        limit=limit,
-        cursor=cursor,
-    )
+    if all_environments and env is not None:
+        raise CliError("--all-environments lists every environment; leave out --env.")
+    after = parse_since(since)
+    queries = state.client().queries
+    environment = None if all_environments else resolve_environment(state, env)
+    if environment is None:
+        page = queries.list_all(
+            include_ended=all_,
+            status=status,
+            submitter=submitter,
+            origin=origin,
+            since=after,
+            limit=limit,
+            cursor=cursor,
+        )
+    else:
+        page = queries.list_page(
+            environment,
+            include_ended=all_,
+            status=status,
+            submitter=submitter,
+            origin=origin,
+            since=after,
+            limit=limit,
+            cursor=cursor,
+        )
     if not page.items and state.output != "json":
-        where = _output.inline(environment)
-        if status or submitter is not None or cursor is not None:
-            typer.echo(f"No queries in {where} match.")
-        else:
-            typer.echo(
-                f"No queries in {where} in the last 24 hours."
-                if all_
-                else f"No queued or running queries in {where}."
+        typer.echo(
+            _nothing_listed(
+                environment, all_, since, filtered=bool(status or submitter or origin or cursor)
             )
+        )
         return
     _output.emit(
         state,
         page.items,
-        columns=_LIST_COLUMNS,
+        columns=_ALL_COLUMNS if all_environments else _LIST_COLUMNS,
         droppable=_LIST_DROPPABLE,
         derived={"kind": _kind, "age": _age, "waiting_for": _waiting},
         flexible=["waiting_for"],
@@ -912,13 +965,47 @@ def list_queries(
         ["lakana", "query", "list"],
         {
             "--env": environment,
+            "--all-environments": all_environments,
             "--all": all_,
             "--status": status,
             "--submitter": submitter,
+            "--origin": origin,
+            "--since": since,
             "--limit": limit if limit != 100 else None,
         },
         page.next_cursor,
     )
+
+
+def _nothing_listed(
+    environment: str | None, all_: bool, since: str | None, *, filtered: bool
+) -> str:
+    """Say that a query list found nothing, in the words of what was asked.
+
+    Parameters
+    ----------
+    environment
+        The environment listed, or `None` for every environment.
+    all_
+        Whether ended queries were asked for.
+    since
+        `--since` as typed, or `None`.
+    filtered
+        Whether a filter or a cursor narrowed the list.
+
+    Returns
+    -------
+    str
+        The line to print.
+    """
+    where = "any environment" if environment is None else _output.inline(environment)
+    if filtered:
+        return f"No queries in {where} match."
+    if not all_:
+        return f"No queued or running queries in {where}."
+    if since is not None:
+        return f"No queries in {where} since {_output.inline(since)}."
+    return f"No queries in {where} in the last 24 hours."
 
 
 @query_app.command("submit")

@@ -27,6 +27,7 @@ from lakana_core.auth import (
 from lakana_core.catalog.identity import resolve_environment_id
 from lakana_core.catalog.query_service import (
     QUERY_LIST_ENDED_SECONDS,
+    QueryEnvironment,
     QueryListItem,
     QueryService,
 )
@@ -1833,6 +1834,8 @@ def test_no_row_carries_sql_an_error_message_or_lineage(
 ) -> None:
     assert [f.name for f in dataclasses.fields(QueryListItem)] == [
         "id",
+        "environment",
+        "origin",
         "submitter",
         "kind",
         "target",
@@ -2340,6 +2343,266 @@ def test_a_final_run_without_a_finish_time_is_not_listed_under_all(
     listed = _add_run(session, env, principal, QueryRunStatus.SUCCEEDED, finished_at=_ago(5))
     rows = QueryService(session, SUBMITTER).list_queries(principal, "dev", include_ended=True)
     assert _ids(rows) == [listed.id]
+
+
+# -- the list across environments -----------------------------------
+
+
+class _ByEnvironment:
+    """Permits actions per environment, and records each batch of questions it is asked.
+
+    Parameters
+    ----------
+    rights
+        The actions permitted, by environment name.
+    """
+
+    def __init__(self, rights: dict[str, set[Action]]) -> None:
+        self.rights = rights
+        self.batches: list[list[tuple[Action, Securable]]] = []
+
+    def authorize(self, principal: PrincipalRef, action: Action, securable: Securable) -> None:
+        """Refuse what `permits` refuses.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Raises
+        ------
+        PermissionDenied
+            If the action is not permitted on the securable's environment.
+        """
+        if not self.permits(principal, action, securable):
+            raise PermissionDenied(f"may not {action.value}")
+
+    def permits(self, principal: PrincipalRef, action: Action, securable: Securable) -> bool:
+        """Answer from the rights of the securable's environment.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        action
+            The action.
+        securable
+            The object.
+
+        Returns
+        -------
+        bool
+            Whether the action is in that environment's rights.
+        """
+        return action in self.rights.get(securable.environment or "", set())
+
+    def permits_each(
+        self, principal: PrincipalRef, questions: list[tuple[Action, Securable]]
+    ) -> list[bool]:
+        """Record the batch and answer each question as `permits`.
+
+        Parameters
+        ----------
+        principal
+            The actor.
+        questions
+            The `(action, securable)` pairs.
+
+        Returns
+        -------
+        list of bool
+            One answer per question.
+        """
+        self.batches.append(list(questions))
+        return [self.permits(principal, action, securable) for action, securable in questions]
+
+
+_QUERY = {Action.SUBMIT_QUERY}
+_MANAGE = {Action.SUBMIT_QUERY, Action.MANAGE_ENVIRONMENT}
+
+
+def _viewed_environments(session: Session) -> list[str | None]:
+    """Return the environments of the `ACTIVITY_VIEWED` rows, in the order written.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of str or None
+        Their `securable_environment`.
+    """
+    session.expire_all()
+    return list(
+        session.scalars(
+            select(AuditEvent.securable_environment)
+            .where(AuditEvent.event_type == AuditEventType.ACTIVITY_VIEWED)
+            .order_by(AuditEvent.occurred_at)
+        )
+    )
+
+
+def _every_page(
+    service: QueryService, p: PrincipalRef, size: int, *, include_ended: bool
+) -> list[QueryListItem]:
+    """Read every page of the list across environments.
+
+    Parameters
+    ----------
+    service
+        The service.
+    p
+        The caller.
+    size
+        The page size.
+    include_ended
+        The filter, sent with every page.
+
+    Returns
+    -------
+    list of QueryListItem
+        Every row, in order.
+    """
+    seen: list[QueryListItem] = []
+    cursor = None
+    while True:
+        items, cursor = service.list_all_queries_page(
+            p, include_ended=include_ended, limit=size, cursor=cursor
+        )
+        seen += items
+        if cursor is None:
+            return seen
+
+
+def test_the_cross_environment_list_pages_every_row_once_across_environments(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    dev = _env(session, principal, tmp_path, "dev")
+    stage = _env(session, principal, tmp_path, "stage")
+    prod = _env(session, principal, tmp_path, "prod")
+    bob = _persisted(session, "bob")
+    same = _ago(100)
+    # 7 rows over 3 environments; dev is managed, stage and prod are the caller's own only
+    a = _add_run(session, dev, bob, QueryRunStatus.RUNNING, started_at=same)
+    b = _add_run(session, prod, principal, QueryRunStatus.RUNNING, started_at=same)
+    c = _add_run(session, stage, principal, created_at=_ago(50))
+    d = _add_run(session, dev, principal, created_at=_ago(40))
+    _add_run(session, stage, bob, created_at=_ago(45))
+    e = _add_run(session, dev, bob, QueryRunStatus.FAILED, age=500, finished_at=_ago(30))
+    _add_run(session, prod, bob, QueryRunStatus.SUCCEEDED, age=500, finished_at=_ago(20))
+    service = QueryService(
+        session, _ByEnvironment({"dev": _MANAGE, "stage": _QUERY, "prod": _QUERY})
+    )
+    expected = [*sorted([a.id, b.id]), c.id, d.id, e.id]
+    for size in (1, 2, 3, 7):
+        rows = _every_page(service, principal, size, include_ended=True)
+        assert _ids(rows) == expected, size
+    rows = _every_page(service, principal, 2, include_ended=True)
+    by_id = {row.id: row.environment for row in rows}
+    assert (by_id[a.id], by_id[b.id], by_id[c.id]) == ("dev", "prod", "stage")
+
+
+def test_the_cross_environment_list_skips_environments_you_may_not_query(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    dev = _env(session, principal, tmp_path, "dev")
+    stage = _env(session, principal, tmp_path, "stage")
+    mine = _add_run(session, dev, principal)
+    _add_run(session, stage, principal)
+    authz = _ByEnvironment({"dev": _QUERY, "stage": {Action.READ_ENVIRONMENT}})
+    items, cursor = QueryService(session, authz).list_all_queries_page(principal)
+    assert (_ids(items), cursor) == ([mine.id], None)
+    assert len(authz.batches) == 1
+    assert QueryService(session, _ByEnvironment({})).list_all_queries_page(principal) == (
+        [],
+        None,
+    )
+
+
+def test_a_managers_cross_environment_page_audits_each_environment_with_others_rows(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    dev = _env(session, principal, tmp_path, "dev")
+    stage = _env(session, principal, tmp_path, "stage")
+    prod = _env(session, principal, tmp_path, "prod")
+    lab = _env(session, principal, tmp_path, "lab")
+    bob = _persisted(session, "bob")
+    _add_run(session, dev, bob, age=40)
+    _add_run(session, stage, bob, age=30)
+    _add_run(session, prod, principal, age=20)
+    _add_run(session, lab, bob, age=10)
+    rights = {"dev": _MANAGE, "stage": _MANAGE, "prod": _MANAGE, "lab": _QUERY}
+    items, _ = QueryService(session, _ByEnvironment(rights)).list_all_queries_page(principal)
+    assert [item.environment for item in items] == ["dev", "stage", "prod"]
+    assert set(_viewed_environments(session)) == {"dev", "stage"}
+    assert len(_viewed_environments(session)) == 2
+
+
+def test_a_task_token_sees_only_its_own_runs_across_environments(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    dev = _env(session, principal, tmp_path, "dev")
+    stage = _env(session, principal, tmp_path, "stage")
+    token_id = uuid.uuid4()
+    token = PrincipalRef(
+        id=principal.id,
+        name=principal.name,
+        type=principal.type,
+        task_scope=TaskScope(environment="dev", asset_scope=["gold.*"], token_id=token_id),
+    )
+    own = _add_run(session, dev, principal, task_token_id=token_id, origin=QueryOrigin.TASK)
+    _add_run(session, dev, principal)
+    _add_run(session, stage, principal, task_token_id=uuid.uuid4())
+    _add_run(session, dev, _persisted(session, "bob"), task_token_id=token_id)
+    authz = _ByEnvironment({"dev": _MANAGE, "stage": _MANAGE})
+    items, _ = QueryService(session, authz).list_all_queries_page(token)
+    assert [(item.id, item.origin) for item in items] == [(own.id, "task")]
+    asked = [action for batch in authz.batches for action, _securable in batch]
+    assert Action.MANAGE_ENVIRONMENT not in asked
+    assert _viewed_environments(session) == []
+
+
+def test_a_cursor_of_the_per_environment_list_is_refused_by_the_cross_environment_list(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    dev = _env(session, principal, tmp_path, "dev")
+    for age in (30, 20, 10):
+        _add_run(session, dev, principal, age=age)
+    service = QueryService(session, SUBMITTER)
+    _, per_environment = service.list_queries_page(principal, "dev", limit=1)
+    assert per_environment is not None
+    with pytest.raises(ValidationError, match="came from the `queries` list"):
+        service.list_all_queries_page(principal, cursor=per_environment)
+    _, across = service.list_all_queries_page(principal, limit=1)
+    assert across is not None
+    with pytest.raises(ValidationError, match="came from the `all-queries` list"):
+        service.list_queries_page(principal, "dev", cursor=across)
+
+
+def test_query_environments_lists_where_you_may_submit_with_protection(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _env(session, principal, tmp_path, "stage")
+    prod = _env(session, principal, tmp_path, "prod")
+    _env(session, principal, tmp_path, "dev")
+    prod.is_protected = True
+    session.commit()
+    stage = {Action.READ_ENVIRONMENT, Action.MANAGE_ENVIRONMENT}
+    authz = _ByEnvironment({"dev": _QUERY, "prod": _QUERY, "stage": stage})
+    found = QueryService(session, authz).query_environments(principal)
+    assert found == [
+        QueryEnvironment(name="dev", protected=False),
+        QueryEnvironment(name="prod", protected=True),
+    ]
+    assert len(authz.batches) == 1
+    assert {action for action, _securable in authz.batches[0]} == {Action.SUBMIT_QUERY}
+    assert len(authz.batches[0]) == 3
 
 
 class _FakePostgresCancel:

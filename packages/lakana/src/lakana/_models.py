@@ -1341,6 +1341,11 @@ class QueryListEntry:
         only on the status.
     waiting_for
         Why a `QUEUED` query has not started; `None` for any other status.
+    environment
+        The name of the query's environment; `None` from a server that does not send it.
+    origin
+        Where the query came from: `written`, `preview`, `check`, `write`, `maintenance` or
+        `task`, kept as the server sent it; `None` from a server that does not send it.
     """
 
     id: str
@@ -1353,6 +1358,24 @@ class QueryListEntry:
     finished_at: datetime | None
     error_cause: str | None
     waiting_for: WaitingFor | None
+    environment: str | None = None
+    origin: str | None = None
+
+
+@dataclass(frozen=True)
+class QueryEnvironment:
+    """An environment where you may submit a query (`client.queries.environments`).
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    protected
+        Whether the environment is protected.
+    """
+
+    name: str
+    protected: bool
 
 
 @dataclass(frozen=True)
@@ -3251,7 +3274,7 @@ class TaskHistoryPage:
 
 @dataclass(frozen=True)
 class QueryListPage:
-    """One page of the queries of an environment.
+    """One page of the queries of an environment, or of every environment you may query.
 
     Parameters
     ----------

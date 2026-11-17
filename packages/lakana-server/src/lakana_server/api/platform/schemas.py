@@ -5285,6 +5285,11 @@ class QueryListOut(BaseModel):
     ----------
     id
         The query's id.
+    environment
+        The name of the query's environment.
+    origin
+        Where the query came from: `written`, `preview`, `check`, `write`, `maintenance` or
+        `task`. A client treats a value it does not know as `written`.
     submitter
         The submitting principal's name, `null` when it was deleted.
     kind
@@ -5308,6 +5313,8 @@ class QueryListOut(BaseModel):
     """
 
     id: str
+    environment: str
+    origin: str
     submitter: str | None
     kind: str
     target: str | None
@@ -5323,6 +5330,37 @@ class QueryListOut(BaseModel):
             "`message`, and the numbers the sentence uses."
         ),
     )
+
+
+class QueryListPageOut(BaseModel):
+    """One page of the queries of every environment the caller may query.
+
+    Parameters
+    ----------
+    items
+        The rows of the page, in the order of the per-environment list.
+    next_cursor
+        Pass back as `cursor` with the same filters for the next page; `null` on the last.
+    """
+
+    items: list[QueryListOut]
+    next_cursor: str | None
+
+
+class QueryEnvironmentOut(BaseModel):
+    """An environment where the caller may submit a query.
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    protected
+        Whether the environment is protected (`is_protected` of the environment): a write
+        outside a run there needs a break-glass reason.
+    """
+
+    name: str
+    protected: bool
 
 
 class WorkerCachesOut(BaseModel):

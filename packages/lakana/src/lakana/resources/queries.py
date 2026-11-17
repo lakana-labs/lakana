@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -16,11 +16,13 @@ from lakana._http import (
     NEXT_CURSOR_HEADER,
     HttpTransport,
     csv_param,
+    every_page,
     query_params,
     retry_wait,
 )
 from lakana._models import (
     MaskedColumn,
+    QueryEnvironment,
     QueryListEntry,
     QueryListPage,
     QueryStatus,
@@ -32,6 +34,7 @@ from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse, QueryFailed, ServerError, ValidationError
 
 _EntryList = list[QueryListEntry]
+_EnvironmentList = list[QueryEnvironment]
 
 
 def _int(value: object) -> int | None:
@@ -186,6 +189,52 @@ def _entry_from_json(data: dict[str, Any]) -> QueryListEntry:
         finished_at=None if finished is None else datetime.fromisoformat(finished),
         error_cause=data["error_cause"],
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
+        environment=data.get("environment"),
+        origin=data.get("origin"),
+    )
+
+
+def _list_params(
+    include_ended: bool,
+    status: str | Sequence[str] | None,
+    submitter: str | None,
+    origin: str | Sequence[str] | None,
+    since: datetime | None,
+    limit: int,
+    cursor: str | None,
+) -> dict[str, object]:
+    """Build the query parameters of the query lists.
+
+    Parameters
+    ----------
+    include_ended
+        Also list the ended queries.
+    status
+        The status filter.
+    submitter
+        The submitter filter.
+    origin
+        The origin filter.
+    since
+        The oldest end time of a listed ended query.
+    limit
+        The page size.
+    cursor
+        The cursor of the page.
+
+    Returns
+    -------
+    dict of str to object
+        The parameters that are set.
+    """
+    return query_params(
+        include_ended="true" if include_ended else "false",
+        status=csv_param(status),
+        submitter=submitter,
+        origin=csv_param(origin),
+        since=None if since is None else since.isoformat(),
+        limit=limit,
+        cursor=cursor,
     )
 
 
@@ -491,8 +540,8 @@ class Queries:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    # `list` and `list_page` take the same filters and each documents them: a public method
-    # states its own parameters.
+    # `list`, `list_page`, `list_all` and `iter_all` take the same filters and each documents
+    # them: a public method states its own parameters.
     # jscpd:ignore-start
     def list(
         self,
@@ -501,6 +550,8 @@ class Queries:
         include_ended: bool = False,
         status: str | Sequence[str] | None = None,
         submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
     ) -> _EntryList:
@@ -511,22 +562,28 @@ class Queries:
         error message or a result, not even your own: read those through the query's status.
         Running queries come first, longest running first, then queued ones in the order they
         will be taken, with the reason each waits in `waiting_for`; with `include_ended`, then
-        the queries that ended in the last 24 hours, newest first. `limit` cuts that order.
-        `status` and `submitter` only narrow what you may see; `list_page` also returns the
-        cursor of the next page.
+        the queries that ended in the last 24 hours (or since `since`), newest first. `limit`
+        cuts that order. `status`, `submitter` and `origin` only narrow what you may see;
+        `list_page` also returns the cursor of the next page.
 
         Parameters
         ----------
         environment
             The environment.
         include_ended
-            Also list the queries that ended in the last 24 hours.
+            Also list the queries that ended in the last 24 hours (or since `since`).
         status
             Only queries in this status or one of these (``queued``, ``running``,
             ``succeeded``, ``failed``, ``cancelled``). An ended status lists the ended queries
-            of the last 24 hours, with or without `include_ended`.
+            of the last 24 hours (or since `since`), with or without `include_ended`.
         submitter
             Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these (``written``, ``preview``, ``check``,
+            ``write``, ``maintenance``, ``task``).
+        since
+            List the queries that ended at or after this time, of any age, instead of those
+            of the last 24 hours. It needs a time zone.
         limit
             Most entries returned (1 to 200).
         cursor
@@ -544,14 +601,16 @@ class Queries:
         lakana.errors.NotFound
             If the environment does not exist.
         lakana.errors.ValidationError
-            If `limit` is outside 1 to 200, a status is unknown, or `cursor` is not one the
-            server issued for the queries list.
+            If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
+            time zone, or `cursor` is not one the server issued for the queries list.
         """
         return self.list_page(
             environment,
             include_ended=include_ended,
             status=status,
             submitter=submitter,
+            origin=origin,
+            since=since,
             limit=limit,
             cursor=cursor,
         ).items
@@ -563,6 +622,8 @@ class Queries:
         include_ended: bool = False,
         status: str | Sequence[str] | None = None,
         submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
     ) -> QueryListPage:
@@ -573,12 +634,18 @@ class Queries:
         environment
             The environment.
         include_ended
-            Also list the queries that ended in the last 24 hours.
+            Also list the queries that ended in the last 24 hours (or since `since`).
         status
             Only queries in this status or one of these (``queued``, ``running``,
             ``succeeded``, ``failed``, ``cancelled``).
         submitter
             Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these (``written``, ``preview``, ``check``,
+            ``write``, ``maintenance``, ``task``).
+        since
+            List the queries that ended at or after this time, of any age, instead of those
+            of the last 24 hours. It needs a time zone.
         limit
             Most entries returned (1 to 200).
         cursor
@@ -597,26 +664,150 @@ class Queries:
         lakana.errors.NotFound
             If the environment does not exist.
         lakana.errors.ValidationError
-            If `limit` is outside 1 to 200, a status is unknown, or `cursor` is not one the
-            server issued for the queries list.
+            If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
+            time zone, or `cursor` is not one the server issued for the queries list.
         """
         response = self._transport.request(
             ROUTES["queries.list"],
             path_params={"env": environment},
-            params=query_params(
-                include_ended="true" if include_ended else "false",
-                status=csv_param(status),
-                submitter=submitter,
-                limit=limit,
-                cursor=cursor,
-            ),
+            params=_list_params(include_ended, status, submitter, origin, since, limit, cursor),
         )
         return QueryListPage(
             items=[_entry_from_json(item) for item in response.json()],
             next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
         )
 
+    def list_all(
+        self,
+        *,
+        environment: str | None = None,
+        include_ended: bool = False,
+        status: str | Sequence[str] | None = None,
+        submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> QueryListPage:
+        """List one page of the queries of every environment you may query.
+
+        The environments are those where you hold `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`; one
+        where you hold neither is left out, so this is never refused for a missing right. Where
+        you hold `MANAGE_ENVIRONMENT` you see everyone's queries, elsewhere your own. The order
+        is that of `list`, over all those environments, and each entry names its
+        `environment`. With `environment`, this is `list_page` of that environment.
+
+        Parameters
+        ----------
+        environment
+            Only this environment; then a missing right or environment is refused as by `list`.
+        include_ended
+            Also list the queries that ended in the last 24 hours (or since `since`).
+        status
+            Only queries in this status or one of these (``queued``, ``running``,
+            ``succeeded``, ``failed``, ``cancelled``).
+        submitter
+            Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these (``written``, ``preview``, ``check``,
+            ``write``, ``maintenance``, ``task``).
+        since
+            List the queries that ended at or after this time, of any age, instead of those
+            of the last 24 hours. It needs a time zone.
+        limit
+            Most entries returned (1 to 200).
+        cursor
+            A previous page's `next_cursor` of this list. Send the same filters with every page.
+
+        Returns
+        -------
+        QueryListPage
+            The entries, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            With `environment`, if you may not submit queries there.
+        lakana.errors.NotFound
+            With `environment`, if it does not exist.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
+            time zone, or `cursor` is not one the server issued for this list.
+        """
+        params = _list_params(include_ended, status, submitter, origin, since, limit, cursor)
+        response = self._transport.request(
+            ROUTES["queries.list_all"],
+            params=query_params(environment=environment, **params),
+        )
+        body = response.json()
+        return QueryListPage(
+            items=[_entry_from_json(item) for item in body["items"]],
+            next_cursor=body["next_cursor"],
+        )
+
+    def iter_all(
+        self,
+        *,
+        environment: str | None = None,
+        include_ended: bool = False,
+        status: str | Sequence[str] | None = None,
+        submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
+        page_size: int = 100,
+    ) -> Iterator[QueryListEntry]:
+        """Yield every query of every environment you may query, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            Only this environment.
+        include_ended
+            Also the queries that ended in the last 24 hours (or since `since`).
+        status
+            Only queries in this status or one of these.
+        submitter
+            Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these.
+        since
+            The queries that ended at or after this time, of any age. It needs a time zone.
+        page_size
+            Entries per request (1 to 200).
+
+        Yields
+        ------
+        QueryListEntry
+            Each entry, once, in the order of `list_all`.
+        """
+        yield from every_page(
+            lambda cursor: self.list_all(
+                environment=environment,
+                include_ended=include_ended,
+                status=status,
+                submitter=submitter,
+                origin=origin,
+                since=since,
+                limit=page_size,
+                cursor=cursor,
+            )
+        )
+
     # jscpd:ignore-end
+
+    def environments(self) -> _EnvironmentList:
+        """List the environments where you may submit a query, sorted by name.
+
+        Returns
+        -------
+        list of QueryEnvironment
+            Each one's name and whether it is protected; empty when there is none.
+        """
+        response = self._transport.request(ROUTES["queries.environments"])
+        return [
+            QueryEnvironment(name=item["name"], protected=item["protected"])
+            for item in response.json()
+        ]
 
     def submit(
         self,

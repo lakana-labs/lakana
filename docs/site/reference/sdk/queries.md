@@ -11,18 +11,20 @@ The `queries` resource of the platform API.
 
 ### `client.queries.list`
 
-Signature: `client.queries.list(environment: str, *, include_ended: bool = False, status: str | Sequence[str] | None = None, submitter: str | None = None, limit: int = 100, cursor: str | None = None) -> list[QueryListEntry]`
+Signature: `client.queries.list(environment: str, *, include_ended: bool = False, status: str | Sequence[str] | None = None, submitter: str | None = None, origin: str | Sequence[str] | None = None, since: datetime | None = None, limit: int = 100, cursor: str | None = None) -> list[QueryListEntry]`
 
 List the queries of an environment: running, then queued, then (optionally) ended.
 
-With `SUBMIT_QUERY` you see the queries you submitted (a task token: its own); with `MANAGE_ENVIRONMENT` on the environment, everyone's. A row never holds the SQL text, an error message or a result, not even your own: read those through the query's status. Running queries come first, longest running first, then queued ones in the order they will be taken, with the reason each waits in `waiting_for`; with `include_ended`, then the queries that ended in the last 24 hours, newest first. `limit` cuts that order. `status` and `submitter` only narrow what you may see; `list_page` also returns the cursor of the next page.
+With `SUBMIT_QUERY` you see the queries you submitted (a task token: its own); with `MANAGE_ENVIRONMENT` on the environment, everyone's. A row never holds the SQL text, an error message or a result, not even your own: read those through the query's status. Running queries come first, longest running first, then queued ones in the order they will be taken, with the reason each waits in `waiting_for`; with `include_ended`, then the queries that ended in the last 24 hours (or since `since`), newest first. `limit` cuts that order. `status`, `submitter` and `origin` only narrow what you may see; `list_page` also returns the cursor of the next page.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `environment` | `str` | required | The environment. |
-| `include_ended` | `bool` | `False` | Also list the queries that ended in the last 24 hours. |
-| `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). An ended status lists the ended queries of the last 24 hours, with or without `include_ended`. |
+| `include_ended` | `bool` | `False` | Also list the queries that ended in the last 24 hours (or since `since`). |
+| `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). An ended status lists the ended queries of the last 24 hours (or since `since`), with or without `include_ended`. |
 | `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
+| `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these (``written``, ``preview``, ``check``, ``write``, ``maintenance``, ``task``). |
+| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours. It needs a time zone. |
 | `limit` | `int` | `100` | Most entries returned (1 to 200). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
 
@@ -32,20 +34,22 @@ Returns: `list of QueryListEntry`. The entries, in the order above.
 |---|---|
 | `lakana.PermissionDenied` | If you may not submit queries in this environment. |
 | `lakana.NotFound` | If the environment does not exist. |
-| `lakana.ValidationError` | If `limit` is outside 1 to 200, a status is unknown, or `cursor` is not one the server issued for the queries list. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no time zone, or `cursor` is not one the server issued for the queries list. |
 
 ### `client.queries.list_page`
 
-Signature: `client.queries.list_page(environment: str, *, include_ended: bool = False, status: str | Sequence[str] | None = None, submitter: str | None = None, limit: int = 100, cursor: str | None = None) -> QueryListPage`
+Signature: `client.queries.list_page(environment: str, *, include_ended: bool = False, status: str | Sequence[str] | None = None, submitter: str | None = None, origin: str | Sequence[str] | None = None, since: datetime | None = None, limit: int = 100, cursor: str | None = None) -> QueryListPage`
 
 List one page of the queries of an environment, with the cursor of the next page.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `environment` | `str` | required | The environment. |
-| `include_ended` | `bool` | `False` | Also list the queries that ended in the last 24 hours. |
+| `include_ended` | `bool` | `False` | Also list the queries that ended in the last 24 hours (or since `since`). |
 | `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). |
 | `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
+| `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these (``written``, ``preview``, ``check``, ``write``, ``maintenance``, ``task``). |
+| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours. It needs a time zone. |
 | `limit` | `int` | `100` | Most entries returned (1 to 200). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
 
@@ -55,7 +59,60 @@ Returns: `QueryListPage`. The entries in the order of `list`, and the cursor for
 |---|---|
 | `lakana.PermissionDenied` | If you may not submit queries in this environment. |
 | `lakana.NotFound` | If the environment does not exist. |
-| `lakana.ValidationError` | If `limit` is outside 1 to 200, a status is unknown, or `cursor` is not one the server issued for the queries list. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no time zone, or `cursor` is not one the server issued for the queries list. |
+
+### `client.queries.list_all`
+
+Signature: `client.queries.list_all(*, environment: str | None = None, include_ended: bool = False, status: str | Sequence[str] | None = None, submitter: str | None = None, origin: str | Sequence[str] | None = None, since: datetime | None = None, limit: int = 100, cursor: str | None = None) -> QueryListPage`
+
+List one page of the queries of every environment you may query.
+
+The environments are those where you hold `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`; one where you hold neither is left out, so this is never refused for a missing right. Where you hold `MANAGE_ENVIRONMENT` you see everyone's queries, elsewhere your own. The order is that of `list`, over all those environments, and each entry names its `environment`. With `environment`, this is `list_page` of that environment.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment; then a missing right or environment is refused as by `list`. |
+| `include_ended` | `bool` | `False` | Also list the queries that ended in the last 24 hours (or since `since`). |
+| `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). |
+| `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
+| `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these (``written``, ``preview``, ``check``, ``write``, ``maintenance``, ``task``). |
+| `since` | `datetime | None` | `None` | List the queries that ended at or after this time, of any age, instead of those of the last 24 hours. It needs a time zone. |
+| `limit` | `int` | `100` | Most entries returned (1 to 200). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same filters with every page. |
+
+Returns: `QueryListPage`. The entries, and the cursor for the next page (`None` on the last).
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | With `environment`, if you may not submit queries there. |
+| `lakana.NotFound` | With `environment`, if it does not exist. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no time zone, or `cursor` is not one the server issued for this list. |
+
+### `client.queries.iter_all`
+
+Signature: `client.queries.iter_all(*, environment: str | None = None, include_ended: bool = False, status: str | Sequence[str] | None = None, submitter: str | None = None, origin: str | Sequence[str] | None = None, since: datetime | None = None, page_size: int = 100) -> Iterator[QueryListEntry]`
+
+Yield every query of every environment you may query, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment. |
+| `include_ended` | `bool` | `False` | Also the queries that ended in the last 24 hours (or since `since`). |
+| `status` | `str | Sequence[str] | None` | `None` | Only queries in this status or one of these. |
+| `submitter` | `str | None` | `None` | Only the queries submitted by the principal with this name. |
+| `origin` | `str | Sequence[str] | None` | `None` | Only queries of this origin or one of these. |
+| `since` | `datetime | None` | `None` | The queries that ended at or after this time, of any age. It needs a time zone. |
+| `page_size` | `int` | `100` | Entries per request (1 to 200). |
+
+Yields: `QueryListEntry`. Each entry, once, in the order of `list_all`.
+
+### `client.queries.environments`
+
+Signature: `client.queries.environments() -> list[QueryEnvironment]`
+
+List the environments where you may submit a query, sorted by name.
+
+Returns: `list of QueryEnvironment`. Each one's name and whether it is protected; empty when there is none.
 
 ### `client.queries.submit`
 

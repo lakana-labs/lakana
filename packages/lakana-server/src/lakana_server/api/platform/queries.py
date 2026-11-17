@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal
 
 import pyarrow as pa
@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.preview import PREVIEW_ROW_LIMIT, previewed_table
-from lakana_core.catalog.query_service import QUERY_LIST_MAX, QueryService, WriteTarget
+from lakana_core.catalog.query_service import (
+    QUERY_LIST_MAX,
+    QueryListItem,
+    QueryService,
+    WriteTarget,
+)
 from lakana_core.errors import ConflictError, ValidationError
 from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus, WriteMode
 from lakana_core.runs.waiting import WaitReason
@@ -20,7 +25,9 @@ from lakana_core.secrets.keys import KeyProvider
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.api.platform.listing import set_next_cursor, split_values
 from lakana_server.api.platform.schemas import (
+    QueryEnvironmentOut,
     QueryListOut,
+    QueryListPageOut,
     QueryStatusOut,
     QuerySubmit,
     QuerySubmitOut,
@@ -46,6 +53,14 @@ router = APIRouter(
     tags=["queries"],
     responses=errors(401),
 )
+
+all_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/queries",
+    tags=["queries"],
+    responses=errors(401),
+)
+"""The queries of every environment the caller may query, and those environments."""
 
 _SQL_SHOWN = frozenset({QueryOrigin.WRITTEN, QueryOrigin.WRITE})
 """The origins whose SQL the status read gives back: what the submitter wrote themselves."""
@@ -106,6 +121,8 @@ def list_queries(
     include_ended: bool = Query(default=False),
     status: list[str] = Query(default=[], max_length=16),
     submitter: str | None = Query(default=None, max_length=255),
+    origin: list[str] = Query(default=[], max_length=16),
+    since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=QUERY_LIST_MAX),
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
@@ -118,9 +135,10 @@ def list_queries(
     `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries
     they submitted. The list never shows SQL text, error messages or results. The cursor of
     the next page is in the `X-Next-Cursor` response header and is absent on the last page;
-    send the same filters with every page. Answers 404 when the environment does not exist.
-    Answers 503 when a manager's page shows someone else's queries and the audit entry for
-    that could not be written; nothing is listed then.
+    send the same filters with every page. Answers 404 when the environment does not exist,
+    and 422 for an unknown status or origin or a `since` without a time zone. Answers 503
+    when a manager's page shows someone else's queries and the audit entry for that could not
+    be written; nothing is listed then.
 
     Parameters
     ----------
@@ -129,14 +147,20 @@ def list_queries(
     response
         The response, to set the cursor header on.
     include_ended
-        Also list the queries that ended in the last 24 hours.
+        Also list the queries that ended in the last 24 hours (or since `since`).
     status
         Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`,
         `cancelled`; any letter case); repeat the parameter or separate the values with commas.
-        An ended status lists the ended queries of the last 24 hours, with or without
-        `include_ended`.
+        An ended status lists the ended queries of the last 24 hours (or since `since`), with
+        or without `include_ended`.
     submitter
         Only queries submitted by the principal with this name.
+    origin
+        Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`,
+        `task`); repeat the parameter or separate the values with commas.
+    since
+        The ended queries listed are those that ended at or after this ISO 8601 time, with a
+        time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours.
     limit
         Most rows returned (1 to 200).
     cursor
@@ -169,24 +193,153 @@ def list_queries(
         include_ended=include_ended,
         status=split_values(status),
         submitter=submitter,
+        origin=split_values(origin),
+        since=since,
         limit=limit,
         cursor=cursor,
     )
     set_next_cursor(response, next_cursor)
+    return [_list_out(item) for item in items]
+
+
+def _list_out(item: QueryListItem) -> QueryListOut:
+    """Build one row of a query list.
+
+    Parameters
+    ----------
+    item
+        The row `QueryService` listed.
+
+    Returns
+    -------
+    QueryListOut
+        The row as the routes answer it.
+    """
+    return QueryListOut(
+        id=str(item.id),
+        environment=item.environment,
+        origin=item.origin,
+        submitter=item.submitter,
+        kind=item.kind,
+        target=item.target,
+        status=item.status,
+        created_at=item.created_at,
+        started_at=item.started_at,
+        finished_at=item.finished_at,
+        error_cause=item.error_cause,
+        waiting_for=None if item.waiting_for is None else item.waiting_for.to_json(),
+    )
+
+
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_queries`.
+# jscpd:ignore-start
+@all_router.get("", response_model=QueryListPageOut, responses=errors(403, 404, 503))
+def list_all_queries(
+    environment: str | None = Query(default=None, max_length=255),
+    include_ended: bool = Query(default=False),
+    status: list[str] = Query(default=[], max_length=16),
+    submitter: str | None = Query(default=None, max_length=255),
+    origin: list[str] = Query(default=[], max_length=16),
+    since: datetime | None = None,
+    limit: int = Query(default=100, ge=1, le=QUERY_LIST_MAX),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    queries: QueryService = Depends(get_query_service),
+) -> QueryListPageOut:
+    """List the queries of every environment you may query.
+
+    Without `environment`, lists the queries of every environment where you hold
+    `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`, in the order of the list of one environment:
+    running, then queued, then (when asked) ended. Where you hold `MANAGE_ENVIRONMENT` you see
+    everyone's queries, elsewhere your own; a task's token sees its own. An environment where
+    you hold neither is left out, so this is never a 403 or a 404. With `environment`, it
+    answers exactly what `GET /api/v1/environments/{env}/queries` answers, with its 403 and
+    404, in this body. Each row names its `environment`. Send `next_cursor` back as `cursor`
+    with the same filters for the next page; a cursor of the list of one environment is
+    refused with 422 here.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    include_ended
+        Also list the queries that ended in the last 24 hours (or since `since`).
+    status
+        Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`,
+        `cancelled`; any letter case); repeat the parameter or separate the values with commas.
+    submitter
+        Only queries submitted by the principal with this name.
+    origin
+        Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`,
+        `task`); repeat the parameter or separate the values with commas.
+    since
+        The ended queries listed are those that ended at or after this ISO 8601 time, with a
+        time zone, of any age, instead of those of the last 24 hours.
+    limit
+        Most rows returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    queries
+        The query service for this request.
+
+    Returns
+    -------
+    QueryListPageOut
+        The rows and the cursor of the next page (`null` on the last).
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403, with `environment` only, as the list of one environment.
+    lakana_core.errors.NotFoundError
+        Mapped to 404, with `environment` only, if it does not exist.
+    lakana_core.errors.AuditUnavailableError
+        Mapped to 503 with `Retry-After`, if a manager's page shows or targets someone else's
+        queries and its `ACTIVITY_VIEWED` audit row could not be written; nothing is listed.
+    """
+    # jscpd:ignore-end
+    items, next_cursor = queries.list_all_queries_page(
+        principal,
+        environment=environment,
+        include_ended=include_ended,
+        status=split_values(status),
+        submitter=submitter,
+        origin=split_values(origin),
+        since=since,
+        limit=limit,
+        cursor=cursor,
+    )
+    return QueryListPageOut(items=[_list_out(item) for item in items], next_cursor=next_cursor)
+
+
+@all_router.get("/environments", response_model=list[QueryEnvironmentOut])
+def list_query_environments(
+    principal: PrincipalRef = Depends(get_principal),
+    queries: QueryService = Depends(get_query_service),
+) -> list[QueryEnvironmentOut]:
+    """List the environments where you may submit a query.
+
+    Every environment where you hold `SUBMIT_QUERY`, sorted by name, and whether it is
+    protected. Empty when there is none; never a 403.
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    queries
+        The query service for this request.
+
+    Returns
+    -------
+    list of QueryEnvironmentOut
+        The environments.
+    """
     return [
-        QueryListOut(
-            id=str(item.id),
-            submitter=item.submitter,
-            kind=item.kind,
-            target=item.target,
-            status=item.status,
-            created_at=item.created_at,
-            started_at=item.started_at,
-            finished_at=item.finished_at,
-            error_cause=item.error_cause,
-            waiting_for=None if item.waiting_for is None else item.waiting_for.to_json(),
-        )
-        for item in items
+        QueryEnvironmentOut(name=env.name, protected=env.protected)
+        for env in queries.query_environments(principal)
     ]
 
 

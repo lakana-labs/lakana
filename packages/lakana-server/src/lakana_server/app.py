@@ -53,6 +53,7 @@ from lakana_server.api.platform.passkeys import router as passkeys_router
 from lakana_server.api.platform.pictures import PICTURE_DECODE_SLOTS
 from lakana_server.api.platform.pictures import router as pictures_router
 from lakana_server.api.platform.principals import router as principals_router
+from lakana_server.api.platform.queries import all_router as queries_all_router
 from lakana_server.api.platform.queries import router as queries_router
 from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
 from lakana_server.api.platform.recovery_links import router as recovery_link_router
@@ -103,6 +104,7 @@ ROUTERS = (
     environments_router,
     namespaces_router,
     queries_router,
+    queries_all_router,
     tables_router,
     dropped_tables_router,
     environment_dropped_tables_router,

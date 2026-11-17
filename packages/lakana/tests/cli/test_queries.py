@@ -914,6 +914,8 @@ def _entry(**more: object) -> dict[str, object]:
     """
     return {
         "id": _LIST_ID,
+        "environment": "dev",
+        "origin": "written",
         "submitter": "alice",
         "kind": "read",
         "target": None,
@@ -1168,6 +1170,65 @@ def test_a_cursor_is_sent_and_a_filter_that_finds_nothing_says_so(tmp_path: Path
     named = invoke(state, "query", "list", "--env", "dev", "--submitter", "bob")
     assert "No queries in dev match." in named.stdout
     assert api.requests[-1].url.params["submitter"] == "bob"
+
+
+def test_query_list_all_environments_adds_the_environment_column(tmp_path: Path) -> None:
+    api = FakeApi()
+    rows = [
+        _entry(environment="prod", origin="written"),
+        _entry(id="b" * 8 + _LIST_ID[8:], environment="stage", origin="task"),
+    ]
+    api.on("GET", "/api/v1/queries", json={"items": rows, "next_cursor": "all-1"})
+    result = invoke(
+        make_state(tmp_path, api),
+        "query",
+        "list",
+        "--all-environments",
+        "--all",
+        "--since",
+        "2026-10-01T00:00:00Z",
+        env={"COLUMNS": "200"},
+    )
+    assert result.exit_code == 0, result.stderr
+    header = next(line for line in result.stdout.splitlines() if " id " in line)
+    assert header.index("environment") < header.index("submitter")
+    assert header.index("id") < header.index("environment")
+    assert "prod" in result.stdout
+    assert "stage" in result.stdout
+    params = api.requests[-1].url.params
+    assert "environment" not in params
+    assert (params["include_ended"], params["since"]) == ("true", "2026-10-01T00:00:00+00:00")
+    assert (
+        "More results: lakana query list --all-environments --all --since 2026-10-01T00:00:00Z "
+        "--cursor all-1" in result.stdout
+    )
+    both = invoke(make_state(tmp_path, api), "query", "list", "--all-environments", "--env", "dev")
+    assert both.exit_code == 2
+    assert "--all-environments" in both.stderr
+    empty = FakeApi()
+    empty.on("GET", "/api/v1/queries", json={"items": [], "next_cursor": None})
+    nothing = invoke(make_state(tmp_path, empty), "query", "list", "--all-environments")
+    assert "No queued or running queries in any environment." in nothing.stdout
+
+
+def test_query_list_origin_is_repeatable(tmp_path: Path) -> None:
+    api = _list_api(_entry(origin="task", environment="dev"))
+    result = invoke(
+        make_state(tmp_path, api),
+        "query",
+        "list",
+        "--env",
+        "dev",
+        "--origin",
+        "written",
+        "--origin",
+        "task",
+        env={"COLUMNS": "200"},
+    )
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.params["origin"] == "written,task"
+    header = next(line for line in result.stdout.splitlines() if " id " in line)
+    assert "environment" not in header
 
 
 def test_query_list_limit_is_bounded_before_a_request(tmp_path: Path) -> None:

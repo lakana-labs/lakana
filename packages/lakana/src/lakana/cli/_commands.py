@@ -81,7 +81,12 @@ COMMANDS: dict[str, tuple[str, ...]] = {
         "tables.set_retention",
     ),
     "query submit": ("queries.submit",),
-    "query list": ("queries.list", "queries.list_page"),
+    "query list": (
+        "queries.list",
+        "queries.list_page",
+        "queries.list_all",
+        "queries.iter_all",
+    ),
     "query status": ("queries.get", "query_run.status"),
     "query wait": ("queries.get", "query_run.wait"),
     "query result": ("queries.get", "query_run.result"),
