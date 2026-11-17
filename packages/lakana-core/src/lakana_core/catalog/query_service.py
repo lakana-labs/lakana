@@ -216,7 +216,7 @@ class _ListFilters:
         kind
             The list, as its cursor names it.
         include_ended
-            Also list the ended runs.
+            Also list the ended runs; a `since` implies it.
         status
             The statuses, as sent (any letter case).
         submitter
@@ -249,7 +249,8 @@ class _ListFilters:
             raise ValidationError(SINCE_WITHOUT_ZONE)
         return cls(
             kind=kind,
-            include_ended=include_ended,
+            # A `since` asks for the runs that ended since then; it never does nothing.
+            include_ended=include_ended or since is not None,
             statuses=statuses,
             origins=origins,
             submitter=submitter,
@@ -725,7 +726,8 @@ class QueryService:
             ``maintenance``, ``task``); none means any.
         since
             The ended runs listed are those that ended at or after this time, of any age,
-            instead of those of the last 24 hours. It must have a time zone.
+            instead of those of the last 24 hours; given, they are listed with or without
+            `include_ended`. It must have a time zone.
         limit
             Most rows returned (1 to 200).
         cursor
@@ -821,8 +823,8 @@ class QueryService:
         origin
             Only runs of one of these origins; none means any.
         since
-            The ended runs listed are those that ended at or after this time, of any age. It
-            must have a time zone.
+            The ended runs listed are those that ended at or after this time, of any age;
+            given, they are listed with or without `include_ended`. It must have a time zone.
         limit
             Most rows returned (1 to 200).
         cursor

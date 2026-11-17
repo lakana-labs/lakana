@@ -3,14 +3,16 @@ r"""The whole result of a query as a file: CSV or a spreadsheet, every value exa
 A download is always the whole result, never a page, and it never holds fewer rows or
 other values than the result. Both formats are written from the same flattened table
 (`file_cells`): a nested value becomes its compact JSON text, a binary value ``\x``
-and two lower-case hex digits per byte, a UUID its canonical text, and SQL NULL an
-empty field or an empty cell.
+and two lower-case hex digits per byte, a UUID its canonical text, a date or timestamp
+column with a value Python has no date for (DuckDB's ``infinity``, a year after 9999)
+the text DuckDB prints, and SQL NULL an empty field or an empty cell.
 
-- **CSV** (`csv_pieces`) is RFC 4180 in UTF-8 without a byte-order mark, written by
-  pyarrow in pieces of 10,000 rows. Values are verbatim: a text starting with ``=`` is
-  not escaped, since a spreadsheet user takes xlsx.
+- **CSV** (`csv_pieces`, `write_csv`) is RFC 4180 in UTF-8 without a byte-order mark,
+  written by pyarrow in pieces of 10,000 rows. Values are verbatim: a text starting with
+  ``=`` is not escaped, since a spreadsheet user takes xlsx.
 - **xlsx** (`write_xlsx`) keeps a number a number only where a spreadsheet holds it
-  exactly; a larger integer, a long decimal, NaN and infinity are text. What a sheet
+  exactly; a larger integer, a long decimal, NaN and infinity are text, and a float32 is
+  the number its shortest text names. What a sheet
   cannot hold at all (too many rows or columns, a value longer than a cell) is refused
   with `XlsxRefused` before a byte is written, naming the CSV command instead.
 """
@@ -21,11 +23,12 @@ import io
 import json
 import math
 import shlex
+import struct
 import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import BinaryIO
+from typing import BinaryIO, cast
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -59,7 +62,7 @@ CSV_BATCH_ROWS = 10_000
 """The rows of one CSV piece."""
 
 FILE_PIECE_BYTES = 1024 * 1024
-"""The bytes of one piece of a finished spreadsheet sent to the client."""
+"""The bytes of one piece of a finished CSV or spreadsheet file sent to the client."""
 
 EXACT_INTEGER = 2**53 - 1
 """The largest integer a spreadsheet's number holds exactly, either sign."""
@@ -69,6 +72,9 @@ EXACT_DIGITS = 15
 
 NUMBER_DIGITS_FORMAT = ".16G"
 """How XlsxWriter writes a number into the sheet; a float this does not hold exactly is text."""
+
+FLOAT32_DIGITS = 9
+"""The significant digits that always read back as the same float32."""
 
 _EXTENSIONS = {"arrow": "arrow", "csv": "csv", "xlsx": "xlsx"}
 _EXCEL_FIRST_DAY = date(1900, 1, 1)
@@ -299,7 +305,151 @@ def _cell_column(column: pa.ChunkedArray) -> pa.ChunkedArray:
         return column.cast(pa.string())
     if pa.types.is_interval(kind):
         return _as_text(column, _interval_text)
+    if (pa.types.is_date(kind) or pa.types.is_timestamp(kind)) and _outside_python(column):
+        return _duckdb_moments(column)
     return column
+
+
+_INFINITY = {32: 2**31 - 1, 64: 2**63 - 1}
+"""DuckDB's ``infinity`` of a date (32 bits) or a timestamp (64 bits); minus it is ``-infinity``."""
+
+_PER_SECOND = {"s": 1, "ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
+"""The units of a timestamp in one second."""
+
+_EPOCH = date(1970, 1, 1)
+_FIRST_PYTHON_DAY = (date.min - _EPOCH).days
+_LAST_PYTHON_DAY = (date.max - _EPOCH).days
+
+
+def _moment_unit(kind: pa.DataType) -> tuple[pa.DataType, int, int]:
+    """Say how a date or timestamp is stored.
+
+    Parameters
+    ----------
+    kind : pyarrow.DataType
+        A date or timestamp type.
+
+    Returns
+    -------
+    tuple
+        The integer type it is stored as, its units in one day (1 for a 32-bit date) and its
+        units in one second (0 for a 32-bit date).
+    """
+    if pa.types.is_date32(kind):
+        return pa.int32(), 1, 0
+    per_second = 1_000 if pa.types.is_date64(kind) else _PER_SECOND[kind.unit]
+    return pa.int64(), 86_400 * per_second, per_second
+
+
+def _outside_python(column: pa.ChunkedArray) -> bool:
+    """Say whether a date or timestamp column holds a value Python has no date for.
+
+    DuckDB's ``infinity`` and ``-infinity``, a year after 9999 and a year before 1 are such
+    values; `pyarrow` cannot turn them into Python objects, and its own text says they are out
+    of range.
+
+    Parameters
+    ----------
+    column : pyarrow.ChunkedArray
+        A date or timestamp column.
+
+    Returns
+    -------
+    bool
+        True when one value lies outside 0001-01-01 to 9999-12-31.
+    """
+    storage, per_day, _ = _moment_unit(column.type)
+    bounds = pc.call_function("min_max", [column.cast(storage)]).as_py()
+    if bounds["min"] is None:
+        return False
+    first = _FIRST_PYTHON_DAY * per_day
+    last = (_LAST_PYTHON_DAY + 1) * per_day - 1
+    return bounds["min"] < first or bounds["max"] > last
+
+
+def _civil_day(days: int) -> tuple[int, int, int]:
+    """Turn days since 1970-01-01 into a proleptic Gregorian year, month and day of any size.
+
+    Parameters
+    ----------
+    days
+        Days since 1970-01-01; negative before it.
+
+    Returns
+    -------
+    tuple of int
+        The year (0 is 1 BC), the month and the day.
+    """
+    # Howard Hinnant's civil_from_days, on Python's unbounded integers.
+    shifted = days + 719_468
+    era = shifted // 146_097
+    day_of_era = shifted - era * 146_097
+    year_of_era = (
+        day_of_era - day_of_era // 1_460 + day_of_era // 36_524 - day_of_era // 146_096
+    ) // 365
+    day_of_year = day_of_era - (365 * year_of_era + year_of_era // 4 - year_of_era // 100)
+    month_index = (5 * day_of_year + 2) // 153
+    day = day_of_year - (153 * month_index + 2) // 5 + 1
+    month = month_index + 3 if month_index < 10 else month_index - 9
+    year = year_of_era + era * 400 + (1 if month <= 2 else 0)
+    return year, month, day
+
+
+def _duckdb_moment(value: int, kind: pa.DataType) -> str:
+    """Write one stored date or timestamp as DuckDB prints it.
+
+    Parameters
+    ----------
+    value
+        The stored integer.
+    kind : pyarrow.DataType
+        Its date or timestamp type; a timestamp with a time zone is written in UTC.
+
+    Returns
+    -------
+    str
+        ``infinity``, ``-infinity``, or ``YYYY-MM-DD`` with as many year digits as it needs,
+        `` (BC)`` for a year before 1, and for a timestamp the time of day, its fraction
+        without trailing zeros, and ``+00`` when it has a time zone.
+    """
+    storage, per_day, per_second = _moment_unit(kind)
+    infinity = _INFINITY[storage.bit_width]
+    if abs(value) == infinity:
+        return "infinity" if value > 0 else "-infinity"
+    days, rest = divmod(value, per_day)
+    year, month, day = _civil_day(days)
+    text = f"{year if year >= 1 else 1 - year:04d}-{month:02d}-{day:02d}"
+    if year < 1:
+        text += " (BC)"
+    if not pa.types.is_timestamp(kind):
+        return text
+    seconds, fraction = divmod(rest, per_second)
+    hours, seconds = divmod(seconds, 3_600)
+    minutes, seconds = divmod(seconds, 60)
+    text += f" {hours:02d}:{minutes:02d}:{seconds:02d}"
+    if fraction:
+        digits = len(str(per_second)) - 1
+        text += "." + f"{fraction:0{digits}d}".rstrip("0")
+    return text + ("" if kind.tz is None else "+00")
+
+
+def _duckdb_moments(column: pa.ChunkedArray) -> pa.ChunkedArray:
+    """Write a date or timestamp column as DuckDB prints it (Ruling V).
+
+    Parameters
+    ----------
+    column : pyarrow.ChunkedArray
+        A date or timestamp column with a value Python has no date for.
+
+    Returns
+    -------
+    pyarrow.ChunkedArray
+        A large string column, NULL kept.
+    """
+    kind = column.type
+    storage, _, _ = _moment_unit(kind)
+    stored = pa.chunked_array([chunk.cast(storage) for chunk in column.chunks], storage)
+    return _as_text(stored, lambda value: _duckdb_moment(cast(int, value), kind))
 
 
 def _json_text(value: object) -> str:
@@ -349,9 +499,10 @@ def file_cells(table: pa.Table) -> pa.Table:
         The same rows and column names. A nested value is its compact JSON text (UTF-8, not
         ASCII-escaped, a map's entries as objects of ``key`` and ``value``), a binary value
         `_hex` text, a UUID its canonical text, a dictionary its values, a time its text and
-        an interval a JSON object of its parts. Any other extension type is its storage, and a
-        run-end encoded column its values, each flattened by these same rules; every other
-        column is unchanged.
+        an interval a JSON object of its parts. A date or timestamp column with a value Python
+        has no date for is the text DuckDB prints (`_duckdb_moment`). Any other extension type
+        is its storage, and a run-end encoded column its values, each flattened by these same
+        rules; every other column is unchanged.
     """
     return pa.Table.from_arrays(
         [_cell_column(column) for column in table.columns], names=table.column_names
@@ -367,8 +518,10 @@ _CSV_OPTIONS = pa_csv.WriteOptions(include_header=True, eol="\r\n", quoting_styl
 def csv_pieces(table: pa.Table) -> Iterator[bytes]:
     """Write a result as CSV, one piece at a time (R6).
 
-    The writer is built and the header row written before this returns, so a column the
-    writer cannot hold fails here, before a caller records the export or sends a byte.
+    The whole result is flattened, and the writer built and the header row written, before
+    this returns: a column the writer cannot hold fails here, before a caller records the
+    export or sends a byte, and a column's type is decided over all its rows (a date column
+    with one value Python has no date for is text in every row).
 
     Parameters
     ----------
@@ -381,22 +534,21 @@ def csv_pieces(table: pa.Table) -> Iterator[bytes]:
         The header row first, then one piece per `CSV_BATCH_ROWS` rows: RFC 4180 with CRLF row
         ends, UTF-8 without a byte-order mark, NULL as an empty field, values verbatim.
     """
+    cells = file_cells(table)
     sink = io.BytesIO()
-    writer = pa_csv.CSVWriter(
-        sink, file_cells(table.slice(0, 0)).schema, write_options=_CSV_OPTIONS
-    )
-    return _csv_rows(table, writer, sink, _drain(sink))
+    writer = pa_csv.CSVWriter(sink, cells.schema, write_options=_CSV_OPTIONS)
+    return _csv_rows(cells, writer, sink, _drain(sink))
 
 
 def _csv_rows(
-    table: pa.Table, writer: pa_csv.CSVWriter, sink: io.BytesIO, header: bytes
+    cells: pa.Table, writer: pa_csv.CSVWriter, sink: io.BytesIO, header: bytes
 ) -> Iterator[bytes]:
     """Yield the header made already, then the rows, closing the writer on every exit.
 
     Parameters
     ----------
-    table : pyarrow.Table
-        The result.
+    cells : pyarrow.Table
+        The flattened result (`file_cells`).
     writer : pyarrow.csv.CSVWriter
         The writer, which has written the header into `sink`.
     sink
@@ -411,9 +563,23 @@ def _csv_rows(
     """
     with writer:
         yield header
-        for start in range(0, table.num_rows, CSV_BATCH_ROWS):
-            writer.write_table(file_cells(table.slice(start, CSV_BATCH_ROWS)))
+        for start in range(0, cells.num_rows, CSV_BATCH_ROWS):
+            writer.write_table(cells.slice(start, CSV_BATCH_ROWS))
             yield _drain(sink)
+
+
+def write_csv(table: pa.Table, target: BinaryIO) -> None:
+    """Write a result as one CSV file (R6), as `csv_pieces` makes it.
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+    target
+        A binary file the CSV is written to.
+    """
+    for piece in csv_pieces(table):
+        target.write(piece)
 
 
 class ResultFileRefused(ValidationError):
@@ -654,6 +820,53 @@ def _put_float(sheet: Worksheet, row: int, col: int, value: object) -> object:
     return sheet.write_number(row, col, number)
 
 
+def _float32_text(value: float) -> str:
+    """Write a float32 in the fewest significant digits that read back as the same float32.
+
+    Parameters
+    ----------
+    value
+        A finite float32, widened to a Python float.
+
+    Returns
+    -------
+    str
+        Its shortest text: ``0.1`` for the float32 nearest 0.1, never more than 9 digits.
+    """
+    for digits in range(1, FLOAT32_DIGITS):
+        text = f"{value:.{digits}g}"
+        if struct.unpack("f", struct.pack("f", float(text)))[0] == value:
+            return text
+    return f"{value:.{FLOAT32_DIGITS}g}"
+
+
+def _put_float32(sheet: Worksheet, row: int, col: int, value: object) -> object:
+    """Write a float32 as the number its shortest text names, as CSV writes it.
+
+    Widened to a double, the float32 nearest 0.1 is 0.10000000149011612, which needs 17
+    digits; its own shortest text, ``0.1``, names the same float32.
+
+    Parameters
+    ----------
+    sheet
+        The sheet.
+    row
+        The row, from 0.
+    col
+        The column, from 0.
+    value
+        The float32, widened to a Python float.
+
+    Returns
+    -------
+    object
+        What the write returns.
+    """
+    if not isinstance(value, float) or not math.isfinite(value):
+        return _put_float(sheet, row, col, value)
+    return _put_float(sheet, row, col, float(_float32_text(value)))
+
+
 def _put_decimal(sheet: Worksheet, row: int, col: int, value: object) -> object:
     """Write a decimal as a number up to 15 significant digits, otherwise as its text.
 
@@ -771,6 +984,8 @@ def _sheet_column(
     kind = column.type
     if pa.types.is_integer(kind):
         return column, _put_integer
+    if pa.types.is_float32(kind):
+        return column, _put_float32
     if pa.types.is_floating(kind):
         return column.cast(pa.float64()), _put_float
     if pa.types.is_decimal(kind):
@@ -866,7 +1081,7 @@ def file_pieces(target: BinaryIO) -> Iterator[bytes]:
     Parameters
     ----------
     target
-        The file `write_xlsx` wrote.
+        The file `write_csv` or `write_xlsx` wrote.
 
     Yields
     ------
@@ -914,9 +1129,11 @@ async def _body(pieces: Iterator[bytes]) -> AsyncIterator[bytes]:
 class ResultFileResponse(StreamingResponse):
     """A whole query result as a file, streamed, with what it is and how big the run said it was.
 
-    No `Content-Length` is promised: CSV and xlsx are made while they are sent. The
-    response closes what it read from and gives back its file slot exactly once, when the body
-    ends, fails, or is never sent because the client went away.
+    No `Content-Length` is promised: an Arrow file is read from storage while it is sent, and
+    the route does not count the bytes of a CSV or spreadsheet file it prepared. The response
+    takes no file slot: the route gives it back once the file is prepared. It closes what it
+    read from exactly once, when the body ends, fails, or is never sent because the client
+    went away.
 
     Parameters
     ----------
@@ -932,8 +1149,6 @@ class ResultFileResponse(StreamingResponse):
         The run's `result_bytes`; the `X-Result-Arrow-Bytes` header is left out when `None`.
     close
         Closes what the pieces are read from (a storage iterator, a temporary file).
-    release
-        Gives back the file slot the route took, or does nothing for a result that takes none.
     """
 
     def __init__(
@@ -945,7 +1160,6 @@ class ResultFileResponse(StreamingResponse):
         rows: int | None,
         arrow_bytes: int | None,
         close: Callable[[], object],
-        release: Callable[[], None],
     ) -> None:
         headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
         if rows is not None:
@@ -955,10 +1169,9 @@ class ResultFileResponse(StreamingResponse):
         super().__init__(_body(pieces), media_type=media_type, headers=headers)
         self._pieces = pieces
         self._close = close
-        self._release = release
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        """Send the response, then close its source and give back its slot.
+        """Send the response, then close its source.
 
         Parameters
         ----------
@@ -976,6 +1189,5 @@ class ResultFileResponse(StreamingResponse):
                 close = getattr(self._pieces, "close", None)
                 if close is not None:
                     close()
-                self._close()
             finally:
-                self._release()
+                self._close()

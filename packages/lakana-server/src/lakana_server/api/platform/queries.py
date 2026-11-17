@@ -51,10 +51,10 @@ from lakana_server.result_files import (
     CSV_MEDIA_TYPE,
     XLSX_MEDIA_TYPE,
     ResultFileResponse,
-    csv_pieces,
     file_pieces,
     refuse_unwritable,
     result_file_name,
+    write_csv,
     write_xlsx,
 )
 from lakana_server.result_json import DEFAULT_PAGE_ROWS, MAX_PAGE_ROWS, json_page
@@ -172,7 +172,8 @@ def list_queries(
         `task`); repeat the parameter or separate the values with commas.
     since
         The ended queries listed are those that ended at or after this ISO 8601 time, with a
-        time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours.
+        time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours;
+        given, they are listed with or without `include_ended`.
     limit
         Most rows returned (1 to 200).
     cursor
@@ -287,7 +288,8 @@ def list_all_queries(
         `task`); repeat the parameter or separate the values with commas.
     since
         The ended queries listed are those that ended at or after this ISO 8601 time, with a
-        time zone, of any age, instead of those of the last 24 hours.
+        time zone, of any age, instead of those of the last 24 hours; given, they are listed
+        with or without `include_ended`.
     limit
         Most rows returned (1 to 200).
     cursor
@@ -628,7 +630,10 @@ def _whole_result(
     Every refusal is decided before the export is recorded, and the export is committed
     before the first byte. The Arrow file is streamed from storage as it is stored and takes
     no file slot. CSV and xlsx read the stored file whole, as a JSON page does (the worker
-    bounds its size), and take one of the caller's file slots until the body ends.
+    bounds its size), and are written whole into a temporary file while they hold one of the
+    caller's file slots; the slot is given back once the file is written, and the finished
+    file is then sent from disk in pieces without one. The temporary file is closed when the
+    body ends, fails or is never sent.
 
     Parameters
     ----------
@@ -683,7 +688,6 @@ def _whole_result(
             rows=run.result_rows,
             arrow_bytes=run.result_bytes,
             close=_nothing,
-            release=_nothing,
         )
     busy = limiter.try_acquire(principal.id)
     if busy is not None:
@@ -693,14 +697,15 @@ def _whole_result(
         content = storage.read(location)
         table = pa.ipc.open_file(pa.BufferReader(content)).read_all()
         refuse_unwritable(table, result_format, query_id=query_id, environment=env)
+        # A route defined with `def` already runs in the threadpool, so the file is written
+        # off the event loop; the temporary file follows TMPDIR.
+        target = tempfile.TemporaryFile()  # ruff: ignore[open-file-with-context-handler] -- the response closes it
         if result_format == "csv":
-            pieces, media_type = csv_pieces(table), CSV_MEDIA_TYPE
+            write_csv(table, target)
+            media_type = CSV_MEDIA_TYPE
         else:
-            # A route defined with `def` already runs in the threadpool, so the workbook is
-            # written off the event loop; its temporary files follow TMPDIR.
-            target = tempfile.TemporaryFile()  # ruff: ignore[open-file-with-context-handler] -- the response closes it
             write_xlsx(table, target, query_id=query_id, environment=env)
-            pieces, media_type = file_pieces(target), XLSX_MEDIA_TYPE
+            media_type = XLSX_MEDIA_TYPE
         queries.record_export(
             principal,
             env,
@@ -710,20 +715,20 @@ def _whole_result(
             size_bytes=len(content) if run.result_bytes is None else run.result_bytes,
         )
     except BaseException:
-        try:
-            if target is not None:
-                target.close()
-        finally:
-            limiter.release(principal.id)
+        if target is not None:
+            target.close()
         raise
+    finally:
+        # The slot bounds the memory of preparing a file; a finished file is sent from disk
+        # without one, so a client that reads slowly holds none of the process's slots.
+        limiter.release(principal.id)
     return ResultFileResponse(
-        pieces,
+        file_pieces(target),
         media_type=media_type,
         file_name=name,
         rows=run.result_rows,
         arrow_bytes=run.result_bytes,
-        close=_nothing if target is None else target.close,
-        release=lambda: limiter.release(principal.id),
+        close=target.close,
     )
 
 
@@ -849,7 +854,8 @@ def get_query_result(
     lakana_server.errors.ResultFileLimitError
         Mapped to 503 with `Retry-After: 1`: the caller already has a CSV or spreadsheet file
         being prepared (one at a time), or this process prepares two already. The slot is held
-        until the file's body ends, however it ends.
+        while the file is written to a temporary file and given back before its first byte is
+        sent, so a slow reader holds none.
     """
     run = queries.get_query_run(principal, env, query_id)
     if run.status != QueryRunStatus.SUCCEEDED:

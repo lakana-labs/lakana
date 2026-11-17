@@ -240,6 +240,83 @@ def test_xlsx_writes_a_float_its_16_digits_would_round_as_text() -> None:
     assert "<v>0.3333333333333333</v>" in sheet_xml(xlsx_bytes(table)), "16 digits, a number"
 
 
+def test_xlsx_writes_a_float32_as_the_number_its_shortest_text_names() -> None:
+    """A float32 widened to a double needs 17 digits; its own shortest text needs at most 9."""
+    table = pa.table({"f": pa.array([0.1, 2.5, 1.3], pa.float32())})
+    assert read_back(table).to_pylist() == [{"f": 0.1}, {"f": 2.5}, {"f": 1.3}]
+    assert csv_text(table) == b'"f"\r\n0.1\r\n2.5\r\n1.3\r\n'
+
+
+INFINITY_US = 2**63 - 1
+"""DuckDB's ``'infinity'::timestamp`` in any unit: the largest int64."""
+
+INFINITY_DAY = 2**31 - 1
+"""DuckDB's ``'infinity'::date``: the largest int32."""
+
+
+def out_of_range_table() -> pa.Table:
+    """Build a result whose temporal columns hold values Python has no date or time for.
+
+    Returns
+    -------
+    pyarrow.Table
+        Timestamps without and with a time zone, and dates: infinity, minus infinity, a long
+        year, a year before 1, and one value Python holds.
+    """
+    long_year = 9_223_372_036_854_775_806
+    moment = 1_700_000_000_123_456
+    return pa.table(
+        {
+            "ts": pa.array([INFINITY_US, -INFINITY_US, long_year, moment], pa.int64()).cast(
+                pa.timestamp("us")
+            ),
+            "tz": pa.array([INFINITY_US, -INFINITY_US, long_year, moment], pa.int64()).cast(
+                pa.timestamp("us", "Europe/Berlin")
+            ),
+            "d": pa.array([INFINITY_DAY, -INFINITY_DAY, 2_932_897, -721_292], pa.int32()).cast(
+                pa.date32()
+            ),
+        }
+    )
+
+
+OUT_OF_RANGE_TEXT = [
+    {"ts": "infinity", "tz": "infinity", "d": "infinity"},
+    {"ts": "-infinity", "tz": "-infinity", "d": "-infinity"},
+    {
+        "ts": "294247-01-10 04:00:54.775806",
+        "tz": "294247-01-10 04:00:54.775806+00",
+        "d": "10000-01-01",
+    },
+    {
+        "ts": "2023-11-14 22:13:20.123456",
+        "tz": "2023-11-14 22:13:20.123456+00",
+        "d": "0006-03-04 (BC)",
+    },
+]
+"""`out_of_range_table` as DuckDB prints it, a time zone's values in UTC."""
+
+
+def test_a_temporal_column_outside_pythons_range_is_duckdbs_text_in_csv() -> None:
+    lines = [",".join(f'"{value}"' for value in row.values()) for row in OUT_OF_RANGE_TEXT]
+    expected = "\r\n".join(['"ts","tz","d"', *lines]) + "\r\n"
+    assert csv_text(out_of_range_table()) == expected.encode()
+
+
+def test_a_temporal_column_outside_pythons_range_is_duckdbs_text_in_xlsx() -> None:
+    assert read_back(out_of_range_table()).to_pylist() == OUT_OF_RANGE_TEXT
+
+
+def test_a_temporal_column_inside_pythons_range_keeps_its_type() -> None:
+    table = pa.table(
+        {
+            "ts": pa.array([datetime(9999, 12, 31, 23, 59, 59, 999_999)], pa.timestamp("us")),
+            "d": pa.array([date(1, 1, 1)], pa.date32()),
+        }
+    )
+    assert file_cells(table).schema == table.schema
+
+
 def test_xlsx_writes_a_string_starting_with_equals_as_text_not_a_formula() -> None:
     xml = sheet_xml(xlsx_bytes(pa.table({"s": ["=SUM(A1)", "=1+1"]})))
     assert "<f>" not in xml

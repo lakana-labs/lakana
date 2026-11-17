@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import IO, Any
 
 import pyarrow as pa
 import pytest
@@ -1666,6 +1667,48 @@ def test_get_all_queries_answers_items_and_next_cursor(client: TestClient) -> No
 def test_get_all_queries_with_an_unknown_environment_is_404(client: TestClient) -> None:
     response = client.get(_ALL, params={"environment": "nowhere"}, headers=AUTH_HEADER)
     assert response.status_code == 404
+    assert "No environment named" in response.json()["detail"]
+
+
+def test_get_all_queries_of_an_environment_without_a_right_is_403_as_its_own_list(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    reader = person(client, "reader", "VIEWER")
+    own = client.get(_list_url(), headers=reader)
+    across = client.get(_ALL, params={"environment": "dev"}, headers=reader)
+    assert (own.status_code, across.status_code) == (403, 403)
+    assert across.json()["detail"] == own.json()["detail"]
+
+
+def test_a_deleted_environments_runs_never_appear_across_environments(client: TestClient) -> None:
+    _environment(client)
+    _environment(client, "other")
+    kept = _submit(client)
+    gone = _submit(client, env="other")
+    _put_status(client, gone, "SUCCEEDED")
+    deleted = client.delete("/api/v1/environments/other", headers=AUTH_HEADER)
+    assert deleted.status_code in (200, 204), deleted.text
+    listed = client.get(_ALL, params={"include_ended": "true"}, headers=AUTH_HEADER).json()
+    assert [row["id"] for row in listed["items"]] == [kept]
+
+
+@pytest.mark.parametrize("route", ["one", "all"])
+def test_since_alone_lists_the_runs_that_ended_since(client: TestClient, route: str) -> None:
+    """`since` without `include_ended` still lists ended runs: a filter never does nothing."""
+    _environment(client)
+    old = _submit(client)
+    _put_status(client, old, "SUCCEEDED")
+    _edit_run(client, old, finished_at=datetime.now(UTC) - timedelta(days=3))
+    older = _submit(client)
+    _put_status(client, older, "SUCCEEDED")
+    _edit_run(client, older, finished_at=datetime.now(UTC) - timedelta(days=10))
+    week = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    if route == "one":
+        rows = client.get(_list_url(), params={"since": week}, headers=AUTH_HEADER).json()
+    else:
+        rows = client.get(_ALL, params={"since": week}, headers=AUTH_HEADER).json()["items"]
+    assert [row["id"] for row in rows] == [old]
 
 
 def test_get_all_queries_without_any_right_is_an_empty_page(client: TestClient) -> None:
@@ -1969,7 +2012,7 @@ def test_a_second_file_of_the_same_person_at_once_is_503_with_retry_after(
     assert _exports(client) == []
 
 
-def test_the_file_slot_is_given_back_when_the_body_ends_and_when_it_fails(
+def test_the_file_slot_is_given_back_when_the_body_ends_and_when_preparing_fails(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _environment(client)
@@ -1977,39 +2020,141 @@ def test_the_file_slot_is_given_back_when_the_body_ends_and_when_it_fails(
     admin = query_run_columns(client, qid, "principal_id")["principal_id"]
     lim = client.app.state.result_file_limiter
     for result_format in ("csv", "xlsx"):
-        assert client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert got.status_code == 200, (result_format, got.text)
         assert lim.try_acquire(admin) is None, result_format
         lim.release(admin)
-
-    def failing(table: pa.Table) -> object:
-        """Yield the header, then fail as a conversion of a batch would.
-
-        Parameters
-        ----------
-        table
-            Ignored.
-
-        Yields
-        ------
-        bytes
-            The first piece.
-
-        Raises
-        ------
-        OSError
-            After the first piece, once the response has started.
-        """
-        yield b"header\r\n"
-        raise OSError("conversion failed")
-
-    monkeypatch.setattr(queries_module, "csv_pieces", failing)
-    with pytest.raises(OSError, match="conversion failed"):
-        client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
-    assert lim.try_acquire(admin) is None
-    lim.release(admin)
+    exported = len(_exports(client))
+    # A conversion that fails on a value fails while the file is prepared: before the 200
+    # and before the export is recorded.
+    monkeypatch.setattr(queries_module, "write_csv", raising)
     monkeypatch.setattr(queries_module, "write_xlsx", raising)
-    assert client.get(result_url(qid, "format=xlsx"), headers=AUTH_HEADER).status_code == 500
-    assert lim.try_acquire(admin) is None
+    for result_format in ("csv", "xlsx"):
+        failed = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert failed.status_code == 500, result_format
+        assert lim.try_acquire(admin) is None, result_format
+        lim.release(admin)
+    assert len(_exports(client)) == exported
+
+
+class _Spooled:
+    """Record the temporary files the result route opens, to see that each is closed."""
+
+    def __init__(self) -> None:
+        import tempfile
+
+        self.files: list[IO[bytes]] = []
+        self._open = tempfile.TemporaryFile
+
+    def __call__(self) -> IO[bytes]:
+        """Open a real temporary file and remember it.
+
+        Returns
+        -------
+        file object
+            The temporary file.
+        """
+        opened = self._open()
+        self.files.append(opened)
+        return opened
+
+
+def _download_over_asgi(
+    client: TestClient, qid: str, result_format: str, fail_on: str
+) -> tuple[bool, list[str]]:
+    """Fetch a result file straight through ASGI, with a client that goes away.
+
+    Parameters
+    ----------
+    client
+        Test client for the API; its app has run its lifespan.
+    qid
+        The query's id.
+    result_format
+        ``csv`` or ``xlsx``.
+    fail_on
+        The ASGI message type whose send fails as a client that went away:
+        ``http.response.start`` (the body never starts) or ``http.response.body``.
+
+    Returns
+    -------
+    tuple
+        Whether the caller's file slot was free when the response started, and the types of
+        the messages sent before the failure.
+    """
+    import asyncio
+    import contextlib
+
+    from starlette.requests import ClientDisconnect
+
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    lim = client.app.state.result_file_limiter
+    free_at_start: list[bool] = []
+    sent: list[str] = []
+    path = f"/api/v1/environments/dev/queries/{qid}/result"
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": f"format={result_format}".encode(),
+        "headers": [
+            (b"host", b"testserver"),
+            (b"authorization", AUTH_HEADER["Authorization"].encode()),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+
+    requested: list[bool] = []
+
+    async def receive() -> dict[str, Any]:
+        if not requested:
+            requested.append(True)
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.Event().wait()
+        return {}  # pragma: no cover
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start" and not free_at_start:
+            free = lim.try_acquire(admin) is None
+            if free:
+                lim.release(admin)
+            free_at_start.append(free)
+        if message["type"] == fail_on:
+            raise OSError("the client went away")
+        sent.append(message["type"])
+        await asyncio.sleep(0)
+
+    async def go() -> None:
+        with contextlib.suppress(OSError, ClientDisconnect):
+            await client.app(scope, receive, send)
+
+    asyncio.run(go())
+    return free_at_start == [True], sent
+
+
+@pytest.mark.parametrize("result_format", ["csv", "xlsx"])
+@pytest.mark.parametrize("fail_on", ["http.response.start", "http.response.body"])
+def test_a_file_streams_without_a_slot_and_its_temporary_file_closes_when_the_client_goes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, result_format: str, fail_on: str
+) -> None:
+    """A paused or vanished reader holds no file slot; the spooled file closes on every path."""
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    spooled = _Spooled()
+    monkeypatch.setattr(queries_module.tempfile, "TemporaryFile", spooled)
+    free_at_start, sent = _download_over_asgi(client, qid, result_format, fail_on)
+    assert free_at_start
+    assert "http.response.body" not in sent
+    assert len(spooled.files) == 1
+    assert spooled.files[0].closed
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None
 
 
 def test_a_result_without_recorded_sizes_downloads_without_the_size_headers(

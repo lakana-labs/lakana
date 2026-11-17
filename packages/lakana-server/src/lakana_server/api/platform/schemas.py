@@ -600,7 +600,7 @@ class QueryStatusOut(BaseModel):
         Line, from 1, of the submitted SQL where an `invalid_query` failure of a `written` or
         `write` run points; `null` when unknown.
     error_column
-        Column, from 1, within `error_line`.
+        Column within `error_line`, counted in characters (Unicode code points) from 1.
     waiting_for
         Why a `QUEUED` query has not started, or `null` for any other status: a stable `code`
         (`no_worker`, `no_worker_of_kind`, `user_limit`, `lock_timeout`, `starting` or
