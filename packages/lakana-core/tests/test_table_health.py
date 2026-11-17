@@ -172,7 +172,7 @@ def _maintenance(
     table_id
         The target; `silver.orders` when `None`.
     write_mode
-        The run's mode.
+        The run's mode; its origin is `maintenance` for `MAINTAIN`, else `write`.
 
     Returns
     -------
@@ -190,7 +190,7 @@ def _maintenance(
         "tags_removed": ["failed-a"],
     }
     run = QueryRun(
-        origin=QueryOrigin.WRITE,
+        origin=QueryOrigin.MAINTENANCE if write_mode == WriteMode.MAINTAIN else QueryOrigin.WRITE,
         id=uuid.uuid4(),
         environment_id=environment.id,
         principal_id=principal.id,

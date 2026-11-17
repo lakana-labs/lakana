@@ -119,6 +119,7 @@ from lakana_core.errors import (
     NotFoundError,
     NotPublishedError,
     PermissionDenied,
+    SqlPosition,
     StorageUnavailableError,
     UnsupportedTableError,
     ValidationError,
@@ -1964,8 +1965,32 @@ def _record_error_position(run: QueryRun, exc: BaseException, cause: QueryErrorC
     if run.origin not in (QueryOrigin.WRITTEN, QueryOrigin.WRITE):
         return
     position = error_position(exc, run.sql_text)
-    if position is not None:
+    if position is not None and _inside(run.sql_text, position):
         run.error_line, run.error_column = position
+
+
+def _inside(sql: str, position: SqlPosition) -> bool:
+    """Say whether a position lies in the SQL: on one of its lines, at most just past its end.
+
+    A refusal raised from text the person did not write (a view's own SQL) could carry a
+    position in that text; one that does not fit the submitted SQL is not recorded.
+
+    Parameters
+    ----------
+    sql
+        The submitted SQL.
+    position
+        The line and column, from 1.
+
+    Returns
+    -------
+    bool
+        True when the line is one of the SQL's and the column at most one past its length.
+    """
+    lines = sql.split("\n")
+    if not 1 <= position.line <= len(lines):
+        return False
+    return 1 <= position.column <= len(lines[position.line - 1]) + 1
 
 
 def _create_view(

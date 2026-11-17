@@ -31,6 +31,8 @@ from lakana_core.errors import (
     LakanaError,
     NotFoundError,
     PermissionDenied,
+    SqlPosition,
+    SqlRefusal,
     UnsupportedTableError,
     ValidationError,
 )
@@ -412,10 +414,11 @@ def test_a_syntax_error_records_line_and_column(session: Session, principal: Pri
     run_id = _run(session, principal.id, "SELECT 1\nFROM")
     run_one(session, run_id, AllowAllAuthorization())
     assert _cause_of(session, run_id) == "invalid_query"
-    line, column = _position_of(session, run_id)
-    assert line == 2
-    assert column is not None
-    assert column >= 1
+    # The column the stored message names ("at line 2, column 4"), not just any column.
+    assert _position_of(session, run_id) == (2, 4)
+    stored = session.get(QueryRun, run_id)
+    assert stored is not None
+    assert "at line 2, column 4" in (stored.error_message or "")
 
 
 def test_a_guard_refusal_records_its_position(session: Session, principal: PrincipalRef) -> None:
@@ -424,6 +427,35 @@ def test_a_guard_refusal_records_its_position(session: Session, principal: Princ
     run_one(session, run_id, AllowAllAuthorization())
     assert _cause_of(session, run_id) == "invalid_query"
     assert _position_of(session, run_id) == (2, 6)
+
+
+@pytest.mark.parametrize(
+    ("position", "stored"),
+    [
+        (SqlPosition(1, 9), (1, 9)),  # just after the last character of "SELECT 1"
+        (SqlPosition(2, 1), (None, None)),  # a line the SQL does not have
+        (SqlPosition(1, 10), (None, None)),  # past the end of its line
+        (SqlPosition(0, 1), (None, None)),
+        (SqlPosition(1, 0), (None, None)),
+    ],
+)
+def test_a_position_outside_the_submitted_sql_is_not_recorded(
+    session: Session,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+    position: SqlPosition,
+    stored: tuple[int | None, int | None],
+) -> None:
+    """A position that does not lie in the person's SQL (a view's text, say) is dropped."""
+
+    def refused(*_args: object, **_kwargs: object) -> pa.Table:
+        raise SqlRefusal("refused", position)
+
+    monkeypatch.setattr("lakana_worker.pipeline.execute_query", refused)
+    run_id = _run(session, principal.id, "SELECT 1")
+    run_one(session, run_id, AllowAllAuthorization())
+    assert _cause_of(session, run_id) == "invalid_query"
+    assert _position_of(session, run_id) == stored
 
 
 def test_a_preview_failure_records_no_position(session: Session, principal: PrincipalRef) -> None:
