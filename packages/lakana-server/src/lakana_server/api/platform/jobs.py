@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 
 from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.jobs.service import JobService, JobView, StartResult, WaitingStart
+from lakana_core.notifications.events import JOB_NOTIFY_EVENTS
 from lakana_core.notifications.views import DeliveryView
 from lakana_core.runs.operator import OperatorRights, job_actions, operator_rights_each, run_actions
 from lakana_server.api.platform.runs import run_out
@@ -24,6 +25,7 @@ from lakana_server.api.platform.schemas import (
     JobOut,
     JobRunRequest,
     JobStartOut,
+    NotifyOut,
     NotifyTestOut,
     OnDemandTriggerOut,
     ScheduleTriggerOut,
@@ -51,7 +53,8 @@ def _job_out(view: JobView, rights: OperatorRights) -> JobOut:
     view
         The job.
     rights
-        What the caller may do in the job's environment.
+        What the caller may do in the job's environment; `deploy` decides whether the secret's
+        name is included.
 
     Returns
     -------
@@ -59,7 +62,8 @@ def _job_out(view: JobView, rights: OperatorRights) -> JobOut:
         The body.
     """
     fields = dataclasses.asdict(view)
-    del fields["on_deploy"]
+    for name in ("on_deploy", "notify"):
+        del fields[name]
     fields["select"] = list(view.select)
     fields["waiting_for"] = None if view.waiting_for is None else view.waiting_for.to_json()
     triggers: list[ScheduleTriggerOut | DeployTriggerOut | OnDemandTriggerOut] = []
@@ -75,7 +79,14 @@ def _job_out(view: JobView, rights: OperatorRights) -> JobOut:
     if view.on_deploy:
         triggers.append(DeployTriggerOut())
     triggers.append(OnDemandTriggerOut())
-    return JobOut(**fields, triggers=triggers, actions=list(job_actions(rights)))
+    notify = None
+    if view.notify is not None:
+        notify = NotifyOut(
+            format=cast("Literal['json', 'slack', 'teams']", view.notify.format),
+            events=list(JOB_NOTIFY_EVENTS),
+            secret=view.notify.webhook if rights.deploy else None,
+        )
+    return JobOut(**fields, triggers=triggers, actions=list(job_actions(rights)), notify=notify)
 
 
 def _waiting_out(waiting: WaitingStart) -> WaitingStartOut:

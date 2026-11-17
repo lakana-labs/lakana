@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from lakana._http import HttpTransport
-from lakana._models import Delivery, Job, JobStart, Trigger, WaitingStart
+from lakana._models import Delivery, Job, JobNotify, JobStart, Trigger, WaitingStart
 from lakana._routes import ROUTES
 from lakana.resources.queries import waiting_for_from_json
 from lakana.resources.runs import notification_from_json, run_from_json
@@ -56,6 +56,24 @@ def trigger_from_json(data: dict[str, Any]) -> Trigger:
     )
 
 
+def _notify_from_json(data: dict[str, Any] | None) -> JobNotify | None:
+    """Build a `JobNotify` from a `NotifyOut` body.
+
+    Parameters
+    ----------
+    data
+        The decoded notification, or `None`.
+
+    Returns
+    -------
+    JobNotify or None
+        The notification; `None` for none. The secret is `None` when the key is absent.
+    """
+    if data is None:
+        return None
+    return JobNotify(format=data["format"], events=tuple(data["events"]), secret=data.get("secret"))
+
+
 def job_from_json(data: dict[str, Any]) -> Job:
     """Build a `Job` from a `JobOut` body.
 
@@ -94,6 +112,9 @@ def job_from_json(data: dict[str, Any]) -> Job:
             if item.get("kind") in _KINDS
         ),
         actions=tuple(data.get("actions", [])),
+        commit_sha=data.get("commit_sha"),
+        source_url=data.get("source_url"),
+        notify=_notify_from_json(data.get("notify")),
     )
 
 

@@ -125,6 +125,30 @@ def _next_run(job: Job) -> str:
     return f"{local} {job.timezone} ({at[11:]} UTC)"
 
 
+def _notify(job: Job) -> str:
+    """Write where a job reports, for `job show`.
+
+    Parameters
+    ----------
+    job
+        The job.
+
+    Returns
+    -------
+    str
+        ``slack, on failed, recovered, columns_changed, health``, with ``; via secret NAME`` when
+        the server named the secret (only for a caller with `DEPLOY`); ``none`` without a
+        notification.
+    """
+    notify = job.notify
+    if notify is None:
+        return "none"
+    text = f"{notify.format}, on {', '.join(notify.events)}"
+    if notify.secret is not None:
+        text += f"; via secret {_output.inline(notify.secret)}"
+    return text
+
+
 def _last_run(job: Job) -> str:
     """Write a job's latest run for the list.
 
@@ -214,8 +238,8 @@ def show_job(ctx: typer.Context, name: _NAME, env: _ENV = None, repo: _REPO = No
     _output.emit(
         state,
         job,
-        columns=["name", "repository", "state", "triggers", "select", "last_run"],
-        derived={"triggers": _triggers_detail, "last_run": _last_run},
+        columns=["name", "repository", "state", "triggers", "select", "last_run", "notify"],
+        derived={"triggers": _triggers_detail, "last_run": _last_run, "notify": _notify},
         flexible=["triggers"],
     )
     if state.output != "json" and job.waiting_for is not None:

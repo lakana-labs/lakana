@@ -99,6 +99,20 @@ command prints:
 delivered
 ```
 
+## See where a job reports
+
+`lakana job show daily_bronze --env dev` has a line `notify`: the format, the events the job
+receives and the name of the secret that holds the webhook, for example `slack, on failed,
+recovered, columns_changed, health; via secret team-alerts`. A job without a `notify:` in the
+environment shows `none`. With `--output json` the `notify` object has the keys `format`, `events`
+and `secret`; the same job also reports the `commit_sha` that is deployed and a `source_url` that
+points at `lakana.yaml` at that commit on the repository's git host (empty for a host Lakana does
+not know).
+
+Only a person who holds the deploy right in the environment, and no CI token, is told the secret's
+name. For anyone else the line ends after the events and the `secret` key is not in the object. The
+webhook URL itself is never sent to a client.
+
 ## What a message looks like
 
 Every message names the job, the environment, the repository, the commit, the run, how the run

@@ -9,14 +9,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lakana_core.auth import CiScope, PrincipalRef
 from lakana_core.models import (
+    Environment,
     EnvironmentDeployment,
     JobSchedule,
     JobVersion,
     NotificationDelivery,
     NotificationState,
+    Principal,
+    PrincipalType,
+    Repository,
     Run,
 )
+from lakana_server.deps import get_principal
 from tests.api.platform.test_deploys import _insert_job_version, _reader, _setup, _token_for
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
@@ -457,3 +463,117 @@ def test_job_actions_follow_the_callers_rights(client: TestClient) -> None:
     assert paused.json()["actions"] == ["run", "pause", "resume"]
     started = client.post(f"{_ENV}/jobs/manual/runs", headers=AUTH_HEADER, json=_BODY)
     assert started.json()["run"]["actions"] == ["cancel", "resume"]
+
+
+def _ci_deployer(client: TestClient) -> dict[str, str]:
+    """Make the caller a CI token of `dev` whose principal holds `DEPLOY` and may read.
+
+    The override gives the principal the scope a CI token carries, so the route sees what a real
+    token would send; the header is the principal's own, for the route's authentication step.
+
+    Parameters
+    ----------
+    client
+        The test client.
+
+    Returns
+    -------
+    dict of str to str
+        An auth header.
+    """
+    header = _grant(client, "ci-deployer", "DEPLOY")
+    reading = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "ci-deployer",
+            "action": "READ_ENVIRONMENT",
+            "kind": "ENVIRONMENT",
+            "environment": "dev",
+        },
+    )
+    assert reading.status_code in (200, 201), reading.text
+    with Session(client.app.state.engine) as session:
+        principal = session.scalars(select(Principal).where(Principal.name == "ci-deployer")).one()
+        environment = session.scalars(select(Environment)).one()
+        repository = session.scalars(select(Repository)).one()
+        scope = CiScope(
+            token_id=uuid.uuid4(),
+            rule_id=uuid.uuid4(),
+            environment="dev",
+            environment_id=environment.id,
+            repository="analytics",
+            repository_id=repository.id,
+            kinds=frozenset({"deploy"}),
+            sha="a" * 40,
+        )
+        ref = PrincipalRef(
+            id=principal.id, name="ci-deployer", type=PrincipalType.SERVICE_ACCOUNT, ci_scope=scope
+        )
+    client.app.dependency_overrides[get_principal] = lambda: ref
+    return header
+
+
+def test_notify_secret_is_absent_not_null_without_deploy(client: TestClient) -> None:
+    """Only a `DEPLOY` holder (no CI token) sees the secret's name; nobody sees its URL."""
+    _deploy_jobs(client, notifying=True)
+    hook = "https://hooks.example.test/T000/B000/hunter2"
+    stored = client.post(
+        f"{_ENV}/secrets",
+        headers=AUTH_HEADER,
+        json={"name": "team-alerts", "values": {"url": hook}},
+    )
+    assert stored.status_code in (200, 201), stored.text
+    reader = _reader(client)
+    deployer = _grant(client, "deployer", "DEPLOY")
+    client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "deployer",
+            "action": "READ_ENVIRONMENT",
+            "kind": "ENVIRONMENT",
+            "environment": "dev",
+        },
+    )
+    seen = {}
+    for who, header in (("reader", reader), ("deployer", deployer), ("admin", AUTH_HEADER)):
+        listed = client.get(f"{_ENV}/jobs", headers=header)
+        shown = client.get(f"{_ENV}/jobs/alerting", headers=header)
+        assert listed.status_code == shown.status_code == 200
+        body = shown.json()
+        assert next(j for j in listed.json() if j["name"] == "alerting")["notify"] == body["notify"]
+        seen[who] = body["notify"]
+        assert "hooks.example.test" not in shown.text + listed.text
+    assert "secret" not in seen["reader"]
+    assert seen["deployer"]["secret"] == "team-alerts"
+    assert seen["admin"]["secret"] == "team-alerts"
+    ci = _ci_deployer(client)
+    try:
+        in_ci = client.get(f"{_ENV}/jobs/alerting", headers=ci)
+        # A CI token may only deploy: it reads no job at all, so it is never told a secret.
+        assert in_ci.status_code == 403, in_ci.text
+        assert "team-alerts" not in in_ci.text
+        assert "hooks.example.test" not in in_ci.text
+    finally:
+        client.app.dependency_overrides.pop(get_principal)
+
+
+def test_notify_lists_format_and_events(client: TestClient) -> None:
+    """The body names the format and the four events a job's `notify:` receives."""
+    _deploy_jobs(client, notifying=True)
+    body = client.get(f"{_ENV}/jobs/alerting", headers=AUTH_HEADER).json()
+    assert body["notify"] == {
+        "format": "slack",
+        "events": ["failed", "recovered", "columns_changed", "health"],
+        "secret": "team-alerts",
+    }
+    assert body["commit_sha"] == "a" * 40
+    assert body["source_url"].endswith(f"/blob/{'a' * 40}/lakana.yaml#L1")
+
+
+def test_a_job_without_notify_has_notify_null(client: TestClient) -> None:
+    """`notify` is present and null for a job that reports nowhere."""
+    _deploy_jobs(client, notifying=True)
+    body = client.get(f"{_ENV}/jobs/daily", headers=AUTH_HEADER).json()
+    assert "notify" in body and body["notify"] is None

@@ -5115,6 +5115,26 @@ TriggerOut = Annotated[
 """One way a job starts. A client must ignore a ``kind`` it does not know: kinds may be added."""
 
 
+class NotifyOut(BaseModel):
+    """Where a job reports, without the address.
+
+    Parameters
+    ----------
+    format
+        ``json``, ``slack`` or ``teams``.
+    events
+        The events the job receives: ``failed``, ``recovered``, ``columns_changed``, ``health``.
+    secret
+        The name of the environment secret that holds the webhook URL. Present only for a caller
+        who holds `DEPLOY` on the environment (and is no CI token); absent, not null, for anyone
+        else. The URL itself never leaves the server.
+    """
+
+    format: Literal["json", "slack", "teams"]
+    events: list[str]
+    secret: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
 class JobOut(BaseModel):
     """One job and the platform's state for it.
 
@@ -5169,6 +5189,13 @@ class JobOut(BaseModel):
         Rights only, as for a table's `actions`: offer a control only when the word is listed
         and the job's state allows it (Pause for an unpaused job with a schedule, Resume for a
         paused one); the server decides every request again.
+    commit_sha
+        The commit of the project version deployed in the environment.
+    source_url
+        The link to ``lakana.yaml`` at that commit on the repository's git host; null for a
+        repository without a known host.
+    notify
+        Where the job reports; null for a job without a usable `notify:`.
     """
 
     name: str
@@ -5191,6 +5218,9 @@ class JobOut(BaseModel):
     last_run_at: datetime | None
     triggers: list[TriggerOut]
     actions: list[str] = Field(default_factory=list)
+    commit_sha: str
+    source_url: str | None
+    notify: NotifyOut | None = None
 
 
 class TaskAttemptOut(BaseModel):

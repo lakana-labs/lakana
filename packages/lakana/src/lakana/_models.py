@@ -3722,6 +3722,27 @@ class Trigger:
 
 
 @dataclass(frozen=True)
+class JobNotify:
+    """Where a job reports a failed or recovered run.
+
+    Parameters
+    ----------
+    format
+        How the message is written: ``json``, ``slack`` or ``teams``.
+    events
+        What the job is told of, in the server's order: ``failed``, ``recovered``,
+        ``columns_changed`` and ``health``.
+    secret
+        The name of the environment secret that holds the webhook URL; `None` unless you hold
+        `DEPLOY` on the environment (the URL itself is never sent).
+    """
+
+    format: str
+    events: tuple[str, ...]
+    secret: str | None = None
+
+
+@dataclass(frozen=True)
 class Job:
     """A job of a deployed project and the platform's state for it.
 
@@ -3773,6 +3794,15 @@ class Job:
         The words of what your rights allow on it: ``run``, ``pause``, ``resume``. Rights
         only; offer a control when the word is listed and the job's state allows it. Empty from
         a server that predates them.
+    commit_sha
+        The commit of the project version deployed in the environment; `None` from a server that
+        predates it.
+    source_url
+        The link to ``lakana.yaml`` at that commit on the repository's git host; `None` for a host
+        Lakana does not know, and from a server that predates it.
+    notify
+        Where the job reports; `None` for a job without a notification, and from a server that
+        predates it.
     """
 
     name: str
@@ -3795,6 +3825,9 @@ class Job:
     last_run_at: datetime | None
     triggers: tuple[Trigger, ...] = ()
     actions: tuple[str, ...] = ()
+    commit_sha: str | None = None
+    source_url: str | None = None
+    notify: JobNotify | None = None
 
 
 @dataclass(frozen=True)
