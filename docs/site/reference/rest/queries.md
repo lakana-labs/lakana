@@ -9,16 +9,18 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List the queries of an environment
 
-Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.
+Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist, and 422 for an unknown status or origin or a `since` without a time zone. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.
 
 Parameters:
 
 | Name | In | Required | Type | Description |
 |---|---|---|---|---|
 | `env` | path | yes | text | Environment name. |
-| `include_ended` | query | no | true or false | Also list the queries that ended in the last 24 hours. |
-| `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. An ended status lists the ended queries of the last 24 hours, with or without `include_ended`. |
+| `include_ended` | query | no | true or false | Also list the queries that ended in the last 24 hours (or since `since`). |
+| `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. An ended status lists the ended queries of the last 24 hours (or since `since`), with or without `include_ended`. |
 | `submitter` | query | no | text or null | Only queries submitted by the principal with this name. |
+| `origin` | query | no | list of text | Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas. |
+| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`. |
 | `limit` | query | no | whole number | Most rows returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
@@ -75,7 +77,7 @@ Answer fields: `QuerySubmitOut`
 
 Show a query's status
 
-Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can see it; for anyone else the answer is 404, as for a query that does not exist.
+Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can see it; for anyone else the answer is 404, as for a query that does not exist. Besides the status, it names the run's `origin`, its times, the size of a stored result and the position of a syntax error. It gives back the run's `sql` for `written` and `write` runs only; for a preview, a check, maintenance or a task's query it is `null`.
 
 Parameters:
 
@@ -111,6 +113,15 @@ Answer fields: `QueryStatusOut`
 | `schema_diff` | mapping of text to list of mapping of text to text or null | no |  |
 | `maintenance` | mapping of text to any or null | no |  |
 | `error_cause` | text or null | no |  |
+| `origin` | one of `written`, `preview`, `check`, `write`, `maintenance`, `task` | yes |  |
+| `sql` | text or null | no |  |
+| `created_at` | text (date-time) | yes |  |
+| `started_at` | text (date-time) or null | no |  |
+| `finished_at` | text (date-time) or null | no |  |
+| `result_rows` | whole number or null | no |  |
+| `result_bytes` | whole number or null | no |  |
+| `error_line` | whole number or null | no |  |
+| `error_column` | whole number or null | no |  |
 | `peak_memory_bytes` | whole number or null | no | Highest resident memory of the attempt's process in bytes; null if not measured (for a container task: the container's cgroup peak). |
 | `cpu_seconds` | number or null | no | Processor time (user plus system) the attempt used, in seconds; null if not measured. |
 | `bytes_read` | whole number or null | no | Bytes DuckDB read for a query (its `io.total_bytes_read` metric, null when DuckDB answered from file metadata); for a Python task the bytes the SDK readers downloaded or read; null if unknown. |
@@ -157,6 +168,15 @@ Answer fields: `QueryStatusOut`
 | `schema_diff` | mapping of text to list of mapping of text to text or null | no |  |
 | `maintenance` | mapping of text to any or null | no |  |
 | `error_cause` | text or null | no |  |
+| `origin` | one of `written`, `preview`, `check`, `write`, `maintenance`, `task` | yes |  |
+| `sql` | text or null | no |  |
+| `created_at` | text (date-time) | yes |  |
+| `started_at` | text (date-time) or null | no |  |
+| `finished_at` | text (date-time) or null | no |  |
+| `result_rows` | whole number or null | no |  |
+| `result_bytes` | whole number or null | no |  |
+| `error_line` | whole number or null | no |  |
+| `error_column` | whole number or null | no |  |
 | `peak_memory_bytes` | whole number or null | no | Highest resident memory of the attempt's process in bytes; null if not measured (for a container task: the container's cgroup peak). |
 | `cpu_seconds` | number or null | no | Processor time (user plus system) the attempt used, in seconds; null if not measured. |
 | `bytes_read` | whole number or null | no | Bytes DuckDB read for a query (its `io.total_bytes_read` metric, null when DuckDB answered from file metadata); for a Python task the bytes the SDK readers downloaded or read; null if unknown. |
@@ -166,7 +186,7 @@ Answer fields: `QueryStatusOut`
 
 Fetch a query's result
 
-Returns the rows of a finished read as an Arrow IPC file, or with `format=json` one page of them as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked; it names the columns masked for you and, for a preview, the table. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with the Arrow result, and for a preview's page longer than 100 rows. Answers 503 with `Retry-After: 1` while you already have a JSON page being prepared, or the server is preparing as many as it allows at once.
+Returns the rows of a finished read as a whole file: an Arrow IPC file (the default), CSV (`format=csv`: RFC 4180, UTF-8 without a byte-order mark, values verbatim) or a spreadsheet (`format=xlsx`: one sheet below a header row; numbers a spreadsheet would round, NaN and infinity are text, a timestamp with a time zone is in UTC). A file is always the whole result, never a page; it is streamed, so no `Content-Length` is promised. It names itself in `Content-Disposition` (`query-ID.arrow`, `.csv`, `.xlsx`) and carries the run's row count and Arrow size as `X-Result-Rows` and `X-Result-Arrow-Bytes` when the run recorded them. Each download of a file is audited as `QUERY_RESULT_EXPORTED`, except an Arrow download by a token bound to a task attempt. With `format=json` it returns one page as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked; it names the columns masked for you and, for a preview, the table; it is not audited as an export. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with a file, for a preview's page longer than 100 rows, and for a spreadsheet of more than 1,048,575 rows or 16,384 columns or with a value longer than 32,767 characters, naming the CSV download instead, and for a CSV or spreadsheet of a column whose type no file holds, naming the Arrow download. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or spreadsheet file being prepared, while 2 of your CSV or spreadsheet files are still being downloaded, or while the server is preparing as many as it allows at once.
 
 Parameters:
 
@@ -174,7 +194,7 @@ Parameters:
 |---|---|---|---|---|
 | `env` | path | yes | text | Environment name. |
 | `query_id` | path | yes | text (uuid) | The query's id. |
-| `format` | query | no | one of `arrow`, `json` | `arrow` for the whole result as an Arrow IPC file, `json` for one page. |
+| `format` | query | no | one of `arrow`, `json`, `csv`, `xlsx` | `arrow` for the whole result as an Arrow IPC file, `csv` or `xlsx` for the whole result as CSV or a spreadsheet, `json` for one page. |
 | `limit` | query | no | whole number or null | Rows of a JSON page, 1 to 1000 (100 at most for a preview); 100 when left out. Only with `format=json`. |
 | `offset` | query | no | whole number or null | The first row of a JSON page, 0 or more; 0 when left out. Only with `format=json`. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
@@ -183,7 +203,7 @@ Answers:
 
 | Status | Meaning | Body |
 |---|---|---|
-| `200` | The whole result as an Arrow IPC file (`format=arrow`, the default), or one page of it as JSON (`format=json`). | `ResultPageOut` or `application/vnd.apache.arrow.file` |
+| `200` | The whole result as an Arrow IPC file (`format=arrow`, the default), as CSV (`format=csv`) or as a spreadsheet (`format=xlsx`), or one page of it as JSON (`format=json`). | `ResultPageOut` or `application/vnd.apache.arrow.file` or `text/csv; charset=utf-8` or `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
@@ -205,3 +225,61 @@ Answer fields: `ResultPageOut`
 | `next_offset` | whole number or null | yes |  |
 | `duration_ms` | whole number or null | yes |  |
 | `preview` | `PreviewOut` or null | yes |  |
+
+## `GET /api/v1/queries`
+
+List the queries of every environment you may query
+
+Without `environment`, lists the queries of every environment where you hold `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`, in the order of the list of one environment: running, then queued, then (when asked) ended. Where you hold `MANAGE_ENVIRONMENT` you see everyone's queries, elsewhere your own; a task's token sees its own. An environment where you hold neither is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/queries` answers, with its 403 and 404, in this body. Each row names its `environment`. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only this environment. |
+| `include_ended` | query | no | true or false | Also list the queries that ended in the last 24 hours (or since `since`). |
+| `status` | query | no | list of text | Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. |
+| `submitter` | query | no | text or null | Only queries submitted by the principal with this name. |
+| `origin` | query | no | list of text | Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas. |
+| `since` | query | no | text (date-time) or null | The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone, of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`. |
+| `limit` | query | no | whole number | Most rows returned (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `QueryListPageOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `503` | The server cannot do this right now; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `QueryListPageOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `QueryListOut` | yes |  |
+| `next_cursor` | text or null | yes |  |
+
+## `GET /api/v1/queries/environments`
+
+List the environments where you may submit a query
+
+Every environment where you hold `SUBMIT_QUERY`, sorted by name, and whether it is protected. Empty when there is none; never a 403.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `QueryEnvironmentOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |

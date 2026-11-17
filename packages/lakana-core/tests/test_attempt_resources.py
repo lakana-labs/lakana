@@ -10,7 +10,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
-from lakana_core.models import QueryRun, QueryRunStatus, Run, TaskAttempt, TaskRun
+from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus, Run, TaskAttempt, TaskRun
 from lakana_core.runs.resources import AttemptResources, valid_count, valid_seconds
 from lakana_core.runs.service import RunService
 from lakana_core.runs.tasks import ClaimedTask, FailureKind, claim_task, record_attempt
@@ -146,6 +146,7 @@ def _link_run(session: Session, claimed: ClaimedTask, **figures: object) -> None
     pipeline = session.get(Run, claimed.run_id)
     assert pipeline is not None
     write = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=pipeline.environment_id,
         principal_id=pipeline.run_as_principal_id,

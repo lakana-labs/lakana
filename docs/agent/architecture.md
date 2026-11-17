@@ -379,7 +379,8 @@ the sweep ended. The other enders and their order are listed in `docs/agent/secu
 query or a waiting task (`query_wait_reason`, `task_wait_reason`, `alive_workers` and `with_work`,
 which read the workers as a `WorkerSnapshot` that counts them for one kind of work, `queued_times`,
 `ahead_of`); it stores nothing and is evaluated when a status or a listing is read. The listings
-are `QueryService.list_queries` and `RunService.list_workers` (routes `queries.list` and `workers.list`).
+are `QueryService.list_queries`, `QueryService.list_all_queries_page` and `RunService.list_workers`
+(routes `queries.list`, `queries.list_all` and `workers.list`).
 
 **Worker pools (M5c3c).** `LAKANA_WORKER__TAKES` (`all`, `interactive`, `pipeline`) is a
 worker's `WorkerPool`, handed by `main` to `poll_forever` → `poll_iteration` → `poll_once` and to the

@@ -20,6 +20,7 @@ from lakana_core.models import (
     Environment,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     TaskAttempt,
@@ -81,6 +82,7 @@ def _queued(session: Session, principal: PrincipalRef, sql: str) -> uuid.UUID:
     """
     env = session.scalars(select(Environment)).one()
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,

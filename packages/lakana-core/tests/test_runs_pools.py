@@ -19,6 +19,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -182,7 +183,7 @@ def _insert(session: Session, environment_id: uuid.UUID, **fields: object) -> Qu
         "status": QueryRunStatus.QUEUED,
     }
     values.update(fields)
-    run = QueryRun(**values)
+    run = QueryRun(origin=QueryOrigin.WRITTEN, **values)
     session.add(run)
     session.flush()
     return run
@@ -573,6 +574,7 @@ def test_pass_by_counts_the_running_queries_in_the_same_statement(
     who = _principal(session, "who")
     session.add(
         QueryRun(
+            origin=QueryOrigin.WRITTEN,
             id=uuid.uuid4(),
             environment_id=environment_id,
             principal_id=who,

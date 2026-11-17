@@ -41,6 +41,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -478,6 +479,18 @@ def test_the_same_check_counted_as_a_principal_without_the_filter_sees_both_ids(
     counted = _count(session, task, unfiltered, authz, _spec())
 
     assert (counted.rows, counted.policy_applied) == (2, False)
+
+
+def test_a_check_count_run_is_of_origin_check(
+    session: Session,
+    runner: PrincipalRef,
+    authz: GrantAuthorization,
+    task: TaskRun,
+) -> None:
+    """The count of a check is a run of the worker's own, marked as a check's."""
+    counted = _count(session, task, runner, authz, _spec())
+
+    assert _stored(session, counted).origin is QueryOrigin.CHECK
 
 
 def test_a_counted_check_stores_no_result_file(

@@ -136,7 +136,7 @@ route with its parameters, its request body and its answers.
 <!-- generated:begin rest-pages -->
 - [Environments](rest/environments.md): 12 routes
 - [Namespaces](rest/namespaces.md): 4 routes
-- [Queries](rest/queries.md): 5 routes
+- [Queries](rest/queries.md): 7 routes
 - [Tables](rest/tables.md): 27 routes
 - [Search](rest/search.md): 1 route
 - [Catalog](rest/catalog.md): 2 routes

@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import shlex
 import sys
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import pyarrow as pa
 import typer
@@ -18,7 +19,7 @@ import typer
 from lakana._models import QueryListEntry, QueryStatus, ResultPage, WaitingFor
 from lakana.cli import _files, _output, _retention
 from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
-from lakana.cli._paging import more_results
+from lakana.cli._paging import more_results, parse_since
 from lakana.cli._state import CliError, CliState, resolve_environment, state_of
 from lakana.cli._waiting import WAIT_LINE_LIMIT, WaitLine, clock
 from lakana.errors import (
@@ -39,7 +40,7 @@ _ENV = Annotated[str | None, typer.Option("--env", help="Environment (default: t
 OUT = Annotated[Path | None, typer.Option("--out", help="Write the full result to this file.")]
 FORMAT = Annotated[
     str | None,
-    typer.Option("--format", help="parquet, csv or arrow (default: from the extension)."),
+    typer.Option("--format", help="parquet, csv, arrow or xlsx (default: from the extension)."),
 ]
 MAX_ROWS = Annotated[int, typer.Option("--max-rows", min=0, help="Most rows to display.")]
 TIMEOUT = Annotated[
@@ -64,6 +65,8 @@ _EVOLVE_SCHEMA = Annotated[
 ]
 _WRITE_MODES = ("create", "replace", "append", "view")
 _LIST_COLUMNS = ["id", "submitter", "kind", "status", "age", "waiting_for"]
+_ALL_COLUMNS = ["id", "environment", "submitter", "kind", "status", "age", "waiting_for"]
+"""The columns of `query list --all-environments`: the environment follows the id."""
 _LIST_DROPPABLE = ["age", "kind", "submitter"]
 """What `query list` leaves out first on a narrow terminal: the id, status and reason stay."""
 _LIST_MOST = 200
@@ -167,17 +170,28 @@ class Written:
     Parameters
     ----------
     rows
-        Rows written.
+        Rows written: counted by the CLI for a file it wrote itself (Parquet, Arrow), and the
+        run's `result_rows` for a file the server made (CSV, xlsx); `None` only when the
+        server has no count for the run (one from before it recorded them).
     path
         The file written.
+    size_bytes
+        Bytes written, for a file the server made; `None` otherwise.
     """
 
-    rows: int
+    rows: int | None
     path: str
+    size_bytes: int | None = None
 
 
-def out_format(out: Path | None, fmt: str | None) -> str | None:
-    """Resolve `--out`'s format up front, before any query runs.
+RESULT_FORMATS = ("parquet", "csv", "arrow", "xlsx")
+"""The formats of a result file. `_files.FORMATS` (what `lakana load` reads) stays as it is."""
+_SERVER_FORMATS = ("csv", "xlsx")
+"""The formats the server writes; the CLI saves its bytes. The others are made from Arrow."""
+
+
+def result_format(out: Path | None, fmt: str | None) -> str | None:
+    """Resolve a result's file format up front, before any query runs.
 
     Parameters
     ----------
@@ -189,15 +203,37 @@ def out_format(out: Path | None, fmt: str | None) -> str | None:
     Returns
     -------
     str or None
-        One of `_files.FORMATS`, or `None` without `--out`.
+        One of `RESULT_FORMATS`: `--format`, else the extension of `out`. `None` without
+        either, which prints the result as a table.
+
+    Raises
+    ------
+    CliError
+        If `--format` is not one of `RESULT_FORMATS`, the extension of `out` is unknown, or
+        `xlsx` is asked for without `--out` (exit 2).
     """
-    return None if out is None else _files.infer_format(out, fmt)
+    if fmt is not None and fmt not in RESULT_FORMATS:
+        raise CliError(f"--format must be one of {', '.join(RESULT_FORMATS)}; got {fmt!r}")
+    if out is None:
+        if fmt == "xlsx":
+            raise CliError("--format xlsx writes a binary file; add --out FILE.xlsx")
+        return fmt
+    if fmt is not None:
+        return fmt
+    if out.suffix.lower() == ".xlsx":
+        return "xlsx"
+    try:
+        return _files.infer_format(out, None)
+    except CliError:
+        raise CliError(
+            f"Can't tell the format of {out.name}; pass --format {'|'.join(RESULT_FORMATS)}"
+        ) from None
 
 
 def _render(
     state: CliState, table: pa.Table, out: Path | None, fmt: str | None, max_rows: int
 ) -> None:
-    """Print a result, or write it to `out`.
+    """Print a result, or write it to `out` as Parquet or Arrow.
 
     Parameters
     ----------
@@ -208,7 +244,7 @@ def _render(
     out
         The destination file, if any.
     fmt
-        Its format, already resolved by `out_format`.
+        Its format, already resolved by `result_format`.
     max_rows
         The display cap.
     """
@@ -220,6 +256,73 @@ def _render(
         state,
         f"Wrote {table.num_rows} rows to {_output.inline(str(out))}",
         Written(rows=table.num_rows, path=str(out)),
+    )
+
+
+def _reader_gone() -> NoReturn:
+    """End quietly when the reader of standard output has gone (``… | head``).
+
+    Standard output is pointed at the null device first, so that the interpreter's last
+    flush at exit cannot fail on the closed pipe again and print a traceback, as Python's
+    documentation on SIGPIPE advises.
+
+    Raises
+    ------
+    typer.Exit
+        Always, with status 0: the reader took what it wanted.
+    """
+    with contextlib.suppress(OSError):
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            with contextlib.suppress(OSError, ValueError):  # no file descriptor under a test
+                os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
+    raise typer.Exit(0)
+
+
+def _deliver(
+    state: CliState, run: QueryRun, out: Path | None, fmt: str | None, max_rows: int
+) -> None:
+    """Print a finished run's result, or save it to `out`.
+
+    CSV and spreadsheet files are made by the server (always the whole result, and audited
+    there) and saved as they come, reported with the run's row count and the file's bytes;
+    without `--out`, CSV is streamed to standard output, and a reader that stops early
+    (``| head``) ends it quietly with status 0. Every other output is made from the Arrow
+    result.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    run
+        The query that has succeeded.
+    out
+        The destination file, if any.
+    fmt
+        Its format, already resolved by `result_format`.
+    max_rows
+        The display cap for a table.
+    """
+    if fmt not in _SERVER_FORMATS:
+        _render(state, run.result(), out, fmt, max_rows)
+        return
+    if out is None:
+        try:
+            run.write_file(sys.stdout.buffer, format=fmt)
+            sys.stdout.buffer.flush()
+        except BrokenPipeError:
+            _reader_gone()
+        return
+    size = run.download(out, format=fmt)
+    # The server made the file; the run says how many rows its result has.
+    rows = run.status().result_rows
+    shown = f"{size} bytes" if rows is None else f"{rows} rows ({size} bytes)"
+    _output.done(
+        state,
+        f"Wrote {shown} to {_output.inline(str(out))}",
+        Written(rows=rows, path=str(out), size_bytes=size),
     )
 
 
@@ -481,7 +584,7 @@ def show_result(
     out
         Write the full result here instead of printing.
     fmt
-        The file's format, already resolved by `out_format`.
+        The file's format, already resolved by `result_format`.
     max_rows
         The most rows to display.
     timeout
@@ -491,8 +594,7 @@ def show_result(
         run = submit()
     _wait(run, environment, timeout, state)
     with _fetching(run, environment):
-        table = run.result()
-    _render(state, table, out, fmt, max_rows)
+        _deliver(state, run, out, fmt, max_rows)
 
 
 def page_cell(value: object) -> str:
@@ -722,7 +824,7 @@ def sql(
             "--expire-after cannot go with --break-glass: tables in a protected environment "
             "never expire. Leave out --expire-after."
         )
-    fmt = out_format(out, file_format)
+    fmt = result_format(out, file_format)
     text = sys.stdin.read() if query == "-" else query
     environment = resolve_environment(state, env)
     glass = break_glass_reason(break_glass, reason, environment)
@@ -828,9 +930,18 @@ def _waiting(entry: QueryListEntry) -> str:
 def list_queries(
     ctx: typer.Context,
     env: _ENV = None,
+    all_environments: Annotated[
+        bool,
+        typer.Option(
+            "--all-environments",
+            help="The queries of every environment you may query, with an environment column.",
+        ),
+    ] = False,
     all_: Annotated[
         bool,
-        typer.Option("--all", help="Also the queries that ended in the last 24 hours."),
+        typer.Option(
+            "--all", help="Also the queries that ended in the last 24 hours (or since --since)."
+        ),
     ] = False,
     status: Annotated[
         list[str] | None,
@@ -838,12 +949,29 @@ def list_queries(
             "--status",
             help="Only queries in this status: queued, running, succeeded, failed or cancelled. "
             "Repeat the option or separate the values with commas. An ended status lists the "
-            "ended queries of the last 24 hours without --all.",
+            "ended queries of the last 24 hours (or since --since) without --all.",
         ),
     ] = None,
     submitter: Annotated[
         str | None,
         typer.Option("--submitter", help="Only the queries this principal submitted."),
+    ] = None,
+    origin: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--origin",
+            help="Only queries from here: written, preview, check, write, maintenance or task. "
+            "Repeat the option or separate the values with commas.",
+        ),
+    ] = None,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="List the queries that ended at or after this date or time "
+            "(2026-10-18 or 2026-10-18T09:30:00Z, local time without a zone), of any age, "
+            "instead of the last 24 hours; implies --all.",
+        ),
     ] = None,
     limit: Annotated[
         int, typer.Option("--limit", min=1, max=_LIST_MOST, help="Most queries to list.")
@@ -857,9 +985,10 @@ def list_queries(
 
     Running queries come first, then queued ones in the order they will be taken, with the
     reason each waits. You see your own queries; with MANAGE_ENVIRONMENT on the environment,
-    everyone's, and --submitter narrows them to one principal's. The SQL and the error text are
-    not listed: read them with 'lakana query status ID'. A long list prints a "More results"
-    line with the command that shows the next page.
+    everyone's, and --submitter narrows them to one principal's. --all-environments lists
+    every environment you may query at once. The SQL and the error text are not listed: read
+    them with 'lakana query status ID'. A long list prints a "More results" line with the
+    command that shows the next page.
 
     Parameters
     ----------
@@ -867,42 +996,69 @@ def list_queries(
         The Typer context.
     env
         The environment.
+    all_environments
+        List every environment you may query instead of one; not with `--env`.
     all_
-        Add the queries that ended in the last 24 hours, newest first, after the others.
+        Add the queries that ended in the last 24 hours (or since `--since`), newest first,
+        after the others.
     status
         Status filter.
     submitter
         Submitter filter.
+    origin
+        Origin filter.
+    since
+        The oldest end time of a listed ended query; given, the ended queries are listed
+        without `--all`.
     limit
         Most queries listed (1 to 200).
     cursor
         The cursor of the page to show.
+
+    Raises
+    ------
+    CliError
+        If `--all-environments` is given with `--env`.
     """
     state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    page = state.client().queries.list_page(
-        environment,
-        include_ended=all_,
-        status=status,
-        submitter=submitter,
-        limit=limit,
-        cursor=cursor,
-    )
+    if all_environments and env is not None:
+        raise CliError("--all-environments lists every environment; leave out --env.")
+    after = parse_since(since)
+    all_ = all_ or after is not None  # --since asks for the queries that ended since then
+    queries = state.client().queries
+    environment = None if all_environments else resolve_environment(state, env)
+    if environment is None:
+        page = queries.list_all(
+            include_ended=all_,
+            status=status,
+            submitter=submitter,
+            origin=origin,
+            since=after,
+            limit=limit,
+            cursor=cursor,
+        )
+    else:
+        page = queries.list_page(
+            environment,
+            include_ended=all_,
+            status=status,
+            submitter=submitter,
+            origin=origin,
+            since=after,
+            limit=limit,
+            cursor=cursor,
+        )
     if not page.items and state.output != "json":
-        where = _output.inline(environment)
-        if status or submitter is not None or cursor is not None:
-            typer.echo(f"No queries in {where} match.")
-        else:
-            typer.echo(
-                f"No queries in {where} in the last 24 hours."
-                if all_
-                else f"No queued or running queries in {where}."
+        typer.echo(
+            _nothing_listed(
+                environment, all_, since, filtered=bool(status or submitter or origin or cursor)
             )
+        )
         return
     _output.emit(
         state,
         page.items,
-        columns=_LIST_COLUMNS,
+        columns=_ALL_COLUMNS if all_environments else _LIST_COLUMNS,
         droppable=_LIST_DROPPABLE,
         derived={"kind": _kind, "age": _age, "waiting_for": _waiting},
         flexible=["waiting_for"],
@@ -912,13 +1068,47 @@ def list_queries(
         ["lakana", "query", "list"],
         {
             "--env": environment,
+            "--all-environments": all_environments,
             "--all": all_,
             "--status": status,
             "--submitter": submitter,
+            "--origin": origin,
+            "--since": since,
             "--limit": limit if limit != 100 else None,
         },
         page.next_cursor,
     )
+
+
+def _nothing_listed(
+    environment: str | None, all_: bool, since: str | None, *, filtered: bool
+) -> str:
+    """Say that a query list found nothing, in the words of what was asked.
+
+    Parameters
+    ----------
+    environment
+        The environment listed, or `None` for every environment.
+    all_
+        Whether ended queries were asked for.
+    since
+        `--since` as typed, or `None`.
+    filtered
+        Whether a filter or a cursor narrowed the list.
+
+    Returns
+    -------
+    str
+        The line to print.
+    """
+    where = "any environment" if environment is None else _output.inline(environment)
+    if filtered:
+        return f"No queries in {where} match."
+    if not all_:
+        return f"No queued or running queries in {where}."
+    if since is not None:
+        return f"No queries in {where} since {_output.inline(since)}."
+    return f"No queries in {where} in the last 24 hours."
 
 
 @query_app.command("submit")
@@ -1039,9 +1229,11 @@ def result(
         The most rows to display.
     """
     state = state_of(ctx)
-    fmt = out_format(out, file_format)
-    run = state.client().queries.get(query_id, resolve_environment(state, env))
-    _render(state, run.result(), out, fmt, max_rows)
+    fmt = result_format(out, file_format)
+    environment = resolve_environment(state, env)
+    run = state.client().queries.get(query_id, environment)
+    with _fetching(run, environment):
+        _deliver(state, run, out, fmt, max_rows)
 
 
 def register(app: typer.Typer) -> None:

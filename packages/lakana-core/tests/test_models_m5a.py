@@ -18,6 +18,7 @@ from lakana_core.models import (
     Environment,
     LineageEdge,
     Namespace,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -56,6 +57,7 @@ def test_query_run_round_trips_every_write_field(session: Session) -> None:
     env = _environment(session)
     table_id = uuid.uuid4()
     run = QueryRun(
+        origin=QueryOrigin.WRITE,
         id=uuid.uuid4(),
         environment_id=env.id,
         sql_text="SELECT 1",
@@ -93,7 +95,11 @@ def test_a_read_run_leaves_every_write_field_null(session: Session) -> None:
     """A plain query run is unchanged: every M5a column defaults to NULL."""
     env = _environment(session)
     run = QueryRun(
-        id=uuid.uuid4(), environment_id=env.id, sql_text="SELECT 1", status=QueryRunStatus.QUEUED
+        origin=QueryOrigin.WRITTEN,
+        id=uuid.uuid4(),
+        environment_id=env.id,
+        sql_text="SELECT 1",
+        status=QueryRunStatus.QUEUED,
     )
     session.add(run)
     session.commit()

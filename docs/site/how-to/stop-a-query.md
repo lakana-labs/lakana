@@ -15,9 +15,10 @@ ended (`peak_memory_bytes`, `cpu_seconds` and `bytes_read` of the query's status
 `lakana query list` shows the queued and running queries of an environment: the running ones first,
 then the queued ones in the order the workers will take them, with the reason each one waits
 (see [Why is my query or task waiting?](why-is-it-waiting.md)).
-`--all` adds the queries that ended in the last 24 hours, the newest first, after the others;
-`--limit N` (1 to 200, default 100) cuts the list, and a list that was cut ends with the
-command for the next page. `--status` and `--submitter` narrow it (see
+`--all` adds the queries that ended in the last 24 hours (or since `--since`, which implies
+`--all`), the newest first, after the others; `--limit N` (1 to 200, default 100) cuts the list,
+and a list that was cut ends with the command for the next page. `--status`, `--submitter` and
+`--origin` narrow it, and `--all-environments` lists every environment you may query at once (see
 [Find a run, a query or a deploy](find-a-run.md)). This is the list for a query you
 started with `lakana query submit`, or one whose `lakana sql` you closed before it printed an id:
 
@@ -48,7 +49,7 @@ submitted, as `12s`, `3m`, `2h` or `1d`) and `waiting_for` (why a queued query h
 empty for any other status). On a narrow terminal the columns `age`, `kind` and `submitter` are
 left out one by one and the line under the table says which; `--output json` has every field.
 A line `No queued or running queries in ENV.` means there is nothing to find, and `--all` then
-looks 24 hours back.
+looks 24 hours back, or further with `--since`.
 
 When the limit of running ad-hoc queries per user is reached, a further query of yours waits with
 the reason `user_limit`, and stopping one of your own running queries lets it start (see

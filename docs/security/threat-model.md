@@ -227,6 +227,20 @@ accepted for M5c2b.
   principal and version within the upload lifetime, not one per file and not a count of bytes sent. A
   bound token writes none. The log therefore shows who fetched a version, not how often within the
   hour.
+- **A result file is the run's own, under the submitter-only read; its export is audited.**
+  `GET …/queries/{id}/result?format=arrow|csv|xlsx` reads the run through `get_query_run` first, so
+  another principal's run, a manager's view of it and a task token's run of another token are the
+  same 404 as the status read, and nothing is recorded. Every download of the whole result writes
+  `QUERY_RESULT_EXPORTED` (query id, format, rows, Arrow size) before the first byte; a JSON page,
+  a refused download and an Arrow download by a token bound to a task attempt write none (that
+  token's CSV or spreadsheet download is recorded). The event records the start of
+  a download, not that it finished. A CSV is written verbatim: a value starting with `=` is not
+  escaped against formula injection; the spreadsheet format writes every text as text.
+- **A person's paused downloads fill `TMPDIR` only so far.** A CSV or spreadsheet is prepared into
+  a temporary file about the size of the result and kept until its response ends, so a client that
+  opens downloads and never reads them holds those files. One person holds at most two at once per
+  server process; a third is `503` until one closes. Many people at once, or one person across
+  many processes, can still fill a small `TMPDIR` (often memory-backed), up to two results each.
 - **A holder of `WRITE_TABLE` can block uploads to the artifact and can fill storage.** The cap of 16
   open uploads is per artifact, not per principal, so a person who opens 16 uploads and leaves them
   keeps a task's `begin` refused until they expire (one hour by default, then again). There is no

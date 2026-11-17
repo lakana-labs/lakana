@@ -51,6 +51,7 @@ from lakana_core.models import (
     Namespace,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -894,6 +895,7 @@ def test_a_table_with_a_query_writing_it_is_postponed(
     table_id = _due(session, catalog, principal)
     env_id = session.scalars(select(Environment.id)).one()
     run = QueryRun(
+        origin=QueryOrigin.WRITE,
         id=uuid.uuid4(),
         environment_id=env_id,
         sql_text="SELECT 1",

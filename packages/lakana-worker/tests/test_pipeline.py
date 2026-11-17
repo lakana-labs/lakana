@@ -289,6 +289,23 @@ def test_a_pivot_without_its_values_fails_with_what_to_write(
     assert run.error_cause == "invalid_query"
 
 
+def test_a_stored_result_records_its_rows_and_its_file_size(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The run says how many rows it holds and how long the stored Arrow file is."""
+    _sales(session, principal, tmp_path)
+    run = QueryService(session, AllowAllAuthorization()).submit_query(
+        principal, "dev", "SELECT * FROM gold.sales"
+    )
+    run_one(session, run.id, AllowAllAuthorization())
+    session.refresh(run)
+    assert run.status == QueryRunStatus.SUCCEEDED, run.error_message
+    assert run.result_location is not None
+    assert run.result_rows == 3
+    assert run.result_bytes == len((tmp_path / run.result_location).read_bytes())
+    assert run.result_bytes > 0
+
+
 def test_a_pivot_with_its_values_listed_returns_rows(
     session: Session, principal: PrincipalRef, tmp_path: Path
 ) -> None:

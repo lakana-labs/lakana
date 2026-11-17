@@ -42,6 +42,7 @@ from lakana_core.models import (
     Base,
     Environment,
     Namespace,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -342,7 +343,13 @@ def _query_run(session: Session, status: QueryRunStatus) -> uuid.UUID:
     """
     run_id = uuid.uuid4()
     session.add(
-        QueryRun(id=run_id, environment_id=_env_id(session), sql_text="SELECT 1", status=status)
+        QueryRun(
+            origin=QueryOrigin.WRITTEN,
+            id=run_id,
+            environment_id=_env_id(session),
+            sql_text="SELECT 1",
+            status=status,
+        )
     )
     session.commit()
     return run_id

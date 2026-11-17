@@ -40,6 +40,7 @@ from lakana_core.models import (
     EnvironmentDeployment,
     JobVersion,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     RollbackOutcome,
@@ -821,6 +822,7 @@ def _sql_task_with_a_write(stack: QueryStack, rows: int | None) -> tuple[uuid.UU
         beat = db_now(session) - timedelta(seconds=_LEASE_SECONDS + 1)
         session.add(Worker(id=dead, host="h", version="1", started_at=beat, heartbeat_at=beat))
         write = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=owner.environment_id,
             principal_id=owner.run_as_principal_id,

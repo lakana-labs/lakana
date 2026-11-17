@@ -204,6 +204,8 @@ ROUTES: dict[str, Route] = {
     "queries.get": Route("GET", "/api/v1/environments/{env}/queries/{query_id}"),
     "queries.result": Route("GET", "/api/v1/environments/{env}/queries/{query_id}/result"),
     "queries.cancel": Route("POST", "/api/v1/environments/{env}/queries/{query_id}/cancel"),
+    "queries.list_all": Route("GET", "/api/v1/queries"),
+    "queries.environments": Route("GET", "/api/v1/queries/environments"),
     "principals.create": Route("POST", "/api/v1/principals"),
     "principals.get": Route("GET", "/api/v1/principals/{name}"),
     "principals.list": Route("GET", "/api/v1/principals"),

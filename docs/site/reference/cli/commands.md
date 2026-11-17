@@ -68,7 +68,7 @@ A query that stays queued for 3 seconds prints a line on standard error that say
 | `QUERY` | text | required | The SQL, or - to read it from stdin. |
 | `--env` | text | none | Environment (default: the profile's). |
 | `--out` | path | none | Write the full result to this file. |
-| `--format` | text | none | parquet, csv or arrow (default: from the extension). |
+| `--format` | text | none | parquet, csv, arrow or xlsx (default: from the extension). |
 | `--max-rows` | whole number, 0 or more | `50` | Most rows to display. |
 | `--timeout` | number | none | Seconds to wait before giving up. |
 | `--into` | text | none | Write the result into this table or view instead of printing it. |

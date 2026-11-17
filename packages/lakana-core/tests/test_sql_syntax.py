@@ -8,13 +8,17 @@ import unicodedata
 import pytest
 import sqlglot
 import sqlglot.errors
+from sqlglot import exp
 
+from lakana_core.errors import SqlPosition, SqlRefusal
 from lakana_core.sql_syntax import (
     MAX_MESSAGE_CHARS,
     SQL_SYNTAX_ERRORS,
     _clean,
     _reduce_class_names,
     describe_syntax_error,
+    error_position,
+    node_position,
     syntax_problem,
 )
 
@@ -230,3 +234,63 @@ def test_an_unterminated_comment_has_no_position() -> None:
     sql = "SELECT 1 /* never ends"
 
     assert "could not be read" in describe_syntax_error(_error(sql), sql)
+
+
+def test_node_position_uses_the_start_offset_not_the_end_column() -> None:
+    """The node starts where its own text does, not where the tokenizer's column ends."""
+    sql = "SELECT *\nFROM read_csv('raw/x.csv')"
+    node = sqlglot.parse_one(sql, dialect="duckdb").find(exp.ReadCSV)
+    assert node is not None
+    assert node_position(node, sql) == SqlPosition(2, 6)
+
+
+def test_node_position_falls_back_to_the_first_descendant() -> None:
+    """A node with no offset of its own starts where its earliest descendant does."""
+    sql = "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM t)\nSELECT * FROM t"
+    node = sqlglot.parse_one(sql, dialect="duckdb").find(exp.CTE)
+    assert node is not None
+    assert "start" not in node.meta
+    assert node_position(node, sql) == SqlPosition(1, 16)
+
+
+def test_a_node_without_any_offset_has_no_position() -> None:
+    """A placeholder, and everything under it, has nothing to point at."""
+    assert node_position(exp.Placeholder(), "SELECT ?") is None
+
+
+def test_error_position_of_a_parse_error_is_the_parsers() -> None:
+    """The position is the one the message names."""
+    sql = "SELECT 1 FROM"
+    exc = _error(sql)
+    assert isinstance(exc, sqlglot.errors.ParseError)
+    problem = syntax_problem(exc, sql)
+    assert problem is not None
+    assert error_position(exc, sql) == SqlPosition(problem.line or 0, problem.column or 0)
+    assert f"line {problem.line}, column {problem.column}" in describe_syntax_error(exc, sql)
+
+
+def test_a_node_from_a_longer_text_has_no_position_in_a_shorter_one() -> None:
+    """An offset past the end of the given SQL (a node parsed from other text) points nowhere."""
+    longer = "SELECT 1;\n" * 5 + "SELECT * FROM read_csv('raw/x.csv')"
+    node = sqlglot.parse(longer, dialect="duckdb")[-1]
+    assert node is not None
+    node = node.find(exp.ReadCSV)
+    assert node is not None
+    assert node_position(node, longer) == SqlPosition(6, 15)
+    assert node_position(node, "SELECT 1") is None
+
+
+def test_error_position_of_a_parse_error_without_a_line_is_none() -> None:
+    """A parse error that names no line, or an unclosed quote without the SQL, has no position."""
+    unplaced = sqlglot.errors.ParseError("x", errors=[{"description": "Bad thing"}])
+    assert error_position(unplaced, "SELECT 1") is None
+    quote = _error("SELECT 'never closed")
+    assert isinstance(quote, sqlglot.errors.TokenError)
+    assert error_position(quote, "") is None
+
+
+def test_error_position_of_a_refusal_is_its_own_and_of_anything_else_is_none() -> None:
+    """A refusal carries its position; an error that is neither refusal nor syntax has none."""
+    assert error_position(SqlRefusal("no", SqlPosition(3, 4)), "x") == SqlPosition(3, 4)
+    assert error_position(SqlRefusal("no"), "x") is None
+    assert error_position(ValueError("x"), "x") is None

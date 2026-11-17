@@ -1,8 +1,10 @@
-"""`QueryService.list_queries_page`: the status and submitter filters and the cursor."""
+"""`QueryService.list_queries_page`: the status, submitter, origin and since filters, the cursor."""
 
 from __future__ import annotations
 
+import re
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ from test_query_service import MANAGER, SUBMITTER, _add_run, _ago, _env, _ids, _
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.query_service import QueryService
 from lakana_core.errors import ValidationError
-from lakana_core.models import Principal, PrincipalType, QueryRunStatus
+from lakana_core.models import Principal, PrincipalType, QueryOrigin, QueryRunStatus
 from lakana_core.pagination import encode_cursor
 
 
@@ -174,3 +176,71 @@ def test_the_cursor_of_another_list_is_refused(
     other = encode_cursor("runs", _ago(5), uuid.uuid4())
     with pytest.raises(ValidationError, match="came from the `runs` list"):
         QueryService(session, SUBMITTER).list_queries_page(principal, "dev", cursor=other)
+
+
+def test_origin_narrows_the_rows_you_may_already_see(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    env = _env(session, principal, tmp_path, "dev")
+    bob = _persisted(session, "bob")
+    written = _add_run(session, env, principal, age=30)
+    task = _add_run(session, env, principal, age=20, origin=QueryOrigin.TASK)
+    preview = _add_run(session, env, principal, age=10, origin=QueryOrigin.PREVIEW)
+    _add_run(session, env, bob, age=5, origin=QueryOrigin.TASK)
+    service = QueryService(session, SUBMITTER)
+    assert _ids(service.list_queries_page(principal, "dev", origin=["task"])[0]) == [task.id]
+    both = service.list_queries_page(principal, "dev", origin=["written", "preview"])[0]
+    assert _ids(both) == [written.id, preview.id]
+    rows = service.list_queries_page(principal, "dev")[0]
+    assert [(row.environment, row.origin) for row in rows] == [
+        ("dev", "written"),
+        ("dev", "task"),
+        ("dev", "preview"),
+    ]
+    # bob's task run stays absent: the filter is one more condition on what the caller sees
+    assert service.list_queries_page(principal, "dev", origin=["task"], submitter="bob") == (
+        [],
+        None,
+    )
+
+
+def test_an_unknown_origin_is_a_validation_error_naming_the_choices(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _env(session, principal, tmp_path, "dev")
+    with pytest.raises(
+        ValidationError,
+        match=re.escape(
+            "Unknown origin 'typed': `origin` must be one of written, preview, check, write, "
+            "maintenance, task."
+        ),
+    ):
+        QueryService(session, SUBMITTER).list_queries_page(principal, "dev", origin=["typed"])
+
+
+def test_since_lists_ended_runs_older_than_a_day(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    env = _env(session, principal, tmp_path, "dev")
+    old = _add_run(
+        session, env, principal, QueryRunStatus.SUCCEEDED, age=300_000, finished_at=_ago(259_200)
+    )
+    older = _add_run(
+        session, env, principal, QueryRunStatus.FAILED, age=900_000, finished_at=_ago(864_000)
+    )
+    service = QueryService(session, SUBMITTER)
+    assert service.list_queries_page(principal, "dev", include_ended=True) == ([], None)
+    week = service.list_queries_page(principal, "dev", include_ended=True, since=_ago(604_800))
+    assert _ids(week[0]) == [old.id]
+    failed = service.list_queries_page(principal, "dev", status=["failed"], since=_ago(1_000_000))
+    assert _ids(failed[0]) == [older.id]
+
+
+def test_since_without_a_time_zone_is_refused(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    _env(session, principal, tmp_path, "dev")
+    with pytest.raises(ValidationError, match="`since` has no time zone"):
+        QueryService(session, SUBMITTER).list_queries_page(
+            principal, "dev", include_ended=True, since=datetime(2026, 10, 18, 9, 30)
+        )

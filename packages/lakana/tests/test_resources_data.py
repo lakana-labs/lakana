@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import io
 import json
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -3786,6 +3788,75 @@ def test_a_query_result_counts_the_bytes_it_downloaded() -> None:
     assert _usage.bytes_read() == len(file_bytes)
 
 
+class _BreakingBody(httpx.SyncByteStream):
+    """A response body that sends one piece and then fails, as a dropped connection does."""
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield b"a,b\r\n1,2\r\n"
+        raise httpx.ReadError("connection reset")
+
+
+def test_download_streams_the_server_file_and_replaces_atomically(tmp_path: Path) -> None:
+    """`download` asks for the format, writes `<path>.part` and replaces the target with it."""
+    target = tmp_path / "orders.csv"
+    target.write_bytes(b"old")
+    seen: list[httpx.Request] = []
+    parts_during: list[bool] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        parts_during.append((tmp_path / "orders.csv.part").exists())
+        return httpx.Response(200, content=b"a,b\r\n1,2\r\n")
+
+    run = QueryRun(_transport(handler), id="q1", environment="dev")
+    written = run.download(target, format="csv")
+
+    assert written == len(b"a,b\r\n1,2\r\n")
+    assert target.read_bytes() == b"a,b\r\n1,2\r\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["orders.csv"]
+    assert seen[0].url.path == "/api/v1/environments/dev/queries/q1/result"
+    assert dict(seen[0].url.params) == {"format": "csv"}
+    assert parts_during == [True]  # the part file is the one being written
+
+
+def test_download_leaves_no_part_file_when_the_body_breaks(tmp_path: Path) -> None:
+    """A body that breaks half way leaves the old file untouched and no `.part` behind."""
+    target = tmp_path / "orders.csv"
+    target.write_bytes(b"old")
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(200, stream=_BreakingBody())),
+        id="q1",
+        environment="dev",
+    )
+
+    with pytest.raises(LakanaConnectionError):
+        run.download(target, format="csv")
+
+    assert target.read_bytes() == b"old"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["orders.csv"]
+
+
+def test_write_file_raises_the_servers_422_sentence_for_xlsx() -> None:
+    """The refusal's sentence reaches the caller unchanged, and nothing is written."""
+    sentence = (
+        "This result has 2,000,000 rows; a spreadsheet holds at most 1,048,575 below its "
+        "header row. Download it as CSV instead: lakana query result q1 --env dev "
+        "--format csv --out query-q1.csv"
+    )
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(422, json={"detail": sentence})),
+        id="q1",
+        environment="dev",
+    )
+    sink = io.BytesIO()
+
+    with pytest.raises(ValidationError) as caught:
+        run.write_file(sink, format="xlsx")
+
+    assert sentence in str(caught.value)
+    assert sink.getvalue() == b""
+
+
 def test_sdk_health_sends_readers_false_only_when_asked() -> None:
     """`health` adds `readers=false` when `readers=False` and nothing otherwise."""
     seen: list[httpx.Request] = []
@@ -3799,3 +3870,50 @@ def test_sdk_health_sends_readers_false_only_when_asked() -> None:
     health = tables.health("dev", "bronze.sales", days=7, readers=False)
     assert [dict(r.url.params) for r in seen] == [{}, {"days": "7", "readers": "false"}]
     assert health.readers is None
+
+
+def test_status_reads_the_new_fields() -> None:
+    """The origin, SQL, times, result size and error position are parsed; times are aware."""
+    body = {
+        **_QUEUED_BODY,
+        "status": "FAILED",
+        "origin": "written",
+        "sql": "SELECT 1",
+        "created_at": "2026-11-01T10:00:00+00:00",
+        "started_at": "2026-11-01T10:00:01+00:00",
+        "finished_at": "2026-11-01T10:00:02+00:00",
+        "result_rows": 5,
+        "result_bytes": 900,
+        "error_line": 2,
+        "error_column": 7,
+    }
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(200, json=body)), id="q1", environment="dev"
+    )
+    status = run.status()
+    assert status.origin == "written"
+    assert status.sql == "SELECT 1"
+    assert status.created_at == datetime(2026, 11, 1, 10, 0, 0, tzinfo=UTC)
+    assert status.started_at == datetime(2026, 11, 1, 10, 0, 1, tzinfo=UTC)
+    assert status.finished_at == datetime(2026, 11, 1, 10, 0, 2, tzinfo=UTC)
+    assert (status.result_rows, status.result_bytes) == (5, 900)
+    assert (status.error_line, status.error_column) == (2, 7)
+
+
+def test_status_of_an_older_server_reads_them_as_none() -> None:
+    """A server that predates the fields sends none of them; each reads as `None`."""
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(200, json=_QUEUED_BODY)),
+        id="q1",
+        environment="dev",
+    )
+    status = run.status()
+    assert status.origin is None
+    assert status.sql is None
+    assert status.created_at is None
+    assert status.started_at is None
+    assert status.finished_at is None
+    assert status.result_rows is None
+    assert status.result_bytes is None
+    assert status.error_line is None
+    assert status.error_column is None

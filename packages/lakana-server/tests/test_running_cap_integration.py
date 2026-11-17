@@ -19,7 +19,14 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from lakana_core.models import Environment, Principal, PrincipalType, QueryRun, QueryRunStatus
+from lakana_core.models import (
+    Environment,
+    Principal,
+    PrincipalType,
+    QueryOrigin,
+    QueryRun,
+    QueryRunStatus,
+)
 from lakana_core.runs import pools
 from lakana_worker import pipeline, poller
 from tests.integration_helpers import backend_pid, wait_for_lock_waiter
@@ -130,6 +137,7 @@ class World:
             for offset, run_id in enumerate(ids):
                 session.add(
                     QueryRun(
+                        origin=QueryOrigin.WRITTEN,
                         id=run_id,
                         environment_id=self.environment_id,
                         principal_id=principal_id,

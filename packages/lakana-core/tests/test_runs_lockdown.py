@@ -59,6 +59,7 @@ from lakana_core.models import (
     Namespace,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -191,6 +192,7 @@ def _task(
     session.add(run)
     session.flush()
     query = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=environment.id,
         principal_id=principal.id,
@@ -573,6 +575,7 @@ def test_a_zombie_attempt_with_a_stale_query_run_is_refused(
     task = session.get(TaskRun, context.task_run_id)
     assert task is not None
     reclaimed = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=session.scalars(select(Environment)).one().id,
         principal_id=principal.id,
@@ -1644,6 +1647,7 @@ def _query_run_task(
         session, principal.id, asset="models.churn", inputs={"rows": "silver.rows"}, extra=extra
     )
     query = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=session.scalars(select(Environment).where(Environment.name == "dev"))
         .one()
@@ -1999,6 +2003,7 @@ def _running(session: Session, principal: PrincipalRef, worker: str | None = "w1
     """
     env = session.scalars(select(Environment).where(Environment.name == "dev")).one()
     run = QueryRun(
+        origin=QueryOrigin.WRITE,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,

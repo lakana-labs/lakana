@@ -103,6 +103,7 @@ nav:
           - how-to/find-a-table.md
           - how-to/open-a-table.md
           - how-to/preview-a-table.md
+          - how-to/download-a-query-result.md
           - how-to/see-where-a-table-is-defined.md
           - how-to/drop-and-restore-a-table.md
           - how-to/let-tables-expire.md

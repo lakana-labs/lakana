@@ -31,6 +31,8 @@ from lakana_core.errors import (
     LakanaError,
     NotFoundError,
     PermissionDenied,
+    SqlPosition,
+    SqlRefusal,
     UnsupportedTableError,
     ValidationError,
 )
@@ -41,6 +43,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -126,7 +129,12 @@ def principal(session: Session, tmp_path: Path) -> PrincipalRef:
     return ref
 
 
-def _run(session: Session, principal_id: uuid.UUID | None, sql: str) -> uuid.UUID:
+def _run(
+    session: Session,
+    principal_id: uuid.UUID | None,
+    sql: str,
+    origin: QueryOrigin = QueryOrigin.WRITTEN,
+) -> uuid.UUID:
     """Queue a read query.
 
     Parameters
@@ -137,6 +145,8 @@ def _run(session: Session, principal_id: uuid.UUID | None, sql: str) -> uuid.UUI
         The submitter.
     sql
         The query.
+    origin
+        Where the run came from.
 
     Returns
     -------
@@ -145,6 +155,7 @@ def _run(session: Session, principal_id: uuid.UUID | None, sql: str) -> uuid.UUI
     """
     env = session.scalars(select(Environment)).one()
     run = QueryRun(
+        origin=origin,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal_id,
@@ -375,6 +386,99 @@ def test_a_failed_run_stores_a_machine_readable_cause(
     run_id = _run(session, principal.id, sql)
     run_one(session, run_id, AllowAllAuthorization())
     assert _cause_of(session, run_id) == cause
+
+
+def _position_of(session: Session, run_id: uuid.UUID) -> tuple[int | None, int | None]:
+    """Read back where in the SQL a run recorded its error.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    run_id
+        The run's id.
+
+    Returns
+    -------
+    tuple
+        `QueryRun.error_line` and `QueryRun.error_column`.
+    """
+    session.expire_all()
+    stored = session.get(QueryRun, run_id)
+    assert stored is not None
+    return stored.error_line, stored.error_column
+
+
+def test_a_syntax_error_records_line_and_column(session: Session, principal: PrincipalRef) -> None:
+    """The parser's own position is kept, as the person typed it."""
+    run_id = _run(session, principal.id, "SELECT 1\nFROM")
+    run_one(session, run_id, AllowAllAuthorization())
+    assert _cause_of(session, run_id) == "invalid_query"
+    # The column the stored message names ("at line 2, column 4"), not just any column.
+    assert _position_of(session, run_id) == (2, 4)
+    stored = session.get(QueryRun, run_id)
+    assert stored is not None
+    assert "at line 2, column 4" in (stored.error_message or "")
+
+
+def test_a_guard_refusal_records_its_position(session: Session, principal: PrincipalRef) -> None:
+    """A refused table function is placed by its node, not by the parser."""
+    run_id = _run(session, principal.id, "SELECT *\nFROM read_csv('raw/x.csv')")
+    run_one(session, run_id, AllowAllAuthorization())
+    assert _cause_of(session, run_id) == "invalid_query"
+    assert _position_of(session, run_id) == (2, 6)
+
+
+@pytest.mark.parametrize(
+    ("position", "stored"),
+    [
+        (SqlPosition(1, 9), (1, 9)),  # just after the last character of "SELECT 1"
+        (SqlPosition(2, 1), (None, None)),  # a line the SQL does not have
+        (SqlPosition(1, 10), (None, None)),  # past the end of its line
+        (SqlPosition(0, 1), (None, None)),
+        (SqlPosition(1, 0), (None, None)),
+    ],
+)
+def test_a_position_outside_the_submitted_sql_is_not_recorded(
+    session: Session,
+    principal: PrincipalRef,
+    monkeypatch: pytest.MonkeyPatch,
+    position: SqlPosition,
+    stored: tuple[int | None, int | None],
+) -> None:
+    """A position that does not lie in the person's SQL (a view's text, say) is dropped."""
+
+    def refused(*_args: object, **_kwargs: object) -> pa.Table:
+        raise SqlRefusal("refused", position)
+
+    monkeypatch.setattr("lakana_worker.pipeline.execute_query", refused)
+    run_id = _run(session, principal.id, "SELECT 1")
+    run_one(session, run_id, AllowAllAuthorization())
+    assert _cause_of(session, run_id) == "invalid_query"
+    assert _position_of(session, run_id) == stored
+
+
+def test_a_preview_failure_records_no_position(session: Session, principal: PrincipalRef) -> None:
+    """The preview's SQL is the server's, so a position in it means nothing to the reader."""
+    run_id = _run(session, principal.id, "SELECT 1\nFROM", origin=QueryOrigin.PREVIEW)
+    run_one(session, run_id, AllowAllAuthorization())
+    assert _cause_of(session, run_id) == "invalid_query"
+    assert _position_of(session, run_id) == (None, None)
+
+
+def test_a_failure_that_is_not_invalid_query_records_no_position(
+    session: Session, principal: PrincipalRef, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A timeout is not a fault of the SQL's text."""
+
+    def _slow(*_args: object, **_kwargs: object) -> pa.Table:
+        raise QueryTimeout("too slow")
+
+    monkeypatch.setattr("lakana_worker.pipeline.execute_query", _slow)
+    run_id = _run(session, principal.id, "SELECT 1 AS x")
+    run_one(session, run_id, AllowAllAuthorization())
+    assert _cause_of(session, run_id) == "timeout"
+    assert _position_of(session, run_id) == (None, None)
 
 
 def test_a_result_over_the_limit_has_the_cause_result_too_large(
@@ -1152,6 +1256,7 @@ def _task_write_run(session: Session, principal_id: uuid.UUID) -> uuid.UUID:
     session.add(task)
     session.flush()
     query = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal_id,
@@ -1213,6 +1318,7 @@ def test_the_audit_of_a_run_ended_in_the_workers_place_is_told_by_who_ended_it(
     status: QueryRunStatus, cause: str | None, task_run: bool, token: bool, expected: bool
 ) -> None:
     run = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         status=status,
         error_cause=cause,

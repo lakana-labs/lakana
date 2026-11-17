@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param
+from lakana.errors import NotFound
 from lakana.resources.artifacts import Artifacts
 from lakana.resources.deploys import Deploys, OrphanTables
 from lakana.resources.namespaces import Namespaces
@@ -172,6 +174,142 @@ def test_queries_list_sends_the_filters_and_page_returns_the_cursor() -> None:
     page = queries.list_page("dev", include_ended=True)
     assert (page.next_cursor, seen[1].url.params["include_ended"]) == ("q-next", "true")
     assert "status" not in seen[1].url.params
+
+
+def test_queries_list_sends_origin_and_since() -> None:
+    seen: list[httpx.Request] = []
+    queries = Queries(_transport([([_ENTRY], None)], seen))
+    since = datetime(2026, 10, 1, 12, 0, tzinfo=timezone(timedelta(hours=2)))
+    queries.list("dev", include_ended=True, origin=["written", "task"], since=since)
+    params = seen[0].url.params
+    assert (params["origin"], params["since"]) == ("written,task", "2026-10-01T12:00:00+02:00")
+    entry = queries.list_page("dev", origin="preview").items[0]
+    assert seen[1].url.params["origin"] == "preview"
+    # an older server sends neither field
+    assert (entry.environment, entry.origin) == (None, None)
+
+
+def test_list_all_sends_the_filters_and_reads_the_cursor_from_the_body() -> None:
+    seen: list[httpx.Request] = []
+    row = {**_ENTRY, "environment": "prod", "origin": "task"}
+    queries = Queries(_object_transport([{"items": [row], "next_cursor": "a1"}], seen))
+    since = datetime(2026, 10, 1, 12, 0, tzinfo=timezone(timedelta(hours=2)))
+    page = queries.list_all(
+        environment="prod",
+        include_ended=True,
+        status=["failed", "cancelled"],
+        submitter="bob",
+        origin="task",
+        since=since,
+        limit=5,
+        cursor="a0",
+    )
+    assert seen[0].url.path == "/api/v1/queries"
+    assert dict(seen[0].url.params) == {
+        "environment": "prod",
+        "include_ended": "true",
+        "status": "failed,cancelled",
+        "submitter": "bob",
+        "origin": "task",
+        "since": "2026-10-01T12:00:00+02:00",
+        "limit": "5",
+        "cursor": "a0",
+    }
+    assert page.next_cursor == "a1"
+    assert [(e.id, e.environment, e.origin) for e in page.items] == [(_ENTRY["id"], "prod", "task")]
+    queries.list_all()
+    assert dict(seen[1].url.params) == {"include_ended": "false", "limit": "100"}
+
+
+def test_iter_all_follows_every_page() -> None:
+    seen: list[httpx.Request] = []
+    bodies = [
+        {"items": [_ENTRY], "next_cursor": "a1"},
+        {"items": [_ENTRY], "next_cursor": "a2"},
+        {"items": [_ENTRY], "next_cursor": None},
+    ]
+    queries = Queries(_object_transport(bodies, seen))
+    assert len(list(queries.iter_all(origin=["written"], page_size=1))) == 3
+    assert [r.url.params.get("cursor") for r in seen] == [None, "a1", "a2"]
+    assert all(r.url.params["origin"] == "written" for r in seen)
+    assert all(r.url.params["limit"] == "1" for r in seen)
+
+
+def test_query_environments_reads_name_and_protection() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=[{"name": "prod", "protected": True}])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    found = Queries(HttpTransport(_CONFIG, http_client=client)).environments()
+    assert seen[0].url.path == "/api/v1/queries/environments"
+    assert [(e.name, e.protected) for e in found] == [("prod", True)]
+
+
+def _answering(status: int, body: dict[str, Any]) -> Queries:
+    """Build the queries resource over a server that answers every request the same.
+
+    Parameters
+    ----------
+    status
+        The status of every answer.
+    body
+        The JSON body of every answer.
+
+    Returns
+    -------
+    Queries
+        The resource.
+    """
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body)),
+        base_url=_CONFIG.url,
+    )
+    return Queries(HttpTransport(_CONFIG, http_client=client))
+
+
+_LIST_ALL_TOO_OLD = (
+    "This server does not have GET /api/v1/queries; it is older than this lakana package. "
+    "Upgrade the server, or list one environment with `lakana query list --env ENV`."
+)
+_ENVIRONMENTS_TOO_OLD = (
+    "This server does not have GET /api/v1/queries/environments; it is older than this lakana "
+    "package. Upgrade the server, or see the environments with `lakana env list`."
+)
+
+
+@pytest.mark.parametrize(
+    ("call", "message"),
+    [
+        (lambda queries: queries.list_all(), _LIST_ALL_TOO_OLD),
+        (lambda queries: queries.list_all(environment="dev"), _LIST_ALL_TOO_OLD),
+        (lambda queries: list(queries.iter_all()), _LIST_ALL_TOO_OLD),
+        (lambda queries: queries.environments(), _ENVIRONMENTS_TOO_OLD),
+    ],
+)
+def test_an_older_server_without_the_route_is_named_as_too_old(
+    call: Callable[[Queries], object], message: str
+) -> None:
+    """The router's bare 404 has no Lakana error type: the route is missing, not the object."""
+    with pytest.raises(NotFound) as caught:
+        call(_answering(404, {"detail": "Not Found"}))
+    assert (str(caught.value), caught.value.status, caught.value.error_type) == (
+        message,
+        404,
+        None,
+    )
+
+
+def test_a_lakana_404_of_an_unknown_environment_stays_as_it_is() -> None:
+    unknown = {"detail": "Environment 'nope' not found.", "type": "NotFoundError"}
+    with pytest.raises(NotFound) as caught:
+        _answering(404, unknown).list_all(environment="nope")
+    assert (str(caught.value), caught.value.error_type) == (
+        "Environment 'nope' not found.",
+        "NotFoundError",
+    )
 
 
 def test_deploys_list_sends_the_filter_and_page_returns_the_cursor() -> None:

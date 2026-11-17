@@ -43,6 +43,7 @@ from lakana_core.models import (
     Environment,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -136,6 +137,15 @@ def test_an_analyst_may_preview(session: Session, orders: uuid.UUID) -> None:
     run = submit_preview(session, GrantAuthorization(session), analyst, _ORDERS)
 
     assert (run.principal_id, run.preview_table_id) == (analyst.id, orders)
+
+
+def test_a_preview_run_is_of_origin_preview(session: Session, orders: uuid.UUID) -> None:
+    """The preview marks its own run; the caller says nothing of it."""
+    analyst = _person(session, "ana", Role.ANALYST)
+
+    run = submit_preview(session, GrantAuthorization(session), analyst, _ORDERS)
+
+    assert run.origin is QueryOrigin.PREVIEW
 
 
 def test_read_table_is_checked_before_submit_query(session: Session, orders: uuid.UUID) -> None:
@@ -298,7 +308,11 @@ def test_a_preview_run_is_bound_and_carries_the_server_sql(
 
 def test_an_ordinary_run_previews_no_table() -> None:
     """A run without the binding names no previewed table, whatever its SQL."""
-    run = QueryRun(id=uuid.uuid4(), sql_text='SELECT * FROM "gold"."orders" LIMIT 100')
+    run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
+        id=uuid.uuid4(),
+        sql_text='SELECT * FROM "gold"."orders" LIMIT 100',
+    )
 
     assert previewed_table(run) is None
 
@@ -334,11 +348,12 @@ def test_sql_that_names_no_table_is_refused_when_read_back() -> None:
 def test_query_completed_detail_marks_a_preview() -> None:
     """The audit event tells a preview from an ordinary query; an ordinary one is unchanged."""
     preview_run = QueryRun(
+        origin=QueryOrigin.PREVIEW,
         id=uuid.uuid4(),
         sql_text='SELECT * FROM "gold"."orders" LIMIT 100',
         preview_table_id=uuid.uuid4(),
     )
-    plain_run = QueryRun(id=uuid.uuid4(), sql_text="SELECT 1")
+    plain_run = QueryRun(origin=QueryOrigin.WRITTEN, id=uuid.uuid4(), sql_text="SELECT 1")
 
     assert (
         query_completed_detail(

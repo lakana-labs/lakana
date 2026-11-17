@@ -36,6 +36,7 @@ from lakana_core.models import (
     CheckResult,
     Environment,
     JobVersion,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Run,
@@ -288,6 +289,7 @@ def submit_check_rows(
         sql_text=check_rows_sql_text(spec.name),
         status=QueryRunStatus.QUEUED,
         task_token_id=None,
+        origin=QueryOrigin.CHECK,
         check_result_id=result.id,
     )
     session.add(query)

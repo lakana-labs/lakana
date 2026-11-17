@@ -67,6 +67,8 @@ dependencies = [
     "pyarrow>=18.0.0",
     # ASGI server for the `lakana-server` console script. BSD-3-Clause.
     "uvicorn>=0.30",
+    # Writes a query result as a spreadsheet (`result_files`). BSD-2-Clause, no dependencies.
+    "xlsxwriter>=3.3.1",
 ]
 
 [tool.hatch.build]

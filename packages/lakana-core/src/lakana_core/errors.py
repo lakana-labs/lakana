@@ -4,7 +4,7 @@ These carry no HTTP knowledge; the server layer is responsible for mapping
 them onto status codes and response bodies.
 """
 
-from typing import Literal
+from typing import Literal, NamedTuple
 
 
 class LakanaError(Exception):
@@ -25,6 +25,43 @@ class ConflictError(LakanaError):
 
 class ValidationError(LakanaError):
     """Input was structurally invalid."""
+
+
+class SqlPosition(NamedTuple):
+    """A place in submitted SQL, counted from 1 as an editor counts.
+
+    Parameters
+    ----------
+    line
+        The line, from 1.
+    column
+        The column in that line, from 1.
+    """
+
+    line: int
+    """The line, from 1."""
+    column: int
+    """The column in that line, from 1."""
+
+
+class SqlRefusal(ValidationError):
+    """The query guard refused the SQL, and may know where in it the cause is.
+
+    A `ValidationError`, so every handler of one (the 422 mapping among them) treats it the
+    same. The message is unchanged by the position.
+
+    Parameters
+    ----------
+    message
+        What is refused and what to do next.
+    position
+        The place in the submitted SQL of the refused node, or `None` when it has none.
+    """
+
+    def __init__(self, message: str, position: SqlPosition | None = None) -> None:
+        super().__init__(message)
+        self.position = position
+        """The place in the submitted SQL, or `None`."""
 
 
 class UnsupportedPicture(ValidationError):

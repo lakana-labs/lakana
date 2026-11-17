@@ -31,6 +31,7 @@ from lakana_core.models import (
     AuditEventType,
     ColumnMask,
     Environment,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     RowFilter,
@@ -255,6 +256,7 @@ def _sql_task(session: Session, principal: PrincipalRef) -> tuple[PrincipalRef, 
     """
     task = python_task_run(session, principal.id, asset=_TABLE, kind="sql")
     query = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=session.scalars(select(Environment.id)).one(),
         principal_id=principal.id,
