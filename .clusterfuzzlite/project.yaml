@@ -1,0 +1,5 @@
+# ClusterFuzzLite's project file (docs/agent/security.md, "Fuzzing"). Python fuzzers run with
+# AddressSanitizer loaded, which only matters for native code they reach.
+language: python
+sanitizers:
+  - address

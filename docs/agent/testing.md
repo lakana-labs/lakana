@@ -395,13 +395,22 @@ every missing output of it means "run everything".
   read a workflow's `container:` image: bump the semgrep version and digest by hand.
 - **`scheduled-failure.yml`** (Scheduled failure report) runs when a watched workflow completes
   (`workflow_run`) and acts only on a failed *scheduled* run of `canary.yml`, `codeql.yml`,
-  `scorecard.yml` or `security-deep.yml`: GitHub tells only the last editor of a cron about a red
+  `fuzz.yml`, `scorecard.yml` or `security-deep.yml`: GitHub tells only the last editor of a cron about a red
   scheduled run, and the weekly image scan once failed unseen for three weeks. It opens one issue
   per workflow (`Scheduled run failed: <name>`, labelled `type:security`, assigned to the
   maintainer) or comments on the one still open; close it once a scheduled run passes. Its one
   job has `issues: write` and nothing else, checks nothing out and gets the run's fields as
   environment variables. A new scheduled workflow joins its list, or `_NOT_REPORTED` in
   `scripts/tests/test_workflows.py` says why not (`mutation.yml` today).
+- **`fuzz.yml`** (Fuzzing) runs ClusterFuzzLite over the Atheris harnesses in `fuzz/`: about five
+  minutes on a pull request from a branch of this repository (never a fork's) that changes what
+  they load, an hour every night on `main` with corpus pruning after it (`.clusterfuzzlite/nightly.sh`).
+  The corpus is kept with `actions/cache`: only the nightly job saves it, a pull request restores
+  it read-only. On GitHub's runner whatever `CI_RUNNER` says (the actions run Docker, and a pull
+  request's harnesses are its own code); every job has `contents: read`, the nightly job also
+  `actions: read` for one `gh cache list` (whether a corpus was kept before), and no
+  ClusterFuzzLite action gets a token. What it fuzzes and where a crash goes: "Fuzzing" in
+  `docs/agent/security.md`.
 - **`codeql.yml`** runs CodeQL for Python on pull requests, on a push to `main` and weekly, on a
   GitHub-hosted runner, with `security-events: write` on its one job. It is CodeQL's *advanced*
   setup: switching on *default setup* in the repository's code-scanning settings would make its
