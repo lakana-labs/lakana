@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { createBody, emptyForm, type FormValues } from "./formBody";
+import { aConnection } from "../test/connections";
+import {
+  createBody,
+  editForm,
+  emptyForm,
+  type FormValues,
+  movesWith,
+  updateBody,
+} from "./formBody";
 
 /**
  * A form as Add holds it, in `prod`.
@@ -222,5 +230,123 @@ describe("createBody", () => {
       "secret_values",
     );
     expect(createBody(form({ secret: { way: "none" } }))).not.toHaveProperty("secret_values");
+  });
+});
+
+/** A stored PostgreSQL connection with a secret and a CA certificate. */
+const STORED = aConnection({
+  address: { host: "db.example.org", port: 5432, database: "crm" },
+  settings: { user: "loader", tls: "require", ca_certificate: "sha256:ab12" },
+});
+
+/**
+ * The Edit form of {@link STORED}, changed.
+ *
+ * @param over - The values that differ from the stored connection.
+ * @returns The form.
+ */
+function edited(over: Partial<FormValues>): FormValues {
+  return { ...editForm(STORED), ...over };
+}
+
+describe("editForm", () => {
+  it("starts from the connection, keeps its secret and CA certificate, and holds no value", () => {
+    expect(editForm(STORED)).toEqual({
+      environment: "prod",
+      kind: "postgresql",
+      name: "crm",
+      address: { host: "db.example.org", port: "5432", database: "crm" },
+      settings: { user: "loader", tls: "require" },
+      ca: { kind: "keep" },
+      secret: { way: "keep" },
+    });
+    expect(editForm(aConnection({ secret: null })).secret).toEqual({ way: "none" });
+    expect(editForm(aConnection({ settings: { user: "loader", tls: null } })).settings).toEqual({
+      user: "loader",
+      tls: "",
+    });
+  });
+});
+
+describe("updateBody", () => {
+  it("an update sends only what changed", () => {
+    expect(
+      updateBody(
+        STORED,
+        edited({
+          address: { host: "db2.internal", port: "5432", database: "crm" },
+          settings: { user: "etl", tls: "require" },
+        }),
+      ),
+    ).toEqual({ address: { host: "db2.internal" }, settings: { user: "etl" } });
+  });
+
+  it("a removed setting is null and an unchanged CA is not sent", () => {
+    const pem = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n";
+
+    expect(
+      updateBody(
+        STORED,
+        edited({ address: { host: "db.example.org", port: "", database: "crm" } }),
+      ),
+    ).toEqual({ address: { port: null } });
+    expect(updateBody(STORED, edited({ settings: { user: "loader", tls: "" } }))).toEqual({
+      settings: { tls: null },
+    });
+    expect(updateBody(STORED, edited({ ca: { kind: "remove" } }))).toEqual({
+      settings: { ca_certificate: null },
+    });
+    expect(updateBody(STORED, edited({ ca: { kind: "new", pem } }))).toEqual({
+      settings: { ca_certificate: pem },
+    });
+  });
+
+  it("stop using a secret sends clear secret", () => {
+    expect(updateBody(STORED, edited({ secret: { way: "none" } }))).toEqual({
+      clear: ["secret"],
+    });
+    expect(updateBody(STORED, edited({ secret: { way: "named", name: "crm-2" } }))).toEqual({
+      secret: "crm-2",
+    });
+    expect(
+      updateBody(STORED, edited({ secret: { way: "values", values: { password: "n3w" } } })),
+    ).toEqual({ secret_values: { password: "n3w" } });
+  });
+
+  it("nothing changed gives null", () => {
+    expect(updateBody(STORED, editForm(STORED))).toBeNull();
+    expect(
+      updateBody(STORED, edited({ secret: { way: "named", name: "crm-password" } })),
+    ).toBeNull();
+    expect(updateBody(STORED, edited({ secret: { way: "values", values: {} } }))).toBeNull();
+    const bare = aConnection({ secret: null, settings: { user: "loader" } });
+    expect(updateBody(bare, editForm(bare))).toBeNull();
+  });
+
+  it("another http auth removes the old auth's settings and, without a secret, unbinds it", () => {
+    const http = aConnection({
+      kind: "http",
+      address: { base_url: "https://api.example.org" },
+      settings: { auth: "basic", username: "loader" },
+    });
+
+    expect(
+      updateBody(http, { ...editForm(http), settings: { auth: "none", username: "loader" } }),
+    ).toEqual({ settings: { auth: "none", username: null }, clear: ["secret"] });
+  });
+});
+
+describe("movesWith", () => {
+  it("a new host, a weaker tls or a new CA moves the secret; a new user does not", () => {
+    expect(
+      movesWith(
+        STORED,
+        edited({ address: { host: "db2.internal", port: "5432", database: "crm" } }),
+      ),
+    ).toBe(true);
+    expect(movesWith(STORED, edited({ settings: { user: "loader", tls: "disable" } }))).toBe(true);
+    expect(movesWith(STORED, edited({ ca: { kind: "remove" } }))).toBe(true);
+    expect(movesWith(STORED, edited({ settings: { user: "etl", tls: "require" } }))).toBe(false);
+    expect(movesWith(STORED, editForm(STORED))).toBe(false);
   });
 });

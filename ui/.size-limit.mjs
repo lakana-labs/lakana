@@ -60,7 +60,10 @@ const NAMED_LIMITS = [
   // test with its cause and next step, the declaring assets) and Delete with its dialog.
   // Measured 10.51 kB (2026-11-17) with the route to Add, loaded on demand, and its loading
   // words; the limit holds.
-  { name: "Connections", prefix: "ConnectionsScreen-", limit: "10.54 kB" },
+  // Raised to the measured 10.93 kB (2026-11-17) + 10 %: the route to Edit, which reads the
+  // connection (its skeleton, Try again and not-found state in the Edit page) before the form
+  // loads on demand.
+  { name: "Connections", prefix: "ConnectionsScreen-", limit: "12.02 kB" },
   // Measured 4.71 kB (2026-11-17) + 10 %: Add a connection, loaded on demand by its route: the
   // environment and the nine kinds, the name checked on blur, each kind's fields (http's after
   // its auth, the CA certificate read from a file), the secret as password fields or an existing
@@ -68,7 +71,11 @@ const NAMED_LIMITS = [
   // and the form's strings.
   // Measured 4.83 kB (2026-11-17) with numbered tcp key rows, the focus on a new row and one
   // azure key and at most 16 tcp keys in the body; the limit holds.
-  { name: "Add a connection", prefix: "ConnectionForm-", limit: "5.18 kB" },
+  // Raised to the measured 6.4 kB (2026-11-17) + 10 %: Edit of a connection: its fields from
+  // the stored ones, the body of only what changed, the CA certificate's fingerprints with
+  // Remove, and the secret kept, given again, another or none, asked again when a change could
+  // send it somewhere new.
+  { name: "Add a connection", prefix: "ConnectionForm-", limit: "7.04 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
   // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected

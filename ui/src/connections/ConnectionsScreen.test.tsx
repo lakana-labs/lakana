@@ -1,18 +1,24 @@
 import { act, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import { aConnection, connectionRoutes } from "../test/connections";
-import { fakeServer } from "../test/server";
+import { fakeServer, type FakeRoute } from "../test/server";
 import { AreaScreen, FormLoading } from "./ConnectionsScreen";
 
 /**
  * Renders the screen at an address below the area's path.
  *
  * @param path - The address.
+ * @param routes - More routes.
  */
-function renderAt(path: string): void {
-  fakeServer(connectionRoutes([aConnection()], [{ name: "prod", actions: ["test"] }]));
+function renderAt(path: string, routes: Record<string, FakeRoute> = {}): void {
+  fakeServer({
+    ...connectionRoutes([aConnection()], [{ name: "prod", actions: ["test"] }]),
+    "GET /api/v1/environments/prod/connections/crm": { status: 200, body: aConnection() },
+    ...routes,
+  });
   render(
     <MemoryRouter initialEntries={[path]}>
       <AreaScreen />
@@ -44,6 +50,38 @@ describe("the Connections screen", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Add connection" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows Edit of a connection at its own address", async () => {
+    renderAt("/prod/crm/edit");
+
+    expect(await screen.findByRole("textbox", { name: "host" })).toHaveValue("db.example.org");
+    expect(screen.getByRole("heading", { level: 1, name: "Edit" })).toBeInTheDocument();
+  });
+
+  it("shows the not-found state for Edit of a connection that does not exist", async () => {
+    renderAt("/prod/gone/edit");
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "This page does not exist" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers Try again when Edit cannot read the connection", async () => {
+    let reads = 0;
+    renderAt("/prod/crm/edit", {
+      "GET /api/v1/environments/prod/connections/crm": () => {
+        reads += 1;
+        return reads === 1
+          ? { status: 500, body: { type: "InternalError", detail: "Down." } }
+          : { status: 200, body: aConnection() };
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Edit" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("textbox", { name: "host" })).toBeInTheDocument();
   });
 
   it("says the form is loading once a second has passed", () => {

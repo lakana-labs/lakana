@@ -30,7 +30,7 @@ interface FactProps {
  * @param props.children - What it says.
  * @returns The fact.
  */
-function Fact({ term, children }: FactProps): JSX.Element {
+export function Fact({ term, children }: FactProps): JSX.Element {
   return (
     <div className="connection-fact">
       <dt>{term}</dt>
@@ -46,7 +46,7 @@ function Fact({ term, children }: FactProps): JSX.Element {
  * @param value - The setting's value.
  * @returns The fingerprints, as text.
  */
-function fingerprints(value: unknown): readonly string[] {
+export function fingerprints(value: unknown): readonly string[] {
   return (Array.isArray(value) ? (value as unknown[]) : [value]).map(String);
 }
 

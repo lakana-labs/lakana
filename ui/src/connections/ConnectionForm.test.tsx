@@ -9,7 +9,6 @@ import { aConnection, ENVIRONMENTS_ROUTE } from "../test/connections";
 import { fakeServer, type FakeRoute, type FakeServer } from "../test/server";
 import { MemoryStorage } from "../test/storage";
 import { fakeWebAuthn } from "../test/webauthn";
-import ConnectionForm from "./ConnectionForm";
 import { AreaScreen } from "./ConnectionsScreen";
 import { writeFilter } from "./remember";
 
@@ -668,16 +667,315 @@ describe("ConnectionForm, add", () => {
   });
 });
 
+const CRM = "/api/v1/environments/prod/connections/crm";
+const UPDATE = `PATCH ${CRM}`;
+/** The stored connection Edit starts from, as a data engineer reads it: no `name_secret`. */
+const STORED = aConnection({
+  settings: { user: "loader" },
+  actions: ["test", "update", "delete"],
+});
+const MANAGING = { ...STORED, actions: ["test", "update", "delete", "name_secret"] } as const;
+
+/**
+ * Serves the update: a step-up first when asked, then the connection as saved, changed after
+ * its last test.
+ *
+ * @param stepUpFirst - Whether the first try is refused with StepUpRequired.
+ * @returns The route.
+ */
+function saved(stepUpFirst = false): FakeRoute {
+  let tries = 0;
+  return () => {
+    tries += 1;
+    return stepUpFirst && tries === 1
+      ? { status: 403, body: { type: "StepUpRequired", detail: "Touch your passkey." } }
+      : { status: 200, body: { ...STORED, updated_at: "2026-11-03T10:00:00Z" } };
+  };
+}
+
+/**
+ * Renders Edit of `prod/crm` as `kim.lee`, with the connection's page behind it.
+ *
+ * @param connection - The connection the server holds.
+ * @param routes - More routes.
+ * @returns The fake server and a user-event session.
+ */
+function renderEdit(
+  connection: ReturnType<typeof aConnection> = STORED,
+  routes: Record<string, FakeRoute> = {},
+): { server: FakeServer; user: UserEvent } {
+  const server = fakeServer({
+    [`GET ${CRM}`]: { status: 200, body: connection },
+    ...routes,
+  });
+  const user = userEvent.setup();
+  render(
+    <MeContext value={ME}>
+      <MemoryRouter initialEntries={["/connections/prod/crm/edit"]}>
+        <Routes>
+          <Route path="/connections/*" element={<AreaScreen />} />
+        </Routes>
+        <Where />
+      </MemoryRouter>
+    </MeContext>,
+  );
+  return { server, user };
+}
+
+/**
+ * Types a new host over the stored one.
+ *
+ * @param user - The user-event session.
+ * @param host - The new host.
+ */
+async function changeHost(user: UserEvent, host = "db2.internal"): Promise<void> {
+  const field = await screen.findByRole("textbox", { name: "host" });
+  await user.clear(field);
+  await user.type(field, host);
+}
+
+/**
+ * The body of the one update sent.
+ *
+ * @param server - The fake server.
+ * @returns The body.
+ */
+function updateSent(server: FakeServer): unknown {
+  const sent = server.sent.filter((request) => request.method === "PATCH");
+  expect(sent).toHaveLength(1);
+  return sent[0]?.body;
+}
+
 describe("ConnectionForm, edit", () => {
-  it("is not built yet, and says the page does not exist", () => {
-    render(
-      <MemoryRouter>
-        <ConnectionForm mode="edit" connection={aConnection()} />
-      </MemoryRouter>,
+  it("shows the environment, kind and name as text and the fields from the connection", async () => {
+    renderEdit();
+
+    expect(await screen.findByRole("textbox", { name: "host" })).toHaveValue("db.example.org");
+    expect(screen.getByRole("heading", { level: 1, name: "Edit" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "crm" })).toHaveAttribute(
+      "href",
+      "/connections/prod/crm",
     );
+    const facts = screen.getByRole("region", { name: "Connection" });
+    expect(within(facts).getByText("prod")).toBeInTheDocument();
+    expect(within(facts).getByText("PostgreSQL")).toBeInTheDocument();
+    expect(within(facts).getByText("crm")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Name" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radiogroup", { name: "Kind" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "host" })).toHaveValue("db.example.org");
+    expect(screen.getByRole("textbox", { name: /^port/ })).toHaveValue("5432");
+    expect(screen.getByRole("textbox", { name: "user" })).toHaveValue("loader");
+    expect(screen.getByRole("radio", { name: "Keep crm-password" })).toBeChecked();
+    expect(screen.queryByRole("radio", { name: /Another secret/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Stop using a secret" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("password")).not.toBeInTheDocument();
+  });
+
+  it("a host change without the right to manage secrets asks for the values and says why", async () => {
+    const { user, server } = renderEdit(STORED, { [UPDATE]: saved() });
 
     expect(
-      screen.getByRole("heading", { level: 1, name: "This page does not exist" }),
+      await screen.findByText(
+        "You may not manage secrets in prod. A change of the address, TLS, CA certificate, or how the secret is sent, needs the secret's values again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Keep crm-password" })).toBeEnabled();
+
+    await changeHost(user);
+
+    const keep = screen.getByRole("radio", { name: "Keep crm-password" });
+    expect(keep).toBeDisabled();
+    expect(keep).toHaveAccessibleDescription(
+      "This change could send crm-password somewhere new; give its values again.",
+    );
+    expect(screen.getByRole("radio", { name: "New values" })).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(writes(server)).toEqual([]);
+    expect(screen.getByLabelText("password")).toHaveAttribute("aria-invalid", "true");
+
+    await user.type(screen.getByLabelText("password"), PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(updateSent(server)).toEqual({
+      address: { host: "db2.internal" },
+      secret_values: { password: PASSWORD },
+    });
+    expect(
+      server.sent.filter((request) => JSON.stringify(request).includes(PASSWORD)),
+    ).toHaveLength(1);
+    expect(document.body.textContent).not.toContain(PASSWORD);
+  });
+
+  it("with the right to manage secrets a moving change may keep the secret and says where it goes", async () => {
+    const { user, server } = renderEdit(MANAGING, { [UPDATE]: saved() });
+    await changeHost(user);
+
+    expect(screen.getByRole("radio", { name: "New values" })).toBeChecked();
+    expect(screen.queryByText(/You may not manage secrets/)).not.toBeInTheDocument();
+    const keep = screen.getByRole("radio", { name: "Keep crm-password" });
+    expect(keep).toBeEnabled();
+    await user.click(keep);
+    expect(keep).toHaveAccessibleDescription("crm-password will be sent to the new address.");
+    // Another key in the host keeps the person's choice.
+    await user.type(screen.getByRole("textbox", { name: "host" }), "x");
+    expect(keep).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(updateSent(server)).toEqual({ address: { host: "db2.internalx" } });
+  });
+
+  it("a change that does not move the secret keeps it without asking", async () => {
+    const { user, server } = renderEdit(STORED, { [UPDATE]: saved() });
+    const field = await screen.findByRole("textbox", { name: "user" });
+    await user.clear(field);
+    await user.type(field, "etl");
+
+    expect(screen.getByRole("radio", { name: "Keep crm-password" })).toBeChecked();
+    expect(screen.queryByLabelText("password")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(updateSent(server)).toEqual({ settings: { user: "etl" } });
+  });
+
+  it("binds another secret with the right to manage secrets, and offers new values where there is none", async () => {
+    const { user, server } = renderEdit(MANAGING, { [UPDATE]: saved() });
+    await user.click(await screen.findByRole("radio", { name: "Another secret of prod" }));
+    await user.type(screen.getByRole("textbox", { name: "Secret name" }), "crm-reader");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(updateSent(server)).toEqual({ secret: "crm-reader" });
+  });
+
+  it("a connection without a secret starts at No secret and may be given new values", async () => {
+    const { user, server } = renderEdit({ ...STORED, secret: null }, { [UPDATE]: saved() });
+
+    expect(await screen.findByRole("radio", { name: "No secret" })).toBeChecked();
+    expect(screen.queryByRole("radio", { name: /^Keep/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/You may not manage secrets/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "New values" }));
+    const password = screen.getByLabelText("password");
+    expect(password).toHaveAttribute("type", "password");
+    expect(password).toHaveAttribute("autocomplete", "off");
+    expect(password).toHaveValue("");
+    await user.type(password, PASSWORD);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(updateSent(server)).toEqual({ secret_values: { password: PASSWORD } });
+  });
+
+  it("shows a stored CA certificate's fingerprints, replaces it or removes it", async () => {
+    const pem =
+      "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ2E=\n-----END CERTIFICATE-----\n";
+    const { user, server } = renderEdit(
+      { ...MANAGING, settings: { user: "loader", ca_certificate: ["sha256:ab12", "sha256:cd34"] } },
+      { [UPDATE]: saved() },
+    );
+    expect(await screen.findByText("sha256:ab12")).toBeInTheDocument();
+    expect(screen.getByText("sha256:cd34")).toBeInTheDocument();
+    const file = screen.getByLabelText("ca_certificate (optional)");
+    expect(file).toHaveAccessibleDescription(
+      "Choose a PEM file (.pem, .crt or .cer) to replace it. Save sends its text; it is never shown.",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Remove the CA certificate" }));
+    expect(screen.getByText("Save removes the CA certificate.")).toBeInTheDocument();
+    expect(screen.queryByText("sha256:ab12")).not.toBeInTheDocument();
+    expect(file).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Keep the stored CA certificate" }));
+    expect(screen.getByText("sha256:ab12")).toBeInTheDocument();
+    expect(file).toHaveFocus();
+
+    await user.upload(file, new File([pem], "ca.pem"));
+    expect(await screen.findByText("A CA certificate is read; Save sends it.")).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("MIIBszCC");
+    await user.click(screen.getByRole("button", { name: "Keep the stored CA certificate" }));
+    expect(screen.getByText("sha256:ab12")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Remove the CA certificate" }));
+    // Without the CA certificate the secret could go to another server: its values are asked.
+    expect(screen.getByRole("radio", { name: "New values" })).toBeChecked();
+    await user.click(screen.getByRole("radio", { name: "Keep crm-password" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(updateSent(server)).toEqual({ settings: { ca_certificate: null } });
+  });
+
+  it("refuses here a move of a tcp secret without new keys, and says why", async () => {
+    const tcp = aConnection({
+      kind: "tcp",
+      address: { host: "mq.internal", port: 5672 },
+      settings: {},
+      secret: "mq-keys",
+      actions: ["test", "update", "delete"],
+    });
+    const { user, server } = renderEdit(tcp);
+    await changeHost(user, "mq2.internal");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This change could send mq-keys somewhere new; give its values again.",
+    );
+    expect(writes(server)).toEqual([]);
+  });
+
+  it("nothing to save sends nothing", async () => {
+    const { user, server } = renderEdit();
+    await user.click(await screen.findByRole("button", { name: "Save" }));
+
+    expect(screen.getByText("Nothing to save.")).toHaveAttribute("role", "status");
+    expect(writes(server)).toEqual([]);
+  });
+
+  it("asks for a passkey touch and sends again", async () => {
+    const webauthn = fakeWebAuthn();
+    const { user, server } = renderEdit(STORED, { ...STEP_UP, [UPDATE]: saved(true) });
+    await user.click(await screen.findByRole("radio", { name: "Stop using a secret" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
+    expect(writes(server)).toEqual([
+      UPDATE,
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      UPDATE,
+    ]);
+    expect(
+      server.sent.filter((request) => request.method === "PATCH").map(({ body }) => body),
+    ).toEqual([{ clear: ["secret"] }, { clear: ["secret"] }]);
+  });
+
+  it("after the save the page says saved and the last test is stale", async () => {
+    let reads = 0;
+    const { user } = renderEdit(STORED, {
+      [UPDATE]: saved(),
+      // Edit reads the connection as stored; the page behind reads it as saved.
+      [`GET ${CRM}`]: () => {
+        reads += 1;
+        return {
+          status: 200,
+          body: reads === 1 ? STORED : { ...STORED, updated_at: "2026-11-03T10:00:00Z" },
+        };
+      },
+    });
+    const field = await screen.findByRole("textbox", { name: "user" });
+    await user.clear(field);
+    await user.type(field, "etl");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const note = await screen.findByText("Saved crm.");
+    expect(note).toHaveAttribute("role", "status");
+    expect(screen.getByTestId("where")).toHaveTextContent("/connections/prod/crm");
+    await waitFor(() => {
+      expect(note).toHaveFocus();
+    });
+    expect(
+      await screen.findByText("Tested before the last change; test it again."),
     ).toBeInTheDocument();
   });
 });

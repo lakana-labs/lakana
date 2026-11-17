@@ -39,6 +39,8 @@ export interface KindFieldsProps {
   readonly settings: Readonly<Record<string, string>>;
   /** The CA certificate. */
   readonly ca: CaChoice;
+  /** On Edit, the fingerprints of the stored CA certificate, when there is one. */
+  readonly caStored?: readonly string[] | undefined;
   /** Called with an address field's key and its new text. */
   readonly onAddress: (key: string, value: string) => void;
   /** Called with a setting's key and its new value. */
@@ -166,6 +168,7 @@ function KindField({ field, regionDefault, value, onChange }: KindFieldProps): J
  * @param props.address - The address fields.
  * @param props.settings - The settings.
  * @param props.ca - The CA certificate.
+ * @param props.caStored - The stored CA certificate's fingerprints.
  * @param props.onAddress - Called with an address field's change.
  * @param props.onSetting - Called with a setting's change.
  * @param props.onCa - Called with a new CA certificate choice.
@@ -176,6 +179,7 @@ export function KindFields({
   address,
   settings,
   ca,
+  caStored,
   onAddress,
   onSetting,
   onCa,
@@ -208,6 +212,7 @@ export function KindFields({
               key={`${kind} ${field.key}`}
               label={fieldLabel(field, optional)}
               value={ca}
+              stored={caStored}
               onChange={onCa}
             />
           );

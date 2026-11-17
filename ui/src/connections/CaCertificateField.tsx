@@ -10,6 +10,7 @@ import { type ChangeEvent, type JSX, type Ref, useId, useRef, useState } from "r
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
+import { VisibleText } from "../shell/VisibleText";
 import type { CaChoice } from "./formBody";
 import { CA_BYTES } from "./kinds";
 import "./formStrings";
@@ -127,6 +128,8 @@ export interface CaCertificateFieldProps {
   readonly label: string;
   /** The CA certificate as the form holds it. */
   readonly value: CaChoice;
+  /** On Edit, the fingerprints of the stored CA certificate, when there is one. */
+  readonly stored?: readonly string[] | undefined;
   /** Called with the new choice. */
   readonly onChange: (value: CaChoice) => void;
 }
@@ -134,26 +137,69 @@ export interface CaCertificateFieldProps {
 /**
  * The CA certificate: a `.pem`, `.crt` or `.cer` file of at most 64 KiB, read as text into the
  * form. Its text is never shown; once read, a line says Save sends it, with Remove, which forgets
- * it and puts the focus back on the file input.
+ * it and puts the focus back on the file input. On Edit a stored one shows its fingerprints;
+ * a file replaces it, and Remove has Save remove it.
  *
  * @param props - The label, the choice and where a new one goes.
  * @param props.label - The label.
  * @param props.value - The CA certificate as the form holds it.
+ * @param props.stored - The stored one's fingerprints.
  * @param props.onChange - Called with the new choice.
  * @returns The field.
  */
 export function CaCertificateField({
   label,
   value,
+  stored,
   onChange,
 }: CaCertificateFieldProps): JSX.Element {
   const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
+  const back = (choice: CaChoice): void => {
+    onChange(choice);
+    // The pressed button goes; the file input holds the focus.
+    const element = input.current as HTMLInputElement;
+    element.value = "";
+    element.focus();
+  };
   return (
     <div className="connection-ca">
+      {stored !== undefined && value.kind === "keep" && (
+        <p className="connection-ca-read">
+          {t("connections.form.caStored")}{" "}
+          {stored.map((print) => (
+            <span key={print} className="connection-print">
+              <VisibleText text={print} />
+            </span>
+          ))}{" "}
+          <Button
+            className="button"
+            onPress={() => {
+              back({ kind: "remove" });
+            }}
+          >
+            {t("connections.form.caRemove")}
+          </Button>
+        </p>
+      )}
+      {value.kind === "remove" && (
+        <p className="connection-ca-read">
+          {t("connections.form.caRemoved")}{" "}
+          <Button
+            className="button"
+            onPress={() => {
+              back({ kind: "keep" });
+            }}
+          >
+            {t("connections.form.caKeep")}
+          </Button>
+        </p>
+      )}
       <TextFileInput
         label={label}
-        description={t("connections.form.caHelp")}
+        description={
+          stored === undefined ? t("connections.form.caHelp") : t("connections.form.caReplace")
+        }
         accept=".pem,.crt,.cer"
         max={CA_BYTES}
         tooBig={t("connections.form.caTooBig")}
@@ -171,13 +217,10 @@ export function CaCertificateField({
           <Button
             className="button"
             onPress={() => {
-              onChange({ kind: "keep" });
-              const element = input.current as HTMLInputElement;
-              element.value = "";
-              element.focus();
+              back({ kind: "keep" });
             }}
           >
-            {t("connections.form.caRemove")}
+            {stored === undefined ? t("connections.form.caRemove") : t("connections.form.caKeep")}
           </Button>
         </p>
       )}

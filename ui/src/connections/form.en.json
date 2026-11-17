@@ -37,5 +37,17 @@
   "removeKey": "Remove key {{number}}",
   "keysMax": "A connection holds at most {{max}} secret keys.",
   "save": "Save",
-  "saving": "Saving the connection…"
+  "saving": "Saving the connection…",
+  "nothing": "Nothing to save.",
+  "secretKeep": "Keep {{secret}}",
+  "secretAnother": "Another secret of {{environment}}",
+  "secretStop": "Stop using a secret",
+  "secretNoneYet": "No secret",
+  "noManage": "You may not manage secrets in {{environment}}. A change of the address, TLS, CA certificate, or how the secret is sent, needs the secret's values again.",
+  "keepMoves": "This change could send {{secret}} somewhere new; give its values again.",
+  "keepSent": "{{secret}} will be sent to the new address.",
+  "caStored": "Stored CA certificate:",
+  "caReplace": "Choose a PEM file (.pem, .crt or .cer) to replace it. Save sends its text; it is never shown.",
+  "caRemoved": "Save removes the CA certificate.",
+  "caKeep": "Keep the stored CA certificate"
 }

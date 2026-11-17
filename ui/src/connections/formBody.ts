@@ -6,8 +6,15 @@
  * the body {@link createBody} returns; nothing here logs, stores or names them.
  * @packageDocumentation
  */
-import type { ConnectionCreateIn, ConnectionKind } from "../api";
-import { FREE_KEYS_MAX, type FieldSpec, kindFields, secretKeys, takesSecret } from "./kinds";
+import type { ConnectionCreateIn, ConnectionKind, ConnectionOut, ConnectionUpdateIn } from "../api";
+import {
+  FREE_KEYS_MAX,
+  type FieldSpec,
+  kindFields,
+  movesSecret,
+  secretKeys,
+  takesSecret,
+} from "./kinds";
 
 /**
  * The CA certificate: the stored one kept (on Add: none), a new one read from a file, or the
@@ -166,4 +173,149 @@ export function createBody(form: FormValues): ConnectionCreateIn {
   }
   const values = sentValues(form, typedValues(secret));
   return values === null ? body : { ...body, secret_values: values };
+}
+
+/**
+ * A stored value as the form's text.
+ *
+ * @param value - The value the server sent.
+ * @returns Its text; empty for none.
+ */
+function formText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  return value === null ? "" : JSON.stringify(value);
+}
+
+/**
+ * The text of each stored value of a part, the PEM one left out.
+ *
+ * @param stored - The part as the server sent it.
+ * @returns The values by key, as text.
+ */
+function formPart(stored: Readonly<Record<string, unknown>>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(stored)
+      .filter(([key]) => key !== "ca_certificate")
+      .map(([key, value]) => [key, formText(value)]),
+  );
+}
+
+/**
+ * The Edit form of a stored connection: its fields as stored, its CA certificate and its secret
+ * kept, and no secret value.
+ *
+ * @param connection - The connection.
+ * @returns The form.
+ */
+export function editForm(connection: ConnectionOut): FormValues {
+  return {
+    environment: connection.environment,
+    kind: connection.kind,
+    name: connection.name,
+    address: formPart(connection.address),
+    settings: formPart(connection.settings),
+    ca: { kind: "keep" },
+    secret: connection.secret === null ? { way: "none" } : { way: "keep" },
+  };
+}
+
+/**
+ * The keys of a part that changed, each with its new value: null for one emptied or no longer
+ * asked for.
+ *
+ * @param fields - The part's fields now and as stored (for `http`, of either auth).
+ * @param asked - The keys the kind asks for now.
+ * @param stored - The part as stored.
+ * @param typed - What the form holds, by key.
+ * @returns The changes.
+ */
+function partChanges(
+  fields: readonly FieldSpec[],
+  asked: ReadonlySet<string>,
+  stored: Readonly<Record<string, unknown>>,
+  typed: Readonly<Record<string, string>>,
+): Record<string, string | number | null> {
+  const result: Record<string, string | number | null> = {};
+  for (const { key, pem } of fields) {
+    const value = typed[key] ?? "";
+    const after = asked.has(key) && value !== "" ? wireValue(key, value) : null;
+    if (pem !== true && (stored[key] ?? null) !== after) {
+      result[key] = after;
+    }
+  }
+  return result;
+}
+
+/**
+ * The secret's part of an update.
+ *
+ * @param before - The connection as stored.
+ * @param form - The form.
+ * @returns The keys to send for the secret, none when it stays as it is.
+ */
+function secretChanges(before: ConnectionOut, form: FormValues): ConnectionUpdateIn {
+  const bound = before.secret !== null;
+  const { secret } = form;
+  if (!takesSecret(form.kind, form.settings) || secret.way === "none") {
+    return bound ? { clear: ["secret"] } : {};
+  }
+  if (secret.way === "named") {
+    return secret.name === before.secret ? {} : { secret: secret.name };
+  }
+  const values = sentValues(form, typedValues(secret));
+  return values === null ? {} : { secret_values: values };
+}
+
+/**
+ * The body that changes a stored connection to what the form holds.
+ *
+ * @remarks
+ * Only the keys that changed are sent, and an emptied one (or one the kind no longer asks for,
+ * such as a setting of another `http` auth) is `null`, which the server removes. The CA
+ * certificate goes only when it was replaced (its text) or removed (`null`). The secret goes as
+ * `secret_values` for new values, `secret` for another secret's name and `clear: ["secret"]`
+ * to stop using one; kept, it sends nothing.
+ * @param before - The connection as stored.
+ * @param form - The form.
+ * @returns The body, or null when nothing changed.
+ */
+export function updateBody(before: ConnectionOut, form: FormValues): ConnectionUpdateIn | null {
+  const now = kindFields(form.kind, form.settings);
+  const then = kindFields(form.kind, formPart(before.settings));
+  const keys = (fields: readonly FieldSpec[]): Set<string> => new Set(fields.map(({ key }) => key));
+  const asked = keys(now.settings);
+  const address = partChanges(now.address, keys(now.address), before.address, form.address);
+  const settings: Record<string, string | number | null> = partChanges(
+    [...now.settings, ...then.settings.filter(({ key }) => !asked.has(key))],
+    asked,
+    before.settings,
+    form.settings,
+  );
+  if (now.settings.some(({ pem }) => pem === true) && form.ca.kind !== "keep") {
+    settings.ca_certificate = form.ca.kind === "new" ? form.ca.pem : null;
+  }
+  const body: ConnectionUpdateIn = {
+    ...(Object.keys(address).length > 0 && { address }),
+    ...(Object.keys(settings).length > 0 && { settings }),
+    ...secretChanges(before, form),
+  };
+  return Object.keys(body).length === 0 ? null : body;
+}
+
+/**
+ * Whether saving the form could send the connection's bound secret somewhere new, so that the
+ * server asks for its values again (or for the right to manage secrets).
+ *
+ * @param before - The connection as stored.
+ * @param form - The form.
+ * @returns True when the change moves the secret.
+ */
+export function movesWith(before: ConnectionOut, form: FormValues): boolean {
+  const body = updateBody(before, form);
+  return movesSecret(form.kind, before, {
+    address: { ...before.address, ...body?.address },
+    settings: { ...before.settings, ...body?.settings },
+  });
 }

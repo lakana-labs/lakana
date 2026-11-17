@@ -17,11 +17,13 @@ import {
   RadioButton,
   RadioField,
   RadioGroup,
+  Text,
   TextField,
 } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import type { ConnectionKind } from "../api";
+import { markedText } from "../shell/VisibleText";
 import { TextFileInput } from "./CaCertificateField";
 import { type SecretChoice, typedValues } from "./formBody";
 import { FREE_KEYS_MAX, SECRET_VALUE_BYTES, secretKeys } from "./kinds";
@@ -33,6 +35,14 @@ const KEY_NAME = /^[a-z][a-z0-9_]{0,31}$/;
 /** The values typed, by key. */
 type Values = Readonly<Record<string, string>>;
 
+/** The secret a stored connection holds, as Edit shows it. */
+export interface KeptSecret {
+  /** Its name; null when the connection has none. */
+  readonly name: string | null;
+  /** Whether the change in the form could send it somewhere new. */
+  readonly moves: boolean;
+}
+
 /** Properties of {@link SecretFields}. */
 export interface SecretFieldsProps {
   /** The kind. */
@@ -43,6 +53,8 @@ export interface SecretFieldsProps {
   readonly environment: string;
   /** Whether the person may bind an existing secret there (`name_secret`). */
   readonly mayName: boolean;
+  /** On Edit, the stored connection's secret; absent on Add. */
+  readonly kept?: KeptSecret;
   /** The secret as the form holds it. */
   readonly value: SecretChoice;
   /** Called with the new secret. */
@@ -307,14 +319,74 @@ function NewValues({ kind, settings, values, onChange }: NewValuesProps): JSX.El
 }
 
 /**
- * Renders the secret: where the environment allows `name_secret`, the choice of new values (the
- * default) or an existing secret of the environment by name; else new values only.
+ * A choice of the secret, started afresh: no value and no name typed.
+ *
+ * @param way - The choice.
+ * @returns The secret.
+ */
+function freshChoice(way: string): SecretChoice {
+  switch (way) {
+    case "keep":
+      return { way: "keep" };
+    case "named":
+      return { way: "named", name: "" };
+    case "none":
+      return { way: "none" };
+    default:
+      return { way: "values", values: {} };
+  }
+}
+
+/** Properties of {@link KeepChoice}. */
+interface KeepChoiceProps {
+  /** The secret's name. */
+  readonly name: string;
+  /** Whether the change in the form could send it somewhere new. */
+  readonly moves: boolean;
+  /** Whether the person may manage secrets, and so may keep it while it moves. */
+  readonly mayName: boolean;
+}
+
+/**
+ * Keep the bound secret. When the change could send it somewhere new, the line under it says
+ * where it goes, or, for a person who may not manage secrets, why it cannot be kept: the
+ * server asks for its values again.
+ *
+ * @param props - The secret, whether it moves, and the right.
+ * @param props.name - The secret's name.
+ * @param props.moves - Whether it moves.
+ * @param props.mayName - Whether the person may manage secrets.
+ * @returns The radio.
+ */
+function KeepChoice({ name, moves, mayName }: KeepChoiceProps): JSX.Element {
+  const { t } = useTranslation();
+  const secret = markedText(name);
+  return (
+    <RadioField className="radio-field" value="keep" isDisabled={moves && !mayName}>
+      <RadioButton className="radio">{t("connections.form.secretKeep", { secret })}</RadioButton>
+      {moves && (
+        <Text slot="description">
+          {mayName
+            ? t("connections.form.keepSent", { secret })
+            : t("connections.form.keepMoves", { secret })}
+        </Text>
+      )}
+    </RadioField>
+  );
+}
+
+/**
+ * Renders the secret. On Add, where the environment allows `name_secret`, the choice of new
+ * values (the default) or an existing secret of the environment by name; else new values only.
+ * On Edit, the choice of keeping the bound secret, new values, another secret (with
+ * `name_secret`) or none.
  *
  * @param props - The kind, the environment, the right and the secret.
  * @param props.kind - The kind.
  * @param props.settings - The settings.
  * @param props.environment - The environment.
  * @param props.mayName - Whether the person may bind an existing secret.
+ * @param props.kept - On Edit, the stored connection's secret.
  * @param props.value - The secret as the form holds it.
  * @param props.onChange - Called with the new secret.
  * @returns The fields.
@@ -324,6 +396,7 @@ export function SecretFields({
   settings,
   environment,
   mayName,
+  kept,
   value,
   onChange,
 }: SecretFieldsProps): JSX.Element {
@@ -332,29 +405,46 @@ export function SecretFields({
   const values = (next: Values): void => {
     onChange({ way: "values", values: next });
   };
+  const shown = markedText(environment);
   return (
     <fieldset className="secret-fields">
       <legend id={legend}>{t("connections.form.secret")}</legend>
-      {mayName && (
+      {(mayName || kept !== undefined) && (
         <RadioGroup
           className="field"
           aria-labelledby={legend}
           value={value.way}
           onChange={(way) => {
-            onChange(way === "named" ? { way: "named", name: "" } : { way: "values", values: {} });
+            onChange(freshChoice(way));
           }}
         >
+          {kept !== undefined && kept.name !== null && (
+            <KeepChoice name={kept.name} moves={kept.moves} mayName={mayName} />
+          )}
           <RadioField className="radio-field" value="values">
             <RadioButton className="radio">{t("connections.form.secretValues")}</RadioButton>
           </RadioField>
-          <RadioField className="radio-field" value="named">
-            <RadioButton className="radio">
-              {t("connections.form.secretNamed", { environment })}
-            </RadioButton>
-          </RadioField>
+          {mayName && (
+            <RadioField className="radio-field" value="named">
+              <RadioButton className="radio">
+                {kept === undefined
+                  ? t("connections.form.secretNamed", { environment: shown })
+                  : t("connections.form.secretAnother", { environment: shown })}
+              </RadioButton>
+            </RadioField>
+          )}
+          {kept !== undefined && (
+            <RadioField className="radio-field" value="none">
+              <RadioButton className="radio">
+                {kept.name === null
+                  ? t("connections.form.secretNoneYet")
+                  : t("connections.form.secretStop")}
+              </RadioButton>
+            </RadioField>
+          )}
         </RadioGroup>
       )}
-      {value.way === "named" ? (
+      {value.way === "named" && (
         <TextField
           className="field"
           isRequired
@@ -367,7 +457,8 @@ export function SecretFields({
           <Input />
           <FieldError />
         </TextField>
-      ) : (
+      )}
+      {value.way === "values" && (
         <>
           <p className="connection-hint">{t("connections.form.secretHelp")}</p>
           <NewValues
