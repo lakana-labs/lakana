@@ -321,17 +321,50 @@ export function updateBody(before: ConnectionOut, form: FormValues): ConnectionU
 }
 
 /**
+ * A part as the server validates it: a key that is absent or `null` takes its default.
+ *
+ * @param fields - The part's fields.
+ * @param part - The part.
+ * @returns The part with the defaults filled in.
+ */
+function withDefaults(
+  fields: readonly FieldSpec[],
+  part: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const filled: Record<string, unknown> = { ...part };
+  for (const { key, default: fallback } of fields) {
+    if (fallback !== undefined && (filled[key] === undefined || filled[key] === null)) {
+      filled[key] = fallback;
+    }
+  }
+  return filled;
+}
+
+/**
  * Whether saving the form could send the connection's bound secret somewhere new, so that the
  * server asks for its values again (or for the right to manage secrets).
  *
+ * @remarks
+ * Both sides are compared as the server validates them, so an emptied port (sent as `null`) is
+ * the kind's default, not a move.
  * @param before - The connection as stored.
  * @param form - The form.
  * @returns True when the change moves the secret.
  */
 export function movesWith(before: ConnectionOut, form: FormValues): boolean {
   const body = updateBody(before, form);
-  return movesSecret(form.kind, before, {
-    address: { ...before.address, ...body?.address },
-    settings: { ...before.settings, ...body?.settings },
-  });
+  const was = kindFields(form.kind, before.settings);
+  const settings = { ...before.settings, ...body?.settings };
+  const now = kindFields(form.kind, settings);
+  return movesSecret(
+    form.kind,
+    {
+      address: withDefaults(was.address, before.address),
+      settings: withDefaults(was.settings, before.settings),
+    },
+    {
+      address: withDefaults(now.address, { ...before.address, ...body?.address }),
+      settings: withDefaults(now.settings, settings),
+    },
+  );
 }

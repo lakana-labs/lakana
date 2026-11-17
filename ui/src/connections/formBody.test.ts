@@ -380,4 +380,15 @@ describe("movesWith", () => {
     expect(movesWith(STORED, edited({ settings: { user: "etl", tls: "require" } }))).toBe(false);
     expect(movesWith(STORED, editForm(STORED))).toBe(false);
   });
+
+  it("an emptied port means the kind's default, as the server fills it", () => {
+    const empty = { host: "db.example.org", port: "", database: "crm" };
+    expect(updateBody(STORED, edited({ address: empty }))).toEqual({ address: { port: null } });
+    expect(movesWith(STORED, edited({ address: empty }))).toBe(false);
+    const own = aConnection({
+      address: { host: "db.example.org", port: 6432, database: "crm" },
+      settings: { user: "loader", tls: "require" },
+    });
+    expect(movesWith(own, { ...editForm(own), address: empty })).toBe(true);
+  });
 });
