@@ -1286,7 +1286,8 @@ in `ui (e2e smoke)` and `ui (e2e server)` beside it (the required check `ui` wai
   (`gate-verdict.test.ts`). When a step before a gate fails (the coverage probe's `test:coverage`,
   say), the probe's message ends with that step's exit status and the end of its output. It prints
   one line per probe and fails naming every gate that got its probe wrong: fix the gate, not the
-  probe. It refuses a `$GATE_PROBE_DIR` that is not empty and lacks its marker file
+  probe. Each gate's run may take 360 s (`TIMEOUT_MS`), since the coverage probe runs the whole
+  Vitest suite (182 s in CI on 2026-11-17); a run cut by the timeout is judged a leak. It refuses a `$GATE_PROBE_DIR` that is not empty and lacks its marker file
   `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm
   --prefix ui run build`) and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof
   is the smoke test's positive control (an image without alt text must be found); the audits prove
