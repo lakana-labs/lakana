@@ -316,6 +316,163 @@ for (const theme of ["light", "dark"] as const) {
   }
 }
 
+/**
+ * Whether the pointer reaches an element at its centre, rather than something laid over it.
+ *
+ * @param locator - The element.
+ * @returns True when the element, or something inside it, is the topmost there.
+ */
+function reachable(locator: Locator): Promise<boolean> {
+  return locator.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return hit !== null && element.contains(hit);
+  });
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`only a name that is a link is drawn in the accent, ${theme}`, async ({ page }) => {
+    await stubManagement(page);
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+    );
+    await openView(page, VIEWS[0], "&ns=gold.sales");
+    const colours = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      const probe = document.createElement("span");
+      document.body.append(probe);
+      const resolve = (token: string): string => {
+        probe.style.color = style.getPropertyValue(token);
+        return getComputedStyle(probe).color;
+      };
+      const name = document.querySelector("span.row-name");
+      const result = {
+        text: resolve("--color-text"),
+        accent: resolve("--color-accent"),
+        name: name === null ? "" : getComputedStyle(name).color,
+      };
+      probe.remove();
+      return result;
+    });
+    expect(colours.name, "a dropped table's name").toBe(colours.text);
+
+    await openView(page, VIEWS[1]);
+    const link = page.getByRole("region", { name: "Expiring tables" }).locator("a.row-name");
+    await expect(link.first()).toHaveCSS("color", colours.accent);
+  });
+}
+
+test.describe("the views' times and links under the pointer", () => {
+  test.beforeEach(async ({ page }) => {
+    await stubManagement(page);
+  });
+
+  test("Dropped and Expiring show the exact time on hover: the pointer reaches each time", async ({
+    page,
+  }) => {
+    await openView(page, VIEWS[0], "&ns=gold.sales");
+    const dropped = page.getByRole("region", { name: "Dropped tables" }).locator("time");
+    await expect(dropped).toHaveCount(4);
+    for (const time of await dropped.all()) {
+      await expect(time).toHaveAttribute("title", /\d/);
+      expect(await reachable(time), await time.innerText()).toBe(true);
+    }
+
+    await openView(page, VIEWS[1]);
+    const expiring = page.getByRole("region", { name: "Expiring tables" }).locator("time");
+    await expect(expiring).toHaveCount(1);
+    await expect(expiring).toHaveAttribute("title", /\d/);
+    expect(await reachable(expiring), "the expiry").toBe(true);
+    // A click on the time still opens the table, like the rest of the row.
+    await expiring.click();
+    await expect(page).toHaveURL(/\/catalog\/prod\/gold\/late_arrival$/);
+  });
+
+  test("at 320 px a row's button keeps its label on one line in Dropped and Orphans", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 640 });
+    // Long names take the width a short label needs, as real tables' names do.
+    await page.route(
+      (url) => url.pathname === "/api/v1/environments/prod/namespaces/gold.sales/dropped-tables",
+      (route) =>
+        route.fulfill({
+          json: [
+            {
+              name: "station_ranking_by_region_and_hour_of_day",
+              namespace: "gold.sales",
+              uuid: "9a41c0de-7b62-4f5d-8c3a-1e0f9b7d2a42",
+              kind: "TABLE",
+              dropped_at: "2026-11-15T09:30:00Z",
+              purge_after: "2026-11-22T09:30:00Z",
+              restorable: true,
+              actions: ["undrop"],
+            },
+          ],
+        }),
+    );
+    await page.route(
+      (url) => url.pathname === "/api/v1/environments/prod/orphans",
+      (route) =>
+        route.fulfill({
+          json: {
+            orphans: [
+              {
+                repository: "analytics_warehouse_models",
+                table: "silver.station_ranking_by_region_and_hour_of_day",
+                kind: "TABLE",
+                exists: true,
+                actions: ["drop"],
+              },
+            ],
+            hidden: 0,
+            next_cursor: null,
+          },
+        }),
+    );
+    for (const [view, extra] of [
+      [VIEWS[0], "&ns=gold.sales"],
+      [VIEWS[2], ""],
+    ] as const) {
+      await openView(page, view, extra);
+      const buttons = page.getByRole("region", { name: view[1] }).getByRole("button");
+      await expect(buttons.first()).toBeVisible();
+      for (const button of await buttons.all()) {
+        // The label's text boxes, by the top of their line: one top is one line.
+        const lines = await button.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const tops = new Set(
+            [...range.getClientRects()]
+              .filter((rect) => rect.width > 0 && rect.height > 0)
+              .map((rect) => Math.round(rect.top)),
+          );
+          return tops.size;
+        });
+        expect(lines, await button.innerText()).toBe(1);
+      }
+    }
+  });
+
+  test("Restore it from Dropped on an orphan opens the Dropped view of its namespace", async ({
+    page,
+  }) => {
+    await openView(page, VIEWS[2]);
+    const restore = page.getByRole("link", { name: /gold\.sales\.fact_returns/ });
+    expect(await reachable(restore), "the link").toBe(true);
+    await restore.click();
+    await expect(page).toHaveURL(/env=prod&ns=gold\.sales&view=dropped/);
+    await expect(page.getByRole("region", { name: "Dropped tables" })).toBeVisible();
+    await expect(page.getByText("Tables dropped from gold.sales.")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Undrop gold.sales.fact_returns" }),
+    ).toBeVisible();
+  });
+});
+
 test.describe("Drop with the passkey in real Chromium", () => {
   test.skip(({ browserName }) => browserName !== "chromium", "the virtual authenticator is CDP");
 
