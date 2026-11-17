@@ -89,7 +89,9 @@ def test_text_that_is_the_same_on_every_run_is_left_alone(text: str) -> None:
     assert mask(text) == text
 
 
-def _tree(tmp_path: Path, block: str, shown: str, captured: str | None) -> tuple[Path, Path]:
+def _tree(
+    tmp_path: Path, block: str, shown: str, captured: str | None, columns: int | None = None
+) -> tuple[Path, Path]:
     """Build a root with one page, one example and, optionally, one captured region.
 
     Parameters
@@ -102,6 +104,8 @@ def _tree(tmp_path: Path, block: str, shown: str, captured: str | None) -> tuple
         What the page shows.
     captured
         What the example printed, or ``None`` for no capture of the region.
+    columns
+        The ``COLUMNS`` the example exports, or ``None`` for none.
 
     Returns
     -------
@@ -112,7 +116,10 @@ def _tree(tmp_path: Path, block: str, shown: str, captured: str | None) -> tuple
     site.mkdir(parents=True)
     (site / "p.md").write_text(block.format(shown), encoding="utf-8")
     (tmp_path / "docs" / "examples" / "demo").mkdir(parents=True)
-    (tmp_path / "docs" / "examples" / "demo" / "run.sh").write_text(RUN_SH, encoding="utf-8")
+    (tmp_path / "docs" / "examples" / "demo" / "run.sh").write_text(
+        RUN_SH if columns is None else RUN_SH.replace("echo", f"export COLUMNS={columns}\necho"),
+        encoding="utf-8",
+    )
     captures = tmp_path / "captures"
     (captures / "demo").mkdir(parents=True)
     if captured is not None:
@@ -525,7 +532,8 @@ def test_fix_keeps_a_page_that_differs_only_in_wrapping(tmp_path: Path) -> None:
     assert "```text\n" + WRAPPED_PAGE + "```" in text
 
 
-LONG = "word " * 18 + "end"
+LONG = "word " * 19 + "end"
+WIDTH = 100
 
 
 @pytest.mark.parametrize(
@@ -534,26 +542,22 @@ LONG = "word " * 18 + "end"
         (LONG + "\n\nnext\n", LONG + "\nnext\n"),
         (LONG + "\n  next\n", LONG + "\nnext\n"),
         (LONG + "\n- one\n- two\n", LONG + "\n- one - two\n"),
-        (LONG + "\nkey: 1\n", LONG + " key: 1\n"),
         (LONG + "\nnext  more\n", LONG + "\nnext more\n"),
         ("| a | b |\n| c | d |\n", "| a | b | | c | d |\n"),
         ("+---+---+\n| a | b |\n", "+---+---+ | a | b |\n"),
-        ("| a   | b |\n", "| a | b |\n"),
     ],
     ids=[
         "blank line removed",
         "indent changed",
         "list items joined",
-        "key value joined",
         "spaces inside a line",
         "markdown table rows joined",
         "ascii table rows joined",
-        "markdown table padding",
     ],
 )
 def test_only_a_wrap_point_is_ignored(tmp_path: Path, shown: str, printed: str) -> None:
     """Blank lines, indents, spacing, items and table rows all keep counting."""
-    root, captures = _tree(tmp_path, BLOCK, shown, printed)
+    root, captures = _tree(tmp_path, BLOCK, shown, printed, WIDTH)
     problems, _ = check(root, root / "docs/site", None, captures)
     assert problems
 
@@ -562,14 +566,14 @@ def test_wraps_on_both_sides_of_a_table_pass(tmp_path: Path) -> None:
     """Text before and after a table may wrap elsewhere; the table is compared as before."""
     shown = LONG + "\nrest\n" + _table("ok") + LONG + "\nrest\n"
     printed = LONG + " rest\n" + _table("ok") + LONG + " rest\n"
-    root, captures = _tree(tmp_path, BLOCK, shown, printed)
+    root, captures = _tree(tmp_path, BLOCK, shown, printed, WIDTH)
     assert check(root, root / "docs/site", None, captures) == ([], 0)
 
 
 def test_one_stray_box_character_in_a_sentence_is_still_text(tmp_path: Path) -> None:
     """A line with a single box character is unwrapped like any sentence."""
     first = "a │ " + LONG
-    root, captures = _tree(tmp_path, BLOCK, first + "\nrest\n", first + " rest\n")
+    root, captures = _tree(tmp_path, BLOCK, first + "\nrest\n", first + " rest\n", WIDTH + 4)
     assert check(root, root / "docs/site", None, captures) == ([], 0)
 
 
@@ -577,8 +581,41 @@ def test_fix_keeps_the_pages_wrap_where_only_the_wrap_differs(tmp_path: Path) ->
     """A wrap difference and a real change: only the changed stretch comes from the run."""
     shown = LONG + "\nrest\n\nold\n"
     printed = LONG + " rest\n\nnew\n"
-    root, captures = _tree(tmp_path, BLOCK, shown, printed)
+    root, captures = _tree(tmp_path, BLOCK, shown, printed, WIDTH)
     fix(root, root / "docs/site", None, captures)
     text = (root / "docs/site/p.md").read_text(encoding="utf-8")
     assert "```text\n" + LONG + "\nrest\n\nnew\n```" in text
     assert fix(root, root / "docs/site", None, captures) == []
+
+
+def test_a_wrap_inside_a_masked_alert_time_passes(tmp_path: Path) -> None:
+    """A mask with a space in it matches across the line break."""
+    shown = "Fired: schema changed (snapshot 5033228317085625887, 05 Nov 00:33 UTC);\ncheck it\n"
+    printed = "Fired: schema changed (snapshot 5033228317085625887, 05 Nov\n00:33 UTC); check it\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, printed, 62)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_continuation_that_starts_with_a_word_and_colon_passes(tmp_path: Path) -> None:
+    """A wrap before `changed:` is a wrap, not a new `key: value` line."""
+    text = "Fired: silver.orders: schema" + " x" * 30
+    root, captures = _tree(
+        tmp_path, BLOCK, text + "\nchanged: added\n", text + " changed:\nadded\n", len(text) + 4
+    )
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_wrap_before_a_long_path_passes(tmp_path: Path) -> None:
+    """The line may end far short of the width when the next word is long."""
+    path = "/srv/lakana/data/warehouse/silver/orders/part-0001.parquet"
+    shown = "Wrote the file to\n" + path + "\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, "Wrote the file to " + path + "\n", 60)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_line_that_fits_is_not_joined_to_the_next(tmp_path: Path) -> None:
+    """With the example's width known, a long line that was not wrapped stays a line."""
+    shown = LONG + "\nnext\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, LONG + " next\n", 120)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
