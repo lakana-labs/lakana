@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useEffect, useEffectEvent, useState } from "react";
+import { type JSX, type ReactNode, useEffect, useEffectEvent, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { PendingButton } from "../../shell/PendingButton";
@@ -96,6 +96,14 @@ export interface ConfirmRowProps {
   readonly confirm: Confirm;
   /** Closes the dialog without acting. */
   readonly onCancel: () => void;
+  /** A second way to act, between the confirm button and Cancel, such as Save as new. */
+  readonly more?: ReactNode;
+  /**
+   * Whether the confirm button shows that it waits; by default while the attempt runs or a press
+   * is kept. A dialog whose second action runs the same attempt passes false while that one runs,
+   * so only the pressed button shows it.
+   */
+  readonly pending?: boolean;
 }
 
 /**
@@ -107,21 +115,31 @@ export interface ConfirmRowProps {
  * @param props.label - The confirm button's label.
  * @param props.confirm - The confirm action.
  * @param props.onCancel - Closes the dialog without acting.
+ * @param props.more - A second way to act.
+ * @param props.pending - Whether the confirm button shows that it waits.
  * @returns The row.
  */
-export function ConfirmRow({ attempt, label, confirm, onCancel }: ConfirmRowProps): JSX.Element {
+export function ConfirmRow({
+  attempt,
+  label,
+  confirm,
+  onCancel,
+  more,
+  pending,
+}: ConfirmRowProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <>
       <div className="step-actions">
         <PendingButton
           className="button button-primary"
-          pending={attempt.busy || confirm.queued}
+          pending={pending ?? (attempt.busy || confirm.queued)}
           isDisabled={confirm.disabled}
           onPress={confirm.press}
         >
           {label}
         </PendingButton>
+        {more}
         <Button className="button" onPress={onCancel}>
           {t("dialog.cancel")}
         </Button>

@@ -15,7 +15,7 @@ import { PendingButton } from "../../shell/PendingButton";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
 import { markedText } from "../../shell/VisibleText";
-import { ReadFailed } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 import { boxWidth, useTextMeasure } from "./boxText";
 import { depthQuery, layout, mergeGraphs, MOST_STEPS, readDepths } from "./layout";
 import { LineageGraph } from "./LineageGraph";

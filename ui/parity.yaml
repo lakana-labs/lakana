@@ -6,12 +6,19 @@
 # done: true (ui and read only) = the interface already shows it; set by the PR that builds it.
 # Rule: docs/agent/conventions.md, "The ui/ project".
 
-"DELETE /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4 }
-"GET /api/v1/environments/{env}/saved-queries": { class: ui, part: 4 }
-"GET /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4 }
-"GET /api/v1/saved-queries": { class: ui, part: 4 }
-"POST /api/v1/environments/{env}/saved-queries": { class: ui, part: 4 }
-"PUT /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4 }
+"DELETE /api/v1/environments/{env}/saved-queries/{saved_query_id}":
+  { class: ui, part: 4, done: true }
+"GET /api/v1/environments/{env}/saved-queries":
+  {
+    class: ui,
+    part: 4,
+    done: true,
+    note: "the Queries screen lists them through GET /api/v1/saved-queries with its environment filter",
+  }
+"GET /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4, done: true }
+"GET /api/v1/saved-queries": { class: ui, part: 4, done: true }
+"POST /api/v1/environments/{env}/saved-queries": { class: ui, part: 4, done: true }
+"PUT /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4, done: true }
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
 "access explain": { class: ui, part: 7 }
 "access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
@@ -123,17 +130,23 @@
 "profile remove": { class: git, reason: "local CLI credential file" }
 "profile use": { class: git, reason: "local CLI credential file" }
 "project-version show": { class: ui, part: 5 }
-"query cancel": { class: ui, part: 4 }
-"query list": { class: ui, part: 4 }
-"query result": { class: ui, part: 4 }
-"query saved create": { class: ui, part: 4 }
-"query saved delete": { class: ui, part: 4 }
-"query saved list": { class: ui, part: 4 }
-"query saved show": { class: ui, part: 4 }
-"query saved update": { class: ui, part: 4 }
-"query status": { class: ui, part: 4 }
-"query submit": { class: ui, part: 4 }
-"query wait": { class: ui, part: 4 }
+"query cancel": { class: ui, part: 4, done: true }
+"query list":
+  {
+    class: ui,
+    part: 4,
+    done: true,
+    note: "your own written queries; a manager's view of everyone's comes with part 5",
+  }
+"query result": { class: ui, part: 4, done: true }
+"query saved create": { class: ui, part: 4, done: true }
+"query saved delete": { class: ui, part: 4, done: true }
+"query saved list": { class: ui, part: 4, done: true }
+"query saved show": { class: ui, part: 4, done: true }
+"query saved update": { class: ui, part: 4, done: true }
+"query status": { class: ui, part: 4, done: true }
+"query submit": { class: ui, part: 4, done: true }
+"query wait": { class: ui, part: 4, done: true }
 "recovery create": { class: ui, part: 1 }
 "recovery list": { class: ui, part: 1 }
 "recovery withdraw": { class: ui, part: 1 }
@@ -171,7 +184,8 @@
 "sign-in settings": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "sign-in setup-link":
   { class: git, reason: "local deployment tooling: prints the first administrator's link" }
-"sql": { class: ui, part: 4, note: "--into (write into a table) is Git, see table append" }
+"sql":
+  { class: ui, part: 4, done: true, note: "--into (write into a table) is Git, see table append" }
 "status": { class: read, part: 2 }
 "table append":
   {
@@ -332,9 +346,15 @@
 "GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
 "GET /api/v1/environments/{env}/orphans": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/project-versions/{project_version_id}": { class: ui, part: 5 }
-"GET /api/v1/environments/{env}/queries": { class: ui, part: 4 }
-"GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4 }
-"GET /api/v1/environments/{env}/queries/{query_id}/result": { class: ui, part: 4 }
+"GET /api/v1/environments/{env}/queries":
+  {
+    class: ui,
+    part: 4,
+    done: true,
+    note: "the Queries screen lists them through GET /api/v1/queries with its environment filter",
+  }
+"GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4, done: true }
+"GET /api/v1/environments/{env}/queries/{query_id}/result": { class: ui, part: 4, done: true }
 "GET /api/v1/environments/{env}/runs": { class: ui, part: 5 }
 "GET /api/v1/environments/{env}/runs/{run_id}": { class: ui, part: 5 }
 "GET /api/v1/environments/{env}/runs/{run_id}/checks": { class: read, part: 5 }
@@ -376,8 +396,8 @@
 "GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
-"GET /api/v1/queries": { class: ui, part: 4 }
-"GET /api/v1/queries/environments": { class: ui, part: 4 }
+"GET /api/v1/queries": { class: ui, part: 4, done: true }
+"GET /api/v1/queries/environments": { class: ui, part: 4, done: true }
 "GET /api/v1/recovery-links": { class: ui, part: 1 }
 "GET /api/v1/repositories": { class: ui, part: 8 }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
@@ -477,8 +497,8 @@
   { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/tables/{name}/undrop":
   { class: ui, part: 3, done: true }
-"POST /api/v1/environments/{env}/queries": { class: ui, part: 4 }
-"POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4 }
+"POST /api/v1/environments/{env}/queries": { class: ui, part: 4, done: true }
+"POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4, done: true }
 "POST /api/v1/environments/{env}/runs": { class: ui, part: 5 }
 "POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5 }
 "POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5 }

@@ -25,7 +25,7 @@ interface SentRequest {
 }
 
 /** What a route answers: a status and an optional JSON body, or a file. */
-interface FakeAnswer {
+export interface FakeAnswer {
   /** The status code. */
   readonly status: number;
   /** The JSON body. */
@@ -138,7 +138,10 @@ export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
     }
     if (answer.blob !== undefined) {
       // As bytes: the fetch of Node does not read a Blob of jsdom.
-      return new Response(await answer.blob.arrayBuffer(), { status: answer.status });
+      return new Response(await answer.blob.arrayBuffer(), {
+        status: answer.status,
+        headers: { "Content-Type": answer.blob.type || "application/octet-stream" },
+      });
     }
     return new Response(JSON.stringify(answer.body ?? null), {
       status: answer.status,

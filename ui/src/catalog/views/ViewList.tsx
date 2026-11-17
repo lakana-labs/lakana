@@ -8,7 +8,7 @@ import { type JSX, type ReactNode, type Ref, useEffect, useImperativeHandle, use
 import { useTranslation } from "react-i18next";
 
 import { PendingButton } from "../../shell/PendingButton";
-import { ReadFailed } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 import { ListSkeleton } from "../ListSkeleton";
 import type { CursorPages } from "./useCursorPages";
 
@@ -30,6 +30,13 @@ export interface ViewListProps {
   readonly onMore?: () => void;
   /** The scrolling region, for a caller that moves the focus into it. */
   readonly regionRef?: Ref<HTMLDivElement>;
+  /**
+   * Whether each row opens its object (its name a link that covers the row, a `›` at its end);
+   * no by default: a list of facts whose rows open nothing.
+   */
+  readonly rowsOpen?: boolean;
+  /** The class that sizes the scrolling region's table; the Dropped list's by default. */
+  readonly scroll?: string;
 }
 
 /**
@@ -44,6 +51,8 @@ export interface ViewListProps {
  * @param props.children - The body rows.
  * @param props.onMore - Called before the next page is read.
  * @param props.regionRef - The region's element.
+ * @param props.rowsOpen - Whether each row opens its object.
+ * @param props.scroll - The class that sizes the table.
  * @returns The frame.
  */
 export function ViewList({
@@ -55,6 +64,8 @@ export function ViewList({
   children,
   onMore,
   regionRef,
+  rowsOpen = false,
+  scroll = "dropped-scroll",
 }: ViewListProps): JSX.Element {
   const { t } = useTranslation();
   const own = useRef<HTMLDivElement>(null);
@@ -93,7 +104,7 @@ export function ViewList({
       )}
       {rowCount > 0 && (
         <div
-          className="list-scroll dropped-scroll"
+          className={`list-scroll ${scroll}`}
           role="region"
           aria-label={region}
           // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
@@ -101,7 +112,7 @@ export function ViewList({
           tabIndex={0}
           ref={own}
         >
-          <table className="list list-static">
+          <table className={rowsOpen ? "list" : "list list-static"}>
             <thead>{head}</thead>
             <tbody>{children}</tbody>
           </table>

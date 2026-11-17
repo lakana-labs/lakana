@@ -26,7 +26,8 @@ import { useFocusAfter } from "../../shell/useFocusAfter";
 import { type Resource, useResource } from "../../shell/useResource";
 import { markedText, VisibleText } from "../../shell/VisibleText";
 import { StatusGlyph } from "../../status/StatusGlyph";
-import { ReadFailed, When } from "../cells";
+import { When } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 import { allowedBecause, editTextsAnswer, grantListCommand, namespaceLevels } from "./reasons";
 import { useTableData } from "./TableContext";
 
