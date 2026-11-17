@@ -544,15 +544,15 @@ class QueryRun:
         Raises
         ------
         lakana.errors.NotFound
-            If the query does not exist, or was submitted by another principal.
+            As `write_file`.
         lakana.errors.Conflict
-            If the query has not succeeded yet, or is not a read.
+            As `write_file`.
         lakana.errors.ValidationError
-            If the result cannot be a file of this format.
+            As `write_file`.
         lakana.errors.ServerError
-            If the server is preparing other result files (status 503).
+            As `write_file`.
         lakana.errors.LakanaConnectionError
-            If the server could not be reached, or the body broke before its end.
+            As `write_file`; `path` is then left as it was.
         OSError
             If the file cannot be written.
         """
