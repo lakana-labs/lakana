@@ -4,8 +4,8 @@
  * @remarks
  * The editor lives in an open shadow root, which the custom properties of `tokens.css` reach by
  * inheritance, so every value here is a `var(--…)`. CodeMirror's lint marks draw with `data:`
- * images, which the content security policy's `img-src` refuses; the theme replaces both with
- * plain CSS (a wavy underline and a filled dot), so no image is asked for.
+ * images, which the content security policy's `img-src` refuses; the theme replaces every one of
+ * them with plain CSS (a wavy underline and a filled dot), so no image is asked for.
  * @packageDocumentation
  */
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
@@ -67,18 +67,24 @@ export const stillWaterTheme: Extension = EditorView.theme({
   ".cm-diagnostic-error": {
     borderLeftColor: "var(--color-bad)",
   },
-  ".cm-lintRange-error": {
+  // Every severity's image is replaced, though the editor marks only errors, so a lint upgrade
+  // that draws another one fails theme.test.ts rather than the policy.
+  ".cm-lintRange-error, .cm-lintRange-warning, .cm-lintRange-info, .cm-lintRange-hint": {
     backgroundImage: "none",
     textDecoration: "underline wavy var(--color-bad)",
     textDecorationSkipInk: "none",
   },
-  ".cm-lint-marker-error": {
+  ".cm-lint-marker-error, .cm-lint-marker-warning, .cm-lint-marker-info": {
     content: "none",
     backgroundColor: "var(--color-bad)",
     borderRadius: "var(--radius-round)",
     width: "var(--space-2)",
     height: "var(--space-2)",
     margin: "var(--space-1) auto",
+  },
+  // A mark at a point (past the end of a line) is a small triangle under it.
+  ".cm-lintPoint:after": {
+    borderBottomColor: "var(--color-bad)",
   },
   // Forced colours drop backgrounds; the dot keeps the system's text colour.
   "@media (forced-colors: active)": {
