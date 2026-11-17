@@ -166,7 +166,7 @@ test("an administrator adds a postgresql connection with a password, and the val
   await page.getByRole("textbox", { name: "user" }).fill("reader");
   const password = page.getByLabel("password", { exact: true });
   await expect(password).toHaveAttribute("type", "password");
-  await expect(password).toHaveAttribute("autocomplete", "off");
+  await expect(password).toHaveAttribute("autocomplete", "new-password");
   await password.fill(PASSWORD);
   await page.getByRole("button", { name: "Save" }).click();
 
