@@ -2342,6 +2342,18 @@ def test_runs_failed_env_help_says_every_environment_is_the_default(tmp_path: Pa
     assert "Only this environment (default: every environment you may read)." in text
 
 
+def test_runs_failed_json_keeps_the_items_and_the_truncated_flag(tmp_path: Path) -> None:
+    api = FakeApi()
+    body = {"items": [_failed_row("nightly", "prod", "a.b", "timeout")], "truncated": True}
+    api.on("GET", "/api/v1/runs/failed", json=body)
+    result = invoke(make_state(tmp_path, api), "--output", "json", "runs", "failed", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"items", "truncated"}
+    assert payload["truncated"] is True
+    assert [(i["run"]["job"], i["task"]) for i in payload["items"]] == [("nightly", "a.b")]
+
+
 def test_runs_failed_says_when_more_were_cut(tmp_path: Path) -> None:
     api = FakeApi()
     body = {"items": [_failed_row("nightly", "prod", "a.b", "timeout")], "truncated": True}

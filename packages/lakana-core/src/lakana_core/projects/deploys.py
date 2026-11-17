@@ -1220,11 +1220,10 @@ class DeployService:
         """
         if run.job_version_id is None:
             return None
+        # The column is `SET NULL` when the version goes, so a set id names a row that exists.
         manifest = self._session.execute(
             select(JobVersion.manifest_json).where(JobVersion.id == run.job_version_id)
-        ).scalar_one_or_none()
-        if manifest is None:
-            return None
+        ).scalar_one()
         return tuple(sorted(manifest_jobs(manifest)))
 
     def _starts_lost(self, run: DeployRun) -> bool:
