@@ -303,6 +303,12 @@ The server now writes a result as CSV or a spreadsheet, and the CLI asks it for 
 - **`origin` and `since` need a new server.** `client.queries.list` and `list_page` with `origin=`
   or `since=` send filters that a server of the previous release does not know: it ignores them
   and lists every row it would list without them.
+- **The lists across environments need a new server.** `GET /api/v1/queries` (behind
+  `client.queries.list_all`, `iter_all` and `lakana query list --all-environments`) and
+  `GET /api/v1/queries/environments` (behind `client.queries.environments`) are new. A server of
+  the previous release answers them with a bare `404 Not Found`; the SDK and the CLI turn that
+  into `NotFound` saying the server is older than the package, and that you can upgrade it or
+  list one environment with `lakana query list --env ENV`.
 - **An Arrow result has no `Content-Length`.** `GET …/queries/{id}/result` streams the stored
   file and names its size in `X-Result-Arrow-Bytes` when the run recorded it. A client that
   read `Content-Length` reads that header instead.

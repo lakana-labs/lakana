@@ -1479,6 +1479,19 @@ def test_query_list_all_environments_adds_the_environment_column(tmp_path: Path)
     assert "No queued or running queries in any environment." in nothing.stdout
 
 
+def test_query_list_all_environments_against_an_older_server_says_to_upgrade(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    api.on("GET", "/api/v1/queries", status=404, json={"detail": "Not Found"})
+    result = invoke(make_state(tmp_path, api), "query", "list", "--all-environments")
+    assert result.exit_code == 6
+    assert " ".join(result.stderr.split()).endswith(
+        "This server does not have GET /api/v1/queries; it is older than this lakana package. "
+        "Upgrade the server, or list one environment with `lakana query list --env ENV`."
+    )
+
+
 def test_query_list_origin_is_repeatable(tmp_path: Path) -> None:
     api = _list_api(_entry(origin="task", environment="dev"))
     result = invoke(

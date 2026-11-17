@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from datetime import datetime
 from typing import Any, BinaryIO, Literal
 
@@ -33,7 +33,13 @@ from lakana._models import (
     WaitingFor,
 )
 from lakana._routes import ROUTES
-from lakana.errors import InvalidResponse, QueryFailed, ServerError, ValidationError
+from lakana.errors import (
+    InvalidResponse,
+    NotFound,
+    QueryFailed,
+    ServerError,
+    ValidationError,
+)
 
 ResultFileFormat = Literal["csv", "xlsx"]
 """The file formats the server makes of a whole result: CSV and a spreadsheet."""
@@ -283,6 +289,50 @@ def _write_target(
         "incremental_key": incremental_key,
         "evolve_schema": evolve_schema,
     }
+
+
+_LIST_ALL_INSTEAD = "list one environment with `lakana query list --env ENV`"
+"""What to do instead of `Queries.list_all` against a server without `GET /api/v1/queries`."""
+
+_ENVIRONMENTS_INSTEAD = "see the environments with `lakana env list`"
+"""What to do instead of `Queries.environments` against a server without that route."""
+
+
+@contextlib.contextmanager
+def _route_of_a_newer_server(route: str, instead: str) -> Generator[None]:
+    """Say that the server is too old when it answers a route with the router's bare 404.
+
+    A route the server does not have is answered by its router: 404 with ``Not Found`` and no
+    Lakana error type. A Lakana 404 (an unknown environment, say) names its type and is left
+    as it is.
+
+    Parameters
+    ----------
+    route
+        The route, as ``GET /api/v1/...``.
+    instead
+        What the caller can do on that server, after "Upgrade the server, or".
+
+    Yields
+    ------
+    None
+        While the request is sent.
+
+    Raises
+    ------
+    lakana.errors.NotFound
+        With a sentence naming the route and the upgrade, for a 404 without an error type.
+    """
+    try:
+        yield
+    except NotFound as exc:
+        if exc.error_type is not None:
+            raise
+        raise NotFound(
+            f"This server does not have {route}; it is older than this lakana package. "
+            f"Upgrade the server, or {instead}.",
+            status=exc.status,
+        ) from exc
 
 
 _PAGE_BUSY_TYPE = "ResultPageLimitError"
@@ -827,16 +877,18 @@ class Queries:
         lakana.errors.PermissionDenied
             With `environment`, if you may not submit queries there.
         lakana.errors.NotFound
-            With `environment`, if it does not exist.
+            With `environment`, if it does not exist; or, with a sentence saying so, if the
+            server is older than this package and has no `GET /api/v1/queries`.
         lakana.errors.ValidationError
             If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
             time zone, or `cursor` is not one the server issued for this list.
         """
         params = _list_params(include_ended, status, submitter, origin, since, limit, cursor)
-        response = self._transport.request(
-            ROUTES["queries.list_all"],
-            params=query_params(environment=environment, **params),
-        )
+        with _route_of_a_newer_server("GET /api/v1/queries", _LIST_ALL_INSTEAD):
+            response = self._transport.request(
+                ROUTES["queries.list_all"],
+                params=query_params(environment=environment, **params),
+            )
         body = response.json()
         return QueryListPage(
             items=[_entry_from_json(item) for item in body["items"]],
@@ -878,6 +930,12 @@ class Queries:
         ------
         QueryListEntry
             Each entry, once, in the order of `list_all`.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            As `list_all`: with `environment`, if it does not exist, or if the server is older
+            than this package and has no `GET /api/v1/queries`.
         """
         yield from every_page(
             lambda cursor: self.list_all(
@@ -901,8 +959,15 @@ class Queries:
         -------
         list of QueryEnvironment
             Each one's name and whether it is protected; empty when there is none.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            With a sentence saying so, if the server is older than this package and has no
+            `GET /api/v1/queries/environments`.
         """
-        response = self._transport.request(ROUTES["queries.environments"])
+        with _route_of_a_newer_server("GET /api/v1/queries/environments", _ENVIRONMENTS_INSTEAD):
+            response = self._transport.request(ROUTES["queries.environments"])
         return [
             QueryEnvironment(name=item["name"], protected=item["protected"])
             for item in response.json()

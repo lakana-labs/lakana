@@ -85,7 +85,7 @@ Returns: `QueryListPage`. The entries, and the cursor for the next page (`None` 
 | Error | When |
 |---|---|
 | `lakana.PermissionDenied` | With `environment`, if you may not submit queries there. |
-| `lakana.NotFound` | With `environment`, if it does not exist. |
+| `lakana.NotFound` | With `environment`, if it does not exist; or, with a sentence saying so, if the server is older than this package and has no `GET /api/v1/queries`. |
 | `lakana.ValidationError` | If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no time zone, or `cursor` is not one the server issued for this list. |
 
 ### `client.queries.iter_all`
@@ -106,6 +106,10 @@ Yield every query of every environment you may query, fetching pages as needed.
 
 Yields: `QueryListEntry`. Each entry, once, in the order of `list_all`.
 
+| Error | When |
+|---|---|
+| `lakana.NotFound` | As `list_all`: with `environment`, if it does not exist, or if the server is older than this package and has no `GET /api/v1/queries`. |
+
 ### `client.queries.environments`
 
 Signature: `client.queries.environments() -> list[QueryEnvironment]`
@@ -113,6 +117,10 @@ Signature: `client.queries.environments() -> list[QueryEnvironment]`
 List the environments where you may submit a query, sorted by name.
 
 Returns: `list of QueryEnvironment`. Each one's name and whether it is protected; empty when there is none.
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | With a sentence saying so, if the server is older than this package and has no `GET /api/v1/queries/environments`. |
 
 ### `client.queries.submit`
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param
+from lakana.errors import NotFound
 from lakana.resources.artifacts import Artifacts
 from lakana.resources.deploys import Deploys, OrphanTables
 from lakana.resources.namespaces import Namespaces
@@ -244,6 +246,70 @@ def test_query_environments_reads_name_and_protection() -> None:
     found = Queries(HttpTransport(_CONFIG, http_client=client)).environments()
     assert seen[0].url.path == "/api/v1/queries/environments"
     assert [(e.name, e.protected) for e in found] == [("prod", True)]
+
+
+def _answering(status: int, body: dict[str, Any]) -> Queries:
+    """Build the queries resource over a server that answers every request the same.
+
+    Parameters
+    ----------
+    status
+        The status of every answer.
+    body
+        The JSON body of every answer.
+
+    Returns
+    -------
+    Queries
+        The resource.
+    """
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body)),
+        base_url=_CONFIG.url,
+    )
+    return Queries(HttpTransport(_CONFIG, http_client=client))
+
+
+_LIST_ALL_TOO_OLD = (
+    "This server does not have GET /api/v1/queries; it is older than this lakana package. "
+    "Upgrade the server, or list one environment with `lakana query list --env ENV`."
+)
+_ENVIRONMENTS_TOO_OLD = (
+    "This server does not have GET /api/v1/queries/environments; it is older than this lakana "
+    "package. Upgrade the server, or see the environments with `lakana env list`."
+)
+
+
+@pytest.mark.parametrize(
+    ("call", "message"),
+    [
+        (lambda queries: queries.list_all(), _LIST_ALL_TOO_OLD),
+        (lambda queries: queries.list_all(environment="dev"), _LIST_ALL_TOO_OLD),
+        (lambda queries: list(queries.iter_all()), _LIST_ALL_TOO_OLD),
+        (lambda queries: queries.environments(), _ENVIRONMENTS_TOO_OLD),
+    ],
+)
+def test_an_older_server_without_the_route_is_named_as_too_old(
+    call: Callable[[Queries], object], message: str
+) -> None:
+    """The router's bare 404 has no Lakana error type: the route is missing, not the object."""
+    with pytest.raises(NotFound) as caught:
+        call(_answering(404, {"detail": "Not Found"}))
+    assert (str(caught.value), caught.value.status, caught.value.error_type) == (
+        message,
+        404,
+        None,
+    )
+
+
+def test_a_lakana_404_of_an_unknown_environment_stays_as_it_is() -> None:
+    unknown = {"detail": "Environment 'nope' not found.", "type": "NotFoundError"}
+    with pytest.raises(NotFound) as caught:
+        _answering(404, unknown).list_all(environment="nope")
+    assert (str(caught.value), caught.value.error_type) == (
+        "Environment 'nope' not found.",
+        "NotFoundError",
+    )
 
 
 def test_deploys_list_sends_the_filter_and_page_returns_the_cursor() -> None:
