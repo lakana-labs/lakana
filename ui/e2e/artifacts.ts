@@ -10,6 +10,8 @@ import { createHash } from "node:crypto";
 
 import type { Page } from "@playwright/test";
 
+import type { GraphOut } from "../src/api";
+
 import { mutatingRequests, stubStepUpCeremony } from "./manage";
 import { signInAsAdmin, STUBBED, TABLE_DETAIL } from "./session";
 
@@ -365,11 +367,14 @@ export async function stubArtifacts(page: Page): Promise<void> {
       const node = new URL(route.request().url()).searchParams.get("node") ?? "";
       return node.endsWith(MODEL_UUID)
         ? route.fulfill({
+            // The server writes an artifact as a table node of `table_type` `artifact`.
             json: {
-              nodes: [{ id: node, kind: "artifact", name: "ml.model", distance: 0 }],
+              nodes: [
+                { id: node, kind: "table", name: "ml.model", distance: 0, table_type: "artifact" },
+              ],
               edges: [],
               next_cursor: null,
-            },
+            } satisfies GraphOut,
           })
         : route.fallback();
     },

@@ -1547,11 +1547,13 @@ def describe_table(
 
     Sets the texts shown for the table in one language (`lang`, else the table's main language),
     or with `null` removes an edit so that the text of the project shows again. A field left out
-    of the body stays as it is. A deploy never replaces a text set here. The table's owner or a
-    holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the
-    table does not exist and 422 for a body with neither field, a blank text, a description over
-    4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a
-    language tag.
+    of the body stays as it is. `label_language` in the body edits the label in another language
+    than the description, for a page that shows the two in different languages. A deploy never
+    replaces a text set here. The table's owner or a holder of `DROP_TABLE` may do this, and must
+    be able to read the table. Answers 404 when the table does not exist and 422 for a body with
+    neither field, a blank text, a description over 4,000 characters, a label over 100 characters
+    or on several lines, a `lang` or `label_language` that is not a language tag, or a
+    `label_language` without a `label`.
 
     Parameters
     ----------
@@ -1562,7 +1564,8 @@ def describe_table(
     name
         Table name.
     body
-        The new `description` and/or `label`, each a text or `null`.
+        The new `description` and/or `label`, each a text or `null`, and the label's language
+        when it is not `lang`.
     request
         The current request, for `Accept-Language`.
     lang
@@ -1596,6 +1599,7 @@ def describe_table(
         _sent(body, "description"),
         label=_sent(body, "label"),
         language=lang,
+        label_language=body.label_language,
     )
     return _describe_out(
         path,
@@ -1628,16 +1632,18 @@ def describe_column(
     """Set a column's description and label.
 
     Works as the table's route does, for one column, which must be in the table's schema: the
-    texts are set in `lang`, else in the table's main language, `null` removes an edit, and a
-    field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it.
-    Answers 404 for a missing table or column and 422 as the table's route does.
+    texts are set in `lang`, else in the table's main language, the label in `label_language`
+    when the body names one, `null` removes an edit, and a field left out stays. The caller owns
+    the table or holds `DROP_TABLE` on it, and may read it. Answers 404 for a missing table or
+    column and 422 as the table's route does.
 
     Parameters
     ----------
     request
         Carries the reader's `Accept-Language`.
     body
-        The column's new texts: `description`, `label` or both, `null` to reset one.
+        The column's new texts: `description`, `label` or both, `null` to reset one, and
+        `label_language` for a label in another language than `lang`.
     env
         The environment's name.
     path
@@ -1679,6 +1685,7 @@ def describe_column(
         _sent(body, "description"),
         label=_sent(body, "label"),
         language=lang,
+        label_language=body.label_language,
     )
     return _describe_out(
         path,

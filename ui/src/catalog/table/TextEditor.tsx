@@ -37,8 +37,10 @@ const NEAR = 0.9;
 export interface TextEditorProps {
   /** The texts as they are now; null for one there is none of. */
   readonly texts: { readonly description: string | null; readonly label: string | null };
-  /** The language the texts are written in. */
+  /** The language the description is written in. */
   readonly lang: string;
+  /** The language the label is written in. */
+  readonly labelLang: string;
   /** Whether to name the language beside the fields, because the table has more than one. */
   readonly named: boolean;
   /** Saves what changed; rejects with the server's refusal. */
@@ -94,13 +96,21 @@ function refusedField(message: string, change: TextChange): Refusal["field"] {
  *
  * @param props - The texts and what to do with them.
  * @param props.texts - The texts as they are now.
- * @param props.lang - The language they are written in.
- * @param props.named - Whether to name the language.
+ * @param props.lang - The language the description is written in.
+ * @param props.labelLang - The language the label is written in.
+ * @param props.named - Whether to name the languages.
  * @param props.onSave - Saves what changed.
  * @param props.onDone - Closes the editor.
  * @returns The editor.
  */
-export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorProps): JSX.Element {
+export function TextEditor({
+  texts,
+  lang,
+  labelLang,
+  named,
+  onSave,
+  onDone,
+}: TextEditorProps): JSX.Element {
   const { t, i18n } = useTranslation();
   const [description, setDescription] = useState(texts.description ?? "");
   const [label, setLabel] = useState(texts.label ?? "");
@@ -112,9 +122,12 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
     start.current?.focus();
   }, []);
   const number = new Intl.NumberFormat(i18n.language);
-  const language = named ? languageName(lang, i18n.language) : null;
   const name = (key: "label" | "description"): string =>
-    language === null ? t(`table.edit.${key}`) : t(`table.edit.${key}In`, { language });
+    named
+      ? t(`table.edit.${key}In`, {
+          language: languageName(key === "label" ? labelLang : lang, i18n.language),
+        })
+      : t(`table.edit.${key}`);
   const descriptionUsed = characters(description.trim());
   const labelUsed = characters(label.trim());
 
@@ -258,8 +271,10 @@ export function TextEditor({ texts, lang, named, onSave, onDone }: TextEditorPro
 
 /** What {@link useDescribe} hands back. */
 export interface Describe {
-  /** The language the edit is written in. */
+  /** The language the description is edited in. */
   readonly lang: string;
+  /** The language the label is edited in. */
+  readonly labelLang: string;
   /** Whether to name the language beside the fields. */
   readonly named: boolean;
   /** Whether the page shows the main language for want of a text in the reader's. */
@@ -280,19 +295,26 @@ export interface Describe {
 }
 
 /**
- * Saves texts of the table the page shows, in the language of the text being edited. The server
- * answers the whole table and the page shows it; when two people save at once the later save
- * wins, and the page shows what the server holds after it. A refusal for permission makes the
- * page read what the person may do again, so Edit goes away for someone who no longer may.
+ * Saves texts of the table the page shows, each in the language it is shown in: a label shown in
+ * another language than the description is saved in its own. The server answers the whole table
+ * and the page shows it; when two people save at once the later save wins, and the page shows
+ * what the server holds after it. A refusal for permission makes the page read what the person
+ * may do again, so Edit goes away for someone who no longer may.
  *
- * @param descriptionLanguage - The language of the description shown; null without one.
- * @returns The language and the two ways to save.
+ * @param shown - The languages of the texts shown.
+ * @param shown.description_language - The description's; null without one.
+ * @param shown.label_language - The label's; null or left out without one.
+ * @returns The languages and the two ways to save.
  */
-export function useDescribe(descriptionLanguage: string | null): Describe {
+export function useDescribe(shown: {
+  readonly description_language: string | null;
+  readonly label_language?: string | null;
+}): Describe {
   const { ref, table, replaceTable, permissions } = useTableData();
   const { reload } = permissions;
-  const { lang, named, fallback } = editLanguage(table, {
-    description_language: descriptionLanguage,
+  const { lang, labelLang, named, fallback } = editLanguage(table, {
+    description_language: shown.description_language,
+    label_language: shown.label_language ?? null,
   });
   const keep = useCallback(
     async (save: Promise<TableOut>): Promise<void> => {
@@ -307,15 +329,23 @@ export function useDescribe(descriptionLanguage: string | null): Describe {
     },
     [replaceTable, reload],
   );
+  const inLanguages = useCallback(
+    (change: TextChange): TextChange =>
+      change.label !== undefined && labelLang !== lang
+        ? { ...change, label_language: labelLang }
+        : change,
+    [lang, labelLang],
+  );
   const saveTable = useCallback(
-    (change: TextChange) => keep(describeTable(ref, change, lang)),
-    [keep, ref, lang],
+    (change: TextChange) => keep(describeTable(ref, inLanguages(change), lang)),
+    [keep, ref, lang, inLanguages],
   );
   const saveColumn = useCallback(
-    (column: string, change: TextChange) => keep(describeColumn(ref, column, change, lang)),
-    [keep, ref, lang],
+    (column: string, change: TextChange) =>
+      keep(describeColumn(ref, column, inLanguages(change), lang)),
+    [keep, ref, lang, inLanguages],
   );
-  return { lang, named, fallback, saveTable, saveColumn };
+  return { lang, labelLang, named, fallback, saveTable, saveColumn };
 }
 
 /** What {@link useReturnFocus} hands back. */

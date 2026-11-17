@@ -266,7 +266,7 @@ type GraphEdge = GraphOut["edges"][number];
  * @returns The node.
  */
 export function graphNode(
-  kind: string,
+  kind: GraphNodeOut["kind"],
   name: string,
   distance: number,
   overrides: Partial<GraphNodeOut> = {},
@@ -295,7 +295,11 @@ export function assetNode(name: string, distance: number, repository = "analytic
  * @param target - The node it reaches.
  * @returns The edge.
  */
-export function graphEdge(kind: string, source: GraphNodeOut, target: GraphNodeOut): GraphEdge {
+export function graphEdge(
+  kind: GraphEdge["kind"],
+  source: GraphNodeOut,
+  target: GraphNodeOut,
+): GraphEdge {
   return { kind, source: source.id, target: target.id };
 }
 
