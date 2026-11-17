@@ -94,6 +94,22 @@ describe("columnHover", () => {
     expect(await hoverAt("select w.station_id| from gold.weather w")).toBeNull();
   });
 
+  it("reads no table for a path whose start names a namespace: its last part is a table", async () => {
+    const nested: CompletionCatalog = {
+      namespaces: () => Promise.resolve(["gold", "gold.sales"]),
+      tables: () => Promise.resolve([]),
+      columns: vi.fn(() => Promise.resolve(null)),
+    };
+    const pos = "select * from gold.sales.fact_sa".length;
+    view = new EditorView({
+      state: EditorState.create({ doc: "select * from gold.sales.fact_sales" }),
+      parent: document.body,
+    });
+
+    expect(await columnTooltip(nested)(view, pos, 1)).toBeNull();
+    expect(nested.columns).not.toHaveBeenCalled();
+  });
+
   it("is an extension the editor takes", () => {
     view = new EditorView({
       state: EditorState.create({ doc: "select 1", extensions: columnHover(catalog) }),

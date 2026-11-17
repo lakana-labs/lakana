@@ -94,8 +94,9 @@ function tablesIn(statement: string): Map<string, TableAt> {
 }
 
 /**
- * The table a qualifier names: `namespace.table` when the namespace is known, or an alias or a
- * table's own name in the statement.
+ * The table a qualifier names: `namespace.table` when the namespace is known and the whole
+ * qualifier is not a namespace too (then it names a namespace, and no table is read), or an alias
+ * or a table's own name in the statement.
  *
  * @param qualifier - The parts before the column.
  * @param namespaces - The known namespaces.
@@ -110,8 +111,9 @@ export function tableOf(
   if (qualifier.length === 1) {
     return tablesIn(statement).get((qualifier[0] as string).toLowerCase()) ?? null;
   }
+  // A qualifier that is itself a namespace names no table: what follows it is a table.
   const namespace = qualifier.slice(0, -1).join(".");
-  return namespaces.includes(namespace)
+  return namespaces.includes(namespace) && !namespaces.includes(qualifier.join("."))
     ? { namespace, table: qualifier[qualifier.length - 1] as string }
     : null;
 }

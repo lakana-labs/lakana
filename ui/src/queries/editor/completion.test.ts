@@ -101,6 +101,13 @@ describe("catalogCompletion", () => {
     expect(await complete("select * from nowhere.|")).toBeNull();
   });
 
+  it("reads no table's columns after a path that names a namespace", async () => {
+    const catalog = aCatalog();
+
+    expect(labels(await complete("select * from gold.sales.|", catalog))).toEqual(["fact_sales"]);
+    expect(catalog.columns).not.toHaveBeenCalled();
+  });
+
   it("offers a table's columns after its alias and a dot, with types", async () => {
     const catalog = aCatalog();
     const columns = vi.spyOn(catalog, "columns");
