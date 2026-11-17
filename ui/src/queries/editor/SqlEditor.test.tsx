@@ -150,6 +150,8 @@ describe("SqlEditor", () => {
 
     expect(box()).toHaveAttribute("contenteditable", "false");
     expect(box()).toHaveAttribute("aria-readonly", "true");
+    // A Tab stop, read-only or not, so the region that scrolls a long line is reached by keyboard.
+    expect(box()).toHaveAttribute("tabindex", "0");
     expect(viewOf(container).state.readOnly).toBe(true);
 
     rerender(<SqlEditor {...props({ readOnly: false, label: "SQL of daily_sales" })} />);
@@ -158,6 +160,7 @@ describe("SqlEditor", () => {
     });
     expect(editable).toHaveAttribute("contenteditable", "true");
     expect(editable).not.toHaveAttribute("aria-readonly");
+    expect(editable).toHaveAttribute("tabindex", "0");
   });
 
   it("focusAt puts the cursor at the line and column", () => {

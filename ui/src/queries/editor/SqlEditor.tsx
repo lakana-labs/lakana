@@ -95,8 +95,12 @@ function settings(readOnly: boolean, label: string): Extension {
   return [
     EditorState.readOnly.of(readOnly),
     EditorView.editable.of(!readOnly),
+    // A Tab stop in both cases: the content is the only thing in the region that scrolls a long
+    // line, and a read-only text is not focusable by itself.
     EditorView.contentAttributes.of(
-      readOnly ? { "aria-label": label, "aria-readonly": "true" } : { "aria-label": label },
+      readOnly
+        ? { "aria-label": label, "aria-readonly": "true", tabindex: "0" }
+        : { "aria-label": label, tabindex: "0" },
     ),
   ];
 }
