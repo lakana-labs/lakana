@@ -284,7 +284,7 @@ test.describe("an invited person", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
     await expect(page.getByText("You have no access yet; ask an administrator.")).toBeVisible();
-    await expect(page.getByRole("link", { name: "Access" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
     await page.context().close();
   });
 });
