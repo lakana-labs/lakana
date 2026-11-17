@@ -29,13 +29,14 @@ export interface PlaceFoldProps {
  */
 export function PlaceFold({ viewer }: PlaceFoldProps): JSX.Element {
   const { t } = useTranslation();
-  const { pathname } = useLocation();
+  // Every navigation is a new history entry with its own key, the place already shown included.
+  const { key } = useLocation();
   const [open, setOpen] = useState(false);
-  // Choosing a place moves to another address: the popover closes with the move.
+  // Choosing a place navigates, even to the place already shown: the popover closes with it.
   // (State adjusted while rendering, as React documents for state that follows a change.)
-  const [at, setAt] = useState(pathname);
-  if (at !== pathname) {
-    setAt(pathname);
+  const [at, setAt] = useState(key);
+  if (at !== key) {
+    setAt(key);
     setOpen(false);
   }
   return (

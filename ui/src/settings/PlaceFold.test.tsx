@@ -53,6 +53,20 @@ describe("PlaceFold", () => {
     });
   });
 
+  it("choosing the place already shown closes Section too", async () => {
+    narrow();
+    const { user, router } = renderShell("/settings/status");
+    await user.click(await screen.findByRole("button", { name: "Section" }));
+    const dialog = await screen.findByRole("dialog", { name: "Settings places" });
+
+    await user.click(within(dialog).getByRole("link", { name: "Status" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(router.state.location.pathname).toBe("/settings/status");
+  });
+
   it("a wide window lists the places beside the place, with no Section", async () => {
     renderShell("/settings/status");
 
