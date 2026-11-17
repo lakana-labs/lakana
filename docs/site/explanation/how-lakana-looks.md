@@ -148,7 +148,9 @@ panels than inside them; a tab that is one list, such as Columns or Preview, has
 detail page is not shown as a row. You can see this before you point at it: the name is in the
 accent colour and a quiet chevron (›) ends the row; on hover the row is highlighted, the name
 underlined and the chevron turns to the accent. The name is a real link, so the keyboard and
-screen readers reach it; the whole row is clickable too.
+screen readers reach it; the whole row is clickable too. A list of facts can name something
+that has no page of its own, such as a dropped table or an upload: that name is plain text in
+the text colour, so only what opens something looks like it does.
 
 **Breadcrumbs.** Every detail page shows where it sits above its heading, for example
 Access › People › test1. Every part but the last is a link. A list or a tab of an area has no
