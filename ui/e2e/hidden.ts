@@ -48,11 +48,15 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "BrowserSessionOut",
   '["absolute_expires_at","display_name","name","needs_passkey","offer_passkey","step_up_until","type","via"]':
     "SessionOut",
+  '["access_key_id","prefix"]': "-",
   '["action","allowed","reason","via"]': "PermissionOut",
   '["action","environment","granted_at","granted_by","group","group_id","id","kind","namespace","note","principal","principal_id","role","table"]':
     "GrantOut",
   '["actions","commit_sha","created_at","created_by","deleted_at","deleted_by","deleted_versions","file_count","files","is_directory","manifest_sha256","project_version_id","run_id","size_bytes","task_run_id","version"]':
     "ArtifactVersionOut",
+  '["actions","address","created_at","created_by","declared_by","environment","kind","last_test","name","secret","settings","updated_at"]':
+    "ConnectionOut",
+  '["actions","name"]': "ConnectionEnvironmentOut",
   '["actions","count","name","namespaces"]': "TableTreeOut.environments",
   '["actions","count","path"]': "TableTreeOut.environments.namespaces",
   '["actions","created_at","current_version","defined_by","keep_versions","kind","name","namespace","size_bytes","uuid","versions"]':
@@ -72,10 +76,14 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["artifact","created_at","expires_at","upload_id"]': "ArtifactUploadOut",
   '["at","column","id","table","target","target_column","target_exists"]': "ModelReferenceOut",
   '["at","environment","kind","ref","title"]': "AttentionItemOut",
+  '["asset","repository"]': "ConnectionOut.declared_by",
   '["audience","complete","hidden","local","steps"]': "GetStartedOut",
+  '["auth"]': "-",
+  '["base_url"]': "-",
   '["backup_eligible","created_at","disabled_reason","id","last_used_at","name","usable_here"]':
     "PasskeyOut",
   '["binary"]': "-",
+  '["bucket","endpoint","region"]': "-",
   '["bound","column","created_at","created_by","environment","expression","group","group_id","id","namespace","principal","principal_id","table"]':
     "ColumnMaskOut",
   '["bound","created_at","created_by","environment","expression","group","group_id","id","namespace","principal","principal_id","table"]':
@@ -95,6 +103,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["column","table"]': "MaskedColumnOut",
   '["columns","columns_cut","duration_ms","masked_columns","masked_columns_cut","next_offset","preview","row_count","row_cut","rows"]':
     "ResultPageOut",
+  '["created_at","finished_at","id","message","outcome","requested_by","state"]':
+    "ConnectionLastTestOut",
   '["connection_kind","distance","id","kind","name"]': "GraphNodeOut",
   '["count","environments"]': "TableTreeOut",
   '["created_at","display_name","expires_at","id","name"]': "OpenInviteOut",
@@ -104,6 +114,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["created_at","finished_at","host_keys","id","kind","message","outcome","state"]':
     "RepositoryProbeOut",
   '["created_at","id","kind","subject"]': "NoticeOut",
+  '["database","host","port"]': "-",
   '["days","expires_at","kept","last_activity_at","name","namespace","never","on","set_at","set_by","source","uuid"]':
     "TableRetentionOut",
   '["description","description_language","description_source","label","label_language","label_source","name","nullable","terms","type"]':
@@ -122,6 +133,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["environment","kind","opened_at","ref"]': "RecentOut",
   '["environment","last_deploy_at","last_deploy_status"]': "WorkEnvironmentOut",
   '["environments","name"]': "WorkRepositoryOut",
+  '["finished_at","outcome","state"]': "ConnectionTestOut",
   '["fingerprint","line","type"]': "HostKeyOut",
   '["get_started_hidden","tour_seen","update_note_seen"]': "InterfaceStateOut",
   '["grant_id","group","kind","role","scope"]': "ViaOut",
@@ -134,7 +146,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["is_active","name","picture","type"]': "PrincipalOut",
   '["is_protected","name"]': "OwnerOut",
   '["item","others","state","text"]': "HealthSummaryOut",
-  '["items","next_cursor"]': "TableListPageOut",
+  '["items","next_cursor"]': "WirePage",
   '["items","truncated"]': "AttentionOut",
   '["job","last_commit_at","seconds","source"]': "HealthObservedOut",
   '["jobs","repositories"]': "WorkOut",
@@ -148,12 +160,14 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["name","type"]': "ResultColumnOut",
   '["name"]': "OwnerOut",
   '["nulls","rate","values"]': "HealthObservedOut",
+  '["path","root"]': "NamespaceOut",
   '["path","properties"]': "NamespaceOut",
   '["path","repository"]': "DefinedByOut",
   '["path","sha256","size"]': "ArtifactFileOut",
   '["query_id","status"]': "QueryStatusOut",
   '["query_id"]': "QueryStatusOut",
   '["table"]': "MaskedColumnOut",
+  '["tls","user"]': "-",
   '["version"]': "InfoOut",
   "[]": "-",
 };

@@ -749,6 +749,42 @@ export async function recordOrphanedVersion(
 }
 
 /**
+ * Creates a connection through the API as the bootstrap administrator, which needs no passkey
+ * touch.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param body - The connection: `name`, `kind`, `address`, `settings`, and its secret.
+ * @returns Resolves once the server answered.
+ */
+export function createConnection(
+  request: APIRequestContext,
+  environment: string,
+  body: object,
+): Promise<void> {
+  return create(request, `/api/v1/environments/${environment}/connections`, body);
+}
+
+/**
+ * Reads a connection's status as the bootstrap administrator, to see whether it is still there.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ * @param name - The connection.
+ * @returns The HTTP status: 200 when the connection exists, 404 when it does not.
+ */
+export async function connectionStatus(
+  request: APIRequestContext,
+  environment: string,
+  name: string,
+): Promise<number> {
+  const response = await request.get(`/api/v1/environments/${environment}/connections/${name}`, {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+  });
+  return response.status();
+}
+
+/**
  * Moves a person's last passkey touch an hour into the past on every open session, so the next
  * action that needs a recent touch meets `StepUpRequired`, as after 15 minutes of work without
  * one. The server has no way to age a touch, so this, like {@link recordOrphanedVersion}, writes
