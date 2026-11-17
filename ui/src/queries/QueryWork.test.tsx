@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { forEachDiagnostic } from "@codemirror/lint";
 import { EditorView } from "@codemirror/view";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -297,6 +298,52 @@ describe("the Queries screen's work", () => {
     await shell.user.click(screen.getByRole("button", { name: "Go to line 2, column 3" }));
 
     expect(view.state.selection.main.head).toBe("select\n  ".length);
+    expect(view.hasFocus).toBe(true);
+  });
+
+  it("marks a hidden character of the server's message on the editor's error mark", async () => {
+    const message = `Column ${String.fromCodePoint(0x202e)}nope does not exist.`;
+    renderShell(RUN_PATH, {
+      routes: routes({
+        [`GET ${STATUS}`]: {
+          status: 200,
+          body: aRun({ status: "FAILED", error_message: message, error_line: 1, error_column: 1 }),
+        },
+      }),
+    });
+    await screen.findByRole("alert");
+    const view = await editor();
+
+    const messages: string[] = [];
+    await waitFor(() => {
+      messages.length = 0;
+      forEachDiagnostic(view.state, (diagnostic) => {
+        messages.push(diagnostic.message);
+      });
+      expect(messages).toEqual(["Column U+202Enope does not exist."]);
+    });
+  });
+
+  it("says why a refused cancel did not cancel, and Cancel can be pressed again", async () => {
+    const shell = renderShell(RUN_PATH, {
+      routes: routes({
+        [`GET ${STATUS}`]: {
+          status: 200,
+          body: aRun({ status: "RUNNING", finished_at: null, result_rows: null }),
+        },
+        [`POST ${STATUS}/cancel`]: {
+          status: 503,
+          body: { detail: "The server is busy; try again.", type: "Busy" },
+        },
+      }),
+    });
+
+    await shell.user.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The query was not cancelled and runs on: The server is busy; try again. Press Cancel to try again.",
+    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
   });
 
   it("opening a recent run loads its SQL and environment, its state and its first page", async () => {
@@ -366,6 +413,7 @@ describe("the Queries screen's work", () => {
     await shell.user.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(await screen.findByRole("grid")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run" })).toHaveFocus();
   });
 
   it("Show 100 more appends the next page of the result", async () => {

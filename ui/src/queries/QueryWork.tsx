@@ -15,7 +15,8 @@ import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { shortcutLabel } from "../shell/shortcut";
 import { useResource } from "../shell/useResource";
-import { VisibleText } from "../shell/VisibleText";
+import { markedText, VisibleText } from "../shell/VisibleText";
+import { problemText } from "../sign-in/messages";
 import type { StatusKind } from "../status/status";
 import { StatusLabel } from "../status/StatusLabel";
 import type { SqlEditorHandle } from "./editor/SqlEditor";
@@ -124,6 +125,7 @@ function Work({ environments, address }: WorkProps): JSX.Element {
   const { t } = useTranslation();
   const query = useQueryRun();
   const editor = useRef<SqlEditorHandle | null>(null);
+  const runButton = useRef<HTMLButtonElement>(null);
   const [sql, setSql] = useState("");
   const [remembered] = useState(readEnvironment);
   // A choice holds for the address it was made at; another run's address brings its own.
@@ -167,7 +169,11 @@ function Work({ environments, address }: WorkProps): JSX.Element {
   const ended = query.run;
   const mark =
     ended !== null && ended.error_line !== null && ended.error_column !== null
-      ? { line: ended.error_line, column: ended.error_column, message: endedMessage(ended, t) }
+      ? {
+          line: ended.error_line,
+          column: ended.error_column,
+          message: markedText(endedMessage(ended, t)),
+        }
       : null;
   const name =
     address === null ? t("queries.untitled") : t("queries.runName", { id: address.id.slice(0, 8) });
@@ -187,6 +193,7 @@ function Work({ environments, address }: WorkProps): JSX.Element {
         />
         {/* One button that is Run, or Cancel while the run is active, so the focus stays on it. */}
         <PendingButton
+          ref={runButton}
           className={active ? "button queries-run" : "button button-primary queries-run"}
           pending={query.phase === "submitting" || query.cancelling}
           onPress={active ? query.cancel : run}
@@ -218,13 +225,23 @@ function Work({ environments, address }: WorkProps): JSX.Element {
           />
         </Suspense>
       </div>
+      {query.cancelRefusal !== null && (
+        <p role="alert" className="step-error queries-alert">
+          {t("queries.cancelRefused", { problem: problemText(t, query.cancelRefusal) })}
+        </p>
+      )}
       <RunLine state={query} />
       <QueryError
         state={query}
         onGoTo={(line, column) => {
           editor.current?.focusAt(line, column);
         }}
-        onRetry={query.retry}
+        onRetry={() => {
+          // Try again goes with the alert it is in: the focus moves to Run, which is Cancel
+          // while the run is followed again.
+          query.retry();
+          runButton.current?.focus();
+        }}
       />
       {query.phase === "done" && query.run?.status === "SUCCEEDED" && (
         <ResultPanel run={query.run} page={query.page} name={name} onMore={query.more} />

@@ -323,7 +323,43 @@ describe("useQueryRun", () => {
     await advance(POLL_FAST_MS);
 
     expect(count(server, "POST", `${STATUS}/cancel`)).toBe(1);
-    expect(result.current.query).toMatchObject({ phase: "done", page: aPage(), cancelling: false });
+    expect(result.current.query).toMatchObject({
+      phase: "done",
+      page: aPage(),
+      cancelling: false,
+      cancelRefusal: null,
+    });
+  });
+
+  it("a cancel refused for another reason says why and may be sent again", async () => {
+    let busy = true;
+    const server = serve(["RUNNING"], {
+      [`POST ${STATUS}/cancel`]: () =>
+        busy
+          ? { status: 503, body: { detail: "The server is busy; try again.", type: "Busy" } }
+          : { status: 200, body: aRun({ status: "CANCELLED" }) },
+    });
+    const { result } = render();
+    await act(() => result.current.query.submit("prod", "select 1 as one"));
+    await settle();
+
+    act(() => {
+      result.current.query.cancel();
+    });
+    await settle();
+
+    expect(result.current.query).toMatchObject({ phase: "waiting", cancelling: false });
+    expect((result.current.query.cancelRefusal as ApiError).status).toBe(503);
+
+    busy = false;
+    let again = false;
+    act(() => {
+      again = result.current.query.cancel();
+    });
+    expect(again).toBe(true);
+    expect(result.current.query).toMatchObject({ cancelling: true, cancelRefusal: null });
+    await settle();
+    expect(count(server, "POST", `${STATUS}/cancel`)).toBe(2);
   });
 
   it("does not cancel on unmount", async () => {
@@ -359,6 +395,23 @@ describe("useQueryRun", () => {
     expect(result.current.query.run?.sql).toBe("select 1 as one");
     expect(count(server, "GET", STATUS)).toBe(1);
     expect(count(server, "POST", "/api/v1/principals/kim.lee/recent")).toBe(1);
+  });
+
+  it("goes on when the record for Home is refused", async () => {
+    serve(["SUCCEEDED"], {
+      "POST /api/v1/principals/kim.lee/recent": {
+        status: 500,
+        body: { detail: "Something broke.", type: "InternalError" },
+      },
+    });
+    const { result } = render();
+
+    act(() => {
+      result.current.query.open("prod", RUN_ID);
+    });
+    await settle();
+
+    expect(result.current.query).toMatchObject({ phase: "done", page: aPage(), error: null });
   });
 
   it("says a run has no stored result when its page answers 409", async () => {

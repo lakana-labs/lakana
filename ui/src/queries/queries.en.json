@@ -29,6 +29,7 @@
   "goTo": "Go to line {{line}}, column {{column}}",
   "lost": "The state of the query could not be read: {{problem}}",
   "tryAgain": "Try again",
+  "cancelRefused": "The query was not cancelled and runs on: {{problem}} Press Cancel to try again.",
   "result": {
     "label": "Result of {{name}}",
     "summary_one": "{{rows}} row · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",

@@ -7,7 +7,15 @@
 import { type JSX, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { RouterProvider } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { Outlet, type NavigateOptions, useHref, useLocation, useNavigate } from "react-router";
+import {
+  NavigationType,
+  Outlet,
+  type NavigateOptions,
+  useHref,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+} from "react-router";
 
 declare module "react-aria-components" {
   /** What a React Aria link may hand to the router: the options of React Router's `navigate`. */
@@ -54,7 +62,7 @@ export interface AppShellProps {
 /**
  * Renders the shell. Ctrl+K and ⌘ K open the palette from anywhere, a text field included;
  * after a navigation to another path, focus moves to the new page's heading (not when only the
- * query changes, so a search field or a tree keeps it, not when the move's history state is
+ * query changes, so a search field or a tree keeps it, not after a push whose history state is
  * `{ keepFocus: true }`, so a control that moved to its own new address (Run) keeps it, and not
  * on the first load, so the skip link stays the first stop). The person's access and interface
  * state are there for every screen inside; the interface state is read once, when the shell
@@ -78,7 +86,12 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   }, []);
   const areas = visibleAreas(access);
 
-  const keepFocus = (location.state as { keepFocus?: unknown } | null)?.keepFocus === true;
+  const navigationType = useNavigationType();
+  // Only the move that asked for it: Back and Forward bring the entry's state back too, and
+  // they move to the heading like any other page.
+  const keepFocus =
+    navigationType === NavigationType.Push &&
+    (location.state as { keepFocus?: unknown } | null)?.keepFocus === true;
   useEffect(() => {
     if (location.pathname !== shownPath.current) {
       shownPath.current = location.pathname;

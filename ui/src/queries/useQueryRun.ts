@@ -51,6 +51,11 @@ export interface QueryRunState {
 export interface QueryRun extends QueryRunState {
   /** Whether a cancel was sent and the run has not ended yet. */
   readonly cancelling: boolean;
+  /**
+   * Why the last cancel was refused (a busy server, no connection); null otherwise. A run that
+   * had already ended is no refusal: the next poll says how it ended.
+   */
+  readonly cancelRefusal: unknown;
   /** Whether the run was opened from its address rather than submitted on this page. */
   readonly opened: boolean;
   /**
@@ -77,6 +82,7 @@ const IDLE: View = {
   page: null,
   error: null,
   cancelling: false,
+  cancelRefusal: null,
   opened: false,
 };
 
@@ -89,8 +95,7 @@ interface Target {
 }
 
 /**
- * Ignores a failed cancel or record: the next poll says how the run ended, and Recently opened
- * is a convenience.
+ * Ignores a failed record: Recently opened is a convenience.
  *
  * @returns Nothing.
  */
@@ -213,8 +218,18 @@ class Follower {
     }
     if (!this.#cancelSent) {
       this.#cancelSent = true;
-      this.#show((view) => ({ ...view, cancelling: true }));
-      cancelQuery(active.environment, active.id).catch(ignore);
+      this.#show((view) => ({ ...view, cancelling: true, cancelRefusal: null }));
+      cancelQuery(active.environment, active.id).catch(
+        this.#current(this.#round, (error: unknown) => {
+          // 409: the run ended before the cancel arrived; the next poll says how.
+          if (error instanceof ApiError && error.status === 409) {
+            return;
+          }
+          // Refused or not sent: Cancel can be pressed again, and the alert says why.
+          this.#cancelSent = false;
+          this.#show((view) => ({ ...view, cancelling: false, cancelRefusal: error }));
+        }),
+      );
     }
     return true;
   }
@@ -264,7 +279,13 @@ class Follower {
     clearTimeout(this.#timer);
     this.#active = target;
     this.#cancelSent = false;
-    this.#show((view) => ({ ...view, phase: "waiting", error: null, cancelling: false }));
+    this.#show((view) => ({
+      ...view,
+      phase: "waiting",
+      error: null,
+      cancelling: false,
+      cancelRefusal: null,
+    }));
     this.#poll(this.#round, target, 0, 0);
   }
 
@@ -289,10 +310,23 @@ class Follower {
         }
         this.#active = null;
         if (run.status === "SUCCEEDED") {
-          this.#show((view) => ({ ...view, phase: "loading_page", run, cancelling: false }));
+          this.#show((view) => ({
+            ...view,
+            phase: "loading_page",
+            run,
+            cancelling: false,
+            cancelRefusal: null,
+          }));
           this.#readFirst(round, target);
         } else {
-          this.#show((view) => ({ ...view, phase: "done", run, page: null, cancelling: false }));
+          this.#show((view) => ({
+            ...view,
+            phase: "done",
+            run,
+            page: null,
+            cancelling: false,
+            cancelRefusal: null,
+          }));
         }
       }),
       this.#current(round, (error: unknown) => {
@@ -303,7 +337,13 @@ class Follower {
           return;
         }
         this.#active = null;
-        this.#show((view) => ({ ...view, phase: "failed", error, cancelling: false }));
+        this.#show((view) => ({
+          ...view,
+          phase: "failed",
+          error,
+          cancelling: false,
+          cancelRefusal: null,
+        }));
       }),
     );
   }

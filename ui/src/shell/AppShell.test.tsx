@@ -43,6 +43,20 @@ describe("AppShell", () => {
     expect(link).toHaveFocus();
   });
 
+  it("focuses the heading on Back to an entry that kept the focus when it was pushed", async () => {
+    const { router } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    await act(() => router.navigate("/jobs", { state: { keepFocus: true } }));
+    await screen.findByRole("heading", { level: 1, name: "Jobs" });
+    await act(() => router.navigate("/connections"));
+    await screen.findByRole("heading", { level: 1, name: "Connections" });
+    screen.getByRole("link", { name: "Home" }).focus();
+
+    await act(() => router.navigate(-1));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
+  });
+
   it("still focuses the heading after moving to another page", async () => {
     const { router } = renderShell("/queries");
     await screen.findByRole("heading", { level: 1, name: "Queries" });

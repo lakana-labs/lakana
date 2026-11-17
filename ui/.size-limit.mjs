@@ -53,6 +53,8 @@ const NAMED_LIMITS = [
   // again) without a cancel on leaving, the run's address, the error with Go to its line and
   // column, the result's line with Show 100 more up to 1,000 rows, the editor's placeholder and
   // the screen's strings. The grid and the menus come in the shared chunks below.
+  // Measured 4.95 kB (2026-11-17) with the focus on Run after Try again and the alert of a
+  // refused cancel; the limit holds.
   { name: "Queries", prefix: "QueriesScreen-", limit: "5.31 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
