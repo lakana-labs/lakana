@@ -98,6 +98,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
         "query_run.write_file",
     ),
     "query cancel": ("queries.cancel", "query_run.cancel"),
+    "raw ls": ("raw.list", "raw.iter"),
     "principal create": ("principals.create",),
     "principal list": ("principals.list", "principals.list_page", "principals.iter"),
     "principal get": ("principals.get",),

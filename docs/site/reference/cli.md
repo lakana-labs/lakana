@@ -27,6 +27,7 @@ Usage: `lakana [OPTIONS] COMMAND [ARGS]...`
 - [`lakana env`](cli/lakana-env.md): Manage environments.
 - [`lakana ns`](cli/lakana-ns.md): Manage namespaces.
 - [`lakana table`](cli/lakana-table.md): Manage tables and load data.
+- [`lakana raw`](cli/lakana-raw.md): Look under raw/, where the files of external tables lie.
 - [`lakana artifact`](cli/lakana-artifact.md): Manage artifacts: versioned files such as models.
 - [`lakana query`](cli/lakana-query.md): Submit queries and fetch their results step by step.
 - [`lakana principal`](cli/lakana-principal.md): Manage principals.

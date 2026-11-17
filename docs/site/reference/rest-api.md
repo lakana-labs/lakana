@@ -134,7 +134,7 @@ These pages are generated from the OpenAPI document, one page per area of the AP
 route with its parameters, its request body and its answers.
 
 <!-- generated:begin rest-pages -->
-- [Environments](rest/environments.md): 12 routes
+- [Environments](rest/environments.md): 13 routes
 - [Namespaces](rest/namespaces.md): 4 routes
 - [Queries](rest/queries.md): 7 routes
 - [Tables](rest/tables.md): 27 routes

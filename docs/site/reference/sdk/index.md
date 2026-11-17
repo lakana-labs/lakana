@@ -58,6 +58,7 @@ Every name the `lakana` package exports and every resource of its client, with t
 | `client.connections` | [Connections](connections.md) | The `connections` resource of the platform API: the connections of an environment. |
 | `client.task_connections` | [Task connections](task-connections.md) | The run-time fetch of a connection, for the helpers of `lakana.ingest`. |
 | `client.terms` | [Terms](terms.md) | The `terms` resource of the platform API: the glossary of an environment. |
+| `client.raw` | [Raw](raw.md) | The `raw` resource of the platform API. |
 | `client.graph` | [Graph](graph.md) | The `graph` resource of the platform API: lineage, neighbours, impact and join paths. |
 | `client.repositories` | [Repositories](repositories.md) | The `repositories` resource of the platform API. |
 | `client.package_indexes` | [Package indexes](package-indexes.md) | The `package_indexes` resource of the platform API. |

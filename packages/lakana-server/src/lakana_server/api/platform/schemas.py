@@ -249,6 +249,59 @@ class OrphanedLocationsOut(BaseModel):
     complete: bool
 
 
+class RawClaimOut(BaseModel):
+    """The external table whose claim an entry of `raw/` lies in.
+
+    Parameters
+    ----------
+    table
+        Its dotted name, such as ``bronze.orders``, when you may read it; `null` otherwise.
+    """
+
+    table: str | None
+
+
+class RawEntryOut(BaseModel):
+    """One folder or file directly in a folder of `raw/`.
+
+    Parameters
+    ----------
+    name
+        Its name in the folder.
+    kind
+        ``folder`` or ``file``.
+    size
+        A file's size in bytes; `null` for a folder.
+    claimed_by
+        The external table whose folder it is or lies in, so it cannot be chosen for another;
+        `null` when it is free. A folder that only holds a claimed folder further down is free
+        to open.
+    """
+
+    name: str
+    kind: Literal["folder", "file"]
+    size: int | None
+    claimed_by: RawClaimOut | None
+
+
+class RawPageOut(BaseModel):
+    """One page of a folder of `raw/`.
+
+    Parameters
+    ----------
+    path
+        The folder listed, such as ``raw/orders``.
+    items
+        Its folders and files, in key order (a folder's key is its name followed by ``/``).
+    next_cursor
+        Pass back as `?cursor=` to fetch the next page; `null` on the last page.
+    """
+
+    path: str
+    items: list[RawEntryOut]
+    next_cursor: str | None
+
+
 class UsagePartOut(BaseModel):
     """The storage one kind of thing uses in an environment.
 

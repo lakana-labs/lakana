@@ -183,6 +183,7 @@ nav:
               - reference/cli/lakana-env.md
               - reference/cli/lakana-ns.md
               - reference/cli/lakana-table.md
+              - reference/cli/lakana-raw.md
               - reference/cli/lakana-artifact.md
               - reference/cli/lakana-query.md
               - reference/cli/lakana-principal.md
@@ -276,6 +277,7 @@ nav:
               - reference/sdk/package-indexes.md
               - reference/sdk/principals.md
               - reference/sdk/queries.md
+              - reference/sdk/raw.md
               - reference/sdk/repositories.md
               - reference/sdk/row-filters.md
               - reference/sdk/runs.md

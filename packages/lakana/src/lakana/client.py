@@ -51,6 +51,7 @@ from lakana.resources.namespaces import Namespaces
 from lakana.resources.package_indexes import PackageIndexes
 from lakana.resources.principals import Principals
 from lakana.resources.queries import Queries
+from lakana.resources.raw import Raw
 from lakana.resources.repositories import Repositories
 from lakana.resources.row_filters import RowFilters
 from lakana.resources.runs import Runs, Scheduler, Workers, worker_info
@@ -135,6 +136,8 @@ class Client:
         self.task_connections = TaskConnections(self._transport)
         """For the helpers of `lakana.ingest` inside a task: the fetch of a declared connection."""
         self.terms = Terms(self._transport)
+        self.raw = Raw(self._transport)
+        """The folders and files under `raw/`, to choose an external table's location."""
         self.graph = MetadataGraph(self._transport)
         self.repositories = Repositories(self._transport)
         self.package_indexes = PackageIndexes(self._transport)
