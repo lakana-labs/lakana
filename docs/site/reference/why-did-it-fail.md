@@ -17,6 +17,11 @@ one (a table name, a check, an error), stays in `detail` / `error_message`.
 | `lakana runs show RUN_ID --output json` and the REST API | `failure` on each task and on each attempt in `GET .../runs/{run_id}/tasks/{asset}/log`: an object with `code`, `cause` and `next_step`, or `null` for a task with no error. `error_message` keeps the free text, as before. `failed_tasks` on a run counts the tasks that ended `failed`; it is also in the run list. |
 | The SDK | `RunTask.failure` and `TaskAttempt.failure` (a `Failure` with the same three fields), `RunTask.error_message` and `Run.failed_tasks`. |
 
+In the web interface, a run on its own page or on its job's page gives each task that failed, was
+cancelled or never ran a second line: the code, which links to the table below, then **Cause:** and
+**Next step:** with the same two sentences. A task's page shows the same line, and the code of each
+attempt. A code the page does not know, `unknown` included, shows as `internal`.
+
 ## The codes
 
 A code belongs to one task, or to one attempt of a task; a run has none of its own. An attempt that
