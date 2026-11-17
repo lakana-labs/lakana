@@ -296,6 +296,33 @@ def test_read_commands(tmp_path: Path) -> None:
     assert dict(api.requests[-1].url.params) == {"limit": "5", "cursor": "c0"}
 
 
+def test_deploys_list_all_environments_adds_the_environment_column(tmp_path: Path) -> None:
+    api = FakeApi()
+    rows = [_deploy("succeeded", environment="prod"), _deploy("failed", environment="test")]
+    api.on("GET", "/api/v1/deploys", json={"items": rows, "next_cursor": "n1"})
+    result = invoke(
+        make_state(tmp_path, api), "deploys", "list", "--all-environments", "--limit", "5"
+    )
+    assert result.exit_code == 0, result.stderr
+    header = next(line for line in result.stdout.splitlines() if " id " in line)
+    assert header.index("id") < header.index("environment") < header.index("repository")
+    assert "prod" in result.stdout and "test" in result.stdout
+    assert dict(api.requests[0].url.params) == {"limit": "5"}
+    assert "More results: lakana deploys list --all-environments --limit 5 --cursor n1" in (
+        result.stdout
+    )
+
+
+def test_deploys_list_env_and_all_environments_together_is_exit_2(tmp_path: Path) -> None:
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api), "deploys", "list", "--all-environments", "--env", "dev"
+    )
+    assert result.exit_code == 2
+    assert "Choose one: --env ENV or --all-environments." in _plain(result.stderr)
+    assert api.requests == []
+
+
 def test_json_output(tmp_path: Path) -> None:
     """`--output json` prints the finished run."""
     api = _api()

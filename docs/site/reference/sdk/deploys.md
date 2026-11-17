@@ -84,6 +84,47 @@ Returns: `DeployPage`. The deploys, newest first, and the cursor for the next pa
 |---|---|
 | `lakana.ValidationError` | If `limit` is outside 1 to 200 or `cursor` is not one the server issued for the deploys list. |
 
+### `client.deploys.list_all`
+
+Signature: `client.deploys.list_all(*, environment: str | None = None, repository: str | None = None, limit: int | None = None, cursor: str | None = None) -> DeployPage`
+
+List one page of the deploys of every environment you may read.
+
+The environments are those where you hold `READ_ENVIRONMENT`; one where you do not is left out, so this is never refused for a missing right. The order is that of `list`, over all those environments, and each deploy names its `environment`; `jobs` is `None` (`get` has it). With `environment`, this is `list_page` of that environment.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment; then a missing right or environment is refused as by `list`. |
+| `repository` | `str | None` | `None` | Only this repository's deploys. |
+| `limit` | `int | None` | `None` | Most deploys returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same `repository` with every page. |
+
+Returns: `DeployPage`. The deploys, newest first, and the cursor for the next page (`None` on the last).
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | With `environment`, if you may not read it. |
+| `lakana.NotFound` | If `environment` or `repository` does not exist. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200 or `cursor` is not one the server issued for this list. |
+
+### `client.deploys.iter_all`
+
+Signature: `client.deploys.iter_all(*, environment: str | None = None, repository: str | None = None, page_size: int = 100) -> Iterator[Deploy]`
+
+Yield every deploy of every environment you may read, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment. |
+| `repository` | `str | None` | `None` | Only this repository's deploys. |
+| `page_size` | `int` | `100` | Deploys per request (1 to 200). |
+
+Yields: `Deploy`. Each deploy, once, in the order of `list_all`.
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | As `list_all`. |
+
 ### `client.deploys.wait`
 
 Signature: `client.deploys.wait(environment: str, deploy_id: str, timeout: float | None = None, poll_interval: float = 0.25, max_interval: float = 2.0, on_update: Callable[[Deploy], None] | None = None) -> Deploy`

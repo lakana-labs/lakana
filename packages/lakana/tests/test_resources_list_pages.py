@@ -235,6 +235,38 @@ def test_iter_all_follows_every_page() -> None:
     assert all(r.url.params["limit"] == "1" for r in seen)
 
 
+def test_list_all_deploys_sends_the_filters_and_reads_the_cursor_from_the_body() -> None:
+    seen: list[httpx.Request] = []
+    row = {**_DEPLOY, "environment": "prod"}
+    deploys = Deploys(_object_transport([{"items": [row], "next_cursor": "d1"}], seen))
+    page = deploys.list_all(environment="prod", repository="analytics", limit=5, cursor="d0")
+    assert seen[0].url.path == "/api/v1/deploys"
+    assert dict(seen[0].url.params) == {
+        "environment": "prod",
+        "repository": "analytics",
+        "limit": "5",
+        "cursor": "d0",
+    }
+    assert page.next_cursor == "d1"
+    assert [(d.id, d.environment) for d in page.items] == [(_DEPLOY["id"], "prod")]
+    deploys.list_all()
+    assert dict(seen[1].url.params) == {}
+
+
+def test_iter_all_deploys_follows_every_page() -> None:
+    seen: list[httpx.Request] = []
+    bodies = [
+        {"items": [_DEPLOY], "next_cursor": "d1"},
+        {"items": [_DEPLOY], "next_cursor": "d2"},
+        {"items": [_DEPLOY], "next_cursor": None},
+    ]
+    deploys = Deploys(_object_transport(bodies, seen))
+    assert len(list(deploys.iter_all(repository="analytics", page_size=1))) == 3
+    assert [r.url.params.get("cursor") for r in seen] == [None, "d1", "d2"]
+    assert all(r.url.params["repository"] == "analytics" for r in seen)
+    assert all(r.url.params["limit"] == "1" for r in seen)
+
+
 def test_query_environments_reads_name_and_protection() -> None:
     seen: list[httpx.Request] = []
 

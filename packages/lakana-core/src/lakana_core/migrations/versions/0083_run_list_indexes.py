@@ -1,8 +1,10 @@
 """run_list_indexes: the indexes that serve the lists of runs of every environment.
 
 `GET /api/v1/runs` pages the runs of every environment the caller may read by
-`(created_at, id)` with one cursor, and `GET /api/v1/runs/failed` ranks finished runs by
-`finished_at`; neither is served by the per-environment indexes the table has.
+`(created_at, id)` with one cursor, `GET /api/v1/runs/failed` ranks finished runs by
+`finished_at`, and `GET /api/v1/deploys` pages the deploys of every environment by
+`(created_at, id)`; none is served by the per-environment indexes the tables have. The indexes
+are `ix_runs_created_at_id`, `ix_runs_finished_at` and `ix_deploy_runs_created_at_id`.
 
 Revision ID: f6b1d4e8a273
 Revises: e9f3a6b2d847
@@ -24,6 +26,7 @@ depends_on: str | Sequence[str] | None = None
 _INDEXES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("ix_runs_created_at_id", "runs", ("created_at", "id")),
     ("ix_runs_finished_at", "runs", ("finished_at",)),
+    ("ix_deploy_runs_created_at_id", "deploy_runs", ("created_at", "id")),
 )
 
 

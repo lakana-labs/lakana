@@ -22,6 +22,7 @@ from lakana_server.api.platform.schemas import (
     DeployJobStartOut,
     DeploymentOut,
     DeployOut,
+    DeployPageOut,
     OrphanOut,
     OrphansOut,
     ProjectVersionOut,
@@ -34,6 +35,12 @@ from lakana_server.deps import get_deploy_service, get_grant_authorization, get_
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
     prefix="/api/v1/environments/{env}",
+    tags=["deploys"],
+    responses=errors(401),
+)
+all_deploys_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/deploys",
     tags=["deploys"],
     responses=errors(401),
 )
@@ -474,4 +481,62 @@ def list_orphans(
         ],
         hidden=report.hidden,
         next_cursor=report.next_cursor,
+    )
+
+
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_deploys`, with `environment`.
+# jscpd:ignore-start
+@all_deploys_router.get("", response_model=DeployPageOut, responses=errors(403, 404))
+def list_all_deploys(
+    environment: str | None = Query(default=None, max_length=255),
+    repository: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: DeployService = Depends(get_deploy_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> DeployPageOut:
+    # jscpd:ignore-end
+    """List the deploys of every environment you may read.
+
+    Without `environment`, lists the deploys of every environment where you hold
+    `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left
+    out, so this is never a 403 or a 404. With `environment`, it answers exactly what
+    `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each
+    deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send
+    `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of
+    the list of one environment is refused with 422 here. Answers 404 when `repository` does
+    not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue
+    for this list.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    repository
+        Only this repository's deploys.
+    limit
+        Page size (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The deploy service.
+    authz
+        The authorization service, asked what the caller may do on each deploy.
+
+    Returns
+    -------
+    DeployPageOut
+        The deploys and the cursor of the next page (`null` on the last).
+    """
+    views, next_cursor = service.list_all_deploys_page(
+        principal, environment=environment, repository=repository, limit=limit, cursor=cursor
+    )
+    rights = operator_rights_each(authz, principal, [view.environment for view in views])
+    words = {name: deploy_actions(right) for name, right in rights.items()}
+    return DeployPageOut(
+        items=[_to_out(view, words[view.environment]) for view in views], next_cursor=next_cursor
     )

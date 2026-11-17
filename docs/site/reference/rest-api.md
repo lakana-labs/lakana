@@ -155,7 +155,7 @@ route with its parameters, its request body and its answers.
 - [Connections](rest/connections.md): 8 routes
 - [Repositories](rest/repositories.md): 8 routes
 - [Package indexes](rest/package-indexes.md): 5 routes
-- [Deploys](rest/deploys.md): 9 routes
+- [Deploys](rest/deploys.md): 10 routes
 - [Runs](rest/runs.md): 14 routes
 - [Jobs](rest/jobs.md): 7 routes
 - [Audit](rest/audit.md): 1 route

@@ -6563,7 +6563,7 @@ _REVISION_0083 = "f6b1d4e8a273"
 def test_0083_adds_the_run_list_indexes_and_drops_them_on_downgrade(
     migrated_db: MigratedDb,
 ) -> None:
-    """Revision `0083`: two indexes on `runs`, for the lists of every environment.
+    """Revision `0083`: three indexes on `runs` and `deploy_runs`, for every-environment lists.
 
     Parameters
     ----------
@@ -6577,14 +6577,20 @@ def test_0083_adds_the_run_list_indexes_and_drops_them_on_downgrade(
     def indexes() -> dict[str | None, list[str | None]]:
         return {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("runs")}
 
+    def deploy_indexes() -> dict[str | None, list[str | None]]:
+        return {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("deploy_runs")}
+
     try:
         assert "ix_runs_created_at_id" not in indexes()
         assert "ix_runs_finished_at" not in indexes()
+        assert "ix_deploy_runs_created_at_id" not in deploy_indexes()
         command.upgrade(config, _REVISION_0083)
         assert indexes()["ix_runs_created_at_id"] == ["created_at", "id"]
         assert indexes()["ix_runs_finished_at"] == ["finished_at"]
+        assert deploy_indexes()["ix_deploy_runs_created_at_id"] == ["created_at", "id"]
         command.downgrade(config, _REVISION_0082)
         assert "ix_runs_created_at_id" not in indexes()
         assert "ix_runs_finished_at" not in indexes()
+        assert "ix_deploy_runs_created_at_id" not in deploy_indexes()
     finally:
         engine.dispose()

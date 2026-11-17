@@ -185,7 +185,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "ci-trust explain": ("ci_trust_rules.explain",),
     "deploy": ("deploys.create", "deploys.wait", "repositories.get"),
     "rollback": ("deploys.create", "deploys.wait"),
-    "deploys list": ("deploys.list", "deploys.list_page"),
+    "deploys list": ("deploys.list", "deploys.list_page", "deploys.list_all", "deploys.iter_all"),
     "deploys show": ("deploys.get",),
     "deployments list": ("deployments.list",),
     "deployments set-run-as": ("deployments.set_run_as", "deployments.clear_run_as"),

@@ -4333,6 +4333,21 @@ class DeployOut(BaseModel):
     actions: list[str] = Field(default_factory=list)
 
 
+class DeployPageOut(BaseModel):
+    """One page of the deploys of every environment the caller may read, newest first.
+
+    Parameters
+    ----------
+    items
+        The deploys of the page; each names its `environment`, and `jobs` is `null`.
+    next_cursor
+        Pass back as `cursor` with the same `repository` for the next page; `null` on the last.
+    """
+
+    items: list[DeployOut]
+    next_cursor: str | None
+
+
 class DeploymentOut(BaseModel):
     """The current project version of one repository.
 

@@ -135,6 +135,7 @@ class DeployRun(Base):
     """
 
     __tablename__ = "deploy_runs"
+    __table_args__ = (Index("ix_deploy_runs_created_at_id", "created_at", "id"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     environment_id: Mapped[uuid.UUID] = mapped_column(

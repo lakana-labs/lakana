@@ -434,6 +434,13 @@ def rollback(
 def list_deploys(
     ctx: typer.Context,
     env: _ENV = None,
+    all_environments: Annotated[
+        bool,
+        typer.Option(
+            "--all-environments",
+            help="The deploys of every environment you may read, with an environment column.",
+        ),
+    ] = False,
     repo: Annotated[str | None, typer.Option("--repo", help="Only this repository.")] = None,
     limit: Annotated[
         int | None,
@@ -446,7 +453,8 @@ def list_deploys(
 ) -> None:
     """List deploy history, newest first.
 
-    A long list prints a "More results" line with the command that shows the next page.
+    --all-environments lists the deploys of every environment you may read at once. A long
+    list prints a "More results" line with the command that shows the next page.
 
     Parameters
     ----------
@@ -454,36 +462,45 @@ def list_deploys(
         The Typer context.
     env
         Environment.
+    all_environments
+        List every environment you may read instead of one; not with `--env`.
     repo
         Repository filter.
     limit
         Most deploys returned (1 to 200); the server's default when omitted.
     cursor
         The cursor of the page to show.
+
+    Raises
+    ------
+    CliError
+        If `--all-environments` is given with `--env` (exit 2).
     """
     state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    page = state.client().deploys.list_page(
-        environment, repository=repo, limit=limit, cursor=cursor
-    )
+    if all_environments and env is not None:
+        raise CliError("Choose one: --env ENV or --all-environments.")
+    deploys = state.client().deploys
+    environment = None if all_environments else resolve_environment(state, env)
+    if environment is None:
+        page = deploys.list_all(repository=repo, limit=limit, cursor=cursor)
+    else:
+        page = deploys.list_page(environment, repository=repo, limit=limit, cursor=cursor)
+    columns = ["id", "repository", "kind", "status", "submitted_by", "resolved_sha", "created_at"]
     _output.emit(
         state,
         page.items,
-        columns=[
-            "id",
-            "repository",
-            "kind",
-            "status",
-            "submitted_by",
-            "resolved_sha",
-            "created_at",
-        ],
+        columns=[columns[0], "environment", *columns[1:]] if all_environments else columns,
         droppable=["kind", "resolved_sha", "repository", "created_at"],
     )
     more_results(
         state,
         ["lakana", "deploys", "list"],
-        {"--env": environment, "--repo": repo, "--limit": limit},
+        {
+            "--env": environment,
+            "--all-environments": all_environments,
+            "--repo": repo,
+            "--limit": limit,
+        },
         page.next_cursor,
     )
 

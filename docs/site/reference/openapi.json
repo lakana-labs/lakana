@@ -17475,6 +17475,155 @@
         }
       }
     },
+    "/api/v1/deploys": {
+      "get": {
+        "tags": [
+          "deploys"
+        ],
+        "summary": "List the deploys of every environment you may read",
+        "description": "Without `environment`, lists the deploys of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue for this list.",
+        "operationId": "list_all_deploys_api_v1_deploys_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "repository",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            },
+            "description": "Only this repository's deploys."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/runs": {
       "post": {
         "tags": [
@@ -28611,6 +28760,35 @@
         ],
         "title": "DeployOut",
         "description": "Response body for a deploy run.\n\nParameters\n----------\nid\n    The run's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nkind\n    ``deploy``, ``dry_run`` or ``rollback``.\nstatus\n    ``queued``, ``running``, ``succeeded`` or ``failed``.\nrequested_ref\n    Ref or SHA asked for.\nresolved_sha\n    The commit fetched.\nrollback_to_project_version_id\n    A rollback's target.\nerror_message\n    Why it failed.\ndiff\n    Table names per change category.\nproject_version_id\n    The project version it made current.\nprincipal_id\n    Who submitted it.\nsubmitted_by\n    The name of the principal that submitted it, in the history and the single read; null\n    once that principal is deleted.\ncreated_at\n    Queued at.\nstarted_at\n    Claimed at.\nfinished_at\n    Finished at.\nhidden_adopted\n    Adopted tables left out of `diff` because the caller may not read them.\nchecks\n    The checks the project has, table to ``[{\"check\", \"on_failure\"}]``; `None` for a run\n    without checks.\nwarnings\n    What the deploy leaves for its owner to act on, as sentences (a removed asset whose\n    table is kept after a failed check; a removed table or column that other repositories\n    declare something on, shown only to a reader who may see it).\nwaiting_for\n    Why a queued deploy has not started: a stable `code`, one sentence in `message` that\n    names the next step, and the numbers it uses; null when it is not waiting. Set on the\n    single read (`GET .../deploys/{id}`) only, null in the history.\njobs\n    The sorted names of the jobs the deploy's project version defines. Set on the single\n    read only; null in the history, and for a run that made no project version (queued,\n    failed, a dry run).\njob_starts\n    The jobs with `on_deploy: true` that a successful deploy started, by name, each with\n    what came of its start; empty for a run that starts no job (a dry run, a rollback, a\n    failed deploy, a deploy of the commit already current).\nactions\n    The words of what the caller's rights allow on it: ``rollback``. Rights only, as for a\n    table's `actions`: offer a control only when the word is listed and the deploy's state\n    allows it (Roll back for a succeeded deploy); the server decides every request again."
+      },
+      "DeployPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeployOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "DeployPageOut",
+        "description": "One page of the deploys of every environment the caller may read, newest first.\n\nParameters\n----------\nitems\n    The deploys of the page; each names its `environment`, and `jobs` is `null`.\nnext_cursor\n    Pass back as `cursor` with the same `repository` for the next page; `null` on the last."
       },
       "DeployTriggerOut": {
         "properties": {

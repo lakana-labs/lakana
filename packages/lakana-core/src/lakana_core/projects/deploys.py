@@ -14,7 +14,7 @@ import functools
 import re
 import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -139,6 +139,7 @@ from lakana_core.projects.manifest import (
 from lakana_core.projects.model import TargetInfo, resolve_references
 from lakana_core.projects.parse import ParsedAsset, file_references, sql_file_references
 from lakana_core.projects.source_map import GATE_VERSION, ProjectFileRecord, write_source_map
+from lakana_core.runs.failed import run_environments
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
 from lakana_core.runs.waiting import (
@@ -2329,10 +2330,111 @@ class DeployService:
             If `limit` is below 1 or `cursor` is not one this server issued for the deploys list.
         """
         env = self._authorize_read(p, environment)
+        page, next_cursor = self._deploys_page(
+            "deploys", [env.id], repository=repository, limit=limit, cursor=cursor
+        )
+        reads = _WarningReads()
+        return [self._view(run, p, reads, name) for run, name in page], next_cursor
+
+    def list_all_deploys_page(
+        self,
+        p: PrincipalRef,
+        *,
+        environment: str | None = None,
+        repository: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[DeployRunView], str | None]:
+        """List the deploys of every environment the caller may read, one page at a time.
+
+        With `environment`, this is `history_page` of that environment: its rows, its cursor
+        and its refusals. Without it, the environments are the live ones where the caller holds
+        `READ_ENVIRONMENT`, asked in one `permits_each` batch (`run_environments`); one where
+        the caller does not is left out, so the list is never refused. The order and the page
+        are those of `history_page`, over all those environments together, in one statement;
+        the cursor belongs to the ``all-deploys`` list, so a cursor of the per-environment
+        list is refused.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Only this environment, with the answers and refusals of `history_page`.
+        repository
+            Narrow to the deploys of this repository.
+        limit
+            Page size, at least 1.
+        cursor
+            What the previous page returned as its `next_cursor`, sent with the same
+            `repository`.
+
+        Returns
+        -------
+        tuple of (list of DeployRunView, str or None)
+            The page, and the cursor of the next one, or `None` on the last.
+
+        Raises
+        ------
+        PermissionDenied
+            With `environment` only, without READ_ENVIRONMENT.
+        NotFoundError
+            If `environment` or the repository does not exist.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for this list.
+        """
+        if environment is not None:
+            return self.history_page(
+                p, environment, repository=repository, limit=limit, cursor=cursor
+            )
+        names = run_environments(self._session, self._authz, p)
+        page, next_cursor = self._deploys_page(
+            "all-deploys", list(names), repository=repository, limit=limit, cursor=cursor
+        )
+        reads = _WarningReads()
+        return [self._view(run, p, reads, name) for run, name in page], next_cursor
+
+    def _deploys_page(
+        self,
+        kind: str,
+        environment_ids: Collection[uuid.UUID],
+        *,
+        repository: str | None,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[Any], str | None]:
+        """Read one page of the deploy runs of some environments, newest first, in one statement.
+
+        Parameters
+        ----------
+        kind
+            The list the cursor belongs to (``deploys`` or ``all-deploys``).
+        environment_ids
+            The environments listed; the caller has already checked the right on each.
+        repository
+            Only this repository's runs.
+        limit
+            Most runs returned.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        tuple of (list of Row, str or None)
+            The page as ``(DeployRun, submitter name)`` rows, and the cursor of the next one, or
+            `None` on the last.
+
+        Raises
+        ------
+        NotFoundError
+            If the repository does not exist.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for `kind`.
+        """
         if limit < 1:
             raise ValidationError(f"limit must be at least 1, got {limit}.")
-        position = None if cursor is None else decode_cursor("deploys", cursor)
-        query = self._runs_with_submitter().where(DeployRun.environment_id == env.id)
+        position = None if cursor is None else decode_cursor(kind, cursor)
+        query = self._runs_with_submitter().where(DeployRun.environment_id.in_(environment_ids))
         if repository is not None:
             query = query.where(DeployRun.repository_id == self._repository(repository).id)
         if position is not None:
@@ -2351,9 +2453,8 @@ class DeployService:
         next_cursor = None
         if len(rows) > limit:
             last = page[-1][0]
-            next_cursor = encode_cursor("deploys", last.created_at, last.id)
-        reads = _WarningReads()
-        return [self._view(run, p, reads, name) for run, name in page], next_cursor
+            next_cursor = encode_cursor(kind, last.created_at, last.id)
+        return page, next_cursor
 
     def deployments(self, p: PrincipalRef, environment: str) -> list[DeploymentView]:
         """List the current project version per repository.

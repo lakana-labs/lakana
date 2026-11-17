@@ -320,3 +320,36 @@ Answer fields: `OrphansOut`
 | `orphans` | list of `OrphanOut` | yes |  |
 | `hidden` | whole number | yes |  |
 | `next_cursor` | text or null | no |  |
+
+## `GET /api/v1/deploys`
+
+List the deploys of every environment you may read
+
+Without `environment`, lists the deploys of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue for this list.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only this environment. |
+| `repository` | query | no | text or null | Only this repository's deploys. |
+| `limit` | query | no | whole number | Page size (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `DeployPageOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `DeployPageOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `DeployOut` | yes |  |
+| `next_cursor` | text or null | yes |  |

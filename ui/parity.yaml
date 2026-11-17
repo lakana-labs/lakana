@@ -277,6 +277,7 @@
 "GET /api/v1/environments/{env}/artifacts/uploads": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/checks": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deployments": { class: read, part: 5 }
+"GET /api/v1/deploys": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deploys": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/deploys/{deploy_id}": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3, done: true }
