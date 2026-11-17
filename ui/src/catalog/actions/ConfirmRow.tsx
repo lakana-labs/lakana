@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useEffect, useEffectEvent, useState } from "react";
+import { type JSX, type ReactNode, useEffect, useEffectEvent, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { PendingButton } from "../../shell/PendingButton";
@@ -96,6 +96,8 @@ export interface ConfirmRowProps {
   readonly confirm: Confirm;
   /** Closes the dialog without acting. */
   readonly onCancel: () => void;
+  /** A second way to act, between the confirm button and Cancel, such as Save as new. */
+  readonly more?: ReactNode;
 }
 
 /**
@@ -107,9 +109,16 @@ export interface ConfirmRowProps {
  * @param props.label - The confirm button's label.
  * @param props.confirm - The confirm action.
  * @param props.onCancel - Closes the dialog without acting.
+ * @param props.more - A second way to act.
  * @returns The row.
  */
-export function ConfirmRow({ attempt, label, confirm, onCancel }: ConfirmRowProps): JSX.Element {
+export function ConfirmRow({
+  attempt,
+  label,
+  confirm,
+  onCancel,
+  more,
+}: ConfirmRowProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <>
@@ -122,6 +131,7 @@ export function ConfirmRow({ attempt, label, confirm, onCancel }: ConfirmRowProp
         >
           {label}
         </PendingButton>
+        {more}
         <Button className="button" onPress={onCancel}>
           {t("dialog.cancel")}
         </Button>

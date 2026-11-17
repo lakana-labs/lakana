@@ -6,7 +6,7 @@ import { EditorView } from "@codemirror/view";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { aPage, aRun, queryRoutes, RUN_ID, WAITING } from "../test/queries";
+import { aPage, aRun, aSavedQuery, queryRoutes, RUN_ID, WAITING } from "../test/queries";
 import { renderShell } from "../test/render";
 import type { FakeRoute } from "../test/server";
 import { EditorSkeleton, RunLine } from "./QueryWork";
@@ -15,6 +15,10 @@ import type { QueryRunState } from "./useQueryRun";
 const RUN_PATH = `/queries/prod/runs/${RUN_ID}`;
 const PROD_RUNS = "/api/v1/environments/prod/queries";
 const STATUS = `${PROD_RUNS}/${RUN_ID}`;
+const SAVED_ID = "6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d";
+const SAVED_PATH = `/queries/prod/saved/${SAVED_ID}`;
+const SAVED_ONE = `/api/v1/environments/prod/saved-queries/${SAVED_ID}`;
+const RANKING = "select station_id from gold.station_ranking";
 
 /**
  * The routes of the screen: the environments, the submit in `dev` and `prod`, the run's status
@@ -512,6 +516,192 @@ describe("the Queries screen's work", () => {
     expect(css).toMatch(/\.queries-toolbar\s*{[^}]*flex-wrap:\s*wrap;/);
     expect(css).toMatch(/\.queries-result-bar\s*{[^}]*flex-wrap:\s*wrap;/);
     expect(css).toMatch(/\.queries-work\s*{[^}]*min-width:\s*0;/);
+  });
+
+  it("opening a saved query loads its SQL and environment", async () => {
+    window.localStorage.setItem("lakana.queries.environment", "dev");
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({
+        [`GET ${SAVED_ONE}`]: { status: 200, body: aSavedQuery({ sql: RANKING }) },
+      }),
+    });
+
+    expect(
+      await screen.findByRole("button", { name: "Environment: prod, protected" }),
+    ).toBeVisible();
+    await waitFor(async () => {
+      expect((await editor()).state.doc.toString()).toBe(RANKING);
+    });
+    expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
+    expect(screen.getByRole("button", { name: "Save…" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Delete…" })).toBeInTheDocument();
+    expect(screen.queryByRole("grid")).toBeNull();
+
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(
+      await screen.findByRole("grid", { name: "Result of Daily sales, rows" }),
+    ).toBeInTheDocument();
+    expect(shell.router.state.location.pathname).toBe(RUN_PATH);
+    expect(
+      shell.server.sent.find((request) => request.method === "POST" && request.path === PROD_RUNS)
+        ?.body,
+    ).toEqual({ sql: RANKING });
+  });
+
+  it("an administrator's view of a private query says the SQL is not readable, disables Run and offers Delete", async () => {
+    // As the server answers an administrator: no `sql` at all.
+    const unreadable = Object.fromEntries(
+      Object.entries(aSavedQuery({ actions: ["delete"] })).filter(([key]) => key !== "sql"),
+    );
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`GET ${SAVED_ONE}`]: { status: 200, body: unreadable } }),
+    });
+
+    expect(await screen.findByText("You may not read the SQL of this query.")).toBeInTheDocument();
+    const facts = document.querySelector(".queries-saved-facts");
+    expect(facts).toHaveTextContent("by kim.lee");
+    expect(facts).toHaveTextContent("Environment prod");
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Format" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Save…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete…" })).toBeEnabled();
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe("");
+    expect(view.state.readOnly).toBe(true);
+
+    // Ctrl Enter in the read-only editor runs nothing either.
+    act(() => {
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }),
+      );
+    });
+    expect(sent(shell).filter((request) => request.startsWith("POST"))).toEqual([]);
+  });
+
+  it("after a delete the note is focused and the SQL stays", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`DELETE ${SAVED_ONE}`]: { status: 204 } }),
+    });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    type(view, "select 2 as two");
+    const reads = (): number =>
+      sent(shell).filter((request) => request.startsWith("GET /api/v1/saved-queries?")).length;
+    await waitFor(() => {
+      expect(reads()).toBe(1);
+    });
+
+    await shell.user.click(screen.getByRole("button", { name: "Delete…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete the saved query Daily sales?" });
+    await shell.user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    const note = await screen.findByText("Deleted Daily sales.");
+    await waitFor(() => {
+      expect(note).toHaveFocus();
+    });
+    expect(note).toHaveAttribute("role", "status");
+    expect(shell.router.state.location.pathname).toBe("/queries");
+    expect((await editor()).state.doc.toString()).toBe("select 2 as two");
+    expect(screen.queryByRole("button", { name: "Delete…" })).toBeNull();
+    expect(screen.getByText("Untitled query")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(reads()).toBe(2);
+    });
+  });
+
+  it("after save as the address is the saved query's and the Saved list shows it", async () => {
+    const created = aSavedQuery({ id: "7b8c9d0e", environment: "dev", name: "Late trains" });
+    let listed = [aSavedQuery()];
+    const shell = renderShell("/queries", {
+      routes: routes({
+        "GET /api/v1/saved-queries": () => ({
+          status: 200,
+          body: { items: listed, next_cursor: null },
+        }),
+        "POST /api/v1/environments/dev/saved-queries": () => {
+          listed = [aSavedQuery(), created];
+          return { status: 201, body: created };
+        },
+        "GET /api/v1/environments/dev/saved-queries/7b8c9d0e": { status: 200, body: created },
+      }),
+    });
+    type(await editor(), "select 1 as one");
+    const save = screen.getByRole("button", { name: "Save…" });
+
+    await shell.user.click(save);
+    const dialog = screen.getByRole("dialog", { name: "Save the query" });
+    await shell.user.type(within(dialog).getByRole("textbox", { name: "Name" }), "Late trains");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Save as new" }));
+
+    await waitFor(() => {
+      expect(shell.router.state.location.pathname).toBe("/queries/dev/saved/7b8c9d0e");
+    });
+    const saved = await screen.findByRole("region", { name: "Saved queries" });
+    expect(await within(saved).findByRole("link", { name: "Late trains" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(save).toHaveFocus();
+    });
+    expect(document.querySelector(".queries-name")).toHaveTextContent(/^Late trains$/);
+  });
+
+  it("Save after a run of a saved query updates it and keeps the run's address", async () => {
+    const updated = aSavedQuery({ name: "Daily sales by region" });
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`PUT ${SAVED_ONE}`]: { status: 200, body: updated } }),
+    });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("grid", { name: "Result of Daily sales, rows" });
+
+    await shell.user.click(screen.getByRole("button", { name: "Save…" }));
+    const dialog = screen.getByRole("dialog", { name: "Save the query" });
+    await shell.user.type(within(dialog).getByRole("textbox", { name: "Name" }), " by region");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales by region$/);
+    });
+    expect(shell.router.state.location.pathname).toBe(RUN_PATH);
+    expect(screen.getByRole("grid")).toBeInTheDocument();
+    expect(sent(shell)).toContain(`PUT ${SAVED_ONE}`);
+  });
+
+  it("a saved query that cannot be read says why", async () => {
+    renderShell(SAVED_PATH, {
+      routes: routes({
+        [`GET ${SAVED_ONE}`]: {
+          status: 404,
+          body: { type: "NotFoundError", detail: "There is no saved query with this id." },
+        },
+      }),
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "There is no saved query with this id.",
+    );
+    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("back at a new query no run shows, and the remembered environment is read again", async () => {
+    const shell = renderShell(RUN_PATH, { routes: routes() });
+    await screen.findByRole("grid");
+    window.localStorage.setItem("lakana.queries.environment", "dev");
+
+    await act(async () => {
+      await shell.router.navigate("/queries");
+    });
+
+    expect(await screen.findByRole("button", { name: "Environment: dev" })).toBeInTheDocument();
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
+    expect(screen.getByText("Untitled query")).toBeInTheDocument();
   });
 });
 

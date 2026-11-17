@@ -11,7 +11,7 @@ import type { HealthSummaryOut, TableHealthOut } from "../../api";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import type { Resource } from "../../shell/useResource";
 import { StatusGlyph } from "../../status/StatusGlyph";
-import { ReadFailed } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 import { HealthWord } from "../HealthWord";
 import { tablePath } from "../paths";
 import { firedLines, judged } from "./health";

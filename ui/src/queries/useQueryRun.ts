@@ -60,21 +60,27 @@ export interface QueryRun extends QueryRunState {
   readonly opened: boolean;
   /**
    * Submits a query, moves to its run's address (keeping the focus where it is) and follows it.
-   * A refusal ends in the phase `refused`, never in a rejection.
+   * A refusal ends in the phase `refused`, never in a rejection. `state` goes with the move, in
+   * the history entry of the run's address.
    */
-  readonly submit: (environment: string, sql: string) => Promise<void>;
+  readonly submit: (environment: string, sql: string, state?: object) => Promise<void>;
   /** Cancels the run while it is queued or running; true when there was one to cancel. */
   readonly cancel: () => boolean;
   /** Follows the run an address names, unless it is the one followed already. */
   readonly open: (environment: string, id: string) => void;
   /** Follows the run again after it was lost. */
   readonly retry: () => void;
+  /**
+   * Stops following the run, without a cancel, and shows none: an address that names no run
+   * (a new query, a saved one) shows no run's result.
+   */
+  readonly reset: () => void;
   /** Reads the next page and appends its rows; rejects with the refusal. */
   readonly more: () => Promise<void>;
 }
 
 /** The view of a run, besides what can be done with it. */
-type View = Omit<QueryRun, "submit" | "cancel" | "open" | "retry" | "more">;
+type View = Omit<QueryRun, "submit" | "cancel" | "open" | "retry" | "more" | "reset">;
 
 const IDLE: View = {
   phase: "idle",
@@ -420,10 +426,10 @@ export function useQueryRun(): QueryRun {
     [me.name],
   );
   const submit = useCallback(
-    (environment: string, sql: string) =>
+    (environment: string, sql: string, state?: object) =>
       follower.submit(environment, sql, (id) => {
         record(environment, id);
-        void navigate(runPath(environment, id), { state: { keepFocus: true } });
+        void navigate(runPath(environment, id), { state: { ...state, keepFocus: true } });
       }),
     [follower, navigate, record],
   );
@@ -440,5 +446,9 @@ export function useQueryRun(): QueryRun {
     follower.retry();
   }, [follower]);
   const more = useCallback(() => follower.more(), [follower]);
-  return { ...view, submit, cancel, open, retry, more };
+  const reset = useCallback(() => {
+    follower.stop();
+    setView(IDLE);
+  }, [follower]);
+  return { ...view, submit, cancel, open, retry, more, reset };
 }

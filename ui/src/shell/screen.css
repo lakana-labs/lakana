@@ -275,3 +275,51 @@ tr:hover .chevron {
     padding: var(--space-3);
   }
 }
+
+/* The list frame's rules (catalog/views/ViewList.tsx), here because the Catalog, an artifact's
+   page and the Queries screen all use it: the scrolling region, the skeleton, the failed read
+   with Try again, and the check of a chosen option in a Select's list. */
+
+/* A data table is the exception to reflow (WCAG 1.4.10): it scrolls inside its own region, and
+   the page never scrolls sideways. */
+.list-scroll {
+  overflow-x: auto;
+}
+
+.list-scroll:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.list-scroll .row-name {
+  overflow-wrap: anywhere;
+}
+
+/* Static blocks, no motion: the rows' height, so nothing jumps when the page arrives. */
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.skeleton-row {
+  height: var(--row-height);
+  border-radius: var(--radius-control);
+  background: var(--color-sunk);
+}
+
+.menu-item[aria-selected="true"] .menu-check::before {
+  content: "✓";
+  color: var(--color-accent);
+}
+
+.read-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.read-failed p {
+  margin: 0;
+}

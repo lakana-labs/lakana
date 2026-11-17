@@ -8,7 +8,7 @@ import type { JSX, ReactNode } from "react";
 
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { useResource } from "../../shell/useResource";
-import { ReadFailed } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 
 /** Properties of {@link TabBody}. */
 export interface TabBodyProps<T> {

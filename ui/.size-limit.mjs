@@ -59,7 +59,13 @@ const NAMED_LIMITS = [
   // command for a result too large for the browser, the file name and their sentences).
   // Measured 6.17 kB (2026-11-17) with Format and its line for SQL it cannot read; the limit
   // holds.
-  { name: "Queries", prefix: "QueriesScreen-", limit: "6.45 kB" },
+  // Raised to the measured 9.13 kB (2026-11-17) + 10 %: Saved and Recent beside the editor (the
+  // filter by environment, the rows that open a saved query or a run, their paging and reading
+  // again after a save or a delete), the Queries ▾ popover of a narrow screen, Save… with its
+  // name, visibility, Save and Save as new, Delete… with its question and the note after it, the
+  // saved query's address with the administrator's view of one whose SQL may not be read, and
+  // their strings.
+  { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.
@@ -102,6 +108,8 @@ const NAMED_LIMITS = [
   // Measured 1.1 kB (2026-11-16) + 10 %: the list frame (skeleton, the server's sentence with Try
   // again, the empty sentence, the scrolling table and Show more) and the paging by cursor, which
   // the Catalog's views share with an artifact's open uploads.
+  // Measured 1.16 kB (2026-11-17) with rows that open their object and the table's width as the
+  // caller's, for the Queries screen's Saved and Recent; the limit holds.
   { name: "the list frame", prefix: "ViewList-", limit: "1.21 kB" },
   // Measured 2.29 kB (2026-11-16) + 10 %: the Drop dialog with the break-glass reason field and
   // the strings of the actions, which the table's Actions and the Catalog's views share.
@@ -114,7 +122,22 @@ const NAMED_LIMITS = [
   // Catalog's views and the place menu.
   // Raised to the measured 2.1 kB (2026-11-17: 2,101 B, 1 B over once the SQL editor's catalog
   // calls changed the minifier's names; the code is unchanged) + 10 %.
-  { name: "the reason and confirm row", prefix: "ProtectedReason-", limit: "2.31 kB" },
+  // Lowered to the measured 1.78 kB (2026-11-17) + 10 %: the confirm row moved into a chunk of
+  // its own (below) once the Queries screen's Save… and Delete… became its importers without the
+  // reason field.
+  { name: "the reason and confirm row", prefix: "ProtectedReason-", limit: "1.96 kB" },
+  // Measured 588 B (2026-11-17) + 10 %: the confirm row (the confirm button, Cancel, a second
+  // action such as Save as new, and the status under them), shared by the Catalog's dialogs and
+  // the Queries screen's Save… and Delete….
+  { name: "the confirm row", prefix: "ConfirmRow-", limit: "0.65 kB" },
+  // Measured 261 B (2026-11-17) + 10 %: the sentence of a failed read with Try again, shared by
+  // the table page's tabs, the Catalog's views, an artifact's versions and the Queries screen's
+  // lists (it left catalog/cells.tsx so the Queries screen does not load the Catalog's cells).
+  { name: "a failed read", prefix: "ReadFailed-", limit: "0.29 kB" },
+  // Measured 293 B (2026-11-17) + 10 %: whether the window is narrow enough to fold the sidebar,
+  // shared by the tour and the Queries screen's library (left beside the editor, or behind
+  // Queries ▾).
+  { name: "the narrow window", prefix: "useFolded-", limit: "0.33 kB" },
   // Measured 1.94 kB (2026-11-16) + 10 %: the Catalog's place menu with New namespace and Delete
   // namespace, their dialogs and the strings of the places, loaded once the tree is known and an
   // environment or a namespace is chosen.
@@ -336,6 +359,8 @@ export default [
   // catalog through api/catalog.ts and api/table.ts, so the bundler moved the API client
   // (api/client.ts) out of the messages' chunk into one of its own that index.html preloads, and
   // the exports between them cost 0.32 kB. No editor or formatter code is in it; the limit holds.
+  // Measured 211.01 kB (2026-11-17) with Saved, Recent, Save… and Delete…, all on demand; the
+  // limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -371,6 +396,9 @@ export default [
   // and the result's line that wrap at 320 px, the editor's resizable host and its placeholder,
   // the protected mark in the colour of danger and the alert's layout), and the shared grid's
   // rules in a file of their own with the grid's chunk.
+  // Measured 9.32 kB (2026-11-17) with the library beside the editor, its lists and the popover
+  // of a narrow screen; the list frame's rules moved from the Catalog's stylesheets into
+  // screen.css, so they apply wherever the frame is used. The limit holds.
   { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "10.12 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

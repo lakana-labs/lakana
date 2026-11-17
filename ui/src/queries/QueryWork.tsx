@@ -1,31 +1,43 @@
 /**
- * The work of the Queries screen: the toolbar (the query's name, the environment and Run, which
- * becomes Cancel while the run is active), the SQL editor, what went wrong, and the result.
+ * The work of the Queries screen: the library of saved and recent queries, the toolbar (the
+ * query's name, Save…, Delete…, Format, the environment and Run, which becomes Cancel while the
+ * run is active), the SQL editor, what went wrong, and the result.
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { type JSX, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 
 import { listQueryEnvironments, type QueryEnvironmentOut } from "../api/queries";
 import { CopyLine } from "../shell/CopyLine";
+import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { Loaded } from "../shell/Loaded";
+import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { shortcutLabel } from "../shell/shortcut";
+import { useFolded } from "../shell/useFolded";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { problemText } from "../sign-in/messages";
 import type { StatusKind } from "../status/status";
 import { StatusLabel } from "../status/StatusLabel";
+import { DeleteSavedDialog } from "./DeleteSavedDialog";
 import type { SqlEditorHandle } from "./editor/SqlEditor";
 import { EnvironmentPicker } from "./EnvironmentPicker";
+import { Library } from "./Library";
+import { LibraryFold } from "./LibraryFold";
+import { savedPath } from "./paths";
 import { endedMessage, QueryError } from "./QueryError";
-import { readEnvironment, writeEnvironment } from "./remember";
+import { QueryNote } from "./QueryNote";
+import { readEnvironment, readFilter, writeEnvironment } from "./remember";
 import { ResultPanel } from "./ResultPanel";
+import { savedWho } from "./SavedList";
+import { SaveQueryDialog } from "./SaveQueryDialog";
 import { useAfter } from "./useAfter";
+import { type QueriesAddress, type QueriesState, useOpenedSaved } from "./useOpenedSaved";
 import { type QueryRunState, useQueryRun } from "./useQueryRun";
 import "./queries.css";
 import "./queryStrings";
@@ -110,29 +122,43 @@ export function RunLine({ state }: RunLineProps): JSX.Element {
 interface WorkProps {
   /** The environments where the person may run a query; at least one. */
   readonly environments: readonly QueryEnvironmentOut[];
-  /** The run the address names; null on a new query. */
-  readonly address: { readonly environment: string; readonly id: string } | null;
+  /** The run or the saved query the address names; null on a new query. */
+  readonly address: QueriesAddress | null;
+  /** The Queries ▾ button of a narrow screen, first in the toolbar; null beside the library. */
+  readonly fold: ReactNode;
+  /** Called after a save or a delete, so the library reads its lists again. */
+  readonly onLibraryChange: () => void;
 }
 
 /**
- * The toolbar, the editor and the run, once the environments are known.
+ * The toolbar, the editor and the run, once the environments are known. An address that names
+ * no run (a new query, a saved one) shows no run: entering it stops following the old one
+ * (without a cancel) and keeps the editor's text.
  *
- * @param props - The environments and the run the address names.
+ * @param props - The environments, the address, the fold and the library's reload.
  * @param props.environments - The environments where the person may run a query.
- * @param props.address - The run the address names, or null.
+ * @param props.address - The run or saved query the address names, or null.
+ * @param props.fold - The Queries ▾ button, or null.
+ * @param props.onLibraryChange - Called after a save or a delete.
  * @returns The work column.
  */
-function Work({ environments, address }: WorkProps): JSX.Element {
+function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.Element {
   const { t } = useTranslation();
+  const me = useMe();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const state = location.state as QueriesState | null;
   const query = useQueryRun();
+  const { opened, error: savedError } = useOpenedSaved(address);
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
   const [sql, setSql] = useState("");
   // Whether the last Format could not read the text; the next edit takes the line away.
   const [unreadable, setUnreadable] = useState(false);
-  const [remembered] = useState(readEnvironment);
-  // A choice holds for the address it was made at; another run's address brings its own.
-  const at = address === null ? "" : `${address.environment}/${address.id}`;
+  const [remembered, setRemembered] = useState(readEnvironment);
+  const [dialog, setDialog] = useState<"save" | "delete" | null>(null);
+  // A choice holds for the address it was made at; another address brings its own.
+  const at = address === null ? "" : `${address.kind}/${address.environment}/${address.id}`;
   const [picked, setPicked] = useState<{ at: string; environment: string } | null>(null);
   const fallback = environments.some((listed) => listed.name === remembered)
     ? (remembered as string)
@@ -140,34 +166,53 @@ function Work({ environments, address }: WorkProps): JSX.Element {
   const environment =
     picked !== null && picked.at === at ? picked.environment : (address?.environment ?? fallback);
 
-  const { open } = query;
-  const runEnvironment = address?.environment;
-  const runId = address?.id;
-  useEffect(() => {
-    if (runEnvironment !== undefined && runId !== undefined) {
-      open(runEnvironment, runId);
-    }
-  }, [open, runEnvironment, runId]);
-
-  // A run opened from its address brings its SQL into the editor once; one submitted here
-  // leaves the editor as the person left it. (State adjusted while rendering, as React
-  // documents for state that follows a change.)
+  // A run or a saved query opened from its address brings its SQL into the editor once per
+  // visit of the address; a run submitted here leaves the editor as the person left it. A new
+  // query reads the remembered environment again, which a run elsewhere may have changed.
+  // (State adjusted while rendering, as React documents for state that follows a change.)
+  const [seen, setSeen] = useState(at);
   const [loaded, setLoaded] = useState<string | null>(null);
+  if (seen !== at) {
+    setSeen(at);
+    setLoaded(null);
+    if (address === null) {
+      setRemembered(readEnvironment());
+    }
+  }
   if (query.opened && query.run !== null && query.run.query_id !== loaded) {
     setLoaded(query.run.query_id);
     if (query.run.sql !== null) {
       setSql(query.run.sql);
     }
   }
+  if (address?.kind === "saved" && opened !== null && opened.id !== loaded) {
+    setLoaded(opened.id);
+    setSql(opened.sql ?? "");
+  }
 
+  const { open, reset } = query;
+  const runAddress = address?.kind === "run" ? address : null;
+  const runEnvironment = runAddress?.environment;
+  const runId = runAddress?.id;
+  useEffect(() => {
+    if (runEnvironment !== undefined && runId !== undefined) {
+      open(runEnvironment, runId);
+    } else {
+      reset();
+    }
+  }, [open, reset, runEnvironment, runId]);
+
+  // Nothing to run until the saved query is read, and nothing when its SQL may not be read.
+  const readOnly =
+    (address?.kind === "saved" && opened === null) || (opened !== null && opened.sql === undefined);
   const active = query.phase === "waiting";
   const run = (): void => {
     // Ctrl/⌘ Enter in the editor while a run is submitted or active starts no second one.
-    if (active || query.phase === "submitting") {
+    if (active || query.phase === "submitting" || readOnly) {
       return;
     }
     writeEnvironment(environment);
-    void query.submit(environment, sql);
+    void query.submit(environment, sql, { saved: opened });
   };
   const ended = query.run;
   const mark =
@@ -179,15 +224,42 @@ function Work({ environments, address }: WorkProps): JSX.Element {
         }
       : null;
   const name =
-    address === null ? t("queries.untitled") : t("queries.runName", { id: address.id.slice(0, 8) });
+    opened?.name ??
+    (runAddress === null
+      ? t("queries.untitled")
+      : t("queries.runName", { id: runAddress.id.slice(0, 8) }));
+  const close = (): void => {
+    setDialog(null);
+  };
   return (
     <div className="queries-work">
       <div className="queries-toolbar">
+        {fold}
         <p className="queries-name">
           <VisibleText text={name} />
         </p>
         <Button
           className="button"
+          isDisabled={readOnly}
+          onPress={() => {
+            setDialog("save");
+          }}
+        >
+          {t("queries.save.open")}
+        </Button>
+        {opened?.actions.includes("delete") === true && (
+          <Button
+            className="button"
+            onPress={() => {
+              setDialog("delete");
+            }}
+          >
+            {t("queries.delete.open")}
+          </Button>
+        )}
+        <Button
+          className="button"
+          isDisabled={readOnly}
           onPress={() => {
             void editor.current?.format().then((formatted) => {
               setUnreadable(!formatted);
@@ -209,6 +281,7 @@ function Work({ environments, address }: WorkProps): JSX.Element {
           ref={runButton}
           className={active ? "button queries-run" : "button button-primary queries-run"}
           pending={query.phase === "submitting" || query.cancelling}
+          isDisabled={readOnly}
           onPress={active ? query.cancel : run}
         >
           {active ? (
@@ -221,6 +294,20 @@ function Work({ environments, address }: WorkProps): JSX.Element {
           )}
         </PendingButton>
       </div>
+      {state?.note !== undefined && <QueryNote note={state.note} />}
+      {savedError !== null && (
+        <p role="alert" className="step-error queries-alert">
+          {savedError}
+        </p>
+      )}
+      {opened !== null && opened.sql === undefined && (
+        <>
+          <p className="queries-saved-facts">
+            {savedWho(t, opened, me.name)} <EnvironmentLabel environment={opened.environment} />
+          </p>
+          <p className="queries-saved-facts">{t("queries.notReadable")}</p>
+        </>
+      )}
       <div className="queries-editor">
         <Suspense fallback={<EditorSkeleton />}>
           <SqlEditor
@@ -231,7 +318,7 @@ function Work({ environments, address }: WorkProps): JSX.Element {
             }}
             onRun={run}
             onCancel={query.cancel}
-            readOnly={false}
+            readOnly={readOnly}
             environment={environment}
             error={mark}
             label={t("queries.sql")}
@@ -270,8 +357,40 @@ function Work({ environments, address }: WorkProps): JSX.Element {
           run={query.run}
           page={query.page}
           name={name}
-          saved={null}
+          saved={opened?.name ?? null}
           onMore={query.more}
+        />
+      )}
+      {dialog === "save" && (
+        <SaveQueryDialog
+          environment={environment}
+          sql={sql}
+          opened={opened}
+          onSaved={(saved, created) => {
+            close();
+            onLibraryChange();
+            // A new saved query moves to its address; one saved again stays where it is (its
+            // own address, or the run's), and its history entry carries it as it is now.
+            void navigate(created ? savedPath(saved.environment, saved.id) : location.pathname, {
+              replace: !created,
+              state: { keepFocus: true, saved },
+            });
+          }}
+          onCancel={close}
+        />
+      )}
+      {dialog === "delete" && opened !== null && (
+        <DeleteSavedDialog
+          saved={opened}
+          onDone={() => {
+            close();
+            onLibraryChange();
+            // The SQL stays in the editor; the note takes the focus from the gone Delete….
+            void navigate("/queries", {
+              state: { keepFocus: true, note: { kind: "deleted", name: opened.name } },
+            });
+          }}
+          onCancel={close}
         />
       )}
     </div>
@@ -280,39 +399,71 @@ function Work({ environments, address }: WorkProps): JSX.Element {
 
 /** Properties of {@link QueryWork}. */
 export interface QueryWorkProps {
-  /** What the address names: a new query, or a run (`/queries/{environment}/runs/{id}`). */
-  readonly mode: "new" | "run";
+  /**
+   * What the address names: a new query, a run (`/queries/{environment}/runs/{id}`) or a saved
+   * query (`/queries/{environment}/saved/{id}`).
+   */
+  readonly mode: "new" | "run" | "saved";
 }
 
 /**
  * The Queries screen's work: reads the environments where the person may run a query; with
- * none, says how to get the right, and the command line meanwhile.
+ * none, says how to get the right, and the command line meanwhile. With some, the library
+ * (Saved and Recent) stands beside the work, or folds behind the Queries ▾ button below 640 px.
  *
  * @param props - What the address names.
- * @param props.mode - A new query, or a run.
+ * @param props.mode - A new query, a run or a saved query.
  * @returns The page.
  */
 export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
   const { t } = useTranslation();
   const params = useParams();
+  const me = useMe();
+  const folded = useFolded();
   const environments = useResource(listQueryEnvironments);
+  const [filter, setFilter] = useState(readFilter);
+  const [reloadKey, setReloadKey] = useState(0);
   const address =
-    mode === "run" ? { environment: String(params.env), id: String(params.id) } : null;
+    mode === "new" ? null : { kind: mode, environment: String(params.env), id: String(params.id) };
   return (
     <Page title={t("areas.queries.name")}>
       <div className="queries">
         <Loaded resource={environments}>
-          {(listed) =>
-            listed.length === 0 ? (
-              <div className="queries-work">
-                <p>{t("queries.noEnvironment")}</p>
-                <p>{t("queries.noEnvironmentCli")}</p>
-                <CopyLine text={CLI_QUERY} copyLabel={t("queries.copy")} />
-              </div>
-            ) : (
-              <Work environments={listed} address={address} />
-            )
-          }
+          {(listed) => {
+            if (listed.length === 0) {
+              return (
+                <div className="queries-work">
+                  <p>{t("queries.noEnvironment")}</p>
+                  <p>{t("queries.noEnvironmentCli")}</p>
+                  <CopyLine text={CLI_QUERY} copyLabel={t("queries.copy")} />
+                </div>
+              );
+            }
+            const library = {
+              me: me.name,
+              environments: listed,
+              filter,
+              onFilter: setFilter,
+              reloadKey,
+            };
+            return (
+              <>
+                {!folded && (
+                  <aside className="queries-library" aria-label={t("queries.library.label")}>
+                    <Library {...library} />
+                  </aside>
+                )}
+                <Work
+                  environments={listed}
+                  address={address}
+                  fold={folded ? <LibraryFold {...library} /> : null}
+                  onLibraryChange={() => {
+                    setReloadKey((key) => key + 1);
+                  }}
+                />
+              </>
+            );
+          }}
         </Loaded>
       </div>
     </Page>

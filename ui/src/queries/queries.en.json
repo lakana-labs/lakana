@@ -14,8 +14,8 @@
   "loadingEditor": "Loading the editor…",
   "environment": {
     "label": "Environment",
-    "trigger": "Environment: {{environment}}",
-    "triggerProtected": "Environment: {{environment}}, protected",
+    "trigger": "{{label}}: {{environment}}",
+    "triggerProtected": "{{label}}: {{environment}}, protected",
     "protected": "protected"
   },
   "noEnvironment": "You may not run queries in any environment yet. Ask an administrator for the right to run queries (SUBMIT_QUERY).",
@@ -52,5 +52,43 @@
     "more": "Show 100 more",
     "empty": "The query returned no rows.",
     "gone": "This run's result is no longer kept."
-  }
+  },
+  "library": {
+    "label": "Saved and recent queries",
+    "fold": "Queries",
+    "filter": "Show",
+    "all": "All environments",
+    "saved": "Saved",
+    "recent": "Recent",
+    "savedRegion": "Saved queries",
+    "recentRegion": "Recent queries",
+    "name": "Name",
+    "when": "When",
+    "state": "State",
+    "noSaved": "No saved queries yet. Save… keeps the query in the editor.",
+    "noRecent": "No queries in the last {{days}} days.",
+    "everyone": "everyone",
+    "by": "by {{owner}}",
+    "formerOwner": "former owner",
+    "seconds": "{{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s"
+  },
+  "save": {
+    "open": "Save…",
+    "title": "Save the query",
+    "name": "Name",
+    "visibility": "Who may run it",
+    "private": "Only me",
+    "everyone": "Everyone who can run queries in {{environment}}",
+    "environment": "It is saved in {{environment}}.",
+    "update": "Save",
+    "create": "Save as new"
+  },
+  "delete": {
+    "open": "Delete…",
+    "title": "Delete the saved query {{name}}?",
+    "text": "The SQL stays in the editor, and its runs stay in Recent.",
+    "confirm": "Delete",
+    "done": "Deleted {{name}}."
+  },
+  "notReadable": "You may not read the SQL of this query."
 }

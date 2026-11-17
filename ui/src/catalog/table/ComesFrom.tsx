@@ -11,7 +11,7 @@ import type { GraphOut } from "../../api";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import type { Resource } from "../../shell/useResource";
 import { VisibleText } from "../../shell/VisibleText";
-import { ReadFailed } from "../cells";
+import { ReadFailed } from "../ReadFailed";
 import { splitDotted, tablePath } from "../paths";
 import { useTableData } from "./TableContext";
 import { neighbourTables } from "./lineage";
