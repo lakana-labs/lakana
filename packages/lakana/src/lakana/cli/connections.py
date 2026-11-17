@@ -579,6 +579,29 @@ def last_test_text(test: LastConnectionTest | None, updated_at: datetime) -> str
     return _finished(test) + _before_change(test, updated_at)
 
 
+_NOT_SAID = "(server does not say)"
+"""The last test of a server older than `last_test`, which sends no `environment` either."""
+
+
+def _last_test_cell(connection: Connection) -> str:
+    """Write the last test as `list` prints it, or say that the server does not send it.
+
+    Parameters
+    ----------
+    connection
+        The connection.
+
+    Returns
+    -------
+    str
+        `last_test_text`, or ``(server does not say)`` when the answer has no `environment`:
+        a server that sends none predates `last_test`, so ``never tested`` would be false.
+    """
+    if connection.environment is None:
+        return _NOT_SAID
+    return last_test_text(connection.last_test, connection.updated_at)
+
+
 def _last_test_line(connection: Connection) -> str:
     """Write the last test as `show` prints it: with its message and who ran it, when sent.
 
@@ -592,10 +615,11 @@ def _last_test_line(connection: Connection) -> str:
     str
         `last_test_text` for a reader. For a holder of the right to manage connections, an open
         test adds its id after when it was requested, and a done one who ran it and its message.
+        ``(server does not say)`` for a server older than `last_test`, as `_last_test_cell`.
     """
     test = connection.last_test
     if test is None or test.id is None:
-        return last_test_text(test, connection.updated_at)
+        return _last_test_cell(connection)
     if test.state != "done":
         return f"{last_test_text(test, connection.updated_at)} (--id {_output.inline(test.id)})"
     who = _output.inline(test.requested_by or "(unknown)")
@@ -705,7 +729,7 @@ def list_connections(
         derived={
             "address": lambda row: _pairs(row.address),
             "declared_by": _declared,
-            "last_test": lambda row: last_test_text(row.last_test, row.updated_at),
+            "last_test": _last_test_cell,
         },
         droppable=["declared_by", "secret", "last_test"],
     )

@@ -946,6 +946,28 @@ def test_show_prints_a_readers_last_test_with_the_next_step_on_stderr(tmp_path: 
     assert never.stderr == ""
 
 
+def test_an_older_server_that_sends_no_last_test_is_not_read_as_never_tested(
+    tmp_path: Path,
+) -> None:
+    """A server without `environment` predates `last_test`: say so, never `never tested`."""
+    older = {
+        key: value
+        for key, value in _CONNECTION.items()
+        if key not in {"environment", "last_test", "actions"}
+    }
+    api = FakeApi()
+    api.on("GET", _BASE, json={"items": [older], "next_cursor": None})
+
+    listed = invoke(make_state(tmp_path, api), "connection", "list", "--env", "prod")
+    shown = _show(tmp_path, older)
+
+    assert (listed.exit_code, shown.exit_code) == (0, 0), listed.output + shown.output
+    assert "(server does not say)" in listed.stdout
+    assert "never tested" not in listed.stdout
+    assert "Last test:   (server does not say)" in shown.stdout.splitlines()
+    assert shown.stderr == ""
+
+
 def test_a_test_before_the_last_change_says_so(tmp_path: Path) -> None:
     before = {**_tested(**_MANAGERS_TEST), **_CHANGED}
     reader = {**_tested(state="done", outcome="ok", finished_at=_DONE_AT), **_CHANGED}
