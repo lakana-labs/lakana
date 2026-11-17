@@ -43,17 +43,23 @@ function byCursor(
  * @param props - The answers and the callback.
  * @param props.answers - The connections read, by key.
  * @param props.onQueued - Called with what was queued.
+ * @param props.stuck - The keys whose test is stuck.
+ * @param props.failed - Whether following stopped after failed reads.
  * @returns The button with its lines.
  */
 function InDev({
   answers,
   onQueued = () => undefined,
+  stuck = new Set(),
+  failed = false,
 }: {
   readonly answers: ReadonlyMap<string, ConnectionOut>;
   readonly onQueued?: (items: readonly ConnectionQueuedTestOut[]) => void;
+  readonly stuck?: ReadonlySet<string>;
+  readonly failed?: boolean;
 }): JSX.Element {
   return (
-    <FollowedAnswers value={answers}>
+    <FollowedAnswers value={{ answers, stuck, failed }}>
       <TestAll environment="dev" onQueued={onQueued} />
     </FollowedAnswers>
   );
@@ -127,6 +133,32 @@ describe("TestAll", () => {
 
     rerender(<InDev answers={read(done("a", "ok"), done("b", "refused"), done("c", "ok"))} />);
     expect(status).toHaveTextContent("Tested 3 connections in dev: 2 OK, 1 not OK.");
+  });
+
+  it("says it stopped following once the reads failed or every open test is stuck", async () => {
+    fakeServer({
+      [TEST_ALL]: byCursor({ "": { items: [item("a"), item("b"), item("c")], next_cursor: null } }),
+    });
+    const user = userEvent.setup();
+    const answers = read(done("a", "ok"));
+    const { rerender } = render(<InDev answers={answers} />);
+    await user.click(screen.getByRole("button", { name: "Test all in dev" }));
+    const status = screen.getByRole("status");
+    await waitFor(() => {
+      expect(status).toHaveTextContent("Testing 3 connections in dev…");
+    });
+
+    // One open test is stuck, another still followed: the line still waits.
+    rerender(<InDev answers={answers} stuck={new Set([testKey("dev", "b")])} />);
+    expect(status).toHaveTextContent("Testing 3 connections in dev…");
+
+    rerender(
+      <InDev answers={answers} stuck={new Set([testKey("dev", "b"), testKey("dev", "c")])} />,
+    );
+    expect(status).toHaveTextContent("Stopped following 2 tests in dev; see the rows.");
+
+    rerender(<InDev answers={read(done("a", "ok"), done("b", "ok"))} failed />);
+    expect(status).toHaveTextContent("Stopped following 1 test in dev; see the rows.");
   });
 
   it("words one connection in the singular", async () => {

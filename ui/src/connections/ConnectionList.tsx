@@ -6,7 +6,7 @@
  */
 import "./connections.css";
 
-import { type JSX, useCallback, useState } from "react";
+import { type JSX, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -82,8 +82,12 @@ function ConnectionTable({
   );
   const follow = useOpenTests(rows, replace);
   const region = useFocusAfter<HTMLDivElement>(follow.failed);
+  const { stuck, failed } = follow;
+  const followed = useMemo(() => ({ answers, stuck, failed }), [answers, stuck, failed]);
 
   const queued = (environment: string, items: readonly ConnectionQueuedTestOut[]): void => {
+    // Every named connection's earlier answer is replaced by the new test, so only this run's
+    // outcomes count; one never read here has none until the follower reads it.
     setAnswers((previous) => {
       const next = new Map(previous);
       for (const item of items) {
@@ -216,7 +220,7 @@ function ConnectionTable({
         (filter === null ? (
           <p className="connections-test-all">{t("connections.testAll.choose")}</p>
         ) : (
-          <FollowedAnswers value={answers}>
+          <FollowedAnswers value={followed}>
             <TestAll
               environment={filter}
               onQueued={(items) => {

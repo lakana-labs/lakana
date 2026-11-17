@@ -140,7 +140,9 @@
     "testing_one": "Testing {{count}} connection in {{environment}}…",
     "testing_other": "Testing {{count}} connections in {{environment}}…",
     "tested_one": "Tested {{count}} connection in {{environment}}: {{ok}} OK, {{failed}} not OK.",
-    "tested_other": "Tested {{count}} connections in {{environment}}: {{ok}} OK, {{failed}} not OK."
+    "tested_other": "Tested {{count}} connections in {{environment}}: {{ok}} OK, {{failed}} not OK.",
+    "stopped_one": "Stopped following {{count}} test in {{environment}}; see the rows.",
+    "stopped_other": "Stopped following {{count}} tests in {{environment}}; see the rows."
   },
   "follow": {
     "failed": "Could not read the test's progress.",

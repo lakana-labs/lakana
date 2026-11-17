@@ -563,6 +563,81 @@ describe("ConnectionList", () => {
       expect(server.sent.filter((request) => request.method === "POST")).toHaveLength(1);
     });
 
+    it("a second Test all counts only its own outcomes, off screen too", async () => {
+      window.localStorage.setItem("lakana.connections.kim.lee", "dev");
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const a = aConnection({ name: "a", environment: "dev" });
+      const c = aConnection({ name: "c", environment: "dev" });
+      const running: ConnectionLastTestOut = {
+        id: "t-2",
+        state: "running",
+        outcome: null,
+        message: null,
+        created_at: new Date().toISOString(),
+        finished_at: null,
+      };
+      const server = fakeServer({
+        ...connectionRoutes([a], MANAGER),
+        "POST /api/v1/environments/dev/connection-tests": {
+          status: 200,
+          body: {
+            items: ["a", "c"].map((name) => ({ connection: name, test_id: "t", queued: true })),
+            next_cursor: null,
+          },
+        },
+        "GET /api/v1/environments/dev/connections/a": {
+          status: 200,
+          body: { ...a, last_test: finished("ok") },
+        },
+        "GET /api/v1/environments/dev/connections/c": {
+          status: 200,
+          body: { ...c, last_test: finished("refused") },
+        },
+      });
+      const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+      renderList();
+      const testAll = await screen.findByRole("button", { name: "Test all in dev" });
+      const status = screen.getByRole("status");
+
+      await user.click(testAll);
+      await advance(1_000);
+      await waitFor(() => {
+        expect(status).toHaveTextContent("Tested 2 connections in dev: 1 OK, 1 not OK.");
+      });
+
+      server.route({
+        "GET /api/v1/environments/dev/connections/a": {
+          status: 200,
+          body: { ...a, last_test: running },
+        },
+        "GET /api/v1/environments/dev/connections/c": {
+          status: 200,
+          body: { ...c, last_test: running },
+        },
+      });
+      await user.click(testAll);
+      await waitFor(() => {
+        expect(status).toHaveTextContent("Testing 2 connections in dev…");
+      });
+      await advance(1_000);
+      expect(status).toHaveTextContent("Testing 2 connections in dev…");
+
+      server.route({
+        "GET /api/v1/environments/dev/connections/c": {
+          status: 200,
+          body: { ...c, last_test: finished("ok") },
+        },
+        "GET /api/v1/environments/dev/connections/a": {
+          status: 200,
+          body: { ...a, last_test: finished("ok") },
+        },
+      });
+      await advance(1_000);
+      await waitFor(() => {
+        expect(status).toHaveTextContent("Tested 2 connections in dev: 2 OK, 0 not OK.");
+      });
+    });
+
     it("says a test open for ten minutes is stuck, and offers Test again", async () => {
       fakeServer(
         connectionRoutes(
