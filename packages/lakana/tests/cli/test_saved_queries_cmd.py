@@ -193,6 +193,32 @@ def test_show_sql_refuses_sql_with_hidden_characters(tmp_path: Path) -> None:
     assert "holds control or invisible characters; read it with --output json" in result.stderr
 
 
+def test_show_sql_prints_crlf_line_endings_as_they_are(tmp_path: Path) -> None:
+    stored = "SELECT 1\r\nFROM orders\r\n"
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item(sql=stored))
+
+    result = invoke(
+        make_state(tmp_path, api), "query", "saved", "show", _ID, "--env", "dev", "--sql"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout_bytes == stored.encode()  # .stdout folds CRLF to LF
+
+
+def test_show_sql_refuses_a_lone_carriage_return(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item(sql="SELECT 1\r-- x\r\nFROM orders"))
+
+    result = invoke(
+        make_state(tmp_path, api), "query", "saved", "show", _ID, "--env", "dev", "--sql"
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "holds control or invisible characters; read it with --output json" in result.stderr
+
+
 def test_update_reads_first_and_puts_the_merged_fields(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", f"{_BASE}/{_ID}", json=_item())

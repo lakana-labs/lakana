@@ -132,7 +132,7 @@ Usage: `lakana query saved show [OPTIONS] {ID}`
 
 Show a saved query: its fields, then its SQL.
 
-With --sql only the SQL is printed, so 'lakana query saved show ID --sql | lakana sql -' runs it. If the SQL holds control or invisible characters, --sql prints nothing and exits 1, as printing it escaped would run another query; read it with --output json. An administrator may not read the SQL of someone else's private query without READ_QUERY_TEXT; the command then says so.
+With --sql only the SQL is printed, so 'lakana query saved show ID --sql | lakana sql -' runs it. If the SQL holds control or invisible characters (a CRLF line ending is not one), --sql prints nothing and exits 1, as printing it escaped would run another query; read it with --output json. An administrator may not read the SQL of someone else's private query without READ_QUERY_TEXT; the command then says so.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
