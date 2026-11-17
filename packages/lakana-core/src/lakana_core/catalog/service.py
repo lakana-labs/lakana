@@ -595,6 +595,28 @@ def _stale_reference_message(view: TableRef, reference: str) -> str:
 
 
 @dataclass(frozen=True)
+class _TextEdit:
+    """One edit of a table's or column's texts, as the setters receive it.
+
+    Parameters
+    ----------
+    description
+        The new description, `None` to reset its edit, or `KEEP`.
+    label
+        The new label, `None` to reset its edit, or `KEEP`.
+    language
+        The tag of the language edited; `None` for the table's main language.
+    label_language
+        The tag of the label's language; `None` for `language`.
+    """
+
+    description: str | Keep | None
+    label: str | Keep | None
+    language: str | None
+    label_language: str | None
+
+
+@dataclass(frozen=True)
 class PropertyUpdateSummary:
     """What an update to a namespace's properties actually changed.
 
@@ -5310,13 +5332,15 @@ class CatalogService:
         *,
         label: str | Keep | None = KEEP,
         language: str | None = None,
+        label_language: str | None = None,
     ) -> None:
-        """Set or reset the edits of a table's description and label, in one language.
+        """Set or reset the edits of a table's description and label.
 
         An edit is shown instead of the project's text in its language. `None` removes the
-        edit, so the project's text shows again; `KEEP` leaves a field as it is. One
-        `TABLE_DESCRIBED` audit event records the change with the language and the lengths of
-        the edits before and after, never the text.
+        edit, so the project's text shows again; `KEEP` leaves a field as it is. Both fields are
+        edited in `language` unless `label_language` names another one for the label. One
+        `TABLE_DESCRIBED` audit event records the change with the language (and the label's,
+        when it differs) and the lengths of the edits before and after, never the text.
 
         Parameters
         ----------
@@ -5331,6 +5355,9 @@ class CatalogService:
         language
             The canonical or any-case tag of the language edited; `None` for the table's main
             language.
+        label_language
+            The tag of the label's language, any case, when it is not `language`; `None` for
+            `language`. Needs a `label`.
 
         Raises
         ------
@@ -5340,19 +5367,52 @@ class CatalogService:
             If `p` neither owns the table nor holds `DROP_TABLE` on it, or may not read it.
         ValidationError
             If both fields are `KEEP`, a text is blank or too long, a label has more than one
-            line, `language` is not a tag Lakana takes, the edit would add a language past
-            `MAX_EDIT_LANGUAGES`, or the row is an artifact.
+            line, `language` or `label_language` is not a tag Lakana takes, `label_language` comes
+            without a `label`, the edit would add a language past `MAX_EDIT_LANGUAGES`, or the
+            row is an artifact.
         """
         row = self._find_table_to_describe(p, ref)
         self._authz.authorize(
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
-        detail = self._edit_texts(p, row, ref.dotted(), None, description, label, language)
+        self._record_texts(
+            p, ref, row, None, _TextEdit(description, label, language, label_language)
+        )
+
+    def _record_texts(
+        self, p: PrincipalRef, ref: TableRef, row: Table, column: str | None, edit: _TextEdit
+    ) -> None:
+        """Store the edits of a table's or column's texts, audit them and commit.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table reference.
+        row
+            The table, already authorized.
+        column
+            The column's name, already checked; `None` for the table itself.
+        edit
+            The fields and their languages.
+        """
+        detail = self._edit_texts(
+            p,
+            row,
+            ref.dotted(),
+            column,
+            edit.description,
+            edit.label,
+            edit.language,
+            edit.label_language,
+        )
+        named = {"table": ref.dotted()} | ({} if column is None else {"column": column})
         AuditService(self._session).record(
             p.id,
-            AuditEventType.TABLE_DESCRIBED,
+            AuditEventType.TABLE_DESCRIBED if column is None else AuditEventType.COLUMN_DESCRIBED,
             securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
-            detail={"table": ref.dotted(), **detail},
+            detail=named | detail,
         )
         self._session.commit()
 
@@ -5365,8 +5425,9 @@ class CatalogService:
         *,
         label: str | Keep | None = KEEP,
         language: str | None = None,
+        label_language: str | None = None,
     ) -> None:
-        """Set or reset the edits of a column's description and label, in one language.
+        """Set or reset the edits of a column's description and label.
 
         Like `set_table_description`, with a `COLUMN_DESCRIBED` event that also names the column.
         The column must be in the table's schema now, and `p` must be able to read the table.
@@ -5378,25 +5439,25 @@ class CatalogService:
         ref
             The table reference.
         column
-            The column's name.
+            The column's name, which must be in the schema.
         description
-            The new description, `None` to reset its edit, or `KEEP`.
+            The column's new description; `None` removes its edit, `KEEP` leaves it.
         label
-            The new label, `None` to reset its edit, or `KEEP`.
+            The column's new label; `None` removes its edit, `KEEP` leaves it.
         language
-            The canonical or any-case tag of the language edited; `None` for the table's main
-            language.
+            The language of the edit, as a tag in any case; the table's main language when `None`.
+        label_language
+            The label's own language, as a tag in any case, when the label is edited in another
+            language than `language`; only with a `label`.
 
         Raises
         ------
         NotFoundError
-            If the table or the column does not exist.
+            If the table, or the column in its schema, does not exist.
         PermissionDenied
             If `p` neither owns the table nor holds `DROP_TABLE` on it, or may not read it.
         ValidationError
-            If both fields are `KEEP`, a text is blank or too long, a label has more than one
-            line, `language` is not a tag Lakana takes, or the edit would add a language past
-            `MAX_EDIT_LANGUAGES`.
+            For the same texts and tags `set_table_description` refuses.
         """
         row = self._find_table_to_describe(p, ref)
         names = [c.name for c in self.describe_table(p, ref, with_actions=False).columns]
@@ -5405,14 +5466,9 @@ class CatalogService:
             raise NotFoundError(
                 f"Table {ref.dotted()} has no column {shown(column)!r}. Its columns: {have}."
             )
-        detail = self._edit_texts(p, row, ref.dotted(), column, description, label, language)
-        AuditService(self._session).record(
-            p.id,
-            AuditEventType.COLUMN_DESCRIBED,
-            securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
-            detail={"table": ref.dotted(), "column": column, **detail},
+        self._record_texts(
+            p, ref, row, column, _TextEdit(description, label, language, label_language)
         )
-        self._session.commit()
 
     def _edit_texts(
         self,
@@ -5423,11 +5479,14 @@ class CatalogService:
         description: str | Keep | None,
         label: str | Keep | None,
         language: str | None,
+        label_language: str | None = None,
     ) -> dict[str, object]:
-        """Check and store the edits of a table's or column's texts in one language.
+        """Check and store the edits of a table's or column's texts.
 
-        Everything is checked before anything is written. An edit in the table's main language
-        goes onto the table or column row; one in another language is a translation edit.
+        Everything is checked before anything is written. Each field is edited in its own
+        language: the label in `label_language` when given, else both in `language`. An edit in
+        the table's main language goes onto the table or column row; one in another language is a
+        translation edit.
 
         Parameters
         ----------
@@ -5445,22 +5504,36 @@ class CatalogService:
             The new label, `None` to reset its edit, or `KEEP`.
         language
             The tag of the language edited, any case; `None` for the table's main language.
+        label_language
+            The tag of the label's language, any case; `None` for `language`.
 
         Returns
         -------
         dict
-            The audit detail: `language`, the lengths of each field sent, and `reset`.
+            The audit detail: `language`, `label_language` when the label was edited in another
+            language, the lengths of each field sent, and `reset`.
 
         Raises
         ------
         ValidationError
-            If both fields are `KEEP`, a text fails its rules, `language` is not a tag, or the
-            edit would give the table a language past `MAX_EDIT_LANGUAGES`.
+            If both fields are `KEEP`, `label_language` comes without a label, a text fails its
+            rules, a language is not a tag, or the edit would give the table a language past
+            `MAX_EDIT_LANGUAGES`.
         """
         if isinstance(description, Keep) and isinstance(label, Keep):
             raise ValidationError("send `description`, `label` or both; null removes an edit")
+        if label_language is not None and isinstance(label, Keep):
+            raise ValidationError(
+                "label_language names the language of `label`; send `label` with it, or leave "
+                "label_language out"
+            )
         what = f"table {dotted}" if column is None else f"column {column} of table {dotted}"
         asked = None if language is None else self._edit_language(language)
+        asked_label = (
+            asked
+            if label_language is None
+            else self._edit_language(label_language, "label_language")
+        )
         if not isinstance(description, Keep):
             description = check_text(description, what)
         if not isinstance(label, Keep):
@@ -5470,36 +5543,48 @@ class CatalogService:
         lock_table(self._session, row)
         main = row.text_language or self._main_language
         lang = asked or main
+        label_lang = asked_label or main
         listed = row.text_languages or []
-        if (
-            lang != main
-            and lang not in listed
-            and len(listed) >= MAX_EDIT_LANGUAGES
-            and any(isinstance(sent, str) for sent in (description, label))
-        ):
+        adding = sorted(
+            {
+                tag
+                for tag, sent in ((lang, description), (label_lang, label))
+                if isinstance(sent, str) and tag != main and tag not in listed
+            }
+        )
+        if adding and len(listed) + len(adding) > MAX_EDIT_LANGUAGES:
+            added = " and ".join(f"`{tag}`" for tag in adding)
+            has = (
+                f"has texts in {MAX_EDIT_LANGUAGES} languages besides its main language, the most "
+                "a table may have."
+                if len(listed) >= MAX_EDIT_LANGUAGES
+                else f"has texts in {len(listed)} languages besides its main language and may "
+                f"have {MAX_EDIT_LANGUAGES} at most."
+            )
             raise ValidationError(
-                f"Table {shown(dotted)} has texts in {MAX_EDIT_LANGUAGES} languages besides its "
-                "main language, the most a table may have. To add "
-                f"`{lang}`, first remove another language's texts: reset its edits "
+                f"Table {shown(dotted)} {has} To add {added}, first remove another language's "
+                "texts: reset its edits "
                 f"(`lakana table describe {shown(dotted)} --lang TAG --reset`, also with "
                 "`--column` for each column that has one) and remove its file from translations/."
             )
         detail: dict[str, object] = {"language": lang}
+        if not isinstance(label, Keep) and label_lang != lang:
+            detail["label_language"] = label_lang
         given: list[str | None] = []
-        fields: tuple[tuple[Literal["description", "label"], str | Keep | None, str], ...] = (
-            ("description", description, ""),
-            ("label", label, "label_"),
+        fields: tuple[tuple[Literal["description", "label"], str | Keep | None, str, str], ...] = (
+            ("description", description, "", lang),
+            ("label", label, "label_", label_lang),
         )
-        for field, value, prefix in fields:
+        for field, value, prefix, field_lang in fields:
             if isinstance(value, Keep):
                 continue
-            if lang != main:
+            if field_lang != main:
                 old, new = edit_translation(
                     self._session,
                     row,
                     subject="table" if column is None else "column",
                     name=column or "",
-                    language=lang,
+                    language=field_lang,
                     field=field,
                     text=value,
                     by=p.id,
@@ -5515,13 +5600,15 @@ class CatalogService:
         detail["reset"] = all(sent is None for sent in given)
         return detail
 
-    def _edit_language(self, language: str) -> str:
+    def _edit_language(self, language: str, name: str = "lang") -> str:
         """Read the language an edit names.
 
         Parameters
         ----------
         language
             The tag, any case.
+        name
+            The name of the parameter that carried it, for the message.
 
         Returns
         -------
@@ -5535,7 +5622,7 @@ class CatalogService:
         """
         canonical = canonical_language(language.strip())
         if canonical is None:
-            raise ValidationError(f"lang: {language_problem(language.strip())}")
+            raise ValidationError(f"{name}: {language_problem(language.strip())}")
         return canonical
 
     def can_read_table(self, p: PrincipalRef, ref: TableRef) -> bool:

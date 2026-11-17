@@ -21,6 +21,7 @@ function show(overrides: Partial<TextEditorProps> = {}) {
     <TextEditor
       texts={TEXTS}
       lang="en"
+      labelLang="en"
       named={false}
       onSave={onSave}
       onDone={onDone}
@@ -51,10 +52,17 @@ describe("TextEditor", () => {
   });
 
   it("names the language beside both fields when the table has more than one", () => {
-    show({ lang: "de", named: true });
+    show({ lang: "de", labelLang: "de", named: true });
 
     expect(screen.getByRole("textbox", { name: "Description (German)" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "Label (German)" })).toBeVisible();
+  });
+
+  it("names each field's own language when the label is in another one", () => {
+    show({ lang: "de", labelLang: "en", named: true });
+
+    expect(screen.getByRole("textbox", { name: "Description (German)" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Label (English)" })).toBeVisible();
   });
 
   it("sends only the field that changed", async () => {

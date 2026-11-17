@@ -7,7 +7,7 @@ import { Fragment, type JSX } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { TableMatchOut } from "../api";
-import { VisibleText } from "../shell/VisibleText";
+import { markedText, VisibleText } from "../shell/VisibleText";
 
 /** Properties of {@link MatchLine}. */
 export interface MatchLineProps {
@@ -62,7 +62,8 @@ export function showsMatch(match: TableMatchOut): boolean {
  */
 export function MatchLine({ match, q }: MatchLineProps): JSX.Element {
   const { t } = useTranslation();
-  const field = t(`catalog.match.${match.matched}`, { defaultValue: match.matched });
+  // i18next does not escape a default value, so an unknown field is marked here.
+  const field = t(`catalog.match.${match.matched}`, { defaultValue: markedText(match.matched) });
   const parts: JSX.Element[] = [];
   if (match.kind === "column") {
     parts.push(
@@ -87,7 +88,11 @@ export function MatchLine({ match, q }: MatchLineProps): JSX.Element {
     );
   }
   if (match.translated && match.language !== null) {
-    parts.push(<span key="language">{match.language}</span>);
+    parts.push(
+      <span key="language">
+        <VisibleText text={match.language} />
+      </span>,
+    );
   }
   return (
     <span className="match-line">

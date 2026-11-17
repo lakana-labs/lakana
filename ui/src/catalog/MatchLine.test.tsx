@@ -97,7 +97,13 @@ describe("MatchLine", () => {
   });
 
   it("falls back to the field's own name for a field it has no word for", () => {
-    const container = line({ kind: "table", matched: "owner", column: null, snippet: "kim" });
+    const container = line({
+      kind: "table",
+      // A field newer than this interface.
+      matched: "owner" as TableMatchOut["matched"],
+      column: null,
+      snippet: "kim",
+    });
 
     expect(container).toHaveTextContent("owner · kim");
   });
@@ -136,5 +142,20 @@ describe("MatchLine", () => {
     expect(container.textContent).not.toMatch(/[\u202E\u2066]/u);
     expect(container.querySelector("mark")).toHaveTextContent("dim");
     expect(container.querySelectorAll(".char-mark")).toHaveLength(3);
+  });
+
+  it("marks hidden characters in a translation's language and in a field it has no word for", () => {
+    const container = line({
+      kind: "table",
+      matched: "foot\u202Enote" as TableMatchOut["matched"],
+      column: null,
+      column_type: null,
+      snippet: "Every sale",
+      language: "d\u202Ee",
+      translated: true,
+    });
+
+    expect(container).toHaveTextContent("footU+202Enote · Every sale · dU+202Ee");
+    expect(container.textContent).not.toMatch(/\u202E/u);
   });
 });

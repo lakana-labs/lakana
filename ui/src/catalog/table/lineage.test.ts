@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { GraphOut } from "../../api";
+
 import { DOWN, lineage, ROOT, UP } from "../../test/table";
 import { neighbourTables, rootOf } from "./lineage";
 
@@ -24,7 +26,7 @@ describe("neighbourTables", () => {
   });
 
   it("keeps every table when the answer has no start", () => {
-    const graph = {
+    const graph: GraphOut = {
       nodes: [{ id: "table:x", kind: "table", name: "a.b", distance: 1 }],
       edges: [],
       next_cursor: null,

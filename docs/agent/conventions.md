@@ -239,7 +239,9 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   count (`U+200B ×350000`). i18next marks every value interpolated into a `t()` sentence the
   same way (`interpolation.escape` is `markedText`, `ui/src/i18n/i18n.ts`), so a name passed to
   `t()` needs no call of its own; only a command to copy opts out, with `{{- name}}`, and
-  `CopyLine` shows its marks.
+  `CopyLine` shows its marks. The Playwright smoke test `ui/e2e/hidden-characters.spec.ts`
+  fails on a server value that reaches the page unmarked (#669, see "The `ui/` gates" in
+  `docs/agent/testing.md`); a new screen adds its walk there.
 - **No Node globals in browser code.** `globals.node` is on for the config files and scripts, so
   ESLint refuses `process` and `Buffer` inside `ui/src/` (`src/api/` included): Vite does not
   polyfill them, so they would fail only in the browser. Use `import.meta.env` and `Uint8Array`.
@@ -333,6 +335,10 @@ build the same as strong copyleft. `scripts/check_licenses.py` runs in `security
 every PR, over an environment with every dependency group **and every extra of every
 workspace package** (`uv run --all-groups --all-extras --all-packages pip-licenses`): a
 dependency only `lakana[assets]` pulls in is judged like any other.
+A Python package whose metadata names no licence (`pip-licenses` reports `UNKNOWN`, or the text is empty, `none` or `n/a`; the same on the npm
+side) fails too, unless it has an entry in `UNKNOWN_PYTHON_LICENCES`, keyed by name and version, that records the licence read from its own
+files and where it was checked (`atheris` 3.1.0: Apache-2.0, the bundled `LICENSE` file). Another version fails until checked
+again, and an entry whose package is no longer unknown or installed fails as stale.
 It matches license metadata case-insensitively against ten copyleft families (short ids match
 as whole tokens, so `Simplified BSD` is not MPL), with
 each family's more specific needle checked before a more general one that would also match
