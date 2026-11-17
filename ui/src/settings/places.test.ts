@@ -68,6 +68,7 @@ describe("places", () => {
     expect(placeAt("/settings/access/people/maria")?.id).toBe("people");
     expect(placeAt("/settings/sign-in/invites")?.id).toBe("invites");
     expect(placeAt("/settings/access/")?.id).toBe("access");
+    expect(placeAt("/Settings/Sign-in/Invites")?.id).toBe("invites");
     expect(placeAt("/settings/statusx")).toBeNull();
     expect(placeAt("/settings")).toBeNull();
     expect(placeAt("/other/status")).toBeNull();

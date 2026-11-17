@@ -14,6 +14,8 @@ describe("movedAccessPath", () => {
     ["/access/invites/", "/settings/sign-in/invites"],
     ["/access/recovery-links", "/settings/sign-in/recovery-links"],
     ["/access/unknown", "/settings/access/unknown"],
+    ["/Access/Invites", "/settings/sign-in/invites"],
+    ["/ACCESS/People/Kim%20Lee", "/settings/access/people/Kim%20Lee"],
   ])("moves every old Access address (%s)", (old, moved) => {
     expect(movedAccessPath(old)).toBe(moved);
   });

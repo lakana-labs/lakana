@@ -138,6 +138,18 @@ describe("SettingsScreen", () => {
     ).toEqual([]);
   });
 
+  it("a deep link in other letter case to a hidden place says so and reads nothing", async () => {
+    const { server } = renderShell("/Settings/Sign-in/Invites", {
+      access: MEMBER,
+      me: { admin: false },
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Invites" }),
+    ).toBeInTheDocument();
+    expect(server.sent.filter((request) => request.path.startsWith("/api/v1/invites"))).toEqual([]);
+  });
+
   it("an unknown place is not found", async () => {
     renderShell("/settings/nowhere");
 

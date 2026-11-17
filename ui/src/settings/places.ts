@@ -137,7 +137,7 @@ export function listedPlaces(
 
 /**
  * The place an address belongs to: the longest registry path that is a whole-segment prefix of
- * what follows `/settings/`, ignoring a trailing slash. Null when there is none.
+ * what follows `/settings/`, ignoring a trailing slash and letter case. Null when there is none.
  *
  * @param pathname - The address's path.
  * @param places - The registry; only a test passes another.
@@ -147,9 +147,11 @@ export function placeAt(
   pathname: string,
   places: readonly SettingsPlace[] = SETTINGS_PLACES,
 ): SettingsPlace | null {
+  // The router matches in any letter case, and the registry's paths are lower case.
+  const lower = pathname.toLowerCase();
   const prefix = "/settings/";
-  if (!pathname.startsWith(prefix)) return null;
-  const rest = pathname.slice(prefix.length).replace(/\/+$/, "");
+  if (!lower.startsWith(prefix)) return null;
+  const rest = lower.slice(prefix.length).replace(/\/+$/, "");
   let found: SettingsPlace | null = null;
   for (const place of places) {
     const within = rest === place.path || rest.startsWith(`${place.path}/`);
