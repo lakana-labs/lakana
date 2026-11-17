@@ -10,6 +10,7 @@ import { Navigate } from "react-router";
 
 import { NotAvailable } from "../shell/NotAvailable";
 import { useMe } from "../shell/me";
+import { REDIRECT } from "../shell/redirect";
 import { entryPath, type SettingsPlace } from "./places";
 import "./settingsStrings";
 
@@ -34,5 +35,9 @@ export function GroupEntry({ group, places }: GroupEntryProps): JSX.Element {
   const { t } = useTranslation();
   const { admin, noAccessYet } = useMe();
   const to = entryPath(group, { admin, noAccessYet }, places);
-  return to === null ? <NotAvailable place={t(group.label)} /> : <Navigate to={to} replace />;
+  return to === null ? (
+    <NotAvailable place={t(group.label)} />
+  ) : (
+    <Navigate to={to} replace state={REDIRECT} />
+  );
 }

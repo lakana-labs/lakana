@@ -32,6 +32,7 @@ import { type AreaAccess, visibleAreas } from "./areas";
 import { CommandPalette } from "./CommandPalette";
 import { InterfaceStateProvider } from "./InterfaceState";
 import { MeContext } from "./me";
+import { isRedirect } from "./redirect";
 import { Sidebar } from "./Sidebar";
 
 /**
@@ -64,7 +65,10 @@ export interface AppShellProps {
  * after a navigation to another path, focus moves to the new page's heading (not when only the
  * query changes, so a search field or a tree keeps it, not after a push whose history state is
  * `{ keepFocus: true }`, so a control that moved to its own new address (Run) keeps it, and not
- * on the first load, so the skip link stays the first stop). The person's access and interface
+ * on the first load, so the skip link stays the first stop). The first load includes the
+ * redirects it lands on: a Replace whose state carries the redirect mark (`REDIRECT`, in
+ * `./redirect`) made before any other navigation. Every other Replace is a move like a Push,
+ * such as a list that replaces a deleted object's page. The person's access and interface
  * state are there for every screen inside; the interface state is read once, when the shell
  * appears.
  *
@@ -95,16 +99,17 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   // A redirect the first load lands on (/settings to its first place) is the page opening, not
   // a move: the skip link stays the first stop. A redirect after a move still focuses.
   const moved = useRef(false);
+  const redirect = navigationType === NavigationType.Replace && isRedirect(location.state);
   useEffect(() => {
     if (location.pathname !== shownPath.current) {
       shownPath.current = location.pathname;
-      const firstRedirect = navigationType === NavigationType.Replace && !moved.current;
-      moved.current ||= navigationType !== NavigationType.Replace;
+      const firstRedirect = redirect && !moved.current;
+      moved.current ||= !redirect;
       if (!keepFocus && !firstRedirect) {
         main.current?.querySelector("h1")?.focus();
       }
     }
-  }, [location.pathname, keepFocus, navigationType]);
+  }, [location.pathname, keepFocus, redirect]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {

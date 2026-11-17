@@ -28,6 +28,7 @@ import { useTranslation } from "react-i18next";
 import { NotAvailable } from "../shell/NotAvailable";
 import { NotFound } from "../shell/NotFound";
 import { useMe } from "../shell/me";
+import { isRedirect, REDIRECT } from "../shell/redirect";
 import { GroupEntry } from "./GroupEntry";
 import { type PagePlaceId, PLACE_PAGES } from "./placePages";
 import { listedPlaces, placePattern, SETTINGS_PLACES, type SettingsPlace } from "./places";
@@ -118,24 +119,26 @@ function Guarded({ place, children }: GuardedProps): JSX.Element {
  * @returns The place.
  */
 export function AreaScreen(): JSX.Element {
-  const { pathname } = useLocation();
+  const location = useLocation();
+  const { pathname } = location;
+  const state: unknown = location.state;
   const opened = useRef(pathname);
   const navigationType = useNavigationType();
   // Arriving by a move (a click on Settings in the sidebar) already counts as one.
   const moved = useRef(navigationType === NavigationType.Push);
   useEffect(() => {
-    if (navigationType === NavigationType.Replace) {
+    if (navigationType === NavigationType.Replace && isRedirect(state)) {
       // A redirect (/settings to Status, a group to its first place) settles where the visit
       // opened; it is not the person moving.
       opened.current = pathname;
     } else {
       moved.current ||= pathname !== opened.current;
     }
-  }, [pathname, navigationType]);
+  }, [pathname, navigationType, state]);
   return (
     <Routes>
       <Route element={<SettingsLayout />}>
-        <Route index element={<Navigate to="status" replace />} />
+        <Route index element={<Navigate to="status" replace state={REDIRECT} />} />
         {PAGE_PLACES.map((place) => {
           const Page = PAGES[place.id];
           return (

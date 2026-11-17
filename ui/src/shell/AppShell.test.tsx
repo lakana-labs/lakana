@@ -85,6 +85,17 @@ describe("AppShell", () => {
     expect(heading).not.toHaveFocus();
   });
 
+  it("focuses the heading after a replacing move the person made on the first page", async () => {
+    // A page opened directly, then a person's action that replaces its entry (a list after a
+    // delete): only a redirect is part of the page opening, not every Replace.
+    const { router } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await act(() => router.navigate("/jobs", { replace: true }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
+  });
+
   it("focuses the heading when a move to a redirecting address lands on its place", async () => {
     const { router } = renderShell("/jobs");
     await screen.findByRole("heading", { level: 1, name: "Jobs" });

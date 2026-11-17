@@ -6,6 +6,7 @@
 import type { JSX } from "react";
 import { Navigate, useLocation } from "react-router";
 
+import { REDIRECT } from "../shell/redirect";
 import { movedAccessPath } from "./moved";
 
 /**
@@ -16,5 +17,7 @@ import { movedAccessPath } from "./moved";
  */
 export function MovedAccess(): JSX.Element {
   const { pathname, search, hash } = useLocation();
-  return <Navigate replace to={{ pathname: movedAccessPath(pathname), search, hash }} />;
+  return (
+    <Navigate replace to={{ pathname: movedAccessPath(pathname), search, hash }} state={REDIRECT} />
+  );
 }
