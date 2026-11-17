@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
-from lakana._http import HttpTransport
-from lakana._models import IssuedToken, Token
+from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
+from lakana._models import IssuedToken, Token, TokenPage
 from lakana._routes import ROUTES
 
 
@@ -23,11 +24,31 @@ def _token_from_json(data: dict[str, Any]) -> Token:
     Token
         The parsed token, never carrying a secret.
     """
-    last_used_at = data["last_used_at"]
+
+    def moment(key: str) -> datetime | None:
+        """Read a time from the body; a missing or null key is `None`.
+
+        Parameters
+        ----------
+        key
+            The body's key.
+
+        Returns
+        -------
+        datetime or None
+            The time, if the server sent one.
+        """
+        value = data.get(key)
+        return None if value is None else datetime.fromisoformat(value)
+
     return Token(
         key_id=data["key_id"],
         name=data["name"],
-        last_used_at=None if last_used_at is None else datetime.fromisoformat(last_used_at),
+        last_used_at=moment("last_used_at"),
+        owner=data.get("owner"),
+        created_at=moment("created_at"),
+        expires_at=moment("expires_at"),
+        revoked_at=moment("revoked_at"),
     )
 
 
@@ -99,6 +120,90 @@ class Tokens:
         """
         response = self._transport.request(ROUTES["tokens.list"], path_params={"name": principal})
         return [_token_from_json(item) for item in response.json()]
+
+    def list_all(
+        self, *, owner: str | None = None, limit: int | None = None, cursor: str | None = None
+    ) -> _TokenList:
+        """List every owner's live PATs, newest first. Needs the ADMIN role.
+
+        The tokens of one page; `list_all_page` also returns the cursor of the next one, and
+        `iter_all` walks every page. Revoked and expired tokens are left out.
+
+        Parameters
+        ----------
+        owner
+            Only this principal's tokens.
+        limit
+            Most tokens returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same `owner` with every page.
+
+        Returns
+        -------
+        list of Token
+            Newest first, each with its owner.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If `owner` names no principal.
+        lakana.errors.PermissionDenied
+            If you do not hold the ADMIN role on the instance.
+        """
+        return self.list_all_page(owner=owner, limit=limit, cursor=cursor).items
+
+    def list_all_page(
+        self, *, owner: str | None = None, limit: int | None = None, cursor: str | None = None
+    ) -> TokenPage:
+        """List one page of every owner's live PATs, with the cursor of the next page.
+
+        Parameters
+        ----------
+        owner
+            Only this principal's tokens.
+        limit
+            Most tokens returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same `owner` with every page.
+
+        Returns
+        -------
+        TokenPage
+            The tokens, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If `owner` names no principal.
+        lakana.errors.PermissionDenied
+            If you do not hold the ADMIN role on the instance.
+        """
+        response = self._transport.request(
+            ROUTES["tokens.list_all"], params=query_params(owner=owner, limit=limit, cursor=cursor)
+        )
+        return TokenPage(
+            items=[_token_from_json(item) for item in response.json()],
+            next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
+        )
+
+    def iter_all(self, *, owner: str | None = None, page_size: int = 100) -> Iterator[Token]:
+        """Yield every owner's live PATs, newest first, fetching pages as needed.
+
+        Parameters
+        ----------
+        owner
+            Only this principal's tokens.
+        page_size
+            Tokens per request (1 to 200).
+
+        Returns
+        -------
+        Iterator of Token
+            Each token, once.
+        """
+        return every_page(
+            lambda cursor: self.list_all_page(owner=owner, limit=page_size, cursor=cursor)
+        )
 
     def revoke(self, principal: str, key_id: str) -> None:
         """Revoke a PAT.

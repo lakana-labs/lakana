@@ -19,7 +19,8 @@ instance administrator overrides it ([Changes outside the file](access-file.md#c
 |---|---|---|---|
 | Grants | `lakana grant list` | `GET /api/v1/grants` | the `ADMIN` role on the instance |
 | A principal's permissions | `lakana access explain` | `GET /api/v1/principals/{name}/permissions` | nothing, about yourself; the `ADMIN` role on the instance, about anyone else |
-| Tokens of a principal | `lakana token list` | `GET /api/v1/principals/{name}/tokens` | nothing, about yourself, with a personal token or a browser session; the `ADMIN` role on the instance, about anyone else |
+| Tokens of a principal | `lakana token list [NAME]` | `GET /api/v1/principals/{name}/tokens` | nothing, about yourself, with a personal token or a browser session; the `ADMIN` role on the instance, about anyone else |
+| Every owner's live tokens | `lakana token list --all` | `GET /api/v1/tokens` | the `ADMIN` role on the instance |
 | Principals | `lakana principal list` | `GET /api/v1/principals` | `MANAGE_PRINCIPAL` on the instance |
 | Groups | `lakana group list` | `GET /api/v1/groups` | the `ADMIN` role on the instance |
 
@@ -148,6 +149,16 @@ administrator may still create tokens with a token, as `lakana token issue` does
 else's tokens, anyone who is not an administrator gets the same `403` whether or not that person
 exists. A task or CI token has no say over its owner's tokens.
 
+A listed token says its `owner`, `name`, `key_id`, `created_at`, `last_used_at`, `expires_at` (empty
+for a token that never expires) and `revoked_at` (empty while it is not revoked), and never its
+value. A principal's own list holds its revoked and expired tokens too, so they can be told apart.
+
+`lakana token list` without a name lists your own tokens. `lakana token list --all` is for an
+administrator: it lists the live tokens (neither revoked nor expired) of every owner, newest
+first, with an owner column, and prints the command for the next page when there is one;
+`--limit` and `--cursor` page it, and a name together with `--all` is refused. An unknown owner
+is `404`; a person, or a task or CI token, gets `403`.
+
 ## Refusals
 
 | Cause | Answer |
@@ -172,6 +183,7 @@ exists. A task or CI token has no say over its owner's tokens.
 | Permissions | `client.principals.permissions(name, environment=, namespace=, table=)` | `GET /api/v1/principals/{name}/permissions?environment=&namespace=&table=` |
 | Principals | `client.principals.list(search=)`, `list_page`, `iter` | `GET /api/v1/principals?q=&limit=&cursor=` |
 | Groups | `client.groups.list(search=)`, `list_page`, `iter` | `GET /api/v1/groups?q=&limit=&cursor=` |
+| Every owner's live tokens | `client.tokens.list_all(owner=)`, `list_all_page`, `iter_all` | `GET /api/v1/tokens?owner=&limit=&cursor=` |
 
 The lists answer with a JSON list and put the cursor of the next page in the `X-Next-Cursor`
 header (absent on the last page). The permissions route answers with one object, the fields above.

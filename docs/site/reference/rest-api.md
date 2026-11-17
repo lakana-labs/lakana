@@ -146,7 +146,7 @@ route with its parameters, its request body and its answers.
 - [Artifacts](rest/artifacts.md): 12 routes
 - [Principals](rest/principals.md): 14 routes
 - [Groups](rest/groups.md): 6 routes
-- [Tokens](rest/tokens.md): 3 routes
+- [Tokens](rest/tokens.md): 4 routes
 - [Task tokens](rest/task-tokens.md): 2 routes
 - [Grants](rest/grants.md): 3 routes
 - [Row filters](rest/row-filters.md): 3 routes

@@ -2290,16 +2290,26 @@ class TokenOut(BaseModel):
         The public lookup key.
     name
         The label given at issuance.
+    owner
+        The name of the principal the token signs in as.
+    created_at
+        When the token was issued.
     last_used_at
         When this PAT last successfully authenticated a request, or `None`
         if never.
+    expires_at
+        When the token stops working, or `None` if it never expires.
+    revoked_at
+        When the token was revoked, or `None` while it is not.
     """
 
     key_id: str
     name: str
+    owner: str
+    created_at: datetime
     last_used_at: datetime | None = None
-
-    model_config = {"from_attributes": True}
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
 
 
 class TaskTokenMintIn(BaseModel):

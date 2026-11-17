@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -19,6 +19,7 @@ from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_white
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
+from lakana_core.pagination import Page, newest_first
 
 OWN_TOKEN_FROM_BROWSER = (
     "A token cannot create a token. Create your own token in the web interface, under your "
@@ -50,6 +51,22 @@ class IssuedPat:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class ListedPat:
+    """A listed PAT, with the name of the principal it signs in as.
+
+    Parameters
+    ----------
+    token
+        The token's row. It carries only `secret_hash`, never a retrievable secret.
+    owner
+        The name of the principal the token authenticates as.
+    """
+
+    token: PersonalAccessToken
+    owner: str
+
+
 class PatService:
     """Issue, list, revoke, and verify PATs.
 
@@ -69,10 +86,10 @@ class PatService:
     anyone, with a token or a browser session, as always; issuing in a browser asks for a fresh
     passkey touch. Everyone else may list and revoke their own tokens with a personal token or a
     browser session, and create one only from a browser session after the passkey touch: no
-    token, personal, task or CI, can create a token, so a stolen token cannot mint
-    replacements. A task or CI token has no rights over its owner's tokens. Anything about
-    another person's tokens needs the `ADMIN` role, and is refused before any lookup, so the
-    answer never says whether that person exists.
+    personal token can create a token, so a stolen one cannot mint replacements. A task or CI
+    token has no rights over its owner's tokens. Anything about another person's tokens needs the
+    `ADMIN` role, and is refused before any lookup, so the answer never says whether that person
+    exists.
     """
 
     def __init__(self, session: Session, authz: AuthorizationService) -> None:
@@ -309,7 +326,7 @@ class PatService:
             is not None
         )
 
-    def list(self, p: PrincipalRef, principal_name: str) -> builtins.list[PersonalAccessToken]:
+    def list(self, p: PrincipalRef, principal_name: str) -> builtins.list[ListedPat]:
         """List every PAT issued to a principal.
 
         Parameters
@@ -321,9 +338,9 @@ class PatService:
 
         Returns
         -------
-        list of PersonalAccessToken
-            Every PAT row for that principal. Rows carry only `secret_hash`,
-            never a retrievable secret.
+        list of ListedPat
+            Every PAT row for that principal, revoked and expired ones too, each with the
+            principal's name. Rows carry only `secret_hash`, never a retrievable secret.
 
         Raises
         ------
@@ -337,12 +354,80 @@ class PatService:
         if not self._own(p, principal_name):
             authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         principal = self._get_principal(principal_name)
-        return list(
-            self._session.execute(
-                select(PersonalAccessToken).where(PersonalAccessToken.principal_id == principal.id)
+        rows = self._session.execute(
+            select(PersonalAccessToken).where(PersonalAccessToken.principal_id == principal.id)
+        ).scalars()
+        return [ListedPat(token=row, owner=principal.name) for row in rows]
+
+    def list_all(
+        self,
+        p: PrincipalRef,
+        *,
+        owner: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> Page[ListedPat]:
+        """List the live PATs of every principal, newest first, one page at a time.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        owner
+            Only this principal's tokens; `None` for everyone's.
+        limit
+            Most tokens returned.
+        cursor
+            The `next_cursor` of the previous page. Send the same `owner` with every page.
+
+        Returns
+        -------
+        Page of ListedPat
+            The tokens neither revoked nor expired, by creation time, newest first, equal times
+            by id, each with its owner's name, and the cursor of the next page.
+
+        Raises
+        ------
+        PermissionDenied
+            If the acting principal does not hold the `ADMIN` role on the instance
+            (`MANAGE_TOKEN` works only with it); a task or CI token is refused too.
+        NotFoundError
+            If `owner` is given and no principal has that name.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for the tokens
+            list.
+        """
+        authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        query = select(PersonalAccessToken).where(
+            PersonalAccessToken.revoked_at.is_(None),
+            or_(
+                PersonalAccessToken.expires_at.is_(None),
+                PersonalAccessToken.expires_at > datetime.now(UTC),
+            ),
+        )
+        if owner is not None:
+            query = query.where(PersonalAccessToken.principal_id == self._get_principal(owner).id)
+        page = newest_first(
+            self._session,
+            query,
+            kind="tokens",
+            at=PersonalAccessToken.created_at,
+            row_id=PersonalAccessToken.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
+        names = {
+            principal_id: principal_name
+            for principal_id, principal_name in self._session.execute(
+                select(Principal.id, Principal.name).where(
+                    Principal.id.in_({row.principal_id for row in page.items})
+                )
             )
-            .scalars()
-            .all()
+        }
+        return Page(
+            [ListedPat(token=row, owner=names[row.principal_id]) for row in page.items],
+            page.next_cursor,
         )
 
     def revoke(

@@ -1,8 +1,16 @@
 """Tests for the shared token-masking helper."""
 
+from datetime import UTC, datetime
+from typing import Any
+
+import httpx
 import pytest
 
+from lakana._config import ResolvedConfig
+from lakana._http import NEXT_CURSOR_HEADER, HttpTransport
+from lakana._models import Token
 from lakana._tokens import mask_token
+from lakana.resources.tokens import Tokens, _token_from_json
 
 
 @pytest.mark.parametrize(
@@ -38,3 +46,91 @@ def test_mask_token_hides_a_token_missing_its_secret_segment() -> None:
     recognised, so the whole thing is masked rather than partially shown.
     """
     assert mask_token("lakana_pat_abc123") == "***"
+
+
+_ROW: dict[str, Any] = {
+    "key_id": "k1",
+    "name": "laptop",
+    "owner": "bob",
+    "created_at": "2026-11-01T09:00:00Z",
+    "last_used_at": None,
+    "expires_at": "2027-01-01T00:00:00Z",
+    "revoked_at": None,
+}
+
+
+def _tokens(
+    pages: list[tuple[list[dict[str, Any]], str | None]], seen: list[httpx.Request]
+) -> Tokens:
+    """Build a `Tokens` resource whose server answers successive requests with successive pages.
+
+    Parameters
+    ----------
+    pages
+        The body and the `X-Next-Cursor` header (or `None`) of each answer; the last repeats.
+    seen
+        Where to record the requests.
+
+    Returns
+    -------
+    Tokens
+        The resource.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body, cursor = pages[min(len(seen), len(pages) - 1)]
+        seen.append(request)
+        headers = {} if cursor is None else {NEXT_CURSOR_HEADER: cursor}
+        return httpx.Response(200, json=body, headers=headers)
+
+    config = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=config.url)
+    return Tokens(HttpTransport(config, http_client=client))
+
+
+def test_a_token_reads_its_owner_and_dates() -> None:
+    """The four fields of a listed token are read as names and times."""
+    assert _token_from_json(_ROW) == Token(
+        key_id="k1",
+        name="laptop",
+        last_used_at=None,
+        owner="bob",
+        created_at=datetime(2026, 11, 1, 9, tzinfo=UTC),
+        expires_at=datetime(2027, 1, 1, tzinfo=UTC),
+        revoked_at=None,
+    )
+
+
+def test_an_older_servers_token_reads_them_as_none() -> None:
+    """A body without the new keys still parses."""
+    token = _token_from_json({"key_id": "k1", "name": "laptop", "last_used_at": None})
+    assert (token.owner, token.created_at, token.expires_at, token.revoked_at) == (
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+def test_list_all_sends_owner_and_reads_the_cursor_header() -> None:
+    """`list_all_page` asks `GET /api/v1/tokens` with the filters and keeps the next cursor."""
+    seen: list[httpx.Request] = []
+    tokens = _tokens([([_ROW], "next-1")], seen)
+
+    page = tokens.list_all_page(owner="bob", limit=5, cursor="c0")
+
+    assert seen[0].url.path == "/api/v1/tokens"
+    assert dict(seen[0].url.params) == {"owner": "bob", "limit": "5", "cursor": "c0"}
+    assert page.next_cursor == "next-1"
+    assert [t.owner for t in page.items] == ["bob"]
+    assert [t.key_id for t in tokens.list_all()] == ["k1"]
+
+
+def test_iter_all_follows_every_page() -> None:
+    """`iter_all` fetches pages until the cursor runs out."""
+    seen: list[httpx.Request] = []
+    second = {**_ROW, "key_id": "k2"}
+    tokens = _tokens([([_ROW], "p2"), ([second], None)], seen)
+
+    assert [t.key_id for t in tokens.iter_all(owner="bob", page_size=1)] == ["k1", "k2"]
+    assert dict(seen[1].url.params) == {"owner": "bob", "limit": "1", "cursor": "p2"}

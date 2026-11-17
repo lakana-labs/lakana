@@ -27,11 +27,12 @@ from lakana_core.errors import (
     NotFoundError,
     PermissionDenied,
     StepUpRequired,
+    ValidationError,
 )
 from lakana_core.grants.admin import admin_only_message, may_manage_tokens
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
-from lakana_core.identity.pats import OWN_TOKEN_FROM_BROWSER, PatService
+from lakana_core.identity.pats import OWN_TOKEN_FROM_BROWSER, ListedPat, PatService
 from lakana_core.identity.tokens import GeneratedToken, hash_secret, parse_token
 from lakana_core.models import (
     AuditEvent,
@@ -41,6 +42,7 @@ from lakana_core.models import (
     Principal,
     PrincipalType,
 )
+from lakana_core.pagination import encode_cursor
 
 
 def _admin(session: Session) -> PrincipalRef:
@@ -145,8 +147,8 @@ def test_verify_updates_last_used_at(session: Session) -> None:
 
     service.verify(issued.key_id, secret)
 
-    [pat] = service.list(_admin(session), "alice")
-    assert pat.last_used_at is not None
+    [listed] = service.list(_admin(session), "alice")
+    assert listed.token.last_used_at is not None
 
 
 def test_verify_rejects_an_expired_pat(session: Session) -> None:
@@ -199,7 +201,8 @@ def test_list_never_exposes_a_secret_or_its_hash(session: Session) -> None:
     _add_principal(session, "alice")
     service = PatService(session, AllowAllAuthorization())
     service.issue(_admin(session), "alice", name="laptop")
-    [pat] = service.list(_admin(session), "alice")
+    [listed] = service.list(_admin(session), "alice")
+    pat = listed.token
     assert not hasattr(pat, "secret")
     assert pat.name == "laptop"
 
@@ -600,7 +603,7 @@ def test_a_person_lists_and_revokes_their_own_tokens_with_a_pat_or_a_session(
     second = service.issue(_in_browser(bob, touched_minutes_ago=0), "bob", name="two")
     stale = _in_browser(bob, touched_minutes_ago=60)
     for ref in (bob, stale):
-        assert {t.key_id for t in service.list(ref, "bob")} == {first.key_id, second.key_id}
+        assert {t.token.key_id for t in service.list(ref, "bob")} == {first.key_id, second.key_id}
     service.revoke(bob, "bob", first.key_id)
     service.revoke(stale, "bob", second.key_id)
     assert all(t.revoked_at is not None for t in _tokens_of(session, bob))
@@ -692,3 +695,95 @@ def test_a_self_made_token_stops_when_its_owner_is_deactivated(session: Session)
     session.commit()
     with pytest.raises(AuthenticationError):
         service.verify(*parsed)
+
+
+def _stamp(
+    session: Session, ref: PrincipalRef, name: str, *, minutes_ago: int, **changes: datetime
+) -> str:
+    """Issue a token for `ref`, then move its creation time and set other columns.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ref
+        The owner.
+    name
+        The token's label.
+    minutes_ago
+        How long ago it was created.
+    **changes
+        Other columns to set (`revoked_at`, `expires_at`).
+
+    Returns
+    -------
+    str
+        The token's key id.
+    """
+    issued = PatService(session, AllowAllAuthorization()).issue(ref, ref.name, name=name)
+    row = session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.key_id == issued.key_id)
+    ).scalar_one()
+    row.created_at = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    for column, value in changes.items():
+        setattr(row, column, value)
+    session.commit()
+    return issued.key_id
+
+
+def test_list_all_pages_every_live_token_once_newest_first(session: Session) -> None:
+    """Five tokens over three owners, one revoked and one expired: three live ones, once each."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    cy = _person(session, "cy")
+    now = datetime.now(UTC)
+    oldest = _stamp(session, ada, "a", minutes_ago=50)
+    _stamp(session, bob, "revoked", minutes_ago=40, revoked_at=now)
+    newest = _stamp(session, cy, "c", minutes_ago=10)
+    _stamp(session, bob, "expired", minutes_ago=30, expires_at=now - timedelta(minutes=1))
+    middle = _stamp(session, bob, "b", minutes_ago=20)
+    service = PatService(session, _auditing(session))
+
+    first = service.list_all(ada, limit=2)
+    assert first.next_cursor is not None
+    second = service.list_all(ada, limit=2, cursor=first.next_cursor)
+
+    seen = [(listed.token.key_id, listed.owner) for listed in (*first.items, *second.items)]
+    assert seen == [(newest, "cy"), (middle, "bob"), (oldest, "ada")]
+    assert all(isinstance(listed, ListedPat) for listed in first.items)
+    assert second.next_cursor is None
+    with pytest.raises(ValidationError):
+        service.list_all(ada, cursor=encode_cursor("grants", now, uuid.uuid4()))
+
+
+def test_list_all_filters_by_owner_and_404s_an_unknown_one(session: Session) -> None:
+    """`owner` keeps one person's live tokens; a name nobody has is not found."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    _stamp(session, ada, "a", minutes_ago=5)
+    mine = _stamp(session, bob, "b", minutes_ago=4)
+    service = PatService(session, _auditing(session))
+
+    assert [listed.token.key_id for listed in service.list_all(ada, owner="bob").items] == [mine]
+    with pytest.raises(NotFoundError):
+        service.list_all(ada, owner="nobody")
+
+
+def test_list_all_is_for_an_administrator_only(session: Session) -> None:
+    """A person, and the administrator's own task token, are refused."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    for ref in (bob, _task_ref(ada)):
+        with pytest.raises(PermissionDenied):
+            service.list_all(ref)
+
+
+def test_list_returns_each_token_with_its_owner(session: Session) -> None:
+    """`list` answers `ListedPat` items carrying the owner's name."""
+    bob = _person(session, "bob")
+    _stamp(session, bob, "laptop", minutes_ago=1)
+    [listed] = PatService(session, _auditing(session)).list(bob, "bob")
+    assert isinstance(listed, ListedPat)
+    assert listed.owner == "bob"
+    assert listed.token.name == "laptop"

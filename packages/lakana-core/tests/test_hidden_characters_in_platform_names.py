@@ -290,12 +290,12 @@ def test_a_stored_token_name_with_a_hidden_character_stays_usable(session: Sessi
     session.query(PersonalAccessToken).update({PersonalAccessToken.name: name})
     session.commit()
 
-    assert [token.name for token in service.list(admin, admin.name)] == [name]
+    assert [listed.token.name for listed in service.list(admin, admin.name)] == [name]
     parsed = parse_token(issued.token, "lakana_pat")
     assert parsed is not None
     assert service.verify(issued.key_id, parsed[1]).id == admin.id
     service.revoke(admin, admin.name, issued.key_id)
-    assert all(token.revoked_at is not None for token in service.list(admin, admin.name))
+    assert all(listed.token.revoked_at is not None for listed in service.list(admin, admin.name))
 
 
 @pytest.mark.parametrize(("name", "code"), _HIDDEN)

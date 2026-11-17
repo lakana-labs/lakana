@@ -353,7 +353,7 @@ def test_every_token_operation_needs_the_admin_role(session: Session, actors: Ac
     _refused_then_allowed(session, actors, Action.MANAGE_TOKEN, issue)
     with pytest.raises(PermissionDenied, match="needs the ADMIN role on the instance"):
         service.list(actors.holder, "carol")
-    assert [pat.key_id for pat in service.list(actors.admin, "carol")] == key_ids
+    assert [listed.token.key_id for listed in service.list(actors.admin, "carol")] == key_ids
     with pytest.raises(PermissionDenied, match="needs the ADMIN role on the instance"):
         service.revoke(actors.holder, "carol", key_ids[0])
     service.revoke(actors.admin, "carol", key_ids[0])
@@ -373,7 +373,7 @@ def test_the_holder_of_manage_token_cannot_issue_with_a_token_for_itself_or_an_a
 _GUARDED = {
     "grants/service.py": ("MANAGE_GRANT", 4),
     "identity/groups.py": ("MANAGE_GROUP", 6),
-    "identity/pats.py": ("MANAGE_TOKEN", 3),
+    "identity/pats.py": ("MANAGE_TOKEN", 4),
     # A CI trust rule lets a CI job act as a service account: issuing it a token, in effect.
     "ci_oidc/rules.py": ("MANAGE_TOKEN", 8),
     # An access file names every kind of access: only an administrator may export, plan or

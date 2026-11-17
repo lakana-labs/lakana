@@ -84,6 +84,7 @@ from lakana_server.api.platform.tables import router as tables_router
 from lakana_server.api.platform.task_connections import router as task_connections_router
 from lakana_server.api.platform.task_tokens import router as task_tokens_router
 from lakana_server.api.platform.terms import router as terms_router
+from lakana_server.api.platform.tokens import all_router as tokens_all_router
 from lakana_server.api.platform.tokens import router as tokens_router
 from lakana_server.api.platform.whoami import router as whoami_router
 from lakana_server.api.routing import describe_openapi
@@ -128,6 +129,7 @@ ROUTERS = (
     principals_router,
     groups_router,
     tokens_router,
+    tokens_all_router,
     task_tokens_router,
     grants_router,
     row_filters_router,

@@ -12053,7 +12053,7 @@
           "tokens"
         ],
         "summary": "Issue a personal access token",
-        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token is never asked for a touch, and a non-administrator's token cannot create a token at all.\n\nIssues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. For another principal it needs the `ADMIN` role on the instance. For oneself, unless one is an administrator, it works only from the web interface: no token can create a token, so a stolen token cannot mint replacements (403). Answers 404 when there is no such principal.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token is never asked for a touch, and a non-administrator's token cannot create a token at all.\n\nIssues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. For another principal it needs the `ADMIN` role on the instance. For oneself, unless one is an administrator, it works only from the web interface: no personal token can create a token, so a stolen token cannot mint replacements (403). Answers 404 when there is no such principal.",
         "operationId": "issue_token_api_v1_principals__name__tokens_post",
         "parameters": [
           {
@@ -12153,7 +12153,7 @@
           "tokens"
         ],
         "summary": "List the tokens of a principal",
-        "description": "Lists the principal's personal access tokens. The token values are never included. Anyone may list their own with a personal token or a web session; anyone else's needs the `ADMIN` role on the instance, and is refused alike whether or not the principal exists. Answers 404 when there is no such principal.",
+        "description": "Lists the principal's personal access tokens, revoked and expired ones too, each with its owner and its creation, last-use, expiry and revocation times. The token values are never included. Anyone may list their own with a personal token or a web session; anyone else's needs the `ADMIN` role on the instance, and is refused alike whether or not the principal exists. Answers 404 when there is no such principal.",
         "operationId": "list_tokens_api_v1_principals__name__tokens_get",
         "parameters": [
           {
@@ -12294,6 +12294,141 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tokens": {
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "List every owner's live tokens",
+        "description": "Lists the personal access tokens that are neither revoked nor expired, newest first, each with its owner. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. Answers 404 when `owner` names no principal.",
+        "operationId": "list_all_tokens_api_v1_tokens_get",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner"
+            },
+            "description": "Only this principal's tokens."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tokens returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `owner`."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TokenOut"
+                  },
+                  "title": "Response List All Tokens Api V1 Tokens Get"
+                }
+              }
+            }
           },
           "401": {
             "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
@@ -37010,6 +37145,15 @@
             "type": "string",
             "title": "Name"
           },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -37021,15 +37165,41 @@
               }
             ],
             "title": "Last Used At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
           }
         },
         "type": "object",
         "required": [
           "key_id",
-          "name"
+          "name",
+          "owner",
+          "created_at"
         ],
         "title": "TokenOut",
-        "description": "Response body for a listed PAT. Never includes a secret.\n\nParameters\n----------\nkey_id\n    The public lookup key.\nname\n    The label given at issuance.\nlast_used_at\n    When this PAT last successfully authenticated a request, or `None`\n    if never."
+        "description": "Response body for a listed PAT. Never includes a secret.\n\nParameters\n----------\nkey_id\n    The public lookup key.\nname\n    The label given at issuance.\nowner\n    The name of the principal the token signs in as.\ncreated_at\n    When the token was issued.\nlast_used_at\n    When this PAT last successfully authenticated a request, or `None`\n    if never.\nexpires_at\n    When the token stops working, or `None` if it never expires.\nrevoked_at\n    When the token was revoked, or `None` while it is not."
       },
       "TranslationCoverageOut": {
         "properties": {

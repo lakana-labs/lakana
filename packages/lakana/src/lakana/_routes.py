@@ -229,6 +229,7 @@ ROUTES: dict[str, Route] = {
     "groups.remove_member": Route("DELETE", "/api/v1/groups/{name}/members/{principal_name}"),
     "tokens.issue": Route("POST", "/api/v1/principals/{name}/tokens"),
     "tokens.list": Route("GET", "/api/v1/principals/{name}/tokens"),
+    "tokens.list_all": Route("GET", "/api/v1/tokens"),
     "tokens.revoke": Route("DELETE", "/api/v1/principals/{name}/tokens/{key_id}"),
     "sign_in.setup_link": Route("POST", "/api/v1/sign-in/setup-link"),
     "sign_in.local_link": Route("POST", "/api/v1/sign-in/local-link"),

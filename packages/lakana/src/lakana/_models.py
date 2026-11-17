@@ -1609,11 +1609,41 @@ class Token:
     last_used_at
         When this PAT last successfully authenticated a request, or `None`
         if never.
+    owner
+        The name of the principal the token signs in as; `None` from a server that does not
+        say.
+    created_at
+        When the token was issued; `None` from a server that does not say.
+    expires_at
+        When the token stops working, or `None` if it never expires (or the server does not
+        say).
+    revoked_at
+        When the token was revoked, or `None` while it is not (or the server does not say).
     """
 
     key_id: str
     name: str
     last_used_at: datetime | None
+    owner: str | None = None
+    created_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class TokenPage:
+    """One page of every owner's live tokens, newest first.
+
+    Parameters
+    ----------
+    items
+        The tokens on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[Token]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)

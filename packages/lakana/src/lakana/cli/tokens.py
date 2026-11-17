@@ -7,10 +7,14 @@ from typing import Annotated
 import typer
 
 from lakana.cli import _output
-from lakana.cli._state import confirm, resolve_environment, state_of
+from lakana.cli._paging import CURSOR, LIMIT, more_results
+from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 
 token_app = typer.Typer(help="Manage personal access tokens.", no_args_is_help=True)
 task_token_app = typer.Typer(help="Mint and revoke task tokens.", no_args_is_help=True)
+
+_DROPPABLE = ("revoked_at", "expires_at", "created_at")
+"""The columns of a token list left out first, when the terminal is too narrow for all of them."""
 
 _YES = Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")]
 
@@ -47,18 +51,60 @@ def issue(ctx: typer.Context, principal: str, name: str) -> None:
 
 
 @token_app.command("list")
-def list_tokens(ctx: typer.Context, principal: str) -> None:
-    """List PRINCIPAL's tokens (never their secrets).
+def list_tokens(
+    ctx: typer.Context,
+    principal: Annotated[
+        str | None, typer.Argument(help="Whose tokens to list; yours when left out.")
+    ] = None,
+    all_owners: Annotated[
+        bool,
+        typer.Option(
+            "--all", help="List every owner's live tokens, with an owner column (admin only)."
+        ),
+    ] = False,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
+) -> None:
+    """List your tokens, or PRINCIPAL's (never their secrets).
+
+    Without a name, your own. `--all` lists the live tokens of every owner, newest first, with
+    an owner column; it needs the ADMIN role and prints a "More results" line with the command
+    that shows the next page.
 
     Parameters
     ----------
     ctx
         The Typer context.
     principal
-        The principal.
+        The principal; yourself when left out.
+    all_owners
+        `--all`: every owner's live tokens.
+    limit
+        Most tokens returned (1 to 200) with `--all`; the server's default when omitted.
+    cursor
+        The cursor of the page to show with `--all`.
+
+    Raises
+    ------
+    CliError
+        With exit code 2, if `--all` is given with a name, or `--limit` or `--cursor` without
+        `--all`.
     """
+    if all_owners and principal is not None:
+        raise CliError("--all lists every owner's tokens; leave out PRINCIPAL.")
+    if not all_owners and (limit is not None or cursor is not None):
+        raise CliError("--limit and --cursor page the --all list.")
     state = state_of(ctx)
-    _output.emit(state, state.client().tokens.list(principal))
+    client = state.client()
+    if all_owners:
+        page = client.tokens.list_all_page(limit=limit, cursor=cursor)
+        _output.emit(state, page.items, droppable=_DROPPABLE)
+        more_results(
+            state, ["lakana", "token", "list", "--all"], {"--limit": limit}, page.next_cursor
+        )
+        return
+    who = principal if principal is not None else client.whoami().name
+    _output.emit(state, client.tokens.list(who), droppable=_DROPPABLE)
 
 
 @token_app.command("revoke")

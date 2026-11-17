@@ -412,6 +412,7 @@
 "GET /api/v1/tables/tree": { class: read, part: 3, done: true }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
+"GET /api/v1/tokens": { class: ui, part: 7 }
 "GET /api/v1/whoami": { class: read, part: 1 }
 "GET /api/v1/workers": { class: ui, part: 8 }
 "PATCH /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
