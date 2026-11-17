@@ -9,7 +9,7 @@ name: Scheduled failure report
 
 on:
   workflow_run:
-    workflows: ["Dependency canary", "CodeQL", "Scorecard", "Security (deep)"]
+    workflows: ["Dependency canary", "CodeQL", "Fuzzing", "Scorecard", "Security (deep)"]
     types: [completed]
 
 permissions: {}

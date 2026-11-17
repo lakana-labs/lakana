@@ -390,7 +390,8 @@ def restore_rows(
     -------
     dict
         The `ENVIRONMENT_RESTORED` event's detail: ``tables``, ``restored_policies`` and
-        ``deleted_at``.
+        ``deleted_at``, and ``skipped_grants`` when a grant stayed revoked because its twin is
+        live (``{"id", "kept_grant_id"}`` each).
 
     Raises
     ------
@@ -425,14 +426,19 @@ def restore_rows(
                 RESTORE_FILES_GONE_MESSAGE.format(name=env.name, table=shown(dotted))
             )
     restored_policies: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
     for record in records:
-        restored_policies += _restore_one(session, actor, env, record, now=now)
-    restored_policies += unrevoke(session, env.revoked_policy_ids or [], revoked_at=env.deleted_at)
-    detail = {
+        restored_policies += _restore_one(session, actor, env, record, now=now, skipped=skipped)
+    restored_policies += unrevoke(
+        session, env.revoked_policy_ids or [], revoked_at=env.deleted_at, skipped=skipped
+    )
+    detail: dict[str, object] = {
         "tables": len(records),
         "restored_policies": len(restored_policies),
         "deleted_at": env.deleted_at.isoformat(),
     }
+    if skipped:
+        detail["skipped_grants"] = skipped
     env.deleted_at = None
     env.deleted_by = None
     env.purge_after = None
@@ -443,7 +449,13 @@ def restore_rows(
 
 
 def _restore_one(
-    session: Session, actor: PrincipalRef, env: Environment, record: TableLocation, *, now: datetime
+    session: Session,
+    actor: PrincipalRef,
+    env: Environment,
+    record: TableLocation,
+    *,
+    now: datetime,
+    skipped: list[dict[str, str]],
 ) -> list[dict[str, str]]:
     """Bring one of a deletion's tables back from its locked tombstone.
 
@@ -459,6 +471,8 @@ def _restore_one(
         The tombstone, locked and checked.
     now
         The restore's time.
+    skipped
+        Gets the grants left revoked because their twin is live (`unrevoke`).
 
     Returns
     -------
@@ -488,9 +502,11 @@ def _restore_one(
         )
     row = restore_table(session, snapshot, namespace_id=namespace_id, name=name)
     retention_cleared = refresh_restored(row, actor.id, now)
+    own: list[dict[str, str]] = []
     restored = restore_policies(
-        session, record, table_id=row.id, namespace=namespace.joined(), name=name
+        session, record, table_id=row.id, namespace=namespace.joined(), name=name, skipped=own
     )
+    skipped += own
     assert record.dropped_at is not None  # nosec B101 -- checked by the caller
     AuditService(session).record(
         actor.id,
@@ -504,6 +520,7 @@ def _restore_one(
             "dropped_at": record.dropped_at.isoformat(),
             "restored_policies": restored,
             "retention_cleared": retention_cleared,
+            **({"skipped_grants": own} if own else {}),
         },
     )
     revive(record)

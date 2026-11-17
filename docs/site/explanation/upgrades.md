@@ -278,6 +278,29 @@ host.** Before you upgrade such an instance, run the server and the workers with
 ([A storage root on a local directory](../how-to/deploy-with-compose.md#a-storage-root-on-a-local-directory)).
 Files written before keep their mode. Storage on S3 or SeaweedFS is not affected.
 
+### A grant that already exists is refused (breaking)
+
+Creating a grant identical to one that is in force (the same principal or group, the same role or
+action, and the same instance, environment, namespace or table) used to make a second copy. It is
+now refused with 409 and nothing is created, through `lakana grant create`, `client.grants.grant`
+and `POST /api/v1/grants` alike; the message names the grant that exists, for example
+`Principal 'tess' already holds ANALYST on environment 'dev' through grant 0b6f…; nothing was
+created.` The SDK raises `lakana.errors.Conflict`. A script that creates the same grant on every
+run must treat that answer as done, or check `lakana grant list` first. An access file is not
+affected: it creates only the grants the instance does not have yet.
+
+Migration `0080` keeps the oldest of each set of identical grants in force and revokes the other
+copies, so everyone keeps exactly the access they had. Each revoked copy gets a `GRANT_REVOKED`
+audit event without an actor, with `reason` `duplicate` and the id of the kept grant in
+`kept_grant_id`. The migration then adds a unique index per grant kind, so the database refuses a
+copy too. It runs with the other migrations, and nothing else has to be done. Going back drops the
+indexes; the revoked copies stay revoked.
+
+A table undrop or an environment restore leaves a grant it would bring back revoked when an
+identical grant is in force, and its `TABLE_UNDROPPED` or `ENVIRONMENT_RESTORED` event lists it
+under `skipped_grants`, each with the `id` of the grant left revoked and the `kept_grant_id` of
+the one in force.
+
 ### Indexes on the artifact tables
 
 Migration `0079` adds six indexes to `artifact_versions` and `artifact_uploads`, so deleting a

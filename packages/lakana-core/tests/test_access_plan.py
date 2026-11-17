@@ -128,7 +128,7 @@ def test_the_plan_lists_creates_changes_and_removals(session: Session) -> None:
     assert [c.text for c in plan.removals] == [
         "grant role ANALYST on environment prod to group:finance"
     ]
-    assert len(plan.removals[0].ids) == 2
+    assert len(plan.removals[0].ids) == 1
     assert [c.op for c in plan.changed] == ["change"]
     change = plan.changed[0]
     assert change.path == "ci_trust[0]"

@@ -57,6 +57,15 @@ check = [
     "cryptography>=50.0.2",
     "PyMySQL>=1.2.3",
 ]
+# The fuzz harnesses (fuzz/, ClusterFuzzLite); nothing else imports it. ClusterFuzzLite's builder
+# image brings its own Atheris for its Python; this group is for running a harness locally and
+# puts Atheris through the licence and audit gates. Wheels exist only for CPython 3.12 to 3.14 on
+# x86-64 Linux (no sdist), hence the markers. Apache-2.0, the wheel's
+# `atheris-3.1.0.dist-info/licenses/LICENSE`; its metadata names no licence, so pip-licenses
+# reports UNKNOWN, which scripts/check_licenses.py passes: re-read that file on an upgrade.
+fuzz = [
+    "atheris==3.1.0; python_version >= '3.12' and sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
 # The documentation site (docs/site), built in CI.
 docs = [
     "zensical>=0.1.1",

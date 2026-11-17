@@ -66,6 +66,11 @@ Created grant c913f5e7-8bf0-4b21-9630-46de66a0082d (ANALYST on environment dev) 
 The role `VIEWER` is smaller still: it reads tables and cannot run a query. Roles that do more
 (`DATA_SCIENTIST`, `DATA_ENGINEER`, `ADMIN`) are for people who deploy or administer.
 
+The same grant again (the same person or group, role or action, and object) is refused with 409,
+and nothing is created. The message names the grant that already gives the access, for example
+`Principal 'alice' already holds ANALYST on environment 'dev' through grant c913f5e7-…; nothing
+was created.` To take the access away, revoke that one grant with `lakana grant revoke ID`.
+
 !!! note "Hide rows or columns before you give access"
     A grant on an environment covers every table in it, tables that are created later included.
     If some people must not see some rows or some values, create the

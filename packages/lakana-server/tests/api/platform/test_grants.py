@@ -509,3 +509,47 @@ def test_a_subject_that_is_gone_has_no_name() -> None:
         assert names.principal(None) is None
         assert names.group(gone) is None
         assert names.group(None) is None
+
+
+@pytest.mark.parametrize(
+    ("subject", "target", "shown"),
+    [
+        ({"principal": "alice"}, {"kind": "INSTANCE"}, "the instance"),
+        ({"group": "eng"}, {"kind": "ENVIRONMENT", "environment": "dev"}, "environment 'dev'"),
+        (
+            {"principal": "alice"},
+            {"kind": "NAMESPACE", "environment": "dev", "namespace": "gold"},
+            "namespace gold in 'dev'",
+        ),
+        (
+            {"group": "eng"},
+            {"kind": "TABLE", "environment": "dev", "namespace": "gold", "table": "orders"},
+            "table 'orders' in 'dev'/gold",
+        ),
+    ],
+    ids=["principal-instance", "group-environment", "principal-namespace", "group-table"],
+)
+def test_an_identical_grant_is_409_naming_the_existing_one(
+    client: TestClient, subject: dict[str, str], target: dict[str, str], shown: str
+) -> None:
+    """#673: the second identical grant is refused with a problem that names the first's id."""
+    create_environment(client)
+    create_table(client, "dev", "gold", "orders")
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "alice", "type": "USER"})
+    client.post("/api/v1/groups", headers=AUTH_HEADER, json={"name": "eng"})
+    body = {**subject, "role": "ANALYST", **target}
+    first = client.post("/api/v1/grants", headers=AUTH_HEADER, json=body)
+    assert first.status_code == 201, first.text
+
+    second = client.post("/api/v1/grants", headers=AUTH_HEADER, json=body)
+
+    holder = "Principal 'alice'" if "principal" in subject else "Group 'eng'"
+    assert second.status_code == 409, second.text
+    assert second.json() == {
+        "detail": f"{holder} already holds ANALYST on {shown} through grant "
+        f"{first.json()['id']}; nothing was created.",
+        "type": "AlreadyExistsError",
+    }
+    params = {"principal_name": "alice"} if "principal" in subject else {"group_name": "eng"}
+    listed = client.get("/api/v1/grants", headers=AUTH_HEADER, params=params).json()
+    assert [g["id"] for g in listed] == [first.json()["id"]]
