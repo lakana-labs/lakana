@@ -431,7 +431,7 @@ def request_connection_test(
     "",
     response_model=ConnectionQueuedTestPage,
     status_code=202,
-    responses=errors(403, 404),
+    responses=errors(403, 404, 409),
 )
 def request_connection_tests(
     environment_name: str,
@@ -446,12 +446,14 @@ def request_connection_tests(
     default 200), and handles each connection in turn: a connection whose test is queued or
     running and under 10 minutes old is not queued again, and that test is returned with
     `queued: false`; an older open test is finished as failed first; every other connection
-    gets a new test with `queued: true`. It never answers 409. Poll each test with
+    gets a new test with `queued: true`. An open test is never a 409. Poll each test with
     `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as
     `cursor` for the next page; it takes the cursors of
     `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422.
     Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the
-    environment does not exist.
+    environment does not exist, and 409 when a connection changed at the same time: the
+    connections before it stay queued, and sending the request again returns their tests with
+    `queued: false`.
 
     Parameters
     ----------

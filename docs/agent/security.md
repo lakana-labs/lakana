@@ -5350,8 +5350,10 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   (`docs/site/reference/connections.md`). Test all
   (`POST /api/v1/environments/{env}/connection-tests`) is the same probe once per connection of a
   page: it needs `MANAGE_CONNECTION` and no passkey touch, as a single test does, and writes the
-  same `CONNECTION_TESTED` events (`state: queued`) per connection it queues; a connection with an
-  open test under 10 minutes old gets that test back and writes nothing.
+  same `CONNECTION_TESTED` events (`state: queued`) per connection it queues; a stuck test it
+  closes first (open over 10 minutes) also writes one, `state: done` and `outcome: failed`, as
+  `ConnectionTestQueue.close` records it for the test's requester; a connection with an open test
+  under 10 minutes old gets that test back and writes nothing.
 - **The answer.** `TaskConnectionOut` carries the settings with a `ca_certificate` in full (the
   helper needs it) and `endpoints` from `connections.endpoints.endpoints`, the list the worker's
   egress grants and the binding's audit `url` use too. `Cache-Control: no-store`,

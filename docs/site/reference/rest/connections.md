@@ -340,7 +340,7 @@ Answers:
 
 Queue a test of every connection of an environment (Test all), a page at a time
 
-Takes one page of the environment's connection list, newest first (`limit` 1 to 200, default 200), and handles each connection in turn: a connection whose test is queued or running and under 10 minutes old is not queued again, and that test is returned with `queued: false`; an older open test is finished as failed first; every other connection gets a new test with `queued: true`. It never answers 409. Poll each test with `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as `cursor` for the next page; it takes the cursors of `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422. Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the environment does not exist.
+Takes one page of the environment's connection list, newest first (`limit` 1 to 200, default 200), and handles each connection in turn: a connection whose test is queued or running and under 10 minutes old is not queued again, and that test is returned with `queued: false`; an older open test is finished as failed first; every other connection gets a new test with `queued: true`. An open test is never a 409. Poll each test with `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as `cursor` for the next page; it takes the cursors of `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422. Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the environment does not exist, and 409 when a connection changed at the same time: the connections before it stay queued, and sending the request again returns their tests with `queued: false`.
 
 Parameters:
 
@@ -359,6 +359,7 @@ Answers:
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
 Answer fields: `ConnectionQueuedTestPage`

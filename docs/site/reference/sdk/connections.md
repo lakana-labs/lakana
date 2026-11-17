@@ -207,6 +207,7 @@ Returns: `QueuedConnectionTestPage`. A test for each connection of the page, and
 | Error | When |
 |---|---|
 | `lakana.PermissionDenied` | Without `MANAGE_CONNECTION` in the environment. |
+| `lakana.Conflict` | If a connection changed at the same time; the ones before it stay queued, and calling again returns their tests as already open. |
 | `lakana.NotFound` | If the environment does not exist; or, with a sentence saying so, if the server is older than this package and has no Test all. |
 | `lakana.ValidationError` | If `limit` is outside 1 to 200 or `cursor` is not one the server issued for the environment's connection list. |
 
@@ -229,5 +230,6 @@ Returns: `dict of str to ConnectionTest`. Each connection's name to its test, ne
 | Error | When |
 |---|---|
 | `lakana.PermissionDenied` | Without `MANAGE_CONNECTION` in the environment. |
+| `lakana.Conflict` | If a connection changed at the same time; the ones before it stay queued, and calling again returns their tests as already open. |
 | `lakana.NotFound` | If the environment does not exist, or the server has no Test all. |
 | `TimeoutError` | If a test is not done after `timeout` seconds; the message names every connection still open and how to look at its test again. |

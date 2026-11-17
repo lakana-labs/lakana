@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, get_args
 
 import httpx
 import pytest
@@ -31,6 +31,7 @@ from lakana_core.models import (
     Repository,
     RepositoryKind,
 )
+from lakana_server.api.platform.schemas import ConnectionLastTestOut
 from tests.api.platform.test_artifacts_delete import _task_headers
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment, session_headers, signed_in
@@ -919,6 +920,55 @@ def test_a_reader_gets_the_last_tests_outcome_without_its_message_or_who_ran_it(
             assert item["last_test"]["finished_at"] is not None
             assert item["actions"] == [], who
         assert "/srv/landing" not in listed.text + shown.text + across.text
+
+
+def test_the_cross_environment_list_gives_each_row_its_own_environments_rights(
+    client: TestClient, client_as: ClientAs
+) -> None:
+    """A data engineer of `dev` and an analyst of `prod`: each row has its own rights."""
+    mixed = _As(client, _token(client, "mixed", "DATA_ENGINEER", "dev"))
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "mixed",
+            "role": "ANALYST",
+            "kind": "ENVIRONMENT",
+            "environment": "prod",
+        },
+    )
+    assert granted.status_code == 201, granted.text
+    _directories(client_as("admin"), "prod", ["p-1"])
+    _directories(client_as("admin"), "dev", ["d-1"])
+    read_only = client_as("admin").post(f"{_BASE}/p-1/tests").json()
+    managed = mixed.post("/api/v1/environments/dev/connections/d-1/tests").json()
+    _finish(client, read_only["id"], ConnectionTestOutcome.CREDENTIALS, "/srv/prod-landing: denied")
+    _finish(client, managed["id"], ConnectionTestOutcome.CREDENTIALS, "/srv/dev-landing: denied")
+
+    response = mixed.get(_ALL)
+
+    assert response.status_code == 200, response.text
+    rows = {item["environment"]: item for item in response.json()["items"]}
+    assert set(rows) == {"dev", "prod"}
+    assert set(rows["dev"]["last_test"]) == {"state", "outcome", "finished_at"} | _HELD_BACK
+    assert rows["dev"]["last_test"]["id"] == managed["id"]
+    assert rows["dev"]["last_test"]["created_at"] == managed["created_at"]
+    assert rows["dev"]["last_test"]["message"] == "/srv/dev-landing: denied"
+    assert rows["dev"]["last_test"]["requested_by"] == "mixed"
+    assert rows["dev"]["actions"] == ["test", "update", "delete"]
+    assert set(rows["prod"]["last_test"]) == {"state", "outcome", "finished_at"}
+    assert rows["prod"]["actions"] == []
+    assert "/srv/prod-landing" not in response.text
+
+
+def test_the_last_tests_state_and_outcome_name_every_value_of_their_enums() -> None:
+    """The schema's hand-written Literals cannot drift from the core enums."""
+    fields = ConnectionLastTestOut.model_fields
+    state = fields["state"].annotation
+    (outcome,) = (arg for arg in get_args(fields["outcome"].annotation) if arg is not type(None))
+
+    assert set(get_args(state)) == {value.value for value in ConnectionTestState}
+    assert set(get_args(outcome)) == {value.value for value in ConnectionTestOutcome}
 
 
 def test_a_manager_gets_the_tests_message_and_who_ran_it(

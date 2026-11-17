@@ -2429,6 +2429,8 @@ def _add_test(
     outcome: ConnectionTestOutcome | None = None,
     requested_by: uuid.UUID | None = None,
     test_id: uuid.UUID | None = None,
+    environment: str = "prod",
+    message: str | None = None,
 ) -> ConnectionTest:
     """Insert a connection test of a given time and state.
 
@@ -2448,13 +2450,17 @@ def _add_test(
         Who asked; the data engineer by default.
     test_id
         Its id; a new one by default.
+    environment
+        The connection's environment; `prod` by default.
+    message
+        Its message; none by default.
 
     Returns
     -------
     ConnectionTest
         The stored row.
     """
-    env = world.session.scalars(select(Environment).where(Environment.name == "prod")).one()
+    env = world.session.scalars(select(Environment).where(Environment.name == environment)).one()
     row = ConnectionTest(
         id=test_id or uuid.uuid4(),
         connection_id=connection_id,
@@ -2462,6 +2468,7 @@ def _add_test(
         requested_by=requested_by or world.data_engineer.id,
         state=state,
         outcome=outcome,
+        message=message,
         created_at=at,
         finished_at=at if state == ConnectionTestState.DONE else None,
     )
@@ -2701,6 +2708,42 @@ def test_the_cross_environment_list_pages_every_readable_connection_once(world: 
     assert second.next_cursor is None
     assert {view.actions for view in first.items + second.items} == {("test", "update", "delete")}
     assert world.events(AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def test_the_cross_environment_list_gives_each_row_its_own_environments_rights(
+    world: World,
+) -> None:
+    """A data engineer of `dev` and an analyst of `prod` gets each row with that row's rights."""
+    GrantService(world.session, AllowAllAuthorization()).grant(
+        world.admin,
+        principal="alice",
+        role=Role.DATA_ENGINEER,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    for minute, environment in enumerate(("prod", "dev")):
+        _made_at(world, environment, f"{environment}-db", _NOW + timedelta(minutes=minute))
+        _add_test(
+            world,
+            world.connection_id(environment, f"{environment}-db"),
+            at=_NOW + timedelta(minutes=minute),
+            state=ConnectionTestState.DONE,
+            outcome=ConnectionTestOutcome.CREDENTIALS,
+            environment=environment,
+            message=f"{environment}: /srv/landing denied",
+        )
+
+    page = world.connections().list_all(world.analyst)
+
+    managed, read_only = page.items
+    assert (managed.environment, read_only.environment) == ("dev", "prod")
+    assert managed.actions == ("test", "update", "delete")
+    assert managed.last_test is not None and managed.last_test.detail is not None
+    assert managed.last_test.detail.message == "dev: /srv/landing denied"
+    assert managed.last_test.detail.requested_by == "dana"
+    assert read_only.actions == ()
+    assert read_only.last_test is not None and read_only.last_test.detail is None
+    assert read_only.last_test.outcome == ConnectionTestOutcome.CREDENTIALS
 
 
 def test_list_all_with_an_environment_answers_as_the_per_environment_list(world: World) -> None:
@@ -2981,6 +3024,35 @@ def test_test_all_commits_each_connection_and_a_failure_leaves_no_transaction(
     assert not world.session.in_transaction()
     assert len(_tests_of(world, "prod", "first")) == 1
     assert _tests_of(world, "prod", "second") == []
+
+
+def test_test_all_that_deadlocks_is_a_conflict_and_a_retry_finds_the_tests_before_it(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deadlock on one connection is a 409; the ones before it stay queued for the retry."""
+    for minute, name in enumerate(("second", "first")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+    real = ConnectionService._queue_test
+    deadlocks = [True]
+
+    def deadlocking(self: ConnectionService, *args: Any) -> ConnectionTest:  # ruff: ignore[any-type]
+        if args[2].name == "second" and deadlocks.pop(0):
+            raise OperationalError("insert", {}, _PgError({"C": "40P01"}))
+        return real(self, *args)
+
+    monkeypatch.setattr(ConnectionService, "_queue_test", deadlocking)
+
+    with pytest.raises(ConflictError, match="connection `second` changed at the same time"):
+        service.request_tests(world.data_engineer, "prod")
+    deadlocks.append(False)
+    retried = service.request_tests(world.data_engineer, "prod")
+
+    assert [(item.connection, item.queued) for item in retried.items] == [
+        ("first", False),
+        ("second", True),
+    ]
+    assert len(_tests_of(world, "prod", "first")) == 1
 
 
 def test_test_all_answers_for_a_connection_deleted_after_its_test_was_queued(

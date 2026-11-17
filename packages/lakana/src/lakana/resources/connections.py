@@ -772,6 +772,9 @@ class Connections:
         ------
         lakana.errors.PermissionDenied
             Without `MANAGE_CONNECTION` in the environment.
+        lakana.errors.Conflict
+            If a connection changed at the same time; the ones before it stay queued, and
+            calling again returns their tests as already open.
         lakana.errors.NotFound
             If the environment does not exist; or, with a sentence saying so, if the server is
             older than this package and has no Test all.
@@ -817,6 +820,9 @@ class Connections:
         ------
         lakana.errors.PermissionDenied
             Without `MANAGE_CONNECTION` in the environment.
+        lakana.errors.Conflict
+            If a connection changed at the same time; the ones before it stay queued, and
+            calling again returns their tests as already open.
         lakana.errors.NotFound
             If the environment does not exist, or the server has no Test all.
         TimeoutError
