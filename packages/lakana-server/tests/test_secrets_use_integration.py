@@ -78,6 +78,7 @@ _STORAGE_ROUTES = frozenset(
         "/api/v1/environments/{env}/namespaces/{path}/tables",
         "/api/v1/environments/{env}/namespaces/{path}/tables/{name}",
         "/api/v1/environments/{name}/orphaned-locations",
+        "/api/v1/environments/{env}/raw",
         "/v1/{prefix}/namespaces/{namespace}/tables/{table}",
     }
 )
@@ -703,6 +704,8 @@ def test_an_error_raised_by_storage_after_the_secret_was_resolved_shows_no_value
             json={},
             allow_5xx=True,
         ),
+        # The listing of raw/ (#672) says the same, and shows no value of the secret.
+        stack.call("GET", f"/api/v1/environments/{_ENV}/raw", allow_5xx=True),
     ]
     for answer in orphaned:
         assert answer.status_code == 502, answer.text
