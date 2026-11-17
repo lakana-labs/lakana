@@ -35,6 +35,7 @@ Returns: `Grant`. The created grant.
 |---|---|
 | `lakana.ValidationError` | If the given fields don't form a valid combination. |
 | `lakana.NotFound` | If the named principal, group, or securable does not exist. |
+| `lakana.Conflict` | If the principal or group already holds the same role or action on the same securable (the message names that grant's id; nothing is created), or an access file manages the scope. |
 
 ### `client.grants.list`
 

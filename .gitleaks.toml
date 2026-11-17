@@ -28,6 +28,8 @@ regexes = [
   '''m5c2aintegrationsecret''',   # its secret half
   # A grant in a test: the words TOKEN and kind= on one line are read as a key and its value.
   '''principal_id=bob.id, action=Action.MANAGE_TOKEN, kind=SecurableKind.INSTANCE''',
+  # The same grant with one holder per row (#673: identical grants are refused).
+  '''principal_id=holder.id, action=Action.MANAGE_TOKEN, kind=SecurableKind.INSTANCE''',
   # Two made-up example values that earlier commits of #247 had in
   # docs/site/reference/ci-trust-rules.md (now placeholders); the pull request's commit scan still
   # reads those commits.
