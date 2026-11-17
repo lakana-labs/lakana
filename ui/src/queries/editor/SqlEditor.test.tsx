@@ -4,12 +4,28 @@ import { act, render, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { CompletionCatalog } from "./catalog";
 import { editorSources, registerEditorSource } from "./extensions";
 import SqlEditor, { type SqlEditorHandle } from "./SqlEditor";
 
 type Props = ComponentProps<typeof SqlEditor>;
 
 const SQL = "select *\nfrom gold.station_ranking";
+
+/**
+ * A catalog that knows no names, as the screen hands one in for an environment.
+ *
+ * @returns The catalog.
+ */
+function emptyCatalog(): CompletionCatalog {
+  return {
+    namespaces: () => Promise.resolve([]),
+    tables: () => Promise.resolve([]),
+    columns: () => Promise.resolve(null),
+  };
+}
+
+const PROD = emptyCatalog();
 
 /**
  * The properties of an editor, each callback a mock.
@@ -24,7 +40,7 @@ function props(overrides: Partial<Props> = {}): Props {
     onRun: vi.fn(),
     onCancel: vi.fn(() => false),
     readOnly: false,
-    environment: "prod",
+    catalog: PROD,
     error: null,
     label: "SQL of Untitled query",
     ...overrides,
@@ -222,17 +238,17 @@ describe("SqlEditor", () => {
     const { rerender, unmount } = render(<SqlEditor {...props()} />);
     expect(catalog()).toEqual(["catalog"]);
 
-    rerender(<SqlEditor {...props({ environment: "dev" })} />);
+    rerender(<SqlEditor {...props({ catalog: emptyCatalog() })} />);
     expect(catalog()).toEqual(["catalog"]);
-    rerender(<SqlEditor {...props({ environment: null })} />);
+    rerender(<SqlEditor {...props({ catalog: null })} />);
     expect(catalog()).toEqual([]);
-    rerender(<SqlEditor {...props({ environment: "prod" })} />);
+    rerender(<SqlEditor {...props({ catalog: PROD })} />);
     unmount();
     expect(catalog()).toEqual([]);
   });
 
   it("starts without the catalog's help when no environment is chosen", () => {
-    const { container } = render(<SqlEditor {...props({ environment: null })} />);
+    const { container } = render(<SqlEditor {...props({ catalog: null })} />);
 
     expect(viewOf(container).state.doc.toString()).toBe(SQL);
     expect(editorSources().map((source) => source.id)).not.toContain("catalog");

@@ -17,8 +17,14 @@ import {
 } from "../test/queries";
 import { renderShell } from "../test/render";
 import type { FakeRoute } from "../test/server";
+import { catalogCache } from "./editor/catalog";
 import { EditorSkeleton, RunLine } from "./QueryWork";
 import type { QueryRunState } from "./useQueryRun";
+
+vi.mock("./editor/catalog", async (original) => {
+  const real = await original<typeof import("./editor/catalog")>();
+  return { ...real, catalogCache: vi.fn(real.catalogCache) };
+});
 
 const RUN_PATH = `/queries/prod/runs/${RUN_ID}`;
 const PROD_RUNS = "/api/v1/environments/prod/queries";
@@ -101,6 +107,18 @@ describe("the Queries screen's work", () => {
 
     expect(screen.getByRole("button", { name: "Environment: dev" })).toBeInTheDocument();
     expect(window.localStorage.getItem("lakana.queries.environment")).toBe("dev");
+  });
+
+  it("hands the editor the chosen environment's catalog for completion and hover", async () => {
+    window.localStorage.setItem("lakana.queries.environment", "prod");
+    const { user } = renderShell("/queries", { routes: routes() });
+    await editor();
+    expect(catalogCache).toHaveBeenLastCalledWith("prod");
+
+    await user.click(await screen.findByRole("button", { name: "Environment: prod, protected" }));
+    await user.click(screen.getByRole("option", { name: "dev" }));
+
+    expect(catalogCache).toHaveBeenLastCalledWith("dev");
   });
 
   it("falls back to the first listed environment when the remembered one is gone", async () => {

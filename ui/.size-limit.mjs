@@ -65,6 +65,9 @@ const NAMED_LIMITS = [
   // name, visibility, Save and Save as new, Delete… with its question and the note after it, the
   // saved query's address with the administrator's view of one whose SQL may not be read, and
   // their strings.
+  // Measured 9.85 kB (2026-11-17) with the editor's catalog cache (queries/editor/catalog.ts),
+  // which the screen now hands to the editor, so that the editor's chunk reaches no API module
+  // (see the first load below); the limit holds.
   { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
@@ -85,6 +88,8 @@ const NAMED_LIMITS = [
   // Measured 127.11 kB (2026-11-17) with completion and hover from the catalog (its cache, the
   // names after FROM, a namespace or an alias, the column under the pointer) and the loader of
   // Format; the limit holds.
+  // Measured 126.33 kB (2026-11-17) once the catalog cache moved to the screen's chunk; the limit
+  // holds.
   { name: "the SQL editor", prefix: "SqlEditor-", limit: "137.6 kB" },
   // Measured 18.36 kB (2026-11-17) + 10 %: Format, sql-formatter with its DuckDB dialect only,
   // loaded on the first press of Format, never with the editor or in the first load.
@@ -361,6 +366,13 @@ export default [
   // the exports between them cost 0.32 kB. No editor or formatter code is in it; the limit holds.
   // Measured 211.01 kB (2026-11-17) with Saved, Recent, Save… and Delete…, all on demand; the
   // limit holds.
+  // Measured 210.38 kB (2026-11-17; 209.84 kB on main in the same build): two splits undone. The
+  // SQL editor no longer imports the API: the Queries screen hands it the catalog, so the API
+  // client is back in the messages' chunk (-0.32 kB). vite.config.ts keeps React's JSX runtime in
+  // the router's chunk, which the editor's chunk (JSX without react-i18next) had split off into a
+  // chunk of its own (-0.17 kB). What is left is the Queries area's loader with the list of chunks
+  // it preloads, the focus kept on Run after its move, and the download's type check in the API
+  // client.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the

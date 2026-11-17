@@ -34,6 +34,7 @@ import { problemText } from "../sign-in/messages";
 import type { StatusKind } from "../status/status";
 import { StatusLabel } from "../status/StatusLabel";
 import { DeleteSavedDialog } from "./DeleteSavedDialog";
+import { catalogCache } from "./editor/catalog";
 import type { SqlEditorHandle } from "./editor/SqlEditor";
 import { EnvironmentPicker } from "./EnvironmentPicker";
 import { Library } from "./Library";
@@ -356,7 +357,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
             onRun={run}
             onCancel={query.cancel}
             readOnly={readOnly}
-            environment={environment}
+            catalog={catalogCache(environment)}
             error={mark}
             label={t("queries.sql")}
             handle={(handle) => {

@@ -17,7 +17,7 @@ import { Annotation, Compartment, EditorState, type Extension, Prec } from "@cod
 import { drawSelection, EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { type JSX, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 
-import { catalogCache } from "./catalog";
+import type { CompletionCatalog } from "./catalog";
 import { catalogCompletion } from "./completion";
 import { clearOnEdit, errorDiagnostic, errorPosition } from "./errorMark";
 import {
@@ -70,8 +70,12 @@ export interface SqlEditorProps {
   readonly onCancel: () => boolean;
   /** Whether the text may not be changed. */
   readonly readOnly: boolean;
-  /** The environment the query runs in, for completion; null when none is chosen. */
-  readonly environment: string | null;
+  /**
+   * The catalog of the environment the query runs in, for completion and hover; null when none
+   * is chosen. The screen hands it in (`catalogCache`), so that the editor's chunk reads nothing
+   * from the server itself and the API client stays in the first load's chunk.
+   */
+  readonly catalog: CompletionCatalog | null;
   /** The server's error to mark, until the next edit; null for none. */
   readonly error: SqlEditorError | null;
   /** The text box's accessible name, such as "SQL of daily_sales". */
@@ -108,11 +112,11 @@ function settings(readOnly: boolean, label: string): Extension {
 /**
  * The hover of an environment's catalog.
  *
- * @param environment - The environment, or null for none.
+ * @param catalog - The catalog, or null without an environment.
  * @returns The extension; none without an environment.
  */
-function catalogHover(environment: string | null): Extension {
-  return environment === null ? [] : columnHover(catalogCache(environment));
+function catalogHover(catalog: CompletionCatalog | null): Extension {
+  return catalog === null ? [] : columnHover(catalog);
 }
 
 /**
@@ -122,7 +126,7 @@ function catalogHover(environment: string | null): Extension {
  * @returns The host element.
  */
 export default function SqlEditor(props: SqlEditorProps): JSX.Element {
-  const { value, readOnly, label, error, environment } = props;
+  const { value, readOnly, label, error, catalog } = props;
   // The host as state: the view is created once React has attached it.
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const editor = useRef<EditorView | null>(null);
@@ -181,15 +185,12 @@ export default function SqlEditor(props: SqlEditorProps): JSX.Element {
   // explains a column under the pointer.
   useEffect(() => {
     editor.current?.dispatch({
-      effects: compartments.catalog.reconfigure(catalogHover(environment)),
+      effects: compartments.catalog.reconfigure(catalogHover(catalog)),
     });
-    return environment === null
+    return catalog === null
       ? undefined
-      : registerEditorSource({
-          id: "catalog",
-          completion: catalogCompletion(catalogCache(environment)),
-        });
-  }, [compartments, environment]);
+      : registerEditorSource({ id: "catalog", completion: catalogCompletion(catalog) });
+  }, [compartments, catalog]);
 
   const create = useEffectEvent((shadow: ShadowRoot): EditorView => {
     const created = EditorState.create({
@@ -207,7 +208,7 @@ export default function SqlEditor(props: SqlEditorProps): JSX.Element {
         stillWaterTheme,
         stillWaterHighlight,
         compartments.settings.of(settings(readOnly, label)),
-        compartments.catalog.of(catalogHover(environment)),
+        compartments.catalog.of(catalogHover(catalog)),
         // A source's commands come before the default keymap; Ctrl/⌘ Enter stays the run key.
         Prec.high(compartments.sources.of(sourceExtension(sources))),
         EditorView.updateListener.of((update) => {

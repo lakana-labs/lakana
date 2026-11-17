@@ -32,9 +32,16 @@ export default defineConfig({
       output: {
         // react-router stays in one chunk of the first load. A screen loaded on demand that
         // uses only some of its hooks (a table's Actions uses useNavigate) would otherwise split
-        // it in two, and the exports between the parts cost about 1.5 kB gzipped there.
+        // it in two, and the exports between the parts cost about 1.5 kB gzipped there. React's
+        // JSX runtime goes with it: the SQL editor's chunk renders JSX without react-i18next, and
+        // would otherwise split the runtime off into a chunk of its own (0.17 kB more there).
         codeSplitting: {
-          groups: [{ name: "lib", test: /node_modules[\\/]react-router[\\/]/ }],
+          groups: [
+            {
+              name: "lib",
+              test: /node_modules[\\/](react-router[\\/]|react[\\/](jsx-runtime|cjs[\\/]react-jsx-runtime))/,
+            },
+          ],
         },
       },
     },
