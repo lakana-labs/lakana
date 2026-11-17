@@ -1,0 +1,19 @@
+# The npm advisories CI's `npm audit` step lets through (`scripts/npm_audit.py`).
+#
+# Each entry is one advisory in one package, with the reason it is acceptable, the issue that
+# tracks its removal and the date it lapses. The audit fails on an entry whose `until` date has
+# come, on an entry whose package is reachable from a production dependency, and on an entry
+# that no audited lock reports any more, so an entry cannot outlive its reason. Every advisory
+# not listed here fails, as before.
+#
+# osv-scanner reads its own ignore list: an entry here needs the same advisory in the
+# `osv-scanner.toml` next to the lock, with `ignoreUntil` set to the same date.
+
+[[advisory]]
+id = "GHSA-fc5q-39xc-vjpf"
+package = "picomatch"
+reason = """ReDoS in picomatch <= 4.0.7, no fixed release yet. In ui/ it comes in only through \
+dev tooling (vite, vitest, knip, dependency-cruiser and their tinyglobby/fdir), which match \
+globs from this repository; it is not in the built bundle. Remove when picomatch releases a fix."""
+issue = 709
+until = 2026-12-01
