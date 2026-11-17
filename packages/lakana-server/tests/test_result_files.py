@@ -5,7 +5,7 @@ import math
 import struct
 import uuid
 import zipfile
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
 import fastexcel
@@ -172,6 +172,52 @@ def test_file_cells_writes_nested_values_as_compact_json_and_a_uuid_as_text() ->
     ]
 
 
+def test_file_cells_writes_every_value_inside_a_nested_value_as_json_text() -> None:
+    """Infinity, a decimal, a date, a NULL item, a dictionary item and a union's child."""
+    union = pa.UnionArray.from_sparse(
+        pa.array([0, 1], pa.int8()),
+        [
+            pa.array([{"a": 1}, None], pa.struct([("a", pa.int64())])),
+            pa.array([None, [1.5, math.inf]], pa.list_(pa.float64())),
+        ],
+    )
+    table = pa.table(
+        {
+            "inf": pa.array([[math.inf, -math.inf], None], pa.list_(pa.float64())),
+            "dec": pa.array([[Decimal("1.50"), None], []], pa.list_(pa.decimal128(5, 2))),
+            "day": pa.array([[date(2026, 1, 2)], None], pa.list_(pa.date32())),
+            "dict": pa.array([["x"], ["y", "x"]], pa.list_(pa.dictionary(pa.int8(), pa.string()))),
+            "union": union,
+        }
+    )
+    assert file_cells(table).to_pylist() == [
+        {
+            "inf": '["Infinity","-Infinity"]',
+            "dec": '["1.50",null]',
+            "day": '["2026-01-02"]',
+            "dict": '["x"]',
+            "union": '{"a":1}',
+        },
+        {"inf": None, "dec": "[]", "day": None, "dict": '["y","x"]', "union": '[1.5,"Infinity"]'},
+    ]
+
+
+def test_file_cells_writes_a_string_view_a_time_and_an_interval_as_text() -> None:
+    interval = pa.scalar((1, 2, 3), pa.month_day_nano_interval()).as_py()
+    table = pa.table(
+        {
+            "sv": pa.array(["a", None], pa.string_view()),
+            "t": pa.array([time(9, 30, 5), None], pa.time64("us")),
+            "iv": pa.array([interval, None], pa.month_day_nano_interval()),
+        }
+    )
+    assert csv_text(table) == (
+        b'"sv","t","iv"\r\n'
+        b'"a","09:30:05.000000","{""months"":1,""days"":2,""nanoseconds"":3}"\r\n'
+        b",,\r\n"
+    )
+
+
 # --- xlsx ----------------------------------------------------------------------------------------
 
 
@@ -257,6 +303,49 @@ def test_xlsx_writes_the_largest_float32_as_its_number() -> None:
     assert read == [3.4028235e38, -3.4028235e38], "the number its shortest text names"
 
 
+def test_xlsx_writes_a_float32_that_needs_9_digits_and_its_nan_and_infinity() -> None:
+    """Eight digits do not name this float32; nine always do. NaN and infinity are text."""
+    needs_nine = struct.unpack("f", struct.pack("I", 0x5D68BCF0))[0]
+    assert struct.unpack("f", struct.pack("f", float(f"{needs_nine:.8g}")))[0] != needs_nine
+    table = pa.table({"f": pa.array([needs_nine], pa.float32())})
+    assert read_back(table).to_pylist() == [{"f": 1.04815894e18}]
+    special = pa.table({"f": pa.array([math.nan, -math.inf], pa.float32())})
+    assert read_back(special).to_pylist() == [{"f": "NaN"}, {"f": "-Infinity"}]
+
+
+def test_xlsx_writes_a_date_or_timestamp_before_1900_as_iso_text() -> None:
+    """A spreadsheet has no date before 1900; the value is its ISO text instead."""
+    table = pa.table(
+        {
+            "d": pa.array([date(1899, 12, 31), date(1, 1, 1)], pa.date32()),
+            "ts": pa.array(
+                [datetime(1899, 12, 31, 23, 59, 59), datetime(1, 1, 1, 0, 0, 1)],
+                pa.timestamp("us"),
+            ),
+        }
+    )
+    assert read_back(table).to_pylist() == [
+        {"d": "1899-12-31", "ts": "1899-12-31 23:59:59"},
+        {"d": "0001-01-01", "ts": "0001-01-01 00:00:01"},
+    ]
+
+
+def test_xlsx_writes_a_nanosecond_column_a_microsecond_cannot_hold_as_its_text() -> None:
+    """One value with nanoseconds makes the whole column text, so none is rounded."""
+    table = pa.table({"ns": pa.array([1, 1_000], pa.int64()).cast(pa.timestamp("ns"))})
+    assert read_back(table).to_pylist() == [
+        {"ns": "1970-01-01 00:00:00.000000001"},
+        {"ns": "1970-01-01 00:00:00.000001000"},
+    ]
+
+
+def test_xlsx_writes_a_duration_as_its_number_of_units() -> None:
+    table = pa.table(
+        {"dur": pa.array([None, timedelta(seconds=90), timedelta(minutes=-2)], pa.duration("s"))}
+    )
+    assert read_back(table).to_pylist() == [{"dur": None}, {"dur": 90.0}, {"dur": -120.0}]
+
+
 INFINITY_US = 2**63 - 1
 """DuckDB's ``'infinity'::timestamp`` in any unit: the largest int64."""
 
@@ -325,6 +414,18 @@ def test_a_temporal_column_inside_pythons_range_keeps_its_type() -> None:
         }
     )
     assert file_cells(table).schema == table.schema
+
+
+def test_a_temporal_column_of_only_nulls_keeps_its_type() -> None:
+    table = pa.table({"d": pa.array([None, None], pa.date32())})
+    assert file_cells(table).schema == table.schema
+
+
+def test_an_out_of_range_timestamp_on_a_whole_second_has_no_fraction() -> None:
+    """A year after 9999 at midnight is DuckDB's text without a trailing ``.0``."""
+    year_10000 = 253_402_300_800_000_000
+    table = pa.table({"ts": pa.array([year_10000, None], pa.int64()).cast(pa.timestamp("us"))})
+    assert file_cells(table).to_pylist() == [{"ts": "10000-01-01 00:00:00"}, {"ts": None}]
 
 
 def test_xlsx_writes_a_string_starting_with_equals_as_text_not_a_formula() -> None:

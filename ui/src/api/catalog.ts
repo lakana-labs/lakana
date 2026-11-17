@@ -50,10 +50,12 @@ export interface OwnerOut {
 
 /** Why a row matches the search. */
 export interface TableMatchOut {
-  /** Whose text matched: `table` for the table's own, `column` for one of its columns'. */
-  readonly kind: string;
-  /** The field that matched: `name`, `label`, `description`, `grain` or `measure`. */
-  readonly matched: string;
+  /**
+   * Whose text matched: `table` for the table's own, `column` for one of its columns'. The server may add values: compare, and keep a fallback.
+   */
+  readonly kind: "table" | "column";
+  /** The field that matched. The server may add values: compare, and keep a fallback. */
+  readonly matched: "name" | "label" | "description" | "grain" | "measure";
   /** The column it matched in, if any. */
   readonly column: string | null;
   /** That column's type. */

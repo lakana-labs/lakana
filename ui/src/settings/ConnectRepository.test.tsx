@@ -134,6 +134,21 @@ function posts(shell: ReturnType<typeof renderShell>): string[] {
     .map((request) => request.path);
 }
 
+/**
+ * The innermost element that shows a text, marks included: a mark is an element of its own, so
+ * the text spans several nodes.
+ *
+ * @param text - The text as shown.
+ * @returns The element.
+ */
+function shown(text: string): HTMLElement {
+  return screen.getByText(
+    (_, element) =>
+      element?.textContent === text &&
+      [...element.children].every((child) => child.textContent !== text),
+  );
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -972,5 +987,70 @@ describe("ConnectRepository", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("The repository analyU+202Etics is in use.");
     expect(alert.textContent).not.toMatch(/[\u202E\u2066]/u);
+  });
+  it("marks a hidden character in the host's keys, the deploy keys, the notes and a check's sentence", async () => {
+    const hide = (text: string): string => `${text}\u202E`;
+    const refused = { ...ACCESS_OK, outcome: "auth_refused", message: hide("Refused.") };
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repository-probes": (request) => ({
+          status: 202,
+          body:
+            (request.body as { kind: string }).kind === "access"
+              ? refused
+              : {
+                  ...PROBE,
+                  message: hide(PROBE.message),
+                  host_keys: [
+                    ED25519,
+                    { ...ECDSA, fingerprint: hide(ECDSA.fingerprint) },
+                    { ...RSA, type: hide(RSA.type) },
+                  ],
+                },
+        }),
+        "POST /api/v1/repositories/analytics/deploy-key": {
+          status: 201,
+          body: {
+            ...DEPLOY_KEY,
+            keys: [{ ...DEV_KEY, fingerprint: hide(DEV_KEY.fingerprint) }],
+            notes: [hide("Replace the old key.")],
+          },
+        },
+      }),
+    );
+    const { user } = shell;
+    await user.click(screen.getByRole("button", { name: /^Show other key types/ }));
+    expect(shown(`${ECDSA.fingerprint}U+202E`)).toBeInTheDocument();
+    expect(shown(`${RSA.type}U+202E`)).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: `This matches: ${RSA.type}U+202E` })).toBeVisible();
+    await user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await user.click(ui.create());
+    await screen.findByRole("button", { name: "Test access in dev" });
+    expect(shown(`${DEV_KEY.fingerprint}U+202E`)).toBeInTheDocument();
+    expect(shown("Replace the old key.U+202E")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Test access in dev" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Refused.U+202E");
+    expect(document.body.textContent).not.toContain("\u202E");
+  });
+
+  it("marks a hidden character in the sentence of a check that succeeded", async () => {
+    const shell = await fetched(
+      flow({
+        "POST /api/v1/repository-probes": (request) => ({
+          status: 202,
+          body:
+            (request.body as { kind: string }).kind === "access"
+              ? { ...ACCESS_OK, message: "Read analy\u202Etics." }
+              : PROBE,
+        }),
+      }),
+    );
+    await shell.user.click(screen.getByRole("checkbox", { name: "This matches: ssh-ed25519" }));
+    await shell.user.click(ui.create());
+    await shell.user.click(await screen.findByRole("button", { name: "Test access in dev" }));
+
+    expect(await screen.findByText("Read analyU+202Etics.")).toHaveAttribute("role", "status");
+    expect(document.body.textContent).not.toContain("\u202E");
   });
 });

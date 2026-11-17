@@ -1908,9 +1908,10 @@ class TableHealthOut(BaseModel):
 
 
 class DescriptionIn(BaseModel):
-    """Request body that sets or resets a description, a label or both, in one language.
+    """Request body that sets or resets a description, a label or both.
 
-    Send one or both; a field left out stays as it is, `null` removes its edit.
+    Send one or both; a field left out stays as it is, `null` removes its edit. Both are edited
+    in the language `?lang=` names, unless `label_language` names another one for the label.
 
     Parameters
     ----------
@@ -1920,10 +1921,15 @@ class DescriptionIn(BaseModel):
     label
         The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so
         that the project's label shows again.
+    label_language
+        The language `label` is edited in, such as `en`, when it is not the description's; left
+        out or `null`, the label is edited in `?lang=`'s language, as the description is. Only
+        with `label`.
     """
 
     description: str | None = None
     label: str | None = None
+    label_language: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def _sends_a_field(self) -> DescriptionIn:
@@ -2222,7 +2228,8 @@ class GroupCreate(BaseModel):
     Parameters
     ----------
     name
-        Unique group name.
+        Unique group name; no control or format character, no line separator and no space
+        at either end.
     """
 
     name: str
@@ -2248,7 +2255,8 @@ class TokenIssueIn(BaseModel):
     Parameters
     ----------
     name
-        A human label for this PAT (e.g. "laptop", "CI").
+        A human label for this PAT (e.g. "laptop", "CI"); no control or format character,
+        no line separator and no space at either end.
     """
 
     name: str
@@ -3285,7 +3293,8 @@ class RepositoryCreate(BaseModel):
     Parameters
     ----------
     name
-        Unique name; no dots.
+        Unique name; no dots, no control or format character, no line separator and no
+        space at either end.
     kind
         ``local``, ``https`` or ``ssh``.
     url
@@ -3472,7 +3481,8 @@ class PackageIndexCreate(BaseModel):
     Parameters
     ----------
     name
-        Unique name; no dots.
+        Unique name; no dots, no control or format character, no line separator and no
+        space at either end.
     url
         ``https://host/path`` of the index, without a user name or password.
     credential_secret

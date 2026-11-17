@@ -112,7 +112,7 @@ interface ColumnRowProps {
 function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps): JSX.Element {
   const { t } = useTranslation();
   const { table, mayEdit } = useTableData();
-  const { lang, named, saveColumn } = useDescribe(column.description_language);
+  const { lang, labelLang, named, saveColumn } = useDescribe(column);
   const { edit, fallback: row, returned } = useReturnFocus<HTMLTableRowElement>();
   const role = columnRole(table, column.name);
   const roleWord = role === null ? null : t(`table.columns.roles.${role}`);
@@ -200,6 +200,7 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
             <TextEditor
               texts={{ description: column.description, label: column.label }}
               lang={lang}
+              labelLang={labelLang}
               named={named}
               onSave={(change) => saveColumn(column.name, change)}
               onDone={close}

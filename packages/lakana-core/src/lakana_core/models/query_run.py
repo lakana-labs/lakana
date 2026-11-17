@@ -127,12 +127,16 @@ class QueryRun(Base, TimestampMixin):
             native_enum=False,
             length=16,
             values_callable=lambda members: [member.value for member in members],
-        )
+        ),
+        server_default=QueryOrigin.WRITTEN.value,
     )
     """Where the run came from: a `QueryOrigin`, stored as its value.
 
-    Has no Python default, so every constructor names one. A run from before the column was
-    given its origin by the rule of migration 0081."""
+    Has no Python default, so every constructor names one. The database default `written` is
+    migration 0081's, declared here too so that a schema built from the models takes a row
+    without an origin as a migrated database does (a server or worker of the previous release
+    inserts such rows during an upgrade). A run from before the column was given its origin by
+    the rule of migration 0081."""
     status: Mapped[QueryRunStatus] = mapped_column(SAEnum(QueryRunStatus, native_enum=False))
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     """Set by `QueryService.cancel_query` on a running run; the worker reads it about twice a

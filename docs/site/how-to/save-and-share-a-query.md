@@ -90,7 +90,7 @@ lakana query saved show "$id" --env dev --sql | lakana sql - --env dev
 ```
 
 The query runs as a query of yours, with your rights, and is in your list of queries like any other.
-If the SQL holds a control or invisible character, `--sql` prints nothing and exits with status 1,
+If the SQL holds a control or invisible character (CRLF line endings are not one and print as stored), `--sql` prints nothing and exits with status 1,
 since the escaped text it could print would be another query; read it with `--output json`.
 
 ## Change and delete

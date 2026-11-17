@@ -106,7 +106,7 @@ Usage: `lakana table describe [OPTIONS] {name}`
 
 Describe or label table NAME or one of its columns, or reset its texts.
 
-The texts you set are shown instead of the asset header's `description:` and `label:` (or a translation file's, with `--lang`), and a deploy never replaces them. `--reset` goes back to the project's texts in that language. You need to own the table, or hold the right to drop it.
+The texts you set are shown instead of the asset header's `description:` and `label:` (or a translation file's, with `--lang`), and a deploy never replaces them. `--reset` goes back to the project's texts in that language. `--label-lang` sets or resets the label in another language than the description. You need to own the table, or hold the right to drop it.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -115,6 +115,7 @@ The texts you set are shown instead of the asset header's `description:` and `la
 | `--text` | text | none | The description, up to 4,000 characters. |
 | `--label` | text | none | The label: one line, up to 100 characters. |
 | `--lang` | text | none | The language you write in, such as fr; without it, the table's main language. |
+| `--label-lang` | text | none | The label's language, when it is not --lang's, such as en; needs --label or --reset. |
 | `--reset` | flag | off | Remove your description and label, so the project's show again. |
 | `--env` | text | none | Environment (default: the profile's). |
 

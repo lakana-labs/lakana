@@ -138,6 +138,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "key_id",
         "kind",
         "kinds",
+        # the language a label edit was made in when it is not the description's: a tag
+        "label_language",
         # the language a description or label edit was made in: a tag, never the text
         "language",
         # the sign-in link a browser session began with (`lakana_core.identity.sessions`)

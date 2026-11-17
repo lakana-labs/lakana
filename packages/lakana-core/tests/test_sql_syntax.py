@@ -269,6 +269,26 @@ def test_error_position_of_a_parse_error_is_the_parsers() -> None:
     assert f"line {problem.line}, column {problem.column}" in describe_syntax_error(exc, sql)
 
 
+def test_a_node_from_a_longer_text_has_no_position_in_a_shorter_one() -> None:
+    """An offset past the end of the given SQL (a node parsed from other text) points nowhere."""
+    longer = "SELECT 1;\n" * 5 + "SELECT * FROM read_csv('raw/x.csv')"
+    node = sqlglot.parse(longer, dialect="duckdb")[-1]
+    assert node is not None
+    node = node.find(exp.ReadCSV)
+    assert node is not None
+    assert node_position(node, longer) == SqlPosition(6, 15)
+    assert node_position(node, "SELECT 1") is None
+
+
+def test_error_position_of_a_parse_error_without_a_line_is_none() -> None:
+    """A parse error that names no line, or an unclosed quote without the SQL, has no position."""
+    unplaced = sqlglot.errors.ParseError("x", errors=[{"description": "Bad thing"}])
+    assert error_position(unplaced, "SELECT 1") is None
+    quote = _error("SELECT 'never closed")
+    assert isinstance(quote, sqlglot.errors.TokenError)
+    assert error_position(quote, "") is None
+
+
 def test_error_position_of_a_refusal_is_its_own_and_of_anything_else_is_none() -> None:
     """A refusal carries its position; an error that is neither refusal nor syntax has none."""
     assert error_position(SqlRefusal("no", SqlPosition(3, 4)), "x") == SqlPosition(3, 4)

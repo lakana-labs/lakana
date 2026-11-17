@@ -188,6 +188,22 @@ the project is active. A deploy that switches a table to `write: history` fails 
 until the table is built again (`HISTORY_COLUMN_MISSING`): deploy, then rebuild. See [Drop and
 restore a table](../how-to/drop-and-restore-a-table.md).
 
+### A label can be saved in its own language
+
+A description save can now name the label's language apart from the description's:
+`label_language` in the body of `PATCH …/tables/{name}` and `PUT …/columns/{column}/description`,
+`label_language=` in `client.tables.describe`, and `--label-lang` on `lakana table describe`.
+Without it a save works as before, both fields in `lang`. It needs a server of this release or
+later: an older server ignores `label_language` and saves the label in `lang`, and the SDK and the
+CLI then fail with `The server ignored label_language: it is older than this SDK, …`, so upgrade
+the server before the CLI and the SDK if you use it. The web interface uses it: a label shown in
+another language than the description is now saved, and reset by **Back to the text from Git**, in
+the label's own language instead of the description's. A label saved before in the description's
+language by mistake stays there; to remove only that label edit, send `{"label": null}` with
+`?lang=TAG`, or call `client.tables.describe(env, NAME, label=None, lang=TAG)`. `TABLE_DESCRIBED` and
+`COLUMN_DESCRIBED` gain `label_language` when the label was edited in another language. See
+[Descriptions](../reference/descriptions.md#rest-routes).
+
 ### A browser asks for a passkey touch before a drop
 
 A signed-in browser now asks for a passkey touch before it drops a table, drops an artifact, deletes
@@ -429,6 +445,45 @@ Earlier releases accepted such names (422 from the REST API now). The web interf
 namespace's path and an undrop's new name without their outer spaces; it now sends them as typed,
 so it and the CLI create the same names and refuse the same ones with the same sentence. Existing
 names are not touched: they stay readable and writable, and can be renamed or dropped.
+
+### The same name rules for repositories, groups, tokens, secrets, package indexes, principals and passkeys (breaking)
+
+The two rules above now hold for more of the names you choose. A new repository, group, package
+index, secret or personal access token name may no longer hold a control or format character
+(such as U+202E, a zero-width space or a soft hyphen) or a line or paragraph separator, nor start
+or end with a space (any Unicode space). A repository named `analy\u202etics` would show as
+another repository in `lakana repo list`, on Home and in the jobs and runs of every environment
+that deploys it. The refusal uses the same sentences, for example `Repository name 'analy\u202etics'
+holds U+202E at character 6, … Choose a name without it` or `Group name 'engineers ' ends with a
+space, so it would look like 'engineers' in every list but be a different name. Use 'engineers'
+instead, …`.
+
+- **Repository** (`lakana repo add`, `POST /api/v1/repositories`, **Connect a repository** in
+  Settings → Repositories) and **package index** (`lakana index add`,
+  `POST /api/v1/package-indexes`): both rules.
+- **Group** (`lakana group create`, `POST /api/v1/groups`): both rules. A group an access file
+  creates already met them.
+- **Personal access token** (`lakana token issue`, `POST /api/v1/principals/{name}/tokens`): both
+  rules for the token's name.
+- **Secret** (`lakana secret create`, `POST /api/v1/environments/{environment_name}/secrets`):
+  its name already refused an ASCII space, control characters and bidirectional controls; now
+  every other format character and any other Unicode space at either end are refused too.
+- **Principal** (`lakana principal create`, `POST /api/v1/principals`): control and format
+  characters were refused already; the line and paragraph separators and a space at either end
+  are now too, as an invite already did.
+- **Passkey** names now refuse the line and paragraph separators too, next to control characters.
+
+Environment and connection names already met both rules: an environment name must be printable
+without a blank at either end, and a connection name is lower-case letters, digits and `-`. A job
+name in `lakana.yaml` already refused these characters at deploy; a space at either end of a job
+name is still accepted there, because a project that has one would fail its next deploy.
+
+Earlier releases accepted such names, so a script that still creates one now gets 422 where it
+worked before; choose a name without the character or the outer space. Existing names are not
+touched: such a repository, group, package index, secret or token stays readable, can be
+changed and can be deleted or revoked as before. To find one, search the JSON output of the list
+commands (`lakana --output json repo list`, `group list`, `token list NAME`) with the `grep`
+above.
 
 ### Control characters in asset files are refused (breaking)
 

@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO, Any
@@ -2139,6 +2140,108 @@ def test_the_file_slot_and_open_file_are_given_back_when_the_body_ends_or_prepar
         assert lim.try_acquire(admin) is None, result_format
         lim.release(admin)
         assert _open_files_free(client, admin), result_format
+    assert len(_exports(client)) == exported
+
+
+class _ClosableRead:
+    """A storage read of an Arrow file that remembers whether it was closed."""
+
+    def __init__(self, pieces: list[bytes]) -> None:
+        """Hold the pieces.
+
+        Parameters
+        ----------
+        pieces
+            What the read yields.
+        """
+        self._pieces = iter(pieces)
+        self.closed = False
+
+    def __iter__(self) -> "_ClosableRead":
+        """Be its own iterator.
+
+        Returns
+        -------
+        _ClosableRead
+            Itself.
+        """
+        return self
+
+    def __next__(self) -> bytes:
+        """Give the next piece.
+
+        Returns
+        -------
+        bytes
+            The piece.
+        """
+        return next(self._pieces)
+
+    def close(self) -> None:
+        """Remember the close."""
+        self.closed = True
+
+
+def _storage_reads(monkeypatch: pytest.MonkeyPatch, closable: bool) -> list[_ClosableRead]:
+    """Make every storage read of a whole file a `_ClosableRead`, or a plain iterator.
+
+    Parameters
+    ----------
+    monkeypatch
+        Patches `FsspecStorage.read_chunks`.
+    closable
+        Whether a read has a `close` (a generator, a storage stream) or not (a plain iterator,
+        which the storage protocol also allows).
+
+    Returns
+    -------
+    list of _ClosableRead
+        The closable reads made, filled as the route reads.
+    """
+    from lakana_core.storage.fsspec_storage import FsspecStorage
+
+    original = FsspecStorage.read_chunks
+    made: list[_ClosableRead] = []
+
+    def read_chunks(self: FsspecStorage, path: str) -> Iterator[bytes]:
+        pieces = list(original(self, path))
+        if not closable:
+            return iter(pieces)
+        made.append(_ClosableRead(pieces))
+        return made[-1]
+
+    monkeypatch.setattr(FsspecStorage, "read_chunks", read_chunks)
+    return made
+
+
+@pytest.mark.parametrize("closable", [True, False], ids=["closable", "plain-iterator"])
+def test_an_arrow_download_streams_a_read_with_or_without_close_and_closes_it_once(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, closable: bool
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    made = _storage_reads(monkeypatch, closable)
+    response = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert pa.ipc.open_file(pa.BufferReader(response.content)).read_all().equals(THREE_ROWS)
+    assert [read.closed for read in made] == ([True] if closable else [])
+
+
+@pytest.mark.parametrize("closable", [True, False], ids=["closable", "plain-iterator"])
+def test_an_arrow_download_whose_export_is_not_recorded_is_500_and_closes_the_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, closable: bool
+) -> None:
+    """The storage read opened before the export is recorded is closed when recording fails."""
+    from lakana_core.catalog.query_service import QueryService
+
+    _environment(client)
+    qid = _sized(client)
+    exported = len(_exports(client))
+    made = _storage_reads(monkeypatch, closable)
+    monkeypatch.setattr(QueryService, "record_export", raising)
+    response = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+    assert response.status_code == 500
+    assert [read.closed for read in made] == ([True] if closable else [])
     assert len(_exports(client)) == exported
 
 

@@ -3835,7 +3835,7 @@
           "tables"
         ],
         "summary": "Set a table's description and label",
-        "description": "Sets the texts shown for the table in one language (`lang`, else the table's main language), or with `null` removes an edit so that the text of the project shows again. A field left out of the body stays as it is. A deploy never replaces a text set here. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table does not exist and 422 for a body with neither field, a blank text, a description over 4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a language tag.",
+        "description": "Sets the texts shown for the table in one language (`lang`, else the table's main language), or with `null` removes an edit so that the text of the project shows again. A field left out of the body stays as it is. `label_language` in the body edits the label in another language than the description, for a page that shows the two in different languages. A deploy never replaces a text set here. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table does not exist and 422 for a body with neither field, a blank text, a description over 4,000 characters, a label over 100 characters or on several lines, a `lang` or `label_language` that is not a language tag, or a `label_language` without a `label`.",
         "operationId": "describe_table_api_v1_environments__env__namespaces__path__tables__name__patch",
         "parameters": [
           {
@@ -4472,7 +4472,7 @@
           "tables"
         ],
         "summary": "Set a column's description and label",
-        "description": "Works as the table's route does, for one column, which must be in the table's schema: the texts are set in `lang`, else in the table's main language, `null` removes an edit, and a field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it. Answers 404 for a missing table or column and 422 as the table's route does.",
+        "description": "Works as the table's route does, for one column, which must be in the table's schema: the texts are set in `lang`, else in the table's main language, the label in `label_language` when the body names one, `null` removes an edit, and a field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it. Answers 404 for a missing table or column and 422 as the table's route does.",
         "operationId": "describe_column_api_v1_environments__env__namespaces__path__tables__name__columns__column__description_put",
         "parameters": [
           {
@@ -28330,11 +28330,23 @@
               }
             ],
             "title": "Label"
+          },
+          "label_language": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Language"
           }
         },
         "type": "object",
         "title": "DescriptionIn",
-        "description": "Request body that sets or resets a description, a label or both, in one language.\n\nSend one or both; a field left out stays as it is, `null` removes its edit.\n\nParameters\n----------\ndescription\n    The new text (1 to 4,000 characters, not blank), or `null` to remove the edit so that the\n    project's text shows again.\nlabel\n    The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so\n    that the project's label shows again."
+        "description": "Request body that sets or resets a description, a label or both.\n\nSend one or both; a field left out stays as it is, `null` removes its edit. Both are edited\nin the language `?lang=` names, unless `label_language` names another one for the label.\n\nParameters\n----------\ndescription\n    The new text (1 to 4,000 characters, not blank), or `null` to remove the edit so that the\n    project's text shows again.\nlabel\n    The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so\n    that the project's label shows again.\nlabel_language\n    The language `label` is edited in, such as `en`, when it is not the description's; left\n    out or `null`, the label is edited in `?lang=`'s language, as the description is. Only\n    with `label`."
       },
       "DroppedTableOut": {
         "properties": {
@@ -29329,7 +29341,7 @@
           "name"
         ],
         "title": "GroupCreate",
-        "description": "Request body for creating a group.\n\nParameters\n----------\nname\n    Unique group name."
+        "description": "Request body for creating a group.\n\nParameters\n----------\nname\n    Unique group name; no control or format character, no line separator and no space\n    at either end."
       },
       "GroupOut": {
         "properties": {
@@ -31383,7 +31395,7 @@
           "url"
         ],
         "title": "PackageIndexCreate",
-        "description": "Request body for registering a package index.\n\nParameters\n----------\nname\n    Unique name; no dots.\nurl\n    ``https://host/path`` of the index, without a user name or password.\ncredential_secret\n    Name of the secret that holds ``username`` and ``password``, per environment."
+        "description": "Request body for registering a package index.\n\nParameters\n----------\nname\n    Unique name; no dots, no control or format character, no line separator and no\n    space at either end.\nurl\n    ``https://host/path`` of the index, without a user name or password.\ncredential_secret\n    Name of the secret that holds ``username`` and ``password``, per environment."
       },
       "PackageIndexOut": {
         "properties": {
@@ -32712,7 +32724,7 @@
           "url"
         ],
         "title": "RepositoryCreate",
-        "description": "Request body for registering a repository.\n\nParameters\n----------\nname\n    Unique name; no dots.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    ``https://…``, ``ssh://…``, ``[user@]host:path``, or an absolute path.\ncredential_secret\n    Secret name resolved in the target environment at deploy time.\ncredential_username\n    HTTPS username; default ``oauth2``.\nssh_known_hosts\n    ``known_hosts`` lines; required for ``ssh``.\ndefault_ref\n    Ref deployed when none is given."
+        "description": "Request body for registering a repository.\n\nParameters\n----------\nname\n    Unique name; no dots, no control or format character, no line separator and no\n    space at either end.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    ``https://…``, ``ssh://…``, ``[user@]host:path``, or an absolute path.\ncredential_secret\n    Secret name resolved in the target environment at deploy time.\ncredential_username\n    HTTPS username; default ``oauth2``.\nssh_known_hosts\n    ``known_hosts`` lines; required for ``ssh``.\ndefault_ref\n    Ref deployed when none is given."
       },
       "RepositoryDeployKeyOut": {
         "properties": {
@@ -36962,7 +36974,7 @@
           "name"
         ],
         "title": "TokenIssueIn",
-        "description": "Request body for issuing a PAT.\n\nParameters\n----------\nname\n    A human label for this PAT (e.g. \"laptop\", \"CI\")."
+        "description": "Request body for issuing a PAT.\n\nParameters\n----------\nname\n    A human label for this PAT (e.g. \"laptop\", \"CI\"); no control or format character,\n    no line separator and no space at either end."
       },
       "TokenIssueOut": {
         "properties": {

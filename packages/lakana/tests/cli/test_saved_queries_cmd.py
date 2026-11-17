@@ -167,6 +167,28 @@ def test_show_without_readable_sql_says_so(tmp_path: Path) -> None:
     assert "Orders by status" in result.stdout
 
 
+def test_show_as_json_emits_the_document_and_does_not_print_the_sql_again(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item())
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "query",
+        "saved",
+        "show",
+        _ID,
+        "--env",
+        "dev",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout)["id"] == _ID  # one document, nothing after it
+
+
 def test_show_sql_without_readable_sql_exits_1(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", f"{_BASE}/{_ID}", json=_item(sql=..., actions=["delete"]))
@@ -183,6 +205,32 @@ def test_show_sql_without_readable_sql_exits_1(tmp_path: Path) -> None:
 def test_show_sql_refuses_sql_with_hidden_characters(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", f"{_BASE}/{_ID}", json=_item(sql="SELECT 1 -- \u202e\x1b[2J"))
+
+    result = invoke(
+        make_state(tmp_path, api), "query", "saved", "show", _ID, "--env", "dev", "--sql"
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert "holds control or invisible characters; read it with --output json" in result.stderr
+
+
+def test_show_sql_prints_crlf_line_endings_as_they_are(tmp_path: Path) -> None:
+    stored = "SELECT 1\r\nFROM orders\r\n"
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item(sql=stored))
+
+    result = invoke(
+        make_state(tmp_path, api), "query", "saved", "show", _ID, "--env", "dev", "--sql"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout_bytes == stored.encode()  # .stdout folds CRLF to LF
+
+
+def test_show_sql_refuses_a_lone_carriage_return(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item(sql="SELECT 1\r-- x\r\nFROM orders"))
 
     result = invoke(
         make_state(tmp_path, api), "query", "saved", "show", _ID, "--env", "dev", "--sql"
@@ -232,6 +280,27 @@ def test_update_reads_first_and_puts_the_merged_fields(tmp_path: Path) -> None:
     assert both.exit_code == 2
     none = invoke(make_state(tmp_path, api), "query", "saved", "update", _ID, "--env", "dev")
     assert none.exit_code == 2
+
+
+def test_update_without_readable_sql_exits_1_and_sends_nothing(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item(sql=..., actions=["delete"]))
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "query",
+        "saved",
+        "update",
+        _ID,
+        "--env",
+        "dev",
+        "--name",
+        "Renamed",
+    )
+
+    assert result.exit_code == 1
+    assert "You may not read the SQL of this query." in result.stderr
+    assert [r.method for r in api.requests] == ["GET"]
 
 
 def test_delete_asks_first_and_yes_skips_it(tmp_path: Path) -> None:

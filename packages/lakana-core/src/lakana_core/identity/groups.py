@@ -18,6 +18,7 @@ from lakana_core.grants.service import (
     mark_admin_holders,
     withdraw_links_of_lapsed_issuers,
 )
+from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
@@ -118,8 +119,14 @@ class GroupService:
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
+        ValidationError
+            If the name holds an invisible or line-breaking character
+            (`refuse_hidden_characters`) or starts or ends with a space
+            (`refuse_outer_whitespace`). A group stored before the rule is not judged.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GROUP)
+        refuse_hidden_characters(name, what="Group name")
+        refuse_outer_whitespace(name, what="Group name")
         guard_change(self._session, p, environment=None, change=f"create group {name}")
         existing = self._session.execute(
             select(Group).where(Group.name == name)
