@@ -128,6 +128,11 @@ A spreadsheet holds at most 1,048,575 rows below its header row, 16,384 columns,
 characters in a cell. A result over any of these is refused with a `422` of the type `XlsxRefused`
 before anything is sent, and the message names the command that downloads it as CSV instead.
 
+Any other Arrow extension type is written as the type it is stored as: DuckDB's `bignum`
+(`varint`) as its bytes in `\x` hex, a JSON column as its text. A column whose type no file holds
+is refused for both CSV and xlsx with a `422` of the type `ResultFileRefused` before anything is
+sent, and the message names the command that downloads the result as Arrow instead.
+
 A file is streamed, so there is no `Content-Length`. These headers say what it is:
 
 | Header | Meaning |

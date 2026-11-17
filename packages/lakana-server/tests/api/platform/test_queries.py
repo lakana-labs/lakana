@@ -2028,3 +2028,27 @@ def test_a_result_without_recorded_sizes_downloads_without_the_size_headers(
         (admin, {**csv_detail, "format": "csv"}),
         (admin, {"query_id": qid, "rows": None, "size_bytes": None, "format": "arrow"}),
     ]
+
+
+def test_a_column_no_file_holds_is_422_before_any_export_or_byte(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A type the flattening does not turn into one a file holds is refused, not cut mid-body."""
+    from lakana_server import result_files
+
+    _environment(client)
+    bignum = pa.opaque(pa.binary(), "bignum", "DuckDB")
+    qid = stored_result(client, "dev", pa.table({"big": pa.array([b"\x05"], bignum)}))
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER).content == (
+        b'"big"\r\n"\\x05"\r\n'
+    )
+    exported = len(_exports(client))
+    monkeypatch.setattr(result_files, "_cell_column", lambda column: column)
+    for result_format in ("csv", "xlsx"):
+        refused = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert refused.status_code == 422, (result_format, refused.text)
+        assert refused.json()["type"] == "ResultFileRefused"
+        assert f"--format arrow --out query-{qid}.arrow" in refused.json()["detail"]
+    assert len(_exports(client)) == exported
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None

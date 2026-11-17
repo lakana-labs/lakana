@@ -9,10 +9,18 @@ from decimal import Decimal
 
 import fastexcel
 import pyarrow as pa
+import pyarrow.compute
 import pytest
 
 from lakana_server import result_files
-from lakana_server.result_files import XlsxRefused, csv_pieces, file_cells, write_xlsx
+from lakana_server.result_files import (
+    ResultFileRefused,
+    XlsxRefused,
+    csv_pieces,
+    file_cells,
+    refuse_unwritable,
+    write_xlsx,
+)
 
 QID = "3f2a6c1e-0000-4000-8000-000000000001"
 """The query id the refusal sentences name."""
@@ -282,6 +290,66 @@ def test_xlsx_refusal_quotes_the_environment_in_the_command(
     with pytest.raises(XlsxRefused) as refused:
         xlsx_bytes(pa.table({"i": [1]}), environment="my env")
     assert str(refused.value).endswith(instead("'my env'"))
+
+
+BIGNUM = pa.opaque(pa.binary(), "bignum", "DuckDB")
+"""The type DuckDB exports `SELECT 5::varint` as: an extension pyarrow does not know."""
+
+
+def extension_table() -> pa.Table:
+    """Build a result whose columns are extension types other than UUID.
+
+    Returns
+    -------
+    pyarrow.Table
+        An opaque binary column, a JSON column and a list of the opaque type.
+    """
+    return pa.table(
+        {
+            "big": pa.array([b"\x05\xff"], BIGNUM),
+            "doc": pa.array(['{"a":1}'], pa.json_()),
+            "bigs": pa.ListArray.from_arrays(
+                [0, 1], pa.ExtensionArray.from_storage(BIGNUM, pa.array([b"\x01"]))
+            ),
+            "runs": pa.compute.call_function("run_end_encode", [pa.array([7])]),
+        }
+    )
+
+
+def test_an_extension_column_is_written_as_its_storage_in_csv_and_xlsx() -> None:
+    table = extension_table()
+    assert csv_text(table) == (
+        b'"big","doc","bigs","runs"\r\n"\\x05\\xff","{""a"":1}","[""\\\\x01""]",7\r\n'
+    )
+    assert read_back(table).to_pylist() == [
+        {"big": "\\x05\\xff", "doc": '{"a":1}', "bigs": '["\\\\x01"]', "runs": 7.0}
+    ]
+    assert "b&apos;" not in sheet_xml(xlsx_bytes(table))
+
+
+def test_csv_pieces_fails_before_it_returns_for_a_column_it_cannot_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(result_files, "_cell_column", lambda column: column)
+    with pytest.raises(pa.ArrowInvalid):
+        csv_pieces(pa.table({"big": pa.array([b"\x05"], BIGNUM)}))
+
+
+def test_a_column_no_file_holds_is_refused_naming_the_arrow_download(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(result_files, "_cell_column", lambda column: column)
+    table = pa.table({"ok": [1], "big": pa.array([b"\x05"], BIGNUM)})
+    with pytest.raises(ResultFileRefused) as refused:
+        refuse_unwritable(table, "csv", query_id=QID, environment="my env")
+    assert str(refused.value) == (
+        "Column 'big' has the type extension<arrow.opaque[storage_type=binary, "
+        "type_name=bignum, vendor_name=DuckDB]>, which a csv file cannot hold. Download it as "
+        f"Arrow instead: lakana query result {QID} --env 'my env' --format arrow "
+        f"--out query-{QID}.arrow"
+    )
+    monkeypatch.undo()
+    refuse_unwritable(extension_table(), "xlsx", query_id=QID, environment="dev")
 
 
 def test_result_file_name() -> None:

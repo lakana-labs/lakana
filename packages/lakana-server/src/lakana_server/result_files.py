@@ -281,6 +281,14 @@ def _cell_column(column: pa.ChunkedArray) -> pa.ChunkedArray:
         return _cell_column(column.cast(kind.value_type))
     if isinstance(kind, pa.UuidType):
         return _as_text(column, _uuid_text)
+    if isinstance(kind, pa.BaseExtensionType):
+        # Any other extension (DuckDB's opaque bignum, JSON, bool8 …) is its storage, written
+        # by the rules of the storage's own type.
+        storage = [chunk.storage for chunk in column.chunks]
+        return _cell_column(pa.chunked_array(storage, kind.storage_type))
+    if pa.types.is_run_end_encoded(kind):
+        decoded = [pc.call_function("run_end_decode", [chunk]) for chunk in column.chunks]
+        return _cell_column(pa.chunked_array(decoded, kind.value_type))
     if _is_binary(kind):
         return _as_text(column, lambda value: _hex(value) if isinstance(value, bytes) else "")
     if _is_nested(kind):
@@ -341,7 +349,9 @@ def file_cells(table: pa.Table) -> pa.Table:
         The same rows and column names. A nested value is its compact JSON text (UTF-8, not
         ASCII-escaped, a map's entries as objects of ``key`` and ``value``), a binary value
         `_hex` text, a UUID its canonical text, a dictionary its values, a time its text and
-        an interval a JSON object of its parts; every other column is unchanged.
+        an interval a JSON object of its parts. Any other extension type is its storage, and a
+        run-end encoded column its values, each flattened by these same rules; every other
+        column is unchanged.
     """
     return pa.Table.from_arrays(
         [_cell_column(column) for column in table.columns], names=table.column_names
@@ -351,28 +361,104 @@ def file_cells(table: pa.Table) -> pa.Table:
 # --- CSV ---------------------------------------------------------------------------------------
 
 
+_CSV_OPTIONS = pa_csv.WriteOptions(include_header=True, eol="\r\n", quoting_style="needed")
+
+
 def csv_pieces(table: pa.Table) -> Iterator[bytes]:
     """Write a result as CSV, one piece at a time (R6).
+
+    The writer is built and the header row written before this returns, so a column the
+    writer cannot hold fails here, before a caller records the export or sends a byte.
 
     Parameters
     ----------
     table : pyarrow.Table
         The result.
 
-    Yields
-    ------
-    bytes
+    Returns
+    -------
+    Iterator of bytes
         The header row first, then one piece per `CSV_BATCH_ROWS` rows: RFC 4180 with CRLF row
         ends, UTF-8 without a byte-order mark, NULL as an empty field, values verbatim.
     """
     sink = io.BytesIO()
-    options = pa_csv.WriteOptions(include_header=True, eol="\r\n", quoting_style="needed")
-    schema = file_cells(table.slice(0, 0)).schema
-    with pa_csv.CSVWriter(sink, schema, write_options=options) as writer:
-        yield _drain(sink)
+    writer = pa_csv.CSVWriter(
+        sink, file_cells(table.slice(0, 0)).schema, write_options=_CSV_OPTIONS
+    )
+    return _csv_rows(table, writer, sink, _drain(sink))
+
+
+def _csv_rows(
+    table: pa.Table, writer: pa_csv.CSVWriter, sink: io.BytesIO, header: bytes
+) -> Iterator[bytes]:
+    """Yield the header made already, then the rows, closing the writer on every exit.
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+    writer : pyarrow.csv.CSVWriter
+        The writer, which has written the header into `sink`.
+    sink
+        Its buffer.
+    header
+        The header row.
+
+    Yields
+    ------
+    bytes
+        The header, then one piece per `CSV_BATCH_ROWS` rows.
+    """
+    with writer:
+        yield header
         for start in range(0, table.num_rows, CSV_BATCH_ROWS):
             writer.write_table(file_cells(table.slice(start, CSV_BATCH_ROWS)))
             yield _drain(sink)
+
+
+class ResultFileRefused(ValidationError):
+    """A result with a column that a CSV or spreadsheet file cannot hold, even as text.
+
+    Raised before the export is recorded and before the first byte; mapped to 422. The
+    message names the command that downloads the result as Arrow instead.
+    """
+
+
+def refuse_unwritable(
+    table: pa.Table, result_format: str, *, query_id: str, environment: str
+) -> None:
+    """Refuse a result whose flattened columns the CSV writer cannot write.
+
+    `file_cells` turns every type Lakana knows into one a file holds; this is the guard for
+    one it does not. A spreadsheet is refused for the same columns: it has no better form
+    for a value CSV cannot hold.
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+    result_format
+        ``csv`` or ``xlsx``, for the message.
+    query_id
+        The query's id, for the Arrow command.
+    environment
+        The environment's name, for the Arrow command.
+
+    Raises
+    ------
+    ResultFileRefused
+        Naming the first such column and its type.
+    """
+    for field in file_cells(table.slice(0, 0)).schema:
+        try:
+            pa_csv.CSVWriter(io.BytesIO(), pa.schema([field]), write_options=_CSV_OPTIONS).close()
+        except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+            raise ResultFileRefused(
+                f"Column {shown(field.name)!r} has the type {shown(str(field.type))}, which a "
+                f"{result_format} file cannot hold. Download it as Arrow instead: lakana query "
+                f"result {query_id} --env {shlex.quote(environment)} --format arrow "
+                f"--out {result_file_name(query_id, 'arrow')}"
+            ) from None
 
 
 def _drain(sink: io.BytesIO) -> bytes:

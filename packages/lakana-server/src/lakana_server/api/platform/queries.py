@@ -53,6 +53,7 @@ from lakana_server.result_files import (
     ResultFileResponse,
     csv_pieces,
     file_pieces,
+    refuse_unwritable,
     result_file_name,
     write_xlsx,
 )
@@ -657,6 +658,8 @@ def _whole_result(
         If the caller already has a file being prepared, or every slot is taken.
     lakana_server.result_files.XlsxRefused
         If one sheet cannot hold the result whole.
+    lakana_server.result_files.ResultFileRefused
+        If a column has a type no CSV or spreadsheet file holds.
     """
     location = run.result_location
     assert location is not None  # nosec B101 -- the route answered 409 for a run without one
@@ -689,6 +692,7 @@ def _whole_result(
     try:
         content = storage.read(location)
         table = pa.ipc.open_file(pa.BufferReader(content)).read_all()
+        refuse_unwritable(table, result_format, query_id=query_id, environment=env)
         if result_format == "csv":
             pieces, media_type = csv_pieces(table), CSV_MEDIA_TYPE
         else:
@@ -776,7 +780,8 @@ def get_query_result(
     only a read has result rows. Answers 422 for `limit` or `offset` with a file, for a
     preview's page longer than 100 rows, and for a spreadsheet of more than 1,048,575 rows or
     16,384 columns or with a value longer than 32,767 characters, naming the CSV download
-    instead. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or
+    instead, and for a CSV or spreadsheet of a column whose type no file holds, naming the
+    Arrow download. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or
     spreadsheet file being prepared, or the server is preparing as many as it allows at once.
 
     Parameters
@@ -834,6 +839,9 @@ def get_query_result(
         Mapped to 422, before the first byte and with no export recorded: the result has more
         rows or columns than one sheet holds, or a value longer than a cell. The message names
         ``lakana query result ID --env ENV --format csv --out query-ID.csv`` instead.
+    lakana_server.result_files.ResultFileRefused
+        Mapped to 422, before the first byte and with no export recorded: a column has a type
+        that neither CSV nor a spreadsheet holds. The message names the Arrow download instead.
     lakana_server.errors.ResultPageLimitError
         Mapped to 503 with `Retry-After: 1`: the caller already has a JSON page being
         prepared, or every slot of this process is taken. The slot is given back once the
