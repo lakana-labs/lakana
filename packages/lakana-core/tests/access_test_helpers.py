@@ -165,14 +165,13 @@ def seed_every_kind(session: Session, world: AccessWorld) -> None:
     for member in ("alice", "bob"):
         groups.add_member(admin, "finance", member)
     grants = GrantService(session, allow)
-    for _ in range(2):
-        grants.grant(
-            admin,
-            group="finance",
-            role=Role.ANALYST,
-            kind=SecurableKind.ENVIRONMENT,
-            environment="prod",
-        )
+    grants.grant(
+        admin,
+        group="finance",
+        role=Role.ANALYST,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="prod",
+    )
     sales = NamespacePath.from_parts(("gold", "sales")).joined()
     ensure_table(session, "prod", sales, "x")
     grants.grant(

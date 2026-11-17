@@ -42,8 +42,9 @@ refused (409): `Alice`, `ALICE`, and the fullwidth `ａｌｉｃｅ`; `STRASSE` 
 and `file` with `ﬁle`. A name an open invite of the web interface holds is refused the same way
 until the invite is used, withdrawn or expires. A name is refused outright (422) when it holds a
 control character (such as a line break), an invisible format character (such as a zero-width
-space, a zero-width joiner, a soft hyphen or a direction mark), or starts with a combining mark
-(such as an accent with no letter before it), and when it has more than 255 characters as typed
+space, a zero-width joiner, a soft hyphen or a direction mark) or a line or paragraph separator
+(U+2028, U+2029), starts or ends with a space, or starts with a combining mark (such as an accent
+with no letter before it), and when it has more than 255 characters as typed
 or once normalised (a ligature such as `ﬃ` counts as three). Choose another name, or withdraw the
 invite first.
 
@@ -66,6 +67,11 @@ Created grant c913f5e7-8bf0-4b21-9630-46de66a0082d (ANALYST on environment dev) 
 The role `VIEWER` is smaller still: it reads tables and cannot run a query. Roles that do more
 (`DATA_SCIENTIST`, `DATA_ENGINEER`, `ADMIN`) are for people who deploy or administer.
 
+The same grant again (the same person or group, role or action, and object) is refused with 409,
+and nothing is created. The message names the grant that already gives the access, for example
+`Principal 'alice' already holds ANALYST on environment 'dev' through grant c913f5e7-…; nothing
+was created.` To take the access away, revoke that one grant with `lakana grant revoke ID`.
+
 !!! note "Hide rows or columns before you give access"
     A grant on an environment covers every table in it, tables that are created later included.
     If some people must not see some rows or some values, create the
@@ -74,7 +80,9 @@ The role `VIEWER` is smaller still: it reads tables and cannot run a query. Role
 ## Issue a token
 
 A token belongs to one principal and carries the principal's access. Name it after the place it
-will be used, so that you can tell tokens apart when you revoke one:
+will be used, so that you can tell tokens apart when you revoke one. The name may not hold a
+control or format character or a line separator, nor start or end with a space (422), so no token
+looks like another in `lakana token list`:
 
 <!-- source: docs/examples/give-access/run.sh#token -->
 ```bash

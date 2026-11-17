@@ -262,6 +262,29 @@ host.** Before you upgrade such an instance, run the server and the workers with
 ([A storage root on a local directory](../how-to/deploy-with-compose.md#a-storage-root-on-a-local-directory)).
 Files written before keep their mode. Storage on S3 or SeaweedFS is not affected.
 
+### A grant that already exists is refused (breaking)
+
+Creating a grant identical to one that is in force (the same principal or group, the same role or
+action, and the same instance, environment, namespace or table) used to make a second copy. It is
+now refused with 409 and nothing is created, through `lakana grant create`, `client.grants.grant`
+and `POST /api/v1/grants` alike; the message names the grant that exists, for example
+`Principal 'tess' already holds ANALYST on environment 'dev' through grant 0b6f…; nothing was
+created.` The SDK raises `lakana.errors.Conflict`. A script that creates the same grant on every
+run must treat that answer as done, or check `lakana grant list` first. An access file is not
+affected: it creates only the grants the instance does not have yet.
+
+Migration `0080` keeps the oldest of each set of identical grants in force and revokes the other
+copies, so everyone keeps exactly the access they had. Each revoked copy gets a `GRANT_REVOKED`
+audit event without an actor, with `reason` `duplicate` and the id of the kept grant in
+`kept_grant_id`. The migration then adds a unique index per grant kind, so the database refuses a
+copy too. It runs with the other migrations, and nothing else has to be done. Going back drops the
+indexes; the revoked copies stay revoked.
+
+A table undrop or an environment restore leaves a grant it would bring back revoked when an
+identical grant is in force, and its `TABLE_UNDROPPED` or `ENVIRONMENT_RESTORED` event lists it
+under `skipped_grants`, each with the `id` of the grant left revoked and the `kept_grant_id` of
+the one in force.
+
 ### Indexes on the artifact tables
 
 Migration `0079` adds six indexes to `artifact_versions` and `artifact_uploads`, so deleting a
@@ -361,6 +384,45 @@ Earlier releases accepted such names (422 from the REST API now). The web interf
 namespace's path and an undrop's new name without their outer spaces; it now sends them as typed,
 so it and the CLI create the same names and refuse the same ones with the same sentence. Existing
 names are not touched: they stay readable and writable, and can be renamed or dropped.
+
+### The same name rules for repositories, groups, tokens, secrets, package indexes, principals and passkeys (breaking)
+
+The two rules above now hold for more of the names you choose. A new repository, group, package
+index, secret or personal access token name may no longer hold a control or format character
+(such as U+202E, a zero-width space or a soft hyphen) or a line or paragraph separator, nor start
+or end with a space (any Unicode space). A repository named `analy\u202etics` would show as
+another repository in `lakana repo list`, on Home and in the jobs and runs of every environment
+that deploys it. The refusal uses the same sentences, for example `Repository name 'analy\u202etics'
+holds U+202E at character 6, … Choose a name without it` or `Group name 'engineers ' ends with a
+space, so it would look like 'engineers' in every list but be a different name. Use 'engineers'
+instead, …`.
+
+- **Repository** (`lakana repo add`, `POST /api/v1/repositories`, **Connect a repository** in
+  Settings → Repositories) and **package index** (`lakana index add`,
+  `POST /api/v1/package-indexes`): both rules.
+- **Group** (`lakana group create`, `POST /api/v1/groups`): both rules. A group an access file
+  creates already met them.
+- **Personal access token** (`lakana token issue`, `POST /api/v1/principals/{name}/tokens`): both
+  rules for the token's name.
+- **Secret** (`lakana secret create`, `POST /api/v1/environments/{environment_name}/secrets`):
+  its name already refused an ASCII space, control characters and bidirectional controls; now
+  every other format character and any other Unicode space at either end are refused too.
+- **Principal** (`lakana principal create`, `POST /api/v1/principals`): control and format
+  characters were refused already; the line and paragraph separators and a space at either end
+  are now too, as an invite already did.
+- **Passkey** names now refuse the line and paragraph separators too, next to control characters.
+
+Environment and connection names already met both rules: an environment name must be printable
+without a blank at either end, and a connection name is lower-case letters, digits and `-`. A job
+name in `lakana.yaml` already refused these characters at deploy; a space at either end of a job
+name is still accepted there, because a project that has one would fail its next deploy.
+
+Earlier releases accepted such names, so a script that still creates one now gets 422 where it
+worked before; choose a name without the character or the outer space. Existing names are not
+touched: such a repository, group, package index, secret or token stays readable, can be
+changed and can be deleted or revoked as before. To find one, search the JSON output of the list
+commands (`lakana --output json repo list`, `group list`, `token list NAME`) with the `grep`
+above.
 
 ### Control characters in asset files are refused (breaking)
 
