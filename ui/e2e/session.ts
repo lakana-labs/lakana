@@ -747,6 +747,9 @@ const PERMISSIONS = {
 const PICTURE =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
+/** Where the Queries screen asks where one may query; none here (`queries.ts` lists some). */
+const QUERY_ENVIRONMENTS = "/api/v1/queries/environments";
+
 /** The paths the stubs answer; any other request to the API is a test failure. */
 export const STUBBED = [
   "/api/v1/sign-in/session",
@@ -772,13 +775,14 @@ export const STUBBED = [
   PREVIEW_RUN_PATH,
   `${PREVIEW_RUN_PATH}/result`,
   `${PREVIEW_RUN_PATH}/cancel`,
+  QUERY_ENVIRONMENTS,
 ];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
- * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture, and the first screens of Access (the people) and
- * Settings (the session lengths).
+ * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture, the first screens of Access (the people) and
+ * Settings (the session lengths), and no environment to run a query in (`stubQueries` adds two).
  *
  * @param page - The page.
  */
@@ -893,6 +897,10 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === TABLES,
     (route) => route.fulfill(tablesAnswer(new URL(route.request().url()))),
+  );
+  await page.route(
+    (url) => url.pathname === QUERY_ENVIRONMENTS,
+    (route) => route.fulfill({ json: [] }),
   );
 }
 

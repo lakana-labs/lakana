@@ -1,40 +1,13 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { consoleErrors, signInAsAdmin } from "./session";
+import { cspViolations, recordCspViolations } from "./csp";
+import { stubQueries } from "./queries";
+import { consoleErrors } from "./session";
 
 // CodeMirror's styles come from style-mod at run time. Inside the editor's open shadow root they
 // mount as a constructed stylesheet (adoptedStyleSheets), which the content security policy does
 // not govern; a <style> element with that text would be refused by style-src. This runs on the
 // production build, under the policy, in every engine (Open point 1 of the Queries plan).
-
-/**
- * Records every content security policy violation of the page, from before its first script.
- *
- * @param page - The page.
- */
-async function recordViolations(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const seen: string[] = [];
-    Object.assign(window, { cspViolations: seen });
-    document.addEventListener(
-      "securitypolicyviolation",
-      (event) => {
-        seen.push(`${event.violatedDirective}: ${event.blockedURI} ${event.sample}`);
-      },
-      true,
-    );
-  });
-}
-
-/**
- * The violations recorded so far.
- *
- * @param page - The page.
- * @returns Each violation's directive, blocked URI and sample.
- */
-async function violations(page: Page): Promise<string[]> {
-  return page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations);
-}
 
 /**
  * Opens Home, then the Queries screen from the sidebar, and waits for the editor.
@@ -57,8 +30,8 @@ async function openQueries(page: Page): Promise<number> {
 test("the editor is styled under the content security policy, without a <style> element", async ({
   page,
 }) => {
-  await recordViolations(page);
-  await signInAsAdmin(page);
+  await recordCspViolations(page);
+  await stubQueries(page);
   const errors = consoleErrors(page);
 
   const styles = await openQueries(page);
@@ -74,18 +47,18 @@ test("the editor is styled under the content security policy, without a <style> 
     ),
   ).toBe(0);
   expect(await page.evaluate(() => document.querySelectorAll("style").length)).toBe(styles);
-  expect(await violations(page)).toEqual([]);
+  expect(await cspViolations(page)).toEqual([]);
   expect(errors).toEqual([]);
 });
 
 // CodeMirror's lint base theme draws the error underline and the gutter marker with data: images,
-// which img-src refuses; the Still Water theme replaces them. Until the screen shows a run's error
-// (a later task), no diagnostic can be drawn through the interface, so this puts elements with
+// which img-src refuses; the Still Water theme replaces them. This puts elements with
 // lint's own class names where CodeMirror draws them (the marker in the lint gutter, the range
-// under the editor) and lets the editor's adopted sheets style them under the real policy.
+// under the editor) and lets the editor's adopted sheets style them under the real policy. A real
+// failed run's marks are drawn in queries.spec.ts.
 test("the error underline and the gutter marker draw without an image", async ({ page }) => {
-  await recordViolations(page);
-  await signInAsAdmin(page);
+  await recordCspViolations(page);
+  await stubQueries(page);
   const errors = consoleErrors(page);
   await openQueries(page);
   const editor = page.locator(".cm-editor");
@@ -144,6 +117,6 @@ test("the error underline and the gutter marker draw without an image", async ({
     };
   });
   expect(rangeStyle).toEqual({ image: "none", line: "underline", wavy: "wavy" });
-  expect(await violations(page)).toEqual([]);
+  expect(await cspViolations(page)).toEqual([]);
   expect(errors).toEqual([]);
 });
