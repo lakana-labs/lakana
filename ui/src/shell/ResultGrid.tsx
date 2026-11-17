@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import type { TFunction } from "i18next";
 import { type JSX, useEffect, useRef, useState } from "react";
 import { Cell, Column, Row, Table, TableBody, TableHeader } from "react-aria-components";
 import { useTranslation } from "react-i18next";
@@ -61,10 +62,7 @@ export function CellText({ cell }: CellTextProps): JSX.Element {
  * @param t - The translation function.
  * @returns The rows of cells.
  */
-export function pageCells(
-  page: ResultPageOut,
-  t: ReturnType<typeof useTranslation>["t"],
-): PreviewText[][] {
+export function pageCells(page: ResultPageOut, t: TFunction): PreviewText[][] {
   return page.rows.map((row, index) =>
     page.columns.map((column, at) =>
       previewValue(row[at], column.type, page.row_cut.includes(index), t),

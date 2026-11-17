@@ -66,7 +66,7 @@ function rowText(table: HTMLElement, index: number): (string | null)[] {
 describe("ResultGrid", () => {
   it("names the region and the grid from label with marks", () => {
     const page = result();
-    show(page, "fact_‮sales");
+    show(page, "fact_\u202Esales");
 
     const region = screen.getByRole("region", { name: "fact_U+202Esales" });
     expect(within(region).getByRole("grid", { name: "fact_U+202Esales, rows" })).toBeVisible();
@@ -170,8 +170,8 @@ describe("ResultGrid", () => {
   it("marks a bidi character in a cell", async () => {
     show(
       result({
-        columns: [{ name: "n‮ote", type: "string" }],
-        rows: [["x‮y"]],
+        columns: [{ name: "n\u202Eote", type: "string" }],
+        rows: [["x\u202Ey"]],
       }),
     );
     const table = await grid();
@@ -248,7 +248,7 @@ describe("ResultGrid", () => {
     const user = show({
       ...page,
       columns: page.columns.map((column, index) =>
-        index === 2 ? { ...column, name: "no⁦te" } : column,
+        index === 2 ? { ...column, name: "no\u2066te" } : column,
       ),
     });
     const table = await grid();
