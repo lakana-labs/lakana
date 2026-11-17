@@ -10428,12 +10428,14 @@ class CatalogService:
                 self._session, snapshot, namespace_id=namespace_id, name=target.name
             )
             retention_cleared = refresh_restored(row, p.id, now)
+            skipped: list[dict[str, str]] = []
             restored = restore_policies(
                 self._session,
                 record,
                 table_id=row.id,
                 namespace=target.namespace.joined(),
                 name=target.name,
+                skipped=skipped,
             )
             AuditService(self._session).record(
                 p.id,
@@ -10446,6 +10448,7 @@ class CatalogService:
                     "dropped_at": record.dropped_at.isoformat(),
                     "restored_policies": restored,
                     "retention_cleared": retention_cleared,
+                    **({"skipped_grants": skipped} if skipped else {}),
                 },
             )
             revive(record)
