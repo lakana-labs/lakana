@@ -11,7 +11,7 @@ const PEOPLE = [
 
 describe("PeoplePage", () => {
   it("lists people; every row opens the person", async () => {
-    const { user, router } = renderShell("/access", {
+    const { user, router } = renderShell("/settings/access/people", {
       routes: {
         "GET /api/v1/principals": { status: 200, body: PEOPLE },
         "GET /api/v1/principals/kim/permissions": {
@@ -34,11 +34,11 @@ describe("PeoplePage", () => {
     expect(screen.getByRole("link", { name: "People" })).toHaveAttribute("aria-current", "page");
 
     await user.click(screen.getByRole("link", { name: "kim" }));
-    expect(router.state.location.pathname).toBe("/access/people/kim");
+    expect(router.state.location.pathname).toBe("/settings/access/people/kim");
   });
 
   it("finds people by part of their name", async () => {
-    const { user, server } = renderShell("/access", {
+    const { user, server } = renderShell("/settings/access/people", {
       routes: {
         "GET /api/v1/principals": (request) => ({
           status: 200,
@@ -64,7 +64,7 @@ describe("PeoplePage", () => {
       type: "USER",
       is_active: true,
     }));
-    renderShell("/access", {
+    renderShell("/settings/access/people", {
       routes: { "GET /api/v1/principals": { status: 200, body: many } },
     });
 
@@ -72,7 +72,7 @@ describe("PeoplePage", () => {
   });
 
   it("says when nobody matches", async () => {
-    renderShell("/access", {
+    renderShell("/settings/access/people", {
       routes: { "GET /api/v1/principals": { status: 200, body: [] } },
     });
 
@@ -80,7 +80,7 @@ describe("PeoplePage", () => {
   });
 
   it("shows each person's picture, or their initials without one, fetching nothing for them", async () => {
-    const { server } = renderShell("/access", {
+    const { server } = renderShell("/settings/access/people", {
       routes: {
         "GET /api/v1/principals": {
           status: 200,
@@ -115,7 +115,7 @@ describe("PeoplePage", () => {
   });
 
   it("marks a hidden character of a person's name", async () => {
-    renderShell("/access", {
+    renderShell("/settings/access/people", {
       routes: {
         "GET /api/v1/principals": {
           status: 200,

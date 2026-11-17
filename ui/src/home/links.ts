@@ -34,7 +34,7 @@ const PLACES: Record<ObjectKind, (environment: string | null, ref: string) => st
   run: () => "/jobs",
   check: () => "/jobs",
   worker: () => "/settings/status",
-  recovery_link: () => "/access/recovery-links",
+  recovery_link: () => "/settings/sign-in/recovery-links",
 };
 
 /** The object each kind of Needs your attention row opens. */

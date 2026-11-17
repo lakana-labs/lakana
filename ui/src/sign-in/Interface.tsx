@@ -225,7 +225,7 @@ function Routed({ createRouter, pages, link, onLinkDone }: RoutedProps): JSX.Ele
       {
         element: <Gate ready={access !== null} />,
         children: appRoutes(
-          areasFor(access?.admin === true, access?.noAccessYet === true),
+          areasFor(access?.noAccessYet === true),
           pages,
           access ?? noKnownRights(""),
         ),

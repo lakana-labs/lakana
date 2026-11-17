@@ -13,6 +13,7 @@ import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
 import { useAttempt } from "../sign-in/Attempt";
 import { SettingsFrame } from "./SettingsFrame";
+import "./settingsStrings";
 import { PendingButton } from "../shell/PendingButton";
 
 const HOUR = 60;
@@ -162,7 +163,7 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
 }
 
 /**
- * Renders Settings with its Sign-in tab.
+ * Renders Settings → Sign-in: the session lengths.
  *
  * @returns The place.
  */
@@ -170,7 +171,7 @@ export function SignInSettings(): JSX.Element {
   const { t } = useTranslation();
   const settings = useResource(getSignInSettings);
   return (
-    <SettingsFrame>
+    <SettingsFrame title={t("settings.places.signIn")}>
       <p className="page-purpose">{t("settings.signIn.intro")}</p>
       <Loaded resource={settings}>{(current) => <LengthsForm current={current} />}</Loaded>
     </SettingsFrame>

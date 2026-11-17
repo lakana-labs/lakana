@@ -22,7 +22,7 @@ const ISSUED = {
 
 describe("InvitesPage", () => {
   it("lists the open invites; each row is withdrawn in place, not opened", async () => {
-    renderShell("/access/invites", {
+    renderShell("/settings/sign-in/invites", {
       routes: { "GET /api/v1/invites": { status: 200, body: [OPEN] } },
     });
 
@@ -30,12 +30,12 @@ describe("InvitesPage", () => {
     expect(within(row).getByText("Kim Lee")).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Withdraw the invite of kim" })).toBeVisible();
     expect(within(row).queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Access" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Invites" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Invites" })).toHaveAttribute("aria-current", "page");
   });
 
   it("says how to invite someone when no invite is open", async () => {
-    renderShell("/access/invites", {
+    renderShell("/settings/sign-in/invites", {
       routes: { "GET /api/v1/invites": { status: 200, body: [] } },
     });
 
@@ -45,7 +45,7 @@ describe("InvitesPage", () => {
 
   it("shows the new link once, with the advice to confirm the person first", async () => {
     let open: unknown[] = [];
-    const { user, server } = renderShell("/access/invites", {
+    const { user, server } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": () => ({ status: 200, body: open }),
         "POST /api/v1/invites": () => {
@@ -82,7 +82,7 @@ describe("InvitesPage", () => {
   it("asks for a passkey touch when the server needs one, then sends once more", async () => {
     const webauthn = fakeWebAuthn();
     let tries = 0;
-    const { user, server } = renderShell("/access/invites", {
+    const { user, server } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
         "POST /api/v1/invites": () => {
@@ -123,7 +123,7 @@ describe("InvitesPage", () => {
     // No browser support for passkeys at all: the server's answer comes first, so the person
     // learns that the account has no passkey, not that the browser cannot use one.
     vi.stubGlobal("PublicKeyCredential", undefined);
-    const { user, server } = renderShell("/access/invites", {
+    const { user, server } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
         "POST /api/v1/invites": {
@@ -157,7 +157,7 @@ describe("InvitesPage", () => {
   });
 
   it("names the server's reason when the invite is refused, and keeps the dialog", async () => {
-    const { user } = renderShell("/access/invites", {
+    const { user } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
         "POST /api/v1/invites": {
@@ -183,7 +183,7 @@ describe("InvitesPage", () => {
 
   it("shows the pending sign on Create the invite while the invite is made", async () => {
     const request = held();
-    const { user } = renderShell("/access/invites", {
+    const { user } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
         "POST /api/v1/invites": request.route,
@@ -206,7 +206,7 @@ describe("InvitesPage", () => {
 
   it("shows the pending sign on Withdraw while the invite is withdrawn", async () => {
     const request = held();
-    const { user } = renderShell("/access/invites", {
+    const { user } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [OPEN] },
         "DELETE /api/v1/invites/i-1": request.route,
@@ -225,7 +225,7 @@ describe("InvitesPage", () => {
 
   it("shows the pending sign only on the Withdraw that was pressed", async () => {
     const request = held();
-    const { user } = renderShell("/access/invites", {
+    const { user } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": {
           status: 200,
@@ -246,7 +246,7 @@ describe("InvitesPage", () => {
 
   it("withdraws an invite and removes its row", async () => {
     let open: unknown[] = [OPEN];
-    const { user, server } = renderShell("/access/invites", {
+    const { user, server } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": () => ({ status: 200, body: open }),
         "DELETE /api/v1/invites/i-1": () => {
@@ -261,12 +261,12 @@ describe("InvitesPage", () => {
     expect(await screen.findByText(/No invite is open/)).toBeInTheDocument();
     expect(server.sent.some((request) => request.method === "DELETE")).toBe(true);
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
+      expect(screen.getByRole("heading", { level: 1, name: "Invites" })).toHaveFocus();
     });
   });
 
   it("names the server's reason when withdrawing fails", async () => {
-    const { user } = renderShell("/access/invites", {
+    const { user } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [OPEN] },
         "DELETE /api/v1/invites/i-1": {
@@ -282,7 +282,7 @@ describe("InvitesPage", () => {
   });
 
   it("names the reason when the list cannot be read", async () => {
-    renderShell("/access/invites", {
+    renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": {
           status: 403,
@@ -295,7 +295,7 @@ describe("InvitesPage", () => {
   });
 
   it("marks hidden characters of an invite's name and display name", async () => {
-    renderShell("/access/invites", {
+    renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": {
           status: 200,
