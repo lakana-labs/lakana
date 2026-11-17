@@ -113,11 +113,11 @@ Returns: `Iterator of HealthSignal`. Each observation, once; raises as `health_s
 
 ### `client.tables.describe`
 
-Signature: `client.tables.describe(environment: str, qualified_name: str, description: str | None = UNSET, *, label: str | None = UNSET, column: str | None = None, lang: str | None = None) -> Table`
+Signature: `client.tables.describe(environment: str, qualified_name: str, description: str | None = UNSET, *, label: str | None = UNSET, column: str | None = None, lang: str | None = None, label_language: str | None = None) -> Table`
 
 Set the description or label of a table or one of its columns, or reset them.
 
-A text set here is shown instead of the one a deploy publishes from the asset header or a translation file, and a deploy never replaces it. Resetting (`None`) removes it, so the project's text shows again; a field you leave out stays as it is. Without `lang`, the edit is in the table's main language. Needs to own the table or hold `DROP_TABLE` on it.
+A text set here is shown instead of the one a deploy publishes from the asset header or a translation file, and a deploy never replaces it. Resetting (`None`) removes it, so the project's text shows again; a field you leave out stays as it is. Without `lang`, the edit is in the table's main language; `label_language` puts the label in another language than the description. Needs to own the table or hold `DROP_TABLE` on it.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -127,15 +127,17 @@ A text set here is shown instead of the one a deploy publishes from the asset he
 | `label` | `str | None` | `UNSET` | The new label (one line, 1 to 100 characters), or `None` to reset. |
 | `column` | `str | None` | `None` | A column of the table to describe instead of the table. |
 | `lang` | `str | None` | `None` | The language edited, such as `"fr"`; also the language of the returned texts. Without it, the edit is in the table's main language and the returned texts follow your profile's language, then the server's main language. |
+| `label_language` | `str | None` | `None` | The language the label is edited in, such as `"en"`, when it is not `lang`'s; without it, the label is edited in the same language as the description. Needs `label`. |
 
 Returns: `Table`. The table, with the texts it shows now.
 
 | Error | When |
 |---|---|
-| `ValueError` | If neither `description` nor `label` is given. |
+| `ValueError` | If neither `description` nor `label` is given, or `label_language` without `label`. |
 | `lakana.NotFound` | If the table, or the column, does not exist. |
 | `lakana.PermissionDenied` | Without the right to describe the table. |
-| `lakana.ValidationError` | If a text breaks its rules or `lang` is not a language tag. |
+| `lakana.ValidationError` | If a text breaks its rules, or `lang` or `label_language` is not a language tag. |
+| `lakana.InvalidResponse` | With `label_language`, when the server is older than it and edited the label in the description's language instead; the message names that language. A label in another language is read back once to check this. |
 
 ### `client.tables.delete`
 
