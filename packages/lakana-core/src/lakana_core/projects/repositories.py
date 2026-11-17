@@ -32,7 +32,12 @@ from lakana_core.errors import (
     NotFoundError,
     ValidationError,
 )
-from lakana_core.identifiers import is_secret_name, validate_path_component
+from lakana_core.identifiers import (
+    is_secret_name,
+    refuse_hidden_characters,
+    refuse_outer_whitespace,
+    validate_path_component,
+)
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     AuditEventType,
@@ -236,7 +241,9 @@ class RepositoryService:
             A `PermissionDenied`: `credential_secret` names a secret that is not bound to this
             repository (unbound, bound elsewhere, or used by its environment).
         ValidationError
-            If a field or the kind is invalid.
+            If a field or the kind is invalid, or the name holds an invisible or line-breaking
+            character (`refuse_hidden_characters`) or starts or ends with a space
+            (`refuse_outer_whitespace`). A repository stored before the rule is not judged.
         AlreadyExistsError
             If the name is taken, including by a concurrent create.
         ConflictError
@@ -247,6 +254,8 @@ class RepositoryService:
         self._authz.authorize(p, Action.MANAGE_REPOSITORY, Securable.instance_scope())
         require_step_up(p)
         validate_path_component(name, what="Repository name")
+        refuse_hidden_characters(name, what="Repository name")
+        refuse_outer_whitespace(name, what="Repository name")
         try:
             kind = RepositoryKind(kind)
         except ValueError as exc:

@@ -17,7 +17,7 @@ Register a package index (needs `MANAGE_PACKAGE_INDEX`).
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str` | required | Unique name; no dots. |
+| `name` | `str` | required | Unique name; no dots, no control or format character, no line separator and no space at either end. |
 | `url` | `str` | required | ``https://host/path`` of the index, without a user name or password. |
 | `credential_secret` | `str | None` | `None` | Name of the secret that holds ``username`` and ``password``, per environment. |
 

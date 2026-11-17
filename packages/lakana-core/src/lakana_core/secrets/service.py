@@ -25,7 +25,12 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.connections.endpoints import endpoint_hosts
 from lakana_core.db import refuse_concurrent_change
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, ValidationError
-from lakana_core.identifiers import is_secret_name, shown
+from lakana_core.identifiers import (
+    is_secret_name,
+    refuse_hidden_characters,
+    refuse_outer_whitespace,
+    shown,
+)
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -60,7 +65,10 @@ def require_storable_name(name: str) -> None:
     The rule is `is_secret_name`, the one every index, repository and deploy key applies to the
     secret it names, so a new secret never has a name nothing could name. It also keeps out
     what PostgreSQL refuses in a text parameter (a NUL, a lone surrogate), which would otherwise
-    reach the caller as a server error. A secret created before the rule keeps its name.
+    reach the caller as a server error. A new name also meets the rules of a new table name: no
+    format character such as a zero-width space (`refuse_hidden_characters`) and no Unicode
+    space at either end (`refuse_outer_whitespace`), so it cannot look like another one. A secret
+    created before a rule keeps its name.
 
     Parameters
     ----------
@@ -70,13 +78,15 @@ def require_storable_name(name: str) -> None:
     Raises
     ------
     ValidationError
-        If `is_secret_name` refuses it.
+        If `is_secret_name`, `refuse_hidden_characters` or `refuse_outer_whitespace` refuses it.
     """
     if not is_secret_name(name):
         raise ValidationError(
             "A secret name must be 1-255 characters with no space, control character, ':', "
             "lone surrogate or bidirectional control character; give the secret another name."
         )
+    refuse_hidden_characters(name, what="Secret name")
+    refuse_outer_whitespace(name, what="Secret name")
 
 
 def insert_secret(
