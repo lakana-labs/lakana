@@ -26,12 +26,23 @@ export interface HostKeyOut {
 export interface RepositoryProbeOut {
   /** The check's id. */
   readonly id: string;
-  /** `host_keys` or `access`. */
-  readonly kind: string;
-  /** `queued`, `running` or `done`. */
-  readonly state: string;
-  /** What it found once done (`ok`, `no_worker`, `auth_refused`, ...); null before. */
-  readonly outcome: string | null;
+  /** What it checks. */
+  readonly kind: "host_keys" | "access";
+  /** Where it is. */
+  readonly state: "queued" | "running" | "done";
+  /** What it found once done; null before. */
+  readonly outcome:
+    | "ok"
+    | "host_key_changed"
+    | "host_key_unknown"
+    | "auth_refused"
+    | "not_found"
+    | "unreachable"
+    | "refused_address"
+    | "timeout"
+    | "no_worker"
+    | "failed"
+    | null;
   /** What it found, with the next step; null before it is done. */
   readonly message: string | null;
   /** The keys a host-key check found; null otherwise. */

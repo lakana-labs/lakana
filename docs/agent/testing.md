@@ -1291,14 +1291,23 @@ in `ui (e2e smoke)` and `ui (e2e server)` beside it (the required check `ui` wai
     the type with every key of the object and the fewest other fields). Its codes keep no
     override: the fields whose type is a union of string literals (through aliases, lists and
     `Other["field"]`), and the `string` fields `STRING_CODES` in `hidden.ts` names per type, each
-    because the interface translates or compares it (a check's `outcome`, a lineage node's
-    `kind`, a probe's `state`, a search hit's `kind`). The same name in another type carries the
-    override (`PermissionOut.reason` does, `GraphNodeOut.kind` does not). Also left alone
-    everywhere: ids (`id`, `*_id`) and any string equal to one of the answer's ids (a lineage
-    edge's ends), upper-case constants (`USER`, `READ_TABLE`), an error's `type`
-    (`StepUpRequired`), times and the empty string. A test pins what `apiTypes()` finds; a change
-    to `src/api` that changes it fails there, so read the type before accepting the new list. A
-    new `string` code joins `STRING_CODES` only with what the interface does with it.
+    because the interface translates it (a check's `outcome`, a health summary's `item`). A code
+    the interface compares (a lineage node's `kind`, a probe's `state`, a search hit's `kind`) is
+    typed in `src/api` as a union of the server's values, so the check finds it by type (#682).
+    The same name in another type carries the override (`PermissionOut.reason` does,
+    `GraphNodeOut.kind` does not). Also left alone everywhere: ids (`id`, `*_id`) and any string
+    equal to one of the answer's ids (a lineage edge's ends), upper-case constants (`USER`,
+    `READ_TABLE`), an error's `type` (`StepUpRequired`), times and the empty string. A test pins
+    what `apiTypes()` finds; a change to `src/api` that changes it fails there, so read the type
+    before accepting the new list. A new `string` code joins `STRING_CODES` only with what the
+    interface does with it.
+  - **Which type each object is read as.** `typeOf` falls back to a partial fit and breaks ties
+    by declaration order, so a new `src/api` type or a changed stub could move an object to a
+    type whose codes include one of its free-text fields, which would then carry no override.
+    `READ_AS` in `hidden.ts` pins the pick for every object the stubs answer, by its sorted keys:
+    after each test the spec fails on an object read as another type or not listed (the message
+    gives the line to add, once its fields are checked), and a test fails when `typeOf` no longer
+    picks what an entry says.
   - **What each step asserts.** `expectMarked(page, label, values)` names one or more stubbed
     values the step's screen shows and requires each with its mark (`fact_salesU+202E`) inside
     the open dialog, or else `<main>`; the shell's own marks (the user menu's name) do not count.

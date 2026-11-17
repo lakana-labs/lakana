@@ -1,15 +1,17 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { apiTypes } from "./api-types";
+import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { ROUTES, stubConnect } from "./connect";
 import {
   apiPaths,
   expectMarked,
   expectNoRaw,
+  misreadObjects,
   poison,
   poisoned,
   rawOverrides,
+  READ_AS,
   RLO,
   STRING_CODES,
 } from "./hidden";
@@ -55,20 +57,25 @@ const LITERAL_CODES: Record<string, string> = {
   ExternalTableOut: "format",
   GetStartedOut: "audience",
   GetStartedStepOut: "id",
+  GraphEdgeOut: "kind",
+  GraphNodeOut: "kind",
   GrantOut: "kind role",
   HealthSummaryOut: "state",
   InstanceStatusOut: "state",
   LastMaintenanceOut: "status",
+  LinkDescriptionOut: "kind state",
   ListTablesQuery: "order sort",
   OrphanOut: "actions kind",
   OwnerOut: "kind",
   QueryStatusOut: "status",
   RecentOut: "kind",
   RepositoryCreate: "kind",
+  RepositoryProbeOut: "kind outcome state",
   ScopeOut: "kind",
   SubjectPrincipalOut: "principal_type",
   TableDefinitionFileOut: "reason",
   TableListItemOut: "kind state",
+  TableMatchOut: "kind matched",
   TableOut: "actions description_source kind label_source state",
   TableRetentionOut: "kept source",
   "TableTreeOut.environments": "actions",
@@ -78,6 +85,12 @@ const LITERAL_CODES: Record<string, string> = {
 
 test.beforeEach(({ browserName }) => {
   test.skip(browserName !== "chromium", "the check reads the DOM, the same in every browser");
+});
+
+// A fixture object read as another type would leave that type's codes alone, a free-text field
+// among them: each object is read as the type READ_AS pins.
+test.afterEach(() => {
+  expect(misreadObjects(), "each stubbed object read as the type READ_AS pins").toEqual([]);
 });
 
 /**
@@ -220,6 +233,19 @@ test("the answers carry the override in every text but each type's codes, ids an
     edges: [{ kind: "reads", source: "table:a", target: "table:a" }],
     error: { type: "StepUpRequired", detail: `Touch your passkey.${RLO}` },
   });
+});
+
+test("each object of the stubbed answers is read as the type READ_AS pins", () => {
+  const types = apiTypes();
+  const picks = Object.fromEntries(
+    Object.keys(READ_AS).map((keys) => [
+      keys,
+      typeOf(types, keys === "" ? [] : keys.split(" "))?.name ?? "-",
+    ]),
+  );
+
+  // A change here changes which codes an object's fields are read as: check its free text.
+  expect(picks).toEqual(READ_AS);
 });
 
 test("the codes of each answer type are the ones src/api declares", () => {

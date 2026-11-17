@@ -625,8 +625,19 @@ export function getTableHealth(
 export interface GraphNodeOut {
   /** Its stable id, such as `table:<uuid>`. */
   readonly id: string;
-  /** `table`, `job`, `connection` and others. */
-  readonly kind: string;
+  /** What it is. */
+  readonly kind:
+    | "table"
+    | "column"
+    | "asset"
+    | "reference"
+    | "measure"
+    | "term"
+    | "check"
+    | "row_filter"
+    | "column_mask"
+    | "job"
+    | "connection";
   /** A name to read: a dotted table name for a table. */
   readonly name: string;
   /** Steps from the start. */
@@ -645,8 +656,19 @@ export interface GraphNodeOut {
 
 /** An edge of the metadata graph, from `source` to `target`. */
 interface GraphEdgeOut {
-  /** `reads`, `builds`, `references` and others. */
-  readonly kind: string;
+  /** What it says, from `source` to `target`. */
+  readonly kind:
+    | "builds"
+    | "checks"
+    | "filters"
+    | "has_column"
+    | "links"
+    | "masks"
+    | "measures"
+    | "reads"
+    | "references"
+    | "runs"
+    | "uses";
   /** The node it leaves. */
   readonly source: string;
   /** The node it reaches. */
