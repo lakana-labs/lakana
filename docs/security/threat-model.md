@@ -1051,6 +1051,37 @@ table's own id suffix could otherwise nest one table's directory inside another'
 rule catches that case specifically. A table failing the id-suffix check must be re-created;
 there is no in-place migration for an existing table's location.
 
+### Browsing raw/ (#672)
+
+`GET /api/v1/environments/{env}/raw` (Browse… in New external table, `lakana raw ls`,
+`client.raw.list`) lists the names and sizes of the folders and files under an environment's
+`raw/`, never a file's contents. It is a listing of storage that the catalog does not describe, so
+it is held to these controls:
+
+- **Who.** Only a caller who may register an external table in some namespace of the environment
+  (`CREATE_TABLE` on a namespace, asked in one `permits_each` batch); anyone else is refused by
+  `CREATE_TABLE` on the environment (recorded as `AUTHORIZATION_DENIED`) before storage is read.
+- **Where.** The folder must be `raw` or a folder below it: no leading `/`, no empty, `.` or `..`
+  part, no NUL, at most 1,024 characters (`parse_raw_folder`), then `confine_to_root` as the
+  registration does. One level of one folder and one page of it (at most 200 entries) per call;
+  on S3 one `ListObjectsV2` page, on the local backend the one directory's names with a `stat` of
+  the files returned only; a symlink is never listed.
+- **Claims.** An entry inside another external table's claim is marked; the table is named only
+  to a reader with `READ_TABLE` on it. A folder that only holds a claim further down is not
+  marked, so its free neighbours stay reachable; registering it is still refused by
+  `check_claim_free`.
+- **Audit.** Each folder read writes `ACTIVITY_VIEWED` (`view: raw_files`, the environment as
+  scope, the folder as targeting key), once per reader and folder within
+  `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, before the answer is returned; if it cannot be written the
+  read is refused (503) and shows nothing.
+
+**Residuals, stated as such.** A holder of `CREATE_TABLE` on one namespace sees the names and
+sizes of every file under `raw/`, those in other tables' folders included, whether or not they may
+read those tables (the maintainer's choice A on #672: the dialog's own right, not a right per
+folder). The marker says that some table holds a folder without naming it, which a registration
+attempt already said (`That directory is already claimed by another table.`). With
+`LAKANA_VIEW_AUDIT__ENABLED=false` the reads are not recorded.
+
 ### Unattended deletion of table locations (#90)
 
 The worker's location sweep deletes table data with no person in the loop, so what it may delete

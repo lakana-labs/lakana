@@ -195,6 +195,8 @@ an `ACTIVITY_VIEWED` event: who looked, at which environment or table, with whic
 rows of how many other people the answer showed, never their names or their SQL. It is written once per
 person and view per hour, so paging, other filters and a screen that refreshes itself add nothing; a
 filter on one person (`--submitter`) is its own view. Looking only at your own activity records nothing.
+Listing a folder of `raw/` (Browse… in New external table, `lakana raw ls`) is recorded the same way,
+once per person and folder per hour, as it shows files that other people and systems put there.
 If the event cannot be written, the read is refused rather than served unrecorded. Reading the text
 of the file that defines a table writes a `SOURCE_VIEWED` event (the repository, path and commit),
 once per person, file and commit per hour, and is refused too if that event cannot be written; so
