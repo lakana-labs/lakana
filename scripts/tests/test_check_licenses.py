@@ -10,10 +10,12 @@ import pytest
 from scripts.check_licenses import (
     ALLOWLIST,
     UNKNOWN_PYTHON_LICENCES,
+    _canonical,
     classify,
     classify_expression,
     find_lockfiles,
     find_npm_violations,
+    find_stale_unknown_entries,
     find_violations,
     main,
 )
@@ -176,11 +178,15 @@ def test_find_lockfiles_skips_vendored_dirs_and_flags_unsupported(tmp_path: Path
     assert unsupported == [tmp_path / "pnpm-lock.yaml", tmp_path / "ui" / "yarn.lock"]
 
 
+_CLEAN_LISTING = [{"Name": "atheris", "License": "UNKNOWN", "Version": "3.1.0", "URL": ""}]
+"""A clean environment: the one listed unknown package, so no entry is stale."""
+
+
 def _stub_python_side(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the Python half of ``main`` see an empty, clean environment."""
     monkeypatch.setattr(
         "scripts.check_licenses.subprocess.run",
-        lambda *a, **k: type("R", (), {"stdout": "[]"})(),
+        lambda *a, **k: type("R", (), {"stdout": json.dumps(_CLEAN_LISTING)})(),
     )
     monkeypatch.setattr("sys.argv", ["check_licenses"])
 
@@ -521,7 +527,7 @@ def test_every_allowlist_entry_is_justified_in_the_docstring() -> None:
         assert f"``{name}``" in doc or name.startswith("lightningcss-")
 
 
-@pytest.mark.parametrize("text", ["UNKNOWN", "unknown", "", "  "])
+@pytest.mark.parametrize("text", ["UNKNOWN", "unknown", "", "  ", "none", "N/A"])
 def test_an_unlisted_python_package_with_an_unknown_licence_fails(text: str) -> None:
     """A distribution whose metadata names no licence is a violation unless it is listed."""
     entries = [{"Name": "mystery-pkg", "License": text}]
@@ -530,10 +536,38 @@ def test_an_unlisted_python_package_with_an_unknown_licence_fails(text: str) -> 
 
 def test_a_listed_unknown_python_package_passes_in_any_spelling() -> None:
     """Atheris is listed with its licence and evidence; names compare as PEP 503 does."""
-    assert UNKNOWN_PYTHON_LICENCES["atheris"][0] == "Apache-2.0"
-    assert "LICENSE" in UNKNOWN_PYTHON_LICENCES["atheris"][1]
-    for name in ("atheris", "Atheris"):
-        assert find_violations([{"Name": name, "License": "UNKNOWN"}], frozenset()) == []
+    assert UNKNOWN_PYTHON_LICENCES["atheris", "3.1.0"][0] == "Apache-2.0"
+    assert "LICENSE" in UNKNOWN_PYTHON_LICENCES["atheris", "3.1.0"][1]
+    for name in ("atheris", "Atheris", "ATHERIS"):
+        entry = {"Name": name, "License": "UNKNOWN", "Version": "3.1.0"}
+        assert find_violations([entry], frozenset()) == []
+
+
+def test_pep_503_name_collapse_of_dash_underscore_and_dot() -> None:
+    """``-``, ``_`` and ``.`` runs are one separator when names are compared."""
+    assert _canonical("Foo__bar.-baz") == _canonical("foo-bar-baz") == "foo-bar-baz"
+
+
+def test_another_version_of_a_listed_package_fails() -> None:
+    """The evidence is for one version; a different one is judged again."""
+    entry = {"Name": "atheris", "License": "UNKNOWN", "Version": "9.9.9"}
+    assert find_violations([entry], frozenset()) == [("atheris", "UNKNOWN", "UNKNOWN")]
+
+
+def test_a_stale_unknown_entry_is_reported() -> None:
+    """An entry is stale when the package is absent, another version, or now has a licence."""
+    ok = {"Name": "atheris", "License": "UNKNOWN", "Version": "3.1.0"}
+    assert find_stale_unknown_entries([ok]) == []
+    assert find_stale_unknown_entries([]) == [("atheris", "3.1.0")]
+    assert find_stale_unknown_entries([{**ok, "Version": "3.2.0"}]) == [("atheris", "3.1.0")]
+    assert find_stale_unknown_entries([{**ok, "License": "Apache-2.0"}]) == [("atheris", "3.1.0")]
+
+
+@pytest.mark.parametrize("text", ["UNKNOWN", "none", "N/A"])
+def test_npm_literal_unknown_licences_fail(text: str) -> None:
+    """A literal placeholder licence is as missing as an absent one."""
+    lock = _lock({"node_modules/p": {"license": text}})
+    assert find_npm_violations(lock, frozenset()) == [("p", text, "UNKNOWN")]
 
 
 def test_listing_covers_only_an_unknown_licence() -> None:
@@ -548,3 +582,16 @@ def test_every_unknown_licence_entry_records_licence_and_evidence() -> None:
         assert licence.strip()
         assert classify(licence) is None
         assert evidence.strip()
+
+
+def test_main_fails_on_a_stale_unknown_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An entry whose package is not installed any more fails the build."""
+    monkeypatch.setattr(
+        "scripts.check_licenses.subprocess.run", lambda *a, **k: type("R", (), {"stdout": "[]"})()
+    )
+    monkeypatch.setattr("sys.argv", ["check_licenses"])
+    monkeypatch.setattr("scripts.check_licenses.REPO_ROOT", tmp_path)
+    assert main() == 1
+    assert "stale UNKNOWN_PYTHON_LICENCES entry" in capsys.readouterr().err

@@ -54,6 +54,7 @@ FORBIDDEN: dict[str, tuple[str, ...]] = {
 # Reserved Font Name), so only the complete upstream woff2 files ship (M7 part-1 design).
 FONT_PACKAGES: frozenset[str] = frozenset({"@ibm/plex-sans", "@ibm/plex-mono"})
 
+# Exact names, unlike UNKNOWN_PYTHON_LICENCES (PEP 503-normalised); keep entries as reported.
 ALLOWLIST: frozenset[str] = frozenset(
     {
         "hypothesis",
@@ -109,14 +110,18 @@ comment justifying it, and adding one is a deliberate decision.
 """
 
 
-UNKNOWN_PYTHON_LICENCES: dict[str, tuple[str, str]] = {
-    "atheris": (
+UNKNOWN_PYTHON_LICENCES: dict[tuple[str, str], tuple[str, str]] = {
+    ("atheris", "3.1.0"): (
         "Apache-2.0",
         "installed atheris 3.1.0: dist-info/licenses/LICENSE is the Apache License 2.0 text; "
         "the package declares no licence field or classifier (checked 2026-11-17)",
     ),
 }
 """Python distributions whose metadata names no licence, with the licence found and where.
+
+Keyed by ``(normalised name, version)``: the licence was read from that version's files, so
+another version fails until it is checked again. An entry whose package is no longer unknown
+or no longer installed is stale and fails too (`find_stale_unknown_entries`).
 
 ``pip-licenses`` reports ``UNKNOWN`` for them, and an unknown licence fails the gate unless
 the package is listed here. Each value is ``(licence, evidence)``: the licence read from the
@@ -226,18 +231,37 @@ def find_violations(
     list of tuple of str
         ``(name, license_text, family)`` for each violation, in input order.
     """
-    checked = {_canonical(name) for name in UNKNOWN_PYTHON_LICENCES}
     violations: list[tuple[str, str, str]] = []
     for entry in entries:
         name, text = entry["Name"], entry["License"]
         if name in allowlist:
             continue
         if is_unknown(text):
-            if _canonical(name) not in checked:
+            if (_canonical(name), entry.get("Version", "")) not in UNKNOWN_PYTHON_LICENCES:
                 violations.append((name, text, "UNKNOWN"))
         elif (family := classify(text)) is not None:
             violations.append((name, text, family))
     return violations
+
+
+def find_stale_unknown_entries(entries: list[dict[str, str]]) -> list[tuple[str, str]]:
+    """Find `UNKNOWN_PYTHON_LICENCES` entries that match no unknown installed package.
+
+    Parameters
+    ----------
+    entries
+        Distributions as reported by ``pip-licenses --format=json``.
+
+    Returns
+    -------
+    list of tuple of str
+        The ``(name, version)`` keys whose package is not installed at that version or no
+        longer reports an unknown licence.
+    """
+    unknown = {
+        (_canonical(e["Name"]), e.get("Version", "")) for e in entries if is_unknown(e["License"])
+    }
+    return [key for key in UNKNOWN_PYTHON_LICENCES if key not in unknown]
 
 
 SKIP_DIRS = frozenset({".git", ".venv", "node_modules", ".worktrees", "__pycache__"})
@@ -390,9 +414,10 @@ def find_npm_violations(
         if (
             licence is None
             or licence in ((), [], "")
-            or (isinstance(licence, str) and not licence.strip())
+            or (isinstance(licence, str) and is_unknown(licence))
         ):
-            violations.append((name, "<missing>", "UNKNOWN"))
+            shown = licence if isinstance(licence, str) and licence.strip() else "<missing>"
+            violations.append((name, shown, "UNKNOWN"))
         elif not isinstance(licence, str):
             violations.append((name, str(licence), "UNPARSEABLE"))
         else:
@@ -471,12 +496,16 @@ def main() -> int:
     ).stdout
     violations = find_violations(json.loads(raw), ALLOWLIST)
 
+    entries = json.loads(raw)
+    stale = find_stale_unknown_entries(entries)
     npm_problems = check_npm(REPO_ROOT, ALLOWLIST)
 
-    if violations or npm_problems:
+    if violations or npm_problems or stale:
         print("Forbidden dependency licences:", file=sys.stderr)
         for name, license_text, family in violations:
             print(f"  {name}: {license_text} ({family})", file=sys.stderr)
+        for name, version in stale:
+            print(f"  {name} {version}: stale UNKNOWN_PYTHON_LICENCES entry", file=sys.stderr)
         for problem in npm_problems:
             print(f"  npm {problem}", file=sys.stderr)
         return 1
