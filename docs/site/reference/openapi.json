@@ -3835,7 +3835,7 @@
           "tables"
         ],
         "summary": "Set a table's description and label",
-        "description": "Sets the texts shown for the table in one language (`lang`, else the table's main language), or with `null` removes an edit so that the text of the project shows again. A field left out of the body stays as it is. A deploy never replaces a text set here. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table does not exist and 422 for a body with neither field, a blank text, a description over 4,000 characters, a label over 100 characters or on several lines, or a `lang` that is not a language tag.",
+        "description": "Sets the texts shown for the table in one language (`lang`, else the table's main language), or with `null` removes an edit so that the text of the project shows again. A field left out of the body stays as it is. `label_language` in the body edits the label in another language than the description, for a page that shows the two in different languages. A deploy never replaces a text set here. The table's owner or a holder of `DROP_TABLE` may do this, and must be able to read the table. Answers 404 when the table does not exist and 422 for a body with neither field, a blank text, a description over 4,000 characters, a label over 100 characters or on several lines, a `lang` or `label_language` that is not a language tag, or a `label_language` without a `label`.",
         "operationId": "describe_table_api_v1_environments__env__namespaces__path__tables__name__patch",
         "parameters": [
           {
@@ -4472,7 +4472,7 @@
           "tables"
         ],
         "summary": "Set a column's description and label",
-        "description": "Works as the table's route does, for one column, which must be in the table's schema: the texts are set in `lang`, else in the table's main language, `null` removes an edit, and a field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it. Answers 404 for a missing table or column and 422 as the table's route does.",
+        "description": "Works as the table's route does, for one column, which must be in the table's schema: the texts are set in `lang`, else in the table's main language, the label in `label_language` when the body names one, `null` removes an edit, and a field left out stays. The caller owns the table or holds `DROP_TABLE` on it, and may read it. Answers 404 for a missing table or column and 422 as the table's route does.",
         "operationId": "describe_column_api_v1_environments__env__namespaces__path__tables__name__columns__column__description_put",
         "parameters": [
           {
@@ -28868,11 +28868,23 @@
               }
             ],
             "title": "Label"
+          },
+          "label_language": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label Language"
           }
         },
         "type": "object",
         "title": "DescriptionIn",
-        "description": "Request body that sets or resets a description, a label or both, in one language.\n\nSend one or both; a field left out stays as it is, `null` removes its edit.\n\nParameters\n----------\ndescription\n    The new text (1 to 4,000 characters, not blank), or `null` to remove the edit so that the\n    project's text shows again.\nlabel\n    The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so\n    that the project's label shows again."
+        "description": "Request body that sets or resets a description, a label or both.\n\nSend one or both; a field left out stays as it is, `null` removes its edit. Both are edited\nin the language `?lang=` names, unless `label_language` names another one for the label.\n\nParameters\n----------\ndescription\n    The new text (1 to 4,000 characters, not blank), or `null` to remove the edit so that the\n    project's text shows again.\nlabel\n    The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so\n    that the project's label shows again.\nlabel_language\n    The language `label` is edited in, such as `en`, when it is not the description's; left\n    out or `null`, the label is edited in `?lang=`'s language, as the description is. Only\n    with `label`."
       },
       "DroppedTableOut": {
         "properties": {
@@ -34304,6 +34316,178 @@
         ],
         "title": "RunPageOut",
         "description": "One page of the runs of every environment the caller may read, newest first.\n\nParameters\n----------\nitems\n    The runs of the page, without tasks; each names its `environment`.\nnext_cursor\n    Pass back as `cursor` with the same filters for the next page; `null` on the last."
+      },
+      "SavedQueryIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Name"
+          },
+          "sql": {
+            "type": "string",
+            "title": "Sql"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "everyone"
+            ],
+            "title": "Visibility",
+            "default": "private"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "sql"
+        ],
+        "title": "SavedQueryIn",
+        "description": "The body that creates a saved query.\n\nParameters\n----------\nname\n    The name, 1 to 200 characters after stripping, on one line of visible characters; unique\n    among the owner's saved queries in the environment. The service checks it after\n    stripping; the bound here only caps what the request carries.\nsql\n    The SQL, stored as sent; not empty, without a NUL character, and at most\n    `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` characters.\nvisibility\n    ``private`` (only you; the default) or ``everyone`` (whoever may query the environment)."
+      },
+      "SavedQueryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "everyone"
+            ],
+            "title": "Visibility"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "former_owner": {
+            "type": "boolean",
+            "title": "Former Owner"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "update",
+                "delete"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "environment",
+          "name",
+          "visibility",
+          "owner",
+          "former_owner",
+          "actions",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SavedQueryOut",
+        "description": "A saved query as the caller sees it.\n\nParameters\n----------\nid\n    The saved query's id.\nenvironment\n    The name of its environment.\nname\n    Its name.\nsql\n    Its SQL. Absent, not `null`, when the caller may not read it: an administrator without\n    `READ_QUERY_TEXT` reading someone else's private query.\nvisibility\n    ``private`` or ``everyone``.\nowner\n    The owner's name, or `null` once the owner's principal is deleted.\nformer_owner\n    Whether the owner's principal is deleted; nobody may then update it.\nactions\n    What the caller may do with it: ``update`` and ``delete`` for the owner (``update`` only\n    while they hold `SUBMIT_QUERY` there), ``delete`` for an administrator who is not the\n    owner, none for anyone else.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed."
+      },
+      "SavedQueryPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SavedQueryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "SavedQueryPageOut",
+        "description": "One page of saved queries.\n\nParameters\n----------\nitems\n    The saved queries of the page, by name in any letter case, then environment, then id.\nnext_cursor\n    Pass back as `cursor` for the next page; `null` on the last."
+      },
+      "SavedQueryUpdateIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 1000,
+            "title": "Name"
+          },
+          "sql": {
+            "type": "string",
+            "title": "Sql"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "everyone"
+            ],
+            "title": "Visibility"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "sql",
+          "visibility"
+        ],
+        "title": "SavedQueryUpdateIn",
+        "description": "The body that replaces a saved query: every field, none left to a default.\n\nParameters\n----------\nvisibility\n    Required here, unlike on create, so that leaving it out never makes a shared query\n    private."
       },
       "SavedQueryIn": {
         "properties": {

@@ -1908,9 +1908,10 @@ class TableHealthOut(BaseModel):
 
 
 class DescriptionIn(BaseModel):
-    """Request body that sets or resets a description, a label or both, in one language.
+    """Request body that sets or resets a description, a label or both.
 
-    Send one or both; a field left out stays as it is, `null` removes its edit.
+    Send one or both; a field left out stays as it is, `null` removes its edit. Both are edited
+    in the language `?lang=` names, unless `label_language` names another one for the label.
 
     Parameters
     ----------
@@ -1920,10 +1921,15 @@ class DescriptionIn(BaseModel):
     label
         The new label (one line, 1 to 100 characters, not blank), or `null` to remove the edit so
         that the project's label shows again.
+    label_language
+        The language `label` is edited in, such as `en`, when it is not the description's; left
+        out or `null`, the label is edited in `?lang=`'s language, as the description is. Only
+        with `label`.
     """
 
     description: str | None = None
     label: str | None = None
+    label_language: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def _sends_a_field(self) -> DescriptionIn:

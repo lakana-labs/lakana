@@ -637,14 +637,11 @@ def _closer(
     Returns
     -------
     callable
-        Closes `target`, then gives back its place in `open_files`; a second call does nothing.
+        Closes `target`, then gives back its place in `open_files`. `ResultFileResponse` calls
+        it exactly once, when the body ends, fails or is never sent.
     """
-    done: list[bool] = []
 
     def close() -> None:
-        if done:
-            return
-        done.append(True)
         try:
             target.close()
         finally:

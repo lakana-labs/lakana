@@ -2605,6 +2605,18 @@ def test_query_environments_lists_where_you_may_submit_with_protection(
     assert len(authz.batches[0]) == 3
 
 
+def test_query_environments_is_empty_without_asking_when_there_is_no_environment(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A dropped environment is not live; with none left, no permission is asked."""
+    gone = _env(session, principal, tmp_path, "gone")
+    gone.deleted_at = datetime.now(UTC)
+    session.commit()
+    authz = _ByEnvironment({"gone": _QUERY})
+    assert QueryService(session, authz).query_environments(principal) == []
+    assert authz.batches == []
+
+
 class _FakePostgresCancel:
     """Pose a SQLite session as PostgreSQL for a cancel, and make a lock wait time out.
 

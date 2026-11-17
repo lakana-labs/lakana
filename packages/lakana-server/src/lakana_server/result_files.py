@@ -24,7 +24,6 @@ import json
 import math
 import shlex
 import struct
-import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -286,7 +285,7 @@ def _cell_column(column: pa.ChunkedArray) -> pa.ChunkedArray:
     if pa.types.is_dictionary(kind):
         return _cell_column(column.cast(kind.value_type))
     if isinstance(kind, pa.UuidType):
-        return _as_text(column, _uuid_text)
+        return _as_text(column, str)
     if isinstance(kind, pa.BaseExtensionType):
         # Any other extension (DuckDB's opaque bignum, JSON, bool8 …) is its storage, written
         # by the rules of the storage's own type.
@@ -777,11 +776,10 @@ def _put_integer(sheet: Worksheet, row: int, col: int, value: object) -> object:
     object
         What the write returns.
     """
-    if not isinstance(value, int) or isinstance(value, bool):
-        return _put_text(sheet, row, col, value)
-    if -EXACT_INTEGER <= value <= EXACT_INTEGER:
-        return sheet.write_number(row, col, value)
-    return sheet.write_string(row, col, str(value))
+    number = cast(int, value)
+    if -EXACT_INTEGER <= number <= EXACT_INTEGER:
+        return sheet.write_number(row, col, number)
+    return sheet.write_string(row, col, str(number))
 
 
 def _put_float(sheet: Worksheet, row: int, col: int, value: object) -> object:
@@ -806,9 +804,7 @@ def _put_float(sheet: Worksheet, row: int, col: int, value: object) -> object:
     object
         What the write returns.
     """
-    if not isinstance(value, float):
-        return _put_text(sheet, row, col, value)
-    number = value
+    number = cast(float, value)
     if math.isnan(number):
         return sheet.write_string(row, col, "NaN")
     if math.isinf(number):
@@ -866,9 +862,10 @@ def _put_float32(sheet: Worksheet, row: int, col: int, value: object) -> object:
     object
         What the write returns.
     """
-    if not isinstance(value, float) or not math.isfinite(value):
-        return _put_float(sheet, row, col, value)
-    return _put_float(sheet, row, col, float(_float32_text(value)))
+    number = cast(float, value)
+    if not math.isfinite(number):
+        return _put_float(sheet, row, col, number)
+    return _put_float(sheet, row, col, float(_float32_text(number)))
 
 
 def _put_decimal(sheet: Worksheet, row: int, col: int, value: object) -> object:
@@ -890,11 +887,10 @@ def _put_decimal(sheet: Worksheet, row: int, col: int, value: object) -> object:
     object
         What the write returns.
     """
-    if not isinstance(value, Decimal) or not value.is_finite():
-        return _put_text(sheet, row, col, value)
-    if len(value.normalize().as_tuple().digits) > EXACT_DIGITS:
-        return sheet.write_string(row, col, str(value))
-    return sheet.write_number(row, col, float(value))
+    number = cast(Decimal, value)
+    if len(number.normalize().as_tuple().digits) > EXACT_DIGITS:
+        return sheet.write_string(row, col, str(number))
+    return sheet.write_number(row, col, float(number))
 
 
 def _put_moment(number_format: Format) -> _Put:
@@ -932,13 +928,12 @@ def _put_moment(number_format: Format) -> _Put:
         object
             What the write returns.
         """
-        if not isinstance(value, date):
-            return _put_text(sheet, row, col, value)
-        day = value.date() if isinstance(value, datetime) else value
+        when = cast(date, value)
+        day = when.date() if isinstance(when, datetime) else when
         if day < _EXCEL_FIRST_DAY:
-            text = value.isoformat(sep=" ") if isinstance(value, datetime) else value.isoformat()
+            text = when.isoformat(sep=" ") if isinstance(when, datetime) else when.isoformat()
             return sheet.write_string(row, col, text)
-        moment = value if isinstance(value, datetime) else datetime.combine(value, time())
+        moment = when if isinstance(when, datetime) else datetime.combine(when, time())
         return sheet.write_datetime(row, col, moment, number_format)
 
     return put
@@ -1056,24 +1051,6 @@ def write_xlsx(table: pa.Table, target: BinaryIO, *, query_id: str, environment:
                 row += 1
     finally:
         workbook.close()
-
-
-def _uuid_text(value: object) -> str:
-    """Write a UUID in its canonical text.
-
-    Parameters
-    ----------
-    value
-        A `uuid.UUID` or its 16 bytes.
-
-    Returns
-    -------
-    str
-        The canonical text.
-    """
-    if isinstance(value, bytes):
-        return str(uuid.UUID(bytes=value))
-    return str(value)
 
 
 # --- The response ------------------------------------------------------------------------------
