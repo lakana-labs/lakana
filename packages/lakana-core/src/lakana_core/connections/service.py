@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, NoReturn
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -106,6 +106,93 @@ _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a creden
 
 
 @dataclass(frozen=True)
+class LastTestDetail:
+    """What only a manager of the connection sees of its last test.
+
+    Parameters
+    ----------
+    id
+        The test's id.
+    created_at
+        When it was requested.
+    message
+        What the check found, redacted; `None` until it is done.
+    requested_by
+        The name of the principal who asked, or `None` if that principal is gone.
+    """
+
+    id: uuid.UUID
+    created_at: datetime
+    message: str | None
+    requested_by: str | None
+
+
+@dataclass(frozen=True)
+class LastTest:
+    """The newest test of a connection, of any state.
+
+    Parameters
+    ----------
+    state
+        `queued`, `running` or `done`.
+    outcome
+        The outcome, `None` until it is done.
+    finished_at
+        When it finished, `None` until it is done.
+    detail
+        The id, time, message and requester; `None` for a caller who may not see them.
+    """
+
+    state: ConnectionTestState
+    outcome: ConnectionTestOutcome | None
+    finished_at: datetime | None
+    detail: LastTestDetail | None
+
+
+def last_tests(
+    session: Session, connection_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, tuple[ConnectionTest, str | None]]:
+    """Read the newest test of each connection, with its requester's name, in one statement.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    connection_ids
+        The connections to read.
+
+    Returns
+    -------
+    dict
+        For each tested connection its newest test (by `created_at`, equal times by the larger
+        `id`) and the name of who requested it, `None` when that principal is gone. A connection
+        never tested is absent.
+    """
+    if not connection_ids:
+        return {}
+    ranked = (
+        select(
+            ConnectionTest.id.label("test_id"),
+            func.row_number()
+            .over(
+                partition_by=ConnectionTest.connection_id,
+                order_by=(ConnectionTest.created_at.desc(), ConnectionTest.id.desc()),
+            )
+            .label("position"),
+        )
+        .where(ConnectionTest.connection_id.in_(list(connection_ids)))
+        .subquery()
+    )
+    rows = session.execute(
+        select(ConnectionTest, Principal.name)
+        .join(ranked, ranked.c.test_id == ConnectionTest.id)
+        .outerjoin(Principal, Principal.id == ConnectionTest.requested_by)
+        .where(ranked.c.position == 1)
+    ).all()
+    return {test.connection_id: (test, name) for test, name in rows}
+
+
+@dataclass(frozen=True)
 class ConnectionView:
     """A connection as a caller may see it: never a secret value, never a CA certificate.
 
@@ -129,6 +216,10 @@ class ConnectionView:
         When it was created.
     updated_at
         When it was last changed.
+    environment
+        The name of its environment.
+    last_test
+        Its newest test of any state, or `None` if it was never tested.
     """
 
     name: str
@@ -140,6 +231,8 @@ class ConnectionView:
     created_by: str
     created_at: datetime
     updated_at: datetime
+    environment: str
+    last_test: LastTest | None
 
 
 def missing_connections(
@@ -505,6 +598,7 @@ class ConnectionService:
         self,
         row: Connection,
         env: Environment,
+        last: tuple[ConnectionTest, str | None] | None,
         declarations: Mapping[str, builtins.list[tuple[str, str]]] | None = None,
     ) -> ConnectionView:
         """Turn a row into what a caller sees.
@@ -515,6 +609,8 @@ class ConnectionService:
             The connection.
         env
             Its environment.
+        last
+            Its entry of `last_tests`, `None` if it was never tested.
         declarations
             `_declarations` of the environment, when the caller read it already.
 
@@ -540,7 +636,52 @@ class ConnectionService:
             created_by=creator.name if creator is not None else "",
             created_at=row.created_at,
             updated_at=row.updated_at,
+            environment=env.name,
+            last_test=None if last is None else self._last_test(*last),
         )
+
+    @staticmethod
+    def _last_test(test: ConnectionTest, requested_by: str | None) -> LastTest:
+        """Turn a test row into the last test of a connection.
+
+        Parameters
+        ----------
+        test
+            The newest test.
+        requested_by
+            The name of who asked, `None` if that principal is gone.
+
+        Returns
+        -------
+        LastTest
+            Its state, outcome and time, with the detail every caller gets for now.
+        """
+        return LastTest(
+            state=test.state,
+            outcome=test.outcome,
+            finished_at=test.finished_at,
+            detail=LastTestDetail(
+                id=test.id,
+                created_at=test.created_at,
+                message=test.message,
+                requested_by=requested_by,
+            ),
+        )
+
+    def _last_of(self, row: Connection) -> tuple[ConnectionTest, str | None] | None:
+        """Read the newest test of one connection.
+
+        Parameters
+        ----------
+        row
+            The connection.
+
+        Returns
+        -------
+        tuple or None
+            Its entry of `last_tests`, `None` if it was never tested.
+        """
+        return last_tests(self._session, [row.id]).get(row.id)
 
     def declared_by(self, environment_id: uuid.UUID, name: str) -> builtins.list[tuple[str, str]]:
         """List the assets whose deployed version declares a connection.
@@ -707,7 +848,7 @@ class ConnectionService:
                 },
             )
             self._commit(env, name)
-        return self._view(row, env)
+        return self._view(row, env, self._last_of(row))
 
     def list(
         self, p: PrincipalRef, environment: str, *, limit: int = 100, cursor: str | None = None
@@ -755,7 +896,11 @@ class ConnectionService:
             cursor=cursor,
         )
         declarations = self._declarations(env.id)
-        return Page([self._view(row, env, declarations) for row in page.items], page.next_cursor)
+        found = last_tests(self._session, [row.id for row in page.items])
+        return Page(
+            [self._view(row, env, found.get(row.id), declarations) for row in page.items],
+            page.next_cursor,
+        )
 
     def get(self, p: PrincipalRef, environment: str, name: str) -> ConnectionView:
         """Show one connection.
@@ -785,7 +930,8 @@ class ConnectionService:
         _refuse_task(p)
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         env = self._environment(environment)
-        return self._view(self._find(env, name), env)
+        row = self._find(env, name)
+        return self._view(row, env, self._last_of(row))
 
     def update(
         self,
@@ -884,7 +1030,7 @@ class ConnectionService:
                 self._session.rollback()
                 raise
             self._commit(env, row.name)
-        return self._view(row, env)
+        return self._view(row, env, self._last_of(row))
 
     def _change(
         self,

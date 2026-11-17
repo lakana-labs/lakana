@@ -16,7 +16,7 @@ from typing import Any, cast
 
 import pytest
 from core_test_helpers import deploy_manifest
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
@@ -28,6 +28,7 @@ from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import (
     ConnectionService,
     ConnectionView,
+    last_tests,
     missing_connections,
 )
 from lakana_core.db import refuse_concurrent_change
@@ -2415,3 +2416,136 @@ def test_a_request_locks_the_open_test_it_reads(
     with pytest.raises(ConflictError):
         service.request_test(world.data_engineer, "prod", "crm-db")
     assert locked and all(locked)
+
+
+def _add_test(
+    world: World,
+    connection_id: uuid.UUID,
+    *,
+    at: datetime,
+    state: ConnectionTestState,
+    outcome: ConnectionTestOutcome | None = None,
+    requested_by: uuid.UUID | None = None,
+    test_id: uuid.UUID | None = None,
+) -> ConnectionTest:
+    """Insert a connection test of a given time and state.
+
+    Parameters
+    ----------
+    world
+        The world.
+    connection_id
+        The connection it tests.
+    at
+        Its creation time.
+    state
+        Its state.
+    outcome
+        Its outcome, once done.
+    requested_by
+        Who asked; the data engineer by default.
+    test_id
+        Its id; a new one by default.
+
+    Returns
+    -------
+    ConnectionTest
+        The stored row.
+    """
+    env = world.session.scalars(select(Environment).where(Environment.name == "prod")).one()
+    row = ConnectionTest(
+        id=test_id or uuid.uuid4(),
+        connection_id=connection_id,
+        environment_id=env.id,
+        requested_by=requested_by or world.data_engineer.id,
+        state=state,
+        outcome=outcome,
+        created_at=at,
+        finished_at=at if state == ConnectionTestState.DONE else None,
+    )
+    world.session.add(row)
+    world.session.commit()
+    return row
+
+
+def test_the_last_test_is_the_newest_of_any_state(world: World) -> None:
+    world.postgres(world.data_engineer)
+    cid = world.connection_id("prod", "crm-db")
+    _add_test(
+        world,
+        cid,
+        at=_NOW,
+        state=ConnectionTestState.DONE,
+        outcome=ConnectionTestOutcome.OK,
+    )
+    _add_test(world, cid, at=_NOW + timedelta(seconds=1), state=ConnectionTestState.QUEUED)
+
+    last = world.connections().get(world.data_engineer, "prod", "crm-db").last_test
+
+    assert last is not None
+    assert (last.state, last.outcome) == (ConnectionTestState.QUEUED, None)
+
+    world.postgres(world.data_engineer, "tied-db")
+    tied = world.connection_id("prod", "tied-db")
+    low, high = sorted((uuid.uuid4(), uuid.uuid4()))
+    for test_id, state in ((high, ConnectionTestState.RUNNING), (low, ConnectionTestState.QUEUED)):
+        _add_test(world, tied, at=_NOW, state=state, test_id=test_id)
+    tie = world.connections().get(world.data_engineer, "prod", "tied-db").last_test
+    assert tie is not None
+    assert tie.state == ConnectionTestState.RUNNING
+    assert tie.detail is not None
+    assert tie.detail.id == high
+
+    world.connections().delete(world.data_engineer, "prod", "crm-db")
+    world.postgres(world.data_engineer)
+    assert world.connections().get(world.data_engineer, "prod", "crm-db").last_test is None
+
+
+def test_a_connection_never_tested_has_no_last_test(world: World) -> None:
+    view = world.postgres(world.data_engineer)
+
+    assert view.last_test is None
+    assert view.environment == "prod"
+    assert world.connections().get(world.analyst, "prod", "crm-db").last_test is None
+
+
+def test_last_tests_reads_a_page_in_one_statement(world: World) -> None:
+    ids = []
+    for number in range(5):
+        world.postgres(world.data_engineer, f"db-{number}")
+        ids.append(world.connection_id("prod", f"db-{number}"))
+        _add_test(world, ids[-1], at=_NOW, state=ConnectionTestState.QUEUED)
+    statements: list[str] = []
+
+    def count(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    engine = world.session.get_bind()
+    event.listen(engine, "after_cursor_execute", count)
+    try:
+        found = last_tests(world.session, ids)
+    finally:
+        event.remove(engine, "after_cursor_execute", count)
+
+    assert len(statements) == 1
+    assert set(found) == set(ids)
+    assert last_tests(world.session, []) == {}
+
+
+def test_the_last_test_names_who_ran_it(world: World) -> None:
+    eva = _principal(world.session, "eva")
+    world.postgres(world.data_engineer)
+    _add_test(
+        world,
+        world.connection_id("prod", "crm-db"),
+        at=_NOW,
+        state=ConnectionTestState.QUEUED,
+        requested_by=eva.id,
+    )
+
+    last = world.connections().get(world.data_engineer, "prod", "crm-db").last_test
+
+    assert last is not None
+    assert last.detail is not None
+    assert last.detail.requested_by == "eva"
+    assert last.detail.created_at == _NOW

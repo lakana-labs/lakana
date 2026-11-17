@@ -4014,3 +4014,56 @@ def test_0082_on_postgres() -> None:
         assert _alembic_version(engine) == revision_0081
         assert "saved_queries" not in sqlalchemy.inspect(engine).get_table_names()
         engine.dispose()
+
+
+def test_0083_on_postgres() -> None:
+    """0083 swaps the `connection_tests` index for one on `(connection_id, created_at)`.
+
+    The rows are kept and the downgrade restores the single-column index.
+    """
+    revision_0082 = "e9f3a6b2d847"
+    revision_0083 = "b6d2f8a4c913"
+    now = datetime(2026, 11, 17, 9, 0, tzinfo=UTC)
+    insert = sqlalchemy.text(
+        "INSERT INTO connection_tests (id, connection_id, environment_id, requested_by, state, "
+        "created_at) VALUES (:id, :connection, :env, :who, :state, :now)"
+    )
+    definitions = sqlalchemy.text(
+        "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'connection_tests'"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0082)
+        engine = sqlalchemy.create_engine(url)
+        connection_id = uuid.uuid4()
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            for state in ("DONE", "QUEUED"):
+                conn.execute(
+                    insert,
+                    {
+                        "id": uuid.uuid4(),
+                        "connection": connection_id,
+                        "env": uuid.uuid4(),
+                        "who": uuid.uuid4(),
+                        "state": state,
+                        "now": now,
+                    },
+                )
+        migrate.upgrade(url, revision_0083)
+        assert _alembic_version(engine) == revision_0083
+        with engine.connect() as conn:
+            found = dict(conn.execute(definitions).all())
+            assert found["ix_connection_tests_connection_id_created_at"].endswith(
+                "(connection_id, created_at)"
+            )
+            assert "ix_connection_tests_connection_id" not in found
+            count = conn.execute(sqlalchemy.text("SELECT count(*) FROM connection_tests"))
+            assert count.scalar_one() == 2
+        migrate.downgrade(url, revision_0082)
+        assert _alembic_version(engine) == revision_0082
+        with engine.connect() as conn:
+            restored = dict(conn.execute(definitions).all())
+        assert restored["ix_connection_tests_connection_id"].endswith("(connection_id)")
+        assert "ix_connection_tests_connection_id_created_at" not in restored
+        engine.dispose()
