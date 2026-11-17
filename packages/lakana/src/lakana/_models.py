@@ -1899,7 +1899,8 @@ class TaskToken:
     environment
         The one environment the token acts in.
     asset_scope
-        The asset patterns it may act on; empty for a token bound to a task.
+        The asset patterns it may act on; for a token bound to a task, that task's asset
+        and its declared inputs.
     issued_at
         When the token was minted.
     expires_at

@@ -129,6 +129,11 @@ class TaskTokens:
         -------
         Iterator of TaskToken
             Each token, once.
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            If you do not hold the ADMIN role on the instance.
         """
         return every_page(
             lambda cursor: self.list_page(environment=environment, limit=page_size, cursor=cursor)

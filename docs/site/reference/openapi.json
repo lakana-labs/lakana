@@ -37109,7 +37109,7 @@
           "expires_at"
         ],
         "title": "TaskTokenOut",
-        "description": "One listed task token: what it is for, never its value.\n\nParameters\n----------\nkey_id\n    The public lookup key, which revokes the token.\nprincipal\n    The name of the principal the token signs in as.\nenvironment\n    The one environment the token acts in.\nasset_scope\n    The asset patterns the token may act on; empty for a token bound to a task, whose\n    scope its run's project version gives.\nissued_at\n    When the token was minted.\nexpires_at\n    When the token stops working.\nrun_id\n    The run whose task the token was minted for, or `None` for a token minted over REST.\njob\n    That run's job, or `None`.\nasset\n    The asset of that task, or `None`."
+        "description": "One listed task token: what it is for, never its value.\n\nParameters\n----------\nkey_id\n    The public lookup key, which revokes the token.\nprincipal\n    The name of the principal the token signs in as.\nenvironment\n    The one environment the token acts in.\nasset_scope\n    The asset patterns the token may act on; for a token bound to a task, that task's\n    asset and its declared inputs.\nissued_at\n    When the token was minted.\nexpires_at\n    When the token stops working.\nrun_id\n    The run whose task the token was minted for, or `None` for a token minted over REST.\njob\n    That run's job, or `None`.\nasset\n    The asset of that task, or `None`."
       },
       "TaskTokenScopeOut": {
         "properties": {

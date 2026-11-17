@@ -60,6 +60,10 @@ Yield every live task token, newest first, fetching pages as needed.
 
 Returns: `Iterator of TaskToken`. Each token, once.
 
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | If you do not hold the ADMIN role on the instance. |
+
 ### `client.task_tokens.mint`
 
 Signature: `client.task_tokens.mint(principal: str, environment: str, asset_scope: list[str], ttl_seconds: int) -> MintedTaskToken`

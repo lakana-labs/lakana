@@ -1,7 +1,7 @@
 """Tests for the task-tokens resource of the platform API."""
 
 import uuid
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,15 +12,14 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-import lakana_server.ui
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
 from lakana_core.identity.task_tokens import TaskTokenService
 from lakana_core.models import AuditEvent, AuditEventType, Base, Grant, Principal, TaskToken
 from lakana_server.app import create_app
-from lakana_server.settings import Settings, TaskTokensConfig, UiConfig
-from tests.conftest import AUTH_HEADER, PUBLIC, write_ui_dist
+from lakana_server.settings import Settings, TaskTokensConfig
+from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import session_headers, signed_in
 
 
@@ -560,35 +559,6 @@ def test_get_task_tokens_pages_and_filters_by_environment(client: TestClient) ->
         "/api/v1/task-tokens", headers=AUTH_HEADER, params={"environment": "nowhere"}
     )
     assert (nowhere.status_code, nowhere.json()) == (200, [])
-
-
-@pytest.fixture
-def browser_client(
-    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[TestClient]:
-    """Provide a client of an app with the web interface on, at its public address.
-
-    Parameters
-    ----------
-    settings
-        Configuration pointed at an isolated database.
-    tmp_path
-        Pytest's per-test directory, for the stand-in build.
-    monkeypatch
-        Points `lakana_server.ui.UI_DIST` at the stand-in.
-
-    Yields
-    ------
-    TestClient
-        A started client whose browser sessions the app reads.
-    """
-    monkeypatch.setattr(lakana_server.ui, "UI_DIST", write_ui_dist(tmp_path))
-    with TestClient(
-        create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)})),
-        base_url=PUBLIC,
-        headers={"Origin": PUBLIC},
-    ) as c:
-        yield c
 
 
 def test_get_task_tokens_from_a_browser_session(browser_client: TestClient) -> None:

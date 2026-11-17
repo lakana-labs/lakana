@@ -17,6 +17,7 @@ from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.auth import (
     Action,
     AllowAllAuthorization,
+    CiScope,
     PrincipalRef,
     SecurableKind,
     TaskScope,
@@ -548,6 +549,8 @@ def test_list_live_pages_unrevoked_unexpired_tokens_newest_first(
         "nightly",
         "gold.scores",
     )
+    assert newer.token.asset_scope == ["bronze.stations", "gold.scores", "silver.weather"]
+    assert older.token.asset_scope == ["gold.a"]
     assert (older.principal, older.run_id, older.job, older.asset) == (plain.name, None, None, None)
 
 
@@ -568,7 +571,7 @@ def test_list_live_filters_by_environment_and_an_unknown_one_is_empty(session: S
 
 
 def test_list_live_is_for_an_administrator_only(session: Session) -> None:
-    """A `MINT_TASK_TOKEN` holder without `ADMIN` and an administrator's task token are refused."""
+    """`MINT_TASK_TOKEN` without `ADMIN`, and an administrator's task or CI token, are refused."""
     admin = _administrator(session)
     holder = _holder(session)
     session.add(
@@ -587,7 +590,21 @@ def test_list_live_is_for_an_administrator_only(session: Session) -> None:
         credential="task",
         task_scope=TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4()),
     )
+    ci = replace(
+        admin,
+        credential="ci",
+        ci_scope=CiScope(
+            token_id=uuid.uuid4(),
+            rule_id=uuid.uuid4(),
+            environment="dev",
+            environment_id=uuid.uuid4(),
+            repository="sales",
+            repository_id=uuid.uuid4(),
+            kinds=frozenset(),
+            sha=None,
+        ),
+    )
     service = _listing_service(session)
-    for ref in (holder, task):
+    for ref in (holder, task, ci):
         with pytest.raises(PermissionDenied):
             service.list_live(ref)

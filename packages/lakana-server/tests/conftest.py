@@ -359,3 +359,32 @@ def fake_request(
             method="GET",
         ),
     )
+
+
+@pytest.fixture
+def browser_client(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
+    """Provide a client of an app with the web interface on, at its public address.
+
+    Parameters
+    ----------
+    settings
+        Configuration pointed at an isolated database.
+    tmp_path
+        Pytest's per-test directory, for the stand-in build.
+    monkeypatch
+        Points `lakana_server.ui.UI_DIST` at the stand-in.
+
+    Yields
+    ------
+    TestClient
+        A started client whose browser sessions the app reads.
+    """
+    monkeypatch.setattr(lakana_server.ui, "UI_DIST", write_ui_dist(tmp_path))
+    with TestClient(
+        create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)})),
+        base_url=PUBLIC,
+        headers={"Origin": PUBLIC},
+    ) as c:
+        yield c

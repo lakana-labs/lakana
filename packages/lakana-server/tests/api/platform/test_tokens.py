@@ -1,24 +1,19 @@
 """Tests for the tokens resource of the platform API."""
 
 import uuid
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-import lakana_server.ui
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.db import create_engine
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.models import Grant, PersonalAccessToken, Principal
-from lakana_server.app import create_app
-from lakana_server.settings import Settings, UiConfig
-from tests.conftest import AUTH_HEADER, PUBLIC, write_ui_dist
+from lakana_server.settings import Settings
+from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import session_headers, signed_in
 
 
@@ -237,35 +232,6 @@ def test_manage_token_as_a_single_action_is_a_403_on_every_route(client: TestCli
         assert answer.status_code == 403, (answer.request.method, str(answer.request.url))
         assert "MANAGE_TOKEN needs the ADMIN role on the instance" in answer.text
     assert client.get("/api/v1/principals/carol/tokens", headers=AUTH_HEADER).status_code == 200
-
-
-@pytest.fixture
-def browser_client(
-    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[TestClient]:
-    """Provide a client of an app with the web interface on, at its public address.
-
-    Parameters
-    ----------
-    settings
-        Configuration pointed at an isolated database.
-    tmp_path
-        Pytest's per-test directory, for the stand-in build.
-    monkeypatch
-        Points `lakana_server.ui.UI_DIST` at the stand-in.
-
-    Yields
-    ------
-    TestClient
-        A started client whose browser sessions the app reads.
-    """
-    monkeypatch.setattr(lakana_server.ui, "UI_DIST", write_ui_dist(tmp_path))
-    with TestClient(
-        create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)})),
-        base_url=PUBLIC,
-        headers={"Origin": PUBLIC},
-    ) as c:
-        yield c
 
 
 def _bob(client: TestClient) -> dict[str, str]:
