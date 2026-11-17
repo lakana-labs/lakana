@@ -523,3 +523,62 @@ def test_fix_keeps_a_page_that_differs_only_in_wrapping(tmp_path: Path) -> None:
     fix(root, root / "docs/site", None, captures)
     text = (root / "docs/site/p.md").read_text(encoding="utf-8")
     assert "```text\n" + WRAPPED_PAGE + "```" in text
+
+
+LONG = "word " * 18 + "end"
+
+
+@pytest.mark.parametrize(
+    ("shown", "printed"),
+    [
+        (LONG + "\n\nnext\n", LONG + "\nnext\n"),
+        (LONG + "\n  next\n", LONG + "\nnext\n"),
+        (LONG + "\n- one\n- two\n", LONG + "\n- one - two\n"),
+        (LONG + "\nkey: 1\n", LONG + " key: 1\n"),
+        (LONG + "\nnext  more\n", LONG + "\nnext more\n"),
+        ("| a | b |\n| c | d |\n", "| a | b | | c | d |\n"),
+        ("+---+---+\n| a | b |\n", "+---+---+ | a | b |\n"),
+        ("| a   | b |\n", "| a | b |\n"),
+    ],
+    ids=[
+        "blank line removed",
+        "indent changed",
+        "list items joined",
+        "key value joined",
+        "spaces inside a line",
+        "markdown table rows joined",
+        "ascii table rows joined",
+        "markdown table padding",
+    ],
+)
+def test_only_a_wrap_point_is_ignored(tmp_path: Path, shown: str, printed: str) -> None:
+    """Blank lines, indents, spacing, items and table rows all keep counting."""
+    root, captures = _tree(tmp_path, BLOCK, shown, printed)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_wraps_on_both_sides_of_a_table_pass(tmp_path: Path) -> None:
+    """Text before and after a table may wrap elsewhere; the table is compared as before."""
+    shown = LONG + "\nrest\n" + _table("ok") + LONG + "\nrest\n"
+    printed = LONG + " rest\n" + _table("ok") + LONG + " rest\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, printed)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_one_stray_box_character_in_a_sentence_is_still_text(tmp_path: Path) -> None:
+    """A line with a single box character is unwrapped like any sentence."""
+    first = "a │ " + LONG
+    root, captures = _tree(tmp_path, BLOCK, first + "\nrest\n", first + " rest\n")
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_fix_keeps_the_pages_wrap_where_only_the_wrap_differs(tmp_path: Path) -> None:
+    """A wrap difference and a real change: only the changed stretch comes from the run."""
+    shown = LONG + "\nrest\n\nold\n"
+    printed = LONG + " rest\n\nnew\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, printed)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "```text\n" + LONG + "\nrest\n\nnew\n```" in text
+    assert fix(root, root / "docs/site", None, captures) == []

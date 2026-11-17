@@ -715,37 +715,123 @@ def comparable(line: str) -> str:
     return _PADDING.sub(" ", _RULE.sub("─", line)).rstrip()
 
 
-def unwrapped(lines: Sequence[str]) -> list[str]:
-    """Join the lines of each stretch of text, for a comparison only.
+_STRUCTURED = re.compile(
+    r"^\s*(?:\+[-=+]+\+|\|.*\||-{3,}(?: +-{3,})+)\s*$|^\s*[│┃┏┓┗┛┡┩┞┦┣┫┠┨├┤┌┐└┘┬┴┼┳┻╇╈╋]"
+)
+_BOXES = re.compile(r"[│┃┏┓┗┛┡┩┞┦┣┫┠┨├┤┌┐└┘┬┴┼┳┻╇╈╋]")
+_STARTS_ITEM = re.compile(r"^\s*(?:[-*+•] |\d+[.)] |[\w.-]+: )")
+WRAP_SLACK = 12
+"""How many characters short of the console width a line may end and still count as wrapped."""
+
+
+def _is_structured(line: str) -> bool:
+    """Say whether a line belongs to a table, tree or panel, which is never unwrapped.
+
+    Parameters
+    ----------
+    line
+        One line of output.
+
+    Returns
+    -------
+    bool
+        ``True`` for a line that starts with a box-drawing character or holds two of them,
+        an ASCII or markdown table row or rule, or a rule of column headers (``--- ---``). One
+        stray box character inside a sentence does not make a line structured.
+    """
+    return _STRUCTURED.search(line) is not None or len(_BOXES.findall(line)) >= 2
+
+
+def _group(lines: Sequence[str], width: int) -> tuple[list[str], list[list[int]]]:
+    """Group `lines` into units for a console of `width` characters.
 
     A terminal wraps a long line at its width, and the masked parts of a line (a snapshot id,
-    a time) differ in length from run to run, so the wrap point moves. Every run of
-    consecutive lines without a box-drawing character becomes one line whose white space is a
-    single space; a table line stays a line of its own. Never write the result into a page.
+    a time) differ in length from run to run, so the wrap point moves. Line ``n + 1`` is
+    joined to line ``n`` only if ``n`` ends within `WRAP_SLACK` characters of `width`, ``n + 1``
+    is not blank, has the indent of ``n`` and does not start a list item or ``key: value``,
+    and neither line is structured. Blank lines, indentation and spacing still count.
 
     Parameters
     ----------
     lines
-        Masked lines, as `comparable` leaves them.
+        Lines of one side.
+    width
+        The console width, as far as it shows.
 
     Returns
     -------
-    list of str
-        The table lines and, between them, one line per stretch of text.
+    tuple of (list of str, list of list of int)
+        The key and the line indexes of each unit.
     """
-    out: list[str] = []
-    text: list[str] = []
-    for line in lines:
-        if _TABLE_LINE.search(line):
-            if text:
-                out.append(" ".join(text))
-                text = []
-            out.append(line)
+    keys: list[str] = []
+    groups: list[list[int]] = []
+    for i, line in enumerate(lines):
+        prev = lines[groups[-1][-1]] if groups else ""
+        indent = len(line) - len(line.lstrip())
+        if (
+            groups
+            and line.strip()
+            and prev.strip()
+            and not _is_structured(line)
+            and not _is_structured(prev)
+            and len(prev) >= width - WRAP_SLACK
+            and indent == len(prev) - len(prev.lstrip())
+            and not _STARTS_ITEM.match(line)
+        ):
+            groups[-1].append(i)
+            keys[-1] += " " + comparable(mask(line)).strip()
         else:
-            text += line.split()
-    if text:
-        out.append(" ".join(text))
-    return out
+            groups.append([i])
+            keys.append(comparable(mask(line)))
+    return keys, groups
+
+
+def _paired(
+    shown: str, printed: str
+) -> tuple[list[str], list[str], list[list[int]], list[list[int]]]:
+    """Read both sides of a comparison into units, with one console width for both.
+
+    Parameters
+    ----------
+    shown
+        The block's body.
+    printed
+        What the example printed.
+
+    Returns
+    -------
+    tuple
+        The unit keys of the page and of the run, then their line indexes.
+    """
+    page = [x for x in _lines(shown) if not is_progress(x)]
+    run = [x for x in _lines(printed) if not is_progress(x)]
+    width = max((len(x) for x in page + run if not _is_structured(x)), default=0)
+    pk, pg = _group(page, width)
+    rk, rg = _group(run, width)
+    return pk, rk, pg, rg
+
+
+def _same_output(shown: str, printed: str) -> bool:
+    """Say whether a block and a run match once masked, ignoring where lines wrap.
+
+    Parameters
+    ----------
+    shown
+        The block's body.
+    printed
+        What the example printed.
+
+    Returns
+    -------
+    bool
+        ``True`` if the masked lines are equal, or equal once the lines of a wrap are joined.
+    """
+    page = [comparable(mask(x)) for x in _lines(shown) if not is_progress(x)]
+    run = [comparable(mask(x)) for x in _lines(printed) if not is_progress(x)]
+    if page == run:
+        return True
+    pk, rk, _, _ = _paired(shown, printed)
+    return pk == rk
 
 
 def redact(text: str) -> str:
@@ -838,27 +924,6 @@ def _captured_text(captured: Path | None, value: str) -> str | None:
         return None
 
 
-def _same_output(shown: str, printed: str) -> bool:
-    """Say whether a block and a run match once masked, ignoring where lines wrap.
-
-    Parameters
-    ----------
-    shown
-        The block's body.
-    printed
-        What the example printed.
-
-    Returns
-    -------
-    bool
-        ``True`` if the masked lines are equal, or equal once each stretch of text outside a
-        table is read as one line.
-    """
-    page = [comparable(mask(x)) for x in _lines(shown) if not is_progress(x)]
-    run = [comparable(mask(x)) for x in _lines(printed) if not is_progress(x)]
-    return page == run or unwrapped(page) == unwrapped(run)
-
-
 def _merge(shown: str, printed: str) -> str:
     """Bring a block up to date with a run, keeping the page's own values.
 
@@ -880,10 +945,9 @@ def _merge(shown: str, printed: str) -> str:
         The new body, each line ending in a newline.
     """
     page, run = _lines(shown), _lines(redact(printed))
-    if _same_output(shown, printed):
-        return shown if shown.endswith("\n") else shown + "\n"
     page_rest = [x for x in page if not is_progress(x)]
     run_rest = [x for x in run if not is_progress(x)]
+    width = max((len(x) for x in page_rest + run_rest if not _is_structured(x)), default=0)
     matcher = difflib.SequenceMatcher(
         None,
         [comparable(mask(x)) for x in page_rest],
@@ -893,6 +957,11 @@ def _merge(shown: str, printed: str) -> str:
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             entries += [(page_rest[i1 + k], j1 + k, False) for k in range(i2 - i1)]
+        elif tag == "replace" and (
+            _group(page_rest[i1:i2], width)[0] == _group(run_rest[j1:j2], width)[0]
+        ):
+            # Only the wrap point moved in this stretch: the page keeps its own line breaks.
+            entries += [(page_rest[x], min(j1 + x - i1, j2 - 1), False) for x in range(i1, i2)]
         else:
             entries += [(run_rest[j], j, True) for j in range(j1, j2)]
     changed_table: set[int] = set()
@@ -945,10 +1014,10 @@ def _output_problem(
     str or None
         The problem with a diff of the masked texts, or ``None`` if they are equal.
     """
+    if _same_output(block.body, printed):
+        return None
     page = [comparable(mask(x)) for x in _lines(block.body) if not is_progress(x)]
     run = [comparable(mask(x)) for x in _lines(printed) if not is_progress(x)]
-    if page == run or unwrapped(page) == unwrapped(run):
-        return None
     diff = "\n".join(
         difflib.unified_diff(page, run, "the page", f"the run ({value})", lineterm="", n=2)
     )

@@ -609,9 +609,14 @@ comparison does this; `--fix` writes the run's real text, and when any line of a
 takes the whole table (top border to bottom border) from the run, so the widths stay consistent.
 
 Where a line wraps is not compared either: the terminal breaks a long line at its width, and
-masked values of another length move the break. If the lines differ, the comparison reads every
-run of lines outside a table as one line with single spaces and compares again, so a sentence
-that wraps after another word passes; a changed word still fails. Table lines stay lines.
+masked values of another length move the break. If the lines differ, the comparison joins line
+`n + 1` to line `n` only when `n` ends within 12 characters of the longest unstructured line
+(the console width as the output shows it), `n + 1` is not blank, has the same indent and does
+not start a list item (`- `, `1. `) or a `key: value`, and neither is a table line (a line that
+starts with, or holds two, box-drawing characters; `+---+` rules; `| a | b |` rows; `--- ---`
+headers), then compares again. Blank lines, indentation, spacing inside a line, list items and
+tables still count, and one stray `│` in a sentence does not make it a table. `--fix` keeps the
+page's own line breaks in a stretch where only the wrap differs.
 
 A mask hides a change too, so add one only for a value that really differs per run, and
 prefer a narrow pattern. Table width depends on the terminal: an example that quotes tables
