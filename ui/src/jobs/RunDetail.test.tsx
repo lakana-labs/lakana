@@ -1,4 +1,5 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import i18next from "i18next";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -384,6 +385,63 @@ describe("RunDetail", () => {
         "/jobs/prod/job/analytics/nightly_sales?run=r9",
       );
     });
+  });
+
+  it("gives the focus to the run's heading when Cancel answers with a run that already ended", async () => {
+    const active = aJobRun({ status: "running", finished_at: null, actions: ["cancel"] });
+    const server = renderRun({ status: 200, body: active });
+    server.route({
+      [`POST /api/v1/environments/prod/runs/${JOB_RUN_ID}/cancel`]: {
+        status: 200,
+        body: aJobRun({ status: "cancelled", cancel_requested: true }),
+      },
+    });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Cancel run" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel run" }),
+    );
+
+    const heading = screen.getByRole("heading", { level: 2 });
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+    expect(screen.queryByText("Cancelling…")).toBeNull();
+  });
+
+  it("gives the focus to the run's heading when Cancelling… goes as the run ends", async () => {
+    let cancelled = false;
+    const active = aJobRun({ status: "running", finished_at: null, actions: ["cancel"] });
+    const server = renderRun(() => ({
+      status: 200,
+      body: cancelled ? aJobRun({ status: "cancelled", cancel_requested: true }) : active,
+    }));
+    server.route({
+      [`POST /api/v1/environments/prod/runs/${JOB_RUN_ID}/cancel`]: () => {
+        cancelled = true;
+        return { status: 200, body: { ...active, cancel_requested: true } };
+      },
+    });
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Cancel run" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel run" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Cancelling…").closest(".jobs-control")).toHaveFocus();
+    });
+
+    const heading = screen.getByRole("heading", { level: 2 });
+    await waitFor(
+      () => {
+        expect(heading).toHaveFocus();
+      },
+      { timeout: 5_000 },
+    );
+    expect(screen.queryByText("Cancelling…")).toBeNull();
+    expect(fact("State")).toHaveTextContent("Cancelled");
   });
 
   it("says the server's sentence when the run cannot be read", async () => {

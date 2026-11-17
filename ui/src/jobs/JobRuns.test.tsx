@@ -4,6 +4,7 @@ import i18next from "i18next";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { RunOut } from "../api/jobs";
 import { aJobRun } from "../test/jobs";
 import { type FakeRoute, fakeServer } from "../test/server";
 import { JobRuns } from "./JobRuns";
@@ -32,12 +33,13 @@ function Where() {
  *
  * @param route - What the server answers for the runs.
  * @param search - The address's query.
- * @returns The fake server and the rows handler.
+ * @returns The fake server, the rows handler and a way to render again with another revision and
+ *   current run.
  */
 function renderRuns(route: FakeRoute, search = "") {
   const server = fakeServer({ [RUNS]: route });
   const onRows = vi.fn();
-  render(
+  const page = (revision: number, current: RunOut | null) => (
     <MemoryRouter initialEntries={[`/jobs/prod/job/analytics/nightly_sales${search}`]}>
       <Routes>
         <Route
@@ -49,7 +51,8 @@ function renderRuns(route: FakeRoute, search = "") {
                 repository="analytics"
                 job="nightly_sales"
                 selected="r2"
-                revision={0}
+                revision={revision}
+                current={current}
                 onRows={onRows}
               />
               <Where />
@@ -57,9 +60,13 @@ function renderRuns(route: FakeRoute, search = "") {
           }
         />
       </Routes>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
-  return { server, onRows };
+  const view = render(page(0, null));
+  const change = (revision: number, current: RunOut | null): void => {
+    view.rerender(page(revision, current));
+  };
+  return { server, onRows, change };
 }
 
 /**
@@ -257,9 +264,152 @@ describe("JobRuns", () => {
     await settle();
     expect(server.sent).toHaveLength(3);
     expect(vi.getTimerCount()).toBe(0);
+    expect(server.sent.map((request) => request.headers["x-lakana-background"])).toEqual([
+      "1",
+      "1",
+      undefined,
+    ]);
   });
 
-  it("starts no timer in a tab that opens hidden", async () => {
+  it("reads the first page at once for a new revision, but keeps the pages once more were shown", async () => {
+    const { server, change } = renderRuns((request) =>
+      request.path.includes("cursor=")
+        ? { status: 200, body: [aJobRun({ id: "old", created_at: "2026-10-01T01:00:00Z" })] }
+        : {
+            status: 200,
+            body: [aJobRun({ id: "r2", status: "running", tasks: [] })],
+            headers: { "X-Next-Cursor": "c2" },
+          },
+    );
+    await screen.findByRole("button", { name: "Show more" });
+
+    change(1, null);
+    await waitFor(() => {
+      expect(server.sent).toHaveLength(2);
+    });
+
+    screen.getByRole("button", { name: "Show more" }).click();
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(3);
+    });
+    const link = screen.getByRole("link", { name: when(aJobRun().created_at) });
+    link.focus();
+
+    change(2, aJobRun({ id: "r2", status: "failed", failed_tasks: 1, total_tasks: 1 }));
+    await settle();
+    expect(server.sent).toHaveLength(3);
+    expect(screen.getAllByRole("row")).toHaveLength(3);
+    expect(link.closest("tr")).toHaveTextContent("Failed");
+    expect(link.closest("tr")).toHaveTextContent("1 of 1 tasks failed");
+    expect(link).toHaveFocus();
+  });
+
+  it("keeps the rows and a still Show more through a failed refresh, and says so after three", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let reads = 0;
+    let open: (() => void) | null = null;
+    const { server } = renderRuns(async () => {
+      reads += 1;
+      if (reads === 1) {
+        return {
+          status: 200,
+          body: [aJobRun({ id: "r2", tasks: [] })],
+          headers: { "X-Next-Cursor": "c2" },
+        };
+      }
+      if (reads === 2) {
+        await new Promise<void>((resolve) => {
+          open = resolve;
+        });
+      }
+      return { status: 503, body: { type: "Unavailable", detail: "The server is busy." } };
+    });
+    await settle();
+    const link = screen.getByRole("link", { name: when(aJobRun().created_at) });
+    link.focus();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(reads).toBe(2);
+    expect(screen.getByRole("button", { name: "Show more" })).not.toHaveAttribute("data-pending");
+    act(() => {
+      open?.();
+    });
+    await settle();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(link).toHaveFocus();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(59_999);
+    });
+    await settle();
+    expect(reads).toBe(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    await settle();
+    expect(reads).toBe(3);
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    await settle();
+    expect(reads).toBe(4);
+    expect(screen.getByRole("alert")).toHaveTextContent("The server is busy.");
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(link).toHaveFocus();
+    expect(server.sent).toHaveLength(4);
+  });
+
+  it("shows a third page after the second", async () => {
+    const pages: Record<string, { id: string; next?: string }> = {
+      "": { id: "r2", next: "c2" },
+      c2: { id: "r1", next: "c3" },
+      c3: { id: "r0" },
+    };
+    renderRuns((request) => {
+      const cursor = new URL(request.path, "http://localhost").searchParams.get("cursor") ?? "";
+      const page = pages[cursor] ?? { id: "none" };
+      return {
+        status: 200,
+        body: [aJobRun({ id: page.id, tasks: [] })],
+        ...(page.next === undefined ? {} : { headers: { "X-Next-Cursor": page.next } }),
+      };
+    });
+
+    (await screen.findByRole("button", { name: "Show more" })).click();
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(3);
+    });
+    screen.getByRole("button", { name: "Show more" }).click();
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(4);
+    });
+    expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  });
+
+  it("says why Show more failed under the rows and keeps them", async () => {
+    renderRuns((request) =>
+      request.path.includes("cursor=")
+        ? { status: 503, body: { type: "Unavailable", detail: "The server is busy." } }
+        : {
+            status: 200,
+            body: [aJobRun({ id: "r2", tasks: [] })],
+            headers: { "X-Next-Cursor": "c2" },
+          },
+    );
+
+    (await screen.findByRole("button", { name: "Show more" })).click();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy.");
+    expect(screen.getAllByRole("row")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Show more" })).toBeInTheDocument();
+  });
+
+  it("reads nothing and starts no timer in a tab that opens hidden", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     vi.spyOn(document, "visibilityState", "get").mockImplementation(() => "hidden");
     const { server } = renderRuns({ status: 200, body: [aJobRun({ id: "r2", tasks: [] })] });
@@ -268,7 +418,7 @@ describe("JobRuns", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(120_000);
     });
-    expect(server.sent).toHaveLength(1);
+    expect(server.sent).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
     vi.restoreAllMocks();
   });

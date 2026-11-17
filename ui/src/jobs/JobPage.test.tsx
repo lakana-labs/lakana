@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import i18next from "i18next";
 import { describe, expect, it } from "vitest";
 
-import { aJob, aJobRun } from "../test/jobs";
+import { aJob, aJobRun, aTask } from "../test/jobs";
 import type { FakeRoute } from "../test/server";
 import { renderShell } from "../test/render";
 
@@ -161,6 +161,38 @@ describe("JobPage", () => {
     await user.click(screen.getByRole("button", { name: "Resume schedule" }));
     expect(await screen.findByText("Resumed the schedule of nightly_sales.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pause schedule" })).toBeInTheDocument();
+  });
+
+  it("Resume selects the new run and gives the focus to its heading", async () => {
+    const failed = aJobRun({
+      id: "r2",
+      status: "failed",
+      failed_tasks: 1,
+      actions: ["resume"],
+      tasks: [aTask({ status: "failed" })],
+    });
+    const next = aJobRun({ id: "r9", status: "queued", created_at: "2026-11-17T09:30:00Z" });
+    const { router, user } = renderShell(PAGE, {
+      routes: jobRoutes({
+        [`GET ${ENV}/runs/r2`]: { status: 200, body: failed },
+        [`POST ${ENV}/runs/r2/resume`]: { status: 201, body: next },
+        [`GET ${ENV}/runs/r9`]: { status: 200, body: next },
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Resume" }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe("?run=r9");
+    });
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: `Run of ${when(next.created_at)}`,
+    });
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
+    expect(await screen.findByText("Resumed the failed part in a new run.")).toBeInTheDocument();
   });
 
   it("records the opened job for Home, and shows the job when that fails", async () => {

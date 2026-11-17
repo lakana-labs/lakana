@@ -69,6 +69,11 @@
   font-weight: var(--type-title-weight);
 }
 
+.jobs-panel-heading:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 /* The runs' heading with its two menus beside it; they go under it on a narrow screen. */
 .jobs-panel-head {
   display: flex;

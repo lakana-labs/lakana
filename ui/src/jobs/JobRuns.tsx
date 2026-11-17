@@ -4,14 +4,18 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useEffect, useId, useState } from "react";
+import { type JSX, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
+import type { RequestOptions } from "../api/client";
 import { listJobRuns, type RunOut } from "../api/jobs";
+import type { CursorPage } from "../api/manage";
+import type { CursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
-import { useLibraryPages } from "../queries/useLibraryPages";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
+import { POLL_FAILURES_SHOWN, useLivePoll } from "../shell/useLivePoll";
+import { problemText } from "../sign-in/messages";
 import { useWhen } from "../shell/useWhen";
 import { StatusLabel } from "../status/StatusLabel";
 import { formatDuration, secondsBetween } from "./format";
@@ -49,47 +53,85 @@ function readFilter(params: URLSearchParams): { status: StatusChoice; period: Pe
   return { status, period: period ?? DEFAULT_PERIOD };
 }
 
+/** The pages read after the first by Show more, for one filter. */
+interface More {
+  /** The filter they belong to. */
+  readonly key: string;
+  /** Their rows. */
+  readonly items: readonly RunOut[];
+  /** The cursor of the next page; null after the last. */
+  readonly next: string | null;
+  /** Whether a page is on its way. */
+  readonly busy: boolean;
+  /** Why the latest page could not be read; null when it was. */
+  readonly error: string | null;
+}
+
 /**
- * Counts up every `everyMs` while `active` and the tab is visible: no timer runs in a hidden tab,
- * and when the tab shows again it counts at once and starts over.
+ * Reads a job's runs: the first page as a background poll every 30 s (J2: never in a hidden tab,
+ * at once when the tab shows again, waiting longer after a failure, the rows kept on screen and
+ * the server's sentence only after three failures in a row), and the next pages on Show more.
+ * Once Show more was pressed for the filter, the first page is not read again, so the list never
+ * collapses under the person; `revision` then changes nothing either.
  *
- * @param everyMs - The interval in milliseconds.
- * @param active - False stops the count.
- * @returns The count.
+ * @param key - The filter; a new one starts again from the first page.
+ * @param load - Reads a page from a cursor, null for the first, as a background poll or not.
+ * @param revision - A number that changes when the first page must be read again at once.
+ * @returns The pages, in the shape the list frame reads.
  */
-function useEvery(everyMs: number, active: boolean): number {
-  const [count, setCount] = useState(0);
+function useRunPages(
+  key: string,
+  load: (cursor: string | null, options: RequestOptions) => Promise<CursorPage<RunOut>>,
+  revision: number,
+): CursorPages<RunOut> {
+  const { t } = useTranslation();
+  const [more, setMore] = useState<More | null>(null);
+  const extra = more !== null && more.key === key ? more : null;
+  const first = useCallback(
+    async () => ({ key, page: await load(null, { background: true }) }),
+    [key, load],
+  );
+  const poll = useLivePoll(first, { everyMs: LIST_EVERY_MS, active: extra === null });
+  const { reload } = poll;
+  const seen = useRef(revision);
   useEffect(() => {
-    if (!active) {
-      return undefined;
+    if (seen.current !== revision) {
+      seen.current = revision;
+      // While more pages are shown the poll is stopped, and this reads nothing.
+      reload();
     }
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const visible = (): boolean => document.visibilityState === "visible";
-    function arm(): void {
-      clearTimeout(timer);
-      if (visible()) {
-        timer = setTimeout(fire, everyMs);
-      }
+  }, [revision, reload]);
+  const data = poll.data?.key === key ? poll.data.page : undefined;
+  const items = useMemo(
+    () => (data === undefined || extra === null ? data?.items : [...data.items, ...extra.items]),
+    [data, extra],
+  );
+  const next = data === undefined ? null : extra === null ? data.nextCursor : extra.next;
+  const quiet = poll.failures < POLL_FAILURES_SHOWN;
+  const loadMore = async (): Promise<void> => {
+    const base = extra === null ? [] : extra.items;
+    setMore({ key, items: base, next, busy: true, error: null });
+    try {
+      const page = await load(next, {});
+      setMore({
+        key,
+        items: [...base, ...page.items],
+        next: page.nextCursor,
+        busy: false,
+        error: null,
+      });
+    } catch (failure: unknown) {
+      setMore({ key, items: base, next, busy: false, error: problemText(t, failure) });
     }
-    function fire(): void {
-      setCount((previous) => previous + 1);
-      arm();
-    }
-    const onVisibility = (): void => {
-      if (visible()) {
-        fire();
-      } else {
-        clearTimeout(timer);
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    arm();
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [everyMs, active]);
-  return count;
+  };
+  return {
+    items,
+    error: data === undefined ? poll.error : (extra?.error ?? (quiet ? null : poll.error)),
+    busy: (data === undefined && poll.error === null) || extra?.busy === true,
+    hasMore: next !== null,
+    loadMore,
+    reload,
+  };
 }
 
 /** Properties of {@link JobRuns}. */
@@ -102,8 +144,10 @@ export interface JobRunsProps {
   readonly job: string;
   /** The id of the selected run, marked in its row; null for none. */
   readonly selected: string | null;
-  /** A number that changes when the list must be read again, such as after a run changed. */
+  /** A number that changes when the first page must be read again, such as for a new run. */
   readonly revision: number;
+  /** The selected run as last read, shown in its row in place of the listed one; null for none. */
+  readonly current: RunOut | null;
   /** Told the rows each time they are read. */
   readonly onRows: (runs: readonly RunOut[]) => void;
 }
@@ -111,14 +155,16 @@ export interface JobRunsProps {
 /**
  * Renders the panel: the heading, the Status and Period menus, and the runs with their state,
  * when each was created (the link that selects it), how long it ran, what started it and how many
- * of its tasks failed. The first page is read again every 30 s while no further page was shown.
+ * of its tasks failed. The first page is read again every 30 s while no further page was shown;
+ * the selected run's row always shows the run as last read.
  *
  * @param props - The job, the selected run, the revision and what to tell of the rows.
  * @param props.environment - The job's environment.
  * @param props.repository - The job's repository.
  * @param props.job - The job's name.
  * @param props.selected - The selected run's id.
- * @param props.revision - Changes when the list must be read again.
+ * @param props.revision - Changes when the first page must be read again.
+ * @param props.current - The selected run as last read.
  * @param props.onRows - Told the rows.
  * @returns The panel.
  */
@@ -128,6 +174,7 @@ export function JobRuns({
   job,
   selected,
   revision,
+  current,
   onRows,
 }: JobRunsProps): JSX.Element {
   const { t } = useTranslation();
@@ -136,10 +183,8 @@ export function JobRuns({
   const [params, setParams] = useSearchParams();
   const { status, period } = readFilter(params);
   const key = JSON.stringify([environment, repository, job, status, period]);
-  const [moreFor, setMoreFor] = useState<string | null>(null);
-  const tick = useEvery(LIST_EVERY_MS, moreFor !== key);
   const load = useCallback(
-    (cursor: string | null) => {
+    (cursor: string | null, options: RequestOptions) => {
       const days = PERIODS[period];
       return listJobRuns(
         environment,
@@ -150,12 +195,15 @@ export function JobRuns({
           since: days === null ? null : new Date(Date.now() - days * DAY_MS).toISOString(),
         },
         cursor,
+        options,
       );
     },
     [environment, repository, job, status, period],
   );
-  const pages = useLibraryPages(key, revision + tick, load);
-  const rows = pages.items ?? [];
+  const pages = useRunPages(key, load, revision);
+  const rows = (pages.items ?? []).map((row) =>
+    current !== null && row.id === current.id ? current : row,
+  );
   useEffect(() => {
     if (pages.items !== undefined) {
       onRows(pages.items);
@@ -209,13 +257,7 @@ export function JobRuns({
         </div>
       </div>
       <ViewList
-        pages={{
-          ...pages,
-          loadMore: () => {
-            setMoreFor(key);
-            return pages.loadMore();
-          },
-        }}
+        pages={pages}
         rowCount={rows.length}
         empty={t("jobs.runs.empty")}
         region={t("jobs.runs.region", { job })}

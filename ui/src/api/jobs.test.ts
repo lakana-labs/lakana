@@ -150,6 +150,20 @@ describe("the job calls", () => {
     expect(server.sent[0]?.body).toEqual({ check: "silver.orders/no_nulls" });
   });
 
+  it("reads a page of runs in the background only when asked, as a refresh is", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/prod/runs": { status: 200, body: [] },
+    });
+
+    await listJobRuns("prod", "analytics", "nightly_sales", NO_FILTER, null, { background: true });
+    await listJobRuns("prod", "analytics", "nightly_sales", NO_FILTER, "c1");
+
+    expect(server.sent.map((request) => request.headers["x-lakana-background"])).toEqual([
+      "1",
+      undefined,
+    ]);
+  });
+
   it("polls are background requests", async () => {
     const server = fakeServer({
       [`GET ${JOBS}`]: { status: 200, body: aJob() },

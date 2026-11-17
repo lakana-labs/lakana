@@ -226,6 +226,8 @@ interface RunViewProps extends RunDetailProps {
   readonly note: ControlNoteValue | null;
   /** Told the new run a Resume started. */
   readonly onResumed: (run: RunOut) => void;
+  /** Whether the run opens after a control that is gone now, so its heading takes the focus. */
+  readonly takeFocus: boolean;
 }
 
 /** A run a control changed, and the read it changed: a newer read wins over it. */
@@ -247,6 +249,7 @@ interface Changed {
  * @param props.onRunChanged - Told the run as it changes.
  * @param props.note - What a control did to it.
  * @param props.onResumed - Told the new run of a Resume.
+ * @param props.takeFocus - Whether its heading takes the focus.
  * @returns The run.
  */
 function RunView({
@@ -256,10 +259,21 @@ function RunView({
   onRunChanged,
   note,
   onResumed,
+  takeFocus,
 }: RunViewProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const heading = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // A control that removes itself (Resume, which opens the new run; Cancel, once the run ends)
+  // would leave the focus on the page: the heading takes it instead.
+  const guarding = useRef(takeFocus);
+  useEffect(() => {
+    if (guarding.current && document.activeElement === document.body) {
+      guarding.current = false;
+      headingRef.current?.focus();
+    }
+  });
   const [ended, setEnded] = useState(false);
   const [changed, setChanged] = useState<Changed | null>(null);
   const load = useCallback(() => getRun(environment, runId), [environment, runId]);
@@ -301,6 +315,7 @@ function RunView({
                 run={run}
                 name={run.job ?? run.repository}
                 onChanged={(next) => {
+                  guarding.current = true;
                   setChanged({ run: next, over: read });
                 }}
               />
@@ -321,6 +336,7 @@ function RunView({
     return (
       <Page
         title={title}
+        headingRef={headingRef}
         trail={[
           { to: "/jobs", label: t("areas.jobs.name") },
           { to: "/jobs", label: environment },
@@ -336,7 +352,7 @@ function RunView({
   }
   return (
     <section className="flat-panel jobs-run" aria-labelledby={heading}>
-      <h2 className="jobs-panel-heading" id={heading}>
+      <h2 className="jobs-panel-heading" id={heading} tabIndex={-1} ref={headingRef}>
         <VisibleText text={title} />
       </h2>
       <PollProblem poll={poll} />
@@ -383,6 +399,7 @@ export function RunDetail({
       level={level}
       onRunChanged={onRunChanged}
       note={note?.runId === runId ? note.note : null}
+      takeFocus={note?.runId === runId}
       onResumed={(next) => {
         setNote({ runId: next.id, note: { kind: "resumed", text: t("jobs.resume.done") } });
         if (level === 1) {

@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import { api } from "./client";
+import { api, type RequestOptions } from "./client";
 import { environmentPath, withQuery, type CursorPage } from "./manage";
 
 /** The state of a run. */
@@ -323,6 +323,8 @@ export function getJob(environment: string, repository: string, job: string): Pr
  * @param job - The job's name.
  * @param filter - What narrows the list.
  * @param cursor - The cursor of the page, or null for the first.
+ * @param options - Whether the read is a background poll (the first page read again), which
+ *   never counts as the person's activity; no by default (Show more).
  * @returns The page; its runs have no tasks.
  * @throws {ApiError} for a refusal.
  */
@@ -332,6 +334,7 @@ export async function listJobRuns(
   job: string,
   filter: JobRunFilter,
   cursor: string | null,
+  options: RequestOptions = {},
 ): Promise<CursorPage<RunOut>> {
   const query = new URLSearchParams({ job, repository });
   if (filter.status !== null) {
@@ -344,7 +347,7 @@ export async function listJobRuns(
   if (cursor !== null) {
     query.set("cursor", cursor);
   }
-  const page = await api.page(withQuery(environmentPath(environment, "/runs"), query));
+  const page = await api.page(withQuery(environmentPath(environment, "/runs"), query), options);
   return { items: page.body as readonly RunOut[], nextCursor: page.nextCursor };
 }
 

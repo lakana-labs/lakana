@@ -70,18 +70,17 @@ function JobView({ env, repository, job }: JobViewProps): JSX.Element {
     }
   }, [read, me.name, env, repository, job]);
 
-  // The list follows the selected run: a run it does not hold, or holds in another state, makes
-  // it read again (a new run, a run that ended).
+  // The list follows the selected run: its row shows the run as last read, and a run the list
+  // does not hold (a new run of Run now or Resume) makes it read its first page again.
+  const [current, setCurrent] = useState<RunOut | null>(null);
   const listed = useRef(rows);
   useEffect(() => {
     listed.current = rows;
   }, [rows]);
   const onRunChanged = useCallback((run: RunOut) => {
+    setCurrent(run);
     const shownRows = listed.current;
-    if (
-      shownRows !== null &&
-      !shownRows.some((row) => row.id === run.id && row.status === run.status)
-    ) {
+    if (shownRows !== null && !shownRows.some((row) => row.id === run.id)) {
       setRevision((previous) => previous + 1);
     }
   }, []);
@@ -147,6 +146,7 @@ function JobView({ env, repository, job }: JobViewProps): JSX.Element {
             job={job}
             selected={selected}
             revision={revision}
+            current={current}
             onRows={setRows}
           />
           {selected !== null && (
