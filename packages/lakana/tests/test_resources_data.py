@@ -719,6 +719,33 @@ def test_tables_describe_says_an_older_server_reset_the_label_in_the_description
         )
 
 
+def test_tables_describe_reads_nothing_back_when_both_languages_are_the_same() -> None:
+    """A `label_language` that is `lang` in another case needs no check: one language for both."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.method)
+        return httpx.Response(200, json=_labelled("Ventes", "edited", "fr"))
+
+    Tables(_transport(handler)).describe(
+        "dev", "bronze.sales", label="Ventes", lang="fr", label_language="FR"
+    )
+
+    assert seen == ["PATCH"]
+
+
+def test_tables_describe_without_lang_names_the_main_language_an_older_server_used() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PATCH":
+            return httpx.Response(200, json=_labelled("Ventes", "edited", "en"))
+        return httpx.Response(200, json=_labelled(None, None, None))
+
+    with pytest.raises(InvalidResponse, match=r"saved in en, the table's main language, not in fr"):
+        Tables(_transport(handler)).describe(
+            "dev", "bronze.sales", label="Ventes", label_language="fr"
+        )
+
+
 def test_tables_delete_sends_a_delete() -> None:
     """`tables.delete` DELETEs `.../namespaces/{path}/tables/{name}`."""
     seen: dict[str, Any] = {}

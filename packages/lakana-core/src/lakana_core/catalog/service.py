@@ -595,6 +595,28 @@ def _stale_reference_message(view: TableRef, reference: str) -> str:
 
 
 @dataclass(frozen=True)
+class _TextEdit:
+    """One edit of a table's or column's texts, as the setters receive it.
+
+    Parameters
+    ----------
+    description
+        The new description, `None` to reset its edit, or `KEEP`.
+    label
+        The new label, `None` to reset its edit, or `KEEP`.
+    language
+        The tag of the language edited; `None` for the table's main language.
+    label_language
+        The tag of the label's language; `None` for `language`.
+    """
+
+    description: str | Keep | None
+    label: str | Keep | None
+    language: str | None
+    label_language: str | None
+
+
+@dataclass(frozen=True)
 class PropertyUpdateSummary:
     """What an update to a namespace's properties actually changed.
 
@@ -5353,14 +5375,44 @@ class CatalogService:
         self._authz.authorize(
             p, Action.READ_TABLE, Securable.table_scope(ref.environment, ref.namespace, ref.name)
         )
-        detail = self._edit_texts(
-            p, row, ref.dotted(), None, description, label, language, label_language
+        self._record_texts(
+            p, ref, row, None, _TextEdit(description, label, language, label_language)
         )
+
+    def _record_texts(
+        self, p: PrincipalRef, ref: TableRef, row: Table, column: str | None, edit: _TextEdit
+    ) -> None:
+        """Store the edits of a table's or column's texts, audit them and commit.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        ref
+            The table reference.
+        row
+            The table, already authorized.
+        column
+            The column's name, already checked; `None` for the table itself.
+        edit
+            The fields and their languages.
+        """
+        detail = self._edit_texts(
+            p,
+            row,
+            ref.dotted(),
+            column,
+            edit.description,
+            edit.label,
+            edit.language,
+            edit.label_language,
+        )
+        named = {"table": ref.dotted()} | ({} if column is None else {"column": column})
         AuditService(self._session).record(
             p.id,
-            AuditEventType.TABLE_DESCRIBED,
+            AuditEventType.TABLE_DESCRIBED if column is None else AuditEventType.COLUMN_DESCRIBED,
             securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
-            detail={"table": ref.dotted(), **detail},
+            detail=named | detail,
         )
         self._session.commit()
 
@@ -5387,28 +5439,25 @@ class CatalogService:
         ref
             The table reference.
         column
-            The column's name.
+            The column's name, which must be in the schema.
         description
-            The new description, `None` to reset its edit, or `KEEP`.
+            The column's new description; `None` removes its edit, `KEEP` leaves it.
         label
-            The new label, `None` to reset its edit, or `KEEP`.
+            The column's new label; `None` removes its edit, `KEEP` leaves it.
         language
-            The canonical or any-case tag of the language edited; `None` for the table's main
-            language.
+            The language of the edit, as a tag in any case; the table's main language when `None`.
         label_language
-            The tag of the label's language, any case, when it is not `language`; `None` for
-            `language`. Needs a `label`.
+            The label's own language, as a tag in any case, when the label is edited in another
+            language than `language`; only with a `label`.
 
         Raises
         ------
         NotFoundError
-            If the table or the column does not exist.
+            If the table, or the column in its schema, does not exist.
         PermissionDenied
             If `p` neither owns the table nor holds `DROP_TABLE` on it, or may not read it.
         ValidationError
-            If both fields are `KEEP`, a text is blank or too long, a label has more than one
-            line, `language` or `label_language` is not a tag Lakana takes, `label_language`
-            comes without a `label`, or the edit would add a language past `MAX_EDIT_LANGUAGES`.
+            For the same texts and tags `set_table_description` refuses.
         """
         row = self._find_table_to_describe(p, ref)
         names = [c.name for c in self.describe_table(p, ref, with_actions=False).columns]
@@ -5417,16 +5466,9 @@ class CatalogService:
             raise NotFoundError(
                 f"Table {ref.dotted()} has no column {shown(column)!r}. Its columns: {have}."
             )
-        detail = self._edit_texts(
-            p, row, ref.dotted(), column, description, label, language, label_language
+        self._record_texts(
+            p, ref, row, column, _TextEdit(description, label, language, label_language)
         )
-        AuditService(self._session).record(
-            p.id,
-            AuditEventType.COLUMN_DESCRIBED,
-            securable=Securable.table_scope(ref.environment, ref.namespace, ref.name),
-            detail={"table": ref.dotted(), "column": column, **detail},
-        )
-        self._session.commit()
 
     def _edit_texts(
         self,
