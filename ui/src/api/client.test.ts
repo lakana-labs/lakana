@@ -5,6 +5,7 @@ import {
   CSRF_STORAGE_KEY,
   DownloadCut,
   DownloadTooLong,
+  WrongFileType,
   api,
   onUnauthorized,
   send,
@@ -312,6 +313,52 @@ describe("api.upload and api.blob", () => {
     expect(server.sent[0]?.headers["x-lakana-background"]).toBeUndefined();
   });
 
+  it("download keeps octet-stream for artifacts", async () => {
+    const server = fakeServer({
+      "GET /api/v1/files/one": { status: 200, blob: new Blob(["bytes"]) },
+    });
+
+    await api.download("/api/v1/files/one", 5);
+
+    expect(server.sent[0]?.headers["accept"]).toBe("application/octet-stream");
+  });
+
+  it("download asks for the type it is given and refuses another", async () => {
+    const server = fakeServer({
+      "GET /api/v1/files/csv": { status: 200, blob: new Blob(["a,b"], { type: "text/csv" }) },
+      "GET /api/v1/files/page": { status: 200, blob: new Blob(["<p>"], { type: "text/html" }) },
+    });
+
+    const csv = await api.download("/api/v1/files/csv", 5, "text/csv");
+    await expect(api.download("/api/v1/files/page", 5, "text/csv")).rejects.toBeInstanceOf(
+      WrongFileType,
+    );
+    await expect(api.download("/api/v1/files/page", 5)).rejects.toBeInstanceOf(WrongFileType);
+
+    expect(await csv.text()).toBe("a,b");
+    expect(server.sent[0]?.headers["accept"]).toBe("text/csv");
+  });
+
+  it("download refuses an answer that names no type", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(c) {
+                c.close();
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+      ),
+    );
+
+    await expect(api.download("/api/v1/files/one", 5)).rejects.toBeInstanceOf(WrongFileType);
+  });
+
   it("download reads an answer without a body as an empty file", async () => {
     fakeServer({ "GET /api/v1/files/one": { status: 204 } });
 
@@ -328,7 +375,14 @@ describe("api.upload and api.blob", () => {
   function streamed(source: UnderlyingDefaultSource<Uint8Array>): void {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => Promise.resolve(new Response(new ReadableStream(source), { status: 200 }))),
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(new ReadableStream(source), {
+            status: 200,
+            headers: { "Content-Type": "application/octet-stream" },
+          }),
+        ),
+      ),
     );
   }
 

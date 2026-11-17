@@ -66,4 +66,12 @@ describe("recordOpened", () => {
       body: { kind: "table", environment: "prod", ref: "gold.sales.fact_sales" },
     });
   });
+
+  it("tells the server that the person opened a query run", async () => {
+    const server = fakeServer({ "POST /api/v1/principals/kim lee/recent": { status: 204 } });
+
+    await recordOpened("kim lee", "query", "prod", "0b1c");
+
+    expect(server.sent[0]?.body).toEqual({ kind: "query", environment: "prod", ref: "0b1c" });
+  });
 });

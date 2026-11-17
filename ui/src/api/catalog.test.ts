@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { getTableTree, listTables, TABLE_SORTS, type ListTablesQuery } from "./catalog";
+import {
+  getTableTree,
+  listCompletionTables,
+  listTables,
+  TABLE_SORTS,
+  type ListTablesQuery,
+} from "./catalog";
 
 import { catalogRoutes, PAGE, TREE } from "../test/catalog";
 import { fakeServer } from "../test/server";
@@ -42,6 +48,20 @@ describe("catalog api", () => {
     await listTables({ ...QUERY, cursor: "abc" });
 
     expect(server.sent[0]?.path).toBe("/api/v1/tables?sort=name&order=asc&limit=50&cursor=abc");
+  });
+
+  it("asks for completion names 200 at a time, by name, and sends q and cursor only when set", async () => {
+    const server = fakeServer(catalogRoutes());
+
+    await listCompletionTables("prod", "", null);
+    await listCompletionTables("prod", "fa", "c2");
+
+    expect(server.sent[0]?.path).toBe(
+      "/api/v1/tables?environment=prod&sort=name&order=asc&limit=200",
+    );
+    expect(server.sent[1]?.path).toBe(
+      "/api/v1/tables?environment=prod&sort=name&order=asc&limit=200&q=fa&cursor=c2",
+    );
   });
 
   it("reads the tree", async () => {

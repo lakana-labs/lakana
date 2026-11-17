@@ -64,6 +64,15 @@ export class DownloadTooLong extends Error {
   }
 }
 
+/** A download the server answered with another kind of file than the one asked for. */
+export class WrongFileType extends Error {
+  /** Builds the error. */
+  constructor() {
+    super("The server sent a different kind of file than the one asked for.");
+    this.name = "WrongFileType";
+  }
+}
+
 /** A refusal or failure the server answered, with its cause and the next step. */
 export class ApiError extends Error {
   /** The HTTP status; 0 when the server could not be reached. */
@@ -467,15 +476,22 @@ export const api = {
    *
    * @param path - The path under the server.
    * @param limit - The most bytes the file may have, such as the size its manifest records.
+   * @param accept - The media type asked for, sent as `Accept`; the answer's `Content-Type` must
+   *   start with it.
    * @returns The file.
    * @throws {ApiError} for a refusal or an unreachable server.
+   * @throws {WrongFileType} when the answer's `Content-Type` does not start with `accept`.
    * @throws {DownloadCut} when the body's stream breaks before it ends.
    * @throws {DownloadTooLong} when the body passes `limit`; the rest is cancelled unread.
    */
-  async download(path: string, limit: number): Promise<Blob> {
-    const response = await exchangeWith("GET", path, { accept: "application/octet-stream" }, {});
+  async download(path: string, limit: number, accept = "application/octet-stream"): Promise<Blob> {
+    const response = await exchangeWith("GET", path, { accept }, {});
     if (response.body === null) {
       return new Blob([]);
+    }
+    if (!(response.headers.get("Content-Type") ?? "").startsWith(accept)) {
+      await response.body.cancel();
+      throw new WrongFileType();
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array<ArrayBuffer>[] = [];
