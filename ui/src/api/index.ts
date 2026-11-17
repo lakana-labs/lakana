@@ -156,3 +156,27 @@ export type {
 } from "./artifacts";
 export { getStatus } from "./status";
 export type { InstanceStatusOut, StatusDetailOut } from "./status";
+export {
+  createConnection,
+  deleteConnection,
+  getConnection,
+  listConnectionEnvironments,
+  listConnections,
+  requestConnectionTest,
+  testAllConnections,
+  updateConnection,
+} from "./connections";
+export type {
+  ConnectionAction,
+  ConnectionCreateIn,
+  ConnectionEnvironmentOut,
+  ConnectionKind,
+  ConnectionLastTestOut,
+  ConnectionOut,
+  ConnectionQueuedTestOut,
+  ConnectionTestOut,
+  ConnectionTestOutcome,
+  ConnectionTestState,
+  ConnectionUpdateIn,
+  EnvironmentConnectionAction,
+} from "./connections";
