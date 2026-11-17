@@ -1,0 +1,85 @@
+/* Settings: the list of places beside the place, or Section above it on a narrow screen. */
+.settings {
+  display: flex;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+
+.settings-places {
+  flex: 0 0 14rem;
+}
+
+.settings-place {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.place-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A place's children, and a group's, are indented beneath it. */
+.place-items .place-items {
+  padding-left: var(--space-4);
+}
+
+.place-link {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: background var(--motion-fast) var(--ease);
+}
+
+.place-link[data-hovered] {
+  background: var(--color-sunk);
+  color: var(--color-text);
+}
+
+.place-link[data-focus-visible] {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* The current place: an accent bar and a heavier weight, never colour alone. */
+.place-link[aria-current="page"] {
+  border-left-color: var(--color-accent);
+  background: var(--color-accent-bg);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+/* A group names its places; it is not a link. */
+.place-group {
+  display: block;
+  padding: var(--space-1) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  font-weight: var(--type-label-weight);
+}
+
+.place-fold {
+  margin-bottom: var(--space-4);
+}
+
+.place-fold-popover {
+  width: min(288px, 100%);
+}
+
+.place-fold-dialog {
+  padding: var(--space-3);
+}
+
+@media (forced-colors: active) {
+  .place-link[aria-current="page"] {
+    border-left-color: Highlight;
+  }
+}

@@ -182,7 +182,7 @@ test.describe("administering sign-in", () => {
     });
     page.on("pageerror", (error) => errors.push(error.message));
 
-    await page.goto(`${ORIGIN}/access/invites`);
+    await page.goto(`${ORIGIN}/settings/sign-in/invites`);
     await expect(page.getByText(/No invite is open/)).toBeVisible();
     expect(await violations(page), "invites").toEqual([]);
 
@@ -260,7 +260,7 @@ test("a person's page has a breadcrumb that fits 320 px and passes axe", async (
     route.fulfill({ json: { name, type: "USER" } }),
   );
   await page.setViewportSize({ width: 320, height: 800 });
-  await page.goto(`/access/people/${name}`);
+  await page.goto(`/settings/access/people/${name}`);
 
   const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
   await expect(crumbs.getByText(name)).toHaveAttribute("aria-current", "page");
@@ -272,5 +272,5 @@ test("a person's page has a breadcrumb that fits 320 px and passes axe", async (
   expect(await violations(page), "a person's page at 320 px").toEqual([]);
 
   await crumbs.getByRole("link", { name: "People" }).click();
-  await expect(page).toHaveURL(/\/access$/);
+  await expect(page).toHaveURL(/\/settings\/access\/people$/);
 });

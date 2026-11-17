@@ -188,10 +188,10 @@ describe("ConnectRepository", () => {
   });
 
   it("is not available to a person who is not an administrator", async () => {
-    renderShell(PAGE, { access: areasFor(false, false), me: { admin: false } });
+    renderShell(PAGE, { access: areasFor(false), me: { admin: false } });
 
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(
-      "You cannot use Settings",
+      "You cannot use Repositories",
     );
     expect(screen.queryByRole("textbox", { name: "Repository URL" })).not.toBeInTheDocument();
   });

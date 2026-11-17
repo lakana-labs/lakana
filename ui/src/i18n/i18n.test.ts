@@ -158,3 +158,15 @@ it("keeps a command to copy exact: its values are not marked, CopyLine shows the
     "lakana recovery create k\u202Eim",
   );
 });
+
+it("names Access as a place of Settings, not an area or a tour step, and ships the places' names with Settings", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("tour.steps.access")).toBe(false);
+  expect(i18n.exists("areas.access.name")).toBe(false);
+  expect(i18n.exists("settings.places.people")).toBe(false);
+
+  await import("../settings/SettingsScreen");
+
+  expect(i18n.t("settings.places.people")).toBe("People");
+});

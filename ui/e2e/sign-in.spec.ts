@@ -161,7 +161,7 @@ test.describe("signing in", () => {
     const { credentials } = await cdp.send("WebAuthn.getCredentials", { authenticatorId });
     expect(credentials).toHaveLength(1);
     expect(credentials[0]?.isResidentCredential).toBe(true);
-    await expect(page.getByRole("link", { name: "Access" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
     await expect(page.getByText("You have no access yet; ask an administrator.")).toBeVisible();
 
     await page.getByRole("button", { name: "Signed in as kim" }).click();

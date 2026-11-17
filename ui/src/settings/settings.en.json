@@ -1,0 +1,11 @@
+{
+  "label": "Settings places",
+  "picker": "Section",
+  "status": "Status",
+  "repositories": "Repositories",
+  "access": "Access",
+  "people": "People",
+  "signIn": "Sign-in",
+  "invites": "Invites",
+  "recoveryLinks": "Recovery links"
+}

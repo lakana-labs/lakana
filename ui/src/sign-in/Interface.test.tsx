@@ -352,27 +352,32 @@ describe("Interface", () => {
     expect(screen.getByRole("button", { name: "Signed in as admin" })).toBeInTheDocument();
   });
 
-  it("hides Access and Settings from a person without admin rights", async () => {
-    renderInterface("/", {
+  it("shows Settings to a person without admin rights, with Status only", async () => {
+    renderInterface("/settings", {
       "GET /api/v1/sign-in/session": { status: 200, body: { ...ADMIN_SESSION, name: "kim" } },
       "GET /api/v1/whoami": { status: 200, body: whoami("kim", false, true) },
     });
 
-    const navigation = await screen.findByRole("navigation");
-    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await screen.findByRole("heading", { level: 1, name: "Status" });
+    const navigation = screen.getByRole("navigation", { name: "Areas" });
     const names = within(navigation)
       .getAllByRole("link")
       .map((link) => link.textContent);
-    expect(names).toEqual(["Home", "Catalog", "Queries", "Jobs", "Connections"]);
-    expect(screen.queryByText(/no access yet/)).not.toBeInTheDocument();
+    expect(names).toEqual(["Home", "Catalog", "Queries", "Jobs", "Connections", "Settings"]);
+    const places = screen.getByRole("navigation", { name: "Settings places" });
+    expect(
+      within(places)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Status"]);
   });
 
-  it("shows Access and Settings to an administrator", async () => {
+  it("shows Settings, and no Access area, to an administrator", async () => {
     renderInterface("/", { "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION } });
 
     const navigation = await screen.findByRole("navigation");
-    expect(within(navigation).getByRole("link", { name: "Access" })).toBeInTheDocument();
     expect(within(navigation).getByRole("link", { name: "Settings" })).toBeInTheDocument();
+    expect(within(navigation).queryByRole("link", { name: "Access" })).not.toBeInTheDocument();
   });
 
   it("shows 'You have no access yet; ask an administrator' on an empty Home", async () => {
@@ -409,8 +414,8 @@ describe("Interface", () => {
     );
   });
 
-  it("hides the administration areas when the rights cannot be read", async () => {
-    renderInterface("/", {
+  it("lists only Status in Settings when the rights cannot be read", async () => {
+    renderInterface("/settings", {
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
       "GET /api/v1/whoami": {
         status: 503,
@@ -418,9 +423,13 @@ describe("Interface", () => {
       },
     });
 
-    const navigation = await screen.findByRole("navigation");
-    await screen.findByRole("heading", { level: 1, name: "Home" });
-    expect(within(navigation).queryByRole("link", { name: "Access" })).not.toBeInTheDocument();
+    await screen.findByRole("heading", { level: 1, name: "Status" });
+    const places = screen.getByRole("navigation", { name: "Settings places" });
+    expect(
+      within(places)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Status"]);
   });
 
   it("disposes the old router once the new one shows", async () => {

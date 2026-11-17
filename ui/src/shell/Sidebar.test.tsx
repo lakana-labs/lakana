@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe("Sidebar", () => {
-  it("puts the work areas and the admin areas in two lists", async () => {
+  it("puts the work areas and the instance areas in two lists", async () => {
     renderShell("/");
     await screen.findByRole("heading", { level: 1, name: "Home" });
 
@@ -20,18 +20,21 @@ describe("Sidebar", () => {
           .getAllByRole("link")
           .map((l) => l.textContent),
       ),
-    ).toEqual([
-      ["Home", "Catalog", "Queries", "Jobs", "Connections"],
-      ["Access", "Settings"],
-    ]);
+    ).toEqual([["Home", "Catalog", "Queries", "Jobs", "Connections"], ["Settings"]]);
   });
 
   it("leaves out the Catalog for a person with no access yet", async () => {
-    renderShell("/", { access: areasFor(false, true), me: { admin: false, noAccessYet: true } });
+    renderShell("/", { access: areasFor(true), me: { admin: false, noAccessYet: true } });
     await screen.findByRole("heading", { level: 1, name: "Home" });
 
     const links = within(screen.getByRole("navigation")).getAllByRole("link");
-    expect(links.map((l) => l.textContent)).toEqual(["Home", "Queries", "Jobs", "Connections"]);
+    expect(links.map((l) => l.textContent)).toEqual([
+      "Home",
+      "Queries",
+      "Jobs",
+      "Connections",
+      "Settings",
+    ]);
     expect(screen.queryByRole("link", { name: "Catalog" })).not.toBeInTheDocument();
   });
 
@@ -46,7 +49,7 @@ describe("Sidebar", () => {
     expect(product).toHaveTextContent(/^Lakana$/);
   });
 
-  it("leaves out the admin list when no admin area is visible", async () => {
+  it("leaves out the instance list when no instance area is visible", async () => {
     renderShell("/", { access: new Set(["home"]) });
     await screen.findByRole("heading", { level: 1, name: "Home" });
 
