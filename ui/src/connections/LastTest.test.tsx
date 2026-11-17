@@ -62,4 +62,14 @@ describe("LastTest", () => {
     expect(screen.getByText(/The TLS handshake failed/)).toBeInTheDocument();
     expect(screen.getByText(/Give the connection your CA certificate/)).toBeInTheDocument();
   });
+
+  it("shows the test command only to people who may test the connection", () => {
+    const { rerender } = render(<LastTest connection={aConnection({})} now={NOW} />);
+
+    expect(screen.getByText(/lakana connection test/)).toBeInTheDocument();
+
+    rerender(<LastTest connection={aConnection({ actions: [] })} now={NOW} />);
+
+    expect(screen.queryByText(/lakana connection test/)).not.toBeInTheDocument();
+  });
 });
