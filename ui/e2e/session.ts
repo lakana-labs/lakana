@@ -760,6 +760,8 @@ export const STUBBED = [
   "/api/v1/principals",
   "/api/v1/principals/admin/picture",
   "/api/v1/settings/sign-in",
+  "/api/v1/invites",
+  "/api/v1/recovery-links",
   ...Object.keys(HOME),
   ...Object.keys(CATALOG),
   TABLES,
@@ -803,6 +805,8 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route("**/api/v1/settings/sign-in", (route) =>
     route.fulfill({ json: SIGN_IN_SETTINGS }),
   );
+  await page.route("**/api/v1/invites", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/recovery-links", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/whoami", (route) =>
     route.fulfill({
       json: {

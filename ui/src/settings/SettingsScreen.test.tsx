@@ -1,4 +1,5 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { type AreaAccess, areasFor } from "../shell/areas";
@@ -25,6 +26,20 @@ describe("SettingsScreen", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Status" })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings/status");
+  });
+
+  it("focuses the heading of a place that loads after the move, not on the first load", async () => {
+    renderShell("/settings/status");
+    const status = await screen.findByRole("heading", { level: 1, name: "Status" });
+    expect(status).not.toHaveFocus();
+
+    const nav = screen.getByRole("navigation", { name: "Settings places" });
+    await userEvent.click(within(nav).getByRole("link", { name: "Sign-in" }));
+
+    const heading = await screen.findByRole("heading", { level: 1, name: "Sign-in" });
+    await waitFor(() => {
+      expect(heading).toHaveFocus();
+    });
   });
 
   it("lists every place for an administrator and marks the current one", async () => {

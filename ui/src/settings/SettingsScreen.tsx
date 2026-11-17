@@ -4,8 +4,17 @@
  *
  * @packageDocumentation
  */
-import { type ComponentType, type JSX, lazy, type LazyExoticComponent, Suspense } from "react";
-import { Navigate, Route, Routes } from "react-router";
+import {
+  type ComponentType,
+  type JSX,
+  lazy,
+  type LazyExoticComponent,
+  type RefObject,
+  Suspense,
+  useEffect,
+  useRef,
+} from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router";
 
 import { NotFound } from "../shell/NotFound";
 import { GroupEntry } from "./GroupEntry";
@@ -41,6 +50,25 @@ const PAGE_PLACES = REGISTRY.filter(hasPage);
 const GROUPS = REGISTRY.filter((place) => !hasPage(place));
 
 /**
+ * Moves the focus to the page's heading once a place that was loading has shown, after a
+ * navigation inside Settings. The shell moves it when the address changes, but a place whose
+ * chunk is still loading has no heading yet; not on the first load, so the skip link stays the
+ * first stop.
+ *
+ * @param props - Whether the person has moved from the address the area opened on.
+ * @param props.moved - Set once the address has changed.
+ * @returns Nothing to show.
+ */
+function FocusHeading({ moved }: { readonly moved: RefObject<boolean> }): null {
+  useEffect(() => {
+    if (moved.current) {
+      document.getElementById("main")?.querySelector("h1")?.focus();
+    }
+  }, [moved]);
+  return null;
+}
+
+/**
  * Renders the place the address names under `/settings`, inside the Settings layout;
  * `/settings` itself opens Status, where Home's "Details" goes, and a group's address
  * (`/settings/access`) its first listed place.
@@ -48,6 +76,12 @@ const GROUPS = REGISTRY.filter((place) => !hasPage(place));
  * @returns The place.
  */
 export function AreaScreen(): JSX.Element {
+  const { pathname } = useLocation();
+  const opened = useRef(pathname);
+  const moved = useRef(false);
+  useEffect(() => {
+    moved.current = pathname !== opened.current;
+  }, [pathname]);
   return (
     <Routes>
       <Route element={<SettingsLayout />}>
@@ -62,6 +96,7 @@ export function AreaScreen(): JSX.Element {
                 // Keyed by place: leaving a place unmounts it at once, even while the next one loads.
                 <Suspense key={place.id} fallback={null}>
                   <Page />
+                  <FocusHeading moved={moved} />
                 </Suspense>
               }
             />
