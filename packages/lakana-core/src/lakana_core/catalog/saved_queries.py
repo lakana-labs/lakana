@@ -380,8 +380,8 @@ class SavedQueryService:
             If the caller already has a saved query of that name there.
         """
         _refuse_task_token(p)
-        self._authz.authorize(p, Action.SUBMIT_QUERY, Securable.environment_scope(environment))
         env = self._environment(environment)
+        self._authz.authorize(p, Action.SUBMIT_QUERY, Securable.environment_scope(environment))
         stripped, chosen = _checked_fields(name, sql, visibility)
         self._refuse_duplicate(p, env, stripped, None)
         row = SavedQuery(id=uuid.uuid4(), environment_id=env.id, owner_id=p.id)

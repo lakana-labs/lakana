@@ -5347,6 +5347,83 @@ class QueryListPageOut(BaseModel):
     next_cursor: str | None
 
 
+class SavedQueryIn(BaseModel):
+    """The body that creates a saved query or replaces one.
+
+    Parameters
+    ----------
+    name
+        The name, 1 to 200 characters after stripping, on one line of visible characters; unique
+        among the owner's saved queries in the environment.
+    sql
+        The SQL, stored as sent; not empty, and at most `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS`
+        characters.
+    visibility
+        ``private`` (only you; the default) or ``everyone`` (whoever may query the environment).
+    """
+
+    name: str = Field(min_length=1, max_length=200)
+    sql: str
+    visibility: Literal["private", "everyone"] = "private"
+
+
+class SavedQueryOut(BaseModel):
+    """A saved query as the caller sees it.
+
+    Parameters
+    ----------
+    id
+        The saved query's id.
+    environment
+        The name of its environment.
+    name
+        Its name.
+    sql
+        Its SQL. Absent, not `null`, when the caller may not read it: an administrator without
+        `READ_QUERY_TEXT` reading someone else's private query.
+    visibility
+        ``private`` or ``everyone``.
+    owner
+        The owner's name, or `null` once the owner's principal is deleted.
+    former_owner
+        Whether the owner's principal is deleted; nobody may then update it.
+    actions
+        What the caller may do with it: ``update`` and ``delete`` for the owner (``update`` only
+        while they hold `SUBMIT_QUERY` there), ``delete`` for an administrator who is not the
+        owner, none for anyone else.
+    created_at
+        When it was created.
+    updated_at
+        When it was last changed.
+    """
+
+    id: str
+    environment: str
+    name: str
+    sql: str | None = None
+    visibility: Literal["private", "everyone"]
+    owner: str | None
+    former_owner: bool
+    actions: list[Literal["update", "delete"]]
+    created_at: datetime
+    updated_at: datetime
+
+
+class SavedQueryPageOut(BaseModel):
+    """One page of saved queries.
+
+    Parameters
+    ----------
+    items
+        The saved queries of the page, by name in any letter case, then environment, then id.
+    next_cursor
+        Pass back as `cursor` for the next page; `null` on the last.
+    """
+
+    items: list[SavedQueryOut]
+    next_cursor: str | None
+
+
 class QueryEnvironmentOut(BaseModel):
     """An environment where the caller may submit a query.
 

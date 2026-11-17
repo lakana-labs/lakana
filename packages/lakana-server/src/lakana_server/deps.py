@@ -22,6 +22,7 @@ from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.lineage_graph import LineageService
 from lakana_core.catalog.query_service import QueryService
 from lakana_core.catalog.rebuild import TableRebuild
+from lakana_core.catalog.saved_queries import SavedQueryService
 from lakana_core.catalog.search import CatalogSearch
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.table_listing import TableListing
@@ -1246,6 +1247,27 @@ def get_query_service(
         running_per_principal=settings.query_limits.running_per_principal,
         view_audit=settings.view_audit,
     )
+
+
+def get_saved_query_service(
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> SavedQueryService:
+    """Build a SavedQueryService for the current request.
+
+    Parameters
+    ----------
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    SavedQueryService
+        A saved query service using real authorization.
+    """
+    return SavedQueryService(session, authz)
 
 
 def get_grant_service(

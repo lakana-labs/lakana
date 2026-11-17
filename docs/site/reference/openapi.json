@@ -2707,6 +2707,688 @@
         }
       }
     },
+    "/api/v1/environments/{env}/saved-queries": {
+      "get": {
+        "tags": [
+          "saved-queries"
+        ],
+        "summary": "List the saved queries of an environment you see",
+        "description": "You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. An administrator sees the `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the item has no `sql` key. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.",
+        "operationId": "list_saved_queries_api_v1_environments__env__saved_queries_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Most items returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedQueryPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "saved-queries"
+        ],
+        "summary": "Save SQL under a name in an environment",
+        "description": "Needs `SUBMIT_QUERY` on the environment. You become the owner. A saved query is only text: running it is a query you submit with your own rights, never with the owner's. The name is stripped and must be one line of 1 to 200 visible characters, unique among your saved queries in the environment; the SQL must not be empty and at most `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS` long. Answers 403 without the right and for a task's token, 404 if the environment does not exist, 409 for a name you already use there (the message names that saved query's id) and 422 for a refused field.",
+        "operationId": "create_saved_query_api_v1_environments__env__saved_queries_post",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavedQueryIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedQueryOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/environments/{env}/saved-queries/{saved_query_id}": {
+      "get": {
+        "tags": [
+          "saved-queries"
+        ],
+        "summary": "Read one saved query",
+        "description": "You read your own, a shared one if you hold `SUBMIT_QUERY` on its environment, and, as an instance administrator with a personal token or a session, any. An administrator reads the `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the answer has no `sql` key. Answers 404 for a saved query that does not exist and for one you may not see, in the same words, and 403 for a task's token.",
+        "operationId": "get_saved_query_api_v1_environments__env__saved_queries__saved_query_id__get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "saved_query_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Saved Query Id"
+            },
+            "description": "The saved query's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedQueryOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "saved-queries"
+        ],
+        "summary": "Replace a saved query's name, SQL and visibility",
+        "description": "A whole replacement: send every field. Only the owner may change a saved query, and only while they hold `SUBMIT_QUERY` on its environment; an administrator who is not the owner may only delete it, and nobody may change one whose owner is gone. The environment never changes: saving in another one is a new `POST`. Answers 403 for anyone but the owner (with a pointer to saving a copy), without the right and for a task's token, 404 for a saved query that does not exist or that you may not see, 409 for a name you already use for another saved query there, and 422 for a refused field.",
+        "operationId": "update_saved_query_api_v1_environments__env__saved_queries__saved_query_id__put",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "saved_query_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Saved Query Id"
+            },
+            "description": "The saved query's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavedQueryIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedQueryOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "saved-queries"
+        ],
+        "summary": "Delete a saved query",
+        "description": "The owner deletes their own, with or without `SUBMIT_QUERY` today; an instance administrator (personal token or session) deletes any, which is how a saved query of a deleted owner goes. Answers 403 for anyone else who sees it and for a task's token, and 404 for a saved query that does not exist or that you may not see.",
+        "operationId": "delete_saved_query_api_v1_environments__env__saved_queries__saved_query_id__delete",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "saved_query_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Saved Query Id"
+            },
+            "description": "The saved query's id."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/saved-queries": {
+      "get": {
+        "tags": [
+          "saved-queries"
+        ],
+        "summary": "List the saved queries of every environment you see",
+        "description": "Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. An administrator sees the `sql` of someone else's private query only with `READ_QUERY_TEXT`; without it the item has no `sql` key. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
+        "operationId": "list_all_saved_queries_api_v1_saved_queries_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Most items returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedQueryPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces/{path}/tables": {
       "post": {
         "tags": [
@@ -32878,6 +33560,150 @@
         ],
         "title": "RunOut",
         "description": "One run.\n\nParameters\n----------\nid\n    Run id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nproject_version_id\n    The project version it runs.\ncommit_sha\n    Its commit.\nkind\n    ``full``, ``selection`` or ``resume``.\nstatus\n    Run status.\ncancel_requested\n    Whether a cancel was requested.\ntriggered_by\n    Who started it.\nrun_as\n    Who it writes as.\nresumed_from_run_id\n    The run a resume continues.\nselection\n    Patterns and flags.\nerror_message\n    Run-level failure.\ncreated_at\n    Created.\nstarted_at\n    Started.\nfinished_at\n    Finished.\ntasks\n    Task runs (empty in listings).\njob\n    The job the run belongs to; null for an ad-hoc run.\ntrigger\n    ``schedule``, ``api`` (a service account called the API), ``manual`` or ``deploy`` (a\n    deploy started the job as its deployer); null for an ad-hoc run.\nscheduled_for\n    For a scheduled run, the time the schedule named.\nmissed\n    How many earlier scheduled times this run stands in for.\nnotifications\n    The notifications the run queued, oldest first (empty in listings).\nfailed_tasks\n    How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in\n    listings."
+      },
+      "SavedQueryIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "sql": {
+            "type": "string",
+            "title": "Sql"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "everyone"
+            ],
+            "title": "Visibility",
+            "default": "private"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "sql"
+        ],
+        "title": "SavedQueryIn",
+        "description": "The body that creates a saved query or replaces one.\n\nParameters\n----------\nname\n    The name, 1 to 200 characters after stripping, on one line of visible characters; unique\n    among the owner's saved queries in the environment.\nsql\n    The SQL, stored as sent; not empty, and at most `LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS`\n    characters.\nvisibility\n    ``private`` (only you; the default) or ``everyone`` (whoever may query the environment)."
+      },
+      "SavedQueryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "everyone"
+            ],
+            "title": "Visibility"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner"
+          },
+          "former_owner": {
+            "type": "boolean",
+            "title": "Former Owner"
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "update",
+                "delete"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "environment",
+          "name",
+          "visibility",
+          "owner",
+          "former_owner",
+          "actions",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SavedQueryOut",
+        "description": "A saved query as the caller sees it.\n\nParameters\n----------\nid\n    The saved query's id.\nenvironment\n    The name of its environment.\nname\n    Its name.\nsql\n    Its SQL. Absent, not `null`, when the caller may not read it: an administrator without\n    `READ_QUERY_TEXT` reading someone else's private query.\nvisibility\n    ``private`` or ``everyone``.\nowner\n    The owner's name, or `null` once the owner's principal is deleted.\nformer_owner\n    Whether the owner's principal is deleted; nobody may then update it.\nactions\n    What the caller may do with it: ``update`` and ``delete`` for the owner (``update`` only\n    while they hold `SUBMIT_QUERY` there), ``delete`` for an administrator who is not the\n    owner, none for anyone else.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed."
+      },
+      "SavedQueryPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SavedQueryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "SavedQueryPageOut",
+        "description": "One page of saved queries.\n\nParameters\n----------\nitems\n    The saved queries of the page, by name in any letter case, then environment, then id.\nnext_cursor\n    Pass back as `cursor` for the next page; `null` on the last."
       },
       "ScheduleTriggerOut": {
         "properties": {

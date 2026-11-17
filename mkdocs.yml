@@ -222,6 +222,7 @@ nav:
               - reference/rest/environments.md
               - reference/rest/namespaces.md
               - reference/rest/queries.md
+              - reference/rest/saved-queries.md
               - reference/rest/tables.md
               - reference/rest/search.md
               - reference/rest/catalog.md

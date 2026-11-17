@@ -129,6 +129,8 @@ def test_create_needs_submit_query_on_the_environment(
         _service(session).create(bob, dev, name="Revenue", sql="SELECT 1")
     with pytest.raises(NotFoundError, match="No environment named 'nowhere'"):
         _service(session).create(_admin(session), "nowhere", name="Revenue", sql="SELECT 1")
+    with pytest.raises(NotFoundError, match="No environment named 'nowhere'"):
+        _service(session).create(bob, "nowhere", name="Revenue", sql="SELECT 1")
     assert session.execute(select(SavedQuery)).first() is None
 
 
@@ -338,7 +340,7 @@ def test_a_deleted_environment_hides_its_saved_queries_until_restored(
     ("typed", "stored"),
     [
         ("a\nb", None),
-        ("a​b", None),
+        ("a\u200bb", None),
         ("x" * 201, None),
         ("  Monthly revenue  ", "Monthly revenue"),
     ],
