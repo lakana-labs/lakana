@@ -16,7 +16,7 @@ release, which does not know the column, still inserts runs during an upgrade; t
 recorded as `written`. The model has no default: new code names an origin everywhere.
 
 Revision ID: d8e2f5a1c736
-Revises: c4e8a1f2d937
+Revises: 15081774c52d
 Create Date: 2026-11-16 09:00:00.000000
 
 """
@@ -28,7 +28,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "d8e2f5a1c736"
-down_revision: str | Sequence[str] | None = "c4e8a1f2d937"
+down_revision: str | Sequence[str] | None = "15081774c52d"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -293,7 +293,7 @@ runs with the other migrations, and nothing else has to be done. Going back drop
 
 ### Every query run records where it came from
 
-Migration `0080` adds an `origin` to every query run (`written`, `preview`, `check`, `write`,
+Migration `0081` adds an `origin` to every query run (`written`, `preview`, `check`, `write`,
 `maintenance` or `task`), room for the size of its stored result and the position of its error,
 and an index on the person who ran it and when it ended. A run that exists before the upgrade is
 given its origin by the first of these rules that holds:
