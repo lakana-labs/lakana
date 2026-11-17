@@ -98,6 +98,12 @@ export interface ConfirmRowProps {
   readonly onCancel: () => void;
   /** A second way to act, between the confirm button and Cancel, such as Save as new. */
   readonly more?: ReactNode;
+  /**
+   * Whether the confirm button shows that it waits; by default while the attempt runs or a press
+   * is kept. A dialog whose second action runs the same attempt passes false while that one runs,
+   * so only the pressed button shows it.
+   */
+  readonly pending?: boolean;
 }
 
 /**
@@ -110,6 +116,7 @@ export interface ConfirmRowProps {
  * @param props.confirm - The confirm action.
  * @param props.onCancel - Closes the dialog without acting.
  * @param props.more - A second way to act.
+ * @param props.pending - Whether the confirm button shows that it waits.
  * @returns The row.
  */
 export function ConfirmRow({
@@ -118,6 +125,7 @@ export function ConfirmRow({
   confirm,
   onCancel,
   more,
+  pending,
 }: ConfirmRowProps): JSX.Element {
   const { t } = useTranslation();
   return (
@@ -125,7 +133,7 @@ export function ConfirmRow({
       <div className="step-actions">
         <PendingButton
           className="button button-primary"
-          pending={attempt.busy || confirm.queued}
+          pending={pending ?? (attempt.busy || confirm.queued)}
           isDisabled={confirm.disabled}
           onPress={confirm.press}
         >

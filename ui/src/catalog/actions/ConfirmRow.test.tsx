@@ -115,6 +115,31 @@ describe("ConfirmRow", () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it("shows the attempt's wait on the confirm button by default, and not when told otherwise", () => {
+    const busy = { busy: true, error: null, addPasskey: false, run: vi.fn() };
+    const confirm = { disabled: false, queued: false, press: vi.fn() };
+    const { rerender } = render(
+      <ConfirmRow attempt={busy} label="Save" confirm={confirm} onCancel={vi.fn()} />,
+    );
+    // A pending button's name takes its sign's words too ("Save Working…").
+    expect(screen.getByRole("button", { name: /^Save/ })).toHaveAttribute("data-pending");
+
+    rerender(
+      <ConfirmRow
+        attempt={busy}
+        label="Save"
+        confirm={confirm}
+        onCancel={vi.fn()}
+        pending={false}
+      />,
+    );
+
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).not.toHaveAttribute("data-pending");
+    expect(save.querySelector(".pending-sign")).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("Working…");
+  });
+
   it("ignores a second press while the action runs, such as Enter after a click", async () => {
     const onConfirm = vi.fn();
     const user = userEvent.setup();

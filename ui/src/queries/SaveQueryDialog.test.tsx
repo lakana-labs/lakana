@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SavedQueryOut } from "../api/savedQueries";
-import { held } from "../test/pending";
+import { expectPending, held } from "../test/pending";
 import { aSavedQuery } from "../test/queries";
 import { fakeServer } from "../test/server";
 import { SaveQueryDialog } from "./SaveQueryDialog";
@@ -144,6 +144,43 @@ describe("SaveQueryDialog", () => {
       expect(onSaved).toHaveBeenCalledWith(created, true);
     });
     expect(writes(server.sent)).toEqual([CREATE]);
+  });
+
+  it("only the pressed button shows that it waits", async () => {
+    const answer = held();
+    fakeServer({ [CREATE]: answer.route, [UPDATE]: answer.route });
+    const { onSaved, user } = renderSave(OPENED);
+    const save = screen.getByRole("button", { name: "Save" });
+    const create = screen.getByRole("button", { name: "Save as new" });
+
+    await user.click(create);
+
+    expectPending(create);
+    expect(save).not.toHaveAttribute("data-pending");
+    expect(save.querySelector(".pending-sign")).toBeNull();
+    expect(save).toBeDisabled();
+    answer.release({ status: 201, body: aSavedQuery({ id: "n5", environment: "dev" }) });
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("Save shows that it waits, and Save as new waits disabled", async () => {
+    const answer = held();
+    fakeServer({ [UPDATE]: answer.route });
+    const { onSaved, user } = renderSave(OPENED);
+    const save = screen.getByRole("button", { name: "Save" });
+    const create = screen.getByRole("button", { name: "Save as new" });
+
+    await user.click(save);
+
+    expectPending(save);
+    expect(create).not.toHaveAttribute("data-pending");
+    expect(create).toBeDisabled();
+    answer.release({ status: 200, body: OPENED });
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("shows the servers 409 word for word and keeps the fields", async () => {

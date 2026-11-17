@@ -5,7 +5,6 @@
  */
 import { type JSX, useState } from "react";
 import {
-  Button,
   Heading,
   Input,
   Label,
@@ -24,6 +23,7 @@ import {
 } from "../api/savedQueries";
 import { ConfirmRow, useConfirm } from "../catalog/actions/ConfirmRow";
 import { ActionDialog } from "../shell/ActionDialog";
+import { PendingButton } from "../shell/PendingButton";
 import { useAttempt } from "../sign-in/Attempt";
 import "./queryStrings";
 
@@ -83,7 +83,11 @@ export function SaveQueryDialog({
       ? opened
       : null;
   const missing = name.trim() === "";
+  // Which button started the attempt: only that one shows that it waits, the other is disabled.
+  const [pressedNew, setPressedNew] = useState(false);
+  const savingNew = attempt.busy && pressedNew;
   const save = (asNew: boolean): void => {
+    setPressedNew(asNew);
     const body = { name: name.trim(), sql, visibility };
     attempt.run(async () => {
       const saved =
@@ -95,7 +99,7 @@ export function SaveQueryDialog({
   };
   const confirm = useConfirm({
     busy: attempt.busy,
-    disabled: missing,
+    disabled: missing || savingNew,
     onConfirm: () => {
       save(false);
     },
@@ -147,17 +151,19 @@ export function SaveQueryDialog({
         label={t(own === null ? "queries.save.create" : "queries.save.update")}
         confirm={confirm}
         onCancel={close}
+        pending={attempt.busy && !pressedNew}
         more={
           own !== null && (
-            <Button
+            <PendingButton
               className="button"
-              isDisabled={missing || attempt.busy}
+              pending={savingNew}
+              isDisabled={missing || (attempt.busy && !pressedNew)}
               onPress={() => {
                 save(true);
               }}
             >
               {t("queries.save.create")}
-            </Button>
+            </PendingButton>
           )
         }
       />
