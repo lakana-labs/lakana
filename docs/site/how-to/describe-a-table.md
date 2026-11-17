@@ -90,12 +90,15 @@ buttons wait, and the open one keeps your text until you save or cancel.
 - **A deploy keeps an edit.** The page says so beside an edited text: a deploy never replaces a
   text edited here. Only **Back to the text from Git**, or `--reset`, brings the project's text
   back.
-- **The language.** An edit is written in the language of the text the page shows. When the table
-  has texts in more than one language, the fields name it, such as "Description (German)", and
-  **Back to the text from Git** removes the edit in that language only. When the table has no text
-  in your language yet, the page shows and edits the table's main language and tells those who may
-  edit. A label and a description are saved in the same language, the description's; the REST API
-  takes one `lang` for both.
+- **The language.** Each field is saved in the language the page shows it in. The label and the
+  description can be in different languages, such as an English label above a German description
+  when the label has no German translation yet: the label is then saved in English and the
+  description in German. When the table has texts in more than one language, each field names its
+  language, such as "Label (English)" and "Description (German)", and **Back to the text from
+  Git** removes the edits in those languages only. A label shown in the table's main language is
+  reset there, so every reader whose language has no label of its own sees the change, not only
+  readers of the description's language. When the table has no text in your language yet,
+  the page shows and edits the table's main language and tells those who may edit.
 - **Two people at once.** Whoever saves last wins: the page does not warn that someone saved
   before you did, and after your save it shows what the server holds. Look at the text again before
   you save a long edit someone else may be changing.

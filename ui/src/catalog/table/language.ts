@@ -5,10 +5,12 @@
  */
 import type { TableOut } from "../../api";
 
-/** The language of an edit and what to tell the person about it. */
+/** The languages of an edit and what to tell the person about them. */
 export interface EditLanguage {
-  /** The language tag the edit is written in. */
+  /** The language tag the description is written in. */
   readonly lang: string;
+  /** The language tag the label is written in, which may differ from the description's. */
+  readonly labelLang: string;
   /** Whether the table has more than its main language, so the person must be told which one. */
   readonly named: boolean;
   /** Whether the page shows the main language because it has no text in the reader's. */
@@ -16,24 +18,36 @@ export interface EditLanguage {
 }
 
 /**
- * Chooses the language an edit is written in: the language of the text the page shows, so that
- * an edit replaces what the person reads. Without a text, the reader's language when the table
- * has texts in it, else the table's main language.
+ * Chooses the language each field of an edit is written in: the language of the text the page
+ * shows, so that an edit replaces what the person reads, even when the label and the description
+ * are shown in different languages. Without a text, the reader's language when the table has
+ * texts in it, else the table's main language.
  *
  * @param table - The table.
- * @param texts - The text being edited.
+ * @param texts - The texts being edited.
  * @param texts.description_language - The language of the description shown; null without one.
- * @returns The language, whether to name it, and whether the page fell back to the main language.
+ * @param texts.label_language - The language of the label shown; null or left out without one.
+ * @returns The languages, whether to name them, and whether the page fell back to the main
+ *   language for the description.
  */
 export function editLanguage(
   table: TableOut,
-  texts: { readonly description_language: string | null },
+  texts: {
+    readonly description_language: string | null;
+    readonly label_language?: string | null;
+  },
 ): EditLanguage {
   const translated =
     table.language === table.main_language ||
     table.translations.some((one) => one.language === table.language);
-  const lang = texts.description_language ?? (translated ? table.language : table.main_language);
-  return { lang, named: table.translations.length > 0, fallback: lang !== table.language };
+  const first = translated ? table.language : table.main_language;
+  const lang = texts.description_language ?? first;
+  return {
+    lang,
+    labelLang: texts.label_language ?? first,
+    named: table.translations.length > 0,
+    fallback: lang !== table.language,
+  };
 }
 
 /**

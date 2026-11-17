@@ -196,7 +196,9 @@ Described gold.sales in dev (fr)
 ```
 
 `--label` sets a label the same way, and `--reset` with `--lang fr` goes back to the file's French
-texts. The rights and the audit records are those of any description; see
+texts. To set the label in another language than the description in one command, add
+`--label-lang`: `--lang fr --text "…" --label "Sales" --label-lang en` saves the description in
+French and the label in English. The rights and the audit records are those of any description; see
 [Descriptions](../reference/descriptions.md).
 
 ## Require a complete translation
