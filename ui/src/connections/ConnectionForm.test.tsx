@@ -893,10 +893,16 @@ describe("ConnectionForm, edit", () => {
     await user.upload(file, new File([pem], "ca.pem"));
     expect(await screen.findByText("A CA certificate is read; Save sends it.")).toBeInTheDocument();
     expect(document.body.textContent).not.toContain("MIIBszCC");
-    await user.click(screen.getByRole("button", { name: "Keep the stored CA certificate" }));
+    // A file refused after it drops the file read, back to the stored one.
+    await user.upload(file, new File(["x".repeat(65_537)], "huge.pem"));
+    expect(await screen.findByText("A CA certificate file holds at most 64 KiB.")).toBeVisible();
+    expect(screen.queryByText("A CA certificate is read; Save sends it.")).not.toBeInTheDocument();
     expect(screen.getByText("sha256:ab12")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Remove the CA certificate" }));
+    // A file refused after Remove keeps the Remove.
+    await user.upload(file, new File(["x".repeat(65_537)], "huge.pem"));
+    expect(screen.getByText("Save removes the CA certificate.")).toBeInTheDocument();
     // Without the CA certificate the secret could go to another server: its values are asked.
     expect(screen.getByRole("radio", { name: "New values" })).toBeChecked();
     await user.click(screen.getByRole("radio", { name: "Keep crm-password" }));
@@ -905,22 +911,46 @@ describe("ConnectionForm, edit", () => {
     expect(updateSent(server)).toEqual({ settings: { ca_certificate: null } });
   });
 
-  it("refuses here a move of a tcp secret without new keys, and says why", async () => {
-    const tcp = aConnection({
-      kind: "tcp",
-      address: { host: "mq.internal", port: 5672 },
-      settings: {},
-      secret: "mq-keys",
-      actions: ["test", "update", "delete"],
-    });
-    const { user, server } = renderEdit(tcp);
-    await changeHost(user, "mq2.internal");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+  it.each([
+    ["without", ["test", "update", "delete"]],
+    ["with", ["test", "update", "delete", "name_secret"]],
+  ] as const)(
+    "refuses here a move of a tcp secret without new keys, %s the right to manage secrets",
+    async (_, actions) => {
+      const tcp = aConnection({
+        kind: "tcp",
+        address: { host: "mq.internal", port: 5672 },
+        settings: {},
+        secret: "mq-keys",
+        actions,
+      });
+      const { user, server } = renderEdit(tcp);
+      await changeHost(user, "mq2.internal");
+      expect(screen.getByRole("radio", { name: "New values" })).toBeChecked();
+      await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "This change could send mq-keys somewhere new; give its values again.",
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "This change could send mq-keys somewhere new; give its values again.",
+      );
+      expect(writes(server)).toEqual([]);
+    },
+  );
+
+  it("without the right to edit says who may, links back and shows no form", async () => {
+    renderEdit({ ...STORED, actions: ["test"] });
+
+    expect(
+      await screen.findByText(
+        "You may not edit connections in prod. Ask an administrator for MANAGE_CONNECTION there.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to crm" })).toHaveAttribute(
+      "href",
+      "/connections/prod/crm",
     );
-    expect(writes(server)).toEqual([]);
+    expect(screen.queryByRole("textbox", { name: "host" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/You may not manage secrets/)).not.toBeInTheDocument();
   });
 
   it("nothing to save sends nothing", async () => {

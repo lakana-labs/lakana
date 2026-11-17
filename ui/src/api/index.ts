@@ -167,16 +167,12 @@ export {
   updateConnection,
 } from "./connections";
 export type {
-  ConnectionAction,
   ConnectionCreateIn,
   ConnectionEnvironmentOut,
   ConnectionKind,
   ConnectionLastTestOut,
   ConnectionOut,
   ConnectionQueuedTestOut,
-  ConnectionTestOut,
   ConnectionTestOutcome,
-  ConnectionTestState,
   ConnectionUpdateIn,
-  EnvironmentConnectionAction,
 } from "./connections";

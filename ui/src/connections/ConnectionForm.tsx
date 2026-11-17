@@ -240,7 +240,9 @@ function EditForm({ connection }: EditFormProps): JSX.Element {
       setSaid("nothing");
       return;
     }
-    if (moves && !naming && body.secret_values === undefined && body.clear === undefined) {
+    // New values chosen but none given (tcp with no key): the secret would move without them.
+    const unvalued = form.secret.way === "values" && body.secret_values === undefined;
+    if (moves && unvalued && body.clear === undefined) {
       setSaid("moves");
       return;
     }
@@ -486,16 +488,29 @@ export default function ConnectionForm(props: ConnectionFormProps): JSX.Element 
 }
 
 /**
- * The Edit page of a connection, with the trail Connections › name › Edit.
+ * The Edit page of a connection, with the trail Connections › name › Edit. Where the
+ * connection's `actions` lack `update`, it says who may edit it and links back to it, with no
+ * form.
  *
  * @param props - The connection.
  * @param props.connection - The connection as stored.
  * @returns The page.
  */
 function EditConnection({ connection }: EditFormProps): JSX.Element {
+  const { t } = useTranslation();
+  const { environment, name } = connection;
   return (
-    <EditPage environment={connection.environment} name={connection.name}>
-      <EditForm connection={connection} />
+    <EditPage environment={environment} name={name}>
+      {connection.actions.includes("update") ? (
+        <EditForm connection={connection} />
+      ) : (
+        <>
+          <p>{t("connections.form.noUpdate", { environment: markedText(environment) })}</p>
+          <Link className="button" to={connectionPath(environment, name)}>
+            {t("connections.form.backTo", { name: markedText(name) })}
+          </Link>
+        </>
+      )}
     </EditPage>
   );
 }

@@ -197,7 +197,7 @@ function tlsStrength(settings: Readonly<Record<string, unknown>>): number {
  * @param region - The region.
  * @returns The endpoint.
  */
-function s3DefaultEndpoint(region: unknown): string {
+export function s3DefaultEndpoint(region: unknown): string {
   return `https://s3.${text(region)}.amazonaws.com`;
 }
 

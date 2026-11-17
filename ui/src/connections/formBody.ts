@@ -12,6 +12,7 @@ import {
   type FieldSpec,
   kindFields,
   movesSecret,
+  s3DefaultEndpoint,
   secretKeys,
   takesSecret,
 } from "./kinds";
@@ -203,6 +204,21 @@ function formPart(stored: Readonly<Record<string, unknown>>): Record<string, str
 }
 
 /**
+ * A stored address as Edit starts from it: an `s3` endpoint that is its region's default counts
+ * as not set, so the field starts empty and a new region takes its own default on the server.
+ *
+ * @param connection - The connection as stored.
+ * @returns The address.
+ */
+function storedAddress(connection: ConnectionOut): Readonly<Record<string, unknown>> {
+  const { kind, address } = connection;
+  if (kind !== "s3" || address.endpoint !== s3DefaultEndpoint(address.region)) {
+    return address;
+  }
+  return Object.fromEntries(Object.entries(address).filter(([key]) => key !== "endpoint"));
+}
+
+/**
  * The Edit form of a stored connection: its fields as stored, its CA certificate and its secret
  * kept, and no secret value.
  *
@@ -214,7 +230,7 @@ export function editForm(connection: ConnectionOut): FormValues {
     environment: connection.environment,
     kind: connection.kind,
     name: connection.name,
-    address: formPart(connection.address),
+    address: formPart(storedAddress(connection)),
     settings: formPart(connection.settings),
     ca: { kind: "keep" },
     secret: connection.secret === null ? { way: "none" } : { way: "keep" },
@@ -286,7 +302,7 @@ export function updateBody(before: ConnectionOut, form: FormValues): ConnectionU
   const then = kindFields(form.kind, formPart(before.settings));
   const keys = (fields: readonly FieldSpec[]): Set<string> => new Set(fields.map(({ key }) => key));
   const asked = keys(now.settings);
-  const address = partChanges(now.address, keys(now.address), before.address, form.address);
+  const address = partChanges(now.address, keys(now.address), storedAddress(before), form.address);
   const settings: Record<string, string | number | null> = partChanges(
     [...now.settings, ...then.settings.filter(({ key }) => !asked.has(key))],
     asked,

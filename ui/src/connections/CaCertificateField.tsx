@@ -208,7 +208,10 @@ export function CaCertificateField({
           onChange({ kind: "new", pem });
         }}
         onRefused={() => {
-          onChange({ kind: "keep" });
+          // A refused file drops only a file read before it; a pending Remove stays.
+          if (value.kind === "new") {
+            onChange({ kind: "keep" });
+          }
         }}
       />
       {value.kind === "new" && (

@@ -16,7 +16,7 @@ export type ConnectionKind =
   "postgresql" | "mariadb" | "sqlite-file" | "http" | "s3" | "gcs" | "azure" | "directory" | "tcp";
 
 /** Where a connection test is. */
-export type ConnectionTestState = "queued" | "running" | "done";
+type ConnectionTestState = "queued" | "running" | "done";
 
 /** What a finished test found. */
 export type ConnectionTestOutcome =
@@ -32,10 +32,10 @@ export type ConnectionTestOutcome =
   | "failed";
 
 /** What the caller's rights allow on one connection. */
-export type ConnectionAction = "test" | "update" | "delete" | "name_secret";
+type ConnectionAction = "test" | "update" | "delete" | "name_secret";
 
 /** What the caller's rights allow on the connections of one environment. */
-export type EnvironmentConnectionAction = "create" | "test" | "name_secret";
+type EnvironmentConnectionAction = "create" | "test" | "name_secret";
 
 /**
  * A connection's latest test. Everyone who reads the connection gets the first three fields;

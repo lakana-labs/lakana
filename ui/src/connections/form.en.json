@@ -39,6 +39,8 @@
   "save": "Save",
   "saving": "Saving the connection…",
   "nothing": "Nothing to save.",
+  "noUpdate": "You may not edit connections in {{environment}}. Ask an administrator for MANAGE_CONNECTION there.",
+  "backTo": "Back to {{name}}",
   "secretKeep": "Keep {{secret}}",
   "secretAnother": "Another secret of {{environment}}",
   "secretStop": "Stop using a secret",

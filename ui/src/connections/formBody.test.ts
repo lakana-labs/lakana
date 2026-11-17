@@ -336,6 +336,37 @@ describe("updateBody", () => {
   });
 });
 
+describe("an s3 endpoint that is its region's default", () => {
+  const s3 = aConnection({
+    kind: "s3",
+    address: {
+      bucket: "events",
+      region: "eu-west-1",
+      endpoint: "https://s3.eu-west-1.amazonaws.com",
+    },
+    settings: { access_key_id: "AKIAEXAMPLE" },
+  });
+
+  it("starts empty, so a new region takes its own default, and still moves the secret", () => {
+    const start = editForm(s3);
+    expect(start.address).toEqual({ bucket: "events", region: "eu-west-1" });
+    expect(updateBody(s3, start)).toBeNull();
+
+    const moved = { ...start, address: { ...start.address, region: "us-east-1" } };
+    expect(updateBody(s3, moved)).toEqual({ address: { region: "us-east-1" } });
+    expect(movesWith(s3, moved)).toBe(true);
+  });
+
+  it("keeps an endpoint of its own", () => {
+    const own = aConnection({
+      kind: "s3",
+      address: { bucket: "events", region: "eu-west-1", endpoint: "https://minio.internal" },
+      settings: { access_key_id: "AKIAEXAMPLE" },
+    });
+    expect(editForm(own).address.endpoint).toBe("https://minio.internal");
+  });
+});
+
 describe("movesWith", () => {
   it("a new host, a weaker tls or a new CA moves the secret; a new user does not", () => {
     expect(

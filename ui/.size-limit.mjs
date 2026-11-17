@@ -75,7 +75,10 @@ const NAMED_LIMITS = [
   // the stored ones, the body of only what changed, the CA certificate's fingerprints with
   // Remove, and the secret kept, given again, another or none, asked again when a change could
   // send it somewhere new.
-  { name: "Add a connection", prefix: "ConnectionForm-", limit: "7.04 kB" },
+  // Raised to the measured 6.56 kB (2026-11-17) + 10 %: Edit says who may edit where the
+  // person may not, refuses a moving change without new values for everyone, keeps a pending
+  // Remove of the CA certificate past a refused file, and starts an s3 default endpoint empty.
+  { name: "Add or edit a connection", prefix: "ConnectionForm-", limit: "7.22 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
   // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected
