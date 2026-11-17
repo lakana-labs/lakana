@@ -60,7 +60,10 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   primary action, top right (act). Detail page: name, one row of tabs, Overview first. At most
   two levels.
 - **Rows open their object:** the name is a real link in the accent colour, a quiet `›` ends the
-  row, the whole row is clickable. Something without a detail page is not a list row.
+  row, the whole row is clickable. Something without a detail page is not a list row. Where a
+  list of facts names something with no page (a dropped table, an orphan, an upload, a version),
+  the name is plain text in the text colour (`span.row-name`), with no click layer over the row:
+  only a link (`a.row-name`) takes the accent and covers the row.
 - **Lists keep at least 24 px between columns** (`--space-3` on each side of a cell); numbers
   right-aligned with tabular figures (`.number`).
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
