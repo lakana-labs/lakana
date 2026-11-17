@@ -22,7 +22,7 @@ from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
 from lakana_core.pagination import Page, newest_first
 
 OWN_TOKEN_FROM_BROWSER = (
-    "A token cannot create a token. Create your own token in the web interface, under your "
+    "A token cannot create a token. Create your own token in the web interface, under your "  # nosec B105 -- a refusal message, not a credential
     "name, after touching your passkey; or ask an administrator: lakana token issue NAME LABEL"
 )
 """The refusal of a token that tries to create a token for its own owner."""
