@@ -321,6 +321,73 @@ describe("ColumnsTab editing", () => {
     expect(put?.body).toEqual({ description: "The store." });
   });
 
+  it("saves a column's label in the language it is shown in, apart from its description", async () => {
+    const mixed = {
+      ...withColumn("store_id", {
+        description: "Die Filiale.",
+        description_language: "de",
+        label: "Store",
+        label_source: "project",
+        label_language: "en",
+      }),
+      language: "de",
+      translations: [{ language: "de", translated: 3, total: 5 }],
+    };
+    const { server, user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: { status: 200, body: mixed },
+        [STORE_ID]: { status: 200, body: mixed },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Edit store_id" }));
+    const form = screen.getByRole("form", { name: "Edit the texts" });
+    const label = within(form).getByRole("textbox", { name: "Label (English)" });
+    await user.clear(label);
+    await user.type(label, "Shop");
+    expect(within(form).getByRole("textbox", { name: "Description (German)" })).toBeVisible();
+    await user.click(within(form).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(server.sent.some((request) => request.method === "PUT")).toBe(true);
+    });
+    const put = server.sent.find((request) => request.method === "PUT");
+    expect(put?.path).toBe(`${TABLE_PATH}/columns/store_id/description?lang=de`);
+    expect(put?.body).toEqual({ label: "Shop", label_language: "en" });
+  });
+
+  it("goes back to the text from Git for a column, each field in the language it is shown in", async () => {
+    const mixed = {
+      ...withColumn("channel", {
+        description: "Der Kanal.",
+        description_source: "edited",
+        description_language: "de",
+        label: "Channel",
+        label_source: "edited",
+        label_language: "en",
+      }),
+      language: "de",
+      translations: [{ language: "de", translated: 3, total: 5 }],
+    };
+    const { server, user } = renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: { status: 200, body: mixed },
+        [`PUT ${TABLE_PATH}/columns/channel/description`]: { status: 200, body: TABLE },
+      },
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Back to the text from Git for channel" }),
+    );
+
+    await waitFor(() => {
+      expect(server.sent.some((request) => request.method === "PUT")).toBe(true);
+    });
+    const put = server.sent.find((request) => request.method === "PUT");
+    expect(put?.path).toBe(`${TABLE_PATH}/columns/channel/description?lang=de`);
+    expect(put?.body).toEqual({ description: null, label: null, label_language: "en" });
+  });
+
   it("keeps one editor and its unsaved text until it is saved or cancelled", async () => {
     const { user } = renderShell(PAGE);
 
