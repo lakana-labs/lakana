@@ -53,13 +53,13 @@ def _read(session: Session, world: AccessWorld) -> LiveAccess:
 
 
 def test_live_state_names_every_kind_and_keeps_every_copy_id(session: Session) -> None:
-    """Two identical grants are one entry with two ids (R5)."""
+    """A grant is one entry with its row id (R5; since #673 one live copy exists)."""
     world = access_world(session)
     seed_every_kind(session, world)
     live = _read(session, world)
     grant = GrantEntry(Subject("group", "finance"), "ANALYST", None, Target("prod"))
     assert grant in live.state.entries
-    assert len(live.ids[grant]) == 2
+    assert len(live.ids[grant]) == 1
     assert MembershipEntry("finance", "alice") in live.state.entries
     assert GroupEntry("nobody") in live.state.entries
     assert ServiceAccountEntry("etl-bot") in live.state.entries

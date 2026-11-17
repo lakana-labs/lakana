@@ -150,7 +150,8 @@ class Repositories:
         Parameters
         ----------
         name
-            Unique name; no dots.
+            Unique name; no dots, no control or format character, no line
+            separator and no space at either end.
         kind
             ``local``, ``https`` or ``ssh``.
         url

@@ -659,14 +659,14 @@ def test_a_long_name_is_cut(session: Session) -> None:
 def test_a_long_list_is_cut_and_says_how_many_more(
     session: Session, count: int, more: int | None
 ) -> None:
-    bob = _principal(session, "bob")
-    for _ in range(count):
+    for i in range(count):
+        holder = _principal(session, f"bob{i:02}")
         _grant(
-            session, principal_id=bob.id, action=Action.MANAGE_TOKEN, kind=SecurableKind.INSTANCE
+            session, principal_id=holder.id, action=Action.MANAGE_TOKEN, kind=SecurableKind.INSTANCE
         )
     text = ineffective_grants_warning(session)
     assert text is not None and text.startswith(f"{count} {_OPENING}")
-    assert text.count("(MANAGE_TOKEN, principal 'bob')") == 20
+    assert text.count("(MANAGE_TOKEN, principal 'bob") == 20
     if more is not None:
         assert (
             f"; and {more} more (`lakana grant list` marks each with a note). Revoke each" in text
@@ -678,10 +678,10 @@ def test_a_long_list_is_cut_and_says_how_many_more(
 
 
 def test_the_warning_reads_at_most_twenty_rows(session: Session) -> None:
-    bob = _principal(session, "bob")
-    for _ in range(25):
+    for i in range(25):
+        holder = _principal(session, f"bob{i:02}")
         _grant(
-            session, principal_id=bob.id, action=Action.MANAGE_TOKEN, kind=SecurableKind.INSTANCE
+            session, principal_id=holder.id, action=Action.MANAGE_TOKEN, kind=SecurableKind.INSTANCE
         )
     loaded: list[str] = []
     event.listen(
