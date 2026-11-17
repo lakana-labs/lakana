@@ -126,6 +126,11 @@
 "query cancel": { class: ui, part: 4 }
 "query list": { class: ui, part: 4 }
 "query result": { class: ui, part: 4 }
+"query saved create": { class: ui, part: 4 }
+"query saved delete": { class: ui, part: 4 }
+"query saved list": { class: ui, part: 4 }
+"query saved show": { class: ui, part: 4 }
+"query saved update": { class: ui, part: 4 }
 "query status": { class: ui, part: 4 }
 "query submit": { class: ui, part: 4 }
 "query wait": { class: ui, part: 4 }

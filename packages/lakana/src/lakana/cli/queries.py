@@ -22,6 +22,7 @@ from lakana.cli._break_glass import BREAK_GLASS, REASON, break_glass_reason
 from lakana.cli._paging import more_results, parse_since
 from lakana.cli._state import CliError, CliState, resolve_environment, state_of
 from lakana.cli._waiting import WAIT_LINE_LIMIT, WaitLine, clock
+from lakana.cli.saved_queries import saved_app
 from lakana.errors import (
     AuthenticationError,
     Conflict,
@@ -1245,4 +1246,5 @@ def register(app: typer.Typer) -> None:
         The root app.
     """
     app.command("sql")(sql)
+    query_app.add_typer(saved_app, name="saved")
     app.add_typer(query_app, name="query")

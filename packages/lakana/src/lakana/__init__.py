@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from lakana._models import SavedQuery
 from lakana._version import resolve_version
 from lakana.assets import asset, output_dir
 from lakana.client import Client
@@ -44,6 +45,7 @@ __all__ = [
     "QueryFailed",
     "ResultFileFormat",
     "RunFailed",
+    "SavedQuery",
     "ServerError",
     "ValidationError",
     "__version__",

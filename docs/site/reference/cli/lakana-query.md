@@ -89,3 +89,82 @@ Fetch a finished query's result.
 | `--out` | path | none | Write the full result to this file. |
 | `--format` | text | none | parquet, csv, arrow or xlsx (default: from the extension). |
 | `--max-rows` | whole number, 0 or more | `50` | Most rows to display. |
+
+## `lakana query saved`
+
+Usage: `lakana query saved [OPTIONS] COMMAND [ARGS]...`
+
+Save queries under a name, keep them private or share them with an environment.
+
+### `lakana query saved create`
+
+Usage: `lakana query saved create [OPTIONS] {name} {query}`
+
+Save a query under NAME; it is private unless you pass --everyone.
+
+Saving does not run the query. Whoever runs it later does so with their own rights.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required | The name: one line, unique among your queries. |
+| `QUERY` | text | required | The SQL, or - to read it from stdin. |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--everyone` | flag | off | Share it with everyone who may run queries in the environment. |
+
+### `lakana query saved list`
+
+Usage: `lakana query saved list [OPTIONS]`
+
+List the saved queries you see in an environment, by name.
+
+You see your own, and those shared with everyone who may run queries in the environment. The SQL is not listed: read it with 'lakana query saved show ID'.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `--env` | text | none | Environment (default: the profile's). |
+| `--all-environments` | flag | off | The saved queries of every environment you may query, with an environment column. |
+| `--limit` | whole number, 1 to 200 | `50` | Most saved queries to list. |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
+
+### `lakana query saved show`
+
+Usage: `lakana query saved show [OPTIONS] {ID}`
+
+Show a saved query: its fields, then its SQL.
+
+With --sql only the SQL is printed, so 'lakana query saved show ID --sql | lakana sql -' runs it. An administrator may not read the SQL of someone else's private query without READ_QUERY_TEXT; the command then says so.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `ID` | text | required | The saved query's id. |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--sql` | flag | off | Print only the SQL, to pipe into 'lakana sql -'. |
+
+### `lakana query saved update`
+
+Usage: `lakana query saved update [OPTIONS] {ID}`
+
+Change the name, the SQL or the visibility of a saved query you own.
+
+The command reads the saved query first and sends every field, so what you leave out stays as it is.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `ID` | text | required | The saved query's id. |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--name` | text | none | The new name. |
+| `--sql` | text | none | The new SQL, or - to read it from stdin. |
+| `--private` | flag | off | Make it private. |
+| `--everyone` | flag | off | Share it with everyone who may run queries. |
+
+### `lakana query saved delete`
+
+Usage: `lakana query saved delete [OPTIONS] {ID}`
+
+Delete a saved query: its owner may, and so may an administrator.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `ID` | text | required | The saved query's id. |
+| `--env` | text | none | Environment (default: the profile's). |
+| `--yes` | flag | off | Don't ask for confirmation. |
