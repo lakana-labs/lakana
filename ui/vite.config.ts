@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { SHELL_CHUNK } from "./build/chunk-groups.ts";
 import { cspFile } from "./build/csp-file.ts";
 import { browserTargets } from "./build/targets.ts";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
@@ -35,11 +36,21 @@ export default defineConfig({
         // it in two, and the exports between the parts cost about 1.5 kB gzipped there. React's
         // JSX runtime goes with it: the SQL editor's chunk renders JSX without react-i18next, and
         // would otherwise split the runtime off into a chunk of its own (0.17 kB more there).
+        // The shell's Page and not-found state and React Aria's Button stay in one chunk of the
+        // first load, with what they import. Settings' places, each loaded on its own, would
+        // otherwise split them, React Aria's Link and its press and hover hooks into chunks of
+        // their own, and the exports between them cost about 1.5 kB.
+        // The pattern (build/chunk-groups.ts) names a file inside react-aria-components; its test
+        // fails if an update moves it.
         codeSplitting: {
           groups: [
             {
               name: "lib",
               test: /node_modules[\\/](react-router[\\/]|react[\\/](jsx-runtime|cjs[\\/]react-jsx-runtime))/,
+            },
+            {
+              name: "shell",
+              test: SHELL_CHUNK,
             },
           ],
         },

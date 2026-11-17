@@ -45,7 +45,7 @@ function firstSignIn(options: FirstSignIn = {}): ReturnType<typeof renderShell> 
   let stored: InterfaceStateOut = { ...STATE, tour_seen: false, ...options.state };
   return renderShell("/", {
     me: options.me ?? {},
-    access: areasFor(options.me?.admin !== false, false),
+    access: areasFor(options.me?.noAccessYet === true),
     routes: {
       [`GET ${path}`]: { status: 200, body: stored },
       [`PATCH ${path}`]: (request) => {
@@ -180,10 +180,10 @@ describe("the tour", () => {
     const { user } = firstSignIn();
     let step = await startTour(user);
     expect(within(step).queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
-    expect(step).toHaveTextContent("Step 1 of 9");
+    expect(step).toHaveTextContent("Step 1 of 8");
 
     const seen: string[] = [];
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       seen.push(currentStep());
       expect(within(step).getByRole("button", { name: "Skip tour" })).toBeInTheDocument();
       if (index > 0) {
@@ -201,7 +201,6 @@ describe("the tour", () => {
       "Queries",
       "Jobs",
       "Connections",
-      "Access",
       "Settings",
       "Search",
     ]);
@@ -243,8 +242,17 @@ describe("the tour", () => {
       await user.click(next);
       step = await screen.findByRole("dialog", { name: /./ });
     }
-    expect(seen).toEqual(["Home", "Catalog", "Queries", "Jobs", "Connections", "Search", "Help"]);
-    expect(step).toHaveTextContent("Step 7 of 7");
+    expect(seen).toEqual([
+      "Home",
+      "Catalog",
+      "Queries",
+      "Jobs",
+      "Connections",
+      "Settings",
+      "Search",
+      "Help",
+    ]);
+    expect(step).toHaveTextContent("Step 8 of 8");
   });
 
   it.each([
@@ -255,7 +263,7 @@ describe("the tour", () => {
     const { user, server } = firstSignIn();
     let step = await startTour(user);
     if (toTheEnd) {
-      for (let index = 0; index < 8; index += 1) {
+      for (let index = 0; index < 7; index += 1) {
         await user.click(within(step).getByRole("button", { name: "Next" }));
         step = await screen.findByRole("dialog", { name: /./ });
       }
@@ -285,7 +293,7 @@ describe("the tour", () => {
       const { user } = firstSignIn();
       let step = await startTour(user);
       if (toTheEnd) {
-        for (let index = 0; index < 8; index += 1) {
+        for (let index = 0; index < 7; index += 1) {
           await user.click(within(step).getByRole("button", { name: "Next" }));
           step = await screen.findByRole("dialog", { name: /./ });
         }
@@ -387,7 +395,7 @@ describe("the tour", () => {
   it("names the first open Get started step on the last step", async () => {
     const { user, router } = firstSignIn();
     let step = await startTour(user);
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       await user.click(within(step).getByRole("button", { name: "Next" }));
       step = await screen.findByRole("dialog", { name: /./ });
     }
@@ -423,7 +431,7 @@ describe("the tour", () => {
       },
     });
     let step = await startTour(user);
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       await user.click(within(step).getByRole("button", { name: "Next" }));
       step = await screen.findByRole("dialog", { name: /./ });
     }
@@ -443,7 +451,7 @@ describe("the tour", () => {
       routes: { "GET /api/v1/home/get-started": { status: 503, body: { detail: "down" } } },
     });
     let step = await startTour(user);
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 7; index += 1) {
       await user.click(within(step).getByRole("button", { name: "Next" }));
       step = await screen.findByRole("dialog", { name: /./ });
     }
@@ -519,7 +527,7 @@ describe("the tour", () => {
     await user.keyboard("{ArrowDown}{Enter}");
 
     const step = await screen.findByRole("dialog", { name: "Home" });
-    expect(step).toHaveTextContent("Step 1 of 9");
+    expect(step).toHaveTextContent("Step 1 of 8");
     await user.keyboard("{Escape}");
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

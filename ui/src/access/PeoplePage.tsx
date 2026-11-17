@@ -1,5 +1,5 @@
 /**
- * Access → People: find a person or service account and open it.
+ * Settings › Access › People: find a person or service account and open it.
  *
  * @packageDocumentation
  */
@@ -13,9 +13,10 @@ import { Avatar } from "../profile/Avatar";
 import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
-import { AccessFrame } from "./AccessFrame";
 import { personPath } from "./personPath";
 import { VisibleText } from "../shell/VisibleText";
+import { SettingsFrame } from "../settings/SettingsFrame";
+import "../settings/settingsStrings";
 
 // How long typing must pause before the list is read again.
 const SEARCH_PAUSE_MS = 250;
@@ -42,7 +43,7 @@ export function PeoplePage(): JSX.Element {
   const load = useCallback(() => listPeople(query), [query]);
   const people = useResource(load);
   return (
-    <AccessFrame>
+    <SettingsFrame title={t("settings.places.people")}>
       <SearchField className="field" value={words} onChange={setWords}>
         <Label className="visually-hidden">{t("access.people.find")}</Label>
         <Input placeholder={t("access.people.find")} />
@@ -94,6 +95,6 @@ export function PeoplePage(): JSX.Element {
           )
         }
       </Loaded>
-    </AccessFrame>
+    </SettingsFrame>
   );
 }

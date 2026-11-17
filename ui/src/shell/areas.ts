@@ -6,7 +6,7 @@
 
 /** The id of an area; its name and purpose are `areas.<id>.name` and `.purpose` in `en.json`. */
 export type AreaId =
-  "home" | "catalog" | "queries" | "jobs" | "connections" | "experiments" | "access" | "settings";
+  "home" | "catalog" | "queries" | "jobs" | "connections" | "experiments" | "settings";
 
 /** One area of the interface: a place in the sidebar with its own URL. */
 export interface Area {
@@ -14,8 +14,8 @@ export interface Area {
   readonly id: AreaId;
   /** The URL path. */
   readonly path: string;
-  /** The sidebar group: everyday work first, administration after a gap. */
-  readonly group: "work" | "admin";
+  /** The sidebar group: everyday work first, the whole instance after a gap. */
+  readonly group: "work" | "instance";
   /** The part of the interface that brings the area's screen, or null when none is planned. */
   readonly part: number | null;
   /** The command line that does the area's job until its screen comes; empty when none. */
@@ -73,17 +73,9 @@ export const AREAS: readonly Area[] = [
     shipped: false,
   },
   {
-    id: "access",
-    path: "/access",
-    group: "admin",
-    part: 7,
-    cli: "lakana principal list",
-    shipped: true,
-  },
-  {
     id: "settings",
     path: "/settings",
-    group: "admin",
+    group: "instance",
     part: 8,
     cli: "lakana env list",
     shipped: true,
@@ -103,22 +95,19 @@ function isShipped(area: Area): area is ShippedArea {
 /** Every shipped area, in sidebar order. */
 export const SHIPPED_AREAS: readonly ShippedArea[] = AREAS.filter(isShipped);
 
-/** Access to every shipped area: an administrator's. */
+/** Access to every shipped area: what anyone who holds a grant may use. */
 export const ALL_SHIPPED: AreaAccess = new Set(SHIPPED_AREAS.map((area) => area.id));
 
 /**
- * The areas a person may use: Access and Settings are for administrators only, and the Catalog
- * is for people who hold any grant at all.
+ * The areas a person may use: every one, Settings included (each of its places has its own
+ * rule), except the Catalog for a person who holds no grant at all.
  *
- * @param admin - Whether the person holds the ADMIN role on the instance.
  * @param noAccessYet - Whether the person holds no grant at all.
  * @returns The areas.
  */
-export function areasFor(admin: boolean, noAccessYet: boolean): AreaAccess {
+export function areasFor(noAccessYet: boolean): AreaAccess {
   return new Set(
-    SHIPPED_AREAS.filter(
-      (area) => (admin || area.group !== "admin") && !(noAccessYet && area.id === "catalog"),
-    ).map((area) => area.id),
+    SHIPPED_AREAS.filter((area) => !(noAccessYet && area.id === "catalog")).map((area) => area.id),
   );
 }
 

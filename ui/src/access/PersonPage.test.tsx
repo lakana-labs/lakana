@@ -42,7 +42,7 @@ function principal(name: string, heldAdmin: boolean): { status: number; body: un
 
 describe("PersonPage", () => {
   it("shows another person's passkeys and sessions, without adding one for them", async () => {
-    renderShell("/access/people/kim", {
+    renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [PASSKEY] },
@@ -60,24 +60,36 @@ describe("PersonPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the breadcrumb Access › People › the person", async () => {
-    renderShell("/access/people/kim", {
+  it("marks People current on a person's page and leads back by the breadcrumb", async () => {
+    renderShell("/settings/access/people/maria", {
       routes: {
-        "GET /api/v1/principals/kim": principal("kim", false),
-        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
-        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/principals/maria": principal("maria", false),
+        "GET /api/v1/principals/maria/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/maria/sessions": { status: 200, body: [] },
       },
     });
 
     const nav = await screen.findByRole("navigation", { name: "Breadcrumb" });
-    expect(within(nav).getByRole("link", { name: "Access" })).toHaveAttribute("href", "/access");
-    expect(within(nav).getByRole("link", { name: "People" })).toHaveAttribute("href", "/access");
-    expect(within(nav).getByText("kim")).toHaveAttribute("aria-current", "page");
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((link) => [link.textContent, link.getAttribute("href")]),
+    ).toEqual([
+      ["Settings", "/settings"],
+      ["Access", "/settings/access"],
+      ["People", "/settings/access/people"],
+    ]);
+    expect(within(nav).getByText("maria")).toHaveAttribute("aria-current", "page");
+    const places = screen.getByRole("navigation", { name: "Settings places" });
+    expect(within(places).getByRole("link", { name: "People" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("shows the operator's command instead of a button for a former administrator", async () => {
     // The ADMIN role was taken away, so the rights read none; the durable mark still counts.
-    const { server } = renderShell("/access/people/ada", {
+    const { server } = renderShell("/settings/access/people/ada", {
       routes: {
         "GET /api/v1/principals/ada": principal("ada", true),
         "GET /api/v1/principals/ada/permissions": {
@@ -104,7 +116,7 @@ describe("PersonPage", () => {
   it("issues a recovery link for the person shown, with a passkey touch", async () => {
     fakeWebAuthn();
     let tries = 0;
-    const { user } = renderShell("/access/people/kim", {
+    const { user } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
@@ -142,7 +154,7 @@ describe("PersonPage", () => {
 
   it("shows the pending sign on Continue while the recovery link is made", async () => {
     const request = held();
-    const { user } = renderShell("/access/people/kim", {
+    const { user } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
@@ -165,7 +177,7 @@ describe("PersonPage", () => {
 
   it("shows the pending sign on the confirming button while a picture is removed", async () => {
     const request = held();
-    const { user } = renderShell("/access/people/kim", {
+    const { user } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": {
           status: 200,
@@ -193,7 +205,7 @@ describe("PersonPage", () => {
   });
 
   it("shows one's own page with the own controls and no recovery link", async () => {
-    renderShell("/access/people/admin", {
+    renderShell("/settings/access/people/admin", {
       routes: {
         "GET /api/v1/principals/admin/passkeys": { status: 200, body: [PASSKEY] },
         "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
@@ -206,7 +218,7 @@ describe("PersonPage", () => {
   });
 
   it("offers the recovery link when the person's rights cannot be read", async () => {
-    renderShell("/access/people/kim", {
+    renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": { status: 500, body: { detail: "Broken." } },
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
@@ -220,7 +232,7 @@ describe("PersonPage", () => {
   });
 
   it("closes the recovery dialog with Cancel or Escape", async () => {
-    const { user } = renderShell("/access/people/kim", {
+    const { user } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
@@ -238,7 +250,7 @@ describe("PersonPage", () => {
   });
 
   it("offers no recovery link for a service account, and says why", async () => {
-    const { server } = renderShell("/access/people/loader", {
+    const { server } = renderShell("/settings/access/people/loader", {
       routes: {
         "GET /api/v1/principals/loader": {
           status: 200,
@@ -255,7 +267,7 @@ describe("PersonPage", () => {
   });
 
   it("lets an administrator remove another person's picture", async () => {
-    const { user, server } = renderShell("/access/people/kim", {
+    const { user, server } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": {
           status: 200,
@@ -287,7 +299,7 @@ describe("PersonPage", () => {
   });
 
   it("offers no removal for a person without a picture, nor on one's own page", async () => {
-    renderShell("/access/people/admin", {
+    renderShell("/settings/access/people/admin", {
       me: { picture: "e1" },
       routes: {
         "GET /api/v1/principals/admin/picture": {
@@ -308,7 +320,7 @@ describe("PersonPage", () => {
 
   it("marks hidden characters of the person's name and a passkey's name, in the dialogs too", async () => {
     const base = "/api/v1/principals/k\u202Eim";
-    const { user } = renderShell("/access/people/k%E2%80%AEim", {
+    const { user } = renderShell("/settings/access/people/k%E2%80%AEim", {
       routes: {
         [`GET ${base}`]: principal("k\u202Eim", false),
         [`GET ${base}/passkeys`]: { status: 200, body: [{ ...PASSKEY, name: "Lap\u2066top" }] },
@@ -333,7 +345,7 @@ describe("PersonPage", () => {
 
   it("marks a hidden character of the person's name in the issued link's sentence", async () => {
     const base = "/api/v1/principals/k\u202Eim";
-    const { user } = renderShell("/access/people/k%E2%80%AEim", {
+    const { user } = renderShell("/settings/access/people/k%E2%80%AEim", {
       routes: {
         [`GET ${base}`]: principal("k\u202Eim", false),
         [`GET ${base}/passkeys`]: { status: 200, body: [] },

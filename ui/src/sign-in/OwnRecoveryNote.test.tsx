@@ -31,7 +31,7 @@ describe("OwnRecoveryNote", () => {
   });
 
   it("says the same on an administrator's own page in Access", async () => {
-    renderShell("/access/people/admin", { routes: ownRoutes(true) });
+    renderShell("/settings/access/people/admin", { routes: ownRoutes(true) });
 
     expect(await screen.findByText("lakana recovery create admin")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Issue a recovery link" })).not.toBeInTheDocument();
