@@ -63,7 +63,8 @@ clients refuse alike. To build it again from git instead, see
 
 1. Remove its asset from the project in git and deploy. The table stays, now built by nothing.
 2. Find it among the orphans and drop it. In the web interface, open **Catalog**, choose **Orphans**
-   and the environment, and press **Drop** beside it. On the command line:
+   and the environment, and press **Drop** beside it. Its row then says it can still be restored,
+   and **Restore it from Dropped** opens the Dropped view of its namespace. On the command line:
 
 <!-- source: docs/examples/drop-and-restore-a-table/run.sh#drop-orphan -->
 ```bash
@@ -194,7 +195,7 @@ walks every page.
 
 In the web interface, open **Catalog** and choose **Dropped** above the list. It lists the tables
 dropped from one environment, newest first, with the namespace each was dropped from, when it was
-dropped ("2 days ago") and until when it can be restored ("in 5 days", the exact time on hover). Choose an environment in the tree first: with none
+dropped ("2 days ago") and until when it can be restored ("in 5 days"); hover either for the exact time. Choose an environment in the tree first: with none
 chosen, the page lists your environments to pick from. Choose a namespace in the tree to see only
 the tables dropped from that namespace. **Show more** adds the next page. A table whose undo
 period has ended says "No longer restorable" and has no button. The view says so when nothing that can

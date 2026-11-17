@@ -11,6 +11,7 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -63,7 +64,7 @@ export interface TableProviderProps {
 /**
  * Provides the table to the tabs and reads what the person may do with it. A table the server
  * answers after a change replaces the one read, until the page reads the table again; so does an
- * artifact read again with `reloadArtifact`.
+ * artifact read again with `reloadArtifact`, the last one asked for when several are open.
  *
  * @param props - The table and the tabs.
  * @param props.place - Where the table is.
@@ -94,13 +95,19 @@ export function TableProvider({
   );
   const table = changed !== null && changed.base === loaded ? changed.next : loaded;
   const [reread, setReread] = useState<{ base: ArtifactOut; next: ArtifactOut } | null>(null);
+  const lastRead = useRef(0);
   const reloadArtifact = useCallback(() => {
     if (readArtifact === null) {
       return;
     }
+    lastRead.current += 1;
+    const read = lastRead.current;
     getArtifact({ environment, namespace, name }).then(
       (next) => {
-        setReread({ base: readArtifact, next });
+        // Two reads may answer out of order; only the last one asked for is shown.
+        if (read === lastRead.current) {
+          setReread({ base: readArtifact, next });
+        }
       },
       // The page shows the artifact it has; the change that asked for this read already said what happened.
       () => undefined,

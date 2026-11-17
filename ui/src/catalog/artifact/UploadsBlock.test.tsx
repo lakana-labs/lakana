@@ -135,6 +135,26 @@ describe("UploadsBlock", () => {
     expect(screen.queryByRole("button", { name: "Show more" })).not.toBeInTheDocument();
   });
 
+  it("says why when a later page is refused with 403, keeps the rows and offers Show more again", async () => {
+    const detail = "You may no longer read prod.";
+    const server = fakeServer({
+      ...artifactRoutes(),
+      [UPLOADS]: (request) =>
+        request.path.includes("cursor=")
+          ? { status: 403, body: { type: "PermissionDeniedError", detail } }
+          : { status: 200, body: { items: [upload()], next_cursor: "c1" } },
+    });
+    const { user } = renderUploads();
+
+    expect(await rows()).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+
+    expect(await screen.findByText(detail)).toBeVisible();
+    expect(server.sent.at(-1)?.path).toContain("cursor=c1");
+    expect(await rows()).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Show more" })).toBeVisible();
+  });
+
   it("withdraws at once without asking, removes the row and focuses Withdrew upload {id}", async () => {
     const server = fakeServer(artifactRoutes());
     const { user } = renderUploads();

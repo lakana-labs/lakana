@@ -88,7 +88,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* A row that opens its object: the name is the link, and its ::after covers the whole row. */
+/* A row that opens its object: the name is the link, and its ::after covers the whole row. Only a
+   link covers it: a name without a page (a dropped table, an orphan, an upload) is a span with the
+   same class, and an overlay from it would catch the pointer meant for the row's times and links. */
 .list tr {
   position: relative;
 }
@@ -97,26 +99,42 @@
   background: var(--color-sunk);
 }
 
+/* Only a link is drawn in the accent: a name without a page (a dropped table, an orphan, an
+   upload, a version) is plain text and must not look like a link. */
 .row-name {
-  color: var(--color-accent);
+  color: var(--color-text);
   text-decoration: none;
 }
 
-.row-name::after {
+a.row-name {
+  color: var(--color-accent);
+}
+
+a.row-name::after {
   content: "";
   position: absolute;
   inset: 0;
 }
 
-tr:hover .row-name {
+tr:hover a.row-name {
   text-decoration: underline;
 }
 
-/* In the Catalog list, what carries a hover title sits above the row's link, so the pointer
-   reaches it. TableList forwards the click; use this class only where a list does too. */
+/* In the Catalog list and the Expiring view, what carries a hover title sits above the row's
+   link, so the pointer reaches it. TableList and ExpiringView forward the click (openFromCell);
+   add a list here only where it does too. */
 .list .button,
-.catalog-list [title] {
+.catalog-list [title],
+.expiring-view [title] {
   position: relative;
+}
+
+/* A row's button keeps its label whole: a cell's overflow-wrap (anywhere, for long names) would
+   otherwise let a narrow column break the word inside the button ("Undro" / "p"). The column takes
+   the button's width; the list scrolls in its own region at 320 px. */
+.list .button {
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .second,
