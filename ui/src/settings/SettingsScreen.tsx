@@ -7,6 +7,7 @@
 import {
   type ComponentType,
   type JSX,
+  type ReactNode,
   lazy,
   type LazyExoticComponent,
   type RefObject,
@@ -22,11 +23,14 @@ import {
   useLocation,
   useNavigationType,
 } from "react-router";
+import { useTranslation } from "react-i18next";
 
+import { NotAvailable } from "../shell/NotAvailable";
 import { NotFound } from "../shell/NotFound";
+import { useMe } from "../shell/me";
 import { GroupEntry } from "./GroupEntry";
 import { type PagePlaceId, PLACE_PAGES } from "./placePages";
-import { SETTINGS_PLACES, type SettingsPlace } from "./places";
+import { listedPlaces, placePattern, SETTINGS_PLACES, type SettingsPlace } from "./places";
 import { SettingsLayout } from "./SettingsLayout";
 
 // Each page is made lazy once, here, so a render never makes a new component (and loses its state).
@@ -75,6 +79,37 @@ function FocusHeading({ moved }: { readonly moved: RefObject<boolean> }): null {
   return null;
 }
 
+/** Properties of {@link Guarded}. */
+interface GuardedProps {
+  /** The place whose route matched. */
+  readonly place: SettingsPlace;
+  /** The place's page, shown only when the person is shown the place. */
+  readonly children: ReactNode;
+}
+
+/**
+ * Shows a place's page only to a person who is shown the place; anyone else gets
+ * {@link NotAvailable} with its name, so the page is never loaded and its routes never read.
+ *
+ * @remarks
+ * It sits inside the place's own route, so the router alone decides which place an address is
+ * (in any letter case, with any segment percent-encoded); no second reading of the address can
+ * let a hidden place through.
+ * @param props - The place and its page.
+ * @param props.place - The place whose route matched.
+ * @param props.children - The page.
+ * @returns The page, or the permission state.
+ */
+function Guarded({ place, children }: GuardedProps): JSX.Element {
+  const { t } = useTranslation();
+  const { admin, noAccessYet } = useMe();
+  return listedPlaces({ admin, noAccessYet }).includes(place) ? (
+    <>{children}</>
+  ) : (
+    <NotAvailable place={t(place.label)} />
+  );
+}
+
 /**
  * Renders the place the address names under `/settings`, inside the Settings layout;
  * `/settings` itself opens Status, where Home's "Details" goes, and a group's address
@@ -106,13 +141,15 @@ export function AreaScreen(): JSX.Element {
           return (
             <Route
               key={place.id}
-              path={place.below ? `${place.path}/*` : place.path}
+              path={placePattern(place)}
               element={
-                // Keyed by place: leaving a place unmounts it at once, even while the next one loads.
-                <Suspense key={place.id} fallback={null}>
-                  <Page />
-                  <FocusHeading moved={moved} />
-                </Suspense>
+                <Guarded key={place.id} place={place}>
+                  {/* Keyed by place: leaving a place unmounts it at once, even while the next one loads. */}
+                  <Suspense fallback={null}>
+                    <Page />
+                    <FocusHeading moved={moved} />
+                  </Suspense>
+                </Guarded>
               }
             />
           );

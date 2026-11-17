@@ -150,6 +150,61 @@ describe("SettingsScreen", () => {
     expect(server.sent.filter((request) => request.path.startsWith("/api/v1/invites"))).toEqual([]);
   });
 
+  it.each([
+    ["/settings/%72epositories", "Repositories"],
+    ["/Settings/%52epositories/New", "Repositories"],
+    ["/settings/%61ccess/people", "People"],
+    ["/settings/Access/%50eople/maria", "People"],
+    ["/settings/access/%70eople", "People"],
+    ["/settings/%73ign-in", "Sign-in"],
+    ["/SETTINGS/%53ign-In/", "Sign-in"],
+    ["/settings/%73ign-in/invites", "Invites"],
+    ["/Settings/Sign-In/%49nvites", "Invites"],
+    ["/settings/sign-in/%72ecovery-links", "Recovery links"],
+    ["/settings/%53IGN-IN/Recovery-%4Cinks", "Recovery links"],
+  ])(
+    "an encoded deep link to a hidden place says so and reads nothing (%s)",
+    async (path, place) => {
+      const { server } = renderShell(path, { access: MEMBER, me: { admin: false } });
+
+      expect(
+        await screen.findByRole("heading", { level: 1, name: `You cannot use ${place}` }),
+      ).toBeInTheDocument();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(
+        server.sent
+          .map((request) => request.path)
+          .filter(
+            (sent) =>
+              sent === "/api/v1/principals" ||
+              [
+                "/api/v1/repository-probes",
+                "/api/v1/repositories",
+                "/api/v1/principals/maria",
+                "/api/v1/settings/sign-in",
+                "/api/v1/invites",
+                "/api/v1/recovery-links",
+              ].some((hidden) => sent.startsWith(hidden)),
+          ),
+      ).toEqual([]);
+    },
+  );
+
+  it("marks the current place for an encoded address", async () => {
+    renderShell("/settings/%73ign-in/invites", {
+      routes: { "GET /api/v1/invites": { status: 200, body: [] } },
+    });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Invites" })).toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Settings places" });
+    expect(within(nav).getByRole("link", { name: "Invites" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+  });
+
   it("an unknown place is not found", async () => {
     renderShell("/settings/nowhere");
 

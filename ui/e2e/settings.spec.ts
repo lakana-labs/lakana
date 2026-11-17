@@ -152,3 +152,48 @@ for (const theme of ["light", "dark"] as const) {
     });
   }
 }
+
+test("an encoded address to a hidden place says so and reads nothing", async ({ page }) => {
+  const errors = consoleErrors(page);
+  const paths = apiPaths(page);
+  await signInAsAdmin(page);
+  // The same person without admin rights: Settings lists Status alone.
+  await page.route("**/api/v1/whoami", (route) =>
+    route.fulfill({
+      json: {
+        name: "admin",
+        type: "USER",
+        task_token: null,
+        ci_token: null,
+        language: null,
+        admin: false,
+        has_access: true,
+        may_deploy: false,
+        picture: "e1",
+      },
+    }),
+  );
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  for (const [path, place] of [
+    ["/settings/%73ign-in/invites", "Invites"],
+    ["/Settings/Sign-In/%52ecovery-Links", "Recovery links"],
+    ["/settings/%61ccess/people", "People"],
+    ["/settings/%53IGN-IN", "Sign-in"],
+  ] as const) {
+    await page.goto(path);
+    await expect(
+      page.getByRole("heading", { level: 1, name: `You cannot use ${place}` }),
+    ).toBeVisible();
+    await expect(page.getByRole("navigation", { name: PLACES }).getByRole("link")).toHaveText([
+      "Status",
+    ]);
+  }
+  await page.waitForLoadState("networkidle");
+  expect(
+    paths.filter((path) =>
+      ["/api/v1/invites", "/api/v1/recovery-links", "/api/v1/settings/sign-in"].includes(path),
+    ),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+});

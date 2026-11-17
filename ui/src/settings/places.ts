@@ -2,10 +2,12 @@
  * The registry of Settings' places: where each lives, what it is called and who is shown it.
  *
  * @remarks
- * The list, the picker, the route guard and `/settings/access`'s entry all read it. It imports
- * nothing but a type, so the pages (which import the frame) never form a cycle with it.
+ * The list, the picker, the routes and `/settings/access`'s entry all read it. It imports
+ * nothing of Lakana's but a type, so the pages (which import the frame) never form a cycle with it.
  * @packageDocumentation
  */
+import { matchRoutes, type RouteObject } from "react-router";
+
 import type { AccessOut } from "../api";
 
 /** The id of a place. */
@@ -136,9 +138,23 @@ export function listedPlaces(
 }
 
 /**
- * The place an address belongs to: the longest registry path that is a whole-segment prefix of
- * what follows `/settings/`, ignoring a trailing slash and letter case. Null when there is none.
+ * A place's route pattern under `/settings`: its path, and everything below it when the page
+ * owns the paths under its own.
  *
+ * @param place - The place.
+ * @returns The pattern, as the Settings screen's routes and {@link placeAt} both use it.
+ */
+export function placePattern(place: SettingsPlace): string {
+  return place.below ? `${place.path}/*` : place.path;
+}
+
+/**
+ * The place an address belongs to, as the router matches it: each segment decoded, in any
+ * letter case, a trailing slash ignored. Null when no place matches.
+ *
+ * @remarks
+ * It marks the current place in the list. It never decides whether a place is shown: each
+ * place's own route does that, so the guard cannot disagree with the router.
  * @param pathname - The address's path.
  * @param places - The registry; only a test passes another.
  * @returns The place, or null.
@@ -147,17 +163,14 @@ export function placeAt(
   pathname: string,
   places: readonly SettingsPlace[] = SETTINGS_PLACES,
 ): SettingsPlace | null {
-  // The router matches in any letter case, and the registry's paths are lower case.
-  const lower = pathname.toLowerCase();
-  const prefix = "/settings/";
-  if (!lower.startsWith(prefix)) return null;
-  const rest = lower.slice(prefix.length).replace(/\/+$/, "");
-  let found: SettingsPlace | null = null;
-  for (const place of places) {
-    const within = rest === place.path || rest.startsWith(`${place.path}/`);
-    if (within && (found === null || place.path.length > found.path.length)) found = place;
-  }
-  return found;
+  const routes: RouteObject[] = [
+    {
+      path: "/settings",
+      children: places.map((place) => ({ path: placePattern(place), handle: place })),
+    },
+  ];
+  const handle: unknown = matchRoutes(routes, pathname)?.at(-1)?.route.handle;
+  return (handle as SettingsPlace | undefined) ?? null;
 }
 
 /**

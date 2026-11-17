@@ -74,9 +74,18 @@ describe("places", () => {
     expect(placeAt("/other/status")).toBeNull();
   });
 
-  it("prefers the longest path", () => {
-    expect(placeAt("/settings/top/kid/x", TREE)?.id).toBe("kid");
+  it("matches as the router does: the most specific route, nothing below a page that owns none", () => {
+    expect(placeAt("/settings/top/kid", TREE)?.id).toBe("kid");
     expect(placeAt("/settings/top", TREE)?.id).toBe("top");
+    expect(placeAt("/settings/top/kid/x", TREE)).toBeNull();
+    expect(placeAt("/settings/top/x", TREE)).toBeNull();
+  });
+
+  it("reads each segment decoded, as the router does", () => {
+    expect(placeAt("/settings/%73ign-in/invites")?.id).toBe("invites");
+    expect(placeAt("/settings/%61ccess/people")?.id).toBe("people");
+    expect(placeAt("/Settings/Access/%50eople/maria")?.id).toBe("people");
+    expect(placeAt("/settings/sign-in%2Finvites")).toBeNull();
   });
 
   it("gives each page its own path as its entry", () => {

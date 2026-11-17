@@ -5,33 +5,26 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import { useTranslation } from "react-i18next";
-import { Outlet, useLocation } from "react-router";
+import { Outlet } from "react-router";
 
-import { NotAvailable } from "../shell/NotAvailable";
 import { useFolded } from "../shell/useFolded";
 import { useMe } from "../shell/me";
 import { PlaceFold } from "./PlaceFold";
 import { PlaceList } from "./PlaceList";
-import { listedPlaces, placeAt, type SettingsViewer } from "./places";
+import type { SettingsViewer } from "./places";
 import "./settings.css";
 import "./settingsStrings";
 
 /**
- * Renders the list (wide) or Section (narrow), then the place. A place the person may not see
- * renders {@link NotAvailable} with its name instead, so its page is never loaded and its route
- * never read.
+ * Renders the list (wide) or Section (narrow), then the place. Whether the person may see the
+ * place is decided inside the place's own route (`SettingsScreen`), not here.
  *
  * @returns The layout.
  */
 export function SettingsLayout(): JSX.Element {
-  const { t } = useTranslation();
-  const { pathname } = useLocation();
   const { admin, noAccessYet } = useMe();
   const viewer: SettingsViewer = { admin, noAccessYet };
   const folded = useFolded();
-  const place = placeAt(pathname);
-  const hidden = place !== null && !listedPlaces(viewer).includes(place);
   return (
     <div className="settings">
       {!folded && (
@@ -41,7 +34,7 @@ export function SettingsLayout(): JSX.Element {
       )}
       <div className="settings-place">
         {folded && <PlaceFold viewer={viewer} />}
-        {hidden ? <NotAvailable place={t(place.label)} /> : <Outlet />}
+        <Outlet />
       </div>
     </div>
   );
