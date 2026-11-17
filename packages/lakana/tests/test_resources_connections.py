@@ -516,7 +516,8 @@ def test_environments_reads_names_and_actions() -> None:
 
 
 @pytest.mark.parametrize(
-    "body", [b"{}", b'[{"actions": []}]', b'[{"name": "dev", "actions": "create"}]']
+    "body",
+    [b"{}", b'[{"actions": []}]', b'[{"name": "dev", "actions": "create"}]', b"not json"],
 )
 def test_an_odd_environments_answer_is_an_invalid_response(body: bytes) -> None:
     with pytest.raises(InvalidResponse):
@@ -725,3 +726,23 @@ def test_test_all_times_out_naming_the_open_ones(monkeypatch: pytest.MonkeyPatch
         one.test_all("prod", timeout=60.0)
     assert str(alone.value).startswith("the test of `a` is still queued after 60s: no worker")
     assert str(alone.value).endswith("lakana connection test a --env prod --id t-a")
+
+
+def test_test_all_with_only_running_tests_names_only_the_workers_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every open test was taken: no hint about a missing worker, only the log to read."""
+    pages: dict[str | None, dict[str, Any]] = {
+        None: {"items": [_queued("a", "t-a"), _queued("b", "t-b")], "next_cursor": None}
+    }
+    reads = {"a": [_read("running", "t-a")], "b": [_read("running", "t-b")]}
+    connections, _ = _test_all_api(monkeypatch, pages, reads, [])
+
+    with pytest.raises(TimeoutError) as raised:
+        connections.test_all("prod", timeout=10.0)
+
+    assert "No worker has taken" not in str(raised.value)
+    assert str(raised.value).endswith(
+        "A worker took a running test: read the worker's log "
+        "(`docker compose logs worker`, or the `lakana local` terminal)."
+    )

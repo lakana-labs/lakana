@@ -1165,6 +1165,62 @@ def test_test_all_of_an_environment_without_connections_says_so(tmp_path: Path) 
     assert result.stdout.strip() == "Environment prod has no connections."
 
 
+def test_test_all_no_wait_of_an_environment_without_connections_says_so(tmp_path: Path) -> None:
+    api = _test_all_api({})
+
+    result = invoke(
+        make_state(tmp_path, api), "connection", "test", "--all", "--env", "prod", "--no-wait"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.strip() == "Environment prod has no connections."
+    assert result.stderr == ""
+
+
+def test_test_all_prints_json_by_connection_with_or_without_waiting(tmp_path: Path) -> None:
+    waited = invoke(
+        make_state(tmp_path, _test_all_api({"files": "ok", "crm-db": "refused"})),
+        "--output",
+        "json",
+        "connection",
+        "test",
+        "--all",
+        "--env",
+        "prod",
+    )
+    queued = invoke(
+        make_state(tmp_path, _test_all_api({"files": "ok", "crm-db": "ok"}, open_ones=("files",))),
+        "--output",
+        "json",
+        "connection",
+        "test",
+        "--all",
+        "--env",
+        "prod",
+        "--no-wait",
+    )
+
+    assert (waited.exit_code, queued.exit_code) == (1, 0), waited.output + queued.output
+    tests = json.loads(waited.stdout)
+    assert list(tests) == ["crm-db", "files"]
+    assert (tests["crm-db"]["id"], tests["crm-db"]["outcome"]) == ("t-crm-db", "refused")
+    assert [
+        (item["connection"], item["test_id"], item["queued"]) for item in json.loads(queued.stdout)
+    ] == [("crm-db", "t-crm-db", True), ("files", "t-files", False)]
+
+
+def test_test_all_with_an_outcome_this_version_does_not_know_exits_1_without_advice(
+    tmp_path: Path,
+) -> None:
+    api = _test_all_api({"crm-db": "something_new", "files": "ok"})
+
+    result = invoke(make_state(tmp_path, api), "connection", "test", "--all", "--env", "prod")
+
+    assert result.exit_code == 1, result.output
+    assert "crm-db: something_new: crm-db said something_new" in result.stdout.splitlines()
+    assert "something_new" not in result.stderr
+
+
 def _refused(tmp_path: Path, *args: str) -> str:
     """Run ``connection test`` with arguments it refuses, and check that nothing was sent.
 

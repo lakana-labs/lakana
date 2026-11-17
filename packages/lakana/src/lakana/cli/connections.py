@@ -1088,8 +1088,7 @@ def _no_connections(state: CliState, environment: str) -> None:
     environment
         The environment.
     """
-    if state.output != "json":
-        sys.stdout.write(f"Environment {_output.inline(environment)} has no connections.\n")
+    sys.stdout.write(f"Environment {_output.inline(environment)} has no connections.\n")
 
 
 def register(app: typer.Typer) -> None:

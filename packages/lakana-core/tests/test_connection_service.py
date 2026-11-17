@@ -16,6 +16,7 @@ from typing import Any, cast
 
 import pytest
 from core_test_helpers import deploy_manifest
+from sqlalchemy import delete as sa_delete
 from sqlalchemy import event, func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -3053,6 +3054,30 @@ def test_test_all_that_deadlocks_is_a_conflict_and_a_retry_finds_the_tests_befor
         ("second", True),
     ]
     assert len(_tests_of(world, "prod", "first")) == 1
+
+
+def test_test_all_skips_a_connection_deleted_after_the_page_was_read(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A connection gone before its lock is left out of the answer; the others are queued."""
+    for minute, name in enumerate(("second", "first")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    gone = world.connection_id("prod", "second")
+    real = service_module.newest_first
+
+    def then_deleted(*args: Any, **kwargs: Any) -> Any:  # ruff: ignore[any-type]
+        page = real(*args, **kwargs)
+        world.session.execute(sa_delete(Connection).where(Connection.id == gone))
+        world.session.commit()
+        return page
+
+    monkeypatch.setattr(service_module, "newest_first", then_deleted)
+
+    page = world.connections().request_tests(world.data_engineer, "prod")
+
+    assert not world.session.in_transaction()
+    assert [(item.connection, item.queued) for item in page.items] == [("first", True)]
+    assert world.connection("prod", "second") is None
 
 
 def test_test_all_answers_for_a_connection_deleted_after_its_test_was_queued(
