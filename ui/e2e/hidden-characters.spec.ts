@@ -1,0 +1,494 @@
+import { expect, type Page, test } from "@playwright/test";
+
+import { apiTypes } from "./api-types";
+import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
+import { ROUTES, stubConnect } from "./connect";
+import {
+  apiPaths,
+  expectMarked,
+  expectNoRaw,
+  poison,
+  poisoned,
+  rawOverrides,
+  RLO,
+  STRING_CODES,
+} from "./hidden";
+import { MANAGE_STUBBED, stubGitOwned, stubManagement } from "./manage";
+import { PLACES_STUBBED, stubPlaces } from "./places";
+import { ADMIN_SESSION, signInAsAdmin, STUBBED } from "./session";
+
+// Every stubbed answer carries a right-to-left override in each text field (e2e/hidden.ts); each
+// step names stubbed values its screen must show with the mark U+202E, and no screen may show the
+// override itself. A failure names the element that shows it raw.
+
+/**
+ * A name as the poisoned answers hold it, written for an address: a link the page builds from
+ * them carries the override too, and so may a link someone sends.
+ *
+ * @param name - The name as the stubs write it.
+ * @returns The name with the override, encoded.
+ */
+function n(name: string): string {
+  return `${name}%E2%80%AE`;
+}
+
+const TABLE = `/catalog/${n("prod")}/${n("gold.sales")}/${n("fact_sales")}`;
+const ARTIFACT = `/catalog/${n("prod")}/${n("ml")}/${n("model")}`;
+
+/** The paths `stubAccounts` answers. */
+const ACCOUNTS = [
+  "/api/v1/invites",
+  "/api/v1/recovery-links",
+  "/api/v1/principals/admin/passkeys",
+  "/api/v1/principals/admin/sessions",
+];
+
+/** What `apiTypes()` finds today: each type with a literal-union field, and those fields. */
+const LITERAL_CODES: Record<string, string> = {
+  ArtifactKeptOut: "reason",
+  ArtifactOut: "actions kind",
+  ArtifactVersionDeletedOut: "actions",
+  ArtifactVersionOut: "actions",
+  AttentionItemOut: "kind",
+  ColumnOut: "description_source label_source",
+  DroppedTableOut: "actions",
+  ExternalTableOut: "format",
+  GetStartedOut: "audience",
+  GetStartedStepOut: "id",
+  GrantOut: "kind role",
+  HealthSummaryOut: "state",
+  InstanceStatusOut: "state",
+  LastMaintenanceOut: "status",
+  ListTablesQuery: "order sort",
+  OrphanOut: "actions kind",
+  OwnerOut: "kind",
+  QueryStatusOut: "status",
+  RecentOut: "kind",
+  RepositoryCreate: "kind",
+  ScopeOut: "kind",
+  SubjectPrincipalOut: "principal_type",
+  TableDefinitionFileOut: "reason",
+  TableListItemOut: "kind state",
+  TableOut: "actions description_source kind label_source state",
+  TableRetentionOut: "kept source",
+  "TableTreeOut.environments": "actions",
+  "TableTreeOut.environments.namespaces": "actions",
+  ViaOut: "kind role",
+};
+
+test.beforeEach(({ browserName }) => {
+  test.skip(browserName !== "chromium", "the check reads the DOM, the same in every browser");
+});
+
+/**
+ * Requires that every API request went to a stubbed path: any other reached `vite preview` and
+ * got no poisoned answer.
+ *
+ * @param paths - The paths sent ({@link apiPaths}).
+ * @param stubbed - The stubbed paths.
+ */
+function expectOnlyStubbed(paths: readonly string[], stubbed: readonly string[]): void {
+  expect(paths.length, "the screens asked the API").toBeGreaterThan(0);
+  expect(paths.filter((path) => !stubbed.includes(path))).toEqual([]);
+}
+
+/**
+ * Opens an address and checks it.
+ *
+ * @param page - The page.
+ * @param address - The address.
+ * @param values - Stubbed values the screen shows.
+ */
+async function visit(
+  page: Page,
+  address: string,
+  values: readonly [string, ...string[]],
+): Promise<void> {
+  await page.goto(address);
+  await expectMarked(page, address, values);
+}
+
+/**
+ * Opens the Actions menu and each of its items in turn, checking each dialog.
+ *
+ * @param page - The page.
+ * @param actions - The name of the Actions button.
+ * @param values - Stubbed values the page and every dialog show.
+ * @param own - For a dialog that reads its own answer, by its item: a value from that answer.
+ */
+async function eachAction(
+  page: Page,
+  actions: RegExp,
+  values: readonly [string, ...string[]],
+  own: Readonly<Record<string, readonly [string, ...string[]]>> = {},
+): Promise<void> {
+  const button = page.getByRole("button", { name: actions }).first();
+  await button.click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  // The menu holds the interface's own words; a disabled item's reason is checked by the raw scan.
+  await expectNoRaw(page, `${actions.source} menu`);
+  const items = await page.getByRole("menuitem").allTextContents();
+  await page.keyboard.press("Escape");
+  for (const item of items) {
+    await button.click();
+    const entry = page.getByRole("menuitem", { name: item, exact: true });
+    if (await entry.isDisabled()) {
+      await page.keyboard.press("Escape");
+      continue;
+    }
+    await entry.click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expectMarked(page, `the ${item} dialog`, own[item] ?? values);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  }
+}
+
+test("the check finds a hidden character shown as itself, and leaves a field's value alone", async ({
+  page,
+}) => {
+  await page.setContent(
+    `<title>t${RLO}</title><p>a<span>b${RLO}</span></p><button aria-label="c${RLO}">c</button>` +
+      `<img alt="d${RLO}" src="data:,"><svg><title>e${RLO}</title></svg>` +
+      `<select><option label="i${RLO}">i</option></select><input type="submit" value="j${RLO}">` +
+      `<textarea>f${RLO}</textarea><input value="g${RLO}"><p>h<span class="char-mark">U+202E</span></p>`,
+  );
+
+  expect(await rawOverrides(page)).toEqual([
+    "document title: t⟨RLO⟩",
+    "text in body > p > span: b⟨RLO⟩",
+    "text in body > svg > title: e⟨RLO⟩",
+    "aria-label of html > body > button: c⟨RLO⟩",
+    "alt of html > body > img: d⟨RLO⟩",
+    "label of body > select > option: i⟨RLO⟩",
+    "value of html > body > input: j⟨RLO⟩",
+  ]);
+});
+
+test("the answers carry the override in every text but each type's codes, ids and times", () => {
+  expect(
+    poison({
+      // A table's row of the list: kind and state are literal unions of TableListItemOut.
+      items: [
+        {
+          environment: "prod",
+          namespace: "gold",
+          name: "fact_sales",
+          uuid: "u-1",
+          kind: "TABLE",
+          state: "failing",
+          owner: { name: "kim", kind: "USER" },
+          health: { state: "failing", item: "check_failed", text: "Check failed", others: 0 },
+          last_write_at: "2026-11-09T10:00:00Z",
+        },
+      ],
+      next_cursor: "c-2",
+      capped: false,
+    }),
+  ).toEqual({
+    items: [
+      {
+        environment: `prod${RLO}`,
+        namespace: `gold${RLO}`,
+        name: `fact_sales${RLO}`,
+        uuid: `u-1${RLO}`,
+        kind: "TABLE",
+        state: "failing",
+        owner: { name: `kim${RLO}`, kind: "USER" },
+        health: { state: "failing", item: "check_failed", text: `Check failed${RLO}`, others: 0 },
+        last_write_at: "2026-11-09T10:00:00Z",
+      },
+    ],
+    next_cursor: `c-2${RLO}`,
+    capped: false,
+  });
+  // A name that is a code in one type is text in another: PermissionOut's reason is text, a
+  // lineage node's kind a code. An error's type, ids and the ends of an edge stay as they are.
+  expect(
+    poison({
+      permissions: [{ action: "drop", allowed: false, via: [], reason: "Not the owner." }],
+      nodes: [{ id: "table:a", kind: "table", name: "gold.a", distance: 0 }],
+      edges: [{ kind: "reads", source: "table:a", target: "table:a" }],
+      error: { type: "StepUpRequired", detail: "Touch your passkey." },
+    }),
+  ).toEqual({
+    permissions: [
+      { action: `drop${RLO}`, allowed: false, via: [], reason: `Not the owner.${RLO}` },
+    ],
+    nodes: [{ id: "table:a", kind: "table", name: `gold.a${RLO}`, distance: 0 }],
+    edges: [{ kind: "reads", source: "table:a", target: "table:a" }],
+    error: { type: "StepUpRequired", detail: `Touch your passkey.${RLO}` },
+  });
+});
+
+test("the codes of each answer type are the ones src/api declares", () => {
+  const literal = Object.fromEntries(
+    [...apiTypes().values()]
+      .filter((type) => type.literal.size > 0)
+      .map((type) => [type.name, [...type.literal].sort().join(" ")]),
+  );
+
+  // A change here changes what the check leaves alone: read the type before accepting it.
+  expect(literal).toEqual(LITERAL_CODES);
+  for (const [type, fields] of Object.entries(STRING_CODES)) {
+    for (const field of fields) {
+      expect(apiTypes().get(type)?.fields.has(field), `${type}.${field}`).toBe(true);
+    }
+  }
+});
+
+const AT = "2026-11-09T10:00:00Z";
+
+/**
+ * Answers what the Access area and one's account read beyond `session.ts`: an open invite, an
+ * open recovery link, a passkey, a session, and a sign-in notice about another person.
+ *
+ * @param page - The page to stub, poisoned.
+ */
+async function stubAccounts(page: Page): Promise<void> {
+  await page.route("**/api/v1/sign-in/notices", (route) =>
+    route.fulfill({
+      json: [{ id: "n-1", kind: "recovery_used", subject: "kim.schulz", created_at: AT }],
+    }),
+  );
+  await page.route("**/api/v1/invites", (route) =>
+    route.fulfill({
+      json: [{ id: "i-1", name: "sam", display_name: "Sam Kay", created_at: AT, expires_at: AT }],
+    }),
+  );
+  await page.route("**/api/v1/recovery-links", (route) =>
+    route.fulfill({ json: [{ id: "r-1", name: "kim.schulz", created_at: AT, expires_at: AT }] }),
+  );
+  await page.route("**/api/v1/principals/admin/passkeys", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: "p-1",
+          name: "Work laptop",
+          created_at: AT,
+          last_used_at: AT,
+          backup_eligible: true,
+          disabled_reason: null,
+          usable_here: true,
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/v1/principals/admin/sessions", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: "s-1",
+          via: "passkey",
+          created_at: AT,
+          last_seen_at: AT,
+          absolute_expires_at: AT,
+          user_agent: "Mozilla/5.0 (X11; Linux x86_64) Chrome/155.0.0.0 Safari/537.36",
+          browser: "Chrome 155 on Linux",
+          peer: "127.0.0.1",
+          current: true,
+        },
+      ],
+    }),
+  );
+}
+
+test("Home, the Catalog and Access mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await visit(page, "/", ["daily_sales"]);
+  await visit(page, "/catalog", ["fact_sales"]);
+  await visit(page, `/catalog?env=${n("prod")}`, ["fact_sales"]);
+  await visit(page, `/catalog?env=${n("prod")}&ns=${n("gold.sales")}`, ["fact_sales"]);
+  await visit(page, `/catalog?env=${n("prod")}&ns=${n("gold")}`, ["station_ranking"]);
+  // A column hit and a translated description: the snippet and its language.
+  await visit(page, "/catalog?q=store", ["store_id", "ranked by the trips it served"]);
+  await expect(page.locator(".match-line > span", { hasText: /^deU\+202E$/ })).toHaveCount(1);
+  await visit(page, `/catalog?env=${n("staging")}`, ["staging"]);
+  await visit(page, "/access", ["admin"]);
+  expectOnlyStubbed(paths, STUBBED);
+});
+
+test("every tab of a table's page, its editors and its dialogs mark hidden characters", async ({
+  page,
+}) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await visit(page, TABLE, ["Every sale in every store, one row per sale."]);
+  await visit(page, `${TABLE}/columns`, ["store_id"]);
+  await visit(page, `${TABLE}/lineage`, ["gold.sales.daily_sales"]);
+  await visit(page, `${TABLE}/references`, ["gold.dim_store"]);
+  await visit(page, `${TABLE}/health`, ["unique_sale_id"]);
+  await visit(page, `${TABLE}/access`, ["kim.schulz"]);
+  await visit(page, `${TABLE}/preview`, ["customer_email"]);
+  await page.getByRole("gridcell").nth(2).click();
+  await expectMarked(page, "the Value panel", ["and more "]);
+
+  await visit(page, `${TABLE}/lineage`, ["gold.sales.daily_sales"]);
+  await page.getByRole("button", { name: "Full screen" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the full-screen lineage", ["gold.sales.daily_sales"]);
+  await page.keyboard.press("Escape");
+
+  await visit(page, TABLE, ["models/gold/fact_sales.sql"]);
+  await page.getByRole("button", { name: /fact_sales\.sql/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the file of Defined in", ["models/gold/fact_sales.sql"]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expectMarked(page, "the editor of the table's texts", ["fact_sales"]);
+
+  await visit(page, `${TABLE}/columns`, ["store_id"]);
+  await page.getByRole("button", { name: /^Edit store_id/ }).click();
+  await expectMarked(page, "the editor of a column's texts", ["store_id"]);
+  expectOnlyStubbed(paths, STUBBED);
+});
+
+test("a table's actions, the catalog's views and a git-owned table mark hidden characters", async ({
+  page,
+}) => {
+  const paths = apiPaths(page);
+  await stubManagement(poisoned(page));
+  await visit(page, `/catalog?env=${n("prod")}&view=dropped`, ["fact_returns"]);
+  await visit(page, `/catalog?env=${n("prod")}&view=expiring`, ["late_arrival"]);
+  await visit(page, `/catalog?env=${n("prod")}&view=orphans`, ["clean"]);
+  await visit(page, TABLE, ["fact_sales"]);
+  // Retention reads the table's rule; its title alone comes from the address.
+  await eachAction(page, /^Actions$/, ["fact_sales"], { "Retention…": ["ana"] });
+  await stubGitOwned(poisoned(page));
+  await visit(page, TABLE, ["fact_sales"]);
+  await eachAction(page, /^Actions$/, ["fact_sales"]);
+  expectOnlyStubbed(paths, MANAGE_STUBBED);
+});
+
+test("the place menu and its dialogs mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubPlaces(poisoned(page));
+  await visit(page, `/catalog?env=${n("prod")}&ns=${n("bronze")}`, ["bronze"]);
+  await eachAction(page, /^Actions for bronze/, ["bronze"]);
+  await visit(page, `/catalog?env=${n("prod")}&ns=${n("gold")}`, ["gold"]);
+  await eachAction(page, /^Actions for gold/, ["gold"]);
+  await visit(page, `/catalog?env=${n("dev")}&ns=${n("gold")}`, ["gold"]);
+  await eachAction(page, /^Actions for gold/, ["gold"]);
+  expectOnlyStubbed(paths, PLACES_STUBBED);
+});
+
+test("an artifact's page marks hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubArtifacts(poisoned(page));
+  await visit(page, ARTIFACT, ["ana.nowak"]);
+  // The stub's lineage holds the artifact alone, which the tab does not name ("Nothing upstream
+  // or downstream"): the header's name is all the step can require.
+  await visit(page, `${ARTIFACT}/lineage`, ["model"]);
+  await visit(page, `${ARTIFACT}/access`, ["kim.schulz"]);
+  await visit(page, `${ARTIFACT}/versions`, ["model"]);
+  await page.getByRole("button", { name: /^Files of version 2/ }).click();
+  await expectMarked(page, "the files of version 2", ["models/v2/model.pkl"]);
+  await visit(page, ARTIFACT, ["model"]);
+  await eachAction(page, /^Actions$/, ["model"]);
+  expectOnlyStubbed(paths, ARTIFACTS_STUBBED);
+});
+
+test("the Access area, one's account and a sign-in notice mark hidden characters", async ({
+  page,
+}) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubAccounts(poisoned(page));
+  await visit(page, "/", ["kim.schulz"]);
+  await visit(page, "/access/invites", ["sam"]);
+  await visit(page, "/access/recovery-links", ["kim.schulz"]);
+  await visit(page, `/access/people/${n("admin")}`, ["Work laptop"]);
+  await visit(page, "/account", ["Work laptop"]);
+  expectOnlyStubbed(paths, [...STUBBED, ...ACCOUNTS]);
+});
+
+test("an invite link marks hidden characters in the name it signs in as", async ({ page }) => {
+  const paths = apiPaths(page);
+  const stub = poisoned(page);
+  await stub.route("**/api/v1/sign-in/session", (route) =>
+    route.fulfill({ status: 401, json: { detail: "Sign in.", type: "AuthenticationError" } }),
+  );
+  await stub.route("**/api/v1/sign-in/links/describe", (route) =>
+    route.fulfill({
+      json: { kind: "invite", name: ADMIN_SESSION.name, display_name: "Ada", state: "open" },
+    }),
+  );
+  await visit(page, "/sign-in#l=pub-1&s=sec-1", ["Ada"]);
+  expectOnlyStubbed(paths, ["/api/v1/sign-in/session", "/api/v1/sign-in/links/describe"]);
+});
+
+test("Connect a repository marks hidden characters in every step", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubConnect(poisoned(page));
+  await page.goto("/settings/repositories/new");
+  const url = page.getByRole("textbox", { name: "Repository URL" });
+  await url.fill("https://github.com/acme/analytics");
+  await url.blur();
+  await page.getByRole("button", { name: "Use a token instead" }).click();
+  await page.getByRole("button", { name: "Fetch the host's keys" }).click();
+  // The host's preferred key type carries the override too, so every key shows at once.
+  await expect(page.getByRole("checkbox", { name: /^This matches: ssh-rsa/ })).toBeVisible();
+  await expectMarked(page, "the host's keys", ["ssh-ed25519", "ssh-rsa"]);
+  await page.getByRole("checkbox", { name: /^This matches: ssh-ed25519/ }).check();
+  await page.getByRole("button", { name: "Create the repository and its keys" }).click();
+  await expect(page.getByRole("button", { name: /^Test access in dev/ })).toBeVisible();
+  await expectMarked(page, "the keys", [
+    "SHA256:dev7Kq2xY0m8vPz3Lr9Wc4Tn6Hb1Jd5Fg0Ns2Qe",
+    "The key of prod was made earlier; it stays as it is.",
+  ]);
+  await page.getByRole("button", { name: /^Test access in dev/ }).click();
+  await expect(page.getByRole("alert")).toBeVisible();
+  await expectMarked(page, "a refused test", ["then test again."]);
+  expectOnlyStubbed(paths, [...STUBBED, ...ROUTES]);
+});
+
+test("the results of the catalog's actions mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubManagement(poisoned(page));
+  await visit(page, TABLE, ["fact_sales"]);
+  await page.getByRole("button", { name: "Actions" }).click();
+  await page.getByRole("menuitem", { name: "Maintain now…" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Maintain now" }).click();
+  await expect(page.getByRole("dialog").getByText(/is queued/)).toBeVisible();
+  await expectMarked(page, "the queued maintenance", ["fact_sales"]);
+  await page.keyboard.press("Escape");
+
+  await visit(page, `/catalog?env=${n("prod")}&view=dropped`, ["fact_returns"]);
+  await page.getByRole("button", { name: /^Undrop gold\.sales.*fact_returns/ }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Restored" })).toBeVisible();
+  await expectMarked(page, "an Undrop", ["fact_returns"]);
+  expectOnlyStubbed(paths, MANAGE_STUBBED);
+});
+
+test("the notes and refusals of the place menu mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubPlaces(poisoned(page));
+  await visit(page, `/catalog?env=${n("prod")}&ns=${n("bronze")}`, ["bronze"]);
+  await page.getByRole("button", { name: /^Actions for bronze/ }).click();
+  await page.getByRole("menuitem", { name: "New namespace…" }).click();
+  const create = page.getByRole("dialog");
+  const path = create.getByRole("textbox", { name: "Path" });
+  await path.press("End");
+  await path.pressSequentially("landing");
+  const button = create.getByRole("button", { name: "Create" });
+  await expect(button).not.toHaveAttribute("data-pending");
+  await button.click();
+  await expect(page.locator(".catalog-result", { hasText: /^Created namespace/ })).toBeVisible();
+  await expectMarked(page, "the note after a create", ["landing"]);
+
+  await visit(page, `/catalog?env=${n("prod")}&ns=${n("gold.sales")}`, ["gold.sales"]);
+  await page.getByRole("button", { name: /^Actions for gold\.sales/ }).click();
+  await page.getByRole("menuitem", { name: "New external table…" }).click();
+  const refused = page.getByRole("dialog");
+  await refused.getByRole("textbox", { name: "Name" }).fill("orders");
+  await refused.getByRole("textbox", { name: "Location" }).fill("raw/none/*.csv");
+  const register = refused.getByRole("button", { name: "Register" });
+  await expect(register).not.toHaveAttribute("data-pending");
+  await register.click();
+  await expect(refused.getByRole("alert")).toBeVisible();
+  await expectMarked(page, "a refused registration", ["No file matches 'raw/none/*.csv'."]);
+  expectOnlyStubbed(paths, PLACES_STUBBED);
+});

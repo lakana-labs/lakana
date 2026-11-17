@@ -244,7 +244,10 @@ describe("VersionFiles", () => {
     await user.click(await screen.findByRole("button", { name: "Download models/model.pkl" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(GONE);
-    expect(onGone).toHaveBeenCalledExactlyOnceWith(GONE);
+    // onGone runs in an effect after the render that shows the alert, so wait for it.
+    await waitFor(() => {
+      expect(onGone).toHaveBeenCalledExactlyOnceWith(GONE);
+    });
     expect(saveBlob).not.toHaveBeenCalled();
   });
 
@@ -268,7 +271,10 @@ describe("VersionFiles", () => {
     const { onGone } = renderFiles();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(GONE);
-    expect(onGone).toHaveBeenCalledExactlyOnceWith(GONE);
+    // onGone runs in an effect after the render that shows the alert, so wait for it.
+    await waitFor(() => {
+      expect(onGone).toHaveBeenCalledExactlyOnceWith(GONE);
+    });
   });
 
   it("shows ReadFailed with Try again when the files cannot be read", async () => {
