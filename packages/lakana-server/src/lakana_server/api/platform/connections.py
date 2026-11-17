@@ -3,20 +3,33 @@
 A connection is addressed through its environment (`/api/v1/environments/{name}/connections`):
 it lives there as a secret does. `MANAGE_CONNECTION` creates, changes and deletes;
 `READ_ENVIRONMENT` lists and shows. No answer carries a secret value or a CA certificate.
+`/api/v1/connections` lists the connections of every environment the caller may read, and those
+environments; `/api/v1/environments/{name}/connection-tests` tests every connection of one
+environment (Test all).
+
+Every route that answers a connection leaves unset fields out (`response_model_exclude_unset`),
+so that the fields of `last_test` a reader may not see are absent, not `null`; every other field
+is always set.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import SecretStr
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.connections.service import ConnectionService, ConnectionView
+from lakana_core.connections.service import TEST_ALL_MAX, ConnectionService, ConnectionView
 from lakana_core.models import ConnectionTest
 from lakana_server.api.platform.schemas import (
     ConnectionCreate,
+    ConnectionEnvironmentOut,
+    ConnectionLastTestOut,
     ConnectionOut,
     ConnectionPage,
+    ConnectionQueuedTestOut,
+    ConnectionQueuedTestPage,
     ConnectionTestOut,
     ConnectionUpdate,
     DeclaringAssetOut,
@@ -32,6 +45,25 @@ router = APIRouter(
     responses=errors(401),
 )
 
+all_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/connections",
+    tags=["connections"],
+    responses=errors(401),
+)
+"""The connections of every environment the caller may read, and those environments."""
+
+tests_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/environments/{environment_name}/connection-tests",
+    tags=["connections"],
+    responses=errors(401),
+)
+"""Test all: a test of every connection of an environment, a page at a time.
+
+Not `.../connections/tests`, which would read as the tests of a connection named ``tests``.
+"""
+
 
 def _to_out(view: ConnectionView) -> ConnectionOut:
     """Build a response body from what the service shows.
@@ -44,8 +76,27 @@ def _to_out(view: ConnectionView) -> ConnectionOut:
     Returns
     -------
     ConnectionOut
-        The body; it has no field for a secret value.
+        The body; it has no field for a secret value. Every field is set, and the id, request
+        time, message and requester of `last_test` only when the view carries them, so that
+        `response_model_exclude_unset` leaves them out otherwise.
     """
+    last_test = None
+    if view.last_test is not None:
+        test = view.last_test
+        detail: dict[str, Any] = {}
+        if test.detail is not None:
+            detail = {
+                "id": test.detail.id,
+                "created_at": test.detail.created_at,
+                "message": test.detail.message,
+                "requested_by": test.detail.requested_by,
+            }
+        last_test = ConnectionLastTestOut(
+            state=test.state.value,
+            outcome=None if test.outcome is None else test.outcome.value,
+            finished_at=test.finished_at,
+            **detail,
+        )
     return ConnectionOut(
         name=view.name,
         kind=view.kind.value,
@@ -59,6 +110,9 @@ def _to_out(view: ConnectionView) -> ConnectionOut:
         created_by=view.created_by,
         created_at=view.created_at,
         updated_at=view.updated_at,
+        environment=view.environment,
+        last_test=last_test,
+        actions=list(view.actions),
     )
 
 
@@ -80,7 +134,13 @@ def _plain(values: dict[str, SecretStr] | None) -> dict[str, str] | None:
     return {key: value.get_secret_value() for key, value in values.items()}
 
 
-@router.post("", response_model=ConnectionOut, status_code=201, responses=errors(403, 404, 409))
+@router.post(
+    "",
+    response_model=ConnectionOut,
+    response_model_exclude_unset=True,
+    status_code=201,
+    responses=errors(403, 404, 409),
+)
 def create_connection(
     environment_name: str,
     body: ConnectionCreate,
@@ -132,7 +192,9 @@ def create_connection(
     return _to_out(view)
 
 
-@router.get("", response_model=ConnectionPage, responses=errors(403, 404))
+@router.get(
+    "", response_model=ConnectionPage, response_model_exclude_unset=True, responses=errors(403, 404)
+)
 def list_connections(
     environment_name: str,
     limit: int = Query(default=100, ge=1, le=200),
@@ -142,9 +204,12 @@ def list_connections(
 ) -> ConnectionPage:
     """List the connections of an environment.
 
-    Lists one page of connections, newest first, with the assets that declare each. Needs
-    `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Answers 404 when
-    the environment does not exist and 422 for a cursor this list did not issue.
+    Lists one page of connections, newest first, with the assets that declare each, its last
+    test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a
+    task token is refused with 403. Every reader gets the last test's `state`, `outcome` and
+    `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of
+    `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers
+    404 when the environment does not exist and 422 for a cursor this list did not issue.
 
     Parameters
     ----------
@@ -170,7 +235,12 @@ def list_connections(
     )
 
 
-@router.get("/{connection_name}", response_model=ConnectionOut, responses=errors(403, 404))
+@router.get(
+    "/{connection_name}",
+    response_model=ConnectionOut,
+    response_model_exclude_unset=True,
+    responses=errors(403, 404),
+)
 def get_connection(
     environment_name: str,
     connection_name: str,
@@ -180,9 +250,12 @@ def get_connection(
     """Show a connection.
 
     Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its
-    secret and the assets that declare it. Needs `READ_ENVIRONMENT` in the environment; a task
-    token is refused with 403, naming no connection. Answers 404 when the environment or the
-    connection does not exist; the answer names no other connection.
+    secret, the assets that declare it, its last test and what you may do with it (`actions`).
+    Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no
+    connection. Every reader gets the last test's `state`, `outcome` and `finished_at`; its
+    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the
+    environment, and for anyone else those keys are absent. Answers 404 when the environment or
+    the connection does not exist; the answer names no other connection.
 
     Parameters
     ----------
@@ -203,7 +276,12 @@ def get_connection(
     return _to_out(service.get(principal, environment_name, connection_name))
 
 
-@router.patch("/{connection_name}", response_model=ConnectionOut, responses=errors(403, 404, 409))
+@router.patch(
+    "/{connection_name}",
+    response_model=ConnectionOut,
+    response_model_exclude_unset=True,
+    responses=errors(403, 404, 409),
+)
 def update_connection(
     environment_name: str,
     connection_name: str,
@@ -349,6 +427,64 @@ def request_connection_test(
     return _test_out(service.request_test(principal, environment_name, connection_name))
 
 
+@tests_router.post(
+    "",
+    response_model=ConnectionQueuedTestPage,
+    status_code=202,
+    responses=errors(403, 404, 409),
+)
+def request_connection_tests(
+    environment_name: str,
+    limit: int = Query(default=TEST_ALL_MAX, ge=1, le=TEST_ALL_MAX),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> ConnectionQueuedTestPage:
+    """Queue a test of every connection of an environment (Test all), a page at a time.
+
+    Takes one page of the environment's connection list, newest first (`limit` 1 to 200,
+    default 200), and handles each connection in turn: a connection whose test is queued or
+    running and under 10 minutes old is not queued again, and that test is returned with
+    `queued: false`; an older open test is finished as failed first; every other connection
+    gets a new test with `queued: true`. An open test is never a 409. Poll each test with
+    `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as
+    `cursor` for the next page; it takes the cursors of
+    `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422.
+    Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the
+    environment does not exist, and 409 when a connection changed at the same time: the
+    connections before it stay queued, and sending the request again returns their tests with
+    `queued: false`.
+
+    Parameters
+    ----------
+    environment_name
+        The environment.
+    limit
+        Most connections tested (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    ConnectionQueuedTestPage
+        A test for each connection of this page, and the cursor of the next.
+    """
+    page = service.request_tests(principal, environment_name, limit=limit, cursor=cursor)
+    return ConnectionQueuedTestPage(
+        items=[
+            ConnectionQueuedTestOut(
+                connection=item.connection, test_id=item.test.id, queued=item.queued
+            )
+            for item in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )
+
+
 @router.get(
     "/{connection_name}/tests/{test_id}",
     response_model=ConnectionTestOut,
@@ -385,3 +521,82 @@ def get_connection_test(
         The test.
     """
     return _test_out(service.test_result(principal, environment_name, connection_name, test_id))
+
+
+@all_router.get(
+    "", response_model=ConnectionPage, response_model_exclude_unset=True, responses=errors(403, 404)
+)
+def list_all_connections(
+    environment: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> ConnectionPage:
+    """List the connections of every environment you may read.
+
+    Without `environment`, lists one page of the connections of every environment where you
+    hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An
+    environment where you do not hold it is left out, so this is never a 404, and never a 403
+    but for a task token, which is refused as every connection read is. With `environment`, it
+    answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers,
+    with its 403 and 404. Each connection carries its last test and what you may do with it
+    (`actions`), as in that list: the last test's `id`, `created_at`, `message` and
+    `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send
+    `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment
+    is refused with 422 here.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    limit
+        Most connections returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    ConnectionPage
+        The connections of this page, and the cursor of the next.
+    """
+    page = service.list_all(principal, environment=environment, limit=limit, cursor=cursor)
+    return ConnectionPage(
+        items=[_to_out(view) for view in page.items], next_cursor=page.next_cursor
+    )
+
+
+@all_router.get(
+    "/environments", response_model=list[ConnectionEnvironmentOut], responses=errors(403)
+)
+def list_connection_environments(
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> list[ConnectionEnvironmentOut]:
+    """List the environments whose connections you may read, and what you may do there.
+
+    Every environment where you hold `READ_ENVIRONMENT`, sorted by name, with its `actions`:
+    `create` and `test` where you hold `MANAGE_CONNECTION`, and `name_secret` (naming an
+    existing secret for a connection) where you hold `MANAGE_SECRET` too. Empty when there is
+    none. A task token is refused with 403, as every connection read is.
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    list of ConnectionEnvironmentOut
+        The environments.
+    """
+    return [
+        ConnectionEnvironmentOut(name=env.name, actions=list(env.actions))
+        for env in service.environments(principal)
+    ]

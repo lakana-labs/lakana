@@ -16,7 +16,8 @@ from typing import Any, cast
 
 import pytest
 from core_test_helpers import deploy_manifest
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import event, func, select
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
@@ -24,10 +25,13 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind, TaskScope
+from lakana_core.connections import service as service_module
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import (
+    TEST_ALL_MAX,
     ConnectionService,
     ConnectionView,
+    last_tests,
     missing_connections,
 )
 from lakana_core.db import refuse_concurrent_change
@@ -2415,3 +2419,681 @@ def test_a_request_locks_the_open_test_it_reads(
     with pytest.raises(ConflictError):
         service.request_test(world.data_engineer, "prod", "crm-db")
     assert locked and all(locked)
+
+
+def _add_test(
+    world: World,
+    connection_id: uuid.UUID,
+    *,
+    at: datetime,
+    state: ConnectionTestState,
+    outcome: ConnectionTestOutcome | None = None,
+    requested_by: uuid.UUID | None = None,
+    test_id: uuid.UUID | None = None,
+    environment: str = "prod",
+    message: str | None = None,
+) -> ConnectionTest:
+    """Insert a connection test of a given time and state.
+
+    Parameters
+    ----------
+    world
+        The world.
+    connection_id
+        The connection it tests.
+    at
+        Its creation time.
+    state
+        Its state.
+    outcome
+        Its outcome, once done.
+    requested_by
+        Who asked; the data engineer by default.
+    test_id
+        Its id; a new one by default.
+    environment
+        The connection's environment; `prod` by default.
+    message
+        Its message; none by default.
+
+    Returns
+    -------
+    ConnectionTest
+        The stored row.
+    """
+    env = world.session.scalars(select(Environment).where(Environment.name == environment)).one()
+    row = ConnectionTest(
+        id=test_id or uuid.uuid4(),
+        connection_id=connection_id,
+        environment_id=env.id,
+        requested_by=requested_by or world.data_engineer.id,
+        state=state,
+        outcome=outcome,
+        message=message,
+        created_at=at,
+        finished_at=at if state == ConnectionTestState.DONE else None,
+    )
+    world.session.add(row)
+    world.session.commit()
+    return row
+
+
+def test_the_last_test_is_the_newest_of_any_state(world: World) -> None:
+    world.postgres(world.data_engineer)
+    cid = world.connection_id("prod", "crm-db")
+    _add_test(
+        world,
+        cid,
+        at=_NOW,
+        state=ConnectionTestState.DONE,
+        outcome=ConnectionTestOutcome.OK,
+    )
+    _add_test(world, cid, at=_NOW + timedelta(seconds=1), state=ConnectionTestState.QUEUED)
+
+    last = world.connections().get(world.data_engineer, "prod", "crm-db").last_test
+
+    assert last is not None
+    assert (last.state, last.outcome) == (ConnectionTestState.QUEUED, None)
+
+    world.postgres(world.data_engineer, "tied-db")
+    tied = world.connection_id("prod", "tied-db")
+    low, high = sorted((uuid.uuid4(), uuid.uuid4()))
+    for test_id, state in ((high, ConnectionTestState.RUNNING), (low, ConnectionTestState.QUEUED)):
+        _add_test(world, tied, at=_NOW, state=state, test_id=test_id)
+    tie = world.connections().get(world.data_engineer, "prod", "tied-db").last_test
+    assert tie is not None
+    assert tie.state == ConnectionTestState.RUNNING
+    assert tie.detail is not None
+    assert tie.detail.id == high
+
+    world.connections().delete(world.data_engineer, "prod", "crm-db")
+    world.postgres(world.data_engineer)
+    assert world.connections().get(world.data_engineer, "prod", "crm-db").last_test is None
+
+
+def test_a_connection_never_tested_has_no_last_test(world: World) -> None:
+    view = world.postgres(world.data_engineer)
+
+    assert view.last_test is None
+    assert view.environment == "prod"
+    assert world.connections().get(world.analyst, "prod", "crm-db").last_test is None
+
+
+def test_last_tests_reads_a_page_in_one_statement(world: World) -> None:
+    ids = []
+    for number in range(5):
+        world.postgres(world.data_engineer, f"db-{number}")
+        ids.append(world.connection_id("prod", f"db-{number}"))
+        _add_test(world, ids[-1], at=_NOW, state=ConnectionTestState.QUEUED)
+    statements: list[str] = []
+
+    def count(*args: object) -> None:
+        statements.append(str(args[2]))
+
+    engine = world.session.get_bind()
+    event.listen(engine, "after_cursor_execute", count)
+    try:
+        found = last_tests(world.session, ids)
+    finally:
+        event.remove(engine, "after_cursor_execute", count)
+
+    assert len(statements) == 1
+    assert set(found) == set(ids)
+    assert last_tests(world.session, []) == {}
+
+
+def test_the_last_test_names_who_ran_it(world: World) -> None:
+    eva = _principal(world.session, "eva")
+    world.postgres(world.data_engineer)
+    _add_test(
+        world,
+        world.connection_id("prod", "crm-db"),
+        at=_NOW,
+        state=ConnectionTestState.QUEUED,
+        requested_by=eva.id,
+    )
+
+    last = world.connections().get(world.data_engineer, "prod", "crm-db").last_test
+
+    assert last is not None
+    assert last.detail is not None
+    assert last.detail.requested_by == "eva"
+    assert last.detail.created_at == _NOW
+
+
+def test_a_managers_view_has_the_actions_and_the_tests_detail(world: World) -> None:
+    """A data engineer manages connections but not secrets: no `name_secret`, the whole test."""
+    world.postgres(world.data_engineer)
+    _add_test(
+        world,
+        world.connection_id("prod", "crm-db"),
+        at=_NOW,
+        state=ConnectionTestState.DONE,
+        outcome=ConnectionTestOutcome.CREDENTIALS,
+    )
+
+    view = world.connections().get(world.data_engineer, "prod", "crm-db")
+    (listed,) = world.connections().list(world.data_engineer, "prod").items
+
+    for seen in (view, listed):
+        assert seen.actions == ("test", "update", "delete")
+        assert seen.last_test is not None
+        assert seen.last_test.detail is not None
+        assert seen.last_test.detail.requested_by == "dana"
+
+
+def test_an_administrators_view_may_name_a_secret(world: World) -> None:
+    """`MANAGE_CONNECTION` and `MANAGE_SECRET` give every action, on create and update too."""
+    created = world.postgres(world.admin)
+    updated = world.connections().update(world.admin, "prod", "crm-db", settings={"user": "loader"})
+    shown = world.connections().get(world.admin, "prod", "crm-db")
+
+    for view in (created, updated, shown):
+        assert view.actions == ("test", "update", "delete", "name_secret")
+
+
+def test_a_readers_view_has_no_actions_and_no_detail(world: World) -> None:
+    """An analyst sees the outcome and its time, never the message, the id or who ran it."""
+    world.postgres(world.data_engineer)
+    _add_test(
+        world,
+        world.connection_id("prod", "crm-db"),
+        at=_NOW,
+        state=ConnectionTestState.DONE,
+        outcome=ConnectionTestOutcome.CREDENTIALS,
+    )
+
+    view = world.connections().get(world.analyst, "prod", "crm-db")
+    (listed,) = world.connections().list(world.analyst, "prod").items
+
+    for seen in (view, listed):
+        assert seen.actions == ()
+        assert seen.last_test is not None
+        assert seen.last_test.detail is None
+        assert (seen.last_test.state, seen.last_test.outcome) == (
+            ConnectionTestState.DONE,
+            ConnectionTestOutcome.CREDENTIALS,
+        )
+        assert seen.last_test.finished_at is not None
+    assert world.events(AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def test_a_pages_rights_are_asked_in_one_batch(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three connections of one page cost one `permits_each` call, not one per row."""
+    for number in range(3):
+        world.postgres(world.data_engineer, f"db-{number}")
+    asked: list[int] = []
+    real = service_module.permits_each
+
+    def spy(*args: Any) -> list[bool]:  # ruff: ignore[any-type]
+        asked.append(len(args[2]))
+        return real(*args)
+
+    monkeypatch.setattr(service_module, "permits_each", spy)
+
+    page = world.connections().list(world.data_engineer, "prod")
+
+    assert len(page.items) == 3
+    assert asked == [2]
+
+
+def _environment(world: World, name: str, *, deleted: bool = False) -> None:
+    """Add an environment where only the administrator holds a right.
+
+    Parameters
+    ----------
+    world
+        The world.
+    name
+        Its name.
+    deleted
+        Mark it deleted, so that no lookup finds it.
+    """
+    world.session.add(
+        Environment(
+            id=uuid.uuid4(),
+            name=name,
+            storage_root=f"file:///srv/{name}",
+            deleted_at=_NOW if deleted else None,
+        )
+    )
+    world.session.commit()
+
+
+def _made_at(world: World, environment: str, name: str, at: datetime) -> None:
+    """Create a directory connection as the administrator, with a given creation time.
+
+    Parameters
+    ----------
+    world
+        The world.
+    environment
+        Its environment.
+    name
+        Its name.
+    at
+        Its creation time.
+    """
+    world.connections().create(
+        world.admin,
+        environment,
+        name=name,
+        kind=ConnectionKind.DIRECTORY,
+        address={"root": "r", "path": name},
+        settings={},
+    )
+    world.session.execute(
+        sa_update(Connection)
+        .where(Connection.id == world.connection_id(environment, name))
+        .values(created_at=at)
+    )
+    world.session.commit()
+
+
+def test_the_cross_environment_list_pages_every_readable_connection_once(world: World) -> None:
+    """Review Focus 4: five connections over three environments, one unreadable, pages of 2."""
+    _environment(world, "stage")
+    made = [("prod", "p-1"), ("dev", "d-1"), ("stage", "s-1"), ("prod", "p-2"), ("dev", "d-2")]
+    for minute, (environment, name) in enumerate(made):
+        _made_at(world, environment, name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+
+    first = service.list_all(world.data_engineer, limit=2)
+    assert first.next_cursor is not None
+    second = service.list_all(world.data_engineer, limit=2, cursor=first.next_cursor)
+
+    seen = [(view.environment, view.name) for view in first.items + second.items]
+    assert seen == [("dev", "d-2"), ("prod", "p-2"), ("dev", "d-1"), ("prod", "p-1")]
+    assert second.next_cursor is None
+    assert {view.actions for view in first.items + second.items} == {("test", "update", "delete")}
+    assert world.events(AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def test_the_cross_environment_list_gives_each_row_its_own_environments_rights(
+    world: World,
+) -> None:
+    """A data engineer of `dev` and an analyst of `prod` gets each row with that row's rights."""
+    GrantService(world.session, AllowAllAuthorization()).grant(
+        world.admin,
+        principal="alice",
+        role=Role.DATA_ENGINEER,
+        kind=SecurableKind.ENVIRONMENT,
+        environment="dev",
+    )
+    for minute, environment in enumerate(("prod", "dev")):
+        _made_at(world, environment, f"{environment}-db", _NOW + timedelta(minutes=minute))
+        _add_test(
+            world,
+            world.connection_id(environment, f"{environment}-db"),
+            at=_NOW + timedelta(minutes=minute),
+            state=ConnectionTestState.DONE,
+            outcome=ConnectionTestOutcome.CREDENTIALS,
+            environment=environment,
+            message=f"{environment}: /srv/landing denied",
+        )
+
+    page = world.connections().list_all(world.analyst)
+
+    managed, read_only = page.items
+    assert (managed.environment, read_only.environment) == ("dev", "prod")
+    assert managed.actions == ("test", "update", "delete")
+    assert managed.last_test is not None and managed.last_test.detail is not None
+    assert managed.last_test.detail.message == "dev: /srv/landing denied"
+    assert managed.last_test.detail.requested_by == "dana"
+    assert read_only.actions == ()
+    assert read_only.last_test is not None and read_only.last_test.detail is None
+    assert read_only.last_test.outcome == ConnectionTestOutcome.CREDENTIALS
+
+
+def test_list_all_with_an_environment_answers_as_the_per_environment_list(world: World) -> None:
+    """The same rows and cursor as `list`, and its refusals: 403 for no right, 404 for none."""
+    for minute, name in enumerate(("first", "second", "third")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    _made_at(world, "dev", "elsewhere", _NOW)
+    service = world.connections()
+
+    for p in (world.analyst, world.data_engineer):
+        page = service.list_all(p, environment="prod", limit=2)
+        assert page == service.list(p, "prod", limit=2)
+        assert service.list_all(p, environment="prod", cursor=page.next_cursor) == service.list(
+            p, "prod", cursor=page.next_cursor
+        )
+    with pytest.raises(PermissionDenied):
+        service.list_all(world.analyst, environment="dev")
+    with pytest.raises(NotFoundError):
+        service.list_all(world.admin, environment="nowhere")
+
+
+def test_list_all_refuses_a_task_token(world: World) -> None:
+    """A task token gets the refusal of every connection read, and no environment list either."""
+    world.postgres(world.data_engineer)
+    task = dataclasses.replace(
+        world.data_engineer,
+        task_scope=TaskScope(environment="prod", asset_scope=[], token_id=uuid.uuid4()),
+    )
+    service = world.connections()
+
+    for call in (
+        lambda: service.list_all(task),
+        lambda: service.list_all(task, environment="prod"),
+        lambda: service.environments(task),
+    ):
+        with pytest.raises(PermissionDenied) as caught:
+            call()
+        assert str(caught.value) == (
+            "a task token cannot list or show connections; read them with your own token"
+        )
+
+
+def test_a_cursor_of_the_per_environment_list_is_refused_by_list_all(world: World) -> None:
+    """The two lists' cursors name different lists, so neither takes the other's."""
+    for minute, name in enumerate(("first", "second")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+    per_environment = service.list(world.data_engineer, "prod", limit=1).next_cursor
+    across = service.list_all(world.data_engineer, limit=1).next_cursor
+    assert per_environment is not None and across is not None
+
+    with pytest.raises(ValidationError):
+        service.list_all(world.data_engineer, cursor=per_environment)
+    with pytest.raises(ValidationError):
+        service.list(world.data_engineer, "prod", cursor=across)
+    with pytest.raises(ValidationError):
+        service.list_all(world.data_engineer, limit=0)
+
+
+def test_environments_lists_where_you_may_read_with_your_actions(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Engineer of `dev`, analyst of `prod`, nothing in `stage`: one `permits_each` batch."""
+    _environment(world, "stage")
+    _environment(world, "gone", deleted=True)
+    eli = _principal(world.session, "eli")
+    grants = GrantService(world.session, AllowAllAuthorization())
+    for environment, role in (("dev", Role.DATA_ENGINEER), ("prod", Role.ANALYST)):
+        grants.grant(
+            world.admin,
+            principal="eli",
+            role=role,
+            kind=SecurableKind.ENVIRONMENT,
+            environment=environment,
+        )
+    asked: list[int] = []
+    real = service_module.permits_each
+
+    def spy(*args: Any) -> list[bool]:  # ruff: ignore[any-type]
+        asked.append(len(args[2]))
+        return real(*args)
+
+    monkeypatch.setattr(service_module, "permits_each", spy)
+    service = world.connections()
+
+    found = service.environments(eli)
+
+    assert [(env.name, env.actions) for env in found] == [("dev", ("create", "test")), ("prod", ())]
+    assert asked == [9]
+    assert [(env.name, env.actions) for env in service.environments(world.admin)] == [
+        ("dev", ("create", "test", "name_secret")),
+        ("prod", ("create", "test", "name_secret")),
+        ("stage", ("create", "test", "name_secret")),
+    ]
+    assert world.events(AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def _tests_of(world: World, environment: str, name: str) -> list[ConnectionTest]:
+    """Read a connection's tests, oldest first.
+
+    Parameters
+    ----------
+    world
+        The world.
+    environment
+        Its environment.
+    name
+        Its name.
+
+    Returns
+    -------
+    list of ConnectionTest
+        The rows.
+    """
+    return list(
+        world.session.scalars(
+            select(ConnectionTest)
+            .where(ConnectionTest.connection_id == world.connection_id(environment, name))
+            .order_by(ConnectionTest.created_at)
+        )
+    )
+
+
+def test_test_all_returns_an_open_test_and_queues_the_rest(world: World) -> None:
+    """Review Focus 2: open 2 minutes ago, open 11 minutes ago, never tested; no 409."""
+    for minute, name in enumerate(("never", "stuck", "fresh")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    now = datetime.now(UTC)
+    fresh = _add_test(
+        world,
+        world.connection_id("prod", "fresh"),
+        at=now - timedelta(minutes=2),
+        state=ConnectionTestState.QUEUED,
+    )
+    stuck = _add_test(
+        world,
+        world.connection_id("prod", "stuck"),
+        at=now - timedelta(minutes=11),
+        state=ConnectionTestState.QUEUED,
+    )
+    fresh_id, stuck_id = fresh.id, stuck.id
+
+    page = world.connections().request_tests(world.data_engineer, "prod")
+
+    assert page.next_cursor is None
+    assert [(item.connection, item.queued) for item in page.items] == [
+        ("fresh", False),
+        ("stuck", True),
+        ("never", True),
+    ]
+    assert page.items[0].test.id == fresh_id
+    assert [test.id for test in _tests_of(world, "prod", "fresh")] == [fresh_id]
+    old, new = _tests_of(world, "prod", "stuck")
+    assert (old.id, old.state, old.outcome, old.message) == (
+        stuck_id,
+        ConnectionTestState.DONE,
+        ConnectionTestOutcome.FAILED,
+        _STUCK,
+    )
+    assert new.id == page.items[1].test.id and new.state == ConnectionTestState.QUEUED
+    assert [test.id for test in _tests_of(world, "prod", "never")] == [page.items[2].test.id]
+    tested = world.events(AuditEventType.CONNECTION_TESTED)
+    assert [(e.detail["connection"], e.detail["state"]) for e in tested] == [
+        ("stuck", "done"),
+        ("stuck", "queued"),
+        ("never", "queued"),
+    ]
+    assert tested[1].detail == {
+        "connection": "stuck",
+        "environment": "prod",
+        "test_id": str(new.id),
+        "state": "queued",
+    }
+    assert tested[1].principal_id == world.data_engineer.id
+
+
+def test_test_all_pages_by_the_lists_cursor(world: World) -> None:
+    """Review Focus 3: 201 connections; 200 on the first page, the last one on the second."""
+    env = world.session.scalars(select(Environment).where(Environment.name == "prod")).one()
+    names = [f"c-{number:03d}" for number in range(201)]
+    for number, name in enumerate(names):
+        world.session.add(
+            Connection(
+                id=uuid.uuid4(),
+                environment_id=env.id,
+                name=name,
+                kind=ConnectionKind.DIRECTORY,
+                address={"root": "r", "path": name},
+                settings={},
+                created_by=world.admin.id,
+                created_at=_NOW + timedelta(seconds=number),
+            )
+        )
+    world.session.commit()
+    service = world.connections()
+    assert TEST_ALL_MAX == 200
+
+    first = service.request_tests(world.data_engineer, "prod")
+    assert len(first.items) == TEST_ALL_MAX and first.next_cursor is not None
+    second = service.request_tests(world.data_engineer, "prod", cursor=first.next_cursor)
+
+    assert second.next_cursor is None
+    queued = [item.connection for item in first.items + second.items]
+    assert queued == names[::-1]
+    assert all(item.queued for item in first.items + second.items)
+    assert world.session.scalar(select(func.count()).select_from(ConnectionTest)) == 201
+    with pytest.raises(ValidationError):
+        service.request_tests(world.data_engineer, "prod", limit=TEST_ALL_MAX + 1)
+    with pytest.raises(ValidationError):
+        service.request_tests(world.data_engineer, "prod", limit=0)
+    across = service.list_all(world.data_engineer, limit=1).next_cursor
+    with pytest.raises(ValidationError):
+        service.request_tests(world.data_engineer, "prod", cursor=across)
+
+
+def test_test_all_needs_manage_connection(world: World) -> None:
+    world.postgres(world.data_engineer)
+
+    with pytest.raises(PermissionDenied):
+        world.connections().request_tests(world.analyst, "prod")
+    with pytest.raises(NotFoundError):
+        world.connections().request_tests(world.admin, "nowhere")
+
+    assert world.session.scalar(select(func.count()).select_from(ConnectionTest)) == 0
+    assert world.events(AuditEventType.CONNECTION_TESTED) == []
+
+
+def test_a_single_test_still_refuses_while_one_is_open(world: World) -> None:
+    """Test all returns an open test; a single test keeps its 409, word for word."""
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    (queued,) = service.request_tests(world.data_engineer, "prod").items
+    (again,) = service.request_tests(world.data_engineer, "prod").items
+    assert (queued.queued, again.queued, again.test.id) == (True, False, queued.test.id)
+
+    with pytest.raises(ConflictError) as refused:
+        service.request_test(world.data_engineer, "prod", "crm-db")
+
+    assert str(refused.value) == (
+        "a test of `crm-db` is already queued; see it with "
+        f"lakana connection test crm-db --env prod --id {queued.test.id}"
+    )
+
+
+def test_test_all_of_an_environment_without_connections_is_empty(world: World) -> None:
+    world.postgres(world.data_engineer)
+
+    page = world.connections().request_tests(world.data_engineer, "dev")
+
+    assert (page.items, page.next_cursor) == ([], None)
+    assert world.events(AuditEventType.CONNECTION_TESTED) == []
+
+
+def test_test_all_commits_each_connection_and_a_failure_leaves_no_transaction(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each connection is locked, queued and committed on its own; a failure rolls back."""
+    for minute, name in enumerate(("second", "first")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+    real = ConnectionService._queue_test
+    seen: list[str] = []
+
+    def failing(self: ConnectionService, *args: Any) -> ConnectionTest:  # ruff: ignore[any-type]
+        name = args[2].name
+        seen.append(name)
+        assert not world.session.new, "the connection before was not committed"
+        if name == "second":
+            raise OperationalError("insert", {}, Exception("connection lost"))
+        return real(self, *args)
+
+    monkeypatch.setattr(ConnectionService, "_queue_test", failing)
+
+    with pytest.raises(OperationalError):
+        service.request_tests(world.data_engineer, "prod")
+
+    assert seen == ["first", "second"]
+    assert not world.session.in_transaction()
+    assert len(_tests_of(world, "prod", "first")) == 1
+    assert _tests_of(world, "prod", "second") == []
+
+
+def test_test_all_that_deadlocks_is_a_conflict_and_a_retry_finds_the_tests_before_it(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deadlock on one connection is a 409; the ones before it stay queued for the retry."""
+    for minute, name in enumerate(("second", "first")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+    real = ConnectionService._queue_test
+    deadlocks = [True]
+
+    def deadlocking(self: ConnectionService, *args: Any) -> ConnectionTest:  # ruff: ignore[any-type]
+        if args[2].name == "second" and deadlocks.pop(0):
+            raise OperationalError("insert", {}, _PgError({"C": "40P01"}))
+        return real(self, *args)
+
+    monkeypatch.setattr(ConnectionService, "_queue_test", deadlocking)
+
+    with pytest.raises(ConflictError, match="connection `second` changed at the same time"):
+        service.request_tests(world.data_engineer, "prod")
+    deadlocks.append(False)
+    retried = service.request_tests(world.data_engineer, "prod")
+
+    assert [(item.connection, item.queued) for item in retried.items] == [
+        ("first", False),
+        ("second", True),
+    ]
+    assert len(_tests_of(world, "prod", "first")) == 1
+
+
+def test_test_all_skips_a_connection_deleted_after_the_page_was_read(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A connection gone before its lock is left out of the answer; the others are queued."""
+    for minute, name in enumerate(("second", "first")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    gone = world.connection_id("prod", "second")
+    real = service_module.newest_first
+
+    def then_deleted(*args: Any, **kwargs: Any) -> Any:  # ruff: ignore[any-type]
+        page = real(*args, **kwargs)
+        world.session.execute(sa_delete(Connection).where(Connection.id == gone))
+        world.session.commit()
+        return page
+
+    monkeypatch.setattr(service_module, "newest_first", then_deleted)
+
+    page = world.connections().request_tests(world.data_engineer, "prod")
+
+    assert not world.session.in_transaction()
+    assert [(item.connection, item.queued) for item in page.items] == [("first", True)]
+    assert world.connection("prod", "second") is None
+
+
+def test_test_all_answers_for_a_connection_deleted_after_its_test_was_queued(
+    world: World,
+) -> None:
+    """The answer holds each test as committed; a delete afterwards cascades without harm."""
+    world.postgres(world.data_engineer, secret_values=None)
+    service = world.connections()
+    page = service.request_tests(world.data_engineer, "prod")
+
+    service.delete(world.data_engineer, "prod", "crm-db")
+
+    (item,) = page.items
+    assert (item.connection, item.test.state, item.queued) == (
+        "crm-db",
+        ConnectionTestState.QUEUED,
+        True,
+    )
+    assert world.session.get(ConnectionTest, item.test.id) is None
