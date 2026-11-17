@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from home_test_helpers import grant, person
 from sqlalchemy import delete, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef, Securable, TaskScope
@@ -491,6 +492,62 @@ def test_names_are_one_visible_line_and_unique_per_owner(
     assert service.update(
         bob, dev, first.id, name=stored, sql="SELECT 5", visibility="private"
     ).sql == ("SELECT 5")
+
+
+def test_a_concurrent_duplicate_found_at_the_flush_is_the_same_409(
+    session: Session, dev: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bob = _querier(session, "bob", dev)
+    service = _service(session)
+    rival = _service(session)
+    rivals: list[SavedQueryView] = []
+    real = service._refuse_duplicate
+
+    def miss_once(*args: object, **kwargs: object) -> None:
+        # The other request commits its row after this one's check and before its flush.
+        monkeypatch.setattr(service, "_refuse_duplicate", real)
+        rivals.append(rival.create(bob, dev, name="Racy", sql="SELECT 1"))
+
+    monkeypatch.setattr(service, "_refuse_duplicate", miss_once)
+
+    with pytest.raises(AlreadyExistsError) as raced:
+        service.create(bob, dev, name="Racy", sql="SELECT 2")
+
+    assert str(raced.value) == (
+        f"You already have a saved query named 'Racy' in 'dev' ({rivals[0].id}); choose another "
+        "name, or update that one."
+    )
+    assert session.execute(select(SavedQuery.id)).scalars().all() == [rivals[0].id]
+
+    # The same race on an update ends the same way.
+    other = service.create(bob, dev, name="Other", sql="SELECT 3")
+    rival.update(bob, dev, rivals[0].id, name="Renamed", sql="SELECT 1", visibility="private")
+    renamed_id = rivals[0].id
+    real = service._refuse_duplicate
+
+    def miss_update(*args: object, **kwargs: object) -> None:
+        monkeypatch.setattr(service, "_refuse_duplicate", real)
+        rival.update(bob, dev, renamed_id, name="Contested", sql="SELECT 1", visibility="private")
+
+    monkeypatch.setattr(service, "_refuse_duplicate", miss_update)
+    with pytest.raises(AlreadyExistsError, match=f"named 'Contested' in 'dev' \\({renamed_id}\\)"):
+        service.update(bob, dev, other.id, name="Contested", sql="SELECT 3", visibility="private")
+
+
+def test_an_integrity_error_that_is_not_a_duplicate_is_raised_as_it_is(
+    session: Session, dev: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Bogus:
+        value = "bogus"  # breaks the `private_owner` check constraint at the flush
+
+    bob = _querier(session, "bob", dev)
+    monkeypatch.setattr(
+        "lakana_core.catalog.saved_queries._checked_fields",
+        lambda name, sql, visibility: (name, _Bogus()),
+    )
+
+    with pytest.raises(IntegrityError, match="private_owner"):
+        _service(session).create(bob, dev, name="Odd", sql="SELECT 1")
 
 
 def test_the_cross_environment_list_orders_by_name_and_pages_every_item_once(
