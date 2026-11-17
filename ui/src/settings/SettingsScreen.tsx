@@ -61,22 +61,36 @@ const PAGE_PLACES = REGISTRY.filter(hasPage);
 /** The groups, which have no page of their own: their address opens their first listed place. */
 const GROUPS = REGISTRY.filter((place) => !hasPage(place));
 
+/** What {@link FocusHeading} reads to decide, kept by {@link AreaScreen}. */
+interface FocusTrack {
+  /** Set once the person has moved from the address the area opened on. */
+  moved: boolean;
+  /** A count that rises with every address change and every key or pointer press. */
+  step: number;
+  /** The step of the last address change. */
+  navigated: number;
+  /** The step of the person's last key or pointer press. */
+  acted: number;
+}
+
 /**
  * Moves the focus to the page's heading once a place that was loading has shown, after a
  * navigation inside Settings. The shell moves it when the address changes, but a place whose
- * chunk is still loading has no heading yet; not on the first load, so the skip link stays the
- * first stop.
+ * chunk is still loading has no heading yet. Not on the first load, so the skip link stays the
+ * first stop; and not when the person has pressed a key or a pointer since the address changed
+ * (Tab, or Section opened again), so the focus stays where they put it.
  *
- * @param props - Whether the person has moved from the address the area opened on.
- * @param props.moved - Set once the address has changed.
+ * @param props - What the area tracked.
+ * @param props.track - The moves and presses.
  * @returns Nothing to show.
  */
-function FocusHeading({ moved }: { readonly moved: RefObject<boolean> }): null {
+function FocusHeading({ track }: { readonly track: RefObject<FocusTrack> }): null {
   useEffect(() => {
-    if (moved.current) {
+    const { moved, navigated, acted } = track.current;
+    if (moved && acted < navigated) {
       document.getElementById("main")?.querySelector("h1")?.focus();
     }
-  }, [moved]);
+  }, [track]);
   return null;
 }
 
@@ -125,16 +139,38 @@ export function AreaScreen(): JSX.Element {
   const opened = useRef(pathname);
   const navigationType = useNavigationType();
   // Arriving by a move (a click on Settings in the sidebar) already counts as one.
-  const moved = useRef(navigationType === NavigationType.Push);
+  const track = useRef<FocusTrack>({
+    moved: navigationType === NavigationType.Push,
+    step: 1,
+    navigated: 1,
+    acted: 0,
+  });
   useEffect(() => {
+    const current = track.current;
+    current.step += 1;
+    current.navigated = current.step;
     if (navigationType === NavigationType.Replace && isRedirect(state)) {
       // A redirect (/settings to Status, a group to its first place) settles where the visit
       // opened; it is not the person moving.
       opened.current = pathname;
     } else {
-      moved.current ||= pathname !== opened.current;
+      current.moved ||= pathname !== opened.current;
     }
   }, [pathname, navigationType, state]);
+  useEffect(() => {
+    // A press is what moves the focus; the press that chose the place comes before its address.
+    const pressed = (): void => {
+      const current = track.current;
+      current.step += 1;
+      current.acted = current.step;
+    };
+    document.addEventListener("keydown", pressed, { capture: true });
+    document.addEventListener("pointerdown", pressed, { capture: true });
+    return () => {
+      document.removeEventListener("keydown", pressed, { capture: true });
+      document.removeEventListener("pointerdown", pressed, { capture: true });
+    };
+  }, []);
   return (
     <Routes>
       <Route element={<SettingsLayout />}>
@@ -150,7 +186,7 @@ export function AreaScreen(): JSX.Element {
                   {/* Keyed by place: leaving a place unmounts it at once, even while the next one loads. */}
                   <Suspense fallback={null}>
                     <Page />
-                    <FocusHeading moved={moved} />
+                    <FocusHeading track={track} />
                   </Suspense>
                 </Guarded>
               }
