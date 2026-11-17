@@ -147,6 +147,9 @@ const NAMED_LIMITS = [
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
   // the cells as text and the Value panel. It loads only when the Preview tab is opened.
+  // Measured 22.73 kB (2026-11-17) with the grid in shell/ResultGrid.tsx, which the Queries screen
+  // shares and which the bundler leaves in this chunk (22.55 kB before, with grid.en.json now in
+  // it); the limit holds.
   { name: "the Preview tab", prefix: "PreviewTab-", limit: "24.17 kB" },
   // Measured 4.29 kB (2026-11-13) + 10 %: the Lineage tab, its layered layout of tables, assets
   // and connections with the merging of the two answers, the drawing with its links and the
@@ -185,6 +188,8 @@ const NAMED_LIMITS = [
   // loaded with the page and never in the first load; the table's page fell to 8.46 kB with it.
   // Raised to the measured 4.23 kB (2026-11-14) + 10 %: the words for what a signal observed,
   // its usual band, its effect and the reasons the server records instead of values.
+  // Measured 4.41 kB (2026-11-17) after the grid's strings left for shell/grid.en.json (4.55 kB
+  // before); the limit, from 4.23 kB + 10 %, holds.
   { name: "the table page's strings", prefix: "tableStrings-", limit: "4.65 kB" },
   // Measured 662 B (2026-11-13) + 10 %: the status glyph, which the table page, the Health tab
   // and the Access tab share.

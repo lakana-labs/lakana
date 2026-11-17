@@ -26,7 +26,7 @@ import { ReadFailed } from "../cells";
 import { formatBytes } from "../format";
 import { ListSkeleton } from "../ListSkeleton";
 import "./artifactStrings";
-import { fileName, saveBlob } from "./saveFile";
+import { fileName, saveBlob } from "../../shell/saveFile";
 import { ShowMore, useShowMore } from "./ShowMore";
 
 /** Properties of {@link VersionFiles}. */

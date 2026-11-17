@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import type { TFunction } from "i18next";
-import "./tableStrings";
+import "./gridStrings";
 
 /** A cell as the preview shows it. */
 export interface PreviewText {
@@ -115,14 +115,14 @@ export function previewValue(
     return { text: "", muted: false, cut: true };
   }
   if (value === null || value === undefined) {
-    return { text: t("table.preview.null"), muted: true, cut: false };
+    return { text: t("grid.null"), muted: true, cut: false };
   }
   if (
     hasKeys(value, ["binary"]) &&
     typeof value["binary"] === "number" &&
     BINARY_TYPE.test(columnType)
   ) {
-    return { text: t("table.preview.binary", { count: value["binary"] }), muted: true, cut: false };
+    return { text: t("grid.binary", { count: value["binary"] }), muted: true, cut: false };
   }
   const kept = cutText(value, columnType, rowCut);
   if (kept !== null) {

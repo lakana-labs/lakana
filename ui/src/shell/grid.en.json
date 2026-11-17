@@ -1,0 +1,12 @@
+{
+  "region": "{{label}}",
+  "grid": "{{label}}, rows",
+  "sqlNull": "SQL null",
+  "null": "null",
+  "binary_one": "binary, {{count}} byte",
+  "binary_other": "binary, {{count}} bytes",
+  "cutMark": "… (cut)",
+  "value": "Value",
+  "valueOf": "{{column}}, row {{row}}",
+  "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
+}

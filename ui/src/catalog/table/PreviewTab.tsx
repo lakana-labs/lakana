@@ -5,15 +5,13 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useEffect, useRef, useState } from "react";
-import { Cell, Column, Row, Table, TableBody, TableHeader } from "react-aria-components";
+import { type JSX, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { MaskedColumnOut, QueryRunStatus, ResultPageOut } from "../../api";
+import { pageCells, ResultGrid } from "../../shell/ResultGrid";
 import { markedText, VisibleText } from "../../shell/VisibleText";
-import "../../shell/data-grid.css";
 import { StatusGlyph } from "../../status/StatusGlyph";
-import { isNumberType, type PreviewText, previewValue } from "./previewValue";
 import { useTableData } from "./TableContext";
 import { statusGlyph, usePreview } from "./usePreview";
 
@@ -125,197 +123,6 @@ function Masked({ columns, more, own }: MaskedProps): JSX.Element {
   );
 }
 
-/** Properties of {@link CellText}. */
-interface CellTextProps {
-  /** The cell as text. */
-  readonly cell: PreviewText;
-}
-
-/**
- * One cell's text: the value with its invisible characters marked, or a value marker for SQL NULL
- * and binary (words that stand for the value, styled so the text "null" never looks like it),
- * and the mark of a cut value.
- *
- * @param props - The cell.
- * @param props.cell - The cell as text.
- * @returns The text.
- */
-function CellText({ cell }: CellTextProps): JSX.Element {
-  const { t } = useTranslation();
-  return (
-    <>
-      {cell.muted ? (
-        <span className="value-marker">
-          {cell.text === t("table.preview.null") ? (
-            // Read as "SQL null", so a screen reader tells it from the text "null" too.
-            <>
-              <span aria-hidden="true">{cell.text}</span>
-              <span className="visually-hidden">{t("table.preview.sqlNull")}</span>
-            </>
-          ) : (
-            cell.text
-          )}
-        </span>
-      ) : (
-        <VisibleText text={cell.text} />
-      )}
-      {cell.cut && <span className="preview-muted">{t("table.preview.cutMark")}</span>}
-    </>
-  );
-}
-
-/**
- * Every cell of a page as text, one entry per column: a cell the page budget left out of a cut
- * row reads as cut.
- *
- * @param page - The page.
- * @param t - The translation function.
- * @returns The rows of cells.
- */
-function pageCells(
-  page: ResultPageOut,
-  t: ReturnType<typeof useTranslation>["t"],
-): PreviewText[][] {
-  return page.rows.map((row, index) =>
-    page.columns.map((column, at) =>
-      previewValue(row[at], column.type, page.row_cut.includes(index), t),
-    ),
-  );
-}
-
-/** Properties of {@link PreviewGrid}. */
-interface PreviewGridProps {
-  /** The page. */
-  readonly page: ResultPageOut;
-  /** The page's cells as text, from {@link pageCells}. */
-  readonly cells: readonly (readonly PreviewText[])[];
-  /** The table's name. */
-  readonly name: string;
-}
-
-/**
- * The rows as a data grid with one tab stop and the arrow keys inside, and the Value panel that
- * shows the focused or clicked cell whole. A muted gutter numbers the rows: it is each row's
- * header for a screen reader, and neither a value nor part of copied cells.
- *
- * @param props - The page, its cells and the table's name.
- * @param props.page - The page.
- * @param props.cells - The page's cells as text.
- * @param props.name - The table's name.
- * @returns The grid and the panel.
- */
-function PreviewGrid({ page, cells, name }: PreviewGridProps): JSX.Element {
-  const { t } = useTranslation();
-  const region = useRef<HTMLDivElement>(null);
-  const [chosen, setChosen] = useState<{ readonly row: number; readonly column: number } | null>(
-    null,
-  );
-  useEffect(() => {
-    const element = region.current;
-    /* v8 ignore next 3 -- the region is rendered with the grid */
-    if (element === null) {
-      return undefined;
-    }
-    // The cell that has the focus or was clicked: React Aria's grid moves the focus itself, so
-    // the panel follows the DOM rather than a callback of the grid.
-    const follow = (event: Event): void => {
-      // Focus and clicks inside the region always come from an element.
-      const target = (event.target as Element).closest("td, th");
-      // The gutter, cell 0, is the row's number and not a value.
-      if (
-        target instanceof HTMLTableCellElement &&
-        target.closest("tbody") !== null &&
-        target.cellIndex > 0
-      ) {
-        const row = target.parentElement as HTMLTableRowElement;
-        setChosen({ row: row.sectionRowIndex, column: target.cellIndex - 1 });
-      }
-    };
-    element.addEventListener("focusin", follow);
-    element.addEventListener("click", follow);
-    return () => {
-      element.removeEventListener("focusin", follow);
-      element.removeEventListener("click", follow);
-    };
-  }, []);
-  const whole = chosen === null ? undefined : cells[chosen.row]?.[chosen.column];
-  const column = chosen === null ? undefined : page.columns[chosen.column];
-  const numbers = page.columns.map((one) => (isNumberType(one.type) ? "number" : undefined));
-  return (
-    <>
-      <div
-        ref={region}
-        className="data-grid-scroll"
-        role="region"
-        aria-label={t("table.preview.region", { name: markedText(name) })}
-      >
-        <Table
-          aria-label={t("table.preview.grid", { name: markedText(name) })}
-          className="data-grid"
-        >
-          <TableHeader>
-            <Column id="row-number" isRowHeader className="row-number" textValue="#">
-              #
-            </Column>
-            {page.columns.map((one, at) => (
-              <Column
-                key={at}
-                id={`column-${String(at)}`}
-                textValue={one.name}
-                {...(numbers[at] === undefined ? {} : { className: numbers[at] })}
-              >
-                <VisibleText text={one.name} />
-              </Column>
-            ))}
-          </TableHeader>
-          <TableBody>
-            {cells.map((row, index) => (
-              <Row key={index} id={`row-${String(index)}`}>
-                <Cell className="row-number" textValue={String(index + 1)}>
-                  {index + 1}
-                </Cell>
-                {row.map((cell, at) => (
-                  <Cell
-                    key={`${String(index)}-${String(at)}`}
-                    textValue={cell.text}
-                    {...(numbers[at] === undefined ? {} : { className: numbers[at] })}
-                  >
-                    <CellText cell={cell} />
-                  </Cell>
-                ))}
-              </Row>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-      {whole !== undefined && column !== undefined && chosen !== null ? (
-        <section
-          className="preview-value"
-          aria-label={t("table.preview.valueOf", {
-            column: markedText(column.name),
-            row: chosen.row + 1,
-          })}
-        >
-          <p className="second">
-            {t("table.preview.value")} · <VisibleText text={column.name} />
-          </p>
-          <p
-            className="preview-whole"
-            // A long value scrolls here, and a scrolling region must be reachable by keyboard
-            // (WCAG 2.1.1), so it takes a tab stop.
-            // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-            tabIndex={0}
-          >
-            <CellText cell={whole} />
-          </p>
-        </section>
-      ) : (
-        <p className="second">{t("table.preview.valueHint")}</p>
-      )}
-    </>
-  );
-}
-
 /**
  * The Preview tab: runs the preview while it is open, cancels it when it is left, and shows the
  * rows, the masked columns and Refresh; a person who may not run queries gets one line and no
@@ -372,7 +179,7 @@ export function PreviewTab(): JSX.Element {
           {shown.row_count === 0 ? (
             <p className="empty">{t("table.preview.empty")}</p>
           ) : (
-            <PreviewGrid page={shown} cells={cells} name={ref.name} />
+            <ResultGrid page={shown} cells={cells} label={ref.name} />
           )}
         </>
       )}

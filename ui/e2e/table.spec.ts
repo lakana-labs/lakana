@@ -58,7 +58,7 @@ async function openNewTab(page: Page, entry: (typeof NEW_TABS)[number]): Promise
  * @returns The grid.
  */
 async function previewGrid(page: Page): Promise<Locator> {
-  const grid = page.getByRole("grid", { name: "The first rows of fact_sales" });
+  const grid = page.getByRole("grid", { name: "fact_sales, rows" });
   await expect(grid).toBeVisible();
   return grid;
 }
@@ -406,7 +406,7 @@ test.describe("the table page in real Chromium", () => {
     }
     await openTable(page, "/preview");
     await previewGrid(page);
-    const preview = page.getByRole("region", { name: "Preview of fact_sales" });
+    const preview = page.getByRole("region", { name: "fact_sales", exact: true });
     const main = (await page.locator(".shell-main").boundingBox())?.width ?? 0;
     // The window less the sidebar and the main area's own padding on both sides.
     expect((await preview.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
@@ -491,7 +491,7 @@ test.describe("the table page in real Chromium", () => {
     expect(looks.textCell[0]).not.toBe("right");
 
     // The header row stays at the top of the region while the rows scroll under it.
-    const region = page.getByRole("region", { name: "Preview of fact_sales" });
+    const region = page.getByRole("region", { name: "fact_sales", exact: true });
     const tops = await region.evaluate((node) => {
       node.scrollTop = 400;
       const head = node.querySelector("thead th");
@@ -765,10 +765,10 @@ test.describe("the table page in real Chromium", () => {
     expect(drawn[0], "the lineage drawing").toBeGreaterThan(drawn[1] ?? 0);
     for (const [tab, name] of [
       ["/columns", "Table columns"],
-      ["/preview", "Preview of fact_sales"],
+      ["/preview", "fact_sales"],
     ] as const) {
       await openTable(page, tab);
-      const region = page.getByRole("region", { name });
+      const region = page.getByRole("region", { name, exact: true });
       await expect(region).toBeVisible();
       // Columns' region is the stop; Preview's is reached through the grid's one stop inside it.
       await expect(tab === "/columns" ? region : region.locator("[tabindex='0']")).toHaveAttribute(

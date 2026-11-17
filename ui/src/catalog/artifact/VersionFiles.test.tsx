@@ -6,11 +6,11 @@ import { BROWSER_DOWNLOAD_LIMIT, type ArtifactFileOut, type TableRef } from "../
 import { api, DownloadCut, DownloadTooLong } from "../../api/client";
 import { artifactRoutes, version, WEIGHTS } from "../../test/artifacts";
 import { fakeServer } from "../../test/server";
-import { saveBlob } from "./saveFile";
+import { saveBlob } from "../../shell/saveFile";
 import { VersionFiles } from "./VersionFiles";
 
-vi.mock("./saveFile", async (original) => ({
-  ...(await original<typeof import("./saveFile")>()),
+vi.mock("../../shell/saveFile", async (original) => ({
+  ...(await original<typeof import("../../shell/saveFile")>()),
   saveBlob: vi.fn(),
 }));
 

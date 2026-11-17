@@ -147,9 +147,6 @@
     "lineage": "Lineage ›"
   },
   "preview": {
-    "region": "Preview of {{name}}",
-    "grid": "The first rows of {{name}}",
-    "sqlNull": "SQL null",
     "first": "First {{count}} rows · read as you",
     "rows_one": "{{count}} row · read as you",
     "rows_other": "{{count}} rows · read as you",
@@ -172,14 +169,7 @@
     "failed": "The preview did not finish. Refresh to run it again.",
     "empty": "No rows to show. Overview says when the table was last written.",
     "cutNote": "Some values were too large to send and are marked cut.",
-    "cutMark": "… (cut)",
-    "null": "null",
-    "binary_one": "binary, {{count}} byte",
-    "binary_other": "binary, {{count}} bytes",
-    "refresh": "Refresh",
-    "value": "Value",
-    "valueOf": "{{column}}, row {{row}}",
-    "valueHint": "Move to a cell with the arrow keys, or click one, to see its whole value here."
+    "refresh": "Refresh"
   },
   "referencesTab": {
     "reading": "Reading the references…",
