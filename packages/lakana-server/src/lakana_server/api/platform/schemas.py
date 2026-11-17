@@ -12,6 +12,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    JsonValue,
     SecretStr,
     StrictBool,
     field_validator,
@@ -2395,6 +2396,30 @@ class TaskTokenOut(BaseModel):
     run_id: uuid.UUID | None = None
     job: str | None = None
     asset: str | None = None
+
+
+class ConfigurationSettingOut(BaseModel):
+    """One setting of the running server, never carrying a secret's value.
+
+    Parameters
+    ----------
+    name
+        The environment variable that sets it.
+    value
+        The value in its JSON form; always `null` for a secret.
+    secret
+        Whether the setting holds a credential.
+    has_value
+        Whether the setting holds a value; for a secret, "set" or "not set".
+    source
+        `set` when the environment or the `.env` file gave it, else `default`.
+    """
+
+    name: str
+    value: JsonValue = None
+    secret: bool
+    has_value: bool
+    source: Literal["set", "default"]
 
 
 class GrantCreate(BaseModel):

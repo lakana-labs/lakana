@@ -10,6 +10,9 @@ variable; set a variable both read in the `x-lakana-env` block of the Compose fi
 the server and every worker share. How to set them: [Deploy with
 Compose](../how-to/deploy-with-compose.md).
 
+An administrator sees the running server's values, with a secret only as set or not set,
+with `lakana configuration` or `GET /api/v1/settings/configuration`.
+
 ## `LAKANA_DATABASE__*`
 
 | Variable | Type | Default | Read by | Description |

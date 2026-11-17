@@ -79,6 +79,14 @@ A query that stays queued for 3 seconds prints a line on standard error that say
 | `--break-glass` | flag | off | Write to a protected environment outside a run (needs MANAGE_ENVIRONMENT; audited). |
 | `--reason` | text | none | Why, 10-500 characters on one line (with --break-glass). |
 
+## `lakana configuration`
+
+Usage: `lakana configuration [OPTIONS]`
+
+Show the running server's configuration (admin only).
+
+One row per setting with its environment variable, its value and whether the server's environment set it (`set`) or it is the default. A secret shows only `(secret, set)` or `(secret, not set)`, never its value. Needs the ADMIN role.
+
 ## `lakana deploy`
 
 Usage: `lakana deploy [OPTIONS] [repo]`

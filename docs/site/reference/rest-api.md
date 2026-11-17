@@ -164,7 +164,7 @@ route with its parameters, its request body and its answers.
 - [Auth](rest/auth.md): 1 route
 - [Whoami](rest/whoami.md): 2 routes
 - [Sign in](rest/sign-in.md): 18 routes
-- [Settings](rest/settings.md): 2 routes
+- [Settings](rest/settings.md): 3 routes
 - [Info](rest/info.md): 1 route
 - [Status](rest/status.md): 1 route
 - [Interface](rest/interface.md): 4 routes

@@ -59,6 +59,7 @@
 "column-mask create": { class: ui, part: 7 }
 "column-mask list": { class: ui, part: 7 }
 "column-mask revoke": { class: ui, part: 7 }
+"configuration": { class: read, part: 8 }
 "connection create": { class: ui, part: 6 }
 "connection delete": { class: ui, part: 6 }
 "connection list": { class: ui, part: 6 }
@@ -404,6 +405,7 @@
 "GET /api/v1/row-filters":
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
+"GET /api/v1/settings/configuration": { class: read, part: 8 }
 "GET /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }

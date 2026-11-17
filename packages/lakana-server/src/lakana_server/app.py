@@ -36,6 +36,7 @@ from lakana_server.api.platform.catalog import router as catalog_router
 from lakana_server.api.platform.ci_oidc import router as ci_oidc_router
 from lakana_server.api.platform.ci_trust_rules import router as ci_trust_rules_router
 from lakana_server.api.platform.column_masks import router as column_masks_router
+from lakana_server.api.platform.configuration import router as configuration_router
 from lakana_server.api.platform.connections import router as connections_router
 from lakana_server.api.platform.deploys import router as deploys_router
 from lakana_server.api.platform.environments import router as environments_router
@@ -164,6 +165,7 @@ ROUTERS = (
     interface_state_router,
     pictures_router,
     home_router,
+    configuration_router,
 )
 """Every router the application includes, in the order they are included."""
 

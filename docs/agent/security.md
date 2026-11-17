@@ -5924,6 +5924,19 @@ fuller text of each part where it already lives.
   for another's, a bound token or an unknown key id
   (`test_a_non_administrators_session_cannot_revoke_anothers_task_token`). `POST` stays
   token-only.
+- **The configuration (`GET /api/v1/settings/configuration`, `describe_settings`).** Read-only, the
+  server process's own settings, one entry per leaf in the order of `Settings`. Administrator only
+  (`require_principal_admin`, the ADMIN role with a personal credential, the rule of the sign-in
+  settings' PATCH): a task or CI token is 403, and reading records nothing. A secret never carries a
+  value: `value` is `null` and `has_value` says set or not set. A setting is a secret when its
+  annotation contains `SecretStr`, or its name is in `PLAIN_SECRETS`; `database.url` stays `str`
+  (core's `DatabaseConfig`, read as text by every engine factory, already redacted in `repr`) and is
+  in `PLAIN_SECRETS` instead of becoming `SecretStr` (R6). `source` is `set` when every step of the
+  path is in `model_fields_set` (environment and `.env` alike, also a value equal to its default).
+  Pins: `test_no_secret_value_reaches_the_answer` (sentinels in the master key, the bootstrap
+  secret, the database password and the index URL; none in `response.text`) and the guard
+  `test_every_secret_looking_setting_is_masked_or_reviewed` (a new setting whose name looks like a
+  credential fails until it is a `SecretStr` or goes in `REVIEWED_NOT_SECRET` with its reason).
 
 ## Governed table creation and append (M4a)
 

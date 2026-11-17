@@ -1941,6 +1941,32 @@ class TaskTokenPage:
 
 
 @dataclass(frozen=True)
+class ConfiguredSetting:
+    """One setting of the running server, never carrying a secret's value.
+
+    Parameters
+    ----------
+    name
+        The environment variable that sets it, such as ``LAKANA_RUN__LEASE_SECONDS``.
+    value
+        The value as JSON; always ``None`` for a secret.
+    secret
+        Whether the setting holds a credential.
+    has_value
+        Whether the setting holds a value. For a secret, this is "set" or "not set".
+    source
+        ``"set"`` when the server's environment gave it (also when it equals the default),
+        else ``"default"``.
+    """
+
+    name: str
+    value: object
+    secret: bool
+    has_value: bool
+    source: str
+
+
+@dataclass(frozen=True)
 class SubjectPrincipal:
     """The principal a grant, row filter or column mask is for.
 

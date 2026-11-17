@@ -245,6 +245,7 @@ ROUTES: dict[str, Route] = {
     "passkeys.remove": Route("DELETE", "/api/v1/principals/{name}/passkeys/{passkey_id}"),
     "sign_in_settings.get": Route("GET", "/api/v1/settings/sign-in"),
     "sign_in_settings.update": Route("PATCH", "/api/v1/settings/sign-in"),
+    "configuration.list": Route("GET", "/api/v1/settings/configuration"),
     "task_tokens.list": Route("GET", "/api/v1/task-tokens"),
     "task_tokens.mint": Route("POST", "/api/v1/task-tokens"),
     "task_tokens.revoke": Route("DELETE", "/api/v1/task-tokens/{key_id}"),

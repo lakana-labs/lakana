@@ -21,7 +21,7 @@ Usage: `lakana [OPTIONS] COMMAND [ARGS]...`
 
 ## Commands
 
-- [Top-level commands](cli/commands.md): `login`, `logout`, `whoami`, `load`, `sql`, `deploy`, `rollback`, `undeploy`, `orphans`, `run`, `status`, `search`, `init`
+- [Top-level commands](cli/commands.md): `login`, `logout`, `whoami`, `load`, `sql`, `configuration`, `deploy`, `rollback`, `undeploy`, `orphans`, `run`, `status`, `search`, `init`
 - [`lakana me`](cli/lakana-me.md): Your own preferences on the instance.
 - [`lakana profile`](cli/lakana-profile.md): Manage saved profiles (local only).
 - [`lakana env`](cli/lakana-env.md): Manage environments.

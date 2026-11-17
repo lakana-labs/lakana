@@ -157,6 +157,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "secret rotate": ("secrets.rotate",),
     "secret revoke": ("secrets.revoke",),
     "secret bind": ("secrets.bind",),
+    "configuration": ("configuration.list",),
     "connection create": ("connections.create",),
     "connection list": ("connections.list", "connections.iter"),
     "connection show": ("connections.get",),
