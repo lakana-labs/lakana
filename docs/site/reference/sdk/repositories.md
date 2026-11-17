@@ -17,7 +17,7 @@ Register a repository (needs `MANAGE_REPOSITORY`).
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `name` | `str` | required | Unique name; no dots. |
+| `name` | `str` | required | Unique name; no dots, no control or format character, no line separator and no space at either end. |
 | `kind` | `str` | required | ``local``, ``https`` or ``ssh``. |
 | `url` | `str` | required | URL, or an absolute path for ``local``. |
 | `credential_secret` | `str | None` | `None` | Secret name resolved per environment. |
