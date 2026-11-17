@@ -2502,6 +2502,41 @@ class DeclaringAsset:
 
 
 @dataclass(frozen=True)
+class LastConnectionTest:
+    """The newest test of a connection, of any state.
+
+    Every reader of the connection gets `state`, `outcome` and `finished_at`. The other four
+    fields come only to a holder of `MANAGE_CONNECTION` on the environment; for anyone else, and
+    from a server that does not send them, they are `None`.
+
+    Parameters
+    ----------
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        What it found, one of the outcomes a `ConnectionTest` has, once done; `None` before.
+    finished_at
+        When it finished; `None` until then.
+    id
+        The test's id, which ``client.connections.test(..., test_id=...)`` takes.
+    created_at
+        When it was requested.
+    message
+        What it found, redacted; `None` before it is done.
+    requested_by
+        The name of the principal who asked for it; `None` when that principal is gone.
+    """
+
+    state: str
+    outcome: str | None
+    finished_at: datetime | None
+    id: str | None = None
+    created_at: datetime | None = None
+    message: str | None = None
+    requested_by: str | None = None
+
+
+@dataclass(frozen=True)
 class Connection:
     """A connection of an environment. Carries its secret's name, never a value.
 
@@ -2527,6 +2562,17 @@ class Connection:
         When it was created.
     updated_at
         When it was last changed.
+    environment
+        The name of its environment; `None` from a server that does not send it.
+    last_test
+        Its newest test of any state, or `None` if it was never tested (or the server does
+        not send it). A change keeps it: when its `finished_at` is before `updated_at`, it
+        tested the connection as it was before the change.
+    actions
+        What the caller's rights allow on it: ``test``, ``update``, ``delete`` and
+        ``name_secret`` (naming a secret not bound to it, or a change that could send its
+        secret somewhere new without new values); empty for a reader. The server decides every
+        request again.
     """
 
     name: str
@@ -2538,6 +2584,9 @@ class Connection:
     created_by: str
     created_at: datetime
     updated_at: datetime
+    environment: str | None = None
+    last_test: LastConnectionTest | None = None
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -2567,6 +2616,42 @@ class ConnectionTest:
     message: str | None
     created_at: datetime
     finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class QueuedConnectionTest:
+    """What Test all did for one connection (`client.connections.queue_tests`).
+
+    Parameters
+    ----------
+    connection
+        The connection's name.
+    test_id
+        The test's id; read it with `client.connections.test(..., test_id=...)`.
+    queued
+        `True` when the request queued the test; `False` when the connection already had an
+        open test under 10 minutes old, which is the one named.
+    """
+
+    connection: str
+    test_id: str
+    queued: bool
+
+
+@dataclass(frozen=True)
+class QueuedConnectionTestPage:
+    """One page of Test all: a test for each connection of a page of the environment's list.
+
+    Parameters
+    ----------
+    items
+        One entry per connection, newest connection first.
+    next_cursor
+        Pass back as `cursor=` to test the next page; `None` on the last page.
+    """
+
+    items: list[QueuedConnectionTest]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
@@ -2626,8 +2711,26 @@ class RepositoryProbe:
 
 
 @dataclass(frozen=True)
+class ConnectionEnvironment:
+    """An environment whose connections you may read (`client.connections.environments`).
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    actions
+        What your rights allow there: ``create`` and ``test`` with `MANAGE_CONNECTION`, and
+        ``name_secret`` (naming an existing secret for a connection) with `MANAGE_SECRET` too;
+        empty for a reader. The server decides every request again.
+    """
+
+    name: str
+    actions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ConnectionPage:
-    """One page of an environment's connections, newest first.
+    """One page of connections, of one environment or of all you may read, newest first.
 
     Parameters
     ----------

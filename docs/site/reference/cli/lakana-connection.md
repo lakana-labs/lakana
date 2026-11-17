@@ -53,19 +53,22 @@ Give the kind's address and settings options, and its secret one of three ways: 
 
 Usage: `lakana connection list [OPTIONS]`
 
-List the connections of an environment, newest first.
+List the connections of an environment, newest first, with each one's last test.
+
+With --all-environments, the connections of every environment you may read, newest first over all of them.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
+| `--all-environments` | flag | off | The connections of every environment you may read, with an environment column. |
 
 ## `lakana connection show`
 
 Usage: `lakana connection show [OPTIONS] {name}`
 
-Show connection NAME: its address, settings, secret's name and the assets that declare it.
+Show connection NAME: its address, settings, secret, declaring assets and last test.
 
-A CA certificate shows as its SHA-256 fingerprint; a secret's values never show.
+A CA certificate shows as its SHA-256 fingerprint; a secret's values never show. The last test shows its outcome and when; with the right to manage connections, also who ran it and its message. What to do about an outcome that is not ``ok`` goes to standard error.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -128,15 +131,16 @@ Its secret stays in the environment, unbound.
 
 ## `lakana connection test`
 
-Usage: `lakana connection test [OPTIONS] {name}`
+Usage: `lakana connection test [OPTIONS] [name]`
 
-Test connection NAME: a worker checks that its host can be reached.
+Test connection NAME, or with --all every connection: a worker checks each host.
 
-Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the outcome is ``ok``. Waits up to 120 seconds for a worker.
+Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the outcome is ``ok``. With --all, prints ``<name>: <outcome>: <message>`` for each connection, sorted by name, and exits 1 unless every outcome is ``ok``; a connection whose test is already open gets that test. Waits up to 120 seconds for a worker.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `NAME` | text | required |  |
+| `NAME` | text | none | The connection; leave it out with --all. |
 | `--env` | text | none | Environment (default: the profile's). |
+| `--all` | flag | off | Test every connection of the environment. |
 | `--no-wait` | flag | off | Queue the test and print its id; don't wait. |
 | `--id` | text | none | Show an earlier test of NAME instead of starting one. |

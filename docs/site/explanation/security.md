@@ -258,7 +258,10 @@ as two statements.
   connection's secret, so whoever may test a connection makes it send its credentials to the
   connection's own address. A `gcs` key is the exception that is narrowed further: its signed token
   request goes only to Google's token endpoint, and a key that names another is refused before
-  anything is sent. With the docker runner, the
+  anything is sent. A reader of the environment sees a test's outcome and time, never its message,
+  which can name paths under an ingestion root and the hosts the worker reached; Test all (testing
+  every connection of an environment at once) is the same probe, once per connection, under the
+  same right. With the docker runner, the
   Compose bundle's default, each task runs in a container without the worker's credentials, and
   reaches the server and the endpoints of the connections its asset declares, nothing else;
   containers share the host's kernel, so this is not a sandbox for hostile code

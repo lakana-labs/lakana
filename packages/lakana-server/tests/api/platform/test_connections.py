@@ -7,7 +7,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, get_args
 
 import httpx
 import pytest
@@ -22,17 +22,23 @@ from sqlalchemy.orm import Session
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    ConnectionTest,
+    ConnectionTestOutcome,
+    ConnectionTestState,
     Environment,
     EnvironmentDeployment,
     JobVersion,
     Repository,
     RepositoryKind,
 )
+from lakana_server.api.platform.schemas import ConnectionLastTestOut
 from tests.api.platform.test_artifacts_delete import _task_headers
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import create_environment
+from tests.server_test_helpers import create_environment, session_headers, signed_in
 
 _BASE = "/api/v1/environments/prod/connections"
+_ALL = "/api/v1/connections"
+_TEST_ALL = "/api/v1/environments/prod/connection-tests"
 _VALUE = "s3cr3t-value"
 _PG = {
     "name": "crm-db",
@@ -396,6 +402,9 @@ def test_a_data_engineer_creates_lists_shows_updates_and_deletes(
         "created_by",
         "created_at",
         "updated_at",
+        "environment",
+        "last_test",
+        "actions",
     }
     assert body["address"] == {"host": "db.example.com", "port": 5432, "database": "crm"}
     assert body["settings"] == {"user": "reader", "tls": "verify-full"}
@@ -857,3 +866,355 @@ def test_a_test_of_another_connection_or_a_missing_connection_is_404(
         "environment `prod` has no connection `missing`; `lakana connection list --env prod` "
         "lists them"
     )
+
+
+def _finish(client: TestClient, test_id: str, outcome: ConnectionTestOutcome, message: str) -> None:
+    """Record a queued test as done, as a worker would.
+
+    Parameters
+    ----------
+    client
+        The test client, for its database.
+    test_id
+        The test.
+    outcome
+        What it found.
+    message
+        Its message.
+    """
+    with Session(client.app.state.engine) as session:
+        test = session.get(ConnectionTest, uuid.UUID(test_id))
+        assert test is not None
+        test.state = ConnectionTestState.DONE
+        test.outcome = outcome
+        test.message = message
+        test.finished_at = datetime.datetime.now(datetime.UTC)
+        session.commit()
+
+
+_HELD_BACK = {"id", "created_at", "message", "requested_by"}
+"""The fields of `last_test` only a holder of `MANAGE_CONNECTION` gets."""
+
+
+def test_a_reader_gets_the_last_tests_outcome_without_its_message_or_who_ran_it(
+    client: TestClient, client_as: ClientAs, created: dict[str, Any]
+) -> None:
+    """Review Focus 1: the four keys are absent from the raw JSON, not `null`; no actions."""
+    queued = client_as("data_engineer").post(f"{_BASE}/crm-db/tests").json()
+    _finish(client, queued["id"], ConnectionTestOutcome.CREDENTIALS, "/srv/landing: denied")
+
+    for who in ("analyst", "viewer"):
+        reader = client_as(who)
+        listed = reader.get(_BASE)
+        shown = reader.get(f"{_BASE}/crm-db")
+        across = reader.get(_ALL)
+
+        assert (listed.status_code, shown.status_code, across.status_code) == (200, 200, 200), who
+        assert len(across.json()["items"]) == 1, who
+        for item in (*listed.json()["items"], shown.json(), *across.json()["items"]):
+            assert set(item["last_test"]) == {"state", "outcome", "finished_at"}, who
+            assert (item["last_test"]["state"], item["last_test"]["outcome"]) == (
+                "done",
+                "credentials",
+            )
+            assert item["last_test"]["finished_at"] is not None
+            assert item["actions"] == [], who
+        assert "/srv/landing" not in listed.text + shown.text + across.text
+
+
+def test_the_cross_environment_list_gives_each_row_its_own_environments_rights(
+    client: TestClient, client_as: ClientAs
+) -> None:
+    """A data engineer of `dev` and an analyst of `prod`: each row has its own rights."""
+    mixed = _As(client, _token(client, "mixed", "DATA_ENGINEER", "dev"))
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "mixed",
+            "role": "ANALYST",
+            "kind": "ENVIRONMENT",
+            "environment": "prod",
+        },
+    )
+    assert granted.status_code == 201, granted.text
+    _directories(client_as("admin"), "prod", ["p-1"])
+    _directories(client_as("admin"), "dev", ["d-1"])
+    read_only = client_as("admin").post(f"{_BASE}/p-1/tests").json()
+    managed = mixed.post("/api/v1/environments/dev/connections/d-1/tests").json()
+    _finish(client, read_only["id"], ConnectionTestOutcome.CREDENTIALS, "/srv/prod-landing: denied")
+    _finish(client, managed["id"], ConnectionTestOutcome.CREDENTIALS, "/srv/dev-landing: denied")
+
+    response = mixed.get(_ALL)
+
+    assert response.status_code == 200, response.text
+    rows = {item["environment"]: item for item in response.json()["items"]}
+    assert set(rows) == {"dev", "prod"}
+    assert set(rows["dev"]["last_test"]) == {"state", "outcome", "finished_at"} | _HELD_BACK
+    assert rows["dev"]["last_test"]["id"] == managed["id"]
+    assert rows["dev"]["last_test"]["created_at"] == managed["created_at"]
+    assert rows["dev"]["last_test"]["message"] == "/srv/dev-landing: denied"
+    assert rows["dev"]["last_test"]["requested_by"] == "mixed"
+    assert rows["dev"]["actions"] == ["test", "update", "delete"]
+    assert set(rows["prod"]["last_test"]) == {"state", "outcome", "finished_at"}
+    assert rows["prod"]["actions"] == []
+    assert "/srv/prod-landing" not in response.text
+
+
+def test_the_last_tests_state_and_outcome_name_every_value_of_their_enums() -> None:
+    """The schema's hand-written Literals cannot drift from the core enums."""
+    fields = ConnectionLastTestOut.model_fields
+    state = fields["state"].annotation
+    (outcome,) = (arg for arg in get_args(fields["outcome"].annotation) if arg is not type(None))
+
+    assert set(get_args(state)) == {value.value for value in ConnectionTestState}
+    assert set(get_args(outcome)) == {value.value for value in ConnectionTestOutcome}
+
+
+def test_a_manager_gets_the_tests_message_and_who_ran_it(
+    client: TestClient, client_as: ClientAs, created: dict[str, Any]
+) -> None:
+    """A data engineer gets every field of `last_test` and may test, update and delete."""
+    engineer = client_as("data_engineer")
+    queued = engineer.post(f"{_BASE}/crm-db/tests").json()
+
+    still_open = engineer.get(f"{_BASE}/crm-db").json()["last_test"]
+    _finish(client, queued["id"], ConnectionTestOutcome.OK, "connected")
+    listed = engineer.get(_BASE).json()["items"]
+    shown = engineer.get(f"{_BASE}/crm-db").json()
+
+    assert still_open == {
+        "id": queued["id"],
+        "state": "queued",
+        "outcome": None,
+        "finished_at": None,
+        "created_at": queued["created_at"],
+        "message": None,
+        "requested_by": "data_engineer",
+    }
+    for item in (*listed, shown):
+        assert set(item["last_test"]) == {"state", "outcome", "finished_at"} | _HELD_BACK
+        assert item["last_test"]["id"] == queued["id"]
+        assert (item["last_test"]["message"], item["last_test"]["requested_by"]) == (
+            "connected",
+            "data_engineer",
+        )
+        assert item["actions"] == ["test", "update", "delete"]
+    assert client_as("admin").get(f"{_BASE}/crm-db").json()["actions"] == [
+        "test",
+        "update",
+        "delete",
+        "name_secret",
+    ]
+
+
+def test_never_tested_is_null_and_every_answer_names_its_environment(
+    client_as: ClientAs,
+) -> None:
+    """`last_test` is `null` (present) before any test, on create, list, show and update."""
+    engineer = client_as("other")
+    base = "/api/v1/environments/dev/connections"
+
+    created = engineer.post(base, json={**_PG, "secret_values": {"password": _VALUE}})
+    listed = engineer.get(base)
+    shown = engineer.get(f"{base}/crm-db")
+    updated = engineer.patch(f"{base}/crm-db", json={"settings": {"user": "loader"}})
+
+    assert (created.status_code, updated.status_code) == (201, 200), created.text + updated.text
+    for body in (created.json(), *listed.json()["items"], shown.json(), updated.json()):
+        assert "last_test" in body and body["last_test"] is None
+        assert body["environment"] == "dev"
+        assert body["actions"] == ["test", "update", "delete"]
+
+
+def test_last_test_stays_after_an_update(
+    client: TestClient, client_as: ClientAs, created: dict[str, Any]
+) -> None:
+    """A change keeps the last test; the client compares `finished_at` with `updated_at`."""
+    engineer = client_as("data_engineer")
+    queued = engineer.post(f"{_BASE}/crm-db/tests").json()
+    _finish(client, queued["id"], ConnectionTestOutcome.OK, "connected")
+    before = engineer.get(f"{_BASE}/crm-db").json()
+
+    updated = engineer.patch(f"{_BASE}/crm-db", json={"settings": {"user": "loader"}})
+
+    assert updated.status_code == 200, updated.text
+    after = updated.json()
+    assert after["last_test"] == before["last_test"]
+    assert after["last_test"]["id"] == queued["id"]
+    finished = datetime.datetime.fromisoformat(after["last_test"]["finished_at"])
+    assert finished < datetime.datetime.fromisoformat(after["updated_at"])
+
+
+def _directories(sender: _As, environment: str, names: Sequence[str]) -> None:
+    """Create directory connections in an environment, one after the other.
+
+    Parameters
+    ----------
+    sender
+        Who creates them.
+    environment
+        The environment.
+    names
+        Their names, oldest first.
+    """
+    for name in names:
+        response = sender.post(
+            f"/api/v1/environments/{environment}/connections",
+            json={"name": name, "kind": "directory", "address": {"root": "r", "path": name}},
+        )
+        assert response.status_code == 201, response.text
+
+
+def test_get_all_connections_answers_items_and_next_cursor(client_as: ClientAs) -> None:
+    """One list over every environment, paged by its own cursor; `environment` narrows it."""
+    admin = client_as("admin")
+    _directories(admin, "prod", ["p-1", "p-2"])
+    _directories(admin, "dev", ["d-1"])
+
+    first = admin.get(_ALL, params={"limit": 2})
+    second = admin.get(_ALL, params={"limit": 2, "cursor": first.json()["next_cursor"]})
+    narrowed = admin.get(_ALL, params={"environment": "prod"})
+
+    assert (first.status_code, second.status_code, narrowed.status_code) == (200, 200, 200)
+    items = first.json()["items"] + second.json()["items"]
+    assert sorted((item["environment"], item["name"]) for item in items) == [
+        ("dev", "d-1"),
+        ("prod", "p-1"),
+        ("prod", "p-2"),
+    ]
+    assert second.json()["next_cursor"] is None
+    assert narrowed.json() == admin.get(_BASE).json()
+    assert set(first.json()) == {"items", "next_cursor"}
+    per_environment = admin.get(_BASE, params={"limit": 1}).json()["next_cursor"]
+    assert admin.get(_ALL, params={"cursor": per_environment}).status_code == 422
+    assert admin.get(_ALL, params={"limit": 0}).status_code == 422
+    assert admin.get(_ALL, params={"limit": 201}).status_code == 422
+
+
+def test_get_all_connections_without_any_right_is_an_empty_page(
+    client: TestClient, client_as: ClientAs
+) -> None:
+    """An environment you may not read is left out, never a 403; no right at all is empty."""
+    _directories(client_as("admin"), "prod", ["p-1"])
+    _directories(client_as("admin"), "dev", ["d-1"])
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "nobody", "type": "USER"})
+    token = client.post(
+        "/api/v1/principals/nobody/tokens", headers=AUTH_HEADER, json={"name": "nobody"}
+    ).json()["token"]
+
+    nobody = _As(client, {"Authorization": f"Bearer {token}"}).get(_ALL)
+    other = client_as("other").get(_ALL)
+
+    assert (nobody.status_code, nobody.json()) == (200, {"items": [], "next_cursor": None})
+    assert [(item["environment"], item["name"]) for item in other.json()["items"]] == [
+        ("dev", "d-1")
+    ]
+
+
+def test_get_all_connections_with_an_unknown_environment_is_404(client_as: ClientAs) -> None:
+    """With `environment`, the refusals of the list of one environment: 404, and 403."""
+    unknown = client_as("admin").get(_ALL, params={"environment": "nowhere"})
+    refused = client_as("analyst").get(_ALL, params={"environment": "dev"})
+
+    assert unknown.status_code == 404, unknown.text
+    assert refused.status_code == 403, refused.text
+
+
+def test_get_connection_environments(client_as: ClientAs) -> None:
+    """Where you may read, by name, with what you may do there."""
+    url = f"{_ALL}/environments"
+
+    assert client_as("analyst").get(url).json() == [{"name": "prod", "actions": []}]
+    assert client_as("data_engineer").get(url).json() == [
+        {"name": "prod", "actions": ["create", "test"]}
+    ]
+    assert client_as("admin").get(url).json() == [
+        {"name": "dev", "actions": ["create", "test", "name_secret"]},
+        {"name": "prod", "actions": ["create", "test", "name_secret"]},
+    ]
+
+
+def test_a_task_token_may_not_list_all_connections_or_their_environments(
+    client: TestClient, client_as: ClientAs
+) -> None:
+    """Bound or not, a task token gets the 403 of every connection read, naming none."""
+    _directories(client_as("admin"), "dev", ["d-1"])
+
+    for kind, header in _task_headers(client).items():
+        task = _As(client, header)
+        for response in (task.get(_ALL), task.get(f"{_ALL}/environments")):
+            assert response.status_code == 403, (kind, response.text)
+            assert "d-1" not in response.text
+            assert response.json()["detail"] == (
+                "a task token cannot list or show connections; read them with your own token"
+            )
+
+
+def test_post_connection_tests_is_202_with_items_and_next_cursor(client_as: ClientAs) -> None:
+    """Test all: a page of the list, newest first; an open test comes back with `queued: false`."""
+    engineer = client_as("data_engineer")
+    _directories(client_as("admin"), "prod", ["p-1", "p-2", "p-3"])
+    single = engineer.post(f"{_BASE}/p-3/tests").json()
+
+    first = engineer.post(_TEST_ALL, params={"limit": 2})
+    second = engineer.post(_TEST_ALL, params={"cursor": first.json()["next_cursor"]})
+
+    assert (first.status_code, second.status_code) == (202, 202), first.text
+    assert set(first.json()) == {"items", "next_cursor"}
+    items = first.json()["items"]
+    assert [set(item) for item in items] == [{"connection", "test_id", "queued"}] * 2
+    assert [(item["connection"], item["queued"]) for item in items] == [
+        ("p-3", False),
+        ("p-2", True),
+    ]
+    assert items[0]["test_id"] == single["id"]
+    assert [(item["connection"], item["queued"]) for item in second.json()["items"]] == [
+        ("p-1", True)
+    ]
+    assert second.json()["next_cursor"] is None
+    shown = engineer.get(f"{_BASE}/p-2/tests/{items[1]['test_id']}")
+    assert shown.status_code == 200 and shown.json()["state"] == "queued"
+    assert engineer.post(_TEST_ALL, params={"limit": 0}).status_code == 422
+    assert engineer.post(_TEST_ALL, params={"limit": 201}).status_code == 422
+    for who in ("analyst", "viewer", "other"):
+        assert client_as(who).post(_TEST_ALL).status_code == 403, who
+
+
+def test_post_connection_tests_needs_no_passkey_touch(ui_client: TestClient) -> None:
+    """A browser session touched 16 minutes ago tests them all, as it tests one."""
+    create_environment(ui_client, "prod")
+    _directories(_As(ui_client, AUTH_HEADER), "prod", ["p-1"])
+    stale = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=16)
+    name, value, csrf = signed_in(ui_client, "admin", touched_at=stale)
+    headers = session_headers(name, value, csrf)
+
+    single = ui_client.post(f"{_BASE}/p-1/tests", headers=headers)
+    every = ui_client.post(_TEST_ALL, headers=headers)
+
+    assert (single.status_code, every.status_code) == (202, 202), every.text
+    assert every.json()["items"] == [
+        {"connection": "p-1", "test_id": single.json()["id"], "queued": False}
+    ]
+
+
+def test_post_connection_tests_of_an_unknown_environment_is_404(client_as: ClientAs) -> None:
+    answer = client_as("admin").post("/api/v1/environments/nowhere/connection-tests")
+
+    assert answer.status_code == 404
+    assert answer.json()["detail"] == "No environment named 'nowhere'."
+
+
+def test_post_connection_tests_with_a_cursor_of_the_cross_environment_list_is_422(
+    client_as: ClientAs,
+) -> None:
+    """Test all pages by the environment's list; the cross-environment list's cursor is not it."""
+    admin = client_as("admin")
+    _directories(admin, "prod", ["p-1", "p-2"])
+    across = admin.get(_ALL, params={"limit": 1}).json()["next_cursor"]
+    assert across is not None
+
+    answer = admin.post(_TEST_ALL, params={"cursor": across})
+
+    assert answer.status_code == 422, answer.text
+    assert admin.get(_BASE).json()["items"][0]["last_test"] is None
