@@ -19,6 +19,7 @@ instance administrator overrides it ([Changes outside the file](access-file.md#c
 |---|---|---|---|
 | Grants | `lakana grant list` | `GET /api/v1/grants` | the `ADMIN` role on the instance |
 | A principal's permissions | `lakana access explain` | `GET /api/v1/principals/{name}/permissions` | nothing, about yourself; the `ADMIN` role on the instance, about anyone else |
+| Tokens of a principal | `lakana token list` | `GET /api/v1/principals/{name}/tokens` | nothing, about yourself, with a personal token or a browser session; the `ADMIN` role on the instance, about anyone else |
 | Principals | `lakana principal list` | `GET /api/v1/principals` | `MANAGE_PRINCIPAL` on the instance |
 | Groups | `lakana group list` | `GET /api/v1/groups` | the `ADMIN` role on the instance |
 
@@ -126,6 +127,25 @@ these fields:
 | `held_admin` | whether it holds the `ADMIN` role on the instance now or has ever held it, directly or through a group. Only the server operator can recover such a person ([Lost your passkey](../how-to/lost-your-passkey.md)); taking the role away does not change that. Shown only to an administrator: anyone else, such as someone granted only `MANAGE_PRINCIPAL`, gets `null` (an empty cell) |
 
 The REST answer also has `picture`, the etag of the profile picture, which the web interface shows.
+
+## Tokens
+
+A personal token signs in as one principal and has exactly that principal's rights, never more.
+Deactivating the principal stops every token it has.
+
+| What | Who may |
+|---|---|
+| List a principal's tokens, revoke one | the principal itself, with a personal token or a browser session (no passkey touch is asked, since revoking removes access); an administrator for anyone |
+| Create a token for yourself | only from a browser session, after a passkey touch in the last 15 minutes |
+| Create a token for anyone else | an administrator |
+
+No token (personal, task or CI) of a person who is not an administrator can create a token, so
+a stolen token cannot mint replacements. The refusal is `403` and is recorded in the audit log:
+"A token cannot create a token. Create your own token in the web interface, under your name,
+after touching your passkey; or ask an administrator: lakana token issue NAME LABEL". An
+administrator may still create tokens with a token, as `lakana token issue` does. About someone
+else's tokens, anyone who is not an administrator gets the same `403` whether or not that person
+exists. A task or CI token has no say over its owner's tokens.
 
 ## Refusals
 

@@ -1,6 +1,7 @@
 """Tests for PatService."""
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -9,13 +10,33 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import lakana_core.identity.pats as pats_module
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef
-from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError
-from lakana_core.identity.pats import PatService
+from lakana_core.audit.authorization import AuditingAuthorization
+from lakana_core.audit.denial_limiter import DenialAuditLimiter
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    CiScope,
+    PrincipalRef,
+    SecurableKind,
+    SessionContext,
+    TaskScope,
+)
+from lakana_core.errors import (
+    AuthenticationError,
+    ConflictError,
+    NotFoundError,
+    PermissionDenied,
+    StepUpRequired,
+)
+from lakana_core.grants.admin import admin_only_message, may_manage_tokens
+from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.grants.roles import Role
+from lakana_core.identity.pats import OWN_TOKEN_FROM_BROWSER, PatService
 from lakana_core.identity.tokens import GeneratedToken, hash_secret, parse_token
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    Grant,
     PersonalAccessToken,
     Principal,
     PrincipalType,
@@ -368,3 +389,306 @@ def test_only_bootstrap_if_needed_marks_a_pat_as_bootstrap(session: Session) -> 
         session.execute(select(PersonalAccessToken.key_id, PersonalAccessToken.bootstrap)).all()
     )
     assert flags == {plain.key_id: False, named.key_id: False, marked.key_id: True}
+
+
+def _auditing(session: Session) -> AuditingAuthorization:
+    """Build the production pairing: grants, wrapped to audit denials.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    AuditingAuthorization
+        The wrapper around `GrantAuthorization`.
+    """
+    return AuditingAuthorization(GrantAuthorization(session), session, DenialAuditLimiter(10_000))
+
+
+def _person(session: Session, name: str, *, admin: bool = False) -> PrincipalRef:
+    """Persist an active user, with the `ADMIN` role on the instance when asked.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    name
+        The user's name.
+    admin
+        Whether the user holds `ADMIN` at instance scope.
+
+    Returns
+    -------
+    PrincipalRef
+        A personal-token reference to the user.
+    """
+    row = _add_principal(session, name)
+    ref = PrincipalRef(id=row.id, name=name, type=row.type, credential="pat")
+    if admin:
+        session.add(
+            Grant(
+                id=uuid.uuid4(),
+                principal_id=row.id,
+                role=Role.ADMIN,
+                kind=SecurableKind.INSTANCE,
+                granted_by=row.id,
+                granted_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    return ref
+
+
+def _in_browser(ref: PrincipalRef, *, touched_minutes_ago: int | None) -> PrincipalRef:
+    """Give a reference a browser session whose last passkey touch is some minutes old.
+
+    Parameters
+    ----------
+    ref
+        The person.
+    touched_minutes_ago
+        Age of the last touch at `verified_at`; `None` for no touch.
+
+    Returns
+    -------
+    PrincipalRef
+        The reference with a `SessionContext`.
+    """
+    now = datetime.now(UTC)
+    touched = None if touched_minutes_ago is None else now - timedelta(minutes=touched_minutes_ago)
+    context = SessionContext(
+        session_id=uuid.uuid4(),
+        key_id="abc",
+        via="passkey",
+        created_at=now,
+        last_touch_at=touched,
+        source_pat_id=None,
+        verified_at=now,
+    )
+    return replace(ref, credential="session", session=context)
+
+
+def _task_ref(ref: PrincipalRef) -> PrincipalRef:
+    """Make a task-token reference for a person.
+
+    Parameters
+    ----------
+    ref
+        The person.
+
+    Returns
+    -------
+    PrincipalRef
+        The same person, authenticated with a task token.
+    """
+    scope = TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4())
+    return replace(ref, credential="task", task_scope=scope)
+
+
+def _ci_ref(ref: PrincipalRef) -> PrincipalRef:
+    """Make a CI-token reference for a person.
+
+    Parameters
+    ----------
+    ref
+        The person.
+
+    Returns
+    -------
+    PrincipalRef
+        The same person, authenticated with a CI token.
+    """
+    scope = CiScope(
+        token_id=uuid.uuid4(),
+        rule_id=uuid.uuid4(),
+        environment="dev",
+        environment_id=uuid.uuid4(),
+        repository="sales",
+        repository_id=uuid.uuid4(),
+        kinds=frozenset(),
+        sha=None,
+    )
+    return replace(ref, credential="ci", ci_scope=scope)
+
+
+def _denials(session: Session) -> list[dict[str, object]]:
+    """Read the details of the recorded denials, oldest first.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of dict
+        One detail dictionary per `AUTHORIZATION_DENIED` row.
+    """
+    rows = session.execute(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == AuditEventType.AUTHORIZATION_DENIED)
+        .order_by(AuditEvent.occurred_at)
+    ).scalars()
+    return [row.detail for row in rows]
+
+
+def _tokens_of(session: Session, ref: PrincipalRef) -> list[PersonalAccessToken]:
+    """Read every token row of a person.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ref
+        The person.
+
+    Returns
+    -------
+    list of PersonalAccessToken
+        Their rows.
+    """
+    return list(
+        session.execute(
+            select(PersonalAccessToken).where(PersonalAccessToken.principal_id == ref.id)
+        ).scalars()
+    )
+
+
+def test_a_token_cannot_create_its_owners_token(session: Session) -> None:
+    """A stolen token of a non-administrator cannot mint a replacement."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    with pytest.raises(PermissionDenied) as refused:
+        service.issue(bob, "bob", name="mine")
+    assert str(refused.value) == OWN_TOKEN_FROM_BROWSER
+    assert _denials(session) == [{"operation": "issue_token", "reason": "not_from_a_browser"}]
+    assert _tokens_of(session, bob) == []
+    with pytest.raises(PermissionDenied):
+        service.issue(_task_ref(bob), "bob", name="mine")
+    with pytest.raises(PermissionDenied):
+        service.issue(_ci_ref(bob), "bob", name="mine")
+    assert _tokens_of(session, bob) == []
+    assert OWN_TOKEN_FROM_BROWSER.startswith("A token cannot create a token.")
+
+
+def test_a_person_creates_their_own_token_from_a_fresh_session_only(session: Session) -> None:
+    """A browser session with a stale touch is asked to step up; a fresh one creates the token."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    with pytest.raises(StepUpRequired):
+        service.issue(_in_browser(bob, touched_minutes_ago=16), "bob", name="laptop")
+    assert _tokens_of(session, bob) == []
+    issued = service.issue(_in_browser(bob, touched_minutes_ago=1), "bob", name="laptop")
+    [row] = _tokens_of(session, bob)
+    assert row.principal_id == bob.id
+    assert row.key_id == issued.key_id
+    [event] = session.execute(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.PAT_ISSUED)
+    ).scalars()
+    assert event.detail["issuer"] == "bob"
+    assert event.detail["subject"] == "bob"
+
+
+def test_a_person_lists_and_revokes_their_own_tokens_with_a_pat_or_a_session(
+    session: Session,
+) -> None:
+    """Listing and revoking one's own tokens need no step-up and work with either credential."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    first = service.issue(_in_browser(bob, touched_minutes_ago=0), "bob", name="one")
+    second = service.issue(_in_browser(bob, touched_minutes_ago=0), "bob", name="two")
+    stale = _in_browser(bob, touched_minutes_ago=60)
+    for ref in (bob, stale):
+        assert {t.key_id for t in service.list(ref, "bob")} == {first.key_id, second.key_id}
+    service.revoke(bob, "bob", first.key_id)
+    service.revoke(stale, "bob", second.key_id)
+    assert all(t.revoked_at is not None for t in _tokens_of(session, bob))
+
+
+def test_task_and_ci_tokens_may_not_list_or_revoke_their_owners_tokens(session: Session) -> None:
+    """A task or CI token is not a personal credential."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    issued = service.issue(_in_browser(bob, touched_minutes_ago=0), "bob", name="one")
+    for ref in (_task_ref(bob), _ci_ref(bob)):
+        with pytest.raises(PermissionDenied):
+            service.list(ref, "bob")
+        with pytest.raises(PermissionDenied):
+            service.revoke(ref, "bob", issued.key_id)
+
+
+@pytest.mark.parametrize("holds_the_action", [False, True])
+def test_someone_elses_tokens_are_403_whether_or_not_they_exist(
+    session: Session, holds_the_action: bool
+) -> None:
+    """The refusal comes before any lookup, so it never says whether a principal exists.
+
+    With a single-action grant of `MANAGE_TOKEN` the refusal is `admin_only_message`; without
+    any grant it is the authorization's own. Either way it is one text for every method and
+    for a person who exists and one who does not.
+    """
+    bob = _person(session, "bob")
+    ada = _person(session, "ada", admin=True)
+    if holds_the_action:
+        session.add(
+            Grant(
+                id=uuid.uuid4(),
+                principal_id=bob.id,
+                action=Action.MANAGE_TOKEN,
+                kind=SecurableKind.INSTANCE,
+                granted_by=ada.id,
+                granted_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    service = PatService(session, _auditing(session))
+    messages: set[str] = set()
+    for subject in ("ada", "nobody"):
+        for call in (
+            lambda s=subject: service.list(bob, s),
+            lambda s=subject: service.revoke(bob, s, "key"),
+            lambda s=subject: service.issue(bob, s, name="x"),
+        ):
+            with pytest.raises(PermissionDenied) as refused:
+                call()
+            messages.add(str(refused.value))
+    assert len(messages) == 1
+    if holds_the_action:
+        assert messages == {admin_only_message(Action.MANAGE_TOKEN)}
+
+
+def test_an_administrator_still_issues_with_a_token(session: Session) -> None:
+    """An administrator keeps today's rule, which the CLI and the bootstrap rely on."""
+    ada = _person(session, "ada", admin=True)
+    _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    service.issue(ada, "bob", name="for-bob")
+    service.issue(ada, "ada", name="for-me")
+    assert len(_tokens_of(session, ada)) == 1
+
+
+def test_may_manage_tokens(session: Session) -> None:
+    """Only an administrator's personal credential, or the bootstrap, may manage tokens."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    authz = _auditing(session)
+    assert may_manage_tokens(session, authz, ada)
+    assert may_manage_tokens(session, AllowAllAuthorization(), bob)
+    assert not may_manage_tokens(session, authz, bob)
+    assert not may_manage_tokens(session, authz, _task_ref(ada))
+    assert _denials(session) == []
+
+
+def test_a_self_made_token_stops_when_its_owner_is_deactivated(session: Session) -> None:
+    """A token a person made for themselves ends with their account."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    issued = service.issue(_in_browser(bob, touched_minutes_ago=1), "bob", name="laptop")
+    parsed = parse_token(issued.token, "lakana_pat")
+    assert parsed is not None
+    session.execute(select(Principal).where(Principal.name == "bob")).scalar_one().is_active = False
+    session.commit()
+    with pytest.raises(AuthenticationError):
+        service.verify(*parsed)

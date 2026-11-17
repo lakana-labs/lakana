@@ -243,6 +243,34 @@ def may_see_grants(session: Session, authz: AuthorizationService, p: PrincipalRe
     return isinstance(authz, AllowAllAuthorization) or holds_instance_admin(session, p.id)
 
 
+def may_manage_tokens(session: Session, authz: AuthorizationService, p: PrincipalRef) -> bool:
+    """Say whether `p` manages anyone's tokens: the `MANAGE_TOKEN` rule, as a yes or no.
+
+    Nothing is recorded for a `False`: a caller who does not manage tokens is not attempting
+    anything. `PatService` asks it first, so that an administrator keeps the rule it always had
+    and only everyone else is offered the rule for their own tokens.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    authz
+        The authorization service of the calling service.
+    p
+        The acting principal.
+
+    Returns
+    -------
+    bool
+        `True` if `authz` permits `MANAGE_TOKEN` at instance scope (never for a task or CI
+        token) and `p` holds the `ADMIN` role there (or `authz` is `AllowAllAuthorization`,
+        which asks for no role).
+    """
+    if not authz.permits(p, Action.MANAGE_TOKEN, Securable.instance_scope()):
+        return False
+    return isinstance(authz, AllowAllAuthorization) or holds_instance_admin(session, p.id)
+
+
 _WARNED = 20
 """Most grants the start-up warning names (and the most rows it loads)."""
 

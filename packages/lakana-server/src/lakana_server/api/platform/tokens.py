@@ -32,8 +32,10 @@ def issue_token(
     `StepUpRequired`); a token never does.
 
     Issues a token that signs in as the principal. The answer holds the token's full value,
-    which is shown this once and cannot be read again. Needs the `ADMIN` role on the
-    instance. Answers 404 when there is no such principal.
+    which is shown this once and cannot be read again. For another principal it needs the
+    `ADMIN` role on the instance. For oneself, unless one is an administrator, it works only
+    from the web interface: no token can create a token, so a stolen token cannot mint
+    replacements (403). Answers 404 when there is no such principal.
 
     Parameters
     ----------
@@ -68,8 +70,10 @@ def list_tokens(
 ) -> list[TokenOut]:
     """List the tokens of a principal.
 
-    Lists the principal's personal access tokens. The token values are never included. Needs
-    the `ADMIN` role on the instance. Answers 404 when there is no such principal.
+    Lists the principal's personal access tokens. The token values are never included. Anyone
+    may list their own with a personal token or a web session; anyone else's needs the
+    `ADMIN` role on the instance, and is refused alike whether or not the principal exists.
+    Answers 404 when there is no such principal.
 
     Parameters
     ----------
@@ -102,8 +106,9 @@ def revoke_token(
 ) -> None:
     """Revoke a personal access token.
 
-    The token stops working at once. Needs the `ADMIN` role on the instance. Answers 404
-    when the principal or the token does not exist.
+    The token stops working at once. Anyone may revoke their own with a personal token or a
+    web session, without a passkey touch; anyone else's needs the `ADMIN` role on the
+    instance. Answers 404 when the principal or the token does not exist.
 
     Parameters
     ----------

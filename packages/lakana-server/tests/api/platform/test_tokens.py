@@ -1,19 +1,25 @@
 """Tests for the tokens resource of the platform API."""
 
 import uuid
-from datetime import UTC, datetime
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import lakana_server.ui
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.db import create_engine
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.models import Grant, Principal
-from lakana_server.settings import Settings
-from tests.conftest import AUTH_HEADER
+from lakana_server.app import create_app
+from lakana_server.settings import Settings, UiConfig
+from tests.conftest import AUTH_HEADER, PUBLIC, write_ui_dist
+from tests.server_test_helpers import session_headers, signed_in
 
 
 def _admin_ref(session: Session) -> PrincipalRef:
@@ -215,12 +221,110 @@ def _holder_of(client: TestClient, action: Action) -> dict[str, str]:
 
 def test_manage_token_as_a_single_action_is_a_403_on_every_route(client: TestClient) -> None:
     header = _holder_of(client, Action.MANAGE_TOKEN)
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "carol", "type": "USER"})
     answers = [
-        client.post("/api/v1/principals/bob/tokens", headers=header, json={"name": "mine"}),
-        client.get("/api/v1/principals/bob/tokens", headers=header),
-        client.delete("/api/v1/principals/bob/tokens/nokey", headers=header),
+        client.post("/api/v1/principals/carol/tokens", headers=header, json={"name": "mine"}),
+        client.get("/api/v1/principals/carol/tokens", headers=header),
+        client.delete("/api/v1/principals/carol/tokens/nokey", headers=header),
     ]
     for answer in answers:
         assert answer.status_code == 403, (answer.request.method, str(answer.request.url))
         assert "MANAGE_TOKEN needs the ADMIN role on the instance" in answer.text
-    assert client.get("/api/v1/principals/bob/tokens", headers=AUTH_HEADER).status_code == 200
+    assert client.get("/api/v1/principals/carol/tokens", headers=AUTH_HEADER).status_code == 200
+
+
+@pytest.fixture
+def browser_client(
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[TestClient]:
+    """Provide a client of an app with the web interface on, at its public address.
+
+    Parameters
+    ----------
+    settings
+        Configuration pointed at an isolated database.
+    tmp_path
+        Pytest's per-test directory, for the stand-in build.
+    monkeypatch
+        Points `lakana_server.ui.UI_DIST` at the stand-in.
+
+    Yields
+    ------
+    TestClient
+        A started client whose browser sessions the app reads.
+    """
+    monkeypatch.setattr(lakana_server.ui, "UI_DIST", write_ui_dist(tmp_path))
+    with TestClient(
+        create_app(settings.model_copy(update={"ui": UiConfig(enabled=True)})),
+        base_url=PUBLIC,
+        headers={"Origin": PUBLIC},
+    ) as c:
+        yield c
+
+
+def _bob(client: TestClient) -> dict[str, str]:
+    """Create Bob, a user with no grant, and give him a personal token through an administrator.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+
+    Returns
+    -------
+    dict of str to str
+        Bob's `Authorization` header.
+    """
+    created = client.post(
+        "/api/v1/principals", headers=AUTH_HEADER, json={"name": "bob", "type": "USER"}
+    )
+    assert created.status_code == 201, created.text
+    token = client.post(
+        "/api/v1/principals/bob/tokens", headers=AUTH_HEADER, json={"name": "first"}
+    ).json()["token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_post_own_token_with_a_pat_is_403_and_from_a_fresh_session_is_201(
+    browser_client: TestClient,
+) -> None:
+    """A person's token cannot create a token; their fresh browser session can."""
+    client = browser_client
+    bob = _bob(client)
+
+    refused = client.post("/api/v1/principals/bob/tokens", headers=bob, json={"name": "second"})
+    assert refused.status_code == 403, refused.text
+    assert "A token cannot create a token" in refused.json()["detail"]
+
+    name, value, csrf = signed_in(client, "bob", touched_at=datetime.now(UTC))
+    created = client.post(
+        "/api/v1/principals/bob/tokens",
+        headers=session_headers(name, value, csrf),
+        json={"name": "second"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["token"].startswith("lakana_pat_")
+
+    stale_name, stale_value, stale_csrf = signed_in(
+        client, "bob", touched_at=datetime.now(UTC) - timedelta(minutes=16)
+    )
+    stale = client.post(
+        "/api/v1/principals/bob/tokens",
+        headers=session_headers(stale_name, stale_value, stale_csrf),
+        json={"name": "third"},
+    )
+    assert stale.status_code == 403
+    assert stale.json()["type"] == "StepUpRequired"
+
+
+def test_get_and_delete_own_tokens_with_a_pat(client: TestClient) -> None:
+    """A person lists and revokes their own tokens with a personal token; not another's."""
+    bob = _bob(client)
+
+    for other in ("admin", "nobody"):
+        assert client.get(f"/api/v1/principals/{other}/tokens", headers=bob).status_code == 403
+    listed = client.get("/api/v1/principals/bob/tokens", headers=bob)
+    assert listed.status_code == 200, listed.text
+    [token] = listed.json()
+    revoked = client.delete(f"/api/v1/principals/bob/tokens/{token['key_id']}", headers=bob)
+    assert revoked.status_code == 204, revoked.text

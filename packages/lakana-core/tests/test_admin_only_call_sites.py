@@ -359,14 +359,15 @@ def test_every_token_operation_needs_the_admin_role(session: Session, actors: Ac
     service.revoke(actors.admin, "carol", key_ids[0])
 
 
-def test_the_holder_of_manage_token_cannot_issue_a_token_for_itself_or_an_administrator(
+def test_the_holder_of_manage_token_cannot_issue_with_a_token_for_itself_or_an_administrator(
     session: Session, actors: Actors
 ) -> None:
-    """No self-service exists for tokens."""
+    """A single-action holder is not an administrator: no token of its own, none for an admin."""
     service = PatService(session, _auditing(session))
-    for subject in ("bob", "ada"):
-        with pytest.raises(PermissionDenied, match="needs the ADMIN role on the instance"):
-            service.issue(actors.holder, subject, name="escalation")
+    with pytest.raises(PermissionDenied, match="needs the ADMIN role on the instance"):
+        service.issue(actors.holder, "ada", name="escalation")
+    with pytest.raises(PermissionDenied, match="A token cannot create a token"):
+        service.issue(actors.holder, "bob", name="mine")
 
 
 _GUARDED = {

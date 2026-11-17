@@ -587,7 +587,7 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   the request's session was read (the app clock in the server), so a test that moves
   `app.state.clock` ages a touch for every route alike:
   - API tokens and the accounts they act for: `POST /api/v1/principals/{name}/tokens` (personal
-    and service-account tokens), `POST /api/v1/principals` (a new service account is the first
+    and service-account tokens, one's own included), `POST /api/v1/principals` (a new service account is the first
     step to a token for it), `DELETE /api/v1/principals/{name}` (deactivating a person);
   - rights: `POST /api/v1/grants`, `DELETE /api/v1/grants/{grant_id}`,
     `PUT|DELETE /api/v1/groups/{name}/members/{principal_name}`, `DELETE /api/v1/groups/{name}`
@@ -3996,9 +3996,9 @@ carries any of the three, and a grant below instance scope never satisfied these
   returns the token once in the HTTP response only, task tokens go to the child's stdin, and
   `PatService`, `TaskTokenService` and the auth paths log no token; a test pins that the
   bootstrap emits no `lakana_pat_` string at any level.
-- **A principal's own tokens** stay administrator-only: issuing, listing and revoking a personal
-  access token needs `MANAGE_TOKEN` whoever it is for. This element adds no self-service; that
-  belongs to the sign-in design (#32).
+- **Tokens of someone else** stay administrator-only: issuing, listing and revoking a personal
+  access token for another principal needs `MANAGE_TOKEN` and the `ADMIN` role. One's own tokens
+  follow "Settings and Access: tokens, configuration, own grants (M7 parts 7 and 8)".
 - **Call sites.** `test_admin_only_call_sites.py` enumerates the thirteen call sites (four in
   `grants/service.py`, six in `identity/groups.py`, three in `identity/pats.py`) and fails on
   any other module that names one of the three actions. A new call site must go through the
@@ -5874,6 +5874,26 @@ fuller text of each part where it already lives.
 | `actions` | The words (`drop`, `rebuild`, …) the reader's rights allow, from one `permits_each` batch per list, no audit event. Rights only: the server decides each request again, and git ownership, protection, step-up and state still refuse. The batch asks `READ_TABLE` too, and the file is named only to a reader. | The `actions` row of the same table. Pins: `test_row_actions.py`. |
 | Audit events | `NAMESPACE_CREATED`, `NAMESPACE_DROPPED`, `TABLE_CREATED` (external), `ARTIFACT_UPLOAD_ABORTED`, `TABLE_REBUILT` (with a `TABLE_DROPPED` of `reason: rebuild`), each in the transaction of its change. No detail names a repository or a deployed file's path, because the log is read with `READ_AUDIT_LOG` alone. A refused change writes no event. | "Audit log": the part 3b bullet. |
 | Paged lists | Dropped tables, expiring tables, namespaces, orphans and artifacts return 100 rows by default. A row the caller may not read is filtered out before the page is cut (`page_in_order` takes only readable rows), and a forged cursor reveals nothing a plain list would not. | `lakana_core.pagination.page_in_order`. Pins: the forged-cursor tests of each list, `test_an_unreadable_artifact_sorting_first_does_not_cost_the_reader_a_page`. |
+
+## Settings and Access: tokens, configuration, own grants (M7 parts 7 and 8)
+
+- **One's own tokens (`PatService`).** The administrator is asked first
+  (`may_manage_tokens`: `MANAGE_TOKEN` permitted and the `ADMIN` role): an administrator keeps
+  today's path for every principal, and `issue` asks a browser session for the step-up. Anyone
+  else acting on their own name through a personal credential (`principal_name == p.name`, no
+  task or CI scope) may list and revoke their own tokens with a personal token or a session, with
+  no step-up, since revoking removes access. They create one only with `p.session` and after the
+  step-up. Any other credential is refused with `OWN_TOKEN_FROM_BROWSER`, audited as
+  `AUTHORIZATION_DENIED` (`operation: issue_token`, `reason: not_from_a_browser`). Why: a stolen
+  token cannot mint replacements for itself. An administrator's token still may issue (R1, for
+  review): the CLI and the bootstrap need it, and it was the rule before. Everyone else, about
+  anyone else's tokens, goes through `authorize_admin_only` before any lookup, so the refusal
+  never says whether the principal exists. A token has exactly its owner's rights, and
+  deactivating the owner stops every token (`PatService.verify`). Pins: `test_identity_pats.py`
+  (`test_a_token_cannot_create_its_owners_token`,
+  `test_a_person_creates_their_own_token_from_a_fresh_session_only`,
+  `test_someone_elses_tokens_are_403_whether_or_not_they_exist`,
+  `test_a_self_made_token_stops_when_its_owner_is_deactivated`), `test_tokens.py`.
 
 ## Governed table creation and append (M4a)
 
