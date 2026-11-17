@@ -50,8 +50,8 @@ export interface SaveQueryDialogProps {
 /**
  * Renders the dialog: the name on one line (a pasted line break becomes a space), who may run
  * it, and the environment in a sentence. Save replaces an opened query of the person's own (the
- * server lists `update` among its actions); Save as new keeps a new one in the picker's
- * environment. A refusal, such as the server's 409 for a name the person already uses there,
+ * server lists `update` among its actions) while the picker names its environment; Save as new
+ * keeps a new one in the picker's environment. A refusal, such as the server's 409 for a name the person already uses there,
  * stays in the dialog word for word, and the fields stay as they are. While the request is
  * open, Escape and Cancel do nothing.
  *
@@ -76,7 +76,12 @@ export function SaveQueryDialog({
   const [visibility, setVisibility] = useState<SavedQueryVisibility>(
     opened?.visibility ?? "private",
   );
-  const own = opened !== null && opened.actions.includes("update") ? opened : null;
+  // Save replaces the opened query in its own environment, so it is offered only while the
+  // picker names that environment; otherwise the query is saved as new where the picker says.
+  const own =
+    opened !== null && opened.actions.includes("update") && opened.environment === environment
+      ? opened
+      : null;
   const missing = name.trim() === "";
   const save = (asNew: boolean): void => {
     const body = { name: name.trim(), sql, visibility };

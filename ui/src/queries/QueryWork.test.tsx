@@ -673,6 +673,58 @@ describe("the Queries screen's work", () => {
     expect(sent(shell)).toContain(`PUT ${SAVED_ONE}`);
   });
 
+  it("a saved query in dev with the picker on prod is saved as new in prod, never replaced", async () => {
+    const inDev = aSavedQuery({ environment: "dev" });
+    const created = aSavedQuery({ id: "8c9d0e1f", name: "Daily sales" });
+    const shell = renderShell(`/queries/dev/saved/${SAVED_ID}`, {
+      routes: routes({
+        [`GET /api/v1/environments/dev/saved-queries/${SAVED_ID}`]: { status: 200, body: inDev },
+        "POST /api/v1/environments/prod/saved-queries": { status: 201, body: created },
+        "GET /api/v1/environments/prod/saved-queries/8c9d0e1f": { status: 200, body: created },
+      }),
+    });
+    await waitFor(() => {
+      expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
+    });
+    await shell.user.click(screen.getByRole("button", { name: "Environment: dev" }));
+    await shell.user.click(screen.getByRole("option", { name: /^prod/ }));
+
+    await shell.user.click(screen.getByRole("button", { name: "Save…" }));
+    const dialog = screen.getByRole("dialog", { name: "Save the query" });
+    expect(within(dialog).queryByRole("button", { name: "Save" })).toBeNull();
+    expect(dialog).toHaveTextContent("It is saved in prod.");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Save as new" }));
+
+    await waitFor(() => {
+      expect(shell.router.state.location.pathname).toBe("/queries/prod/saved/8c9d0e1f");
+    });
+    expect(sent(shell)).toContain("POST /api/v1/environments/prod/saved-queries");
+    expect(sent(shell).filter((request) => request.startsWith("PUT"))).toEqual([]);
+  });
+
+  it("names no query while a saved query's address is read", async () => {
+    let answer: () => void = () => undefined;
+    renderShell(SAVED_PATH, {
+      routes: routes({
+        [`GET ${SAVED_ONE}`]: () =>
+          new Promise((resolve) => {
+            answer = () => {
+              resolve({ status: 200, body: aSavedQuery() });
+            };
+          }),
+      }),
+    });
+    await screen.findByRole("button", { name: "Save…" });
+
+    expect(document.querySelector(".queries-name")).toHaveTextContent(/^$/);
+    expect(screen.queryByText("Untitled query")).toBeNull();
+    answer();
+
+    await waitFor(() => {
+      expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
+    });
+  });
+
   it("a saved query that cannot be read says why", async () => {
     renderShell(SAVED_PATH, {
       routes: routes({

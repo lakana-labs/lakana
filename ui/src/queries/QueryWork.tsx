@@ -223,11 +223,15 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           message: markedText(endedMessage(ended, t)),
         }
       : null;
-  const name =
-    opened?.name ??
-    (runAddress === null
-      ? t("queries.untitled")
-      : t("queries.runName", { id: runAddress.id.slice(0, 8) }));
+  // A saved query's address names it once it is read; until then the toolbar names nothing.
+  let name = t("queries.untitled");
+  if (opened !== null) {
+    name = opened.name;
+  } else if (runAddress !== null) {
+    name = t("queries.runName", { id: runAddress.id.slice(0, 8) });
+  } else if (address !== null) {
+    name = "";
+  }
   const close = (): void => {
     setDialog(null);
   };

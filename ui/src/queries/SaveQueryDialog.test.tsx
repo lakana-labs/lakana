@@ -9,8 +9,8 @@ import { fakeServer } from "../test/server";
 import { SaveQueryDialog } from "./SaveQueryDialog";
 
 const CREATE = "POST /api/v1/environments/dev/saved-queries";
-const OPENED = aSavedQuery();
-const UPDATE = `PUT /api/v1/environments/prod/saved-queries/${OPENED.id}`;
+const OPENED = aSavedQuery({ environment: "dev" });
+const UPDATE = `PUT /api/v1/environments/dev/saved-queries/${OPENED.id}`;
 
 /**
  * Renders the dialog for the SQL `select 2`, picked in `dev`.
@@ -73,7 +73,11 @@ describe("SaveQueryDialog", () => {
   });
 
   it("Save updates only an own opened query", async () => {
-    const updated = aSavedQuery({ name: "Daily sales by region", sql: "select 2" });
+    const updated = aSavedQuery({
+      environment: "dev",
+      name: "Daily sales by region",
+      sql: "select 2",
+    });
     const server = fakeServer({ [UPDATE]: { status: 200, body: updated } });
     const { onSaved, user } = renderSave(OPENED);
     const name = screen.getByRole("textbox", { name: "Name" });
@@ -105,6 +109,21 @@ describe("SaveQueryDialog", () => {
     expect(
       screen.getByRole("radio", { name: "Everyone who can run queries in dev" }),
     ).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Save as new" }));
+
+    await waitFor(() => {
+      expect(onSaved).toHaveBeenCalledWith(created, true);
+    });
+    expect(writes(server.sent)).toEqual([CREATE]);
+  });
+
+  it("offers only Save as new when the picker names another environment than the opened query's", async () => {
+    const created = aSavedQuery({ id: "n4", environment: "dev" });
+    const server = fakeServer({ [CREATE]: { status: 201, body: created } });
+    const { onSaved, user } = renderSave(aSavedQuery({ environment: "prod" }));
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toHaveTextContent("It is saved in dev.");
 
     await user.click(screen.getByRole("button", { name: "Save as new" }));
 
