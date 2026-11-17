@@ -97,6 +97,7 @@ def deploy_from_json(data: dict[str, Any]) -> Deploy:
         warnings=tuple(data.get("warnings", ())),
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
         job_starts=tuple(job_start_from_json(item) for item in data.get("job_starts", ())),
+        actions=tuple(data.get("actions", [])),
     )
 
 

@@ -202,3 +202,8 @@ def test_a_deploy_that_has_not_finished_at_the_timeout_is_a_plain_timeout(
     with pytest.raises(TimeoutError, match="still running") as raised:
         deploys.wait("dev", _BODY["id"], timeout=0)
     assert not isinstance(raised.value, JobStartsNotRecorded)
+
+
+def test_a_deploy_reads_actions_and_an_older_server_gives_none() -> None:
+    assert deploy_from_json(_BODY).actions == ()
+    assert deploy_from_json({**_BODY, "actions": ["rollback"]}).actions == ("rollback",)

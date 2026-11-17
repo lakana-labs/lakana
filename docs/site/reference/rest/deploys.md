@@ -119,6 +119,7 @@ Answer fields: `DeployOut`
 | `warnings` | list of text | no |  |
 | `waiting_for` | mapping of text to any or null | no | Why this is waiting, or null when it is not: a stable `code`, one sentence in `message`, and the numbers the sentence uses. |
 | `job_starts` | list of `DeployJobStartOut` | no |  |
+| `actions` | list of text | no |  |
 
 ## `GET /api/v1/environments/{env}/deployments`
 

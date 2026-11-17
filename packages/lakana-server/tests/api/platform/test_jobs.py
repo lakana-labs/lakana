@@ -17,7 +17,7 @@ from lakana_core.models import (
     NotificationState,
     Run,
 )
-from tests.api.platform.test_deploys import _insert_job_version, _setup, _token_for
+from tests.api.platform.test_deploys import _insert_job_version, _reader, _setup, _token_for
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -443,3 +443,17 @@ def test_pause_answers_with_the_triggers(client: TestClient) -> None:
     deployer = _grant(client, "deployer2", "DEPLOY")
     paused = client.post(f"{_ENV}/jobs/daily/pause", headers=deployer, json=_BODY).json()
     assert paused["triggers"][0]["paused"] is True
+
+
+def test_job_actions_follow_the_callers_rights(client: TestClient) -> None:
+    """A reader is offered no word, an administrator all three, in a list, a show and a pause."""
+    _deploy_jobs(client)
+    reader = _reader(client)
+    for header, words in ((AUTH_HEADER, ["run", "pause", "resume"]), (reader, [])):
+        listed = client.get(f"{_ENV}/jobs", headers=header)
+        assert [j["actions"] for j in listed.json()] == [words, words]
+        assert client.get(f"{_ENV}/jobs/daily", headers=header).json()["actions"] == words
+    paused = client.post(f"{_ENV}/jobs/daily/pause", headers=AUTH_HEADER, json=_BODY)
+    assert paused.json()["actions"] == ["run", "pause", "resume"]
+    started = client.post(f"{_ENV}/jobs/manual/runs", headers=AUTH_HEADER, json=_BODY)
+    assert started.json()["run"]["actions"] == ["cancel", "resume"]

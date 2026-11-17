@@ -713,3 +713,17 @@ def test_orphans_say_what_they_are_and_page(client: TestClient) -> None:
     assert second["next_cursor"] is None
     bad = client.get(url, params={"cursor": "nonsense"}, headers=AUTH_HEADER)
     assert bad.status_code == 422
+
+
+def test_deploy_actions_offer_rollback_to_deployers_only(client: TestClient) -> None:
+    """A reader reads the deploy with no word; an administrator is offered `rollback`."""
+    _setup(client)
+    queued = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    )
+    path = f"/api/v1/environments/dev/deploys/{queued.json()['id']}"
+    reader = _reader(client)
+    for header, words in ((AUTH_HEADER, ["rollback"]), (reader, [])):
+        assert client.get(path, headers=header).json()["actions"] == words
+        listed = client.get("/api/v1/environments/dev/deploys", headers=header).json()
+        assert [d["actions"] for d in listed] == [words]

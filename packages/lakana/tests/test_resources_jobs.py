@@ -261,3 +261,14 @@ def test_get_reads_one_job() -> None:
     assert "repository" not in seen[0].url.params
     _jobs(200, _JOB, seen).get("dev", "daily", repository="analytics")
     assert seen[-1].url.params["repository"] == "analytics"
+
+
+def test_job_reads_actions_and_an_older_server_gives_none() -> None:
+    assert _jobs(200, [_JOB]).list("dev")[0].actions == ()
+    job = _jobs(200, [{**_JOB, "actions": ["run", "pause", "resume"]}]).list("dev")[0]
+    assert job.actions == ("run", "pause", "resume")
+
+
+def test_run_reads_actions_and_an_older_server_gives_none() -> None:
+    assert run_from_json(_RUN).actions == ()
+    assert run_from_json({**_RUN, "actions": ["cancel", "resume"]}).actions == ("cancel", "resume")

@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.models import DeployKind
 from lakana_core.projects.deploys import DeploymentView, DeployRunView, DeployService
+from lakana_core.runs.operator import deploy_actions, operator_rights_each
 from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     DeployAccepted,
@@ -27,7 +29,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_deploy_service, get_principal
+from lakana_server.deps import get_deploy_service, get_grant_authorization, get_principal
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -37,13 +39,15 @@ router = APIRouter(
 )
 
 
-def _to_out(view: DeployRunView) -> DeployOut:
+def _to_out(view: DeployRunView, actions: Sequence[str] = ()) -> DeployOut:
     """Build a response body.
 
     Parameters
     ----------
     view
         The run's view.
+    actions
+        The words of what the caller's rights allow on it (`lakana_core.runs.operator`).
 
     Returns
     -------
@@ -71,6 +75,7 @@ def _to_out(view: DeployRunView) -> DeployOut:
         warnings=view.warnings,
         waiting_for=None if view.waiting_for is None else view.waiting_for.to_json(),
         job_starts=[DeployJobStartOut(**dataclasses.asdict(start)) for start in view.job_starts],
+        actions=list(actions),
     )
 
 
@@ -125,6 +130,7 @@ def list_deploys(
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[DeployOut]:
     """List an environment's deploys.
 
@@ -150,6 +156,8 @@ def list_deploys(
         The authenticated caller.
     service
         The deploy service.
+    authz
+        The authorization service, asked what the caller may do on each deploy.
 
     Returns
     -------
@@ -160,7 +168,8 @@ def list_deploys(
         principal, env, repository=repository, limit=limit, cursor=cursor
     )
     set_next_cursor(response, next_cursor)
-    return [_to_out(view) for view in views]
+    words = deploy_actions(operator_rights_each(authz, principal, [env])[env])
+    return [_to_out(view, words) for view in views]
 
 
 @router.get("/deploys/{deploy_id}", response_model=DeployOut, responses=errors(403, 404))
@@ -169,6 +178,7 @@ def get_deploy(
     deploy_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> DeployOut:
     """Show one deploy.
 
@@ -185,13 +195,16 @@ def get_deploy(
         The authenticated caller.
     service
         The deploy service.
+    authz
+        The authorization service, asked what the caller may do on each deploy.
 
     Returns
     -------
     DeployOut
         The run.
     """
-    return _to_out(service.get(principal, env, deploy_id))
+    view = service.get(principal, env, deploy_id)
+    return _to_out(view, deploy_actions(operator_rights_each(authz, principal, [env])[env]))
 
 
 def _deployment_out(view: DeploymentView) -> DeploymentOut:

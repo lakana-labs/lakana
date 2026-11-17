@@ -157,3 +157,8 @@ def test_task_history_asks_for_a_page_and_parses_the_entries() -> None:
         None,
     )
     assert older.started_at.isoformat() == "2026-11-01T12:00:00+00:00"
+
+
+def test_a_listed_run_reads_actions_and_an_older_server_gives_none() -> None:
+    assert run_from_json(_RUN).actions == ()
+    assert run_from_json({**_RUN, "actions": ["cancel"]}).actions == ("cancel",)

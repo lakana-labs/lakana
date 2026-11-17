@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Annotated
 
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.runs.check_rows import submit_check_rows
 from lakana_core.runs.checks import CheckResultView
+from lakana_core.runs.operator import operator_rights_each, run_actions
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService, RunView, TaskLogView, TaskRunView, WorkerView
 from lakana_server.api.platform.listing import set_next_cursor, split_values
@@ -71,13 +73,38 @@ def _task_out(task: TaskRunView) -> TaskRunOut:
     return TaskRunOut(**fields)
 
 
-def run_out(view: RunView) -> RunOut:
+def run_words(
+    authz: AuthorizationService, principal: PrincipalRef, environments: Iterable[str]
+) -> dict[str, tuple[str, ...]]:
+    """Ask what the caller may do on the runs of each environment, once.
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    principal
+        The caller.
+    environments
+        The environments of the runs to answer.
+
+    Returns
+    -------
+    dict of str to tuple of str
+        The run words per distinct environment.
+    """
+    rights = operator_rights_each(authz, principal, environments)
+    return {name: run_actions(r) for name, r in rights.items()}
+
+
+def run_out(view: RunView, actions: Sequence[str] = ()) -> RunOut:
     """Build a run body.
 
     Parameters
     ----------
     view
         The run.
+    actions
+        The words of what the caller's rights allow on it (`lakana_core.runs.operator`).
 
     Returns
     -------
@@ -88,7 +115,7 @@ def run_out(view: RunView) -> RunOut:
     fields["project_version_id"] = fields.pop("job_version_id")
     fields["tasks"] = [_task_out(task) for task in view.tasks]
     fields["notifications"] = [NotificationOut(**vars(n)) for n in view.notifications]
-    return RunOut(**fields)
+    return RunOut(**fields, actions=list(actions))
 
 
 def _log_out(view: TaskLogView) -> TaskLogOut:
@@ -138,6 +165,7 @@ def start_run(
     body: RunCreate,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Start a run.
 
@@ -157,6 +185,8 @@ def start_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
@@ -166,7 +196,8 @@ def start_run(
     selection = Selection(
         patterns=tuple(body.select), upstream=body.upstream, downstream=body.downstream
     )
-    return run_out(service.start(principal, env, body.repository, selection))
+    view = service.start(principal, env, body.repository, selection)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.get("/runs", response_model=list[RunOut], responses=errors(403, 404))
@@ -182,6 +213,7 @@ def list_runs(
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[RunOut]:
     """List runs.
 
@@ -218,6 +250,8 @@ def list_runs(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
@@ -236,7 +270,8 @@ def list_runs(
         cursor=cursor,
     )
     set_next_cursor(response, next_cursor)
-    return [run_out(v) for v in views]
+    words = run_words(authz, principal, [env])[env]
+    return [run_out(v, words) for v in views]
 
 
 @router.get(
@@ -303,6 +338,7 @@ def get_run(
     run_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Show a run.
 
@@ -319,13 +355,16 @@ def get_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
     RunOut
         The run.
     """
-    return run_out(service.get(principal, env, run_id))
+    view = service.get(principal, env, run_id)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.get(
@@ -470,6 +509,7 @@ def cancel_run(
     run_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Cancel a run.
 
@@ -486,13 +526,16 @@ def cancel_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
     RunOut
         The run with `cancel_requested`.
     """
-    return run_out(service.cancel(principal, env, run_id))
+    view = service.cancel(principal, env, run_id)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.post(
@@ -503,6 +546,7 @@ def resume_run(
     run_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Resume a run.
 
@@ -522,13 +566,16 @@ def resume_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
     RunOut
         The new run.
     """
-    return run_out(service.resume(principal, env, run_id))
+    view = service.resume(principal, env, run_id)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.get(

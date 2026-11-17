@@ -93,6 +93,7 @@ def job_from_json(data: dict[str, Any]) -> Job:
             for item in data.get("triggers", [])
             if item.get("kind") in _KINDS
         ),
+        actions=tuple(data.get("actions", [])),
     )
 
 

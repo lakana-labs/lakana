@@ -3038,6 +3038,10 @@ class Deploy:
     job_starts
         The jobs with `on_deploy: true` the deploy started, by name; empty for a run that
         starts no job and from a server that predates the field.
+    actions
+        The words of what your rights allow on it: ``rollback``. Rights only; offer a
+        control when the word is listed and the deploy's state allows it. Empty from a
+        server that predates them.
     """
 
     id: str
@@ -3060,6 +3064,7 @@ class Deploy:
     warnings: tuple[str, ...] = ()
     waiting_for: WaitingFor | None = None
     job_starts: tuple[DeployJobStart, ...] = ()
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -3656,6 +3661,10 @@ class Run:
     failed_tasks
         How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``), also in
         listings; 0 from a server that predates the field.
+    actions
+        The words of what your rights allow on it: ``cancel``, ``resume``. Rights only; offer a
+        control when the word is listed and the run's state allows it. Empty from a
+        server that predates them.
     """
 
     id: str
@@ -3681,6 +3690,7 @@ class Run:
     missed: int = 0
     notifications: list[Notification] = field(default_factory=list)
     failed_tasks: int = 0
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -3759,6 +3769,10 @@ class Job:
         When it was created.
     triggers
         How the job starts, schedule first; empty from a server that does not send them.
+    actions
+        The words of what your rights allow on it: ``run``, ``pause``, ``resume``. Rights
+        only; offer a control when the word is listed and the job's state allows it. Empty from
+        a server that predates them.
     """
 
     name: str
@@ -3780,6 +3794,7 @@ class Job:
     last_run_trigger: str | None
     last_run_at: datetime | None
     triggers: tuple[Trigger, ...] = ()
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

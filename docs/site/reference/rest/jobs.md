@@ -78,6 +78,7 @@ Answer fields: `JobOut`
 | `last_run_trigger` | text or null | yes |  |
 | `last_run_at` | text (date-time) or null | yes |  |
 | `triggers` | list of `ScheduleTriggerOut` or `DeployTriggerOut` or `OnDemandTriggerOut` | yes |  |
+| `actions` | list of text | no |  |
 
 ## `POST /api/v1/environments/{env}/jobs/{job}/runs`
 
@@ -172,6 +173,7 @@ Answer fields: `JobOut`
 | `last_run_trigger` | text or null | yes |  |
 | `last_run_at` | text (date-time) or null | yes |  |
 | `triggers` | list of `ScheduleTriggerOut` or `DeployTriggerOut` or `OnDemandTriggerOut` | yes |  |
+| `actions` | list of text | no |  |
 
 ## `POST /api/v1/environments/{env}/jobs/{job}/resume`
 
@@ -226,6 +228,7 @@ Answer fields: `JobOut`
 | `last_run_trigger` | text or null | yes |  |
 | `last_run_at` | text (date-time) or null | yes |  |
 | `triggers` | list of `ScheduleTriggerOut` or `DeployTriggerOut` or `OnDemandTriggerOut` | yes |  |
+| `actions` | list of text | no |  |
 
 ## `POST /api/v1/environments/{env}/jobs/{job}/notify-test`
 

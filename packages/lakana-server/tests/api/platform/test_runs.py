@@ -18,7 +18,7 @@ from lakana_server.api.platform.schemas import (
     TaskAttemptResourcesOut,
 )
 from tests.api.platform.test_deployments_run_as import _deploy
-from tests.api.platform.test_deploys import _token_for
+from tests.api.platform.test_deploys import _reader, _token_for
 from tests.conftest import AUTH_HEADER
 
 _RUNS = "/api/v1/environments/dev/runs"
@@ -1000,3 +1000,17 @@ def test_the_openapi_says_where_the_figures_come_from() -> None:
     for model in (TaskAttemptOut, TaskAttemptResourcesOut, QueryStatusOut):
         description = model.model_json_schema()["properties"]["bytes_read"]["description"]
         assert "DuckDB" in description, model.__name__
+
+
+def test_run_actions_follow_the_callers_rights(client: TestClient) -> None:
+    """Start, list, show and cancel give an administrator both words and a reader none."""
+    _deploy(client)
+    started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+    assert started["actions"] == ["cancel", "resume"]
+    reader = _reader(client)
+    for header, words in ((AUTH_HEADER, ["cancel", "resume"]), (reader, [])):
+        listed = client.get(_RUNS, headers=header).json()
+        assert [r["actions"] for r in listed] == [words]
+        assert client.get(f"{_RUNS}/{started['id']}", headers=header).json()["actions"] == words
+    cancelled = client.post(f"{_RUNS}/{started['id']}/cancel", headers=AUTH_HEADER)
+    assert cancelled.json()["actions"] == ["cancel", "resume"]

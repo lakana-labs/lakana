@@ -239,6 +239,7 @@ def run_from_json(data: dict[str, Any]) -> Run:
         missed=data.get("missed", 0),
         notifications=[notification_from_json(n) for n in data.get("notifications", ())],
         failed_tasks=data.get("failed_tasks", 0),
+        actions=tuple(data.get("actions", [])),
     )
 
 

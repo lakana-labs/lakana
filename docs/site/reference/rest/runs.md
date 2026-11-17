@@ -65,6 +65,7 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `GET /api/v1/environments/{env}/runs`
 
@@ -183,6 +184,7 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `GET /api/v1/environments/{env}/runs/{run_id}/checks`
 
@@ -331,6 +333,7 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `POST /api/v1/environments/{env}/runs/{run_id}/resume`
 
@@ -384,6 +387,7 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log`
 

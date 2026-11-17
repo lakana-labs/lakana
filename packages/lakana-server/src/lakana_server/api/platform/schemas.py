@@ -4289,6 +4289,10 @@ class DeployOut(BaseModel):
         The jobs with `on_deploy: true` that a successful deploy started, by name, each with
         what came of its start; empty for a run that starts no job (a dry run, a rollback, a
         failed deploy, a deploy of the commit already current).
+    actions
+        The words of what the caller's rights allow on it: ``rollback``. Rights only, as for a
+        table's `actions`: offer a control only when the word is listed and the deploy's state
+        allows it (Roll back for a succeeded deploy); the server decides every request again.
     """
 
     id: uuid.UUID
@@ -4317,6 +4321,7 @@ class DeployOut(BaseModel):
         ),
     )
     job_starts: list[DeployJobStartOut] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
 
 
 class DeploymentOut(BaseModel):
@@ -4901,6 +4906,11 @@ class RunOut(BaseModel):
     failed_tasks
         How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in
         listings.
+    actions
+        The words of what the caller's rights allow on it: ``cancel``, ``resume``. Rights
+        only, as for a table's `actions`: offer a control only when the word is listed and the
+        run's state allows it (Cancel for a queued or running run, Resume for a finished one
+        that did not succeed); the server decides every request again.
     """
 
     id: uuid.UUID
@@ -4926,6 +4936,7 @@ class RunOut(BaseModel):
     missed: int = 0
     notifications: list[NotificationOut] = Field(default_factory=list)
     failed_tasks: int = 0
+    actions: list[str] = Field(default_factory=list)
 
 
 class JobRunRequest(BaseModel):
@@ -5096,6 +5107,11 @@ class JobOut(BaseModel):
         How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule
         in this environment, a ``deploy`` trigger when it starts after each deploy here, and the
         ``on_demand`` trigger every job has, last. Kinds may be added.
+    actions
+        The words of what the caller's rights allow on it: ``run``, ``pause``, ``resume``.
+        Rights only, as for a table's `actions`: offer a control only when the word is listed
+        and the job's state allows it (Pause for an unpaused job with a schedule, Resume for a
+        paused one); the server decides every request again.
     """
 
     name: str
@@ -5117,6 +5133,7 @@ class JobOut(BaseModel):
     last_run_trigger: str | None
     last_run_at: datetime | None
     triggers: list[TriggerOut]
+    actions: list[str] = Field(default_factory=list)
 
 
 class TaskAttemptOut(BaseModel):
