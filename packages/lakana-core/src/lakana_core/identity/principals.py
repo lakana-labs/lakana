@@ -18,6 +18,7 @@ from lakana_core.grants.service import (
     held_admin_ids,
     withdraw_links_of_lapsed_issuers,
 )
+from lakana_core.identifiers import refuse_outer_whitespace
 from lakana_core.identity.links import (
     invisible_character_problem,
     name_length_problem,
@@ -79,8 +80,9 @@ class PrincipalService:
         ValidationError
             If the name or its normalised form is over 255 characters
             (`lakana_core.identity.links.name_length_problem`), or it holds a control or format
-            character, or starts with a combining mark
-            (`lakana_core.identity.links.invisible_character_problem`).
+            character or a line separator, or starts with a combining mark
+            (`lakana_core.identity.links.invisible_character_problem`), or it starts or ends with
+            a space (`lakana_core.identifiers.refuse_outer_whitespace`).
         PermissionDenied
             If the acting principal may not manage principals.
         StepUpRequired
@@ -96,6 +98,7 @@ class PrincipalService:
         problem = name_length_problem(name) or invisible_character_problem(name)
         if problem is not None:
             raise ValidationError(problem)
+        refuse_outer_whitespace(name, what="Principal name")
         problem = name_unavailable(self._session, name, now=utc_now())
         if problem is not None:
             raise AlreadyExistsError(problem)

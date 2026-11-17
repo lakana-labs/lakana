@@ -42,8 +42,9 @@ refused (409): `Alice`, `ALICE`, and the fullwidth `ａｌｉｃｅ`; `STRASSE` 
 and `file` with `ﬁle`. A name an open invite of the web interface holds is refused the same way
 until the invite is used, withdrawn or expires. A name is refused outright (422) when it holds a
 control character (such as a line break), an invisible format character (such as a zero-width
-space, a zero-width joiner, a soft hyphen or a direction mark), or starts with a combining mark
-(such as an accent with no letter before it), and when it has more than 255 characters as typed
+space, a zero-width joiner, a soft hyphen or a direction mark) or a line or paragraph separator
+(U+2028, U+2029), starts or ends with a space, or starts with a combining mark (such as an accent
+with no letter before it), and when it has more than 255 characters as typed
 or once normalised (a ligature such as `ﬃ` counts as three). Choose another name, or withdraw the
 invite first.
 
@@ -79,7 +80,9 @@ was created.` To take the access away, revoke that one grant with `lakana grant 
 ## Issue a token
 
 A token belongs to one principal and carries the principal's access. Name it after the place it
-will be used, so that you can tell tokens apart when you revoke one:
+will be used, so that you can tell tokens apart when you revoke one. The name may not hold a
+control or format character or a line separator, nor start or end with a space (422), so no token
+looks like another in `lakana token list`:
 
 <!-- source: docs/examples/give-access/run.sh#token -->
 ```bash
