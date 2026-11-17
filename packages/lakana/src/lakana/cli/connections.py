@@ -11,13 +11,14 @@ from __future__ import annotations
 import inspect
 import sys
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
-from lakana._models import Connection, ConnectionTest
+from lakana._models import Connection, ConnectionTest, LastConnectionTest
 from lakana.cli import _output
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 from lakana.cli.secrets import read_stdin, read_values
@@ -514,6 +515,90 @@ def _declared(connection: Connection) -> str:
     )
 
 
+def _finished(test: LastConnectionTest) -> str:
+    """Write what a finished test found and when.
+
+    Parameters
+    ----------
+    test
+        A done test.
+
+    Returns
+    -------
+    str
+        ``<outcome> at <ISO time>``.
+    """
+    when = test.finished_at.isoformat() if test.finished_at is not None else "(unknown)"
+    return f"{_output.inline(test.outcome or 'failed')} at {when}"
+
+
+def _before_change(test: LastConnectionTest, updated_at: datetime) -> str:
+    """Say that a test finished before the connection's last change, when it did.
+
+    Parameters
+    ----------
+    test
+        The test.
+    updated_at
+        When the connection was last changed.
+
+    Returns
+    -------
+    str
+        `` (before the last change)``, or nothing.
+    """
+    if test.finished_at is not None and test.finished_at < updated_at:
+        return " (before the last change)"
+    return ""
+
+
+def last_test_text(test: LastConnectionTest | None, updated_at: datetime) -> str:
+    """Write a connection's last test in a few words, as every reader may see it.
+
+    Parameters
+    ----------
+    test
+        Its last test, or `None` when it was never tested.
+    updated_at
+        When the connection was last changed.
+
+    Returns
+    -------
+    str
+        ``never tested``, ``queued``, ``running``, or ``<outcome> at <ISO time>``; followed by
+        `` (before the last change)`` when it finished before `updated_at`.
+    """
+    if test is None:
+        return "never tested"
+    if test.state != "done":
+        return _output.inline(test.state)
+    return _finished(test) + _before_change(test, updated_at)
+
+
+def _last_test_line(connection: Connection) -> str:
+    """Write the last test as `show` prints it: with its message and who ran it, when sent.
+
+    Parameters
+    ----------
+    connection
+        The connection.
+
+    Returns
+    -------
+    str
+        `last_test_text` for a reader. For a holder of the right to manage connections, an open
+        test adds its id, and a done one who ran it and its message.
+    """
+    test = connection.last_test
+    if test is None or test.id is None:
+        return last_test_text(test, connection.updated_at)
+    if test.state != "done":
+        return f"{_output.inline(test.state)} (--id {_output.inline(test.id)})"
+    who = _output.inline(test.requested_by or "(unknown)")
+    line = f"{_finished(test)} by {who}{_before_change(test, connection.updated_at)}"
+    return f"{line}: {_output.inline(test.message)}" if test.message else line
+
+
 @connection_app.command("create")
 @_with_kind_options
 def create(
@@ -570,7 +655,7 @@ def create(
 
 @connection_app.command("list")
 def list_connections(ctx: typer.Context, env: _ENV = None) -> None:
-    """List the connections of an environment, newest first.
+    """List the connections of an environment, newest first, with each one's last test.
 
     Parameters
     ----------
@@ -585,17 +670,23 @@ def list_connections(ctx: typer.Context, env: _ENV = None) -> None:
     _output.emit(
         state,
         connections,
-        columns=["name", "kind", "address", "secret", "declared_by"],
-        derived={"address": lambda row: _pairs(row.address), "declared_by": _declared},
-        droppable=["declared_by", "secret"],
+        columns=["name", "kind", "address", "secret", "declared_by", "last_test"],
+        derived={
+            "address": lambda row: _pairs(row.address),
+            "declared_by": _declared,
+            "last_test": lambda row: last_test_text(row.last_test, row.updated_at),
+        },
+        droppable=["declared_by", "secret", "last_test"],
     )
 
 
 @connection_app.command("show")
 def show(ctx: typer.Context, name: str, env: _ENV = None) -> None:
-    """Show connection NAME: its address, settings, secret's name and the assets that declare it.
+    """Show connection NAME: its address, settings, secret, declaring assets and last test.
 
-    A CA certificate shows as its SHA-256 fingerprint; a secret's values never show.
+    A CA certificate shows as its SHA-256 fingerprint; a secret's values never show. The last
+    test shows its outcome and when; with the right to manage connections, also who ran it and
+    its message. What to do about an outcome that is not ``ok`` goes to standard error.
 
     Parameters
     ----------
@@ -617,11 +708,16 @@ def show(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         f"Settings:    {_pairs(connection.settings)}",
         f"Secret:      {_output.inline(connection.secret or '(none)')}",
         f"Declared by: {_declared(connection)}",
+        f"Last test:   {_last_test_line(connection)}",
         f"Created:     {connection.created_at.isoformat()} by "
         f"{_output.inline(connection.created_by or '(unknown)')}",
         f"Updated:     {connection.updated_at.isoformat()}",
     ]
     sys.stdout.write(_output.safe_text("\n".join(lines)) + "\n")
+    last = connection.last_test
+    advice = next_step(last.outcome) if last is not None and last.state == "done" else None
+    if advice:
+        _output.next_step(state, advice)
 
 
 @connection_app.command("update")

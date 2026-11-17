@@ -71,6 +71,7 @@ What each setting means, and its default:
 |---|---|---|
 | Create, change, delete and test a connection | `MANAGE_CONNECTION` on the environment | `ADMIN`, `DATA_ENGINEER` |
 | List and show connections | `READ_ENVIRONMENT` on the environment | every role on it |
+| See a connection's last test: its outcome and when, for `READ_ENVIRONMENT`; its message and who ran it, for `MANAGE_CONNECTION` | `READ_ENVIRONMENT`; `MANAGE_CONNECTION` for the message and who ran it | every role on it; `ADMIN` and `DATA_ENGINEER` for the message and who ran it |
 
 Testing a connection is a probe from the worker: with the local runner it dials from the worker's host
 to any address the connection names and lists paths under the ingestion roots, so
@@ -254,12 +255,12 @@ lakana connection list --env dev
 
 <!-- output: connections#list -->
 ```text
-┏━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
-┃ name    ┃ kind       ┃ address                                    ┃ secret            ┃ declared_by ┃
-┡━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
-│ exports │ directory  │ root=shared path=exports                   │                   │ (none)      │
-│ crm-db  │ postgresql │ host=db.example.com port=5432 database=crm │ crm-db-connection │ (none)      │
-└─────────┴────────────┴────────────────────────────────────────────┴───────────────────┴─────────────┘
+┏━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ name    ┃ kind       ┃ address                                    ┃ secret            ┃ declared_by ┃ last_test    ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ exports │ directory  │ root=shared path=exports                   │                   │ (none)      │ never tested │
+│ crm-db  │ postgresql │ host=db.example.com port=5432 database=crm │ crm-db-connection │ (none)      │ never tested │
+└─────────┴────────────┴────────────────────────────────────────────┴───────────────────┴─────────────┴──────────────┘
 ```
 
 <!-- source: docs/examples/connections/run.sh#show -->
@@ -274,6 +275,7 @@ Address:     host=db.example.com port=5432 database=crm
 Settings:    user=reader tls=verify-full
 Secret:      crm-db-connection
 Declared by: (none)
+Last test:   never tested
 Created:     2026-10-23T22:54:56.950729+00:00 by admin
 Updated:     2026-10-23T22:54:56.954955+00:00
 ```
@@ -310,6 +312,13 @@ The audit events of connections:
 ```bash
 lakana audit list --kind connection --env dev
 ```
+
+`list` has a `last_test` column and `show` a `Last test:` line: `never tested`, `queued`,
+`running`, or the outcome and when it finished, followed by `(before the last change)` when the
+connection changed after it. With `MANAGE_CONNECTION`, `show` adds who ran it and its message
+(`by dana: password authentication failed ...`), and for an open test its id (`queued (--id ID)`),
+which `lakana connection test NAME --id ID` shows. For an outcome other than `ok`, `show` prints
+what to do next on standard error.
 
 `--output json` prints the record of the REST answer (below) for `show`, `create` and `update`.
 
@@ -348,9 +357,27 @@ removed), `secret`, `secret_values`, and `clear`, a list of `secret` and setting
 
 The record, in every answer: `name`, `kind`, `address` and `settings` (with defaults filled in,
 `ca_certificate` as its fingerprint), `secret` (the secret's name, or `null`), `declared_by` (a
-list of `{"repository": ..., "asset": ...}`), `created_by` (a principal's name), `created_at` and
-`updated_at`. No answer of these routes holds a secret's value; only the task route above does,
-for the running task itself.
+list of `{"repository": ..., "asset": ...}`), `created_by` (a principal's name), `created_at`,
+`updated_at`, `environment` (its environment's name), `last_test` and `actions`. No answer of
+these routes holds a secret's value; only the task route above does, for the running task itself.
+
+`last_test` is the connection's newest test of any state, or `null` if it was never tested:
+
+- every reader gets `state` (`queued`, `running` or `done`), `outcome` (`null` until done) and
+  `finished_at` (`null` until done);
+- a holder of `MANAGE_CONNECTION` also gets `id`, `created_at`, `message` and `requested_by` (the
+  name of who asked, `null` when that principal is gone). For anyone else these four keys are
+  absent, not `null`: the message can name paths, hosts and ports the worker reached, while each
+  outcome's cause and next step are public ([Test a connection](#test-a-connection)).
+
+A change keeps `last_test`: when its `finished_at` is before `updated_at`, it tested the connection
+as it was before the change.
+
+`actions` says what your rights allow on the connection, in this order: `test`, `update` and
+`delete` with `MANAGE_CONNECTION` on the environment, and `name_secret` with `MANAGE_SECRET` there
+too (naming a secret not bound to the connection, or a change that could send its secret somewhere
+new without new values). A reader gets `[]`. The server still decides every request: an offered
+action can be refused, for example a delete while a deployed version declares the connection.
 
 ## SDK
 
@@ -377,6 +404,9 @@ events = client.audit_events.list(kind="connection")
 ```
 
 `update` takes `address`, `settings`, `secret`, `secret_values` and `clear` (a list of names).
+A `Connection` also has `environment`, `last_test` (a `LastConnectionTest` with `state`,
+`outcome` and `finished_at`, and `id`, `created_at`, `message` and `requested_by`, which are
+`None` without `MANAGE_CONNECTION`) and `actions`, a tuple of the words of `actions` above.
 
 `client.connections.test("prod", "crm-db")` queues a test and polls it (0.5 s, growing to 2 s) until
 it is done or `timeout` (120 s) passes, and returns a `ConnectionTest` with `id`, `state`,

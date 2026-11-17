@@ -3655,6 +3655,56 @@ class DeclaringAssetOut(BaseModel):
     asset: str
 
 
+class ConnectionLastTestOut(BaseModel):
+    """The newest test of a connection, of any state.
+
+    Every reader of the connection gets `state`, `outcome` and `finished_at`. Only a holder of
+    `MANAGE_CONNECTION` on the environment gets `id`, `created_at`, `message` and
+    `requested_by`; for anyone else those four keys are absent, not `null`, because the message
+    can name paths, hosts and ports the worker reached.
+
+    Parameters
+    ----------
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        What it found once ``done``; `null` before. Each outcome's cause and next step are
+        public; the message is not.
+    finished_at
+        When it was done; `null` before.
+    id
+        The test's id; with `GET .../tests/{test_id}` it shows the test.
+    created_at
+        When it was requested.
+    message
+        What it found, redacted; `null` before it is done.
+    requested_by
+        The name of the principal who asked for it; `null` when that principal is gone.
+    """
+
+    state: Literal["queued", "running", "done"]
+    outcome: (
+        Literal[
+            "ok",
+            "dns",
+            "refused",
+            "timeout",
+            "tls",
+            "credentials",
+            "not_found",
+            "not_allowed",
+            "root_unavailable",
+            "failed",
+        ]
+        | None
+    )
+    finished_at: datetime | None
+    id: uuid.UUID | None = None
+    created_at: datetime | None = None
+    message: str | None = None
+    requested_by: str | None = None
+
+
 class ConnectionOut(BaseModel):
     """Response body for a connection. Carries its secret's name, never a value.
 
@@ -3679,6 +3729,19 @@ class ConnectionOut(BaseModel):
         When it was created.
     updated_at
         When it was last changed.
+    environment
+        The name of its environment.
+    last_test
+        Its newest test of any state (queued, running or done), or `null` if it was never
+        tested. A change keeps it: a test that finished before `updated_at` tested the
+        connection as it was. Every reader gets its `state`, `outcome` and `finished_at`; its
+        `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` on
+        the environment, and for anyone else those keys are absent.
+    actions
+        What the caller's rights allow on it: ``test``, ``update`` and ``delete`` with
+        `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound
+        to it, or a change that could send its secret somewhere new without new values) with
+        `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again.
     """
 
     name: str
@@ -3690,6 +3753,9 @@ class ConnectionOut(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    environment: str
+    last_test: ConnectionLastTestOut | None
+    actions: list[Literal["test", "update", "delete", "name_secret"]]
 
 
 class ConnectionPage(BaseModel):

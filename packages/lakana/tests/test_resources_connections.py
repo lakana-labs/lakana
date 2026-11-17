@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -10,7 +11,7 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
-from lakana._models import Connection, DeclaringAsset
+from lakana._models import Connection, DeclaringAsset, LastConnectionTest
 from lakana.errors import InvalidResponse
 from lakana.resources.connections import Connections
 from lakana.resources.task_connections import TaskConnections
@@ -140,6 +141,9 @@ def test_the_model_has_no_field_for_a_secret_value() -> None:
         "created_by",
         "created_at",
         "updated_at",
+        "environment",
+        "last_test",
+        "actions",
     }
 
 
@@ -383,3 +387,67 @@ def test_an_odd_test_answer_is_an_invalid_response(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(InvalidResponse):
         connections.test("prod", "crm-db", wait=False)
+
+
+_LAST_TEST = {
+    "state": "done",
+    "outcome": "credentials",
+    "finished_at": "2026-11-17T08:00:00+00:00",
+    "id": "6f1c1f0e-0a52-4b7b-9d0e-2f3a4b5c6d7e",
+    "created_at": "2026-11-17T07:59:58+00:00",
+    "message": "password authentication failed for user reader",
+    "requested_by": "dana",
+}
+
+
+def test_a_connection_reads_environment_last_test_and_actions() -> None:
+    answer = {
+        **_ANSWER,
+        "environment": "prod",
+        "last_test": _LAST_TEST,
+        "actions": ["test", "update", "delete"],
+    }
+
+    connection = _connections(answer, []).get("prod", "crm-db")
+
+    assert connection.environment == "prod"
+    assert connection.actions == ("test", "update", "delete")
+    assert connection.last_test == LastConnectionTest(
+        state="done",
+        outcome="credentials",
+        finished_at=datetime(2026, 11, 17, 8, 0, tzinfo=UTC),
+        id="6f1c1f0e-0a52-4b7b-9d0e-2f3a4b5c6d7e",
+        created_at=datetime(2026, 11, 17, 7, 59, 58, tzinfo=UTC),
+        message="password authentication failed for user reader",
+        requested_by="dana",
+    )
+    queued = {**answer, "last_test": {"state": "queued", "outcome": None, "finished_at": None}}
+    assert _connections(queued, []).get("prod", "crm-db").last_test == LastConnectionTest(
+        state="queued", outcome=None, finished_at=None
+    )
+
+
+def test_an_older_servers_connection_reads_them_as_defaults() -> None:
+    connection = _connections(_ANSWER, []).get("prod", "crm-db")
+
+    assert (connection.environment, connection.last_test, connection.actions) == (None, None, ())
+
+
+def test_a_readers_last_test_has_no_detail() -> None:
+    reader = {key: _LAST_TEST[key] for key in ("state", "outcome", "finished_at")}
+    answer = {**_ANSWER, "environment": "prod", "last_test": reader, "actions": []}
+
+    last = _connections(answer, []).get("prod", "crm-db").last_test
+
+    assert last is not None
+    assert (last.state, last.outcome) == ("done", "credentials")
+    assert last.message is None and last.requested_by is None
+    assert last.id is None and last.created_at is None
+
+
+@pytest.mark.parametrize(
+    "last_test", [[], {"outcome": "ok", "finished_at": None}, {"state": "done", "finished_at": 1}]
+)
+def test_an_odd_last_test_is_an_invalid_response(last_test: Any) -> None:  # ruff: ignore[any-type]
+    with pytest.raises(InvalidResponse):
+        _connections({**_ANSWER, "last_test": last_test}, []).get("prod", "crm-db")

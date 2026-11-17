@@ -19,6 +19,12 @@ give it which secret is split by case:
 When a connection takes a secret, every other secret bound to it is let go (unbound), so that
 "keep the bound secret" can only ever mean the one it uses. No method decrypts a secret, and no
 view, message or audit event holds a secret value or the text of a CA certificate.
+
+Every view says what its reader may do with the connection (`CONNECTION_ACTIONS`) and its last
+test. Every reader sees the test's state, outcome and finish time; only a holder of
+`MANAGE_CONNECTION` on the environment sees its id, request time, message and requester, because
+the message can name paths, hosts and ports the worker reached. The rights of a page are asked in
+one `permits_each` batch, which writes no audit event.
 """
 
 from __future__ import annotations
@@ -35,7 +41,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
 from lakana_core.connections.kinds import (
     NAME,
     ConnectionKind,
@@ -103,11 +109,19 @@ _TEST_STUCK = (
     "log (`docker compose logs worker`, or the `lakana local` terminal)"
 )
 _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a credential
+CONNECTION_ACTIONS: tuple[str, ...] = ("test", "update", "delete", "name_secret")
+"""The words a connection's `actions` may hold, in this order.
+
+``test``, ``update`` and ``delete`` need `MANAGE_CONNECTION` on the environment. ``name_secret``
+needs `MANAGE_SECRET` there too: the right to name a secret not bound to the connection, or to make
+a change that could send its secret somewhere new without new values. They are rights only: the
+server decides every request again.
+"""
 
 
 @dataclass(frozen=True)
 class LastTestDetail:
-    """What only a manager of the connection sees of its last test.
+    """What only a holder of `MANAGE_CONNECTION` on the environment sees of a last test.
 
     Parameters
     ----------
@@ -140,7 +154,8 @@ class LastTest:
     finished_at
         When it finished, `None` until it is done.
     detail
-        The id, time, message and requester; `None` for a caller who may not see them.
+        The id, time, message and requester; `None` for a caller without `MANAGE_CONNECTION`
+        on the environment.
     """
 
     state: ConnectionTestState
@@ -220,6 +235,8 @@ class ConnectionView:
         The name of its environment.
     last_test
         Its newest test of any state, or `None` if it was never tested.
+    actions
+        What the caller's rights allow on it, drawn from `CONNECTION_ACTIONS` in that order.
     """
 
     name: str
@@ -233,6 +250,7 @@ class ConnectionView:
     updated_at: datetime
     environment: str
     last_test: LastTest | None
+    actions: tuple[str, ...]
 
 
 def missing_connections(
@@ -594,11 +612,42 @@ class ConnectionService:
             )
         return row
 
+    def _rights(self, p: PrincipalRef, environments: Iterable[str]) -> dict[str, tuple[bool, bool]]:
+        """Ask what a caller may do with the connections of some environments, in one batch.
+
+        Two questions per environment, `MANAGE_CONNECTION` and `MANAGE_SECRET`, go in one
+        `permits_each` call. Like every visibility question, it writes no audit event.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        environments
+            The environments' names; one may repeat.
+
+        Returns
+        -------
+        dict of str to tuple of (bool, bool)
+            Each environment's name to whether the caller holds `MANAGE_CONNECTION` and
+            `MANAGE_SECRET` there.
+        """
+        names = sorted(set(environments))
+        questions = [
+            (action, Securable.environment_scope(name))
+            for name in names
+            for action in (Action.MANAGE_CONNECTION, Action.MANAGE_SECRET)
+        ]
+        answers = permits_each(self._authz, p, questions) if questions else []
+        return {
+            name: (answers[2 * index], answers[2 * index + 1]) for index, name in enumerate(names)
+        }
+
     def _view(
         self,
         row: Connection,
         env: Environment,
         last: tuple[ConnectionTest, str | None] | None,
+        rights: tuple[bool, bool],
         declarations: Mapping[str, builtins.list[tuple[str, str]]] | None = None,
     ) -> ConnectionView:
         """Turn a row into what a caller sees.
@@ -611,6 +660,9 @@ class ConnectionService:
             Its environment.
         last
             Its entry of `last_tests`, `None` if it was never tested.
+        rights
+            Its environment's entry of `_rights`: whether the caller holds `MANAGE_CONNECTION`
+            and `MANAGE_SECRET` there.
         declarations
             `_declarations` of the environment, when the caller read it already.
 
@@ -626,6 +678,10 @@ class ConnectionService:
             settings["ca_certificate"] = fingerprint(settings["ca_certificate"])
         secret = self._used_secret(row)
         creator = self._session.get(Principal, row.created_by)
+        manages, manages_secrets = rights
+        actions: tuple[str, ...] = ()
+        if manages:
+            actions = CONNECTION_ACTIONS if manages_secrets else CONNECTION_ACTIONS[:3]
         return ConnectionView(
             name=row.name,
             kind=row.kind,
@@ -637,12 +693,13 @@ class ConnectionService:
             created_at=row.created_at,
             updated_at=row.updated_at,
             environment=env.name,
-            last_test=None if last is None else self._last_test(*last),
+            last_test=None if last is None else self._last_test(*last, manages=manages),
+            actions=actions,
         )
 
     @staticmethod
-    def _last_test(test: ConnectionTest, requested_by: str | None) -> LastTest:
-        """Turn a test row into the last test of a connection.
+    def _last_test(test: ConnectionTest, requested_by: str | None, *, manages: bool) -> LastTest:
+        """Turn a test row into the last test of a connection, as its caller may see it.
 
         Parameters
         ----------
@@ -650,22 +707,27 @@ class ConnectionService:
             The newest test.
         requested_by
             The name of who asked, `None` if that principal is gone.
+        manages
+            Whether the caller holds `MANAGE_CONNECTION` on the environment.
 
         Returns
         -------
         LastTest
-            Its state, outcome and time, with the detail every caller gets for now.
+            Its state, outcome and time; the detail only for a caller who `manages`.
         """
-        return LastTest(
-            state=test.state,
-            outcome=test.outcome,
-            finished_at=test.finished_at,
-            detail=LastTestDetail(
+        detail = None
+        if manages:
+            detail = LastTestDetail(
                 id=test.id,
                 created_at=test.created_at,
                 message=test.message,
                 requested_by=requested_by,
-            ),
+            )
+        return LastTest(
+            state=test.state,
+            outcome=test.outcome,
+            finished_at=test.finished_at,
+            detail=detail,
         )
 
     def _last_of(self, row: Connection) -> tuple[ConnectionTest, str | None] | None:
@@ -848,7 +910,7 @@ class ConnectionService:
                 },
             )
             self._commit(env, name)
-        return self._view(row, env, self._last_of(row))
+        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
 
     def list(
         self, p: PrincipalRef, environment: str, *, limit: int = 100, cursor: str | None = None
@@ -897,8 +959,9 @@ class ConnectionService:
         )
         declarations = self._declarations(env.id)
         found = last_tests(self._session, [row.id for row in page.items])
+        rights = self._rights(p, [env.name])[env.name]
         return Page(
-            [self._view(row, env, found.get(row.id), declarations) for row in page.items],
+            [self._view(row, env, found.get(row.id), rights, declarations) for row in page.items],
             page.next_cursor,
         )
 
@@ -931,7 +994,7 @@ class ConnectionService:
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         env = self._environment(environment)
         row = self._find(env, name)
-        return self._view(row, env, self._last_of(row))
+        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
 
     def update(
         self,
@@ -1030,7 +1093,7 @@ class ConnectionService:
                 self._session.rollback()
                 raise
             self._commit(env, row.name)
-        return self._view(row, env, self._last_of(row))
+        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
 
     def _change(
         self,

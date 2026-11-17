@@ -22,6 +22,9 @@ from sqlalchemy.orm import Session
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    ConnectionTest,
+    ConnectionTestOutcome,
+    ConnectionTestState,
     Environment,
     EnvironmentDeployment,
     JobVersion,
@@ -396,6 +399,9 @@ def test_a_data_engineer_creates_lists_shows_updates_and_deletes(
         "created_by",
         "created_at",
         "updated_at",
+        "environment",
+        "last_test",
+        "actions",
     }
     assert body["address"] == {"host": "db.example.com", "port": 5432, "database": "crm"}
     assert body["settings"] == {"user": "reader", "tls": "verify-full"}
@@ -857,3 +863,130 @@ def test_a_test_of_another_connection_or_a_missing_connection_is_404(
         "environment `prod` has no connection `missing`; `lakana connection list --env prod` "
         "lists them"
     )
+
+
+def _finish(client: TestClient, test_id: str, outcome: ConnectionTestOutcome, message: str) -> None:
+    """Record a queued test as done, as a worker would.
+
+    Parameters
+    ----------
+    client
+        The test client, for its database.
+    test_id
+        The test.
+    outcome
+        What it found.
+    message
+        Its message.
+    """
+    with Session(client.app.state.engine) as session:
+        test = session.get(ConnectionTest, uuid.UUID(test_id))
+        assert test is not None
+        test.state = ConnectionTestState.DONE
+        test.outcome = outcome
+        test.message = message
+        test.finished_at = datetime.datetime.now(datetime.UTC)
+        session.commit()
+
+
+_HELD_BACK = {"id", "created_at", "message", "requested_by"}
+"""The fields of `last_test` only a holder of `MANAGE_CONNECTION` gets."""
+
+
+def test_a_reader_gets_the_last_tests_outcome_without_its_message_or_who_ran_it(
+    client: TestClient, client_as: ClientAs, created: dict[str, Any]
+) -> None:
+    """Review Focus 1: the four keys are absent from the raw JSON, not `null`; no actions."""
+    queued = client_as("data_engineer").post(f"{_BASE}/crm-db/tests").json()
+    _finish(client, queued["id"], ConnectionTestOutcome.CREDENTIALS, "/srv/landing: denied")
+
+    for who in ("analyst", "viewer"):
+        reader = client_as(who)
+        listed = reader.get(_BASE)
+        shown = reader.get(f"{_BASE}/crm-db")
+
+        assert listed.status_code == 200 and shown.status_code == 200, who
+        for item in (*listed.json()["items"], shown.json()):
+            assert set(item["last_test"]) == {"state", "outcome", "finished_at"}, who
+            assert (item["last_test"]["state"], item["last_test"]["outcome"]) == (
+                "done",
+                "credentials",
+            )
+            assert item["last_test"]["finished_at"] is not None
+            assert item["actions"] == [], who
+        assert "/srv/landing" not in listed.text + shown.text
+
+
+def test_a_manager_gets_the_tests_message_and_who_ran_it(
+    client: TestClient, client_as: ClientAs, created: dict[str, Any]
+) -> None:
+    """A data engineer gets every field of `last_test` and may test, update and delete."""
+    engineer = client_as("data_engineer")
+    queued = engineer.post(f"{_BASE}/crm-db/tests").json()
+
+    still_open = engineer.get(f"{_BASE}/crm-db").json()["last_test"]
+    _finish(client, queued["id"], ConnectionTestOutcome.OK, "connected")
+    listed = engineer.get(_BASE).json()["items"]
+    shown = engineer.get(f"{_BASE}/crm-db").json()
+
+    assert still_open == {
+        "id": queued["id"],
+        "state": "queued",
+        "outcome": None,
+        "finished_at": None,
+        "created_at": queued["created_at"],
+        "message": None,
+        "requested_by": "data_engineer",
+    }
+    for item in (*listed, shown):
+        assert set(item["last_test"]) == {"state", "outcome", "finished_at"} | _HELD_BACK
+        assert item["last_test"]["id"] == queued["id"]
+        assert (item["last_test"]["message"], item["last_test"]["requested_by"]) == (
+            "connected",
+            "data_engineer",
+        )
+        assert item["actions"] == ["test", "update", "delete"]
+    assert client_as("admin").get(f"{_BASE}/crm-db").json()["actions"] == [
+        "test",
+        "update",
+        "delete",
+        "name_secret",
+    ]
+
+
+def test_never_tested_is_null_and_every_answer_names_its_environment(
+    client_as: ClientAs,
+) -> None:
+    """`last_test` is `null` (present) before any test, on create, list, show and update."""
+    engineer = client_as("other")
+    base = "/api/v1/environments/dev/connections"
+
+    created = engineer.post(base, json={**_PG, "secret_values": {"password": _VALUE}})
+    listed = engineer.get(base)
+    shown = engineer.get(f"{base}/crm-db")
+    updated = engineer.patch(f"{base}/crm-db", json={"settings": {"user": "loader"}})
+
+    assert (created.status_code, updated.status_code) == (201, 200), created.text + updated.text
+    for body in (created.json(), *listed.json()["items"], shown.json(), updated.json()):
+        assert "last_test" in body and body["last_test"] is None
+        assert body["environment"] == "dev"
+        assert body["actions"] == ["test", "update", "delete"]
+
+
+def test_last_test_stays_after_an_update(
+    client: TestClient, client_as: ClientAs, created: dict[str, Any]
+) -> None:
+    """A change keeps the last test; the client compares `finished_at` with `updated_at`."""
+    engineer = client_as("data_engineer")
+    queued = engineer.post(f"{_BASE}/crm-db/tests").json()
+    _finish(client, queued["id"], ConnectionTestOutcome.OK, "connected")
+    before = engineer.get(f"{_BASE}/crm-db").json()
+
+    updated = engineer.patch(f"{_BASE}/crm-db", json={"settings": {"user": "loader"}})
+
+    assert updated.status_code == 200, updated.text
+    after = updated.json()
+    assert after["last_test"] == before["last_test"]
+    assert after["last_test"]["id"] == queued["id"]
+    finished = datetime.datetime.fromisoformat(after["last_test"]["finished_at"])
+    assert finished < datetime.datetime.fromisoformat(after["updated_at"])

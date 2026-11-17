@@ -53,7 +53,7 @@ Give the kind's address and settings options, and its secret one of three ways: 
 
 Usage: `lakana connection list [OPTIONS]`
 
-List the connections of an environment, newest first.
+List the connections of an environment, newest first, with each one's last test.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -63,9 +63,9 @@ List the connections of an environment, newest first.
 
 Usage: `lakana connection show [OPTIONS] {name}`
 
-Show connection NAME: its address, settings, secret's name and the assets that declare it.
+Show connection NAME: its address, settings, secret, declaring assets and last test.
 
-A CA certificate shows as its SHA-256 fingerprint; a secret's values never show.
+A CA certificate shows as its SHA-256 fingerprint; a secret's values never show. The last test shows its outcome and when; with the right to manage connections, also who ran it and its message. What to do about an outcome that is not ``ok`` goes to standard error.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

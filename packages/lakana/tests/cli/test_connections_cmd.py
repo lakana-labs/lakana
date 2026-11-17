@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,8 @@ import httpx
 import pytest
 from conftest import FakeApi, invoke, make_state
 
-from lakana.cli.connections import _secret_values
+from lakana._models import LastConnectionTest
+from lakana.cli.connections import _secret_values, last_test_text, next_step
 
 _BASE = "/api/v1/environments/prod/connections"
 _VALUE = "s3cr3t-value"
@@ -26,6 +28,9 @@ _CONNECTION: dict[str, Any] = {
     "created_by": "dana",
     "created_at": "2026-10-23T12:00:00+00:00",
     "updated_at": "2026-10-23T12:00:00+00:00",
+    "environment": "prod",
+    "last_test": None,
+    "actions": ["test", "update", "delete"],
 }
 _S3: dict[str, Any] = {
     **_CONNECTION,
@@ -835,3 +840,133 @@ def test_an_outcome_this_version_does_not_know_is_printed_without_a_next_step(
     assert result.exit_code == 1
     assert "quota: the source said no" in result.stdout
     assert "Next:" not in result.stdout + result.stderr
+
+
+_DONE_AT = "2026-11-17T08:00:00+00:00"
+_MANAGERS_TEST: dict[str, Any] = {
+    "state": "done",
+    "outcome": "credentials",
+    "finished_at": _DONE_AT,
+    "id": _TEST_ID,
+    "created_at": "2026-11-17T07:59:58+00:00",
+    "message": "password authentication failed for user reader",
+    "requested_by": "dana",
+}
+_CHANGED = {"updated_at": "2026-11-17T09:00:00+00:00"}
+
+
+def _tested(**last_test: Any) -> dict[str, Any]:  # ruff: ignore[any-type]
+    """Give `crm-db` a last test, changed before it.
+
+    Parameters
+    ----------
+    **last_test
+        The `last_test` object of the answer.
+
+    Returns
+    -------
+    dict
+        The answer.
+    """
+    return {**_CONNECTION, "updated_at": "2026-11-17T07:00:00+00:00", "last_test": last_test}
+
+
+def _show(tmp_path: Path, answer: dict[str, Any]) -> Any:  # ruff: ignore[any-type]
+    """Run `lakana connection show crm-db --env prod` against one answer.
+
+    Parameters
+    ----------
+    tmp_path
+        The test's directory.
+    answer
+        The server's answer.
+
+    Returns
+    -------
+    click.testing.Result
+        The run.
+    """
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/crm-db", json=answer)
+    return invoke(make_state(tmp_path, api), "connection", "show", "crm-db", "--env", "prod")
+
+
+def test_list_shows_the_last_test_column(tmp_path: Path) -> None:
+    ok = _tested(state="done", outcome="ok", finished_at=_DONE_AT)
+    api = FakeApi()
+    api.on("GET", _BASE, json={"items": [ok, _S3], "next_cursor": None})
+
+    result = invoke(make_state(tmp_path, api), "connection", "list", "--env", "prod")
+
+    assert result.exit_code == 0, result.output
+    assert "last_test" in result.stdout
+    assert "ok at 2026-11-17T08:00:00+00:00" in result.stdout
+    assert "never tested" in result.stdout
+
+
+def test_show_prints_the_managers_last_test_with_message_and_who(tmp_path: Path) -> None:
+    done = _show(tmp_path, _tested(**_MANAGERS_TEST))
+    queued = _show(
+        tmp_path,
+        _tested(
+            state="queued",
+            outcome=None,
+            finished_at=None,
+            id=_TEST_ID,
+            created_at=_DONE_AT,
+            message=None,
+            requested_by="dana",
+        ),
+    )
+
+    assert done.exit_code == 0, done.output
+    lines = done.stdout.splitlines()
+    assert lines[lines.index("Declared by: analytics: customers") + 1] == (
+        "Last test:   credentials at 2026-11-17T08:00:00+00:00 by dana: "
+        "password authentication failed for user reader"
+    )
+    assert "lakana connection update NAME --values-stdin" in done.stderr
+    assert f"Last test:   queued (--id {_TEST_ID})" in queued.stdout.splitlines()
+
+
+def test_show_prints_a_readers_last_test_with_the_next_step_on_stderr(tmp_path: Path) -> None:
+    reader = _tested(state="done", outcome="credentials", finished_at=_DONE_AT)
+
+    result = _show(tmp_path, reader)
+
+    assert result.exit_code == 0, result.output
+    assert "Last test:   credentials at 2026-11-17T08:00:00+00:00" in result.stdout.splitlines()
+    assert next_step("credentials") in result.stderr
+    assert next_step("credentials") not in result.stdout
+    never = _show(tmp_path, _CONNECTION)
+    assert "Last test:   never tested" in never.stdout.splitlines()
+    assert never.stderr == ""
+
+
+def test_a_test_before_the_last_change_says_so(tmp_path: Path) -> None:
+    before = {**_tested(**_MANAGERS_TEST), **_CHANGED}
+    reader = {**_tested(state="done", outcome="ok", finished_at=_DONE_AT), **_CHANGED}
+
+    shown = _show(tmp_path, before)
+    read = _show(tmp_path, reader)
+
+    assert (
+        "Last test:   credentials at 2026-11-17T08:00:00+00:00 by dana (before the last change): "
+        "password authentication failed for user reader"
+    ) in shown.stdout.splitlines()
+    assert (
+        "Last test:   ok at 2026-11-17T08:00:00+00:00 (before the last change)"
+        in read.stdout.splitlines()
+    )
+    test = LastConnectionTest(
+        state="done", outcome="ok", finished_at=datetime(2026, 11, 17, 8, 0, tzinfo=UTC)
+    )
+    assert last_test_text(test, datetime(2026, 11, 17, 8, 0, tzinfo=UTC)) == (
+        "ok at 2026-11-17T08:00:00+00:00"
+    )
+    assert last_test_text(test, datetime(2026, 11, 17, 9, 0, tzinfo=UTC)).endswith(
+        " (before the last change)"
+    )
+    running = LastConnectionTest(state="running", outcome=None, finished_at=None)
+    assert last_test_text(running, datetime(2026, 11, 17, 9, 0, tzinfo=UTC)) == "running"
+    assert last_test_text(None, datetime(2026, 11, 17, 9, 0, tzinfo=UTC)) == "never tested"

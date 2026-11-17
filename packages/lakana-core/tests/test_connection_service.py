@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind, TaskScope
+from lakana_core.connections import service as service_module
 from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.connections.service import (
     ConnectionService,
@@ -2549,3 +2550,81 @@ def test_the_last_test_names_who_ran_it(world: World) -> None:
     assert last.detail is not None
     assert last.detail.requested_by == "eva"
     assert last.detail.created_at == _NOW
+
+
+def test_a_managers_view_has_the_actions_and_the_tests_detail(world: World) -> None:
+    """A data engineer manages connections but not secrets: no `name_secret`, the whole test."""
+    world.postgres(world.data_engineer)
+    _add_test(
+        world,
+        world.connection_id("prod", "crm-db"),
+        at=_NOW,
+        state=ConnectionTestState.DONE,
+        outcome=ConnectionTestOutcome.CREDENTIALS,
+    )
+
+    view = world.connections().get(world.data_engineer, "prod", "crm-db")
+    (listed,) = world.connections().list(world.data_engineer, "prod").items
+
+    for seen in (view, listed):
+        assert seen.actions == ("test", "update", "delete")
+        assert seen.last_test is not None
+        assert seen.last_test.detail is not None
+        assert seen.last_test.detail.requested_by == "dana"
+
+
+def test_an_administrators_view_may_name_a_secret(world: World) -> None:
+    """`MANAGE_CONNECTION` and `MANAGE_SECRET` give every action, on create and update too."""
+    created = world.postgres(world.admin)
+    updated = world.connections().update(world.admin, "prod", "crm-db", settings={"user": "loader"})
+    shown = world.connections().get(world.admin, "prod", "crm-db")
+
+    for view in (created, updated, shown):
+        assert view.actions == ("test", "update", "delete", "name_secret")
+
+
+def test_a_readers_view_has_no_actions_and_no_detail(world: World) -> None:
+    """An analyst sees the outcome and its time, never the message, the id or who ran it."""
+    world.postgres(world.data_engineer)
+    _add_test(
+        world,
+        world.connection_id("prod", "crm-db"),
+        at=_NOW,
+        state=ConnectionTestState.DONE,
+        outcome=ConnectionTestOutcome.CREDENTIALS,
+    )
+
+    view = world.connections().get(world.analyst, "prod", "crm-db")
+    (listed,) = world.connections().list(world.analyst, "prod").items
+
+    for seen in (view, listed):
+        assert seen.actions == ()
+        assert seen.last_test is not None
+        assert seen.last_test.detail is None
+        assert (seen.last_test.state, seen.last_test.outcome) == (
+            ConnectionTestState.DONE,
+            ConnectionTestOutcome.CREDENTIALS,
+        )
+        assert seen.last_test.finished_at is not None
+    assert world.events(AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def test_a_pages_rights_are_asked_in_one_batch(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three connections of one page cost one `permits_each` call, not one per row."""
+    for number in range(3):
+        world.postgres(world.data_engineer, f"db-{number}")
+    asked: list[int] = []
+    real = service_module.permits_each
+
+    def spy(*args: Any) -> list[bool]:  # ruff: ignore[any-type]
+        asked.append(len(args[2]))
+        return real(*args)
+
+    monkeypatch.setattr(service_module, "permits_each", spy)
+
+    page = world.connections().list(world.data_engineer, "prod")
+
+    assert len(page.items) == 3
+    assert asked == [2]

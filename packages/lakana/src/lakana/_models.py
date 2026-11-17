@@ -2502,6 +2502,41 @@ class DeclaringAsset:
 
 
 @dataclass(frozen=True)
+class LastConnectionTest:
+    """The newest test of a connection, of any state.
+
+    Every reader of the connection gets `state`, `outcome` and `finished_at`. The other four
+    fields come only to a holder of `MANAGE_CONNECTION` on the environment; for anyone else, and
+    from a server that does not send them, they are `None`.
+
+    Parameters
+    ----------
+    state
+        ``queued``, ``running`` or ``done``.
+    outcome
+        What it found, one of the outcomes a `ConnectionTest` has, once done; `None` before.
+    finished_at
+        When it finished; `None` until then.
+    id
+        The test's id, which ``client.connections.test(..., test_id=...)`` takes.
+    created_at
+        When it was requested.
+    message
+        What it found, redacted; `None` before it is done.
+    requested_by
+        The name of the principal who asked for it; `None` when that principal is gone.
+    """
+
+    state: str
+    outcome: str | None
+    finished_at: datetime | None
+    id: str | None = None
+    created_at: datetime | None = None
+    message: str | None = None
+    requested_by: str | None = None
+
+
+@dataclass(frozen=True)
 class Connection:
     """A connection of an environment. Carries its secret's name, never a value.
 
@@ -2527,6 +2562,17 @@ class Connection:
         When it was created.
     updated_at
         When it was last changed.
+    environment
+        The name of its environment; `None` from a server that does not send it.
+    last_test
+        Its newest test of any state, or `None` if it was never tested (or the server does
+        not send it). A change keeps it: when its `finished_at` is before `updated_at`, it
+        tested the connection as it was before the change.
+    actions
+        What the caller's rights allow on it: ``test``, ``update``, ``delete`` and
+        ``name_secret`` (naming a secret not bound to it, or a change that could send its
+        secret somewhere new without new values); empty for a reader. The server decides every
+        request again.
     """
 
     name: str
@@ -2538,6 +2584,9 @@ class Connection:
     created_by: str
     created_at: datetime
     updated_at: datetime
+    environment: str | None = None
+    last_test: LastConnectionTest | None = None
+    actions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

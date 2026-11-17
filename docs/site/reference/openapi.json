@@ -14513,7 +14513,7 @@
           "connections"
         ],
         "summary": "List the connections of an environment",
-        "description": "Lists one page of connections, newest first, with the assets that declare each. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
+        "description": "Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
         "operationId": "list_connections_api_v1_environments__environment_name__connections_get",
         "parameters": [
           {
@@ -14636,7 +14636,7 @@
           "connections"
         ],
         "summary": "Show a connection",
-        "description": "Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret and the assets that declare it. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Answers 404 when the environment or the connection does not exist; the answer names no other connection.",
+        "description": "Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret, the assets that declare it, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment or the connection does not exist; the answer names no other connection.",
         "operationId": "get_connection_api_v1_environments__environment_name__connections__connection_name__get",
         "parameters": [
           {
@@ -27435,6 +27435,108 @@
         "title": "ConnectionCreate",
         "description": "Request body for creating a connection.\n\n`kind`, `address` and `settings` are judged by the service after the right is checked, so a\ncaller without `MANAGE_CONNECTION` learns nothing from a 422.\n\nParameters\n----------\nname\n    Lower-case letters, digits and ``-``, starting with a letter, at most 63; unique in\n    the environment. Never changes.\nkind\n    ``postgresql``, ``mariadb``, ``sqlite-file``, ``http``, ``s3``, ``gcs``, ``azure``,\n    ``directory`` or ``tcp``. Never changes.\naddress\n    Where the source is, by kind (``host``, ``port``, ``database``; ``base_url``; ...).\nsettings\n    How to reach it, by kind (``user``, ``tls``, ``ca_certificate``; ``auth``; ...).\nsecret\n    The name of an existing secret of the environment to use.\nsecret_values\n    Values of a new secret ``<name>-connection`` (or the next free\n    ``<name>-connection-N``), born bound to the connection. Never echoed. At most one of\n    `secret` and `secret_values`."
       },
+      "ConnectionLastTestOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "done"
+            ],
+            "title": "State"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ok",
+                  "dns",
+                  "refused",
+                  "timeout",
+                  "tls",
+                  "credentials",
+                  "not_found",
+                  "not_allowed",
+                  "root_unavailable",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "outcome",
+          "finished_at"
+        ],
+        "title": "ConnectionLastTestOut",
+        "description": "The newest test of a connection, of any state.\n\nEvery reader of the connection gets `state`, `outcome` and `finished_at`. Only a holder of\n`MANAGE_CONNECTION` on the environment gets `id`, `created_at`, `message` and\n`requested_by`; for anyone else those four keys are absent, not `null`, because the message\ncan name paths, hosts and ports the worker reached.\n\nParameters\n----------\nstate\n    ``queued``, ``running`` or ``done``.\noutcome\n    What it found once ``done``; `null` before. Each outcome's cause and next step are\n    public; the message is not.\nfinished_at\n    When it was done; `null` before.\nid\n    The test's id; with `GET .../tests/{test_id}` it shows the test.\ncreated_at\n    When it was requested.\nmessage\n    What it found, redacted; `null` before it is done.\nrequested_by\n    The name of the principal who asked for it; `null` when that principal is gone."
+      },
       "ConnectionOut": {
         "properties": {
           "name": {
@@ -27486,6 +27588,33 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "last_test": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionLastTestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actions": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "test",
+                "update",
+                "delete",
+                "name_secret"
+              ]
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -27498,10 +27627,13 @@
           "declared_by",
           "created_by",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "environment",
+          "last_test",
+          "actions"
         ],
         "title": "ConnectionOut",
-        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed."
+        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed.\nenvironment\n    The name of its environment.\nlast_test\n    Its newest test of any state (queued, running or done), or `null` if it was never\n    tested. A change keeps it: a test that finished before `updated_at` tested the\n    connection as it was. Every reader gets its `state`, `outcome` and `finished_at`; its\n    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` on\n    the environment, and for anyone else those keys are absent.\nactions\n    What the caller's rights allow on it: ``test``, ``update`` and ``delete`` with\n    `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound\n    to it, or a change that could send its secret somewhere new without new values) with\n    `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again."
       },
       "ConnectionPage": {
         "properties": {

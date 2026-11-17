@@ -8,16 +8,86 @@ from datetime import datetime
 from typing import Any
 
 from lakana._http import HttpTransport, every_page, query_params
-from lakana._models import Connection, ConnectionPage, ConnectionTest, DeclaringAsset
+from lakana._models import (
+    Connection,
+    ConnectionPage,
+    ConnectionTest,
+    DeclaringAsset,
+    LastConnectionTest,
+)
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
 from lakana.resources.artifacts import _ODD_ANSWER, _object
 
 
+def _when(value: object) -> datetime | None:
+    """Read a time that may be `null`.
+
+    Parameters
+    ----------
+    value
+        An ISO 8601 text, or `None`.
+
+    Returns
+    -------
+    datetime or None
+        The time, or `None`.
+
+    Raises
+    ------
+    TypeError
+        If `value` is neither text nor `None`.
+    ValueError
+        If the text is not a time.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TypeError("a time is text")
+    return datetime.fromisoformat(value)
+
+
+def _last_test_from_json(data: object) -> LastConnectionTest | None:
+    """Build a `LastConnectionTest` from the `last_test` of a `ConnectionOut` body.
+
+    The fields a reader without `MANAGE_CONNECTION` does not get are read as `None`.
+
+    Parameters
+    ----------
+    data
+        The decoded `last_test`, or `None` for a connection never tested.
+
+    Returns
+    -------
+    LastConnectionTest or None
+        The test, or `None`.
+
+    Raises
+    ------
+    AssertionError, KeyError, TypeError, ValueError
+        If `data` is not an object with a state; `_connection_from_json` turns each into
+        `InvalidResponse`.
+    """
+    if data is None:
+        return None
+    assert isinstance(data, dict)  # nosec B101 -- an untrusted answer; the caller catches it
+    test_id = data.get("id")
+    return LastConnectionTest(
+        state=str(data["state"]),
+        outcome=data.get("outcome"),
+        finished_at=_when(data.get("finished_at")),
+        id=None if test_id is None else str(test_id),
+        created_at=_when(data.get("created_at")),
+        message=data.get("message"),
+        requested_by=data.get("requested_by"),
+    )
+
+
 def _connection_from_json(data: object) -> Connection:
     """Build a `Connection` from a `ConnectionOut` body.
 
-    A field this SDK does not know is ignored.
+    A field this SDK does not know is ignored; `environment`, `last_test` and `actions`, which
+    an older server does not send, are read as `None`, `None` and no actions when missing.
 
     Parameters
     ----------
@@ -39,6 +109,8 @@ def _connection_from_json(data: object) -> Connection:
         address, settings, declared = data["address"], data["settings"], data["declared_by"]
         assert isinstance(address, dict) and isinstance(settings, dict)  # nosec B101
         assert isinstance(declared, list)  # nosec B101 -- as above
+        actions = data.get("actions", [])
+        assert isinstance(actions, list)  # nosec B101 -- as above
         return Connection(
             name=data["name"],
             kind=data["kind"],
@@ -52,6 +124,9 @@ def _connection_from_json(data: object) -> Connection:
             created_by=data.get("created_by", ""),
             created_at=datetime.fromisoformat(data["created_at"]),
             updated_at=datetime.fromisoformat(data["updated_at"]),
+            environment=data.get("environment"),
+            last_test=_last_test_from_json(data.get("last_test")),
+            actions=tuple(str(action) for action in actions),
         )
     except (AssertionError, KeyError, TypeError, ValueError):
         raise InvalidResponse(_ODD_ANSWER.format(what="a connection")) from None

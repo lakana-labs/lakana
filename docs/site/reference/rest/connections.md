@@ -55,12 +55,15 @@ Answer fields: `ConnectionOut`
 | `created_by` | text | yes |  |
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
+| `environment` | text | yes |  |
+| `last_test` | `ConnectionLastTestOut` or null | yes |  |
+| `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
 
 ## `GET /api/v1/environments/{environment_name}/connections`
 
 List the connections of an environment
 
-Lists one page of connections, newest first, with the assets that declare each. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.
+Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.
 
 Parameters:
 
@@ -92,7 +95,7 @@ Answer fields: `ConnectionPage`
 
 Show a connection
 
-Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret and the assets that declare it. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Answers 404 when the environment or the connection does not exist; the answer names no other connection.
+Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret, the assets that declare it, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment or the connection does not exist; the answer names no other connection.
 
 Parameters:
 
@@ -125,6 +128,9 @@ Answer fields: `ConnectionOut`
 | `created_by` | text | yes |  |
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
+| `environment` | text | yes |  |
+| `last_test` | `ConnectionLastTestOut` or null | yes |  |
+| `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
 
 ## `PATCH /api/v1/environments/{environment_name}/connections/{connection_name}`
 
@@ -176,6 +182,9 @@ Answer fields: `ConnectionOut`
 | `created_by` | text | yes |  |
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
+| `environment` | text | yes |  |
+| `last_test` | `ConnectionLastTestOut` or null | yes |  |
+| `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
 
 ## `DELETE /api/v1/environments/{environment_name}/connections/{connection_name}`
 

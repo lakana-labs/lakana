@@ -3,6 +3,10 @@
 A connection is addressed through its environment (`/api/v1/environments/{name}/connections`):
 it lives there as a secret does. `MANAGE_CONNECTION` creates, changes and deletes;
 `READ_ENVIRONMENT` lists and shows. No answer carries a secret value or a CA certificate.
+
+Every route that answers a connection leaves unset fields out (`response_model_exclude_unset`),
+so that the fields of `last_test` a reader may not see are absent, not `null`; every other field
+is always set.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from lakana_core.connections.service import ConnectionService, ConnectionView
 from lakana_core.models import ConnectionTest
 from lakana_server.api.platform.schemas import (
     ConnectionCreate,
+    ConnectionLastTestOut,
     ConnectionOut,
     ConnectionPage,
     ConnectionTestOut,
@@ -44,8 +49,23 @@ def _to_out(view: ConnectionView) -> ConnectionOut:
     Returns
     -------
     ConnectionOut
-        The body; it has no field for a secret value.
+        The body; it has no field for a secret value. Every field is set, and the id, request
+        time, message and requester of `last_test` only when the view carries them, so that
+        `response_model_exclude_unset` leaves them out otherwise.
     """
+    last_test = None
+    if view.last_test is not None:
+        test = view.last_test
+        last_test = ConnectionLastTestOut(
+            state=test.state.value,
+            outcome=None if test.outcome is None else test.outcome.value,
+            finished_at=test.finished_at,
+        )
+        if test.detail is not None:
+            last_test.id = test.detail.id
+            last_test.created_at = test.detail.created_at
+            last_test.message = test.detail.message
+            last_test.requested_by = test.detail.requested_by
     return ConnectionOut(
         name=view.name,
         kind=view.kind.value,
@@ -59,6 +79,9 @@ def _to_out(view: ConnectionView) -> ConnectionOut:
         created_by=view.created_by,
         created_at=view.created_at,
         updated_at=view.updated_at,
+        environment=view.environment,
+        last_test=last_test,
+        actions=list(view.actions),  # ty: ignore[invalid-argument-type]
     )
 
 
@@ -80,7 +103,13 @@ def _plain(values: dict[str, SecretStr] | None) -> dict[str, str] | None:
     return {key: value.get_secret_value() for key, value in values.items()}
 
 
-@router.post("", response_model=ConnectionOut, status_code=201, responses=errors(403, 404, 409))
+@router.post(
+    "",
+    response_model=ConnectionOut,
+    response_model_exclude_unset=True,
+    status_code=201,
+    responses=errors(403, 404, 409),
+)
 def create_connection(
     environment_name: str,
     body: ConnectionCreate,
@@ -132,7 +161,9 @@ def create_connection(
     return _to_out(view)
 
 
-@router.get("", response_model=ConnectionPage, responses=errors(403, 404))
+@router.get(
+    "", response_model=ConnectionPage, response_model_exclude_unset=True, responses=errors(403, 404)
+)
 def list_connections(
     environment_name: str,
     limit: int = Query(default=100, ge=1, le=200),
@@ -142,9 +173,12 @@ def list_connections(
 ) -> ConnectionPage:
     """List the connections of an environment.
 
-    Lists one page of connections, newest first, with the assets that declare each. Needs
-    `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Answers 404 when
-    the environment does not exist and 422 for a cursor this list did not issue.
+    Lists one page of connections, newest first, with the assets that declare each, its last
+    test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a
+    task token is refused with 403. Every reader gets the last test's `state`, `outcome` and
+    `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of
+    `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers
+    404 when the environment does not exist and 422 for a cursor this list did not issue.
 
     Parameters
     ----------
@@ -170,7 +204,12 @@ def list_connections(
     )
 
 
-@router.get("/{connection_name}", response_model=ConnectionOut, responses=errors(403, 404))
+@router.get(
+    "/{connection_name}",
+    response_model=ConnectionOut,
+    response_model_exclude_unset=True,
+    responses=errors(403, 404),
+)
 def get_connection(
     environment_name: str,
     connection_name: str,
@@ -180,9 +219,12 @@ def get_connection(
     """Show a connection.
 
     Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its
-    secret and the assets that declare it. Needs `READ_ENVIRONMENT` in the environment; a task
-    token is refused with 403, naming no connection. Answers 404 when the environment or the
-    connection does not exist; the answer names no other connection.
+    secret, the assets that declare it, its last test and what you may do with it (`actions`).
+    Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no
+    connection. Every reader gets the last test's `state`, `outcome` and `finished_at`; its
+    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the
+    environment, and for anyone else those keys are absent. Answers 404 when the environment or
+    the connection does not exist; the answer names no other connection.
 
     Parameters
     ----------
@@ -203,7 +245,12 @@ def get_connection(
     return _to_out(service.get(principal, environment_name, connection_name))
 
 
-@router.patch("/{connection_name}", response_model=ConnectionOut, responses=errors(403, 404, 409))
+@router.patch(
+    "/{connection_name}",
+    response_model=ConnectionOut,
+    response_model_exclude_unset=True,
+    responses=errors(403, 404, 409),
+)
 def update_connection(
     environment_name: str,
     connection_name: str,
