@@ -54,7 +54,9 @@ frees its place one hour after it began unless the operator changed
 the versions, the section **Your open uploads** lists your own open uploads of that artifact,
 newest first: the upload's id, when it began and when it expires, 100 at a time with **Show
 more**. The section shows only when you have at least one open upload of the artifact; without
-one, or when you may not list uploads, the tab shows the versions alone.
+one, or when you may not list uploads, the tab shows the versions alone. If **Show more** is
+refused (for example, your access was taken away meanwhile), the section keeps the uploads it
+shows, says why and offers **Show more** again.
 
 ## Withdraw one
 
