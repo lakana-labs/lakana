@@ -155,10 +155,10 @@ does not cancel when you interrupt it: `client.sql` leaves the query running unl
 ### Cancel in the web interface
 
 On the **Queries** screen, **Run** becomes **Cancel** while the query is queued or running. Press
-**Cancel**, or **Esc** in the editor. When the completion list is open, the first **Esc**
-closes it and the query runs on; the next **Esc** cancels. The button says "Cancelling…"
-until the query has ended, and the line under the editor then says Cancelled, or Succeeded when the
-cancel came too late (see the table above). A cancel the server refuses shows its sentence: "The
+**Cancel**, or **Esc** in the editor. When the completion list or a tooltip is open, the first
+**Esc** closes it and the query runs on; the next **Esc** cancels. The button says "Cancelling…"
+until the query has ended, and the line under the editor then says Cancelled, or the result
+appears when the cancel came too late (see the table above). A cancel the server refuses shows its sentence: "The
 query was not cancelled and runs on: … Press Cancel to try again." It is the same cancel as
 `lakana query cancel`, and the same people may send it.
 

@@ -74,7 +74,7 @@ person → **Remove picture**. The person can set a new one whenever they like.
 | **Tab**, **Shift Tab** | Move to the next or the previous control. |
 | **Enter** | Open the row that has focus. |
 | **Ctrl Enter** (**⌘ Enter** on a Mac) | In the editor of **Queries**: run the query. |
-| **Esc** in the editor of **Queries** | Close the completion list; with none open, cancel the running query. |
+| **Esc** in the editor of **Queries** | Close the completion list or a tooltip; with none open, cancel the running query. |
 
 Home shows everything you may see across all environments; each row carries a small label with
 its environment (`dev`, `prod`), or `Instance` for something that belongs to the whole instance,
