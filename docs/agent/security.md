@@ -5906,8 +5906,11 @@ fuller text of each part where it already lives.
   and `revoke` do, not through `DenialAuditLimiter`.
 - **Local mode.** A stolen non-administrator personal token could mint a local sign-in link, enrol
   a first passkey within `FIRST_PASSKEY_WINDOW` and then create a personal token. Local mode is
-  single-machine and that passkey is already a persistent credential; this is as before and
-  unchanged here.
+  single-machine and that passkey is already a persistent credential. The last hop is new: before
+  this change a non-administrator could never create a personal token, and with local sign-in a
+  stolen non-administrator token can now go local link, session, first passkey, step-up, new
+  personal token. This is accepted, because local mode runs on loopback and the enrolled passkey
+  is already a lasting credential.
 - **The task-token list (`TaskTokenService.list_live`, `GET /api/v1/task-tokens`).** Administrator
   only (`authorize_admin_only(MANAGE_TOKEN)`): listing them is administering tokens, and a task or
   CI token is refused. Live tokens only (not revoked, not expired), newest first by
