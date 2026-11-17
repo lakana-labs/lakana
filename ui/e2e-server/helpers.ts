@@ -823,9 +823,15 @@ async function workersAlive(request: APIRequestContext): Promise<number> {
  * must run starts one, in its `beforeAll`, and stops it in its `afterAll`. Stopped with SIGTERM,
  * the worker drains and removes its own heartbeat, so the server counts none again.
  *
+ * `uv` starts `lakana-worker` as its child, so both run in a process group of their own
+ * (`detached`), and every signal goes to the group: a SIGKILL after 30 s, or when the runner exits
+ * without stopping it (an aborted run), ends the worker too, not only `uv`. A worker left behind
+ * would take the next run's queued queries.
+ *
  * @param request - The request context.
  * @returns A function that stops the worker and resolves once it has exited.
- * @throws {Error} when the worker exits or is not alive within 90 s, with the end of its log.
+ * @throws {Error} when the worker cannot start, exits or is not alive within 90 s, with the end
+ *   of its log.
  */
 export async function startWorker(request: APIRequestContext): Promise<() => Promise<void>> {
   const server = serverConfig.webServer;
@@ -834,28 +840,54 @@ export async function startWorker(request: APIRequestContext): Promise<() => Pro
     cwd: resolve(import.meta.dirname, "..", ".."),
     env: { ...process.env, ...settings },
     stdio: ["ignore", "ignore", "pipe"],
+    detached: true,
   });
   let log = "";
   worker.stderr.on("data", (chunk: Buffer) => {
     log = `${log}${chunk.toString()}`.slice(-4_000);
   });
+  // A spawn that fails (no `uv`) emits "error" and never "exit".
+  let failed: Error | null = null;
   const exited = new Promise<void>((done) => {
     worker.once("exit", () => {
       done();
     });
+    worker.once("error", (error) => {
+      failed = error;
+      done();
+    });
   });
-  const stop = async (): Promise<void> => {
-    if (worker.exitCode === null && worker.signalCode === null) {
-      worker.kill("SIGTERM");
+  const group = worker.pid;
+  const signal = (name: NodeJS.Signals): void => {
+    if (group === undefined) {
+      return;
     }
-    const hard = setTimeout(() => worker.kill("SIGKILL"), 30_000);
+    try {
+      process.kill(-group, name);
+    } catch {
+      // The group has gone already.
+    }
+  };
+  const reap = (): void => {
+    signal("SIGKILL");
+  };
+  process.once("exit", reap);
+  const stop = async (): Promise<void> => {
+    signal("SIGTERM");
+    const hard = setTimeout(reap, 30_000);
     await exited;
     clearTimeout(hard);
+    // `uv` waits for its child, but a child it left would still be in the group.
+    reap();
+    process.off("exit", reap);
   };
   try {
     await expect
       .poll(
         () => {
+          if (failed !== null) {
+            throw new Error(`The worker could not start: ${failed.message}`);
+          }
           if (worker.exitCode !== null) {
             throw new Error(`The worker stopped with ${String(worker.exitCode)}: ${log}`);
           }
