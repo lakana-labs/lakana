@@ -28,6 +28,21 @@ ORPHANED_STORAGE_UNREACHABLE = (
 """What the orphaned-locations routes say when the environment's storage did not answer."""
 
 
+RAW_STORAGE_REFUSED = (
+    "The storage of environment '{environment}' refused access, so raw/ could not be listed. "
+    "Ask the operator to check the environment's storage credentials (its storage options, or "
+    "the secret they name), then try again."
+)
+"""What a listing of `raw/` says when the storage refused the environment's credentials."""
+
+RAW_STORAGE_UNREACHABLE = (
+    "The storage of environment '{environment}' could not be reached, so raw/ could not be "
+    "listed. Try again in a moment; if it keeps failing, tell the operator that this "
+    "environment's storage may be unreachable."
+)
+"""What a listing of `raw/` says when the environment's storage did not answer."""
+
+
 def is_storage_unavailable(exc: BaseException) -> bool:
     """Tell whether a read failed because the storage did not answer.
 

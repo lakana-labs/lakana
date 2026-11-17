@@ -11,7 +11,7 @@ import re
 import secrets
 import stat
 import urllib.parse
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -941,7 +941,9 @@ class FsspecStorage:
                 return True
         return False
 
-    def list_children_page(self, prefix: str, *, after: str | None, limit: int) -> list[ChildEntry]:
+    def list_children_page(
+        self, prefix: str, *, after: str | None, limit: int
+    ) -> Sequence[ChildEntry]:
         """List one page of the entries directly beneath a prefix; see `Storage.list_children_page`.
 
         The local backend reads the one directory's names and the size of the files it returns
@@ -989,7 +991,9 @@ class FsspecStorage:
             key=lambda entry: entry.key,
         )
 
-    def _local_children_page(self, full: str, after: str | None, limit: int) -> list[ChildEntry]:
+    def _local_children_page(
+        self, full: str, after: str | None, limit: int
+    ) -> Sequence[ChildEntry]:
         """Read one page of a local directory, statting only the files returned.
 
         Parameters
@@ -1032,7 +1036,7 @@ class FsspecStorage:
             page.append(ChildEntry(entry.name, False, size))
         return page
 
-    def _s3_children_page(self, full: str, after: str | None, limit: int) -> list[ChildEntry]:
+    def _s3_children_page(self, full: str, after: str | None, limit: int) -> Sequence[ChildEntry]:
         """Ask S3 for one page of the keys and common prefixes directly beneath a path.
 
         S3 answers a `StartAfter` that ends in a common prefix's own key (``…/orders/``) with

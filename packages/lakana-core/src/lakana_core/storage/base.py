@@ -1,6 +1,6 @@
 """The storage protocol every backend implements."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -261,7 +261,9 @@ class Storage(Protocol):
         """
         ...
 
-    def list_children_page(self, prefix: str, *, after: str | None, limit: int) -> list[ChildEntry]:
+    def list_children_page(
+        self, prefix: str, *, after: str | None, limit: int
+    ) -> Sequence[ChildEntry]:
         """List one page of the entries directly beneath a prefix, in key order.
 
         Reads one level of one directory, never below it, and on an object store no more than

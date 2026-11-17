@@ -116,7 +116,12 @@ from lakana_core.catalog.environment_deletion import (
     purge_rows,
     restore_rows,
 )
-from lakana_core.catalog.external_location import check_claim_free, parse_external_location
+from lakana_core.catalog.external_location import (
+    check_claim_free,
+    external_claims,
+    parse_external_location,
+    parse_raw_folder,
+)
 from lakana_core.catalog.field_ids import check_added_files_have_field_ids
 from lakana_core.catalog.files_read import (
     FilesReadReport,
@@ -244,6 +249,13 @@ from lakana_core.catalog.orphaned_locations import (
     delete_orphaned_locations,
     find_orphaned_locations,
     target,
+)
+from lakana_core.catalog.raw_browse import (
+    RAW_CURSOR_KIND,
+    RawPage,
+    may_browse_raw,
+    raw_entries,
+    read_children,
 )
 from lakana_core.catalog.retention import (
     DEFAULT_EXPIRY_WARNING_DAYS,
@@ -383,7 +395,10 @@ from lakana_core.models.run import TERMINAL_TASK_STATUSES
 from lakana_core.models.table import table_kind
 from lakana_core.pagination import (
     LIST_LIMIT_DEFAULT,
+    LIST_LIMIT_MAX,
     Page,
+    decode_key_cursor,
+    encode_key_cursor,
     escape_like,
     instant_key,
     page_in_order,
@@ -439,6 +454,7 @@ from lakana_core.secrets.uses import (
 from lakana_core.storage.base import StoredObject
 from lakana_core.storage.fsspec_storage import FSSPEC_CHAIN
 from lakana_core.storage.resolver import (
+    RAW_PREFIX,
     ResolvedStorage,
     StorageResolver,
     check_root_scheme,
@@ -2064,6 +2080,82 @@ class CatalogService:
             .order_by(Environment.deleted_at, Environment.name)
         )
         return self._readable_environments(p, list(rows.scalars()))
+
+    def list_raw(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        path: str = RAW_PREFIX,
+        cursor: str | None = None,
+        limit: int = LIST_LIMIT_DEFAULT,
+    ) -> RawPage:
+        """List one page of a folder under `raw/`, to choose an external table's location.
+
+        Reads one level of one folder and one page of it (`Storage.list_children_page`), in key
+        order; the rules are `lakana_core.catalog.raw_browse`'s.
+
+        Parameters
+        ----------
+        p
+            The reader; needs `CREATE_TABLE` on some namespace of the environment.
+        environment
+            The environment's name.
+        path
+            The folder: ``"raw"`` or a folder below it (`parse_raw_folder`).
+        cursor
+            A previous page's `next_cursor`.
+        limit
+            Most entries, 1 to `LIST_LIMIT_MAX`.
+
+        Returns
+        -------
+        RawPage
+            The folder, its entries and the next page's cursor.
+
+        Raises
+        ------
+        ValidationError
+            For a path outside `raw/`, a limit out of range or a cursor of another list.
+        PermissionDenied
+            If `p` may register an external table in no namespace of the environment (refused
+            by `CREATE_TABLE` on the environment); nothing is read from storage.
+        NotFoundError
+            If the environment does not exist.
+        StorageRefusedError
+            If the storage refused the environment's credentials.
+        StorageUnavailableError
+            If the storage did not answer.
+        AuditUnavailableError
+            If the `ACTIVITY_VIEWED` row could not be written; nothing is returned.
+        """
+        folder = parse_raw_folder(path)
+        if not 1 <= limit <= LIST_LIMIT_MAX:
+            raise ValidationError(f"limit must be between 1 and {LIST_LIMIT_MAX}; got {limit}.")
+        after = decode_key_cursor(RAW_CURSOR_KIND, cursor) if cursor is not None else None
+        if not may_browse_raw(self._session, self._authz, p, environment):
+            self._authz.authorize(p, Action.CREATE_TABLE, Securable.environment_scope(environment))
+        env = self._find_environment(environment)
+        claims = external_claims(self._session, env.id)
+        resolved = self._storage.for_environment(environment)
+        resolved.confine_to_root(f"{resolved.config.root.rstrip('/')}/{folder}")
+        children = read_children(resolved.storage, environment, folder, after, limit + 1)
+        more = len(children) > limit
+        children = children[:limit]
+        items = raw_entries(self._authz, p, environment, folder, children, claims)
+        record_view(
+            sessions_like(self._session),
+            p,
+            View.RAW_FILES,
+            Securable.environment_scope(environment),
+            {"path": folder},
+            ViewDetail(
+                filters={"path": folder}, rows_shown=len(items), others_shown=0, distinct_others=0
+            ),
+            config=self._view_audit,
+        )
+        next_cursor = encode_key_cursor(RAW_CURSOR_KIND, children[-1].key) if more else None
+        return RawPage(path=folder, items=items, next_cursor=next_cursor)
 
     def environment_usage(self, p: PrincipalRef, name: str) -> EnvironmentUsage:
         """Report how much storage an environment uses, from the catalog database alone.

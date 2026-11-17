@@ -19,7 +19,7 @@ from pyiceberg.io.pyarrow import PyArrowFileIO
 from lakana_core.config import StorageConfig
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.storage import FsspecStorage, build_file_io, build_storage
-from lakana_core.storage.base import ChildEntry
+from lakana_core.storage.base import ChildEntry, Storage
 from lakana_core.storage.fsspec_storage import (
     _modified_at,
     _RemoteStreamWriter,
@@ -872,7 +872,7 @@ def test_list_children_on_a_non_local_backend_uses_the_backends_listing() -> Non
     assert list(storage.list_children("artifacts/stray.txt")) == []
 
 
-def _child_tree(storage: FsspecStorage) -> None:
+def _child_tree(storage: Storage) -> None:
     """Write `raw/` with two folders and two files beside them, named to test the order.
 
     Parameters
