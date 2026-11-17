@@ -63,14 +63,15 @@ def issue_token(
     """Issue a personal access token.
 
     From the web interface it needs a passkey touch within the last 15 minutes (403
-    `StepUpRequired`); a token is never asked for a touch, and a non-administrator's token
-    cannot create a token at all.
+    `StepUpRequired`); a token is never asked for a touch, and no token (personal, task or
+    CI) of a non-administrator can create a personal token.
 
     Issues a token that signs in as the principal. The answer holds the token's full value,
     which is shown this once and cannot be read again. For another principal it needs the
     `ADMIN` role on the instance. For oneself, unless one is an administrator, it works only
-    from the web interface: no personal token can create a token, so a stolen token cannot
-    mint replacements (403). Answers 404 when there is no such principal.
+    from the web interface: no token (personal, task or CI) of a non-administrator can create a
+    personal token, so a stolen token cannot mint replacements (403). Answers 404 when there is
+    no such principal.
 
     Parameters
     ----------

@@ -363,7 +363,9 @@ def test_a_listed_token_says_owner_created_expires_and_revoked(client: TestClien
     bob = _bob(client)
     [before] = _listed(client, bob, "/api/v1/principals/bob/tokens")
     with Session(client.app.state.engine) as session:
-        row = session.execute(select(PersonalAccessToken)).scalars().all()[-1]
+        row = session.execute(
+            select(PersonalAccessToken).where(PersonalAccessToken.key_id == before["key_id"])
+        ).scalar_one()
         created = row.created_at
     assert before["owner"] == "bob"
     assert datetime.fromisoformat(str(before["created_at"])).replace(tzinfo=UTC) == created.replace(
@@ -418,3 +420,13 @@ def test_get_all_tokens_never_holds_a_secret(client: TestClient) -> None:
     answer = client.get("/api/v1/tokens", headers=AUTH_HEADER)
     assert answer.status_code == 200
     assert "lakana_pat_" not in answer.text
+    for row in answer.json():
+        assert set(row) == {
+            "key_id",
+            "name",
+            "owner",
+            "created_at",
+            "last_used_at",
+            "expires_at",
+            "revoked_at",
+        }

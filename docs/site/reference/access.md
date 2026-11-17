@@ -140,7 +140,7 @@ Deactivating the principal stops every token it has.
 | Create a token for yourself | only from a browser session, after a passkey touch in the last 15 minutes |
 | Create a token for anyone else | an administrator |
 
-No token (personal, task or CI) of a person who is not an administrator can create a personal
+No token (personal, task or CI) of a non-administrator can create a personal
 token, so a stolen token cannot mint a replacement. The refusal of a personal token is `403`, reads
 "A token cannot create a token. Create your own token in the web interface, under your name,
 after touching your passkey; or ask an administrator: lakana token issue NAME LABEL" and is recorded in the audit log; a task or CI token gets the
@@ -152,6 +152,7 @@ exists. A task or CI token has no say over its owner's tokens.
 A listed token says its `owner`, `name`, `key_id`, `created_at`, `last_used_at`, `expires_at` (empty
 for a token that never expires) and `revoked_at` (empty while it is not revoked), and never its
 value. A principal's own list holds its revoked and expired tokens too, so they can be told apart.
+A deactivated owner's unrevoked tokens still appear in `--all`, but no longer sign in.
 
 `lakana token list` without a name lists your own tokens. `lakana token list --all` is for an
 administrator: it lists the live tokens (neither revoked nor expired) of every owner, newest

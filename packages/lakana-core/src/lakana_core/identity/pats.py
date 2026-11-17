@@ -86,10 +86,10 @@ class PatService:
     anyone, with a token or a browser session, as always; issuing in a browser asks for a fresh
     passkey touch. Everyone else may list and revoke their own tokens with a personal token or a
     browser session, and create one only from a browser session after the passkey touch: no
-    personal token can create a token, so a stolen one cannot mint replacements. A task or CI
-    token has no rights over its owner's tokens. Anything about another person's tokens needs the
-    `ADMIN` role, and is refused before any lookup, so the answer never says whether that person
-    exists.
+    token (personal, task or CI) of a non-administrator can create a personal token, so a stolen
+    one cannot mint replacements. A task or CI token has no rights over its owner's tokens.
+    Anything about another person's tokens needs the `ADMIN` role, and is refused before any
+    lookup, so the answer never says whether that person exists.
     """
 
     def __init__(self, session: Session, authz: AuthorizationService) -> None:
