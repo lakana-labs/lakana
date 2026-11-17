@@ -642,6 +642,25 @@ export async function queryStatus(
 }
 
 /**
+ * Cancels every queued or running run of an environment, as the bootstrap administrator, so that a
+ * test that started runs leaves none for the worker of a later test to pick up.
+ *
+ * @param request - The request context.
+ * @param environment - The environment.
+ */
+export async function cancelRuns(request: APIRequestContext, environment: string): Promise<void> {
+  const base = `/api/v1/environments/${environment}/runs`;
+  const headers = { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` };
+  const listed = await request.get(base, { headers });
+  await ensureOk(`GET ${base}`, listed);
+  const runs = (await listed.json()) as { id: string; status: string }[];
+  for (const run of runs.filter((each) => each.status === "queued" || each.status === "running")) {
+    const path = `${base}/${run.id}/cancel`;
+    await ensureOk(`POST ${path}`, await request.post(path, { headers }));
+  }
+}
+
+/**
  * Signs the bootstrap administrator in on Home without the welcome.
  *
  * @param browser - The browser.

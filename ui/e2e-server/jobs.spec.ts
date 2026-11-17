@@ -2,6 +2,7 @@ import { expect, type Page, test } from "@playwright/test";
 
 import {
   administrator,
+  cancelRuns,
   createEnvironment,
   type DeployedJob,
   freshPage,
@@ -163,27 +164,33 @@ for (const scheme of ["light", "dark"] as const) {
       request,
     }) => {
       test.skip(browserName !== "chromium", "axe runs in Chromium only");
-      const { address } = await deployed(request);
+      const { environment, address } = await deployed(request);
       await skipTheTour(request);
       const page = await freshPage(browser);
       await page.setViewportSize({ width, height: width === 320 ? 640 : 800 });
       await page.emulateMedia({ colorScheme: scheme });
       await signInLocally(page, request);
 
-      await openJob(page, address);
-      expect(await violations(page), "the job page").toEqual([]);
-      await page.getByRole("button", { name: "Run now" }).click();
-      await expect(runFacts(page)).toContainText("Queued");
-      expect(await violations(page), "the job page with its queued run").toEqual([]);
-      const run = new URL(page.url()).searchParams.get("run") ?? "";
-      await page.goto(`${address.split("/job/")[0] ?? ""}/runs/${run}`);
-      await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
-      expect(await violations(page), "the run's page").toEqual([]);
-      expect(
-        await page.evaluate(
-          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        ),
-      ).toBeLessThanOrEqual(0);
+      // The run this test starts is cancelled at the end: no worker runs here, and a queued
+      // run would be picked up by the worker of a later file.
+      try {
+        await openJob(page, address);
+        expect(await violations(page), "the job page").toEqual([]);
+        await page.getByRole("button", { name: "Run now" }).click();
+        await expect(runFacts(page)).toContainText("Queued");
+        expect(await violations(page), "the job page with its queued run").toEqual([]);
+        const run = new URL(page.url()).searchParams.get("run") ?? "";
+        await page.goto(`${address.split("/job/")[0] ?? ""}/runs/${run}`);
+        await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
+        expect(await violations(page), "the run's page").toEqual([]);
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          ),
+        ).toBeLessThanOrEqual(0);
+      } finally {
+        await cancelRuns(request, environment);
+      }
       await page.context().close();
     });
   }

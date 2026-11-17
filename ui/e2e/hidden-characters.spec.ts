@@ -17,6 +17,7 @@ import {
   takeReads,
 } from "./hidden";
 import {
+  FAILED_CHECK,
   FAILED_ID,
   JOBS_STUBBED,
   MISSING_ID,
@@ -643,7 +644,14 @@ walk("the job, run and task pages mark hidden characters", async ({ page }) => {
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
 
-  await visit(page, `/jobs/${env}/runs/${FAILED_ID}`, [TIMED_OUT, TIMEOUT_CAUSE, "daily_sales"]);
+  // The failed check's name is the label of its Show rows button.
+  await visit(page, `/jobs/${env}/runs/${FAILED_ID}`, [
+    TIMED_OUT,
+    TIMEOUT_CAUSE,
+    "daily_sales",
+    FAILED_CHECK,
+  ]);
+  await expect(page.getByRole("button", { name: /^Show rows of .*U\+202E$/ })).toBeVisible();
   await page
     .getByRole("row")
     .filter({ has: page.getByRole("button", { name: /^Show rows of / }) })
