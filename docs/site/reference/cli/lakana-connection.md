@@ -55,9 +55,12 @@ Usage: `lakana connection list [OPTIONS]`
 
 List the connections of an environment, newest first, with each one's last test.
 
+With --all-environments, the connections of every environment you may read, newest first over all of them.
+
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
+| `--all-environments` | flag | off | The connections of every environment you may read, with an environment column. |
 
 ## `lakana connection show`
 

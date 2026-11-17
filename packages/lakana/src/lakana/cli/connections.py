@@ -657,8 +657,21 @@ def create(
 
 
 @connection_app.command("list")
-def list_connections(ctx: typer.Context, env: _ENV = None) -> None:
+def list_connections(
+    ctx: typer.Context,
+    env: _ENV = None,
+    all_environments: Annotated[
+        bool,
+        typer.Option(
+            "--all-environments",
+            help="The connections of every environment you may read, with an environment column.",
+        ),
+    ] = False,
+) -> None:
     """List the connections of an environment, newest first, with each one's last test.
+
+    With --all-environments, the connections of every environment you may read, newest first
+    over all of them.
 
     Parameters
     ----------
@@ -666,14 +679,28 @@ def list_connections(ctx: typer.Context, env: _ENV = None) -> None:
         The Typer context.
     env
         The environment.
+    all_environments
+        List every environment you may read instead of one; not with `--env`.
+
+    Raises
+    ------
+    CliError
+        If `--all-environments` is given with `--env`.
     """
     state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    connections = list(state.client().connections.iter(environment))
+    if all_environments and env is not None:
+        raise CliError("--all-environments lists every environment; leave out --env.")
+    resource = state.client().connections
+    if all_environments:
+        connections = list(resource.iter_all())
+        columns = ["name", "environment", "kind", "address", "secret", "declared_by", "last_test"]
+    else:
+        connections = list(resource.iter(resolve_environment(state, env)))
+        columns = ["name", "kind", "address", "secret", "declared_by", "last_test"]
     _output.emit(
         state,
         connections,
-        columns=["name", "kind", "address", "secret", "declared_by", "last_test"],
+        columns=columns,
         derived={
             "address": lambda row: _pairs(row.address),
             "declared_by": _declared,

@@ -2628,3 +2628,170 @@ def test_a_pages_rights_are_asked_in_one_batch(
 
     assert len(page.items) == 3
     assert asked == [2]
+
+
+def _environment(world: World, name: str, *, deleted: bool = False) -> None:
+    """Add an environment where only the administrator holds a right.
+
+    Parameters
+    ----------
+    world
+        The world.
+    name
+        Its name.
+    deleted
+        Mark it deleted, so that no lookup finds it.
+    """
+    world.session.add(
+        Environment(
+            id=uuid.uuid4(),
+            name=name,
+            storage_root=f"file:///srv/{name}",
+            deleted_at=_NOW if deleted else None,
+        )
+    )
+    world.session.commit()
+
+
+def _made_at(world: World, environment: str, name: str, at: datetime) -> None:
+    """Create a directory connection as the administrator, with a given creation time.
+
+    Parameters
+    ----------
+    world
+        The world.
+    environment
+        Its environment.
+    name
+        Its name.
+    at
+        Its creation time.
+    """
+    world.connections().create(
+        world.admin,
+        environment,
+        name=name,
+        kind=ConnectionKind.DIRECTORY,
+        address={"root": "r", "path": name},
+        settings={},
+    )
+    world.session.execute(
+        sa_update(Connection)
+        .where(Connection.id == world.connection_id(environment, name))
+        .values(created_at=at)
+    )
+    world.session.commit()
+
+
+def test_the_cross_environment_list_pages_every_readable_connection_once(world: World) -> None:
+    """Review Focus 4: five connections over three environments, one unreadable, pages of 2."""
+    _environment(world, "stage")
+    made = [("prod", "p-1"), ("dev", "d-1"), ("stage", "s-1"), ("prod", "p-2"), ("dev", "d-2")]
+    for minute, (environment, name) in enumerate(made):
+        _made_at(world, environment, name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+
+    first = service.list_all(world.data_engineer, limit=2)
+    assert first.next_cursor is not None
+    second = service.list_all(world.data_engineer, limit=2, cursor=first.next_cursor)
+
+    seen = [(view.environment, view.name) for view in first.items + second.items]
+    assert seen == [("dev", "d-2"), ("prod", "p-2"), ("dev", "d-1"), ("prod", "p-1")]
+    assert second.next_cursor is None
+    assert {view.actions for view in first.items + second.items} == {("test", "update", "delete")}
+    assert world.events(AuditEventType.AUTHORIZATION_DENIED) == []
+
+
+def test_list_all_with_an_environment_answers_as_the_per_environment_list(world: World) -> None:
+    """The same rows and cursor as `list`, and its refusals: 403 for no right, 404 for none."""
+    for minute, name in enumerate(("first", "second", "third")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    _made_at(world, "dev", "elsewhere", _NOW)
+    service = world.connections()
+
+    for p in (world.analyst, world.data_engineer):
+        page = service.list_all(p, environment="prod", limit=2)
+        assert page == service.list(p, "prod", limit=2)
+        assert service.list_all(p, environment="prod", cursor=page.next_cursor) == service.list(
+            p, "prod", cursor=page.next_cursor
+        )
+    with pytest.raises(PermissionDenied):
+        service.list_all(world.analyst, environment="dev")
+    with pytest.raises(NotFoundError):
+        service.list_all(world.admin, environment="nowhere")
+
+
+def test_list_all_refuses_a_task_token(world: World) -> None:
+    """A task token gets the refusal of every connection read, and no environment list either."""
+    world.postgres(world.data_engineer)
+    task = dataclasses.replace(
+        world.data_engineer,
+        task_scope=TaskScope(environment="prod", asset_scope=[], token_id=uuid.uuid4()),
+    )
+    service = world.connections()
+
+    for call in (
+        lambda: service.list_all(task),
+        lambda: service.list_all(task, environment="prod"),
+        lambda: service.environments(task),
+    ):
+        with pytest.raises(PermissionDenied) as caught:
+            call()
+        assert str(caught.value) == (
+            "a task token cannot list or show connections; read them with your own token"
+        )
+
+
+def test_a_cursor_of_the_per_environment_list_is_refused_by_list_all(world: World) -> None:
+    """The two lists' cursors name different lists, so neither takes the other's."""
+    for minute, name in enumerate(("first", "second")):
+        _made_at(world, "prod", name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+    per_environment = service.list(world.data_engineer, "prod", limit=1).next_cursor
+    across = service.list_all(world.data_engineer, limit=1).next_cursor
+    assert per_environment is not None and across is not None
+
+    with pytest.raises(ValidationError):
+        service.list_all(world.data_engineer, cursor=per_environment)
+    with pytest.raises(ValidationError):
+        service.list(world.data_engineer, "prod", cursor=across)
+    with pytest.raises(ValidationError):
+        service.list_all(world.data_engineer, limit=0)
+
+
+def test_environments_lists_where_you_may_read_with_your_actions(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Engineer of `dev`, analyst of `prod`, nothing in `stage`: one `permits_each` batch."""
+    _environment(world, "stage")
+    _environment(world, "gone", deleted=True)
+    eli = _principal(world.session, "eli")
+    grants = GrantService(world.session, AllowAllAuthorization())
+    for environment, role in (("dev", Role.DATA_ENGINEER), ("prod", Role.ANALYST)):
+        grants.grant(
+            world.admin,
+            principal="eli",
+            role=role,
+            kind=SecurableKind.ENVIRONMENT,
+            environment=environment,
+        )
+    asked: list[int] = []
+    real = service_module.permits_each
+
+    def spy(*args: Any) -> list[bool]:  # ruff: ignore[any-type]
+        asked.append(len(args[2]))
+        return real(*args)
+
+    monkeypatch.setattr(service_module, "permits_each", spy)
+    service = world.connections()
+
+    found = service.environments(eli)
+
+    assert [(env.name, env.actions) for env in found] == [("dev", ("create", "test")), ("prod", ())]
+    assert asked == [9]
+    assert [(env.name, env.actions) for env in service.environments(world.admin)] == [
+        ("dev", ("create", "test", "name_secret")),
+        ("prod", ("create", "test", "name_secret")),
+        ("stage", ("create", "test", "name_secret")),
+    ]
+    assert world.events(AuditEventType.AUTHORIZATION_DENIED) == []

@@ -36,6 +36,7 @@ from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
 _BASE = "/api/v1/environments/prod/connections"
+_ALL = "/api/v1/connections"
 _VALUE = "s3cr3t-value"
 _PG = {
     "name": "crm-db",
@@ -904,9 +905,11 @@ def test_a_reader_gets_the_last_tests_outcome_without_its_message_or_who_ran_it(
         reader = client_as(who)
         listed = reader.get(_BASE)
         shown = reader.get(f"{_BASE}/crm-db")
+        across = reader.get(_ALL)
 
-        assert listed.status_code == 200 and shown.status_code == 200, who
-        for item in (*listed.json()["items"], shown.json()):
+        assert (listed.status_code, shown.status_code, across.status_code) == (200, 200, 200), who
+        assert len(across.json()["items"]) == 1, who
+        for item in (*listed.json()["items"], shown.json(), *across.json()["items"]):
             assert set(item["last_test"]) == {"state", "outcome", "finished_at"}, who
             assert (item["last_test"]["state"], item["last_test"]["outcome"]) == (
                 "done",
@@ -914,7 +917,7 @@ def test_a_reader_gets_the_last_tests_outcome_without_its_message_or_who_ran_it(
             )
             assert item["last_test"]["finished_at"] is not None
             assert item["actions"] == [], who
-        assert "/srv/landing" not in listed.text + shown.text
+        assert "/srv/landing" not in listed.text + shown.text + across.text
 
 
 def test_a_manager_gets_the_tests_message_and_who_ran_it(
@@ -990,3 +993,108 @@ def test_last_test_stays_after_an_update(
     assert after["last_test"]["id"] == queued["id"]
     finished = datetime.datetime.fromisoformat(after["last_test"]["finished_at"])
     assert finished < datetime.datetime.fromisoformat(after["updated_at"])
+
+
+def _directories(sender: _As, environment: str, names: Sequence[str]) -> None:
+    """Create directory connections in an environment, one after the other.
+
+    Parameters
+    ----------
+    sender
+        Who creates them.
+    environment
+        The environment.
+    names
+        Their names, oldest first.
+    """
+    for name in names:
+        response = sender.post(
+            f"/api/v1/environments/{environment}/connections",
+            json={"name": name, "kind": "directory", "address": {"root": "r", "path": name}},
+        )
+        assert response.status_code == 201, response.text
+
+
+def test_get_all_connections_answers_items_and_next_cursor(client_as: ClientAs) -> None:
+    """One list over every environment, paged by its own cursor; `environment` narrows it."""
+    admin = client_as("admin")
+    _directories(admin, "prod", ["p-1", "p-2"])
+    _directories(admin, "dev", ["d-1"])
+
+    first = admin.get(_ALL, params={"limit": 2})
+    second = admin.get(_ALL, params={"limit": 2, "cursor": first.json()["next_cursor"]})
+    narrowed = admin.get(_ALL, params={"environment": "prod"})
+
+    assert (first.status_code, second.status_code, narrowed.status_code) == (200, 200, 200)
+    items = first.json()["items"] + second.json()["items"]
+    assert sorted((item["environment"], item["name"]) for item in items) == [
+        ("dev", "d-1"),
+        ("prod", "p-1"),
+        ("prod", "p-2"),
+    ]
+    assert second.json()["next_cursor"] is None
+    assert narrowed.json() == admin.get(_BASE).json()
+    assert set(first.json()) == {"items", "next_cursor"}
+    per_environment = admin.get(_BASE, params={"limit": 1}).json()["next_cursor"]
+    assert admin.get(_ALL, params={"cursor": per_environment}).status_code == 422
+    assert admin.get(_ALL, params={"limit": 0}).status_code == 422
+    assert admin.get(_ALL, params={"limit": 201}).status_code == 422
+
+
+def test_get_all_connections_without_any_right_is_an_empty_page(
+    client: TestClient, client_as: ClientAs
+) -> None:
+    """An environment you may not read is left out, never a 403; no right at all is empty."""
+    _directories(client_as("admin"), "prod", ["p-1"])
+    _directories(client_as("admin"), "dev", ["d-1"])
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "nobody", "type": "USER"})
+    token = client.post(
+        "/api/v1/principals/nobody/tokens", headers=AUTH_HEADER, json={"name": "nobody"}
+    ).json()["token"]
+
+    nobody = _As(client, {"Authorization": f"Bearer {token}"}).get(_ALL)
+    other = client_as("other").get(_ALL)
+
+    assert (nobody.status_code, nobody.json()) == (200, {"items": [], "next_cursor": None})
+    assert [(item["environment"], item["name"]) for item in other.json()["items"]] == [
+        ("dev", "d-1")
+    ]
+
+
+def test_get_all_connections_with_an_unknown_environment_is_404(client_as: ClientAs) -> None:
+    """With `environment`, the refusals of the list of one environment: 404, and 403."""
+    unknown = client_as("admin").get(_ALL, params={"environment": "nowhere"})
+    refused = client_as("analyst").get(_ALL, params={"environment": "dev"})
+
+    assert unknown.status_code == 404, unknown.text
+    assert refused.status_code == 403, refused.text
+
+
+def test_get_connection_environments(client_as: ClientAs) -> None:
+    """Where you may read, by name, with what you may do there."""
+    url = f"{_ALL}/environments"
+
+    assert client_as("analyst").get(url).json() == [{"name": "prod", "actions": []}]
+    assert client_as("data_engineer").get(url).json() == [
+        {"name": "prod", "actions": ["create", "test"]}
+    ]
+    assert client_as("admin").get(url).json() == [
+        {"name": "dev", "actions": ["create", "test", "name_secret"]},
+        {"name": "prod", "actions": ["create", "test", "name_secret"]},
+    ]
+
+
+def test_a_task_token_may_not_list_all_connections_or_their_environments(
+    client: TestClient, client_as: ClientAs
+) -> None:
+    """Bound or not, a task token gets the 403 of every connection read, naming none."""
+    _directories(client_as("admin"), "dev", ["d-1"])
+
+    for kind, header in _task_headers(client).items():
+        task = _As(client, header)
+        for response in (task.get(_ALL), task.get(f"{_ALL}/environments")):
+            assert response.status_code == 403, (kind, response.text)
+            assert "d-1" not in response.text
+            assert response.json()["detail"] == (
+                "a task token cannot list or show connections; read them with your own token"
+            )

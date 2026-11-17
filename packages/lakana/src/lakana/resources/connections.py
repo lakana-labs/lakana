@@ -10,6 +10,7 @@ from typing import Any
 from lakana._http import HttpTransport, every_page, query_params
 from lakana._models import (
     Connection,
+    ConnectionEnvironment,
     ConnectionPage,
     ConnectionTest,
     DeclaringAsset,
@@ -18,6 +19,15 @@ from lakana._models import (
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
 from lakana.resources.artifacts import _ODD_ANSWER, _object
+from lakana.resources.queries import _route_of_a_newer_server
+
+_LIST_ALL_INSTEAD = "list one environment with `lakana connection list --env ENV`"
+"""What to do instead of `Connections.list_all` against a server without that route."""
+
+_ENVIRONMENTS_INSTEAD = "see the environments with `lakana env list`"
+"""What to do instead of `Connections.environments` against a server without that route."""
+
+_EnvironmentList = list[ConnectionEnvironment]
 
 
 def _when(value: object) -> datetime | None:
@@ -191,6 +201,42 @@ def _page_from_json(data: dict[str, Any]) -> ConnectionPage:
     return ConnectionPage(items=[_connection_from_json(item) for item in items], next_cursor=cursor)
 
 
+def _environments_from_json(data: object) -> list[ConnectionEnvironment]:
+    """Build the `ConnectionEnvironment` list from a `ConnectionEnvironmentOut` list body.
+
+    A field this SDK does not know is ignored.
+
+    Parameters
+    ----------
+    data
+        The decoded body.
+
+    Returns
+    -------
+    list of ConnectionEnvironment
+        The environments, in the server's order.
+
+    Raises
+    ------
+    InvalidResponse
+        If `data` is not a list of objects, each with a name and a list of actions.
+    """
+    try:
+        assert isinstance(data, list)  # nosec B101 -- an untrusted answer; caught just below
+        found = []
+        for item in data:
+            actions = item["actions"]
+            assert isinstance(actions, list)  # nosec B101 -- as above
+            found.append(
+                ConnectionEnvironment(
+                    name=str(item["name"]), actions=tuple(str(action) for action in actions)
+                )
+            )
+        return found
+    except (AssertionError, KeyError, TypeError):
+        raise InvalidResponse(_ODD_ANSWER.format(what="the environments")) from None
+
+
 def _still(environment: str, name: str, test: ConnectionTest, timeout: float) -> str:
     """Write the message of a test that is not done in time.
 
@@ -342,6 +388,96 @@ class Connections:
             Each connection, once.
         """
         return every_page(lambda cursor: self.list(environment, limit=page_size, cursor=cursor))
+
+    def list_all(
+        self, *, environment: str | None = None, limit: int | None = None, cursor: str | None = None
+    ) -> ConnectionPage:
+        """List one page of the connections of every environment you may read, newest first.
+
+        The environments are those where you hold `READ_ENVIRONMENT`; one where you do not is
+        left out, so this is never refused for a missing right. Each connection names its
+        `environment`. With `environment`, this is `list` of that environment.
+
+        Parameters
+        ----------
+        environment
+            Only this environment; then a missing right or environment is refused as by `list`.
+        limit
+            Most connections returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor` of this list.
+
+        Returns
+        -------
+        ConnectionPage
+            The connections, and the cursor of the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            With a task's token; with `environment`, also if you may not read it.
+        lakana.errors.NotFound
+            With `environment`, if it does not exist; or, with a sentence saying so, if the
+            server is older than this package and has no `GET /api/v1/connections`.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200 or `cursor` is not one the server issued for this
+            list.
+        """
+        with _route_of_a_newer_server("GET /api/v1/connections", _LIST_ALL_INSTEAD):
+            response = self._transport.request(
+                ROUTES["connections.list_all"],
+                params=query_params(environment=environment, limit=limit, cursor=cursor),
+            )
+        return _page_from_json(_object(response, "the connections"))
+
+    def iter_all(
+        self, *, environment: str | None = None, page_size: int = 100
+    ) -> Iterator[Connection]:
+        """Yield every connection of every environment you may read, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            Only this environment.
+        page_size
+            Connections per request (1 to 200).
+
+        Returns
+        -------
+        Iterator of Connection
+            Each connection, once, in the order of `list_all`.
+        """
+        return every_page(
+            lambda cursor: self.list_all(environment=environment, limit=page_size, cursor=cursor)
+        )
+
+    def environments(self) -> _EnvironmentList:
+        """List the environments whose connections you may read, sorted by name.
+
+        Returns
+        -------
+        list of ConnectionEnvironment
+            Each one's name and what you may do there; empty when there is none.
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            With a task's token.
+        lakana.errors.NotFound
+            With a sentence saying so, if the server is older than this package and has no
+            `GET /api/v1/connections/environments`.
+        lakana.errors.InvalidResponse
+            If the answer is not a list of environments.
+        """
+        with _route_of_a_newer_server(
+            "GET /api/v1/connections/environments", _ENVIRONMENTS_INSTEAD
+        ):
+            response = self._transport.request(ROUTES["connections.environments"])
+        try:
+            body = response.json()
+        except ValueError:
+            raise InvalidResponse(_ODD_ANSWER.format(what="the environments")) from None
+        return _environments_from_json(body)
 
     def get(self, environment: str, name: str) -> Connection:
         """Show a connection.

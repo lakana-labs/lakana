@@ -2675,8 +2675,26 @@ class RepositoryProbe:
 
 
 @dataclass(frozen=True)
+class ConnectionEnvironment:
+    """An environment whose connections you may read (`client.connections.environments`).
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    actions
+        What your rights allow there: ``create`` and ``test`` with `MANAGE_CONNECTION`, and
+        ``name_secret`` (naming an existing secret for a connection) with `MANAGE_SECRET` too;
+        empty for a reader. The server decides every request again.
+    """
+
+    name: str
+    actions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class ConnectionPage:
-    """One page of an environment's connections, newest first.
+    """One page of connections, of one environment or of all you may read, newest first.
 
     Parameters
     ----------

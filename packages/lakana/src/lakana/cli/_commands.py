@@ -151,7 +151,12 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "secret revoke": ("secrets.revoke",),
     "secret bind": ("secrets.bind",),
     "connection create": ("connections.create",),
-    "connection list": ("connections.list", "connections.iter"),
+    "connection list": (
+        "connections.list",
+        "connections.iter",
+        "connections.list_all",
+        "connections.iter_all",
+    ),
     "connection show": ("connections.get",),
     "connection update": ("connections.get", "connections.update"),
     "connection delete": ("connections.delete",),

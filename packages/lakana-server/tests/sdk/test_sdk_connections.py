@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import lakana
-from lakana._models import Connection, DeclaringAsset
+from lakana._models import Connection, ConnectionEnvironment, DeclaringAsset
 from lakana.errors import Conflict, NotFound, PermissionDenied, ValidationError
 
 _VALUE = "s3cr3t-value"
@@ -131,3 +131,33 @@ def test_a_secret_is_bound_to_a_connection_and_its_events_are_listed_by_kind(
         "CONNECTION_CREATED"
     ]
     assert DeclaringAsset("analytics", "customers").asset == "customers"
+
+
+def test_connections_of_two_environments_list_together_against_the_real_app(
+    lakana_client: lakana.Client, storage_root: str
+) -> None:
+    """`list_all`, `iter_all` and `environments` against the in-process server."""
+    for environment in ("dev", "prod"):
+        lakana_client.environments.create(
+            environment, storage={"scheme": "file", "root": f"{storage_root}/{environment}"}
+        )
+        lakana_client.connections.create(
+            environment,
+            f"{environment}-files",
+            kind="directory",
+            address={"root": "r", "path": "p"},
+        )
+    connections = lakana_client.connections
+
+    first = connections.list_all(limit=1)
+    together = [(c.environment, c.name) for c in connections.iter_all(page_size=1)]
+
+    assert len(first.items) == 1 and first.next_cursor is not None
+    assert sorted(together) == [("dev", "dev-files"), ("prod", "prod-files")]
+    assert [c.name for c in connections.list_all(environment="dev").items] == ["dev-files"]
+    assert connections.environments() == [
+        ConnectionEnvironment(name="dev", actions=("create", "test", "name_secret")),
+        ConnectionEnvironment(name="prod", actions=("create", "test", "name_secret")),
+    ]
+    with pytest.raises(NotFound, match="No environment named"):
+        connections.list_all(environment="nowhere")

@@ -11,8 +11,8 @@ import pytest
 
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
-from lakana._models import Connection, DeclaringAsset, LastConnectionTest
-from lakana.errors import InvalidResponse
+from lakana._models import Connection, ConnectionEnvironment, DeclaringAsset, LastConnectionTest
+from lakana.errors import InvalidResponse, NotFound
 from lakana.resources.connections import Connections
 from lakana.resources.task_connections import TaskConnections
 
@@ -451,3 +451,88 @@ def test_a_readers_last_test_has_no_detail() -> None:
 def test_an_odd_last_test_is_an_invalid_response(last_test: Any) -> None:  # ruff: ignore[any-type]
     with pytest.raises(InvalidResponse):
         _connections({**_ANSWER, "last_test": last_test}, []).get("prod", "crm-db")
+
+
+def test_list_all_sends_the_environment_and_reads_the_cursor_from_the_body() -> None:
+    sent: list[httpx.Request] = []
+    answer = {"items": [{**_ANSWER, "environment": "dev"}], "next_cursor": "n1"}
+    resource = _connections(answer, sent)
+
+    page = resource.list_all(limit=1, cursor="c0")
+    resource.list_all(environment="dev")
+
+    assert [(c.environment, c.name) for c in page.items] == [("dev", "crm-db")]
+    assert page.next_cursor == "n1"
+    assert [(r.method, r.url.path) for r in sent] == [("GET", "/api/v1/connections")] * 2
+    assert [dict(r.url.params) for r in sent] == [
+        {"limit": "1", "cursor": "c0"},
+        {"environment": "dev"},
+    ]
+
+
+def test_iter_all_follows_every_page() -> None:
+    pages = {
+        None: {"items": [{**_ANSWER, "environment": "prod"}], "next_cursor": "c1"},
+        "c1": {"items": [{**_ANSWER, "name": "files", "environment": "dev"}], "next_cursor": None},
+    }
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json=pages[request.url.params.get("cursor")])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    resource = Connections(HttpTransport(_CONFIG, http_client=client))
+
+    found = [(c.environment, c.name) for c in resource.iter_all(environment="prod", page_size=1)]
+
+    assert found == [("prod", "crm-db"), ("dev", "files")]
+    assert [dict(r.url.params) for r in sent] == [
+        {"environment": "prod", "limit": "1"},
+        {"environment": "prod", "limit": "1", "cursor": "c1"},
+    ]
+
+
+def test_environments_reads_names_and_actions() -> None:
+    sent: list[httpx.Request] = []
+    answer = [
+        {"name": "dev", "actions": ["create", "test"]},
+        {"name": "prod", "actions": [], "future": 1},
+    ]
+
+    found = _connections(answer, sent).environments()
+
+    assert found == [
+        ConnectionEnvironment(name="dev", actions=("create", "test")),
+        ConnectionEnvironment(name="prod", actions=()),
+    ]
+    assert [(r.method, r.url.path) for r in sent] == [("GET", "/api/v1/connections/environments")]
+
+
+@pytest.mark.parametrize(
+    "body", [b"{}", b'[{"actions": []}]', b'[{"name": "dev", "actions": "create"}]']
+)
+def test_an_odd_environments_answer_is_an_invalid_response(body: bytes) -> None:
+    with pytest.raises(InvalidResponse):
+        _connections(body, []).environments()
+
+
+def test_an_older_server_without_the_routes_says_to_upgrade() -> None:
+    """The router's bare 404 names the route; a Lakana 404 (an unknown environment) stays."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("environment") == "nowhere":
+            return httpx.Response(
+                404, json={"detail": "No environment named 'nowhere'.", "type": "NotFoundError"}
+            )
+        return httpx.Response(404, json={"detail": "Not Found"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    resource = Connections(HttpTransport(_CONFIG, http_client=client))
+
+    with pytest.raises(NotFound, match=r"does not have GET /api/v1/connections; .* --env ENV"):
+        resource.list_all()
+    with pytest.raises(NotFound, match=r"GET /api/v1/connections/environments; .* env list"):
+        resource.environments()
+    with pytest.raises(NotFound, match="No environment named 'nowhere'"):
+        resource.list_all(environment="nowhere")

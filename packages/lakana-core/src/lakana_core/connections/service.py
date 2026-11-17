@@ -119,6 +119,14 @@ needs `MANAGE_SECRET` there too: the right to name a secret not bound to the con
 a change that could send its secret somewhere new without new values. They are rights only: the
 server decides every request again.
 """
+EnvironmentAction = Literal["create", "test", "name_secret"]
+"""A word of an environment's `actions` (`ConnectionService.environments`)."""
+ENVIRONMENT_ACTIONS: tuple[EnvironmentAction, ...] = ("create", "test", "name_secret")
+"""The words an environment's `actions` may hold, in this order.
+
+``create`` and ``test`` need `MANAGE_CONNECTION` on the environment; ``name_secret`` needs
+`MANAGE_SECRET` there too, as a connection's ``name_secret`` does.
+"""
 
 
 @dataclass(frozen=True)
@@ -207,6 +215,22 @@ def last_tests(
         .where(ranked.c.position == 1)
     ).all()
     return {test.connection_id: (test, name) for test, name in rows}
+
+
+@dataclass(frozen=True)
+class ConnectionEnvironment:
+    """An environment whose connections the caller may read (`ConnectionService.environments`).
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    actions
+        What the caller's rights allow there, drawn from `ENVIRONMENT_ACTIONS` in that order.
+    """
+
+    name: str
+    actions: tuple[EnvironmentAction, ...]
 
 
 @dataclass(frozen=True)
@@ -644,6 +668,44 @@ class ConnectionService:
             name: (answers[2 * index], answers[2 * index + 1]) for index, name in enumerate(names)
         }
 
+    def _readable_environments(
+        self, p: PrincipalRef
+    ) -> dict[uuid.UUID, tuple[Environment, tuple[bool, bool]]]:
+        """Find the live environments whose connections a caller may read, with their rights.
+
+        Three questions per environment, `READ_ENVIRONMENT`, `MANAGE_CONNECTION` and
+        `MANAGE_SECRET`, go in one `permits_each` call, which writes no audit event. An
+        environment without `READ_ENVIRONMENT` is left out.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        dict
+            Each readable environment's id to its row and its entry of `_rights` (whether the
+            caller holds `MANAGE_CONNECTION` and `MANAGE_SECRET` there), by name.
+        """
+        envs = builtins.list(
+            self._session.execute(
+                select(Environment).where(LIVE_ENVIRONMENT).order_by(Environment.name)
+            ).scalars()
+        )
+        questions = [
+            (action, Securable.environment_scope(env.name))
+            for env in envs
+            for action in (Action.READ_ENVIRONMENT, Action.MANAGE_CONNECTION, Action.MANAGE_SECRET)
+        ]
+        answers = iter(permits_each(self._authz, p, questions) if questions else [])
+        readable: dict[uuid.UUID, tuple[Environment, tuple[bool, bool]]] = {}
+        for env in envs:
+            reads, manages, manages_secrets = next(answers), next(answers), next(answers)
+            if reads:
+                readable[env.id] = (env, (manages, manages_secrets))
+        return readable
+
     def _view(
         self,
         row: Connection,
@@ -966,6 +1028,107 @@ class ConnectionService:
             [self._view(row, env, found.get(row.id), rights, declarations) for row in page.items],
             page.next_cursor,
         )
+
+    def list_all(
+        self,
+        p: PrincipalRef,
+        *,
+        environment: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> Page[ConnectionView]:
+        """List the connections of every environment the caller may read, one page at a time.
+
+        With `environment`, this is `list` of that environment: its rows, its cursor and its
+        refusals. Without it, the environments are every live one where the caller holds
+        `READ_ENVIRONMENT`, asked with the page's rights in one `permits_each` batch; one
+        without the right is left out, so the list is never refused but for a task token. The
+        rows are newest first over all of them, equal times by id, read in one statement; the
+        cursor belongs to the ``all-connections`` list, so a cursor of `list` is refused.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Only this environment, with the answers and refusals of `list`.
+        limit
+            Most connections returned.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        Page of ConnectionView
+            The connections, each naming its environment, and the cursor of the next page.
+
+        Raises
+        ------
+        PermissionDenied
+            For a task token (`_refuse_task`); with `environment`, also without
+            `READ_ENVIRONMENT` there.
+        NotFoundError
+            With `environment` only, if it does not exist.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for this list.
+        """
+        _refuse_task(p)
+        if environment is not None:
+            return self.list(p, environment, limit=limit, cursor=cursor)
+        readable = self._readable_environments(p)
+        page = newest_first(
+            self._session,
+            select(Connection).where(Connection.environment_id.in_(builtins.list(readable))),
+            kind="all-connections",
+            at=Connection.created_at,
+            row_id=Connection.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
+        declarations = {
+            env_id: self._declarations(env_id)
+            for env_id in {row.environment_id for row in page.items}
+        }
+        found = last_tests(self._session, [row.id for row in page.items])
+        views = []
+        for row in page.items:
+            env, rights = readable[row.environment_id]
+            views.append(
+                self._view(row, env, found.get(row.id), rights, declarations[row.environment_id])
+            )
+        return Page(views, page.next_cursor)
+
+    def environments(self, p: PrincipalRef) -> builtins.list[ConnectionEnvironment]:
+        """List the environments whose connections the caller may read, and what they may do.
+
+        Every live environment where the caller holds `READ_ENVIRONMENT`, with its actions
+        (`ENVIRONMENT_ACTIONS`): ``create`` and ``test`` with `MANAGE_CONNECTION`, and
+        ``name_secret`` with `MANAGE_SECRET` too. One `permits_each` batch answers it.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+
+        Returns
+        -------
+        list of ConnectionEnvironment
+            The environments, sorted by name; empty when there is none.
+
+        Raises
+        ------
+        PermissionDenied
+            For a task token (`_refuse_task`).
+        """
+        _refuse_task(p)
+        found = []
+        for env, (manages, manages_secrets) in self._readable_environments(p).values():
+            actions: tuple[EnvironmentAction, ...] = ()
+            if manages:
+                actions = ENVIRONMENT_ACTIONS if manages_secrets else ENVIRONMENT_ACTIONS[:2]
+            found.append(ConnectionEnvironment(name=env.name, actions=actions))
+        return found
 
     def get(self, p: PrincipalRef, environment: str, name: str) -> ConnectionView:
         """Show one connection.

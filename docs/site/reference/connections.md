@@ -263,6 +263,25 @@ lakana connection list --env dev
 └─────────┴────────────┴────────────────────────────────────────────┴───────────────────┴─────────────┴──────────────┘
 ```
 
+`--all-environments` lists the connections of every environment you may read, newest first over
+all of them, with an `environment` column after the name; give it without `--env`:
+
+<!-- source: docs/examples/connections/run.sh#list-all -->
+```bash
+lakana connection list --all-environments
+```
+
+<!-- output: connections#list-all -->
+```text
+┏━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ name    ┃ environment ┃ kind       ┃ address                                    ┃ secret            ┃ last_test    ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ exports │ dev         │ directory  │ root=shared path=exports                   │                   │ never tested │
+│ crm-db  │ dev         │ postgresql │ host=db.example.com port=5432 database=crm │ crm-db-connection │ never tested │
+└─────────┴─────────────┴────────────┴────────────────────────────────────────────┴───────────────────┴──────────────┘
+Not shown: declared_by. Use --output json to see it.
+```
+
 <!-- source: docs/examples/connections/run.sh#show -->
 ```bash
 lakana connection show crm-db --env dev
@@ -329,6 +348,8 @@ what to do next on standard error.
 |---|---|---|
 | `POST /api/v1/environments/{env}/connections` | `MANAGE_CONNECTION` | 201 and the connection, whose `secret` is the name its new secret got; 409 when the name is taken; 422 naming the field that is not valid |
 | `GET /api/v1/environments/{env}/connections?limit=&cursor=` | `READ_ENVIRONMENT` | `{"items": [...], "next_cursor": ...}`, newest first, `limit` from 1 to 200 (default 100) |
+| `GET /api/v1/connections?environment=&limit=&cursor=` | `READ_ENVIRONMENT` in each environment listed | the same body over every environment where you hold it, newest first over all of them; an environment without it is left out, never a 403 or 404. With `environment`, exactly the list of that environment, with its 403 and 404. Its `next_cursor` pages this list only: a cursor of the list of one environment is a 422 |
+| `GET /api/v1/connections/environments` | `READ_ENVIRONMENT` in each environment listed | `[{"name", "actions"}]`, sorted by name: every environment where you hold it. `actions` holds `create` and `test` with `MANAGE_CONNECTION` there, and `name_secret` (naming an existing secret for a connection) with `MANAGE_SECRET` too; `[]` for a reader |
 | `GET /api/v1/environments/{env}/connections/{name}` | `READ_ENVIRONMENT` | the connection; 404 names no other connection |
 | `PATCH /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION`, and `MANAGE_SECRET` as above | the connection |
 | `DELETE /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION` | 204; 409 while a deployed project version declares it |
@@ -399,12 +420,17 @@ client.connections.update("prod", "crm-db", settings={"user": "loader"})
 page = client.connections.list("prod")  # one page: page.items, page.next_cursor
 for each in client.connections.iter("prod"):  # every page
     print(each.name, each.declared_by)
+for each in client.connections.iter_all():  # every environment you may read
+    print(each.environment, each.name)
 client.connections.delete("prod", "crm-db")
 client.secrets.bind("prod", "crm-reader", "connection", "crm-db")
 events = client.audit_events.list(kind="connection")
 ```
 
 `update` takes `address`, `settings`, `secret`, `secret_values` and `clear` (a list of names).
+`list_all` (one page, `environment=`, `limit=`, `cursor=`) and `iter_all` list the connections of
+every environment you may read, as `GET /api/v1/connections` does; `client.connections.environments()`
+returns those environments as `ConnectionEnvironment`s with `name` and `actions`.
 A `Connection` also has `environment`, `last_test` (a `LastConnectionTest` with `state`,
 `outcome` and `finished_at`, and `id`, `created_at`, `message` and `requested_by`, which are
 `None` without `MANAGE_CONNECTION`) and `actions`, a tuple of the words of `actions` above.

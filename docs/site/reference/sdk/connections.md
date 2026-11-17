@@ -60,6 +60,55 @@ Yield every connection of an environment, newest first, fetching pages as needed
 
 Returns: `Iterator of Connection`. Each connection, once.
 
+### `client.connections.list_all`
+
+Signature: `client.connections.list_all(*, environment: str | None = None, limit: int | None = None, cursor: str | None = None) -> ConnectionPage`
+
+List one page of the connections of every environment you may read, newest first.
+
+The environments are those where you hold `READ_ENVIRONMENT`; one where you do not is left out, so this is never refused for a missing right. Each connection names its `environment`. With `environment`, this is `list` of that environment.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment; then a missing right or environment is refused as by `list`. |
+| `limit` | `int | None` | `None` | Most connections returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. |
+
+Returns: `ConnectionPage`. The connections, and the cursor of the next page (`None` on the last).
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | With a task's token; with `environment`, also if you may not read it. |
+| `lakana.NotFound` | With `environment`, if it does not exist; or, with a sentence saying so, if the server is older than this package and has no `GET /api/v1/connections`. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200 or `cursor` is not one the server issued for this list. |
+
+### `client.connections.iter_all`
+
+Signature: `client.connections.iter_all(*, environment: str | None = None, page_size: int = 100) -> Iterator[Connection]`
+
+Yield every connection of every environment you may read, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment. |
+| `page_size` | `int` | `100` | Connections per request (1 to 200). |
+
+Returns: `Iterator of Connection`. Each connection, once, in the order of `list_all`.
+
+### `client.connections.environments`
+
+Signature: `client.connections.environments() -> list[ConnectionEnvironment]`
+
+List the environments whose connections you may read, sorted by name.
+
+Returns: `list of ConnectionEnvironment`. Each one's name and what you may do there; empty when there is none.
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | With a task's token. |
+| `lakana.NotFound` | With a sentence saying so, if the server is older than this package and has no `GET /api/v1/connections/environments`. |
+| `lakana.InvalidResponse` | If the answer is not a list of environments. |
+
 ### `client.connections.get`
 
 Signature: `client.connections.get(environment: str, name: str) -> Connection`

@@ -283,6 +283,59 @@ Answer fields: `ConnectionTestOut`
 | `created_at` | text (date-time) | yes |  |
 | `finished_at` | text (date-time) or null | yes |  |
 
+## `GET /api/v1/connections`
+
+List the connections of every environment you may read
+
+Without `environment`, lists one page of the connections of every environment where you hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An environment where you do not hold it is left out, so this is never a 404, and never a 403 but for a task token, which is refused as every connection read is. With `environment`, it answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers, with its 403 and 404. Each connection carries its last test and what you may do with it (`actions`), as in that list: the last test's `id`, `created_at`, `message` and `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only this environment. |
+| `limit` | query | no | whole number | Most connections returned (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `ConnectionPage` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `ConnectionPage`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `ConnectionOut` | yes |  |
+| `next_cursor` | text or null | yes |  |
+
+## `GET /api/v1/connections/environments`
+
+List the environments whose connections you may read, and what you may do there
+
+Every environment where you hold `READ_ENVIRONMENT`, sorted by name, with its `actions`: `create` and `test` where you hold `MANAGE_CONNECTION`, and `name_secret` (naming an existing secret for a connection) where you hold `MANAGE_SECRET` too. Empty when there is none. A task token is refused with 403, as every connection read is.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `ConnectionEnvironmentOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
 ## `GET /api/v1/tasks/self/connections/{name}`
 
 Fetch a connection the running task's asset declares, with its secret

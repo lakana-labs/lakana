@@ -30,6 +30,12 @@ out=$(lakana --output json connection list --env dev)
 python3 -c 'import json,sys; assert sorted(c["name"] for c in json.loads(sys.argv[1])) == ["crm-db", "exports"]' "$out"
 python3 -c 'import json,sys; c=json.loads(sys.argv[1]); assert {(x["environment"], x["last_test"], tuple(x["actions"])) for x in c} == {("dev", None, ("test", "update", "delete", "name_secret"))}, c' "$out"
 
+# docs:start list-all
+lakana connection list --all-environments
+# docs:end list-all
+out=$(lakana --output json connection list --all-environments)
+python3 -c 'import json,sys; c=json.loads(sys.argv[1]); assert {("dev", "crm-db"), ("dev", "exports")} <= {(x["environment"], x["name"]) for x in c}, c' "$out"
+
 # docs:start show
 lakana connection show crm-db --env dev
 # docs:end show

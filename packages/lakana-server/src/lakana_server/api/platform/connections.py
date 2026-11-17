@@ -3,6 +3,8 @@
 A connection is addressed through its environment (`/api/v1/environments/{name}/connections`):
 it lives there as a secret does. `MANAGE_CONNECTION` creates, changes and deletes;
 `READ_ENVIRONMENT` lists and shows. No answer carries a secret value or a CA certificate.
+`/api/v1/connections` lists the connections of every environment the caller may read, and those
+environments.
 
 Every route that answers a connection leaves unset fields out (`response_model_exclude_unset`),
 so that the fields of `last_test` a reader may not see are absent, not `null`; every other field
@@ -21,6 +23,7 @@ from lakana_core.connections.service import ConnectionService, ConnectionView
 from lakana_core.models import ConnectionTest
 from lakana_server.api.platform.schemas import (
     ConnectionCreate,
+    ConnectionEnvironmentOut,
     ConnectionLastTestOut,
     ConnectionOut,
     ConnectionPage,
@@ -38,6 +41,14 @@ router = APIRouter(
     tags=["connections"],
     responses=errors(401),
 )
+
+all_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/connections",
+    tags=["connections"],
+    responses=errors(401),
+)
+"""The connections of every environment the caller may read, and those environments."""
 
 
 def _to_out(view: ConnectionView) -> ConnectionOut:
@@ -438,3 +449,82 @@ def get_connection_test(
         The test.
     """
     return _test_out(service.test_result(principal, environment_name, connection_name, test_id))
+
+
+@all_router.get(
+    "", response_model=ConnectionPage, response_model_exclude_unset=True, responses=errors(403, 404)
+)
+def list_all_connections(
+    environment: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> ConnectionPage:
+    """List the connections of every environment you may read.
+
+    Without `environment`, lists one page of the connections of every environment where you
+    hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An
+    environment where you do not hold it is left out, so this is never a 404, and never a 403
+    but for a task token, which is refused as every connection read is. With `environment`, it
+    answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers,
+    with its 403 and 404. Each connection carries its last test and what you may do with it
+    (`actions`), as in that list: the last test's `id`, `created_at`, `message` and
+    `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send
+    `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment
+    is refused with 422 here.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    limit
+        Most connections returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    ConnectionPage
+        The connections of this page, and the cursor of the next.
+    """
+    page = service.list_all(principal, environment=environment, limit=limit, cursor=cursor)
+    return ConnectionPage(
+        items=[_to_out(view) for view in page.items], next_cursor=page.next_cursor
+    )
+
+
+@all_router.get(
+    "/environments", response_model=list[ConnectionEnvironmentOut], responses=errors(403)
+)
+def list_connection_environments(
+    principal: PrincipalRef = Depends(get_principal),
+    service: ConnectionService = Depends(get_connection_service),
+) -> list[ConnectionEnvironmentOut]:
+    """List the environments whose connections you may read, and what you may do there.
+
+    Every environment where you hold `READ_ENVIRONMENT`, sorted by name, with its `actions`:
+    `create` and `test` where you hold `MANAGE_CONNECTION`, and `name_secret` (naming an
+    existing secret for a connection) where you hold `MANAGE_SECRET` too. Empty when there is
+    none. A task token is refused with 403, as every connection read is.
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    service
+        The connection service for this request.
+
+    Returns
+    -------
+    list of ConnectionEnvironmentOut
+        The environments.
+    """
+    return [
+        ConnectionEnvironmentOut(name=env.name, actions=list(env.actions))
+        for env in service.environments(principal)
+    ]

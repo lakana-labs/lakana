@@ -1009,3 +1009,35 @@ def test_an_open_test_says_when_it_was_requested_to_whoever_gets_that_time(
     changed = datetime(2026, 11, 17, 9, 0, tzinfo=UTC)
     assert last_test_text(reader, changed) == "queued"
     assert last_test_text(manager, changed) == "queued at 2026-11-17T08:00:00+00:00"
+
+
+def test_list_all_environments_adds_the_environment_column_after_the_name(tmp_path: Path) -> None:
+    pages = {
+        None: {"items": [_CONNECTION], "next_cursor": "c1"},
+        "c1": {"items": [{**_S3, "environment": "dev"}], "next_cursor": None},
+    }
+    api = FakeApi()
+    api.routes["GET", "/api/v1/connections"] = lambda request: httpx.Response(
+        200, json=pages[request.url.params.get("cursor")]
+    )
+
+    result = invoke(make_state(tmp_path, api), "connection", "list", "--all-environments")
+
+    assert result.exit_code == 0, result.output
+    header = next(line for line in result.stdout.splitlines() if "name" in line)
+    assert header.index("name") < header.index("environment") < header.index("kind")
+    assert "crm-db" in result.stdout and "landing" in result.stdout
+    assert "dev" in result.stdout and "prod" in result.stdout
+    assert [r.url.path for r in api.requests] == ["/api/v1/connections"] * 2
+
+
+def test_list_all_environments_with_env_is_exit_2(tmp_path: Path) -> None:
+    api = FakeApi()
+
+    result = invoke(
+        make_state(tmp_path, api), "connection", "list", "--all-environments", "--env", "prod"
+    )
+
+    assert result.exit_code == 2
+    assert "--all-environments lists every environment; leave out --env." in result.stderr
+    assert api.requests == []

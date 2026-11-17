@@ -270,6 +270,8 @@ ROUTES: dict[str, Route] = {
     ),
     "connections.create": Route("POST", "/api/v1/environments/{environment_name}/connections"),
     "connections.list": Route("GET", "/api/v1/environments/{environment_name}/connections"),
+    "connections.list_all": Route("GET", "/api/v1/connections"),
+    "connections.environments": Route("GET", "/api/v1/connections/environments"),
     "connections.get": Route(
         "GET", "/api/v1/environments/{environment_name}/connections/{connection_name}"
     ),

@@ -3759,7 +3759,7 @@ class ConnectionOut(BaseModel):
 
 
 class ConnectionPage(BaseModel):
-    """One page of an environment's connections, newest first.
+    """One page of connections, of one environment or of all you may read, newest first.
 
     Parameters
     ----------
@@ -3771,6 +3771,23 @@ class ConnectionPage(BaseModel):
 
     items: list[ConnectionOut]
     next_cursor: str | None
+
+
+class ConnectionEnvironmentOut(BaseModel):
+    """An environment whose connections the caller may read, and what they may do there.
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    actions
+        What the caller's rights allow there: ``create`` and ``test`` with
+        `MANAGE_CONNECTION`, and ``name_secret`` (naming an existing secret for a connection)
+        with `MANAGE_SECRET` too; `[]` for a reader. The server decides every request again.
+    """
+
+    name: str
+    actions: list[Literal["create", "test", "name_secret"]]
 
 
 class TermLinkOut(BaseModel):
