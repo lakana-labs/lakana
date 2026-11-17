@@ -1,7 +1,20 @@
 import { defaultKeymap } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
-import { EditorView, keymap, runScopeHandlers } from "@codemirror/view";
+import {
+  closeHoverTooltips,
+  EditorView,
+  hasHoverTooltips,
+  keymap,
+  runScopeHandlers,
+} from "@codemirror/view";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// A hover tooltip opens only on a real mouse over laid-out text, which jsdom has none of; the
+// test says when one is open, and the module keeps its own behaviour otherwise.
+vi.mock("@codemirror/view", async (original) => {
+  const real = await original<typeof import("@codemirror/view")>();
+  return { ...real, hasHoverTooltips: vi.fn(real.hasHoverTooltips) };
+});
 
 import { runKeys } from "./keys";
 
@@ -62,5 +75,20 @@ describe("runKeys", () => {
     onCancel.mockReturnValue(true);
     expect(press(target, { key: "Escape" })).toBe(true);
     expect(onCancel).toHaveBeenCalledTimes(2);
+  });
+
+  it("Escape closes an open hover tooltip first and cancels only on the next press", () => {
+    const onCancel = vi.fn(() => true);
+    const target = editor(() => undefined, onCancel);
+    const dispatch = vi.spyOn(target, "dispatch");
+    vi.mocked(hasHoverTooltips).mockReturnValueOnce(true);
+
+    expect(press(target, { key: "Escape" })).toBe(true);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({ effects: closeHoverTooltips });
+
+    expect(press(target, { key: "Escape" })).toBe(true);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 });

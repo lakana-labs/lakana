@@ -50,8 +50,24 @@ describe("EnvironmentPicker", () => {
       <EnvironmentPicker environments={QUERY_ENVIRONMENTS} value="staging" onChange={vi.fn()} />,
     );
 
-    expect(screen.getByRole("button", { name: "Environment: staging" })).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Environment: staging" });
+    // The trigger shows the name, so the person sees where the opened query lives.
+    expect(trigger.querySelector(".react-aria-SelectValue")).toHaveTextContent(/^staging$/);
     expect(container.querySelector(".env-protected")).toBeNull();
+  });
+
+  it("marks a hidden character of an environment that is no longer listed", () => {
+    render(
+      <EnvironmentPicker
+        environments={QUERY_ENVIRONMENTS}
+        value={"stag\u200Bing"}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(document.querySelector(".react-aria-SelectValue .char-mark")).toHaveTextContent(
+      "U+200B",
+    );
   });
 
   it("marks a hidden character of an environment's name", () => {

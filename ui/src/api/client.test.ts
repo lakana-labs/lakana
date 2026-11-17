@@ -359,8 +359,24 @@ describe("api.upload and api.blob", () => {
     await expect(api.download("/api/v1/files/one", 5)).rejects.toBeInstanceOf(WrongFileType);
   });
 
-  it("download reads an answer without a body as an empty file", async () => {
+  it("download refuses an answer without a body that names no type, such as a 204", async () => {
     fakeServer({ "GET /api/v1/files/one": { status: 204 } });
+
+    await expect(api.download("/api/v1/files/one", 5)).rejects.toBeInstanceOf(WrongFileType);
+  });
+
+  it("download reads an answer of the asked type without a body as an empty file", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(null, {
+            status: 200,
+            headers: { "Content-Type": "application/octet-stream" },
+          }),
+        ),
+      ),
+    );
 
     const read = await api.download("/api/v1/files/one", 5);
 

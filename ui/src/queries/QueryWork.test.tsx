@@ -6,7 +6,15 @@ import { EditorView } from "@codemirror/view";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { aPage, aRun, aSavedQuery, queryRoutes, RUN_ID, WAITING } from "../test/queries";
+import {
+  aListedRun,
+  aPage,
+  aRun,
+  aSavedQuery,
+  queryRoutes,
+  RUN_ID,
+  WAITING,
+} from "../test/queries";
 import { renderShell } from "../test/render";
 import type { FakeRoute } from "../test/server";
 import { EditorSkeleton, RunLine } from "./QueryWork";
@@ -260,6 +268,40 @@ describe("the Queries screen's work", () => {
     expect(sent(shell).filter((request) => request.endsWith("/cancel"))).toEqual([]);
   });
 
+  it("Recent lists a run once it is submitted and its new state once it ends, without a reload", async () => {
+    let submitted = false;
+    let done = false;
+    const running = { status: "RUNNING" as const, finished_at: null, result_rows: null };
+    window.localStorage.setItem("lakana.queries.environment", "prod");
+    const shell = renderShell("/queries", {
+      routes: routes({
+        "GET /api/v1/queries": () => ({
+          status: 200,
+          body: {
+            items: submitted ? [aListedRun(done ? {} : running)] : [],
+            next_cursor: null,
+          },
+        }),
+        [`POST ${PROD_RUNS}`]: () => {
+          submitted = true;
+          return { status: 202, body: { query_id: RUN_ID } };
+        },
+        [`GET ${STATUS}`]: () => ({ status: 200, body: aRun(done ? {} : running) }),
+      }),
+    });
+    const recent = await screen.findByRole("region", { name: "Recent" });
+    expect(await within(recent).findByText("No queries in the last 30 days.")).toBeInTheDocument();
+    type(await editor(), "select 1 as one");
+
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+
+    expect(await within(recent).findByText("Running")).toBeInTheDocument();
+    done = true;
+    expect(await screen.findByRole("grid", {}, { timeout: 3_000 })).toBeInTheDocument();
+    expect(await within(recent).findByText("Succeeded")).toBeInTheDocument();
+    expect(within(recent).queryByText("Running")).toBeNull();
+  });
+
   it("shows a refusal through problemText above the result", async () => {
     const shell = renderShell(RUN_PATH, {
       routes: routes({
@@ -365,6 +407,41 @@ describe("the Queries screen's work", () => {
     expect((await editor()).state.doc.toString()).toBe("select 1 as one");
     expect(screen.getByText("1 row · 1.0 s")).toHaveAttribute("role", "status");
     expect(window.localStorage.getItem("lakana.queries.environment")).toBe("dev");
+  });
+
+  it("a run in an environment no longer listed names it, disables Run and says why", async () => {
+    const staging = `/api/v1/environments/staging/queries/${RUN_ID}`;
+    const shell = renderShell(`/queries/staging/runs/${RUN_ID}`, {
+      routes: routes({
+        [`GET ${staging}`]: { status: 200, body: aRun() },
+        [`GET ${staging}/result`]: { status: 200, body: aPage() },
+      }),
+    });
+    expect(await screen.findByRole("grid")).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: "Environment: staging" });
+    expect(trigger).toHaveTextContent(/staging▾$/);
+    const run = screen.getByRole("button", { name: "Run" });
+    expect(run).toBeDisabled();
+    expect(screen.getByText("You may not run queries in staging.")).toBeInTheDocument();
+    const view = await editor();
+    expect(view.state.doc.toString()).toBe("select 1 as one");
+    act(() => {
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }),
+      );
+    });
+
+    // A listed environment chosen in the picker runs as usual.
+    await shell.user.click(trigger);
+    await shell.user.click(screen.getByRole("option", { name: "dev" }));
+    expect(screen.queryByText("You may not run queries in staging.")).toBeNull();
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => {
+      expect(sent(shell)).toContain("POST /api/v1/environments/dev/queries");
+    });
+    expect(
+      sent(shell).filter((request) => request.startsWith("POST") && request.includes("staging")),
+    ).toEqual([]);
   });
 
   it("an opened run whose SQL the server does not keep leaves the editor as it was", async () => {
@@ -495,6 +572,32 @@ describe("the Queries screen's work", () => {
     // The next edit takes the line away.
     act(() => {
       view.dispatch({ changes: { from: view.state.doc.length, insert: "'" } });
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("Format says so when its code cannot load, and leaves the text", async () => {
+    const shell = renderShell("/queries", { routes: routes() });
+    const view = await editor();
+    type(view, "select 1 as one");
+    vi.doMock("./editor/formatSql", () => {
+      throw new Error("Failed to fetch dynamically imported module");
+    });
+
+    try {
+      await shell.user.click(screen.getByRole("button", { name: "Format" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Format could not load; reload the page.",
+      );
+    } finally {
+      vi.doUnmock("./editor/formatSql");
+    }
+    expect(view.state.doc.toString()).toBe("select 1 as one");
+
+    // The next edit takes the line away.
+    act(() => {
+      view.dispatch({ changes: { from: view.state.doc.length, insert: " " } });
     });
     expect(screen.queryByRole("alert")).toBeNull();
   });

@@ -10,7 +10,7 @@ describe("resultFileName", () => {
     ["Monthly revenue", DONE, "csv", "Monthly-revenue-2026-11-16.csv"],
     [null, DONE, "csv", `query-${ID}-2026-11-16.csv`],
     ["a/b\\c", DONE, "xlsx", "a-b-c-2026-11-16.xlsx"],
-    ["​", DONE, "csv", `query-${ID}-2026-11-16.csv`],
+    ["\u200B", DONE, "csv", `query-${ID}-2026-11-16.csv`],
     ["  ", DONE, "csv", `query-${ID}-2026-11-16.csv`],
     ["..", DONE, "csv", `query-${ID}-2026-11-16.csv`],
     ["Sales  by\tregion", DONE, "csv", "Sales-by-region-2026-11-16.csv"],

@@ -59,6 +59,11 @@ export interface QueryRun extends QueryRunState {
   /** Whether the run was opened from its address rather than submitted on this page. */
   readonly opened: boolean;
   /**
+   * A number that grows when the list of recent runs changed: a submit was taken, or a run seen
+   * queued or running here ended.
+   */
+  readonly listed: number;
+  /**
    * Submits a query, moves to its run's address (keeping the focus where it is) and follows it.
    * A refusal ends in the phase `refused`, never in a rejection. `state` goes with the move, in
    * the history entry of the run's address.
@@ -80,7 +85,7 @@ export interface QueryRun extends QueryRunState {
 }
 
 /** The view of a run, besides what can be done with it. */
-type View = Omit<QueryRun, "submit" | "cancel" | "open" | "retry" | "more" | "reset">;
+type View = Omit<QueryRun, "submit" | "cancel" | "open" | "retry" | "more" | "reset" | "listed">;
 
 const IDLE: View = {
   phase: "idle",
@@ -137,19 +142,24 @@ class Follower {
   #active: Target | null = null;
   /** Whether the cancel of the active run was sent. */
   #cancelSent = false;
+  /** Whether the run was submitted here or seen queued or running, so its end changes Recent. */
+  #seenActive = false;
   /** The rows shown and the run they belong to. */
   #shown: { readonly target: Target; readonly page: ResultPageOut } | null = null;
   #round = 0;
   #timer: ReturnType<typeof setTimeout> | undefined = undefined;
   readonly #show: Dispatch<SetStateAction<View>>;
+  readonly #changed: () => void;
 
   /**
    * Builds the follower.
    *
    * @param show - Sets the view of the run.
+   * @param changed - Called when the list of recent runs changed.
    */
-  constructor(show: Dispatch<SetStateAction<View>>) {
+  constructor(show: Dispatch<SetStateAction<View>>, changed: () => void) {
     this.#show = show;
+    this.#changed = changed;
   }
 
   /** Stops following: no more polls, and no cancel (leaving the page lets the run go on). */
@@ -159,6 +169,7 @@ class Follower {
     this.#target = null;
     this.#active = null;
     this.#shown = null;
+    this.#seenActive = false;
   }
 
   /**
@@ -177,7 +188,9 @@ class Follower {
       this.#current(round, (id: string) => {
         const target = { environment, id };
         this.#target = target;
+        this.#seenActive = true;
         submitted(id);
+        this.#changed();
         this.#follow(target);
       }),
       this.#current(round, (error: unknown) => {
@@ -307,6 +320,7 @@ class Follower {
     getQueryRun(target.environment, target.id).then(
       this.#current(round, (run: QueryRunOut) => {
         if (ACTIVE_STATUSES.includes(run.status)) {
+          this.#seenActive = true;
           this.#show((view) => ({ ...view, phase: "waiting", run }));
           const wait = waited < POLL_FAST_FOR_MS ? POLL_FAST_MS : POLL_SLOW_MS;
           this.#later(wait, () => {
@@ -315,6 +329,10 @@ class Follower {
           return;
         }
         this.#active = null;
+        if (this.#seenActive) {
+          this.#seenActive = false;
+          this.#changed();
+        }
         if (run.status === "SUCCEEDED") {
           this.#show((view) => ({
             ...view,
@@ -410,7 +428,13 @@ export function useQueryRun(): QueryRun {
   const navigate = useNavigate();
   const me = useMe();
   const [view, setView] = useState<View>(IDLE);
-  const [follower] = useState(() => new Follower(setView));
+  const [listed, setListed] = useState(0);
+  const [follower] = useState(
+    () =>
+      new Follower(setView, () => {
+        setListed((count) => count + 1);
+      }),
+  );
 
   useEffect(
     () => () => {
@@ -450,5 +474,5 @@ export function useQueryRun(): QueryRun {
     follower.stop();
     setView(IDLE);
   }, [follower]);
-  return { ...view, submit, cancel, open, retry, more, reset };
+  return { ...view, listed, submit, cancel, open, retry, more, reset };
 }

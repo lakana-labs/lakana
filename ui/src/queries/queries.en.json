@@ -11,6 +11,7 @@
   "cancelling": "Cancelling…",
   "format": "Format",
   "formatUnreadable": "Format could not read this SQL; run it to see the server's reason.",
+  "formatUnloaded": "Format could not load; reload the page.",
   "loadingEditor": "Loading the editor…",
   "environment": {
     "label": "Environment",
@@ -90,5 +91,6 @@
     "confirm": "Delete",
     "done": "Deleted {{name}}."
   },
-  "notReadable": "You may not read the SQL of this query."
+  "notReadable": "You may not read the SQL of this query.",
+  "notAllowed": "You may not run queries in {{environment}}."
 }

@@ -486,12 +486,13 @@ export const api = {
    */
   async download(path: string, limit: number, accept = "application/octet-stream"): Promise<Blob> {
     const response = await exchangeWith("GET", path, { accept }, {});
+    // The type first: an answer without a body (a 204 or 205) is no empty file of that type.
+    if (!(response.headers.get("Content-Type") ?? "").startsWith(accept)) {
+      await response.body?.cancel();
+      throw new WrongFileType();
+    }
     if (response.body === null) {
       return new Blob([]);
-    }
-    if (!(response.headers.get("Content-Type") ?? "").startsWith(accept)) {
-      await response.body.cancel();
-      throw new WrongFileType();
     }
     const reader = response.body.getReader();
     const chunks: Uint8Array<ArrayBuffer>[] = [];

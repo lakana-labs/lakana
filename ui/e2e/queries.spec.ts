@@ -512,6 +512,13 @@ for (const theme of ["light", "dark"] as const) {
         await writeSql(page, editor, BROKEN_SQL);
         await page.keyboard.press("ControlOrMeta+Enter");
         await expect(page.getByRole("alert")).toContainText(PARSER_ERROR);
+        // Recent lists the run and how it ended, with no save, delete or reload in between.
+        await expect(page).toHaveURL(/\/queries\/prod\/runs\//u);
+        const brokenRun = new URL(page.url()).pathname;
+        const recent = page.getByRole("region", { name: "Recent queries" });
+        await expect(
+          recent.getByRole("row").filter({ has: page.locator(`a[href="${brokenRun}"]`) }),
+        ).toContainText("Failed");
 
         // Save as new, then delete it again.
         await page.getByRole("button", { name: "Save…" }).click();
@@ -529,12 +536,8 @@ for (const theme of ["light", "dark"] as const) {
         ).toBeFocused();
 
         // The run again from Recent, with its result.
-        await page
-          .getByRole("region", { name: "Recent queries" })
-          .getByRole("link")
-          .first()
-          .click();
-        await expect(page).toHaveURL(/\/queries\/prod\/runs\//u);
+        await recent.getByRole("link").first().click();
+        await expect(page).toHaveURL(new RegExp(`${brokenRun}$`, "u"));
         await expect(page.getByRole("alert")).toContainText(PARSER_ERROR);
         await expect.poll(() => open.size).toBe(0);
 

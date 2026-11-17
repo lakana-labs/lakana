@@ -5,7 +5,16 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from "react";
+import {
+  type JSX,
+  lazy,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router";
@@ -126,7 +135,10 @@ interface WorkProps {
   readonly address: QueriesAddress | null;
   /** The Queries ▾ button of a narrow screen, first in the toolbar; null beside the library. */
   readonly fold: ReactNode;
-  /** Called after a save or a delete, so the library reads its lists again. */
+  /**
+   * Called after a save or a delete, a submit taken or a followed run's end, so the library reads
+   * its lists again; the same function on every render.
+   */
   readonly onLibraryChange: () => void;
 }
 
@@ -139,7 +151,7 @@ interface WorkProps {
  * @param props.environments - The environments where the person may run a query.
  * @param props.address - The run or saved query the address names, or null.
  * @param props.fold - The Queries ▾ button, or null.
- * @param props.onLibraryChange - Called after a save or a delete.
+ * @param props.onLibraryChange - Called when the library's lists changed.
  * @returns The work column.
  */
 function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.Element {
@@ -153,8 +165,9 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
   const [sql, setSql] = useState("");
-  // Whether the last Format could not read the text; the next edit takes the line away.
-  const [unreadable, setUnreadable] = useState(false);
+  // Why the last Format changed nothing: it could not read the text, or its code could not
+  // load; null when it worked. The next edit takes the line away.
+  const [formatLine, setFormatLine] = useState<"unreadable" | "unloaded" | null>(null);
   const [remembered, setRemembered] = useState(readEnvironment);
   const [dialog, setDialog] = useState<"save" | "delete" | null>(null);
   // A choice holds for the address it was made at; another address brings its own.
@@ -165,6 +178,9 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
     : (environments[0] as QueryEnvironmentOut).name;
   const environment =
     picked !== null && picked.at === at ? picked.environment : (address?.environment ?? fallback);
+  // An opened run or saved query may live where the person may no longer run one; it shows,
+  // but no run is sent there until a listed environment is chosen.
+  const allowed = environments.some((listed) => listed.name === environment);
 
   // A run or a saved query opened from its address brings its SQL into the editor once per
   // visit of the address; a run submitted here leaves the editor as the person left it. A new
@@ -190,6 +206,14 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
     setSql(opened.sql ?? "");
   }
 
+  // Recent lists a run once its submit is taken, and its new state once it ends.
+  const { listed } = query;
+  useEffect(() => {
+    if (listed > 0) {
+      onLibraryChange();
+    }
+  }, [listed, onLibraryChange]);
+
   const { open, reset } = query;
   const runAddress = address?.kind === "run" ? address : null;
   const runEnvironment = runAddress?.environment;
@@ -208,7 +232,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
   const active = query.phase === "waiting";
   const run = (): void => {
     // Ctrl/⌘ Enter in the editor while a run is submitted or active starts no second one.
-    if (active || query.phase === "submitting" || readOnly) {
+    if (active || query.phase === "submitting" || readOnly || !allowed) {
       return;
     }
     writeEnvironment(environment);
@@ -265,9 +289,14 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           className="button"
           isDisabled={readOnly}
           onPress={() => {
-            void editor.current?.format().then((formatted) => {
-              setUnreadable(!formatted);
-            });
+            void editor.current?.format().then(
+              (formatted) => {
+                setFormatLine(formatted ? null : "unreadable");
+              },
+              () => {
+                setFormatLine("unloaded");
+              },
+            );
           }}
         >
           {t("queries.format")}
@@ -285,7 +314,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           ref={runButton}
           className={active ? "button queries-run" : "button button-primary queries-run"}
           pending={query.phase === "submitting" || query.cancelling}
-          isDisabled={readOnly}
+          isDisabled={readOnly || (!active && !allowed)}
           onPress={active ? query.cancel : run}
         >
           {active
@@ -299,6 +328,9 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           </kbd>
         )}
       </div>
+      {!allowed && (
+        <p className="queries-saved-facts">{t("queries.notAllowed", { environment })}</p>
+      )}
       {state?.note !== undefined && <QueryNote note={state.note} />}
       {savedError !== null && (
         <p role="alert" className="step-error queries-alert">
@@ -319,7 +351,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
             value={sql}
             onChange={(changed) => {
               setSql(changed);
-              setUnreadable(false);
+              setFormatLine(null);
             }}
             onRun={run}
             onCancel={query.cancel}
@@ -333,9 +365,9 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           />
         </Suspense>
       </div>
-      {unreadable && (
+      {formatLine !== null && (
         <p role="alert" className="step-error queries-alert">
-          {t("queries.formatUnreadable")}
+          {t(formatLine === "unreadable" ? "queries.formatUnreadable" : "queries.formatUnloaded")}
         </p>
       )}
       {query.cancelRefusal !== null && (
@@ -428,6 +460,9 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
   const environments = useResource(listQueryEnvironments);
   const [filter, setFilter] = useState(readFilter);
   const [reloadKey, setReloadKey] = useState(0);
+  const reloadLibrary = useCallback(() => {
+    setReloadKey((key) => key + 1);
+  }, []);
   const address =
     mode === "new" ? null : { kind: mode, environment: String(params.env), id: String(params.id) };
   return (
@@ -462,9 +497,7 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
                   environments={listed}
                   address={address}
                   fold={folded ? <LibraryFold {...library} /> : null}
-                  onLibraryChange={() => {
-                    setReloadKey((key) => key + 1);
-                  }}
+                  onLibraryChange={reloadLibrary}
                 />
               </>
             );

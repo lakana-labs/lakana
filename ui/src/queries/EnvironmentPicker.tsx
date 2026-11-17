@@ -137,12 +137,14 @@ export function EnvironmentPicker({
           )}
         </span>
         <SelectValue aria-hidden="true">
-          {chosen === undefined ? (
-            value === null ? (
-              all
-            ) : null
-          ) : (
+          {chosen !== undefined ? (
             <EnvironmentName environment={chosen} />
+          ) : value === null ? (
+            all
+          ) : (
+            // Not listed (an opened run's or saved query's environment where the person may no
+            // longer run one): its name still shows where the opened query lives.
+            <VisibleText text={value} />
           )}
         </SelectValue>
         <span aria-hidden="true">▾</span>
