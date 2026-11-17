@@ -64,8 +64,10 @@ jobs:
         run: uv run python scripts/check_licenses.py
 
   # The npm locks of the interface (ui/) and of the duplication check (tools/jscpd), audited by
-  # npm and by osv-scanner at the lowest level: a finding of any severity fails. The last step
-  # proves both tools fail on a lock with a known advisory, written here and never committed.
+  # npm and by osv-scanner at the lowest level: a finding of any severity fails, except an
+  # advisory in the time-limited allowlist (scripts/npm-audit-allowlist.toml for npm audit, the
+  # osv-scanner.toml next to the lock for osv-scanner). The last step proves both tools, and the
+  # allowlist, fail on a lock with a known advisory, written here and never committed.
   npm-audit:
     name: npm audit
     needs: changes
@@ -78,11 +80,11 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
         with:
           node-version-file: ui/.nvmrc
-      # The lock is enough: nothing is installed.
+      # The lock is enough: nothing is installed. `scripts/npm_audit.py` runs `npm audit --json`
+      # in each directory and fails on every advisory but an allowlisted one that has not lapsed,
+      # reaches no production dependency, and is still reported.
       - name: npm audit
-        run: |
-          npm audit --audit-level=low --prefix ui
-          npm audit --audit-level=low --prefix tools/jscpd
+        run: python3 scripts/npm_audit.py ui tools/jscpd
       # The osv-scanner command line (Apache-2.0): one pinned release, refused unless its SHA-256
       # matches; raise both together from the release's osv-scanner_SHA256SUMS file.
       - name: Install osv-scanner
@@ -113,11 +115,26 @@ jobs:
             echo "npm audit passed a lock with lodash 4.17.20, which has known advisories." >&2
             exit 1
           fi
+          # With ui/ audited alongside, so the allowlist entries are in use and the only
+          # failures left are the probe's: the allowlist must not swallow them.
+          if python3 "$GITHUB_WORKSPACE/scripts/npm_audit.py" "$GITHUB_WORKSPACE/ui" . 2> audit.err; then
+            echo "scripts/npm_audit.py passed a lock with lodash 4.17.20, which has known advisories." >&2
+            exit 1
+          fi
+          cat audit.err >&2
+          if grep -v ' in lodash: not allowlisted' audit.err | grep -q '^FAIL'; then
+            echo "scripts/npm_audit.py failed the probe for a reason other than lodash." >&2
+            exit 1
+          fi
+          if ! grep -q ' in lodash: not allowlisted' audit.err; then
+            echo "scripts/npm_audit.py did not name lodash's advisories as not allowlisted." >&2
+            exit 1
+          fi
           if "$RUNNER_TEMP/osv-scanner" scan source --lockfile package-lock.json; then
             echo "osv-scanner passed a lock with lodash 4.17.20, which has known advisories." >&2
             exit 1
           fi
-          echo "Both npm audit and osv-scanner fail on a known advisory, as they should."
+          echo "npm audit, scripts/npm_audit.py and osv-scanner fail on a known advisory, as they should."
 
   secrets:
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
