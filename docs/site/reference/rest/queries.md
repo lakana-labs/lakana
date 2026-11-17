@@ -186,7 +186,7 @@ Answer fields: `QueryStatusOut`
 
 Fetch a query's result
 
-Returns the rows of a finished read as an Arrow IPC file, or with `format=json` one page of them as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked; it names the columns masked for you and, for a preview, the table. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with the Arrow result, and for a preview's page longer than 100 rows. Answers 503 with `Retry-After: 1` while you already have a JSON page being prepared, or the server is preparing as many as it allows at once.
+Returns the rows of a finished read as a whole file: an Arrow IPC file (the default), CSV (`format=csv`: RFC 4180, UTF-8 without a byte-order mark, values verbatim) or a spreadsheet (`format=xlsx`: one sheet below a header row; numbers a spreadsheet would round, NaN and infinity are text, a timestamp with a time zone is in UTC). A file is always the whole result, never a page; it is streamed, so no `Content-Length` is promised. It names itself in `Content-Disposition` (`query-ID.arrow`, `.csv`, `.xlsx`) and carries the run's row count and Arrow size as `X-Result-Rows` and `X-Result-Arrow-Bytes` when the run recorded them. Each download of a file is audited as `QUERY_RESULT_EXPORTED`, except by a token bound to a task attempt. With `format=json` it returns one page as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked; it names the columns masked for you and, for a preview, the table; it is not audited as an export. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with a file, for a preview's page longer than 100 rows, and for a spreadsheet of more than 1,048,575 rows or 16,384 columns or with a value longer than 32,767 characters, naming the CSV download instead. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or spreadsheet file being prepared, or the server is preparing as many as it allows at once.
 
 Parameters:
 
@@ -194,7 +194,7 @@ Parameters:
 |---|---|---|---|---|
 | `env` | path | yes | text | Environment name. |
 | `query_id` | path | yes | text (uuid) | The query's id. |
-| `format` | query | no | one of `arrow`, `json` | `arrow` for the whole result as an Arrow IPC file, `json` for one page. |
+| `format` | query | no | one of `arrow`, `json`, `csv`, `xlsx` | `arrow` for the whole result as an Arrow IPC file, `csv` or `xlsx` for the whole result as CSV or a spreadsheet, `json` for one page. |
 | `limit` | query | no | whole number or null | Rows of a JSON page, 1 to 1000 (100 at most for a preview); 100 when left out. Only with `format=json`. |
 | `offset` | query | no | whole number or null | The first row of a JSON page, 0 or more; 0 when left out. Only with `format=json`. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
@@ -203,7 +203,7 @@ Answers:
 
 | Status | Meaning | Body |
 |---|---|---|
-| `200` | The whole result as an Arrow IPC file (`format=arrow`, the default), or one page of it as JSON (`format=json`). | `ResultPageOut` or `application/vnd.apache.arrow.file` |
+| `200` | The whole result as an Arrow IPC file (`format=arrow`, the default), as CSV (`format=csv`) or as a spreadsheet (`format=xlsx`), or one page of it as JSON (`format=json`). | `ResultPageOut` or `application/vnd.apache.arrow.file` or `text/csv; charset=utf-8` or `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |

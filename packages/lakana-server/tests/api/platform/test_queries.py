@@ -22,7 +22,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.result_json import json_page
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import person, query_run_columns
+from tests.server_test_helpers import create_environment, person, query_run_columns
 
 
 def test_submit_then_get_returns_queued(client: TestClient) -> None:
@@ -299,7 +299,7 @@ def test_another_principals_query_is_404_on_status_and_result(
 
 
 def _environment(client: TestClient, name: str = "dev") -> None:
-    """Create an environment with a file store.
+    """Create an environment with a file store under the test's own directory.
 
     Parameters
     ----------
@@ -308,12 +308,7 @@ def _environment(client: TestClient, name: str = "dev") -> None:
     name
         The environment's name.
     """
-    created = client.post(
-        "/api/v1/environments",
-        json={"name": name, "storage": {"scheme": "file", "root": "file:///tmp/cancel"}},
-        headers=AUTH_HEADER,
-    )
-    assert created.status_code == 201, created.text
+    create_environment(client, name)
 
 
 def _submit(client: TestClient, headers: dict[str, str] = AUTH_HEADER, env: str = "dev") -> str:
@@ -1399,14 +1394,15 @@ def test_limit_or_offset_with_arrow_is_422(client: TestClient) -> None:
         response = client.get(result_url(qid, query), headers=AUTH_HEADER)
         assert response.status_code == 422, query
         assert response.json()["detail"] == (
-            "limit and offset apply to format=json; the Arrow result is always whole."
+            "limit and offset apply to format=json; arrow, csv and xlsx are always the whole "
+            "result."
         )
 
 
 def test_an_unknown_format_is_422(client: TestClient) -> None:
     _environment(client)
     qid = stored_result(client, "dev", pa.table({"i": [1]}))
-    response = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    response = client.get(result_url(qid, "format=parquet"), headers=AUTH_HEADER)
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["query", "format"]
 
@@ -1470,11 +1466,16 @@ def test_the_slot_is_released_after_a_page_and_after_a_failure(
     assert client.app.state.json_page_limiter.try_acquire(admin) is None
 
 
-def test_the_result_route_documents_arrow_and_the_json_page(client: TestClient) -> None:
+def test_the_result_route_documents_every_format(client: TestClient) -> None:
     spec = client.app.openapi()
     op = spec["paths"]["/api/v1/environments/{env}/queries/{query_id}/result"]["get"]
     content = op["responses"]["200"]["content"]
-    assert set(content) == {"application/vnd.apache.arrow.file", "application/json"}
+    assert set(content) == {
+        "application/vnd.apache.arrow.file",
+        "application/json",
+        "text/csv; charset=utf-8",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
     assert content["application/json"]["schema"] == {"$ref": "#/components/schemas/ResultPageOut"}
     assert {code for code in op["responses"]} == {"200", "401", "403", "404", "409", "422", "503"}
     limit = next(p for p in op["parameters"] if p["name"] == "limit")
@@ -1732,4 +1733,298 @@ def test_get_query_environments(client: TestClient) -> None:
     analyst = person(client, "ana", "ANALYST", env="stage")
     assert client.get(f"{_ALL}/environments", headers=analyst).json() == [
         {"name": "stage", "protected": False}
+    ]
+
+
+# --- Whole-result files ---------------------------------------------------------------------------
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+THREE_ROWS = pa.table({"name": ["a,b", "é", None], "n": [1, 2, 3]})
+"""A small result; its rows are written as `result_rows` where a test records sizes."""
+
+
+def _arrow_size(table: pa.Table) -> int:
+    """Return the length of the Arrow IPC file `stored_result` writes for a table.
+
+    Parameters
+    ----------
+    table
+        The result.
+
+    Returns
+    -------
+    int
+        The stored file's bytes.
+    """
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_file(sink, table.schema) as writer:
+        writer.write_table(table)
+    return len(sink.getvalue())
+
+
+def _sized(client: TestClient, table: pa.Table = THREE_ROWS) -> str:
+    """Store a result in `dev` whose run records its rows and size, as the worker does.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    table
+        The result.
+
+    Returns
+    -------
+    str
+        The query's id.
+    """
+    return stored_result(
+        client, "dev", table, result_rows=table.num_rows, result_bytes=_arrow_size(table)
+    )
+
+
+def _exports(client: TestClient) -> list[tuple[object, dict[str, object]]]:
+    """List the `QUERY_RESULT_EXPORTED` audit events as (principal id, detail).
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+
+    Returns
+    -------
+    list of tuple
+        One entry per event, oldest first.
+    """
+    from sqlalchemy import select
+
+    from lakana_core.models import AuditEvent, AuditEventType
+
+    with Session(client.app.state.engine) as session:
+        rows = session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == AuditEventType.QUERY_RESULT_EXPORTED)
+            .order_by(AuditEvent.occurred_at)
+        ).all()
+        return [(row.principal_id, dict(row.detail)) for row in rows]
+
+
+def test_csv_result_streams_with_disposition_and_size_headers(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    response = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["content-disposition"] == f'attachment; filename="query-{qid}.csv"'
+    assert response.headers["x-result-rows"] == "3"
+    assert response.headers["x-result-arrow-bytes"] == str(_arrow_size(THREE_ROWS))
+    assert "content-length" not in response.headers
+    assert response.content == b'"name","n"\r\n"a,b",1\r\n"\xc3\xa9",2\r\n,3\r\n'
+
+
+def test_xlsx_result_is_a_zip_with_the_spreadsheet_media_type(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    response = client.get(result_url(qid, "format=xlsx"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == XLSX
+    assert response.headers["content-disposition"] == f'attachment; filename="query-{qid}.xlsx"'
+    assert "content-length" not in response.headers
+    assert response.content.startswith(b"PK\x03\x04")
+
+
+def test_arrow_result_now_has_the_disposition_and_still_the_same_bytes(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    response = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+    assert response.headers["content-type"] == "application/vnd.apache.arrow.file"
+    assert response.headers["content-disposition"] == f'attachment; filename="query-{qid}.arrow"'
+    assert response.headers["x-result-rows"] == "3"
+    assert "content-length" not in response.headers
+    assert pa.ipc.open_file(pa.BufferReader(response.content)).read_all().equals(THREE_ROWS)
+
+
+def test_a_whole_result_download_writes_one_export_event_per_format(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.get(result_url(qid, "format=json"), headers=AUTH_HEADER).status_code == 200
+    assert _exports(client) == []
+    for result_format in ("arrow", "csv", "xlsx"):
+        got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert got.status_code == 200, got.text
+    detail = {"query_id": qid, "rows": 3, "size_bytes": _arrow_size(THREE_ROWS)}
+    assert _exports(client) == [
+        (admin, {**detail, "format": "arrow"}),
+        (admin, {**detail, "format": "csv"}),
+        (admin, {**detail, "format": "xlsx"}),
+    ]
+
+
+def test_a_download_of_another_principals_run_is_404_and_writes_no_export_event(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ADMIN")
+    for headers in (bob, carol):
+        for result_format in ("arrow", "csv", "xlsx"):
+            refused = client.get(result_url(qid, f"format={result_format}"), headers=headers)
+            assert refused.status_code == 404, (result_format, refused.text)
+    assert _exports(client) == []
+
+
+def test_a_bound_task_token_writes_no_export_event(client: TestClient) -> None:
+    from lakana_core.auth import BoundTask, PrincipalRef, TaskScope
+    from lakana_core.models import PrincipalType
+    from lakana_server.deps import get_principal
+
+    _environment(client)
+    token_id = uuid.uuid4()
+    qid = stored_result(client, "dev", THREE_ROWS, task_token_id=token_id)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert isinstance(admin, uuid.UUID)
+    scope = TaskScope(
+        environment="dev",
+        asset_scope=[],
+        token_id=token_id,
+        bound=BoundTask(uuid.uuid4(), 1, "gold.scores", ("bronze.events",), ("bronze.events",)),
+    )
+    bound = PrincipalRef(id=admin, name="admin", type=PrincipalType.USER, task_scope=scope)
+    client.app.dependency_overrides[get_principal] = lambda: bound
+    try:
+        for result_format in ("arrow", "csv", "xlsx"):
+            got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+            assert got.status_code == 200, (result_format, got.text)
+    finally:
+        del client.app.dependency_overrides[get_principal]
+    assert _exports(client) == []
+
+
+def test_an_xlsx_refusal_is_422_with_the_sentence_and_writes_no_export_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lakana_server import result_files
+
+    monkeypatch.setattr(result_files, "XLSX_MAX_ROWS", 2)
+    _environment(client)
+    qid = _sized(client)
+    refused = client.get(result_url(qid, "format=xlsx"), headers=AUTH_HEADER)
+    assert refused.status_code == 422
+    assert refused.json() == {
+        "detail": (
+            "This result has 3 rows; a spreadsheet holds at most 2 below its header row. "
+            f"Download it as CSV instead: lakana query result {qid} --env dev --format csv "
+            f"--out query-{qid}.csv"
+        ),
+        "type": "XlsxRefused",
+    }
+    assert _exports(client) == []
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None
+
+
+def test_paging_parameters_with_a_file_format_are_422(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    for result_format in ("arrow", "csv", "xlsx"):
+        for paging in ("limit=5", "offset=0"):
+            response = client.get(
+                result_url(qid, f"format={result_format}&{paging}"), headers=AUTH_HEADER
+            )
+            assert response.status_code == 422, (result_format, paging)
+            assert response.json()["detail"] == queries_module.WHOLE_RESULT_TAKES_NO_PAGING
+    assert _exports(client) == []
+
+
+def test_a_second_file_of_the_same_person_at_once_is_503_with_retry_after(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    lim = client.app.state.result_file_limiter
+    assert lim.try_acquire(admin) is None
+    for result_format in ("csv", "xlsx"):
+        busy = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert (busy.status_code, busy.headers["Retry-After"], busy.json()) == (
+            503,
+            "1",
+            {
+                "detail": (
+                    "You already have a result file being prepared; wait for it, then try again."
+                ),
+                "type": "ResultFileLimitError",
+            },
+        )
+    lim.release(admin)
+    others = [uuid.uuid4(), uuid.uuid4()]
+    for other in others:
+        assert lim.try_acquire(other) is None
+    full = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert (full.status_code, full.json()["detail"]) == (
+        503,
+        "The server is preparing other result files; try again in a moment.",
+    )
+    assert _exports(client) == []
+
+
+def test_the_file_slot_is_given_back_when_the_body_ends_and_when_it_fails(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    lim = client.app.state.result_file_limiter
+    for result_format in ("csv", "xlsx"):
+        assert client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert lim.try_acquire(admin) is None, result_format
+        lim.release(admin)
+
+    def failing(table: pa.Table) -> object:
+        """Yield the header, then fail as a conversion of a batch would.
+
+        Parameters
+        ----------
+        table
+            Ignored.
+
+        Yields
+        ------
+        bytes
+            The first piece.
+
+        Raises
+        ------
+        OSError
+            After the first piece, once the response has started.
+        """
+        yield b"header\r\n"
+        raise OSError("conversion failed")
+
+    monkeypatch.setattr(queries_module, "csv_pieces", failing)
+    with pytest.raises(OSError, match="conversion failed"):
+        client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert lim.try_acquire(admin) is None
+    lim.release(admin)
+    monkeypatch.setattr(queries_module, "write_xlsx", raising)
+    assert client.get(result_url(qid, "format=xlsx"), headers=AUTH_HEADER).status_code == 500
+    assert lim.try_acquire(admin) is None
+
+
+def test_a_result_without_recorded_sizes_downloads_without_the_size_headers(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", THREE_ROWS)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    for result_format in ("csv", "arrow"):
+        response = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert response.status_code == 200, response.text
+        assert "x-result-rows" not in response.headers
+        assert "x-result-arrow-bytes" not in response.headers
+    csv_detail = {"query_id": qid, "rows": 3, "size_bytes": _arrow_size(THREE_ROWS)}
+    assert _exports(client) == [
+        (admin, {**csv_detail, "format": "csv"}),
+        (admin, {"query_id": qid, "rows": None, "size_bytes": None, "format": "arrow"}),
     ]

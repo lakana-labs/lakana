@@ -1610,6 +1610,7 @@ dependencies = [
     { name = "lakana-core" },
     { name = "pyarrow" },
     { name = "uvicorn" },
+    { name = "xlsxwriter" },
 ]
 
 [package.dev-dependencies]
@@ -1623,6 +1624,7 @@ requires-dist = [
     { name = "lakana-core", editable = "packages/lakana-core" },
     { name = "pyarrow", specifier = ">=18.0.0" },
     { name = "uvicorn", specifier = ">=0.30" },
+    { name = "xlsxwriter", specifier = ">=3.3.1" },
 ]
 
 [package.metadata.requires-dev]

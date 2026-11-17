@@ -1,4 +1,4 @@
-"""Non-blocking concurrency limiters: governed appends, and JSON result pages.
+"""Non-blocking concurrency limiters: governed appends, JSON result pages and result files.
 
 `asyncio.Semaphore.acquire()` *waits* for a slot to free up rather than
 refusing outright, which is the wrong behaviour for an HTTP request that
@@ -120,6 +120,12 @@ JSON_PAGES_PER_PROCESS = 4
 
 JSON_PAGES_PER_PRINCIPAL = 1
 """The most JSON result pages one principal has converted at once, in one process."""
+
+RESULT_FILES_PER_PROCESS = 2
+"""The most CSV or spreadsheet result files one server process prepares at once."""
+
+RESULT_FILES_PER_PRINCIPAL = 1
+"""The most CSV or spreadsheet result files one principal has prepared at once, in one process."""
 
 
 class ThreadSafeConcurrencyLimiter:

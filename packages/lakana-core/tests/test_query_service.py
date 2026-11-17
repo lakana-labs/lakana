@@ -2721,3 +2721,71 @@ def test_a_cancel_of_a_queued_run_whose_row_is_locked_is_bounded_too(
     session.refresh(run)
     assert run.status is QueryRunStatus.QUEUED
     assert session.execute(select(1)).scalar_one() == 1, "the session is usable after the refusal"
+
+
+# --- Result exports -------------------------------------------------------------------------------
+
+
+def _exports(session: Session) -> list[AuditEvent]:
+    """List the `QUERY_RESULT_EXPORTED` audit events.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of AuditEvent
+        The events, oldest first.
+    """
+    return list(
+        session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == AuditEventType.QUERY_RESULT_EXPORTED)
+            .order_by(AuditEvent.occurred_at)
+        )
+    )
+
+
+def test_an_export_is_recorded_on_the_environment_with_its_format_and_size(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    run = _queued(session, principal, tmp_path)
+    service = QueryService(session, SUBMITTER)
+    service.record_export(principal, "dev", run, "csv", rows=3, size_bytes=812)
+    service.record_export(principal, "dev", run, "arrow", rows=None, size_bytes=None)
+    first, second = _exports(session)
+    assert (first.principal_id, first.securable_kind, first.securable_environment) == (
+        principal.id,
+        SecurableKind.ENVIRONMENT,
+        "dev",
+    )
+    assert first.detail == {"query_id": str(run.id), "format": "csv", "rows": 3, "size_bytes": 812}
+    assert second.detail == {
+        "query_id": str(run.id),
+        "format": "arrow",
+        "rows": None,
+        "size_bytes": None,
+    }
+    session.rollback()
+    assert len(_exports(session)) == 2, "the event is committed before the first byte"
+
+
+def test_an_export_by_a_token_bound_to_a_task_attempt_is_not_recorded(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    run = _queued(session, principal, tmp_path)
+    scope = TaskScope(
+        environment="dev",
+        asset_scope=[],
+        token_id=uuid.uuid4(),
+        bound=BoundTask(uuid.uuid4(), 1, "gold.scores", ("bronze.events",), ("bronze.events",)),
+    )
+    bound = dataclasses.replace(principal, task_scope=scope)
+    service = QueryService(session, SUBMITTER)
+    service.record_export(bound, "dev", run, "arrow", rows=1, size_bytes=10)
+    assert _exports(session) == []
+    unbound = dataclasses.replace(principal, task_scope=dataclasses.replace(scope, bound=None))
+    service.record_export(unbound, "dev", run, "arrow", rows=1, size_bytes=10)
+    assert len(_exports(session)) == 1

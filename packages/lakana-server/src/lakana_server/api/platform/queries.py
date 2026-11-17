@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Literal
@@ -22,6 +23,7 @@ from lakana_core.errors import ConflictError, ValidationError
 from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus, WriteMode
 from lakana_core.runs.waiting import WaitReason
 from lakana_core.secrets.keys import KeyProvider
+from lakana_core.storage.base import Storage
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.api.platform.listing import set_next_cursor, split_values
 from lakana_server.api.platform.schemas import (
@@ -44,7 +46,16 @@ from lakana_server.deps import (
     get_session,
     with_break_glass,
 )
-from lakana_server.errors import ResultPageLimitError
+from lakana_server.errors import ResultFileLimitError, ResultPageLimitError
+from lakana_server.result_files import (
+    CSV_MEDIA_TYPE,
+    XLSX_MEDIA_TYPE,
+    ResultFileResponse,
+    csv_pieces,
+    file_pieces,
+    result_file_name,
+    write_xlsx,
+)
 from lakana_server.result_json import DEFAULT_PAGE_ROWS, MAX_PAGE_ROWS, json_page
 
 router = APIRouter(
@@ -512,20 +523,26 @@ _NO_RESULT_CLAUSES: dict[WriteMode | None, str] = {
 }
 
 
+ARROW_MEDIA_TYPE = "application/vnd.apache.arrow.file"
+"""The media type of the result as an Arrow IPC file."""
+
 _RESULT_CONTENT: dict[int | str, dict[str, Any]] = {
     200: {
         "model": ResultPageOut,
         "description": (
-            "The whole result as an Arrow IPC file (`format=arrow`, the default), or one page "
-            "of it as JSON (`format=json`)."
+            "The whole result as an Arrow IPC file (`format=arrow`, the default), as CSV "
+            "(`format=csv`) or as a spreadsheet (`format=xlsx`), or one page of it as JSON "
+            "(`format=json`)."
         ),
-        "content": {"application/vnd.apache.arrow.file": {}},
+        "content": {ARROW_MEDIA_TYPE: {}, CSV_MEDIA_TYPE: {}, XLSX_MEDIA_TYPE: {}},
     }
 }
-"""The two media types of a result, for the OpenAPI document; JSON is `ResultPageOut`."""
+"""The four media types of a result, for the OpenAPI document; JSON is `ResultPageOut`."""
 
-ARROW_TAKES_NO_PAGING = "limit and offset apply to format=json; the Arrow result is always whole."
-"""The 422 for `limit` or `offset` with the Arrow result."""
+WHOLE_RESULT_TAKES_NO_PAGING = (
+    "limit and offset apply to format=json; arrow, csv and xlsx are always the whole result."
+)
+"""The 422 for `limit` or `offset` with a whole-result format."""
 
 PREVIEW_PAGE_TOO_LONG = (
     f"A preview shows at most {PREVIEW_ROW_LIMIT} rows; ask with limit={PREVIEW_ROW_LIMIT} or less."
@@ -534,6 +551,8 @@ PREVIEW_PAGE_TOO_LONG = (
 
 _OWN_PAGE_BUSY = "You already have a result page being prepared; wait for it, then try again."
 _ALL_PAGES_BUSY = "The server is preparing other result pages; try again in a moment."
+_OWN_FILE_BUSY = "You already have a result file being prepared; wait for it, then try again."
+_ALL_FILES_BUSY = "The server is preparing other result files; try again in a moment."
 
 
 def _duration_ms(run: QueryRun) -> int | None:
@@ -589,15 +608,133 @@ def _json_result(
     )
 
 
+def _nothing() -> None:
+    """Do nothing: the Arrow result takes no file slot and has nothing of its own to close."""
+
+
+def _whole_result(
+    run: QueryRun,
+    env: str,
+    result_format: Literal["arrow", "csv", "xlsx"],
+    *,
+    storage: Storage,
+    limiter: ThreadSafeConcurrencyLimiter,
+    principal: PrincipalRef,
+    queries: QueryService,
+) -> ResultFileResponse:
+    """Prepare the whole result as a file, record the export, and stream it.
+
+    Every refusal is decided before the export is recorded, and the export is committed
+    before the first byte. The Arrow file is streamed from storage as it is stored and takes
+    no file slot. CSV and xlsx read the stored file whole, as a JSON page does (the worker
+    bounds its size), and take one of the caller's file slots until the body ends.
+
+    Parameters
+    ----------
+    run
+        The succeeded read, which the caller may read.
+    env
+        Its environment.
+    result_format
+        ``arrow``, ``csv`` or ``xlsx``.
+    storage
+        The environment's storage.
+    limiter
+        The file slots.
+    principal
+        The caller.
+    queries
+        Records the export.
+
+    Returns
+    -------
+    ResultFileResponse
+        The file, with `Content-Disposition` and the sizes the run recorded.
+
+    Raises
+    ------
+    ResultFileLimitError
+        If the caller already has a file being prepared, or every slot is taken.
+    lakana_server.result_files.XlsxRefused
+        If one sheet cannot hold the result whole.
+    """
+    location = run.result_location
+    assert location is not None  # nosec B101 -- the route answered 409 for a run without one
+    query_id = str(run.id)
+    name = result_file_name(query_id, result_format)
+    if result_format == "arrow":
+        chunks = storage.read_chunks(location)
+        try:
+            queries.record_export(
+                principal, env, run, "arrow", rows=run.result_rows, size_bytes=run.result_bytes
+            )
+        except BaseException:
+            close = getattr(chunks, "close", None)
+            if close is not None:
+                close()
+            raise
+        return ResultFileResponse(
+            chunks,
+            media_type=ARROW_MEDIA_TYPE,
+            file_name=name,
+            rows=run.result_rows,
+            arrow_bytes=run.result_bytes,
+            close=_nothing,
+            release=_nothing,
+        )
+    busy = limiter.try_acquire(principal.id)
+    if busy is not None:
+        raise ResultFileLimitError(_OWN_FILE_BUSY if busy == "own" else _ALL_FILES_BUSY)
+    target = None
+    try:
+        content = storage.read(location)
+        table = pa.ipc.open_file(pa.BufferReader(content)).read_all()
+        if result_format == "csv":
+            pieces, media_type = csv_pieces(table), CSV_MEDIA_TYPE
+        else:
+            # A route defined with `def` already runs in the threadpool, so the workbook is
+            # written off the event loop; its temporary files follow TMPDIR.
+            target = tempfile.TemporaryFile()  # ruff: ignore[open-file-with-context-handler] -- the response closes it
+            write_xlsx(table, target, query_id=query_id, environment=env)
+            pieces, media_type = file_pieces(target), XLSX_MEDIA_TYPE
+        queries.record_export(
+            principal,
+            env,
+            run,
+            result_format,
+            rows=table.num_rows if run.result_rows is None else run.result_rows,
+            size_bytes=len(content) if run.result_bytes is None else run.result_bytes,
+        )
+    except BaseException:
+        try:
+            if target is not None:
+                target.close()
+        finally:
+            limiter.release(principal.id)
+        raise
+    return ResultFileResponse(
+        pieces,
+        media_type=media_type,
+        file_name=name,
+        rows=run.result_rows,
+        arrow_bytes=run.result_bytes,
+        close=_nothing if target is None else target.close,
+        release=lambda: limiter.release(principal.id),
+    )
+
+
 @router.get("/{query_id}/result", responses={**_RESULT_CONTENT, **errors(403, 404, 409, 503)})
 def get_query_result(
     env: str,
     query_id: uuid.UUID,
     request: Request,
-    result_format: Literal["arrow", "json"] = Query(
+    result_format: Literal["arrow", "json", "csv", "xlsx"] = Query(
         "arrow",
         alias="format",
-        description="`arrow` for the whole result as an Arrow IPC file, `json` for one page.",
+        description=(
+            "`arrow` for the whole result as an Arrow IPC file, `csv` or `xlsx` for the whole "
+            "result as CSV or a spreadsheet, `json` for one page."
+        ),
     ),
     limit: int | None = Query(
         None,
@@ -621,17 +758,26 @@ def get_query_result(
 ) -> Response:
     """Fetch a query's result.
 
-    Returns the rows of a finished read as an Arrow IPC file, or with `format=json` one page
-    of them as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for
-    a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most
-    64 KiB, with cut values marked; it names the columns masked for you and, for a preview,
-    the table. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the
-    result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or
-    when it succeeded without being a read (it wrote to a table, created a view or was
-    maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with the
-    Arrow result, and for a preview's page longer than 100 rows. Answers 503 with
-    `Retry-After: 1` while you already have a JSON page being prepared, or the server is
-    preparing as many as it allows at once.
+    Returns the rows of a finished read as a whole file: an Arrow IPC file (the default), CSV
+    (`format=csv`: RFC 4180, UTF-8 without a byte-order mark, values verbatim) or a spreadsheet
+    (`format=xlsx`: one sheet below a header row; numbers a spreadsheet would round, NaN and
+    infinity are text, a timestamp with a time zone is in UTC). A file is always the whole
+    result, never a page; it is streamed, so no `Content-Length` is promised. It names itself
+    in `Content-Disposition` (`query-ID.arrow`, `.csv`, `.xlsx`) and carries the run's row
+    count and Arrow size as `X-Result-Rows` and `X-Result-Arrow-Bytes` when the run recorded
+    them. Each download of a file is audited as `QUERY_RESULT_EXPORTED`, except by a token
+    bound to a task attempt. With `format=json` it returns one page as JSON: at most `limit`
+    rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows.
+    The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked;
+    it names the columns masked for you and, for a preview, the table; it is not audited as an
+    export. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result;
+    for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it
+    succeeded without being a read (it wrote to a table, created a view or was maintenance):
+    only a read has result rows. Answers 422 for `limit` or `offset` with a file, for a
+    preview's page longer than 100 rows, and for a spreadsheet of more than 1,048,575 rows or
+    16,384 columns or with a value longer than 32,767 characters, naming the CSV download
+    instead. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or
+    spreadsheet file being prepared, or the server is preparing as many as it allows at once.
 
     Parameters
     ----------
@@ -640,9 +786,10 @@ def get_query_result(
     query_id
         The query's id.
     request
-        The request, used to reach the JSON page limiter.
+        The request, used to reach the JSON page and result file limiters.
     result_format
-        ``arrow`` (the default) or ``json``, from the `format` query parameter.
+        ``arrow`` (the default), ``csv``, ``xlsx`` or ``json``, from the `format` query
+        parameter.
     limit
         The rows of a JSON page; `DEFAULT_PAGE_ROWS` when not given.
     offset
@@ -666,25 +813,35 @@ def get_query_result(
     Returns
     -------
     Response
-        The result's raw Arrow IPC bytes, or one page of it as UTF-8 JSON (`ResultPageOut`).
+        The whole result as a streamed file (`ResultFileResponse`), or one page of it as
+        UTF-8 JSON (`ResultPageOut`).
 
     Raises
     ------
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`, if the query does not
-        exist or was submitted by another principal.
+        exist or was submitted by another principal; nothing is audited as an export.
     lakana_core.errors.ConflictError
         Mapped to 409, if the query has not finished yet, or if it succeeded but is not a
         read (it wrote to a table, created a view or was a maintenance run): only a read has
         result rows, and the message names ``lakana query status ID --env ENV`` to see what
         it did.
     lakana_core.errors.ValidationError
-        Mapped to 422: `limit` or `offset` with the Arrow result (`ARROW_TAKES_NO_PAGING`), or
-        a preview's page longer than its rows (`PREVIEW_PAGE_TOO_LONG`).
+        Mapped to 422: `limit` or `offset` with a whole-result format
+        (`WHOLE_RESULT_TAKES_NO_PAGING`), or a preview's page longer than its rows
+        (`PREVIEW_PAGE_TOO_LONG`).
+    lakana_server.result_files.XlsxRefused
+        Mapped to 422, before the first byte and with no export recorded: the result has more
+        rows or columns than one sheet holds, or a value longer than a cell. The message names
+        ``lakana query result ID --env ENV --format csv --out query-ID.csv`` instead.
     lakana_server.errors.ResultPageLimitError
         Mapped to 503 with `Retry-After: 1`: the caller already has a JSON page being
         prepared, or every slot of this process is taken. The slot is given back once the
         page's bytes are built, before they are sent.
+    lakana_server.errors.ResultFileLimitError
+        Mapped to 503 with `Retry-After: 1`: the caller already has a CSV or spreadsheet file
+        being prepared (one at a time), or this process prepares two already. The slot is held
+        until the file's body ends, however it ends.
     """
     run = queries.get_query_run(principal, env, query_id)
     if run.status != QueryRunStatus.SUCCEEDED:
@@ -697,12 +854,18 @@ def get_query_result(
             "download. "
             f"See what it did with: lakana query status {query_id} --env {env}"
         )
-    if result_format == "arrow":
+    if result_format != "json":
         if limit is not None or offset is not None:
-            raise ValidationError(ARROW_TAKES_NO_PAGING)
-        resolved = StorageResolver(session, key_provider).for_environment(env)
-        content = resolved.storage.read(run.result_location)
-        return Response(content=content, media_type="application/vnd.apache.arrow.file")
+            raise ValidationError(WHOLE_RESULT_TAKES_NO_PAGING)
+        return _whole_result(
+            run,
+            env,
+            result_format,
+            storage=StorageResolver(session, key_provider).for_environment(env).storage,
+            limiter=request.app.state.result_file_limiter,
+            principal=principal,
+            queries=queries,
+        )
     preview = previewed_table(run)
     if preview is not None and limit is not None and limit > PREVIEW_ROW_LIMIT:
         raise ValidationError(PREVIEW_PAGE_TOO_LONG)

@@ -496,6 +496,56 @@ class QueryService:
             raise NotFoundError(f"No query run {query_id} in {environment!r}.")
         return run
 
+    def record_export(
+        self,
+        p: PrincipalRef,
+        environment: str,
+        run: QueryRun,
+        result_format: Literal["arrow", "csv", "xlsx"],
+        *,
+        rows: int | None,
+        size_bytes: int | None,
+    ) -> None:
+        """Record a whole-result download as `QUERY_RESULT_EXPORTED`, committed.
+
+        The caller has already read the run with `get_query_run` and decided every refusal,
+        and calls this before the first byte is sent. A JSON page is not an export and is never
+        recorded. Nor is a download by a token bound to a task attempt, as for
+        `ARTIFACT_DOWNLOADED`: a pipeline task reads its inputs as Arrow on every run, which
+        is not a person exporting data.
+
+        Parameters
+        ----------
+        p
+            The downloading principal.
+        environment
+            The run's environment; the event's securable.
+        run
+            The run whose result is downloaded.
+        result_format
+            ``arrow``, ``csv`` or ``xlsx``.
+        rows
+            The result's rows, from the run or else from the result itself; `None` if neither
+            is known.
+        size_bytes
+            The stored Arrow file's length, from the run or else from the file read; `None` if
+            neither is known.
+        """
+        if p.task_scope is not None and p.task_scope.bound is not None:
+            return
+        AuditService(self._session).record(
+            p.id,
+            AuditEventType.QUERY_RESULT_EXPORTED,
+            securable=Securable.environment_scope(environment),
+            detail={
+                "query_id": str(run.id),
+                "format": result_format,
+                "rows": rows,
+                "size_bytes": size_bytes,
+            },
+            commit=True,
+        )
+
     def waiting_for(self, run: QueryRun) -> WaitReason | None:
         """Say why a run has not started, when it is still `QUEUED`.
 

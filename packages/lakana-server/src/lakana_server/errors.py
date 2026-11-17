@@ -76,6 +76,15 @@ class ResultPageLimitError(LakanaError):
     """
 
 
+class ResultFileLimitError(LakanaError):
+    """Too many result files are being prepared in this process, or one already for the caller.
+
+    Server-only, like `ResultPageLimitError`: an HTTP-layer cap on CSV and spreadsheet files,
+    each of which holds a whole result in memory while it is made. Mapped to 503 with a
+    `Retry-After: 1` header.
+    """
+
+
 class AppendReadTimeoutError(LakanaError):
     """A governed append's request body took too long to arrive.
 
@@ -150,6 +159,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     AppendConcurrencyLimitError: 503,
     DownloadConcurrencyLimitError: 503,
     ResultPageLimitError: 503,
+    ResultFileLimitError: 503,
     ClientDisconnectedError: 400,
     StorageUnavailableError: 503,
     StorageRefusedError: 502,
@@ -163,6 +173,7 @@ _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
     AppendConcurrencyLimitError: "1",
     DownloadConcurrencyLimitError: "1",
     ResultPageLimitError: "1",
+    ResultFileLimitError: "1",
     StorageUnavailableError: "5",
     AuditUnavailableError: "5",
     GraphBusyError: "5",
