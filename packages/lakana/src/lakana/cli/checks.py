@@ -9,7 +9,7 @@ import typer
 from lakana._models import CheckHealth, CheckResult
 from lakana.cli import _output
 from lakana.cli._state import resolve_environment, state_of
-from lakana.cli.queries import FORMAT, MAX_ROWS, OUT, TIMEOUT, out_format, show_result
+from lakana.cli.queries import FORMAT, MAX_ROWS, OUT, TIMEOUT, result_format, show_result
 from lakana.resources.checks import Checks
 
 check_app = typer.Typer(
@@ -230,7 +230,7 @@ def rows(
         Seconds to wait for the query.
     """
     state = state_of(ctx)
-    fmt = out_format(out, file_format)
+    fmt = result_format(out, file_format)
     environment = resolve_environment(state, env)
     checks = state.client().checks
     show_result(

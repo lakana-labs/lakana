@@ -3836,3 +3836,83 @@ def test_0080_on_postgres() -> None:
         with engine.connect() as conn:
             assert conn.execute(indexes).all() == []
         engine.dispose()
+
+
+def test_0081_on_postgres() -> None:
+    """0081 gives old runs their origin by the rule and indexes `(principal_id, finished_at)`."""
+    revision_0080 = "15081774c52d"
+    revision_0081 = "d8e2f5a1c736"
+    insert = sqlalchemy.text(
+        "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at, updated_at, "
+        "preview_table_id, check_result_id, task_run_id, task_token_id, write_mode) VALUES "
+        "(:id, :env, 'SELECT 1', 'SUCCEEDED', now(), now(), :preview, :check, :task_run, "
+        ":task_token, :mode)"
+    )
+    rows = {  # name -> (columns set, expected origin)
+        "preview": ({"preview", "check", "mode"}, "preview"),
+        "check": ({"check", "task_run"}, "check"),
+        "maintenance": ({"mode_maintain", "task_run"}, "maintenance"),
+        "task_run": ({"task_run", "mode"}, "task"),
+        "task_token": ({"task_token"}, "task"),
+        "write": ({"mode"}, "write"),
+        "written": (set(), "written"),
+    }
+    ids = {name: uuid.uuid4() for name in rows}
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0080)
+        engine = sqlalchemy.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            for name, (set_columns, _) in rows.items():
+                conn.execute(
+                    insert,
+                    {
+                        "id": ids[name],
+                        "env": uuid.uuid4(),
+                        "preview": uuid.uuid4() if "preview" in set_columns else None,
+                        "check": uuid.uuid4() if "check" in set_columns else None,
+                        "task_run": uuid.uuid4() if "task_run" in set_columns else None,
+                        "task_token": uuid.uuid4() if "task_token" in set_columns else None,
+                        "mode": (
+                            "MAINTAIN"
+                            if "mode_maintain" in set_columns
+                            else "CREATE"
+                            if "mode" in set_columns
+                            else None
+                        ),
+                    },
+                )
+        migrate.upgrade(url, revision_0081)
+        assert _alembic_version(engine) == revision_0081
+        index = sqlalchemy.text(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'query_runs' "
+            "AND indexname = 'ix_query_runs_principal_id_finished_at'"
+        )
+        with engine.connect() as conn:
+            origins = dict(conn.execute(sqlalchemy.text("SELECT id, origin FROM query_runs")).all())
+            assert origins == {ids[name]: origin for name, (_, origin) in rows.items()}
+            assert conn.execute(index).scalar_one().endswith("(principal_id, finished_at)")
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            old_id = uuid.uuid4()
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at, "
+                    "updated_at) VALUES (:id, :env, 'SELECT 1', 'QUEUED', now(), now())"
+                ),
+                {"id": old_id, "env": uuid.uuid4()},
+            )
+            assert (
+                conn.execute(
+                    sqlalchemy.text("SELECT origin FROM query_runs WHERE id = :id"), {"id": old_id}
+                ).scalar_one()
+                == "written"
+            )
+        migrate.downgrade(url, revision_0080)
+        assert _alembic_version(engine) == revision_0080
+        with engine.connect() as conn:
+            assert conn.execute(index).all() == []
+            columns = {c["name"] for c in sqlalchemy.inspect(conn).get_columns("query_runs")}
+        assert not {"origin", "result_rows", "result_bytes", "error_line", "error_column"} & columns
+        engine.dispose()

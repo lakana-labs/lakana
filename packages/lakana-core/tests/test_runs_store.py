@@ -29,6 +29,7 @@ from lakana_core.models import (
     JobVersion,
     NotificationDelivery,
     NotificationState,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -211,6 +212,7 @@ def test_a_lost_lease_fails_the_orphaned_write_run(session: Session, run_id: uui
     ):
         session.add(
             QueryRun(
+                origin=QueryOrigin.TASK,
                 id=query_run_id,
                 environment_id=run.environment_id,
                 principal_id=run.run_as_principal_id,
@@ -699,6 +701,7 @@ def test_a_missed_reclaim_leaves_the_tasks_write_run_running(
     write_id = uuid.uuid4()
     session.add(
         QueryRun(
+            origin=QueryOrigin.TASK,
             id=write_id,
             environment_id=run.environment_id,
             principal_id=run.run_as_principal_id,
@@ -830,13 +833,15 @@ def _run(session: Session, environment_id: uuid.UUID, **fields: object) -> Query
         "status": QueryRunStatus.RUNNING,
     }
     values.update(fields)
-    run = QueryRun(**values)
+    run = QueryRun(origin=QueryOrigin.WRITTEN, **values)
     session.add(run)
     session.flush()
     return run
 
 
-def _worker(session: Session, worker_id: str, age_seconds: int) -> None:
+def _worker(
+    session: Session, worker_id: str, age_seconds: int, now: datetime | None = None
+) -> None:
     """Insert a worker whose last heartbeat is that old by the database's clock.
 
     Parameters
@@ -847,8 +852,11 @@ def _worker(session: Session, worker_id: str, age_seconds: int) -> None:
         The worker's id.
     age_seconds
         Age of the heartbeat.
+    now
+        The time the age counts from; the database's clock when omitted. A test that sweeps at a
+        `now` of its own passes it, so the age holds however long the test takes.
     """
-    beat = db_now(session) - timedelta(seconds=age_seconds)
+    beat = (db_now(session) if now is None else now) - timedelta(seconds=age_seconds)
     session.add(Worker(id=worker_id, host="h", version="1", started_at=beat, heartbeat_at=beat))
     session.flush()
 
@@ -944,7 +952,7 @@ def test_a_lost_run_ends_by_its_kind(
     audited: bool,
 ) -> None:
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _run(session, environment_id, worker_id="dead", principal_id=principal_id, **fields)
     session.commit()
     assert end_lost_runs(session, now, 60) == 1
@@ -966,7 +974,7 @@ def test_the_event_of_a_lost_query_that_showed_the_rows_of_a_check_names_the_res
 ) -> None:
     """A read of a checked snapshot is told from an ordinary query in the trail, also when lost."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     result_id = uuid.UUID("5d1e7c0a-9b1f-4a3e-8c2d-7f6b5a4c3d2e")
     _run(
         session,
@@ -996,7 +1004,7 @@ def test_the_sweep_never_writes_the_evidence_and_adds_no_details(
 ) -> None:
     """R4.7.9 and R4.7.10: a swept SUCCEEDED run has no watermark, diff or lineage."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     table_id = uuid.uuid4()
     run = _run(
         session,
@@ -1035,7 +1043,7 @@ def test_a_heartbeat_that_arrives_before_the_update_keeps_the_run(
     session: Session, environment_id: uuid.UUID
 ) -> None:
     now = db_now(session)
-    _worker(session, "slow", age_seconds=61)
+    _worker(session, "slow", age_seconds=61, now=now)
     run = _run(session, environment_id, worker_id="slow")
     session.commit()
     (candidate,) = store._lost_query_runs(session, now, 60)
@@ -1050,7 +1058,7 @@ def test_evidence_that_arrives_before_the_update_keeps_the_run_for_the_next_tick
     session: Session, environment_id: uuid.UUID
 ) -> None:
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _run(
         session, environment_id, worker_id="dead", write_mode=WriteMode.APPEND, target_name="s.o"
     )
@@ -1075,7 +1083,7 @@ def test_a_run_that_ended_before_the_update_is_not_touched(
 ) -> None:
     """R4.7.1: the status stands in the UPDATE's WHERE (an ended or queued run is not touched)."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _run(session, environment_id, worker_id="dead")
     session.commit()
     (candidate,) = store._lost_query_runs(session, now, 60)
@@ -1096,8 +1104,8 @@ def test_the_run_of_an_alive_worker_is_never_ended(
     session: Session, environment_id: uuid.UUID, principal_id: uuid.UUID
 ) -> None:
     now = db_now(session)
-    _worker(session, "alive", age_seconds=20)
-    _worker(session, "dead", age_seconds=600)
+    _worker(session, "alive", age_seconds=20, now=now)
+    _worker(session, "dead", age_seconds=600, now=now)
     alive = _run(session, environment_id, worker_id="alive", principal_id=principal_id)
     others = [
         _run(session, environment_id, worker_id="dead", status=status)
@@ -1170,7 +1178,11 @@ def test_a_run_whose_workers_row_is_gone_is_ended_at_once(
 
 
 def _task_write(
-    session: Session, run_id: uuid.UUID, token: uuid.UUID | None, **fields: object
+    session: Session,
+    run_id: uuid.UUID,
+    token: uuid.UUID | None,
+    now: datetime | None = None,
+    **fields: object,
 ) -> QueryRun:
     """Insert a `RUNNING` query run bound to `silver.clean`'s task run, of a dead worker.
 
@@ -1182,6 +1194,8 @@ def _task_write(
         The pipeline run.
     token
         The run's `task_token_id` (`None` for a SQL task's own write).
+    now
+        The time the dead worker's heartbeat age counts from (the database's clock if omitted).
     **fields
         More column values.
 
@@ -1194,7 +1208,7 @@ def _task_write(
     assert pipeline is not None
     task = _task(session, "silver.clean")
     if session.get(Worker, "dead") is None:
-        _worker(session, "dead", age_seconds=61)
+        _worker(session, "dead", age_seconds=61, now=now)
     run = _run(
         session,
         pipeline.environment_id,
@@ -1214,12 +1228,11 @@ def test_a_sql_tasks_own_write_without_a_live_lease_ends_by_the_evidence(
     session: Session, run_id: uuid.UUID
 ) -> None:
     """Without evidence the task's message; with evidence SUCCEEDED. Never an event."""
-    now = db_now(session)
-    plain = _task_write(session, run_id, None, write_mode=WriteMode.APPEND, target_name="s.o")
+    plain = _task_write(session, run_id, None, NOW, write_mode=WriteMode.APPEND, target_name="s.o")
     committed = _task_write(
-        session, run_id, None, write_mode=WriteMode.APPEND, target_name="s.o", rows_written=4
+        session, run_id, None, NOW, write_mode=WriteMode.APPEND, target_name="s.o", rows_written=4
     )
-    assert end_lost_runs(session, now, 60) == 2
+    assert end_lost_runs(session, NOW, 60) == 2
     stored = _stored(session, plain)
     assert (stored.status, stored.error_cause, stored.error_message) == (
         QueryRunStatus.FAILED,
@@ -1239,9 +1252,8 @@ def test_a_sql_tasks_own_write_without_a_live_lease_ends_by_the_evidence(
 def test_the_query_of_a_python_task_is_ended_like_any_other(
     session: Session, run_id: uuid.UUID
 ) -> None:
-    now = db_now(session)
-    run = _task_write(session, run_id, uuid.uuid4())
-    assert end_lost_runs(session, now, 60) == 1
+    run = _task_write(session, run_id, uuid.uuid4(), NOW)
+    assert end_lost_runs(session, NOW, 60) == 1
     stored = _stored(session, run)
     assert (stored.status, stored.error_message) == (QueryRunStatus.FAILED, QUERY_LOST_MESSAGE)
     assert len(_events(session, AuditEventType.QUERY_COMPLETED)) == 1
@@ -1310,7 +1322,7 @@ def test_a_lost_run_of_a_deleted_principal_is_ended_without_an_event(
     session: Session, environment_id: uuid.UUID
 ) -> None:
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _run(session, environment_id, worker_id="dead", principal_id=None)
     session.commit()
     assert end_lost_runs(session, now, 60) == 1
@@ -1327,7 +1339,7 @@ def test_a_living_worker_counted_lost_is_ended_cleanly_and_its_heartbeat_changes
     next tick adds no second event.
     """
     now = db_now(session)
-    _worker(session, "slow", age_seconds=61)
+    _worker(session, "slow", age_seconds=61, now=now)
     run = _run(session, environment_id, worker_id="slow", principal_id=principal_id, started_at=now)
     session.commit()
     assert end_lost_runs(session, now, 60) == 1
@@ -1422,7 +1434,7 @@ def test_the_sweep_takes_a_bounded_batch_oldest_first(
     assert SWEEP_BATCH == 100
     monkeypatch.setattr(store, "SWEEP_BATCH", 2)
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     runs = [
         _run(
             session,
@@ -1456,7 +1468,7 @@ def test_scheduler_tick_sweeps_when_given_a_lease_also_without_a_transition(
     session: Session, environment_id: uuid.UUID
 ) -> None:
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _run(session, environment_id, worker_id="dead")
     session.commit()
     assert scheduler_tick(session, now, _half, 60) == 0
@@ -1467,7 +1479,7 @@ def test_scheduler_tick_without_a_lease_ends_nothing(
     session: Session, environment_id: uuid.UUID
 ) -> None:
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _run(session, environment_id, worker_id="dead")
     session.commit()
     assert scheduler_tick(session, now, _half) == 0
@@ -1476,8 +1488,8 @@ def test_scheduler_tick_without_a_lease_ends_nothing(
 
 def test_scheduler_tick_forgets_workers_silent_for_an_hour(session: Session) -> None:
     now = db_now(session)
-    _worker(session, "old", age_seconds=3601)
-    _worker(session, "recent", age_seconds=3500)
+    _worker(session, "old", age_seconds=3601, now=now)
+    _worker(session, "recent", age_seconds=3500, now=now)
     session.commit()
     scheduler_tick(session, now, _half, 60)
     assert set(session.scalars(select(Worker.id))) == {"recent"}
@@ -1486,7 +1498,7 @@ def test_scheduler_tick_forgets_workers_silent_for_an_hour(session: Session) -> 
 def test_scheduler_tick_forgets_with_the_lease_not_below_it(session: Session) -> None:
     """A lease longer than an hour must not delete the row of a worker that still counts alive."""
     now = db_now(session)
-    _worker(session, "stalled", age_seconds=3700)
+    _worker(session, "stalled", age_seconds=3700, now=now)
     session.commit()
     scheduler_tick(session, now, _half, 7200)
     assert set(session.scalars(select(Worker.id))) == {"stalled"}
@@ -1498,8 +1510,8 @@ def test_runs_of_alive_workers_do_not_fill_the_batch(
     """The candidate read already leaves out the alive: they must not starve the lost."""
     monkeypatch.setattr(store, "SWEEP_BATCH", 1)
     now = db_now(session)
-    _worker(session, "alive", age_seconds=1)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "alive", age_seconds=1, now=now)
+    _worker(session, "dead", age_seconds=61, now=now)
     old = now - timedelta(seconds=300)
     _run(session, environment_id, worker_id="alive", created_at=old)
     lost = _run(session, environment_id, worker_id="dead", created_at=now)
@@ -1570,7 +1582,7 @@ def test_a_lost_deploy_run_is_failed_with_its_message(
 ) -> None:
     """The sweep fails a `running` deploy no alive worker holds: message, finish time, no event."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _deploy_run(session, environment_id, worker_id="dead", started_at=now)
     session.commit()
     assert end_lost_runs(session, now, 60) == 1
@@ -1589,8 +1601,8 @@ def test_the_deploy_of_an_alive_worker_is_never_ended(
 ) -> None:
     """An alive worker's deploy, and the queued, succeeded and failed ones, stay as they are."""
     now = db_now(session)
-    _worker(session, "alive", age_seconds=20)
-    _worker(session, "dead", age_seconds=600)
+    _worker(session, "alive", age_seconds=20, now=now)
+    _worker(session, "dead", age_seconds=600, now=now)
     alive = _deploy_run(session, environment_id, worker_id="alive", started_at=now)
     others = [
         _deploy_run(session, environment_id, worker_id="dead", status=status)
@@ -1627,7 +1639,7 @@ def test_a_heartbeat_before_the_update_keeps_the_deploy(
 ) -> None:
     """The statement that ends a deploy repeats "no alive worker": a late beat saves the run."""
     now = db_now(session)
-    _worker(session, "slow", age_seconds=61)
+    _worker(session, "slow", age_seconds=61, now=now)
     run = _deploy_run(session, environment_id, worker_id="slow", started_at=now)
     session.commit()
     (candidate,) = store._lost_deploy_runs(session, now, 60)
@@ -1642,7 +1654,7 @@ def test_a_deploy_that_ended_before_the_update_is_not_touched(
 ) -> None:
     """The status stands in the statement's WHERE: a deploy that finished meanwhile is kept."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _deploy_run(session, environment_id, worker_id="dead", started_at=now)
     session.commit()
     (candidate,) = store._lost_deploy_runs(session, now, 60)
@@ -1675,7 +1687,7 @@ def test_the_batch_counts_query_and_deploy_runs_alike(
     """The batch is per kind of run; the count adds both."""
     monkeypatch.setattr(store, "SWEEP_BATCH", 1)
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     _run(session, environment_id, worker_id="dead")
     _deploy_run(session, environment_id, worker_id="dead", started_at=now)
     session.commit()
@@ -1685,7 +1697,7 @@ def test_the_batch_counts_query_and_deploy_runs_alike(
 def test_scheduler_tick_ends_a_lost_deploy(session: Session, environment_id: uuid.UUID) -> None:
     """The tick that sweeps queries sweeps deploys; without a lease it sweeps neither."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     run = _deploy_run(session, environment_id, worker_id="dead", started_at=now)
     session.commit()
     assert scheduler_tick(session, now, _half) == 0
@@ -1700,8 +1712,8 @@ def test_deploys_of_alive_workers_and_queued_ones_do_not_fill_the_batch(
     """The candidate read already leaves out the alive and the queued: they must not starve."""
     monkeypatch.setattr(store, "SWEEP_BATCH", 1)
     now = db_now(session)
-    _worker(session, "alive", age_seconds=1)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "alive", age_seconds=1, now=now)
+    _worker(session, "dead", age_seconds=61, now=now)
     old = now - timedelta(seconds=300)
     _deploy_run(session, environment_id, worker_id="alive", created_at=old, started_at=now)
     _deploy_run(session, environment_id, status=DeployStatus.QUEUED, created_at=old)
@@ -1809,8 +1821,8 @@ def test_a_workers_orphans_are_ended_by_the_evidence_rule_and_nothing_else(
 ) -> None:
     """I3: at idle, a worker ends the `RUNNING` runs that carry its own id, alive or not."""
     now = db_now(session)
-    _worker(session, "me", age_seconds=1)  # alive: the sweep would never take these
-    _worker(session, "other", age_seconds=600)  # dead: not this path's to take
+    _worker(session, "me", age_seconds=1, now=now)  # alive: the sweep would never take these
+    _worker(session, "other", age_seconds=600, now=now)  # dead: not this path's to take
 
     def make(worker: str, **fields: object) -> QueryRun:
         return _run(session, environment_id, worker_id=worker, principal_id=principal_id, **fields)
@@ -1930,8 +1942,8 @@ def test_an_idle_worker_ends_its_own_leftover_deploys_and_no_others(
 ) -> None:
     """A deploy of any kind still `running` under this id is failed; nothing else is."""
     now = db_now(session)
-    _worker(session, "me", age_seconds=1)  # alive: the sweep never takes these
-    _worker(session, "other", age_seconds=1)
+    _worker(session, "me", age_seconds=1, now=now)  # alive: the sweep never takes these
+    _worker(session, "other", age_seconds=1, now=now)
     mine = _deploy_run(session, environment_id, kind=kind, worker_id="me", started_at=now)
     foreign = _deploy_run(session, environment_id, kind=kind, worker_id="other", started_at=now)
     unclaimed = _deploy_run(session, environment_id, kind=kind, started_at=now)
@@ -2012,7 +2024,7 @@ def test_other_workers_deploys_do_not_fill_the_leftover_batch(
 
 def test_scheduler_tick_forgets_nothing_when_told_not_to(session: Session) -> None:
     now = db_now(session)
-    _worker(session, "old", age_seconds=3601)
+    _worker(session, "old", age_seconds=3601, now=now)
     session.commit()
     scheduler_tick(session, now, _half, 60, forget=False)
     assert set(session.scalars(select(Worker.id))) == {"old"}
@@ -2113,7 +2125,7 @@ def test_one_run_that_raises_while_it_is_ended_blocks_neither_the_others_nor_the
 ) -> None:
     """I1: each run ends in its own transaction; the raising one stays, the tick returns."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     first, second, third = _three_lost_runs(session, environment_id, principal_id, worker_id="dead")
     deploy = _deploy_run(session, environment_id, worker_id="dead", started_at=now)
     session.commit()
@@ -2141,7 +2153,7 @@ def test_one_deploy_that_raises_while_it_is_ended_blocks_neither_the_others_nor_
 ) -> None:
     """I1, the deploy half: the same isolation."""
     now = db_now(session)
-    _worker(session, "dead", age_seconds=61)
+    _worker(session, "dead", age_seconds=61, now=now)
     runs = [
         _deploy_run(
             session,
@@ -2259,6 +2271,7 @@ def _lost_task_with_write(
         )
     )
     write = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=pipeline.environment_id,
         principal_id=pipeline.run_as_principal_id,
@@ -2360,6 +2373,7 @@ def test_the_evidence_of_an_earlier_attempts_write_does_not_end_a_later_attempt(
     """Only the task's CURRENT write run counts (`task_runs.query_run_id`)."""
     task, current = _lost_task_with_write(session, run_id, rows=None, attempt=2)
     earlier = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=current.environment_id,
         principal_id=current.principal_id,
@@ -2387,6 +2401,7 @@ def test_a_later_attempt_that_is_running_is_left_alone_whatever_an_earlier_one_c
     )
     session.add(
         QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=current.environment_id,
             principal_id=current.principal_id,
@@ -2535,6 +2550,7 @@ def test_a_lost_tasks_other_running_runs_end_by_their_own_evidence(
     others = []
     for rows in (7, None):
         other = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=current.environment_id,
             principal_id=current.principal_id,

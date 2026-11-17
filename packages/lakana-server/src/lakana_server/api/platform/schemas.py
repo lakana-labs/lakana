@@ -579,6 +579,28 @@ class QueryStatusOut(BaseModel):
         Processor time the query used, in seconds; `null` if not measured.
     bytes_read
         Bytes DuckDB read (a query) or the SDK readers read (a Python task); `null` if unknown.
+    origin
+        Where the run came from: `written` (a query someone submitted), `preview`, `check`,
+        `write`, `maintenance` or `task`. A client treats a value it does not know as opaque.
+    sql
+        The text as submitted, for a `written` or `write` run; `null` for every other origin,
+        whose SQL is the server's own or a task's code.
+    created_at
+        When the run was submitted.
+    started_at
+        When a worker started it; `null` while it is queued.
+    finished_at
+        When it ended; `null` until then.
+    result_rows
+        Rows of the stored result, set once a read succeeded; `null` otherwise and for a run
+        from before the field existed.
+    result_bytes
+        Size in bytes of the stored Arrow file, set with `result_rows`.
+    error_line
+        Line, from 1, of the submitted SQL where an `invalid_query` failure of a `written` or
+        `write` run points; `null` when unknown.
+    error_column
+        Column within `error_line`, counted in characters (Unicode code points) from 1.
     waiting_for
         Why a `QUEUED` query has not started, or `null` for any other status: a stable `code`
         (`no_worker`, `no_worker_of_kind`, `user_limit`, `lock_timeout`, `starting` or
@@ -607,6 +629,15 @@ class QueryStatusOut(BaseModel):
     schema_diff: dict[str, list[dict[str, str]]] | None = None
     maintenance: dict | None = None
     error_cause: str | None = None
+    origin: Literal["written", "preview", "check", "write", "maintenance", "task"]
+    sql: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    result_rows: int | None = None
+    result_bytes: int | None = None
+    error_line: int | None = None
+    error_column: int | None = None
     peak_memory_bytes: int | None = Field(
         default=None,
         description=(
@@ -5264,6 +5295,11 @@ class QueryListOut(BaseModel):
     ----------
     id
         The query's id.
+    environment
+        The name of the query's environment.
+    origin
+        Where the query came from: `written`, `preview`, `check`, `write`, `maintenance` or
+        `task`. A client treats a value it does not know as `written`.
     submitter
         The submitting principal's name, `null` when it was deleted.
     kind
@@ -5287,6 +5323,8 @@ class QueryListOut(BaseModel):
     """
 
     id: str
+    environment: str
+    origin: str
     submitter: str | None
     kind: str
     target: str | None
@@ -5302,6 +5340,37 @@ class QueryListOut(BaseModel):
             "`message`, and the numbers the sentence uses."
         ),
     )
+
+
+class QueryListPageOut(BaseModel):
+    """One page of the queries of every environment the caller may query.
+
+    Parameters
+    ----------
+    items
+        The rows of the page, in the order of the per-environment list.
+    next_cursor
+        Pass back as `cursor` with the same filters for the next page; `null` on the last.
+    """
+
+    items: list[QueryListOut]
+    next_cursor: str | None
+
+
+class QueryEnvironmentOut(BaseModel):
+    """An environment where the caller may submit a query.
+
+    Parameters
+    ----------
+    name
+        The environment's name.
+    protected
+        Whether the environment is protected (`is_protected` of the environment): a write
+        outside a run there needs a break-glass reason.
+    """
+
+    name: str
+    protected: bool
 
 
 class WorkerCachesOut(BaseModel):

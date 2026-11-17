@@ -31,6 +31,7 @@ from lakana_core.models import (
     JobVersion,
     Namespace,
     Principal,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -461,6 +462,7 @@ def test_a_write_run_into_another_table_is_refused_when_the_worker_runs_it(bound
         run = session.get(Run, task.run_id)
         assert run is not None
         forged = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=run.environment_id,
             principal_id=token.principal_id,

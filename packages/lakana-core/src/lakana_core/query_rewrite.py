@@ -55,9 +55,9 @@ from sqlglot.optimizer.qualify import qualify
 from sqlglot.optimizer.scope import Scope, build_scope, traverse_scope
 
 from lakana_core import sql_dialect
-from lakana_core.errors import LakanaError, ValidationError
+from lakana_core.errors import LakanaError, SqlRefusal, ValidationError
 from lakana_core.sql_dialect import KEYWORD_LAMBDA
-from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS
+from lakana_core.sql_syntax import SQL_SYNTAX_ERRORS, node_position
 
 _BLACKLISTED_FUNCTIONS = frozenset(
     {
@@ -1284,7 +1284,7 @@ def _fail_closed(func: Callable[_P, _R]) -> Callable[_P, _R]:
     return guarded
 
 
-def _reject_recursive_ctes(parsed: exp.Expr) -> None:
+def _reject_recursive_ctes(parsed: exp.Expr, sql: str) -> None:
     """Refuse a statement that would reach DuckDB as a recursive query, anywhere in it.
 
     Two spellings reach DuckDB as `WITH RECURSIVE`: the clause itself, and a
@@ -1336,18 +1336,21 @@ def _reject_recursive_ctes(parsed: exp.Expr) -> None:
     ----------
     parsed
         The parsed statement to check. Not modified.
+    sql
+        The text `parsed` was parsed from, for the refusal's position.
 
     Raises
     ------
-    ValidationError
+    SqlRefusal
         If any `WITH` clause in `parsed` carries the `RECURSIVE` keyword, or
         `parsed` holds a `CONNECT BY`, `PRIOR` or `CONNECT_BY_ROOT` anywhere.
     """
     for with_clause in parsed.find_all(exp.With):
         if with_clause.args.get(_RECURSIVE_ARG):
-            raise ValidationError(_RECURSIVE_CTE_MESSAGE)
-    if parsed.find(*_CONNECT_BY_NODES) is not None:
-        raise ValidationError(_CONNECT_BY_MESSAGE)
+            raise SqlRefusal(_RECURSIVE_CTE_MESSAGE, node_position(with_clause, sql))
+    connect = parsed.find(*_CONNECT_BY_NODES)
+    if connect is not None:
+        raise SqlRefusal(_CONNECT_BY_MESSAGE, node_position(connect, sql))
 
 
 PIVOT_VALUES_MESSAGE = (
@@ -1356,7 +1359,7 @@ PIVOT_VALUES_MESSAGE = (
 """Why a PIVOT without an ``IN`` list of literals is refused, and what to write instead."""
 
 
-def _reject_pivot_without_values(parsed: exp.Expr) -> None:
+def _reject_pivot_without_values(parsed: exp.Expr, sql: str) -> None:
     """Refuse a PIVOT whose ON column does not list its values as literals.
 
     Without the list DuckDB runs the PIVOT as two statements: it first creates a type of the
@@ -1371,10 +1374,12 @@ def _reject_pivot_without_values(parsed: exp.Expr) -> None:
     ----------
     parsed
         The parsed statement to check. Not modified.
+    sql
+        The text `parsed` was parsed from, for the refusal's position.
 
     Raises
     ------
-    ValidationError
+    SqlRefusal
         `PIVOT_VALUES_MESSAGE`, if a PIVOT anywhere in `parsed` has an ON column (statement
         form) or a ``FOR`` field (standard form) that is not ``column IN (<values>)``.
     """
@@ -1390,10 +1395,10 @@ def _reject_pivot_without_values(parsed: exp.Expr) -> None:
             or any(value.find(exp.Query) is not None for value in column.expressions)
             for column in columns
         ):
-            raise ValidationError(PIVOT_VALUES_MESSAGE)
+            raise SqlRefusal(PIVOT_VALUES_MESSAGE, node_position(pivot, sql))
 
 
-def _reject_placeholders(parsed: exp.Expr) -> None:
+def _reject_placeholders(parsed: exp.Expr, sql: str) -> None:
     """Refuse a statement carrying a query parameter or placeholder anywhere.
 
     The query process sets every resolved file list as a session variable
@@ -1419,15 +1424,18 @@ def _reject_placeholders(parsed: exp.Expr) -> None:
     ----------
     parsed
         The parsed statement to check. Not modified.
+    sql
+        The text `parsed` was parsed from, for the refusal's position.
 
     Raises
     ------
-    ValidationError
+    SqlRefusal
         If `parsed` contains any `exp.Placeholder` or `exp.Parameter` node.
         The message is fixed text and never echoes the query or a URL.
     """
-    if parsed.find(exp.Placeholder, exp.Parameter) is not None:
-        raise ValidationError(_PLACEHOLDER_MESSAGE)
+    placeholder = parsed.find(exp.Placeholder, exp.Parameter)
+    if placeholder is not None:
+        raise SqlRefusal(_PLACEHOLDER_MESSAGE, node_position(placeholder, sql))
 
 
 def _leading_keyword(node: exp.Expr, dialect: str) -> str:
@@ -1455,7 +1463,7 @@ def _leading_keyword(node: exp.Expr, dialect: str) -> str:
     return (words[0] if words else node.key).upper()[:_KEYWORD_CHARS]
 
 
-def _reject_statements_inside(parsed: exp.Expr, dialect: str) -> None:
+def _reject_statements_inside(parsed: exp.Expr, dialect: str, sql: str) -> None:
     """Refuse a statement that is not a read, wherever in the tree it sits.
 
     DuckDB 2 runs DML inside a CTE (`WITH m AS (DELETE ... RETURNING *) SELECT ...`) and its
@@ -1469,25 +1477,29 @@ def _reject_statements_inside(parsed: exp.Expr, dialect: str) -> None:
         The parsed statement. Not modified.
     dialect
         The SQL dialect it was parsed as, for naming the refused keyword.
+    sql
+        The text `parsed` was parsed from, for the refusal's position.
 
     Raises
     ------
-    ValidationError
+    SqlRefusal
         If any node is one of `_NOT_A_READ`, or a CTE's body is not one of `_READ_BODIES`. The
         message names the statement's first word and nothing else of the query.
     """
     for node in parsed.walk():
         if isinstance(node, _NOT_A_READ):
-            raise ValidationError(
-                _NOT_A_READ_MESSAGE.format(keyword=_leading_keyword(node, dialect))
+            raise SqlRefusal(
+                _NOT_A_READ_MESSAGE.format(keyword=_leading_keyword(node, dialect)),
+                node_position(node, sql),
             )
         if isinstance(node, exp.CTE) and not isinstance(node.this, _READ_BODIES):
-            raise ValidationError(
-                _NOT_A_READ_MESSAGE.format(keyword=_leading_keyword(node.this, dialect))
+            raise SqlRefusal(
+                _NOT_A_READ_MESSAGE.format(keyword=_leading_keyword(node.this, dialect)),
+                node_position(node.this, sql),
             )
 
 
-def _reject_joins_without_from(parsed: exp.Expr) -> None:
+def _reject_joins_without_from(parsed: exp.Expr, sql: str) -> None:
     """Refuse a `SELECT` anywhere in the statement that has a `JOIN` but no `FROM`.
 
     sqlglot parses `SELECT * JOIN t ON true` and renders the joined table as a column of the
@@ -1499,15 +1511,17 @@ def _reject_joins_without_from(parsed: exp.Expr) -> None:
     ----------
     parsed
         The parsed statement. Not modified.
+    sql
+        The text `parsed` was parsed from, for the refusal's position.
 
     Raises
     ------
-    ValidationError
+    SqlRefusal
         If a `SELECT` carries a join and no `FROM` (`_JOIN_WITHOUT_FROM_MESSAGE`).
     """
     for select in parsed.find_all(exp.Select):
         if select.args.get("joins") and select.args.get("from_") is None:
-            raise ValidationError(_JOIN_WITHOUT_FROM_MESSAGE)
+            raise SqlRefusal(_JOIN_WITHOUT_FROM_MESSAGE, node_position(select, sql))
 
 
 def _require_unambiguous_references(parsed: exp.Expr, dialect: str) -> None:
@@ -1599,7 +1613,7 @@ def unreadable_view_message(dotted: str) -> str:
     return f"View {dotted!r} could not be read. Ask its owner to recreate it."
 
 
-def _select_of_values(values: exp.Values) -> exp.Select:
+def _select_of_values(values: exp.Values, sql: str) -> exp.Select:
     """Make a bare `VALUES` list a `SELECT * FROM (VALUES ...) AS __lakana_values`.
 
     sqlglot builds no scope for a top-level `exp.Values` (`build_scope` returns `None`), so
@@ -1613,6 +1627,8 @@ def _select_of_values(values: exp.Values) -> exp.Select:
     ----------
     values
         The parsed top-level `VALUES` list, moved into the result (not copied).
+    sql
+        The text `values` was parsed from, for a refusal's position.
 
     Returns
     -------
@@ -1621,11 +1637,11 @@ def _select_of_values(values: exp.Values) -> exp.Select:
 
     Raises
     ------
-    ValidationError
+    SqlRefusal
         If the list carries an alias or a clause DuckDB refuses on a bare `VALUES`; see
         `_reject_values_clauses`.
     """
-    _reject_values_clauses(values)
+    _reject_values_clauses(values, sql)
     select = exp.Select(expressions=[exp.Star()])
     for key in _VALUES_MODIFIERS:
         modifier = values.args.get(key)
@@ -1636,17 +1652,19 @@ def _select_of_values(values: exp.Values) -> exp.Select:
     return select.from_(values, copy=False)
 
 
-def _reject_values_clauses(values: exp.Values) -> None:
+def _reject_values_clauses(values: exp.Values, sql: str) -> None:
     """Refuse a bare `VALUES` list that carries anything but its rows, an order and a limit.
 
     Parameters
     ----------
     values
         The parsed top-level `VALUES` list. Not modified.
+    sql
+        The text `values` was parsed from, for the refusal's position.
 
     Raises
     ------
-    ValidationError
+    SqlRefusal
         If it carries an argument outside `_VALUES_ARGS` — an alias (`_ALIASED_VALUES_MESSAGE`)
         or a clause such as `WHERE` or `JOIN` (`_VALUES_CLAUSE_MESSAGE`, naming the clause), or
         one DuckDB never takes, such as `SORT BY` (`_NO_SUCH_CLAUSE_MESSAGE`).
@@ -1654,13 +1672,14 @@ def _reject_values_clauses(values: exp.Values) -> None:
     for key, value in values.args.items():
         if key in _VALUES_ARGS or value is None or value == []:
             continue
+        where = node_position(value, sql) if isinstance(value, exp.Expr) else None
         if key == "alias":
-            raise ValidationError(_ALIASED_VALUES_MESSAGE)
+            raise SqlRefusal(_ALIASED_VALUES_MESSAGE, where)
         clause = _VALUES_CLAUSES.get(key, key.upper())
         hint = _CLAUSES_DUCKDB_LACKS.get(clause)
         if hint is not None:
-            raise ValidationError(_NO_SUCH_CLAUSE_MESSAGE.format(clause=clause, hint=hint))
-        raise ValidationError(_VALUES_CLAUSE_MESSAGE.format(clause=clause))
+            raise SqlRefusal(_NO_SUCH_CLAUSE_MESSAGE.format(clause=clause, hint=hint), where)
+        raise SqlRefusal(_VALUES_CLAUSE_MESSAGE.format(clause=clause), where)
 
 
 def _parse_checked(sql: str, dialect: str) -> exp.Expr:
@@ -1699,12 +1718,12 @@ def _parse_checked(sql: str, dialect: str) -> exp.Expr:
     """
     parsed = _parse_with_hints(sql, dialect)
     if isinstance(parsed, exp.Values):
-        parsed = _select_of_values(parsed)
-    _reject_placeholders(parsed)
-    _reject_statements_inside(parsed, dialect)
-    _reject_recursive_ctes(parsed)
-    _reject_pivot_without_values(parsed)
-    _reject_joins_without_from(parsed)
+        parsed = _select_of_values(parsed, sql)
+    _reject_placeholders(parsed, sql)
+    _reject_statements_inside(parsed, dialect, sql)
+    _reject_recursive_ctes(parsed, sql)
+    _reject_pivot_without_values(parsed, sql)
+    _reject_joins_without_from(parsed, sql)
     _require_unambiguous_references(parsed, dialect)
     return parsed
 
@@ -2340,6 +2359,9 @@ def _expand_into(
     ------
     ValidationError
         As `expand_views` documents.
+    SqlRefusal
+        If a view's own SQL is refused by the guard, without a position: its text is not the
+        reader's.
     """
     bound = _cte_reference_ids(parsed)
     for table in list(parsed.find_all(exp.Table)):
@@ -2373,6 +2395,9 @@ def _expand_into(
             # `SORT BY` is unreadable too (a view saved under sqlglot 30.24 can hold one): the
             # reader never wrote it, so the `ORDER BY` hint is not theirs to act on.
             raise ValidationError(unreadable_view_message(dotted)) from exc
+        except SqlRefusal as exc:
+            # A position in the view's text is not a position in the reader's SQL.
+            raise SqlRefusal(str(exc)) from exc
         _expand_into(inner, lookup, (*stack, dotted), expanded, named_views, max_depth, dialect)
         alias = table.args.get("alias")
         key = _qualifier_key(table)
@@ -2727,6 +2752,9 @@ def check_blacklist(sql: str, dialect: str = "duckdb") -> None:
 
     Raises
     ------
+    SqlRefusal
+        A `ValidationError` carrying the refused node's position, when it has one, for each of
+        the refusals below that name a node.
     ValidationError
         If `sql` uses a table function other than the generators in
         `_ALLOWED_TABLE_FUNCTIONS`; if it calls a blacklisted function or one whose name
@@ -2747,38 +2775,50 @@ def check_blacklist(sql: str, dialect: str = "duckdb") -> None:
     for item in parsed.find_all(exp.Table, exp.Lateral):
         function = _from_item_function_name(item)
         if function is not None and function not in _ALLOWED_TABLE_FUNCTIONS:
-            raise ValidationError(_refused_table_function(function))
+            raise SqlRefusal(_refused_table_function(function), node_position(item, sql))
     for func in parsed.find_all(exp.Func):
         name = func.name.lower() if isinstance(func, exp.Anonymous) else func.sql_name().lower()
         if name in _NO_QUERY_USE_REASONS:
-            raise ValidationError(
+            raise SqlRefusal(
                 f"{name} {_NO_QUERY_USE_REASONS[name]}, which no query needs, so it may not be "
-                "called. Remove the call; a query reads tables only."
+                "called. Remove the call; a query reads tables only.",
+                node_position(func, sql),
             )
         if name in _BLACKLISTED_FUNCTIONS:
-            raise ValidationError(f"{name} may not be called directly; query the catalog instead.")
+            raise SqlRefusal(
+                f"{name} may not be called directly; query the catalog instead.",
+                node_position(func, sql),
+            )
         if isinstance(func, exp.Anonymous) and _is_operator_name(func.name):
-            raise ValidationError(_operator_call_message(func.name))
+            raise SqlRefusal(_operator_call_message(func.name), node_position(func, sql))
         if name.startswith(_INTERNAL_FUNCTION_PREFIX):
-            raise ValidationError(
+            raise SqlRefusal(
                 f"{name} is internal to DuckDB and may not be called directly; "
-                "write the SQL it stands for instead, such as CAST or BETWEEN."
+                "write the SQL it stands for instead, such as CAST or BETWEEN.",
+                node_position(func, sql),
             )
     for node_type, label in ((exp.Attach, "ATTACH"), (exp.Copy, "COPY"), (exp.Install, "INSTALL")):
-        if parsed.find(node_type) is not None:
-            raise ValidationError(f"{label} is not permitted in a submitted query.")
+        found = parsed.find(node_type)
+        if found is not None:
+            raise SqlRefusal(
+                f"{label} is not permitted in a submitted query.", node_position(found, sql)
+            )
     for command in parsed.find_all(exp.Command):
         keyword = str(command.this).lower()
         if keyword in _BLACKLISTED_COMMANDS:
-            raise ValidationError(f"{keyword.upper()} is not permitted in a submitted query.")
-    _reject_placeholders(parsed)
+            raise SqlRefusal(
+                f"{keyword.upper()} is not permitted in a submitted query.",
+                node_position(command, sql),
+            )
+    _reject_placeholders(parsed, sql)
     if not isinstance(parsed, _TOP_LEVEL_READS):
-        raise ValidationError(
+        raise SqlRefusal(
             f"Only a single query may be submitted, not {parsed.key.upper()}; "
-            "submit one SELECT statement."
+            "submit one SELECT statement.",
+            node_position(parsed, sql),
         )
     if isinstance(parsed, exp.Values):
-        _reject_values_clauses(parsed)
-    _reject_statements_inside(parsed, dialect)
-    _reject_recursive_ctes(parsed)
-    _reject_pivot_without_values(parsed)
+        _reject_values_clauses(parsed, sql)
+    _reject_statements_inside(parsed, dialect, sql)
+    _reject_recursive_ctes(parsed, sql)
+    _reject_pivot_without_values(parsed, sql)

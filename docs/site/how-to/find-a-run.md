@@ -57,7 +57,9 @@ principal. Everyone else sees their own queries only, and the name of someone el
 lakana query list --env dev --status failed --submitter admin
 ```
 
-A status that has ended lists the queries that ended in the last 24 hours, without `--all`.
+A status that has ended lists the queries that ended in the last 24 hours, without `--all`;
+add `--since 2026-10-01` to look further back. `--all-environments` looks in every environment
+you may query at once.
 
 ## Find the deploys of one repository
 

@@ -3,9 +3,10 @@
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from lakana_core.models import PrincipalType, QueryRun, QueryRunStatus
+from lakana_core.models import PrincipalType, QueryOrigin, QueryRun, QueryRunStatus
 
 
 def test_a_query_run_round_trips_through_the_database(session: Session) -> None:
@@ -25,6 +26,7 @@ def test_a_query_run_round_trips_through_the_database(session: Session) -> None:
     session.commit()
 
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,
@@ -45,6 +47,41 @@ def test_a_query_run_round_trips_through_the_database(session: Session) -> None:
     assert fetched.finished_at is None
 
 
+def test_a_schema_from_the_models_records_a_run_without_an_origin_as_written(
+    session: Session,
+) -> None:
+    """A row that names no origin is `written`, as in a database migrated by 0081.
+
+    A server or worker of the previous release inserts such rows during an upgrade; the schema
+    the tests build from the models must take them as the migrated one does.
+    """
+    from lakana_core.models import Environment
+
+    env = Environment(
+        id=uuid.uuid4(),
+        name="dev",
+        storage_root="file:///tmp/lakana-test",
+        storage_options={},
+        is_protected=False,
+        properties={},
+    )
+    session.add(env)
+    session.commit()
+    run_id = uuid.uuid4()
+    session.execute(
+        text(
+            "INSERT INTO query_runs (id, environment_id, sql_text, status, created_at,"
+            " updated_at) VALUES (:id, :env, 'SELECT 1', 'QUEUED', :now, :now)"
+        ),
+        {"id": run_id.hex, "env": env.id.hex, "now": datetime.now(UTC).isoformat()},
+    )
+    session.commit()
+
+    fetched = session.get(QueryRun, run_id)
+    assert fetched is not None
+    assert fetched.origin is QueryOrigin.WRITTEN
+
+
 def test_a_query_run_survives_its_principal_being_deleted(session: Session) -> None:
     """`principal_id` is set NULL, not cascaded, so query history outlives its author."""
     from lakana_core.models import Environment, Principal
@@ -61,6 +98,7 @@ def test_a_query_run_survives_its_principal_being_deleted(session: Session) -> N
     session.add_all([env, principal])
     session.commit()
     run = QueryRun(
+        origin=QueryOrigin.WRITTEN,
         id=uuid.uuid4(),
         environment_id=env.id,
         principal_id=principal.id,

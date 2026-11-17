@@ -27,6 +27,7 @@ from lakana_core.identifiers import NamespacePath, TableRef, shown
 from lakana_core.models import (
     Environment,
     Namespace,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -276,6 +277,7 @@ def submit_preview(
         sql_text=preview_sql(namespace, table.name),
         status=QueryRunStatus.QUEUED,
         task_token_id=None,
+        origin=QueryOrigin.PREVIEW,
         preview_table_id=table.id,
     )
     session.add(run)

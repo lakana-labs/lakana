@@ -10,6 +10,7 @@ from typing import Literal
 from lakana_server.concurrency import (
     JSON_PAGES_PER_PRINCIPAL,
     JSON_PAGES_PER_PROCESS,
+    OPEN_RESULT_FILES_PER_PRINCIPAL,
     ThreadSafeConcurrencyLimiter,
 )
 
@@ -107,6 +108,13 @@ def test_a_released_key_leaves_no_count_behind() -> None:
     lim.release(_A)
     assert lim._per_key == {}
     assert [lim.try_acquire(_A), lim.try_acquire(_A), lim.try_acquire(_A)] == [None, None, "own"]
+
+
+def test_a_limiter_without_a_total_caps_only_each_key() -> None:
+    lim = ThreadSafeConcurrencyLimiter(None, OPEN_RESULT_FILES_PER_PRINCIPAL)
+    keys = [uuid.uuid4() for _ in range(50)]
+    assert [lim.try_acquire(k) for k in keys for _ in range(2)] == [None] * 100
+    assert [lim.try_acquire(k) for k in keys] == ["own"] * 50
 
 
 def test_eight_threads_at_one_barrier_get_exactly_four_slots() -> None:

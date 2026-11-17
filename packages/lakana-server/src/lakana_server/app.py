@@ -53,6 +53,7 @@ from lakana_server.api.platform.passkeys import router as passkeys_router
 from lakana_server.api.platform.pictures import PICTURE_DECODE_SLOTS
 from lakana_server.api.platform.pictures import router as pictures_router
 from lakana_server.api.platform.principals import router as principals_router
+from lakana_server.api.platform.queries import all_router as queries_all_router
 from lakana_server.api.platform.queries import router as queries_router
 from lakana_server.api.platform.recovery_links import links_router as recovery_links_router
 from lakana_server.api.platform.recovery_links import router as recovery_link_router
@@ -88,6 +89,9 @@ from lakana_server.browser_guard import BrowserGuard
 from lakana_server.concurrency import (
     JSON_PAGES_PER_PRINCIPAL,
     JSON_PAGES_PER_PROCESS,
+    OPEN_RESULT_FILES_PER_PRINCIPAL,
+    RESULT_FILES_PER_PRINCIPAL,
+    RESULT_FILES_PER_PROCESS,
     AppendConcurrencyLimiter,
     ThreadSafeConcurrencyLimiter,
 )
@@ -103,6 +107,7 @@ ROUTERS = (
     environments_router,
     namespaces_router,
     queries_router,
+    queries_all_router,
     tables_router,
     dropped_tables_router,
     environment_dropped_tables_router,
@@ -245,6 +250,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.download_slots = AppendConcurrencyLimiter(MAX_CONCURRENT_DOWNLOADS)
         app.state.json_page_limiter = ThreadSafeConcurrencyLimiter(
             JSON_PAGES_PER_PROCESS, JSON_PAGES_PER_PRINCIPAL
+        )
+        app.state.result_file_limiter = ThreadSafeConcurrencyLimiter(
+            RESULT_FILES_PER_PROCESS, RESULT_FILES_PER_PRINCIPAL
+        )
+        app.state.open_result_file_limiter = ThreadSafeConcurrencyLimiter(
+            None, OPEN_RESULT_FILES_PER_PRINCIPAL
         )
         readiness = resolved_settings.readiness
         app.state.readiness = ReadinessCheck(

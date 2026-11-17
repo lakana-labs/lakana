@@ -32,6 +32,7 @@ from lakana_core.errors import KeptAfterCheckError, LakanaError, NotPublishedErr
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import (
     JobVersion,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Run,
@@ -286,6 +287,7 @@ def _count_form(
     run = session.get(Run, task.run_id)
     assert run is not None
     query = QueryRun(
+        origin=QueryOrigin.TASK,
         id=uuid.uuid4(),
         environment_id=run.environment_id,
         principal_id=principal.id,

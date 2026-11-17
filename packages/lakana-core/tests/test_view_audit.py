@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pydantic
@@ -303,7 +303,7 @@ def test_a_managers_list_of_other_peoples_queries_is_recorded_once_per_window(
     assert (row.securable_kind, row.securable_environment) == (SecurableKind.ENVIRONMENT, "dev")
     assert row.detail == {
         "view": "queries",
-        "filters": {"include_ended": False, "status": [], "limit": 2},
+        "filters": {"include_ended": False, "status": [], "origin": [], "limit": 2},
         "rows_shown": 2,
         "others_shown": 1,
         "distinct_others": 1,
@@ -317,6 +317,44 @@ def test_a_managers_list_of_other_peoples_queries_is_recorded_once_per_window(
     service.list_queries_page(principal, "dev", include_ended=True)
     service.list_queries(principal, "dev")
     assert len(_views(session)) == 1
+
+
+def test_a_managers_list_with_since_and_origin_records_them_and_the_ended_runs(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    env = _env(session, principal, tmp_path, "dev")
+    bob = _persisted(session, "bob")
+    since = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone(timedelta(hours=2)))
+    _add_run(session, env, bob, QueryRunStatus.FAILED, finished_at=datetime.now(UTC))
+    service = QueryService(session, MANAGER)
+    service.list_queries_page(principal, "dev", origin=["written", "check"], since=since)
+    (row,) = _views(session)
+    # `since` lists the ended runs of any age, so the page is recorded as one that includes them
+    assert row.detail["filters"] == {
+        "include_ended": True,
+        "status": [],
+        "origin": ["written", "check"],
+        "since": "2026-01-02T01:04:05+00:00",
+        "limit": 100,
+    }
+
+
+def test_a_managers_cross_environment_list_records_since_and_origin(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    env = _env(session, principal, tmp_path, "dev")
+    _add_run(session, env, _persisted(session, "bob"))
+    since = datetime(2026, 1, 2, tzinfo=UTC)
+    service = QueryService(session, MANAGER)
+    service.list_all_queries_page(principal, origin=["written"], since=since, limit=5)
+    (row,) = _views(session)
+    assert row.detail["filters"] == {
+        "include_ended": True,
+        "status": [],
+        "origin": ["written"],
+        "since": "2026-01-02T00:00:00+00:00",
+        "limit": 5,
+    }
 
 
 def test_the_deleted_submitter_counts_as_someone_else(

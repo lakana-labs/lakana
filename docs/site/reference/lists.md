@@ -12,6 +12,7 @@ under [Other paged lists](#other-paged-lists).
 |---|---|---|---|
 | Runs | `lakana runs list` | `READ_ENVIRONMENT` | creation time, newest first; equal times by id |
 | Queries | `lakana query list` | `SUBMIT_QUERY`; `MANAGE_ENVIRONMENT` shows everyone's | running, then queued, then (with `--all`, or an ended status) ended ones |
+| Queries of every environment | `lakana query list --all-environments` | none: an environment where you hold neither `SUBMIT_QUERY` nor `MANAGE_ENVIRONMENT` is left out | as the queries of one environment, over all of them |
 | Deploys | `lakana deploys list` | `READ_ENVIRONMENT` | creation time, newest first; equal times by id |
 
 Every filter narrows the list; filters combine with AND. A filter is never a way to see more than
@@ -52,15 +53,25 @@ dropped tables of an environment and the orphans), or use `client.tables.iter_dr
 | Status | `--status`, `status` | runs: `queued`, `running`, `succeeded`, `failed`, `cancelled`. Queries: the same words in any letter case (the list shows them in capitals). Repeat the option or separate the values with commas: `failed,cancelled` | runs, queries |
 | Trigger | `--trigger`, `trigger` | `schedule`, `api`, `manual`, `deploy`; repeat or separate with commas. A run started with `lakana run` has none and matches no trigger | runs |
 | Job | `--job`, `job` | the name of a job | runs |
-| Since | `--since`, `since` | an ISO 8601 time with a time zone, for example `2026-10-18T09:30:00Z`; the run was created at or after it | runs |
+| Since | `--since`, `since` | an ISO 8601 time with a time zone, for example `2026-10-18T09:30:00Z`. Runs: the run was created at or after it. Queries: the ended queries listed are those that ended at or after it, of any age | runs, queries |
 | Submitter | `--submitter`, `submitter` | a principal's name; none of that name's queries is shown to someone who may not see them | queries |
+| Origin | `--origin`, `origin` | where the query came from: `written` (SQL someone wrote), `preview` (a table's preview), `check` (the rows or the count of a check), `write` (SQL that writes a table), `maintenance` (a table's maintenance) or `task` (a read or write of a pipeline task). Repeat the option or separate the values with commas | queries |
 
 `--since` on the command line also takes a date (`2026-10-18`) or a time without a time zone, which
 is read in the time zone of your computer. The route needs the time zone: `since=2026-10-18T09:30:00`
 is refused with `422`.
 
 A query status that has ended (`succeeded`, `failed`, `cancelled`) lists the queries that ended in
-the last 24 hours, with or without `--all`. The list never shows older ones.
+the last 24 hours, with or without `--all`. With `--since`, it lists those that ended at or after that
+time instead, however long ago: `--all --since 2026-10-01` lists every query that ended since
+the first of October. `--since` changes only the ended queries; the running and queued ones are
+always listed.
+
+`--all-environments` lists the queries of every environment you may query at once, in the order of
+the list of one environment, and adds an `environment` column after the id. In each environment you
+see what its own list shows you: everyone's queries where you hold `MANAGE_ENVIRONMENT`, your own
+elsewhere. An environment where you may not query is left out; the list is never refused for it.
+It does not take `--env`.
 
 ## Paging
 
@@ -80,13 +91,14 @@ A page continues strictly after the last row of the previous one. A run, query o
 arrives while you page is never shown twice, and none that was there is skipped. The one exception
 is a query that changes from queued to running between two pages, which moves to another part of
 the order of queries. The cursor belongs to its list: the cursor of the runs list is refused by the
-queries list, with `422` and a message that names both lists. Start again without `cursor`.
+queries list, with `422` and a message that names both lists, and so is the cursor of the queries of
+one environment by the list of every environment. Start again without `cursor`.
 
 ## Refusals
 
 | Cause | Answer |
 |---|---|
-| a status, trigger or `limit` that is not allowed | `422`; the message names the parameter and the allowed values |
+| a status, trigger, origin or `limit` that is not allowed | `422`; the message names the parameter and the allowed values |
 | `since` without a time zone, or not a time | `422`; the message shows how to write it |
 | a cursor that was not issued, or came from another list | `422` |
 | an unknown repository | `404` |
@@ -97,7 +109,9 @@ queries list, with `422` and a message that names both lists. Start again withou
 
 A list of runs or deploys is not audited, and neither is a list of your own queries. When a manager's
 query list shows someone else's query, or filters on someone else with `--submitter`, the audit log gets
-one `ACTIVITY_VIEWED` event, and so does seeing the readers of a table
+one `ACTIVITY_VIEWED` event (a page of `--all-environments` one for each environment you manage
+where the page shows someone else's query or `--submitter` names someone else), and so does seeing
+the readers of a table
 ([table health](table-health.md#audit)) and reading the audit log itself (`lakana audit list`) when
 the page shows someone else's events or filters on someone else with `--principal-id`:
 
@@ -106,7 +120,7 @@ the page shows someone else's events or filters on someone else with `--principa
 | principal | who looked |
 | object | the environment of the query list, the table whose readers were shown, or the instance for the audit log |
 | `detail.view` | `queries`, `table_readers` or `audit_log` |
-| `detail.filters` | the filters of the first look: `include_ended`, `status` and `limit` for queries, `days` for readers, `event_type`, `environment`, `since`, `until` and `limit` for the audit log |
+| `detail.filters` | the filters of the first look: `include_ended` (true when `since` listed the ended runs), `status`, `origin`, `since` (UTC, only when given) and `limit` for queries, `days` for readers, `event_type`, `environment`, `since`, `until` and `limit` for the audit log |
 | `detail.rows_shown` | how many rows the answer showed |
 | `detail.others_shown` | how many of them were other people's (a deleted principal's, and an event of nobody, such as a failed sign-in, included) |
 | `detail.distinct_others` | how many other people those rows belong to |
@@ -176,7 +190,9 @@ How much text a new event stores is set on the server and every worker:
 |---|---|---|
 | Runs, one page of runs | `client.runs.list(env, ...)`; `client.runs.list_page(env, ...)` also returns the cursor | `GET /api/v1/environments/{env}/runs?repository=&status=&trigger=&job=&since=&limit=&cursor=` |
 | Every run that matches | `client.runs.iter(env, ...)` | the same route, page by page |
-| Queries | `client.queries.list(env, ...)`; `client.queries.list_page(env, ...)` | `GET /api/v1/environments/{env}/queries?include_ended=&status=&submitter=&limit=&cursor=` |
+| Queries | `client.queries.list(env, ...)`; `client.queries.list_page(env, ...)` | `GET /api/v1/environments/{env}/queries?include_ended=&status=&submitter=&origin=&since=&limit=&cursor=` |
+| Queries of every environment | `client.queries.list_all(...)`; `client.queries.iter_all(...)` | `GET /api/v1/queries?environment=&include_ended=&status=&submitter=&origin=&since=&limit=&cursor=`; answers `{"items": [...], "next_cursor": ...}` |
+| Environments where you may query | `client.queries.environments()` | `GET /api/v1/queries/environments`; answers `[{"name": ..., "protected": ...}]`, by name |
 | Deploys | `client.deploys.list(env, ...)`; `client.deploys.list_page(env, ...)` | `GET /api/v1/environments/{env}/deploys?repository=&limit=&cursor=` |
 | Dropped tables of an environment | `client.tables.list_dropped_page(env, ...)`; `client.tables.iter_dropped(env)` | `GET /api/v1/environments/{env}/dropped-tables?limit=&cursor=`; answers `{"items": [...], "next_cursor": ...}` |
 | Expiring tables | `client.tables.expiring(env, ...)`; `client.tables.expiring_page(env, ...)`; `client.tables.iter_expiring(env, ...)` | `GET /api/v1/environments/{env}/expiring-tables?within_days=&namespace=&limit=&cursor=` |

@@ -1,8 +1,10 @@
 # The result page
 
 A query that read rows has a result you can fetch as one JSON page, with every cell cut to a size a
-screen can hold. The web interface and `lakana table preview` read this page; the whole result in
-Arrow stays as it is (`lakana query result`, `lakana sql --out`).
+screen can hold. The web interface and `lakana table preview` read this page. The whole result, never
+cut, is a file in Arrow, CSV or a spreadsheet (`format=arrow`, `csv` or `xlsx`; `lakana query
+result`, `lakana sql --out`); see [The whole result as a file](#the-whole-result-as-a-file) and
+[Download a query result](../how-to/download-a-query-result.md).
 
 The page is `GET /api/v1/environments/{env}/queries/{query_id}/result` with the query parameters
 `format=json`, `offset` and `limit`.
@@ -41,12 +43,12 @@ lakana --output json table preview silver.orders
 
 | Parameter | Meaning |
 |---|---|
-| `format` | `json` for this page; `arrow` (the default) for the whole result. |
+| `format` | `json` for this page; `arrow` (the default), `csv` or `xlsx` for the whole result. |
 | `limit` | Rows on the page: 1 to 1,000, default 100. A preview's result holds at most 100 rows, and `limit` above 100 is a `422`. |
 | `offset` | Rows to skip, at least 0. An offset at or past the end gives `rows: []`. |
 
-`limit` and `offset` with `format=arrow` are a `422`: the Arrow result is always whole. A `limit`
-below 1 and an `offset` below 0 are a `422` too. A query that has not succeeded, or is not a read,
+`limit` and `offset` with `format=arrow`, `csv` or `xlsx` are a `422`: a file is always the whole
+result. A `limit` below 1 and an `offset` below 0 are a `422` too. A query that has not succeeded, or is not a read,
 answers `409` with its own message.
 
 ## Fields
@@ -107,3 +109,48 @@ Making a page costs the server memory, so it converts four pages at a time per s
 time per person. A fifth, or a second of yours, is answered `503` with `Retry-After: 1` and the
 type `ResultPageLimitError`. Ask again after that many seconds. `QueryRun.page` of the SDK and
 `lakana table preview` do it for you, up to five times.
+
+## The whole result as a file
+
+`format=arrow` (the default), `format=csv` and `format=xlsx` answer the whole result, never a page
+and never fewer rows than it has:
+
+| Format | Media type | What it holds |
+|---|---|---|
+| `arrow` | `application/vnd.apache.arrow.file` | The stored Arrow IPC file, as the worker wrote it. |
+| `csv` | `text/csv; charset=utf-8` | RFC 4180 with CRLF row ends, UTF-8 without a byte-order mark. Every text value and every header name is quoted. A value is written as it is: a text starting with `=` is not escaped, so open the file in a spreadsheet as data, or take `xlsx`. |
+| `xlsx` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | One sheet, the column names in its first row. Text is always text, never a formula. A number a spreadsheet would round (an integer beyond ±9,007,199,254,740,991, a decimal of more than 15 significant digits, a float its 16 digits do not hold) and NaN or infinity are text. A timestamp with a time zone is in UTC, shown with `UTC`. |
+
+In both CSV and xlsx, a nested value (a list, struct, map or union) is its compact JSON text, a
+binary value is `\x` and two hex digits per byte, as DuckDB prints a blob, and NULL is an empty field
+or cell.
+
+A spreadsheet holds at most 1,048,575 rows below its header row, 16,384 columns, and 32,767
+characters in a cell. A result over any of these is refused with a `422` of the type `XlsxRefused`
+before anything is sent, and the message names the command that downloads it as CSV instead.
+
+Any other Arrow extension type is written as the type it is stored as: DuckDB's `bignum`
+(`varint`) as its bytes in `\x` hex, a JSON column as its text. A column whose type no file holds
+is refused for both CSV and xlsx with a `422` of the type `ResultFileRefused` before anything is
+sent, and the message names the command that downloads the result as Arrow instead.
+
+A file is streamed, so there is no `Content-Length`. These headers say what it is:
+
+| Header | Meaning |
+|---|---|
+| `Content-Disposition` | `attachment; filename="query-{query_id}.arrow"` (`.csv`, `.xlsx`). |
+| `X-Result-Rows` | The rows of the result, as the worker recorded them. |
+| `X-Result-Arrow-Bytes` | The size of the stored Arrow file. |
+
+A query from before Lakana recorded these sizes has neither size header; its file is the same.
+
+Every download of a file is recorded in the audit log as `QUERY_RESULT_EXPORTED`, with the query's
+id, the format, the rows and the size. A JSON page is not. A pipeline task that reads its inputs
+as Arrow writes none; its CSV or spreadsheet download is recorded.
+
+Making a CSV or a spreadsheet costs the server memory, so it prepares two at a time per server and
+one at a time per person, until the file is written; it is then sent without holding either. The
+prepared file takes disk space until its download ends, so one person has at most two CSV or
+spreadsheet downloads under way at once. Another is answered `503` with `Retry-After: 1` and the
+type `ResultFileLimitError`. The Arrow file is sent from storage as it is and is never refused for
+this.

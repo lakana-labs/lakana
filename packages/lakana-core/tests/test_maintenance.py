@@ -42,6 +42,7 @@ from lakana_core.models import (
     AuditEvent,
     AuditEventType,
     Environment,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Table,
@@ -543,6 +544,7 @@ def test_orphan_removal_waits_while_a_write_into_the_table_is_running(
     env = session.execute(select(Environment)).scalar_one()
     session.add(
         QueryRun(
+            origin=QueryOrigin.WRITE,
             id=uuid.uuid4(),
             environment_id=env.id,
             principal_id=principal.id,

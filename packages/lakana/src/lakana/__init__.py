@@ -23,6 +23,7 @@ from lakana.errors import (
     ServerError,
     ValidationError,
 )
+from lakana.resources.queries import ResultFileFormat
 
 __version__ = resolve_version()
 
@@ -41,6 +42,7 @@ __all__ = [
     "PayloadTooLarge",
     "PermissionDenied",
     "QueryFailed",
+    "ResultFileFormat",
     "RunFailed",
     "ServerError",
     "ValidationError",

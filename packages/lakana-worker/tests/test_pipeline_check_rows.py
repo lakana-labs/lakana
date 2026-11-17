@@ -73,6 +73,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     QueryErrorCause,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -1630,6 +1631,7 @@ def _submit_raw(session: Session, reader_: PrincipalRef, result: CheckResult) ->
         The query run's id.
     """
     query = QueryRun(
+        origin=QueryOrigin.CHECK,
         id=uuid.uuid4(),
         environment_id=result.environment_id,
         principal_id=reader_.id,

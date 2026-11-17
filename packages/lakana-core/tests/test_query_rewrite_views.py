@@ -7,11 +7,12 @@ from collections.abc import Callable
 
 import pytest
 
-from lakana_core.errors import ValidationError
+from lakana_core.errors import SqlRefusal, ValidationError
 from lakana_core.query_rewrite import (
     MAX_EXPANDED_VIEWS,
     MAX_VIEW_DEPTH,
     ViewDefinition,
+    check_blacklist,
     expand_views,
     extract_table_refs,
 )
@@ -44,6 +45,18 @@ def test_a_query_without_views_is_returned_unchanged() -> None:
 
     assert expanded.sql == "SELECT id FROM bronze.orders"
     assert expanded.views == ()
+
+
+def test_a_refusal_of_a_views_own_sql_keeps_its_message_and_drops_its_position() -> None:
+    """The view's text is not the reader's: a place in it would point into the wrong SQL."""
+    view_sql = "SELECT *\nFROM read_csv('raw/x.csv')"
+    with pytest.raises(SqlRefusal) as direct:
+        check_blacklist(view_sql)
+    assert direct.value.position is not None
+    with pytest.raises(SqlRefusal) as info:
+        expand_views("SELECT * FROM gold.v", _lookup({"gold.v": view_sql}))
+    assert str(info.value) == str(direct.value)
+    assert info.value.position is None
 
 
 def test_a_view_becomes_a_subquery_and_only_base_tables_remain() -> None:

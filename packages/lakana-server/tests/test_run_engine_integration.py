@@ -49,6 +49,7 @@ from lakana_core.models import (
     Environment,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -1384,6 +1385,7 @@ def _claimed_write(
         run_row = session.scalars(select(Principal).where(Principal.name == service)).one()
         env_row = session.scalars(select(Environment).where(Environment.name == env)).one()
         write = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=env_row.id,
             principal_id=run_row.id,

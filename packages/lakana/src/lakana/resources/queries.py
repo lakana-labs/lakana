@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Iterator, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, BinaryIO, Literal
 
 import pyarrow as pa
 import pyarrow.ipc
@@ -16,11 +18,13 @@ from lakana._http import (
     NEXT_CURSOR_HEADER,
     HttpTransport,
     csv_param,
+    every_page,
     query_params,
     retry_wait,
 )
 from lakana._models import (
     MaskedColumn,
+    QueryEnvironment,
     QueryListEntry,
     QueryListPage,
     QueryStatus,
@@ -29,9 +33,19 @@ from lakana._models import (
     WaitingFor,
 )
 from lakana._routes import ROUTES
-from lakana.errors import InvalidResponse, QueryFailed, ServerError, ValidationError
+from lakana.errors import (
+    InvalidResponse,
+    NotFound,
+    QueryFailed,
+    ServerError,
+    ValidationError,
+)
+
+ResultFileFormat = Literal["csv", "xlsx"]
+"""The file formats the server makes of a whole result: CSV and a spreadsheet."""
 
 _EntryList = list[QueryListEntry]
+_EnvironmentList = list[QueryEnvironment]
 
 
 def _int(value: object) -> int | None:
@@ -102,6 +116,22 @@ def waiting_for_from_json(data: object) -> WaitingFor | None:
     )
 
 
+def _optional_time(value: str | None) -> datetime | None:
+    """Parse an ISO 8601 time of a response, or `None` when the field is absent or `null`.
+
+    Parameters
+    ----------
+    value
+        The time as the server wrote it, or `None`.
+
+    Returns
+    -------
+    datetime or None
+        The parsed time, or `None`.
+    """
+    return None if value is None else datetime.fromisoformat(value)
+
+
 def _status_from_json(data: dict[str, Any]) -> QueryStatus:
     """Build a `QueryStatus` from the platform API's JSON response body.
 
@@ -129,6 +159,15 @@ def _status_from_json(data: dict[str, Any]) -> QueryStatus:
         maintenance=data.get("maintenance"),
         error_cause=data.get("error_cause"),
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
+        origin=data.get("origin"),
+        sql=data.get("sql"),
+        created_at=_optional_time(data.get("created_at")),
+        started_at=_optional_time(data.get("started_at")),
+        finished_at=_optional_time(data.get("finished_at")),
+        result_rows=data.get("result_rows"),
+        result_bytes=data.get("result_bytes"),
+        error_line=data.get("error_line"),
+        error_column=data.get("error_column"),
         peak_memory_bytes=data.get("peak_memory_bytes"),
         cpu_seconds=data.get("cpu_seconds"),
         bytes_read=data.get("bytes_read"),
@@ -161,6 +200,52 @@ def _entry_from_json(data: dict[str, Any]) -> QueryListEntry:
         finished_at=None if finished is None else datetime.fromisoformat(finished),
         error_cause=data["error_cause"],
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
+        environment=data.get("environment"),
+        origin=data.get("origin"),
+    )
+
+
+def _list_params(
+    include_ended: bool,
+    status: str | Sequence[str] | None,
+    submitter: str | None,
+    origin: str | Sequence[str] | None,
+    since: datetime | None,
+    limit: int,
+    cursor: str | None,
+) -> dict[str, object]:
+    """Build the query parameters of the query lists.
+
+    Parameters
+    ----------
+    include_ended
+        Also list the ended queries.
+    status
+        The status filter.
+    submitter
+        The submitter filter.
+    origin
+        The origin filter.
+    since
+        The oldest end time of a listed ended query.
+    limit
+        The page size.
+    cursor
+        The cursor of the page.
+
+    Returns
+    -------
+    dict of str to object
+        The parameters that are set.
+    """
+    return query_params(
+        include_ended="true" if include_ended else "false",
+        status=csv_param(status),
+        submitter=submitter,
+        origin=csv_param(origin),
+        since=None if since is None else since.isoformat(),
+        limit=limit,
+        cursor=cursor,
     )
 
 
@@ -204,6 +289,50 @@ def _write_target(
         "incremental_key": incremental_key,
         "evolve_schema": evolve_schema,
     }
+
+
+_LIST_ALL_INSTEAD = "list one environment with `lakana query list --env ENV`"
+"""What to do instead of `Queries.list_all` against a server without `GET /api/v1/queries`."""
+
+_ENVIRONMENTS_INSTEAD = "see the environments with `lakana env list`"
+"""What to do instead of `Queries.environments` against a server without that route."""
+
+
+@contextlib.contextmanager
+def _route_of_a_newer_server(route: str, instead: str) -> Generator[None]:
+    """Say that the server is too old when it answers a route with the router's bare 404.
+
+    A route the server does not have is answered by its router: 404 with ``Not Found`` and no
+    Lakana error type. A Lakana 404 (an unknown environment, say) names its type and is left
+    as it is.
+
+    Parameters
+    ----------
+    route
+        The route, as ``GET /api/v1/...``.
+    instead
+        What the caller can do on that server, after "Upgrade the server, or".
+
+    Yields
+    ------
+    None
+        While the request is sent.
+
+    Raises
+    ------
+    lakana.errors.NotFound
+        With a sentence naming the route and the upgrade, for a 404 without an error type.
+    """
+    try:
+        yield
+    except NotFound as exc:
+        if exc.error_type is not None:
+            raise
+        raise NotFound(
+            f"This server does not have {route}; it is older than this lakana package. "
+            f"Upgrade the server, or {instead}.",
+            status=exc.status,
+        ) from exc
 
 
 _PAGE_BUSY_TYPE = "ResultPageLimitError"
@@ -396,6 +525,99 @@ class QueryRun:
         with pyarrow.ipc.open_file(pa.BufferReader(response.content)) as reader:
             return reader.read_all()
 
+    def write_file(self, target: BinaryIO, *, format: ResultFileFormat) -> int:
+        """Write the server's CSV or spreadsheet of the whole result into `target`.
+
+        The server makes the file and the body is streamed, so memory holds one piece at a
+        time. This SDK reads no spreadsheet: it only moves bytes. Every download of a whole
+        result is recorded in the audit log.
+
+        Parameters
+        ----------
+        target
+            A file opened for binary writing.
+        format
+            ``"csv"`` (RFC 4180, UTF-8, every value as it is) or ``"xlsx"`` (one sheet; values
+            a cell cannot hold are written as text or refused).
+
+        Returns
+        -------
+        int
+            The bytes written.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the query does not exist, or was submitted by another principal.
+        lakana.errors.Conflict
+            If the query has not succeeded yet, or is not a read.
+        lakana.errors.ValidationError
+            If the result cannot be a file of this format; the message says why and, for a
+            spreadsheet, names the command that saves a CSV instead.
+        lakana.errors.ServerError
+            If the server is preparing other result files (status 503, `Retry-After`).
+        lakana.errors.LakanaConnectionError
+            If the server could not be reached, or the body broke before its end; what was
+            written is then incomplete.
+        """
+        written = 0
+        with self._transport.stream(
+            ROUTES["queries.result"],
+            path_params={"env": self.environment, "query_id": self.id},
+            params={"format": format},
+        ) as chunks:
+            for chunk in chunks:
+                target.write(chunk)
+                written += len(chunk)
+        _usage.add_bytes_read(written)
+        return written
+
+    def download(self, path: str | os.PathLike[str], *, format: ResultFileFormat) -> int:
+        """Save the server's CSV or spreadsheet of the whole result at `path`.
+
+        The file is written to `<path>.part` in the same directory and moved onto `path` when
+        it is complete, so `path` never holds half a file. A failure removes the part file
+        and leaves `path` as it was.
+
+        Parameters
+        ----------
+        path
+            Where to save the file. An existing file is replaced.
+        format
+            ``"csv"`` or ``"xlsx"``; see `write_file`.
+
+        Returns
+        -------
+        int
+            The bytes written.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            As `write_file`.
+        lakana.errors.Conflict
+            As `write_file`.
+        lakana.errors.ValidationError
+            As `write_file`.
+        lakana.errors.ServerError
+            As `write_file`.
+        lakana.errors.LakanaConnectionError
+            As `write_file`; `path` is then left as it was.
+        OSError
+            If the file cannot be written.
+        """
+        target = os.fspath(path)
+        part = f"{target}.part"
+        try:
+            with open(part, "wb") as handle:
+                written = self.write_file(handle, format=format)
+            os.replace(part, target)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(part)
+            raise
+        return written
+
     def page(self, *, limit: int = 100, offset: int = 0) -> ResultPage:
         """Fetch one page of this query's result as JSON, cells bounded in size.
 
@@ -466,8 +688,8 @@ class Queries:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    # `list` and `list_page` take the same filters and each documents them: a public method
-    # states its own parameters.
+    # `list`, `list_page`, `list_all` and `iter_all` take the same filters and each documents
+    # them: a public method states its own parameters.
     # jscpd:ignore-start
     def list(
         self,
@@ -476,6 +698,8 @@ class Queries:
         include_ended: bool = False,
         status: str | Sequence[str] | None = None,
         submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
     ) -> _EntryList:
@@ -486,22 +710,28 @@ class Queries:
         error message or a result, not even your own: read those through the query's status.
         Running queries come first, longest running first, then queued ones in the order they
         will be taken, with the reason each waits in `waiting_for`; with `include_ended`, then
-        the queries that ended in the last 24 hours, newest first. `limit` cuts that order.
-        `status` and `submitter` only narrow what you may see; `list_page` also returns the
-        cursor of the next page.
+        the queries that ended in the last 24 hours (or since `since`), newest first. `limit`
+        cuts that order. `status`, `submitter` and `origin` only narrow what you may see;
+        `list_page` also returns the cursor of the next page.
 
         Parameters
         ----------
         environment
             The environment.
         include_ended
-            Also list the queries that ended in the last 24 hours.
+            Also list the queries that ended in the last 24 hours (or since `since`).
         status
             Only queries in this status or one of these (``queued``, ``running``,
             ``succeeded``, ``failed``, ``cancelled``). An ended status lists the ended queries
-            of the last 24 hours, with or without `include_ended`.
+            of the last 24 hours (or since `since`), with or without `include_ended`.
         submitter
             Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these (``written``, ``preview``, ``check``,
+            ``write``, ``maintenance``, ``task``).
+        since
+            List the queries that ended at or after this time, of any age, instead of those
+            of the last 24 hours, with or without `include_ended`. It needs a time zone.
         limit
             Most entries returned (1 to 200).
         cursor
@@ -519,14 +749,16 @@ class Queries:
         lakana.errors.NotFound
             If the environment does not exist.
         lakana.errors.ValidationError
-            If `limit` is outside 1 to 200, a status is unknown, or `cursor` is not one the
-            server issued for the queries list.
+            If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
+            time zone, or `cursor` is not one the server issued for the queries list.
         """
         return self.list_page(
             environment,
             include_ended=include_ended,
             status=status,
             submitter=submitter,
+            origin=origin,
+            since=since,
             limit=limit,
             cursor=cursor,
         ).items
@@ -538,6 +770,8 @@ class Queries:
         include_ended: bool = False,
         status: str | Sequence[str] | None = None,
         submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
     ) -> QueryListPage:
@@ -548,12 +782,18 @@ class Queries:
         environment
             The environment.
         include_ended
-            Also list the queries that ended in the last 24 hours.
+            Also list the queries that ended in the last 24 hours (or since `since`).
         status
             Only queries in this status or one of these (``queued``, ``running``,
             ``succeeded``, ``failed``, ``cancelled``).
         submitter
             Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these (``written``, ``preview``, ``check``,
+            ``write``, ``maintenance``, ``task``).
+        since
+            List the queries that ended at or after this time, of any age, instead of those
+            of the last 24 hours, with or without `include_ended`. It needs a time zone.
         limit
             Most entries returned (1 to 200).
         cursor
@@ -572,26 +812,166 @@ class Queries:
         lakana.errors.NotFound
             If the environment does not exist.
         lakana.errors.ValidationError
-            If `limit` is outside 1 to 200, a status is unknown, or `cursor` is not one the
-            server issued for the queries list.
+            If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
+            time zone, or `cursor` is not one the server issued for the queries list.
         """
         response = self._transport.request(
             ROUTES["queries.list"],
             path_params={"env": environment},
-            params=query_params(
-                include_ended="true" if include_ended else "false",
-                status=csv_param(status),
-                submitter=submitter,
-                limit=limit,
-                cursor=cursor,
-            ),
+            params=_list_params(include_ended, status, submitter, origin, since, limit, cursor),
         )
         return QueryListPage(
             items=[_entry_from_json(item) for item in response.json()],
             next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
         )
 
+    def list_all(
+        self,
+        *,
+        environment: str | None = None,
+        include_ended: bool = False,
+        status: str | Sequence[str] | None = None,
+        submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> QueryListPage:
+        """List one page of the queries of every environment you may query.
+
+        The environments are those where you hold `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`; one
+        where you hold neither is left out, so this is never refused for a missing right. Where
+        you hold `MANAGE_ENVIRONMENT` you see everyone's queries, elsewhere your own. The order
+        is that of `list`, over all those environments, and each entry names its
+        `environment`. With `environment`, this is `list_page` of that environment.
+
+        Parameters
+        ----------
+        environment
+            Only this environment; then a missing right or environment is refused as by `list`.
+        include_ended
+            Also list the queries that ended in the last 24 hours (or since `since`).
+        status
+            Only queries in this status or one of these (``queued``, ``running``,
+            ``succeeded``, ``failed``, ``cancelled``).
+        submitter
+            Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these (``written``, ``preview``, ``check``,
+            ``write``, ``maintenance``, ``task``).
+        since
+            List the queries that ended at or after this time, of any age, instead of those
+            of the last 24 hours, with or without `include_ended`. It needs a time zone.
+        limit
+            Most entries returned (1 to 200).
+        cursor
+            A previous page's `next_cursor` of this list. Send the same filters with every page.
+
+        Returns
+        -------
+        QueryListPage
+            The entries, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            With `environment`, if you may not submit queries there.
+        lakana.errors.NotFound
+            With `environment`, if it does not exist; or, with a sentence saying so, if the
+            server is older than this package and has no `GET /api/v1/queries`.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200, a status or an origin is unknown, `since` has no
+            time zone, or `cursor` is not one the server issued for this list.
+        """
+        params = _list_params(include_ended, status, submitter, origin, since, limit, cursor)
+        with _route_of_a_newer_server("GET /api/v1/queries", _LIST_ALL_INSTEAD):
+            response = self._transport.request(
+                ROUTES["queries.list_all"],
+                params=query_params(environment=environment, **params),
+            )
+        body = response.json()
+        return QueryListPage(
+            items=[_entry_from_json(item) for item in body["items"]],
+            next_cursor=body["next_cursor"],
+        )
+
+    def iter_all(
+        self,
+        *,
+        environment: str | None = None,
+        include_ended: bool = False,
+        status: str | Sequence[str] | None = None,
+        submitter: str | None = None,
+        origin: str | Sequence[str] | None = None,
+        since: datetime | None = None,
+        page_size: int = 100,
+    ) -> Iterator[QueryListEntry]:
+        """Yield every query of every environment you may query, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            Only this environment.
+        include_ended
+            Also the queries that ended in the last 24 hours (or since `since`).
+        status
+            Only queries in this status or one of these.
+        submitter
+            Only the queries submitted by the principal with this name.
+        origin
+            Only queries of this origin or one of these.
+        since
+            The queries that ended at or after this time, of any age, with or without
+            `include_ended`. It needs a time zone.
+        page_size
+            Entries per request (1 to 200).
+
+        Yields
+        ------
+        QueryListEntry
+            Each entry, once, in the order of `list_all`.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            As `list_all`: with `environment`, if it does not exist, or if the server is older
+            than this package and has no `GET /api/v1/queries`.
+        """
+        yield from every_page(
+            lambda cursor: self.list_all(
+                environment=environment,
+                include_ended=include_ended,
+                status=status,
+                submitter=submitter,
+                origin=origin,
+                since=since,
+                limit=page_size,
+                cursor=cursor,
+            )
+        )
+
     # jscpd:ignore-end
+
+    def environments(self) -> _EnvironmentList:
+        """List the environments where you may submit a query, sorted by name.
+
+        Returns
+        -------
+        list of QueryEnvironment
+            Each one's name and whether it is protected; empty when there is none.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            With a sentence saying so, if the server is older than this package and has no
+            `GET /api/v1/queries/environments`.
+        """
+        with _route_of_a_newer_server("GET /api/v1/queries/environments", _ENVIRONMENTS_INSTEAD):
+            response = self._transport.request(ROUTES["queries.environments"])
+        return [
+            QueryEnvironment(name=item["name"], protected=item["protected"])
+            for item in response.json()
+        ]
 
     def submit(
         self,

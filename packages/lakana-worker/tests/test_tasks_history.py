@@ -14,6 +14,7 @@ from lakana_core.catalog.history import RUN_WROTE_MESSAGE
 from lakana_core.config import DEFAULT_MAX_HISTORY_OPEN_VERSIONS, QueryLimitsConfig
 from lakana_core.models import (
     Environment,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Run,
@@ -233,6 +234,7 @@ def _write_again(world: World, task_run_id: uuid.UUID) -> QueryRun:
     with world.session() as session:
         environment = session.query(Environment).filter_by(name="dev").one()
         run = QueryRun(
+            origin=QueryOrigin.TASK,
             id=uuid.uuid4(),
             environment_id=environment.id,
             principal_id=world.admin.id,

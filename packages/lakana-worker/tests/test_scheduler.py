@@ -26,6 +26,7 @@ from lakana_core.models import (
     JobVersion,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Repository,
@@ -640,6 +641,7 @@ def _lost_run(engine: sqlalchemy.Engine) -> uuid.UUID:
     with Session(engine) as session:
         env = session.scalars(select(Environment)).one()
         run = QueryRun(
+            origin=QueryOrigin.WRITTEN,
             id=uuid.uuid4(),
             environment_id=env.id,
             sql_text="SELECT 1",

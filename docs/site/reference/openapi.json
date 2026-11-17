@@ -1716,7 +1716,7 @@
           "queries"
         ],
         "summary": "List the queries of an environment",
-        "description": "Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.",
+        "description": "Lists running queries first, then queued ones, then, when asked, ended ones. Needs `SUBMIT_QUERY` on the environment, or `MANAGE_ENVIRONMENT`. A holder of `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries they submitted. The list never shows SQL text, error messages or results. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Answers 404 when the environment does not exist, and 422 for an unknown status or origin or a `since` without a time zone. Answers 503 when a manager's page shows someone else's queries and the audit entry for that could not be written; nothing is listed then.",
         "operationId": "list_queries_api_v1_environments__env__queries_get",
         "parameters": [
           {
@@ -1738,7 +1738,7 @@
               "default": false,
               "title": "Include Ended"
             },
-            "description": "Also list the queries that ended in the last 24 hours."
+            "description": "Also list the queries that ended in the last 24 hours (or since `since`)."
           },
           {
             "name": "status",
@@ -1753,7 +1753,7 @@
               "default": [],
               "title": "Status"
             },
-            "description": "Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. An ended status lists the ended queries of the last 24 hours, with or without `include_ended`."
+            "description": "Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas. An ended status lists the ended queries of the last 24 hours (or since `since`), with or without `include_ended`."
           },
           {
             "name": "submitter",
@@ -1772,6 +1772,39 @@
               "title": "Submitter"
             },
             "description": "Only queries submitted by the principal with this name."
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "default": [],
+              "title": "Origin"
+            },
+            "description": "Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            },
+            "description": "The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`."
           },
           {
             "name": "limit",
@@ -1997,7 +2030,7 @@
           "queries"
         ],
         "summary": "Show a query's status",
-        "description": "Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can see it; for anyone else the answer is 404, as for a query that does not exist.",
+        "description": "Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can see it; for anyone else the answer is 404, as for a query that does not exist. Besides the status, it names the run's `origin`, its times, the size of a stored result and the position of a syntax error. It gives back the run's `sql` for `written` and `write` runs only; for a preview, a check, maintenance or a task's query it is `null`.",
         "operationId": "get_query_status_api_v1_environments__env__queries__query_id__get",
         "parameters": [
           {
@@ -2213,7 +2246,7 @@
           "queries"
         ],
         "summary": "Fetch a query's result",
-        "description": "Returns the rows of a finished read as an Arrow IPC file, or with `format=json` one page of them as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked; it names the columns masked for you and, for a preview, the table. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with the Arrow result, and for a preview's page longer than 100 rows. Answers 503 with `Retry-After: 1` while you already have a JSON page being prepared, or the server is preparing as many as it allows at once.",
+        "description": "Returns the rows of a finished read as a whole file: an Arrow IPC file (the default), CSV (`format=csv`: RFC 4180, UTF-8 without a byte-order mark, values verbatim) or a spreadsheet (`format=xlsx`: one sheet below a header row; numbers a spreadsheet would round, NaN and infinity are text, a timestamp with a time zone is in UTC). A file is always the whole result, never a page; it is streamed, so no `Content-Length` is promised. It names itself in `Content-Disposition` (`query-ID.arrow`, `.csv`, `.xlsx`) and carries the run's row count and Arrow size as `X-Result-Rows` and `X-Result-Arrow-Bytes` when the run recorded them. Each download of a file is audited as `QUERY_RESULT_EXPORTED`, except an Arrow download by a token bound to a task attempt. With `format=json` it returns one page as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked; it names the columns masked for you and, for a preview, the table; it is not audited as an export. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it succeeded without being a read (it wrote to a table, created a view or was maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with a file, for a preview's page longer than 100 rows, and for a spreadsheet of more than 1,048,575 rows or 16,384 columns or with a value longer than 32,767 characters, naming the CSV download instead, and for a CSV or spreadsheet of a column whose type no file holds, naming the Arrow download. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or spreadsheet file being prepared, while 2 of your CSV or spreadsheet files are still being downloaded, or while the server is preparing as many as it allows at once.",
         "operationId": "get_query_result_api_v1_environments__env__queries__query_id__result_get",
         "parameters": [
           {
@@ -2244,14 +2277,16 @@
             "schema": {
               "enum": [
                 "arrow",
-                "json"
+                "json",
+                "csv",
+                "xlsx"
               ],
               "type": "string",
-              "description": "`arrow` for the whole result as an Arrow IPC file, `json` for one page.",
+              "description": "`arrow` for the whole result as an Arrow IPC file, `csv` or `xlsx` for the whole result as CSV or a spreadsheet, `json` for one page.",
               "default": "arrow",
               "title": "Format"
             },
-            "description": "`arrow` for the whole result as an Arrow IPC file, `json` for one page."
+            "description": "`arrow` for the whole result as an Arrow IPC file, `csv` or `xlsx` for the whole result as CSV or a spreadsheet, `json` for one page."
           },
           {
             "name": "limit",
@@ -2313,14 +2348,16 @@
         ],
         "responses": {
           "200": {
-            "description": "The whole result as an Arrow IPC file (`format=arrow`, the default), or one page of it as JSON (`format=json`).",
+            "description": "The whole result as an Arrow IPC file (`format=arrow`, the default), as CSV (`format=csv`) or as a spreadsheet (`format=xlsx`), or one page of it as JSON (`format=json`).",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResultPageOut"
                 }
               },
-              "application/vnd.apache.arrow.file": {}
+              "application/vnd.apache.arrow.file": {},
+              "text/csv; charset=utf-8": {},
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}
             }
           },
           "401": {
@@ -2365,6 +2402,290 @@
           },
           "503": {
             "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queries": {
+      "get": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "List the queries of every environment you may query",
+        "description": "Without `environment`, lists the queries of every environment where you hold `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`, in the order of the list of one environment: running, then queued, then (when asked) ended. Where you hold `MANAGE_ENVIRONMENT` you see everyone's queries, elsewhere your own; a task's token sees its own. An environment where you hold neither is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/queries` answers, with its 403 and 404, in this body. Each row names its `environment`. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here.",
+        "operationId": "list_all_queries_api_v1_queries_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "include_ended",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Ended"
+            },
+            "description": "Also list the queries that ended in the last 24 hours (or since `since`)."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "default": [],
+              "title": "Status"
+            },
+            "description": "Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`; any letter case); repeat the parameter or separate the values with commas."
+          },
+          {
+            "name": "submitter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Submitter"
+            },
+            "description": "Only queries submitted by the principal with this name."
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "default": [],
+              "title": "Origin"
+            },
+            "description": "Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`, `task`); repeat the parameter or separate the values with commas."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            },
+            "description": "The ended queries listed are those that ended at or after this ISO 8601 time, with a time zone, of any age, instead of those of the last 24 hours; given, they are listed with or without `include_ended`."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most rows returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryListPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queries/environments": {
+      "get": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "List the environments where you may submit a query",
+        "description": "Every environment where you hold `SUBMIT_QUERY`, sorted by name, and whether it is protected. Empty when there is none; never a 403.",
+        "operationId": "list_query_environments_api_v1_queries_environments_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueryEnvironmentOut"
+                  },
+                  "title": "Response List Query Environments Api V1 Queries Environments Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -24875,6 +25196,7 @@
           "CONNECTION_CREDENTIAL_REFUSED",
           "QUERY_COMPLETED",
           "QUERY_CANCELLED",
+          "QUERY_RESULT_EXPORTED",
           "ROW_FILTER_CREATED",
           "ROW_FILTER_REVOKED",
           "COLUMN_MASK_CREATED",
@@ -25120,6 +25442,7 @@
           "CONNECTION_CREDENTIAL_REFUSED",
           "QUERY_COMPLETED",
           "QUERY_CANCELLED",
+          "QUERY_RESULT_EXPORTED",
           "ROW_FILTER_CREATED",
           "ROW_FILTER_REVOKED",
           "COLUMN_MASK_CREATED",
@@ -30897,11 +31220,38 @@
         "title": "ProjectVersionOut",
         "description": "A project version with its manifest filtered for the caller.\n\nParameters\n----------\nid\n    The project version's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\ncommit_sha\n    The commit.\ncode_uri\n    Code tarball location.\ncode_sha256\n    Its digest.\ndeployed_by\n    Who first deployed it.\ncreated_at\n    When.\nmanifest\n    Assets, DAG edges, external inputs, resolved config; SQL withheld\n    where the caller cannot read every referenced table."
       },
+      "QueryEnvironmentOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "protected": {
+            "type": "boolean",
+            "title": "Protected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "protected"
+        ],
+        "title": "QueryEnvironmentOut",
+        "description": "An environment where the caller may submit a query.\n\nParameters\n----------\nname\n    The environment's name.\nprotected\n    Whether the environment is protected (`is_protected` of the environment): a write\n    outside a run there needs a break-glass reason."
+      },
       "QueryListOut": {
         "properties": {
           "id": {
             "type": "string",
             "title": "Id"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
           },
           "submitter": {
             "anyOf": [
@@ -30990,6 +31340,8 @@
         "type": "object",
         "required": [
           "id",
+          "environment",
+          "origin",
           "submitter",
           "kind",
           "target",
@@ -31000,7 +31352,36 @@
           "error_cause"
         ],
         "title": "QueryListOut",
-        "description": "One row of the list of an environment's queries.\n\nNever the SQL text, an error message, lineage, a result location or the worker.\n\nParameters\n----------\nid\n    The query's id.\nsubmitter\n    The submitting principal's name, `null` when it was deleted.\nkind\n    `read`, `create`, `replace`, `append`, `view` or `maintain`.\ntarget\n    A write run's target table, `null` for a read.\nstatus\n    `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED` or `CANCELLED`.\ncreated_at\n    When it was submitted.\nstarted_at\n    When a worker started it.\nfinished_at\n    When it ended.\nerror_cause\n    Why a `FAILED` or `CANCELLED` run ended, as on the status read; never the message.\nwaiting_for\n    Why a `QUEUED` query has not started, as on the status read (including `user_limit` and\n    `no_worker_of_kind`); `null` for other statuses. On another principal's row a manager\n    reads `limit` and never the number running."
+        "description": "One row of the list of an environment's queries.\n\nNever the SQL text, an error message, lineage, a result location or the worker.\n\nParameters\n----------\nid\n    The query's id.\nenvironment\n    The name of the query's environment.\norigin\n    Where the query came from: `written`, `preview`, `check`, `write`, `maintenance` or\n    `task`. A client treats a value it does not know as `written`.\nsubmitter\n    The submitting principal's name, `null` when it was deleted.\nkind\n    `read`, `create`, `replace`, `append`, `view` or `maintain`.\ntarget\n    A write run's target table, `null` for a read.\nstatus\n    `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED` or `CANCELLED`.\ncreated_at\n    When it was submitted.\nstarted_at\n    When a worker started it.\nfinished_at\n    When it ended.\nerror_cause\n    Why a `FAILED` or `CANCELLED` run ended, as on the status read; never the message.\nwaiting_for\n    Why a `QUEUED` query has not started, as on the status read (including `user_limit` and\n    `no_worker_of_kind`); `null` for other statuses. On another principal's row a manager\n    reads `limit` and never the number running."
+      },
+      "QueryListPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueryListOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "QueryListPageOut",
+        "description": "One page of the queries of every environment the caller may query.\n\nParameters\n----------\nitems\n    The rows of the page, in the order of the per-environment list.\nnext_cursor\n    Pass back as `cursor` with the same filters for the next page; `null` on the last."
       },
       "QueryStatusOut": {
         "properties": {
@@ -31141,6 +31522,102 @@
             ],
             "title": "Error Cause"
           },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "written",
+              "preview",
+              "check",
+              "write",
+              "maintenance",
+              "task"
+            ],
+            "title": "Origin"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "result_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Rows"
+          },
+          "result_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Bytes"
+          },
+          "error_line": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Line"
+          },
+          "error_column": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Column"
+          },
           "peak_memory_bytes": {
             "anyOf": [
               {
@@ -31194,10 +31671,12 @@
         "type": "object",
         "required": [
           "query_id",
-          "status"
+          "status",
+          "origin",
+          "created_at"
         ],
         "title": "QueryStatusOut",
-        "description": "Response body for a query's current status.\n\nParameters\n----------\nquery_id\n    The query's id.\nstatus\n    `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED` or `CANCELLED`.\nerror_message\n    Set when `status` is `FAILED` or `CANCELLED`.\nlineage\n    Column lineage, set only when `status` is `SUCCEEDED`.\nwrite_mode\n    A write run's mode, `None` for a read.\ntarget\n    A write run's target, as submitted.\nrows_written\n    Rows a write run wrote.\nsnapshot_id\n    The snapshot a write run committed, if any.\nwatermark\n    The type-tagged watermark an incremental append filtered on.\nschema_diff\n    How a write changed its target's schema, if it did.\nmaintenance\n    A maintenance run's `{\"request\", \"report\"}`. The report's `conflict`\n    is `true` when the table changed during maintenance and nothing was\n    applied (retry); its `note` says in words why part of the run was\n    skipped.\nerror_cause\n    Why a `FAILED` or `CANCELLED` run ended: `not_found`, `permission_denied`,\n    `result_too_large`, `invalid_query`, `out_of_memory`, `timeout`, `cancelled`, `worker_lost`\n    or `internal`.\n    `null` for a run that did not end that way and for a failure recorded without one\n    (a run from before the field existed).\npeak_memory_bytes\n    Highest resident memory of the query's process in bytes; `null` if not measured. A query\n    that failed or was stopped keeps what it measured before it ended.\ncpu_seconds\n    Processor time the query used, in seconds; `null` if not measured.\nbytes_read\n    Bytes DuckDB read (a query) or the SDK readers read (a Python task); `null` if unknown.\nwaiting_for\n    Why a `QUEUED` query has not started, or `null` for any other status: a stable `code`\n    (`no_worker`, `no_worker_of_kind`, `user_limit`, `lock_timeout`, `starting` or\n    `workers_busy`), one\n    sentence in `message`, and the numbers the sentence uses. `workers` is the number of\n    workers that take this kind of work and `ahead` the queued work those workers take\n    before this query; both count the whole instance. `no_worker_of_kind` (workers are\n    running and none takes this kind of work) carries `workers` (0) and `other_workers`.\n    `user_limit` (the submitter already runs as many ad-hoc queries as the limit per user\n    allows) carries `running`, the submitter's own number, and `limit`, and no `ahead`; a\n    manager who reads another principal's row gets `limit` only. `lock_timeout` (a worker\n    waited too long for the lock that serialises the start of the submitter's queries, so\n    workers pass them by for a few seconds) carries `workers` and `next_attempt_at`, the end\n    of that time."
+        "description": "Response body for a query's current status.\n\nParameters\n----------\nquery_id\n    The query's id.\nstatus\n    `QUEUED`, `RUNNING`, `SUCCEEDED`, `FAILED` or `CANCELLED`.\nerror_message\n    Set when `status` is `FAILED` or `CANCELLED`.\nlineage\n    Column lineage, set only when `status` is `SUCCEEDED`.\nwrite_mode\n    A write run's mode, `None` for a read.\ntarget\n    A write run's target, as submitted.\nrows_written\n    Rows a write run wrote.\nsnapshot_id\n    The snapshot a write run committed, if any.\nwatermark\n    The type-tagged watermark an incremental append filtered on.\nschema_diff\n    How a write changed its target's schema, if it did.\nmaintenance\n    A maintenance run's `{\"request\", \"report\"}`. The report's `conflict`\n    is `true` when the table changed during maintenance and nothing was\n    applied (retry); its `note` says in words why part of the run was\n    skipped.\nerror_cause\n    Why a `FAILED` or `CANCELLED` run ended: `not_found`, `permission_denied`,\n    `result_too_large`, `invalid_query`, `out_of_memory`, `timeout`, `cancelled`, `worker_lost`\n    or `internal`.\n    `null` for a run that did not end that way and for a failure recorded without one\n    (a run from before the field existed).\npeak_memory_bytes\n    Highest resident memory of the query's process in bytes; `null` if not measured. A query\n    that failed or was stopped keeps what it measured before it ended.\ncpu_seconds\n    Processor time the query used, in seconds; `null` if not measured.\nbytes_read\n    Bytes DuckDB read (a query) or the SDK readers read (a Python task); `null` if unknown.\norigin\n    Where the run came from: `written` (a query someone submitted), `preview`, `check`,\n    `write`, `maintenance` or `task`. A client treats a value it does not know as opaque.\nsql\n    The text as submitted, for a `written` or `write` run; `null` for every other origin,\n    whose SQL is the server's own or a task's code.\ncreated_at\n    When the run was submitted.\nstarted_at\n    When a worker started it; `null` while it is queued.\nfinished_at\n    When it ended; `null` until then.\nresult_rows\n    Rows of the stored result, set once a read succeeded; `null` otherwise and for a run\n    from before the field existed.\nresult_bytes\n    Size in bytes of the stored Arrow file, set with `result_rows`.\nerror_line\n    Line, from 1, of the submitted SQL where an `invalid_query` failure of a `written` or\n    `write` run points; `null` when unknown.\nerror_column\n    Column within `error_line`, counted in characters (Unicode code points) from 1.\nwaiting_for\n    Why a `QUEUED` query has not started, or `null` for any other status: a stable `code`\n    (`no_worker`, `no_worker_of_kind`, `user_limit`, `lock_timeout`, `starting` or\n    `workers_busy`), one\n    sentence in `message`, and the numbers the sentence uses. `workers` is the number of\n    workers that take this kind of work and `ahead` the queued work those workers take\n    before this query; both count the whole instance. `no_worker_of_kind` (workers are\n    running and none takes this kind of work) carries `workers` (0) and `other_workers`.\n    `user_limit` (the submitter already runs as many ad-hoc queries as the limit per user\n    allows) carries `running`, the submitter's own number, and `limit`, and no `ahead`; a\n    manager who reads another principal's row gets `limit` only. `lock_timeout` (a worker\n    waited too long for the lock that serialises the start of the submitter's queries, so\n    workers pass them by for a few seconds) carries `workers` and `next_attempt_at`, the end\n    of that time."
       },
       "QuerySubmit": {
         "properties": {

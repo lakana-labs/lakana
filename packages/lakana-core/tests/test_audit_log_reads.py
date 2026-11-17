@@ -51,6 +51,7 @@ from lakana_core.models import (
     Grant,
     Principal,
     PrincipalType,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
 )
@@ -498,7 +499,7 @@ def _run(sql: str = _SQL) -> QueryRun:
     QueryRun
         The run.
     """
-    return QueryRun(id=uuid.uuid4(), sql_text=sql, check_result_id=None)
+    return QueryRun(origin=QueryOrigin.WRITTEN, id=uuid.uuid4(), sql_text=sql, check_result_id=None)
 
 
 @pytest.mark.parametrize(("mode", "stored"), [("full", _SQL), ("hash", _HASHED), ("off", None)])

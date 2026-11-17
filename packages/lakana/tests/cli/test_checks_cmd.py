@@ -352,6 +352,37 @@ def test_check_rows_prints_json_and_writes_a_file_like_sql(tmp_path: Path) -> No
     assert pq.read_table(out).equals(table)
 
 
+def test_check_rows_to_a_csv_file_reports_the_runs_rows_and_the_files_size(
+    tmp_path: Path,
+) -> None:
+    """The server makes the CSV; `rows` still comes from the run, as for a Parquet file."""
+    csv = b'"id"\r\n1\r\n2\r\n'
+    api = FakeApi()
+    run = {"query_id": "q1", "status": "SUCCEEDED", "error_message": None, "lineage": None}
+    api.on("POST", _ROWS, status=202, json={"query_id": "q1"})
+    api.on("GET", f"{_QUERIES}/q1", json={**run, "result_rows": 2})
+    api.on("GET", f"{_QUERIES}/q1/result", content=csv)
+    out = tmp_path / "rows.csv"
+
+    as_json = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "check",
+        "rows",
+        _RUN,
+        _CHECK,
+        "--env",
+        "dev",
+        "--out",
+        str(out),
+    )
+
+    assert as_json.exit_code == 0, as_json.stderr
+    assert json.loads(as_json.stdout) == {"rows": 2, "path": str(out), "size_bytes": len(csv)}
+    assert out.read_bytes() == csv
+
+
 def test_check_rows_refuses_an_unknown_out_extension_before_it_queues_anything(
     tmp_path: Path,
 ) -> None:

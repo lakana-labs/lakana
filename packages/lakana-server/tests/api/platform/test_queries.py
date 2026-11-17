@@ -2,8 +2,10 @@
 
 import json
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import IO, Any
 
 import pyarrow as pa
 import pytest
@@ -11,7 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import LakanaError
-from lakana_core.models import QueryRun, QueryRunStatus, WriteMode
+from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus, WriteMode
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.api.platform import queries as queries_module
 from lakana_server.api.platform.schemas import (
@@ -22,7 +24,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.result_json import json_page
 from tests.conftest import AUTH_HEADER
-from tests.server_test_helpers import person, query_run_columns
+from tests.server_test_helpers import create_environment, person, query_run_columns
 
 
 def test_submit_then_get_returns_queued(client: TestClient) -> None:
@@ -299,7 +301,7 @@ def test_another_principals_query_is_404_on_status_and_result(
 
 
 def _environment(client: TestClient, name: str = "dev") -> None:
-    """Create an environment with a file store.
+    """Create an environment with a file store under the test's own directory.
 
     Parameters
     ----------
@@ -308,12 +310,7 @@ def _environment(client: TestClient, name: str = "dev") -> None:
     name
         The environment's name.
     """
-    created = client.post(
-        "/api/v1/environments",
-        json={"name": name, "storage": {"scheme": "file", "root": "file:///tmp/cancel"}},
-        headers=AUTH_HEADER,
-    )
-    assert created.status_code == 201, created.text
+    create_environment(client, name)
 
 
 def _submit(client: TestClient, headers: dict[str, str] = AUTH_HEADER, env: str = "dev") -> str:
@@ -535,6 +532,22 @@ def test_a_holder_of_manage_environment_cancels_anyones_query(client: TestClient
     assert event[1]["query_id"] == query_id
     assert event[1]["status"] == "QUEUED"
     assert event[1]["submitted_by"] == principals["bob"]
+
+
+def test_a_managers_cancel_of_anothers_run_does_not_return_its_sql(client: TestClient) -> None:
+    """The cancel answer carries the SQL to the submitter only, never to a manager."""
+    _environment(client)
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ADMIN")
+    by_manager = _submit(client, bob)
+    by_owner = _submit(client, bob)
+
+    managed = client.post(_cancel_url(by_manager), headers=carol).json()
+    owned = client.post(_cancel_url(by_owner), headers=bob).json()
+
+    assert managed["origin"] == "written"
+    assert managed["sql"] is None
+    assert owned["sql"] is not None
 
 
 def test_cancel_needs_a_token(client: TestClient) -> None:
@@ -930,6 +943,8 @@ def test_the_list_never_contains_sql(client: TestClient) -> None:
     for row in rows:
         assert set(row) == {
             "id",
+            "environment",
+            "origin",
             "submitter",
             "kind",
             "target",
@@ -1381,14 +1396,15 @@ def test_limit_or_offset_with_arrow_is_422(client: TestClient) -> None:
         response = client.get(result_url(qid, query), headers=AUTH_HEADER)
         assert response.status_code == 422, query
         assert response.json()["detail"] == (
-            "limit and offset apply to format=json; the Arrow result is always whole."
+            "limit and offset apply to format=json; arrow, csv and xlsx are always the whole "
+            "result."
         )
 
 
 def test_an_unknown_format_is_422(client: TestClient) -> None:
     _environment(client)
     qid = stored_result(client, "dev", pa.table({"i": [1]}))
-    response = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    response = client.get(result_url(qid, "format=parquet"), headers=AUTH_HEADER)
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["query", "format"]
 
@@ -1452,11 +1468,16 @@ def test_the_slot_is_released_after_a_page_and_after_a_failure(
     assert client.app.state.json_page_limiter.try_acquire(admin) is None
 
 
-def test_the_result_route_documents_arrow_and_the_json_page(client: TestClient) -> None:
+def test_the_result_route_documents_every_format(client: TestClient) -> None:
     spec = client.app.openapi()
     op = spec["paths"]["/api/v1/environments/{env}/queries/{query_id}/result"]["get"]
     content = op["responses"]["200"]["content"]
-    assert set(content) == {"application/vnd.apache.arrow.file", "application/json"}
+    assert set(content) == {
+        "application/vnd.apache.arrow.file",
+        "application/json",
+        "text/csv; charset=utf-8",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }
     assert content["application/json"]["schema"] == {"$ref": "#/components/schemas/ResultPageOut"}
     assert {code for code in op["responses"]} == {"200", "401", "403", "404", "409", "422", "503"}
     limit = next(p for p in op["parameters"] if p["name"] == "limit")
@@ -1485,3 +1506,909 @@ def test_the_page_schema_declares_every_key_the_writer_emits() -> None:
     assert set(page["masked_columns"][0]) == set(MaskedColumnOut.model_fields)
     assert set(page["preview"]) == set(PreviewOut.model_fields)
     ResultPageOut.model_validate(page)
+
+
+def _submit_in(client: TestClient, env: str, sql: str = "SELECT 1") -> str:
+    """Create environment `env` and submit `sql` in it.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    env
+        Name of the environment to create.
+    sql
+        The query to submit.
+
+    Returns
+    -------
+    str
+        The new query's id.
+    """
+    client.post(
+        "/api/v1/environments",
+        json={"name": env, "storage": {"scheme": "file", "root": "file:///tmp/s", "options": {}}},
+        headers=AUTH_HEADER,
+    )
+    submitted = client.post(
+        f"/api/v1/environments/{env}/queries", json={"sql": sql}, headers=AUTH_HEADER
+    )
+    assert submitted.status_code == 202
+    return submitted.json()["query_id"]
+
+
+def _edit_run(client: TestClient, query_id: str, **values: object) -> None:
+    """Set attributes of a query run straight in the app's database.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    query_id
+        The query's id.
+    **values
+        Attribute names of `QueryRun` and the values to set.
+    """
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        run = session.get(QueryRun, uuid.UUID(query_id))
+        assert run is not None
+        for name, value in values.items():
+            setattr(run, name, value)
+        session.commit()
+
+
+def test_the_status_of_a_written_query_has_its_sql_origin_and_times(client: TestClient) -> None:
+    """A written query's status carries the SQL as submitted, its origin and its times."""
+    query_id = _submit_in(client, "st1", "SELECT 1 AS one")
+    started = datetime(2026, 11, 1, 10, 0, 1, tzinfo=UTC)
+    finished = datetime(2026, 11, 1, 10, 0, 2, tzinfo=UTC)
+    _edit_run(client, query_id, started_at=started, finished_at=finished)
+
+    body = client.get(f"/api/v1/environments/st1/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert body["origin"] == "written"
+    assert body["sql"] == "SELECT 1 AS one"
+    assert datetime.fromisoformat(body["created_at"]).tzinfo is not None
+    assert datetime.fromisoformat(body["started_at"]) == started
+    assert datetime.fromisoformat(body["finished_at"]) == finished
+    assert body["result_rows"] is None
+    assert body["result_bytes"] is None
+    assert body["error_line"] is None
+    assert body["error_column"] is None
+
+
+def test_the_status_of_a_write_has_its_sql_and_a_server_made_run_has_none(
+    client: TestClient,
+) -> None:
+    """Only `written` and `write` runs give back their SQL; every other origin says `null`."""
+    query_id = _submit_in(client, "st2", "SELECT 1")
+    shown = {"written": True, "write": True}
+    for origin in QueryOrigin:
+        _edit_run(client, query_id, origin=origin)
+        body = client.get(
+            f"/api/v1/environments/st2/queries/{query_id}", headers=AUTH_HEADER
+        ).json()
+        assert body["origin"] == origin.value
+        assert (body["sql"] is not None) is shown.get(origin.value, False)
+
+
+def test_the_status_of_a_preview_has_no_sql(client: TestClient) -> None:
+    """A preview's SQL is the server's own text; the status read says `null`."""
+    query_id = _submit_in(client, "st3", "SELECT 1")
+    _edit_run(client, query_id, origin=QueryOrigin.PREVIEW)
+
+    body = client.get(f"/api/v1/environments/st3/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert body["origin"] == "preview"
+    assert body["sql"] is None
+
+
+def test_the_status_of_a_succeeded_read_has_its_result_rows_and_bytes(
+    client: TestClient,
+) -> None:
+    """Once a read succeeded, its row count and the stored file's size are in the status."""
+    query_id = _submit_in(client, "st4")
+    _edit_run(client, query_id, status=QueryRunStatus.SUCCEEDED, result_rows=3, result_bytes=1234)
+
+    body = client.get(f"/api/v1/environments/st4/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert (body["result_rows"], body["result_bytes"]) == (3, 1234)
+
+
+def test_the_status_of_a_failed_query_has_its_error_position(client: TestClient) -> None:
+    """A failed query's status gives the line and column the worker recorded."""
+    query_id = _submit_in(client, "st5", "SELECT\n  FROM")
+    _edit_run(
+        client,
+        query_id,
+        status=QueryRunStatus.FAILED,
+        error_message="bad",
+        error_cause="invalid_query",
+        error_line=2,
+        error_column=3,
+    )
+
+    body = client.get(f"/api/v1/environments/st5/queries/{query_id}", headers=AUTH_HEADER).json()
+
+    assert (body["error_line"], body["error_column"]) == (2, 3)
+
+
+# -- the list across environments ------------------------------------
+
+_ALL = "/api/v1/queries"
+
+
+def test_get_all_queries_answers_items_and_next_cursor(client: TestClient) -> None:
+    """The cross-environment list has the body of a new paged list, not the header."""
+    _environment(client)
+    _environment(client, "other")
+    first = _submit(client)
+    second = _submit(client, env="other")
+    third = _submit(client)
+    page = client.get(_ALL, params={"limit": 2}, headers=AUTH_HEADER)
+    assert page.status_code == 200, page.text
+    assert "X-Next-Cursor" not in page.headers
+    body = page.json()
+    assert set(body) == {"items", "next_cursor"}
+    assert [row["id"] for row in body["items"]] == [first, second]
+    assert body["next_cursor"] is not None
+    rest = client.get(
+        _ALL, params={"limit": 2, "cursor": body["next_cursor"]}, headers=AUTH_HEADER
+    ).json()
+    assert ([row["id"] for row in rest["items"]], rest["next_cursor"]) == ([third], None)
+    only = client.get(_ALL, params={"environment": "other"}, headers=AUTH_HEADER).json()
+    assert [row["id"] for row in only["items"]] == [second]
+    per_env = client.get(_list_url(), params={"limit": 1}, headers=AUTH_HEADER)
+    refused = client.get(
+        _ALL, params={"cursor": per_env.headers["X-Next-Cursor"]}, headers=AUTH_HEADER
+    )
+    assert refused.status_code == 422
+
+
+def test_get_all_queries_with_an_unknown_environment_is_404(client: TestClient) -> None:
+    response = client.get(_ALL, params={"environment": "nowhere"}, headers=AUTH_HEADER)
+    assert response.status_code == 404
+    assert "No environment named" in response.json()["detail"]
+
+
+def test_get_all_queries_of_an_environment_without_a_right_is_403_as_its_own_list(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    reader = person(client, "reader", "VIEWER")
+    own = client.get(_list_url(), headers=reader)
+    across = client.get(_ALL, params={"environment": "dev"}, headers=reader)
+    assert (own.status_code, across.status_code) == (403, 403)
+    assert across.json()["detail"] == own.json()["detail"]
+
+
+def test_a_deleted_environments_runs_never_appear_across_environments(client: TestClient) -> None:
+    _environment(client)
+    _environment(client, "other")
+    kept = _submit(client)
+    gone = _submit(client, env="other")
+    _put_status(client, gone, "SUCCEEDED")
+    deleted = client.delete("/api/v1/environments/other", headers=AUTH_HEADER)
+    assert deleted.status_code in (200, 204), deleted.text
+    listed = client.get(_ALL, params={"include_ended": "true"}, headers=AUTH_HEADER).json()
+    assert [row["id"] for row in listed["items"]] == [kept]
+
+
+@pytest.mark.parametrize("route", ["one", "all"])
+def test_since_alone_lists_the_runs_that_ended_since(client: TestClient, route: str) -> None:
+    """`since` without `include_ended` still lists ended runs: a filter never does nothing."""
+    _environment(client)
+    old = _submit(client)
+    _put_status(client, old, "SUCCEEDED")
+    _edit_run(client, old, finished_at=datetime.now(UTC) - timedelta(days=3))
+    older = _submit(client)
+    _put_status(client, older, "SUCCEEDED")
+    _edit_run(client, older, finished_at=datetime.now(UTC) - timedelta(days=10))
+    week = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    if route == "one":
+        rows = client.get(_list_url(), params={"since": week}, headers=AUTH_HEADER).json()
+    else:
+        rows = client.get(_ALL, params={"since": week}, headers=AUTH_HEADER).json()["items"]
+    assert [row["id"] for row in rows] == [old]
+
+
+def test_get_all_queries_without_any_right_is_an_empty_page(client: TestClient) -> None:
+    """A caller with no right anywhere gets an empty page, never a 403 or a 404."""
+    _environment(client)
+    _environment(client, "other")
+    _submit(client)
+    reader = person(client, "reader", "VIEWER")
+    listed = client.get(_ALL, headers=reader)
+    assert listed.status_code == 200, listed.text
+    assert listed.json() == {"items": [], "next_cursor": None}
+    assert client.get(f"{_ALL}/environments", headers=reader).json() == []
+    assert client.get(_ALL).status_code == 401
+
+
+def test_rows_carry_environment_and_origin(client: TestClient) -> None:
+    _environment(client)
+    written = _submit(client)
+    task = _submit(client)
+    _edit_run(client, task, origin=QueryOrigin.TASK)
+    rows = client.get(_list_url(), headers=AUTH_HEADER).json()
+    assert [(row["id"], row["environment"], row["origin"]) for row in rows] == [
+        (written, "dev", "written"),
+        (task, "dev", "task"),
+    ]
+    across = client.get(_ALL, params={"origin": "task"}, headers=AUTH_HEADER).json()["items"]
+    assert [(row["id"], row["environment"], row["origin"]) for row in across] == [
+        (task, "dev", "task")
+    ]
+    by_origin = client.get(_list_url(), params={"origin": "written,task"}, headers=AUTH_HEADER)
+    assert len(by_origin.json()) == 2
+    unknown = client.get(_list_url(), params={"origin": "typed"}, headers=AUTH_HEADER)
+    assert unknown.status_code == 422
+    assert "`origin` must be one of written, preview" in unknown.text
+    _put_status(client, written, "SUCCEEDED")
+    _edit_run(client, written, finished_at=datetime.now(UTC) - timedelta(days=3))
+    params = {"include_ended": "true", "status": "succeeded"}
+    assert client.get(_list_url(), params=params, headers=AUTH_HEADER).json() == []
+    week = (datetime.now(UTC) - timedelta(days=7)).isoformat()
+    old = client.get(_ALL, params={**params, "since": week}, headers=AUTH_HEADER).json()
+    assert [row["id"] for row in old["items"]] == [written]
+    naive = client.get(_list_url(), params={"since": "2026-10-18T09:30:00"}, headers=AUTH_HEADER)
+    assert naive.status_code == 422
+    assert "`since` has no time zone" in naive.text
+
+
+def test_get_query_environments(client: TestClient) -> None:
+    """The environments where the caller may submit a query, by name, with their protection."""
+    _environment(client, "prod")
+    _environment(client)
+    _environment(client, "stage")
+    from lakana_core.models import Environment
+
+    with Session(client.app.state.engine) as session:  # type: ignore[attr-defined]
+        prod = session.query(Environment).filter_by(name="prod").one()
+        prod.is_protected = True
+        session.commit()
+    answer = client.get(f"{_ALL}/environments", headers=AUTH_HEADER)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == [
+        {"name": "dev", "protected": False},
+        {"name": "prod", "protected": True},
+        {"name": "stage", "protected": False},
+    ]
+    analyst = person(client, "ana", "ANALYST", env="stage")
+    assert client.get(f"{_ALL}/environments", headers=analyst).json() == [
+        {"name": "stage", "protected": False}
+    ]
+
+
+# --- Whole-result files ---------------------------------------------------------------------------
+
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+THREE_ROWS = pa.table({"name": ["a,b", "é", None], "n": [1, 2, 3]})
+"""A small result; its rows are written as `result_rows` where a test records sizes."""
+
+
+def _arrow_size(table: pa.Table) -> int:
+    """Return the length of the Arrow IPC file `stored_result` writes for a table.
+
+    Parameters
+    ----------
+    table
+        The result.
+
+    Returns
+    -------
+    int
+        The stored file's bytes.
+    """
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_file(sink, table.schema) as writer:
+        writer.write_table(table)
+    return len(sink.getvalue())
+
+
+def _sized(client: TestClient, table: pa.Table = THREE_ROWS) -> str:
+    """Store a result in `dev` whose run records its rows and size, as the worker does.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    table
+        The result.
+
+    Returns
+    -------
+    str
+        The query's id.
+    """
+    return stored_result(
+        client, "dev", table, result_rows=table.num_rows, result_bytes=_arrow_size(table)
+    )
+
+
+def _exports(client: TestClient) -> list[tuple[object, dict[str, object]]]:
+    """List the `QUERY_RESULT_EXPORTED` audit events as (principal id, detail).
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+
+    Returns
+    -------
+    list of tuple
+        One entry per event, oldest first.
+    """
+    from sqlalchemy import select
+
+    from lakana_core.models import AuditEvent, AuditEventType
+
+    with Session(client.app.state.engine) as session:
+        rows = session.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.event_type == AuditEventType.QUERY_RESULT_EXPORTED)
+            .order_by(AuditEvent.occurred_at)
+        ).all()
+        return [(row.principal_id, dict(row.detail)) for row in rows]
+
+
+def test_csv_result_streams_with_disposition_and_size_headers(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    response = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["content-disposition"] == f'attachment; filename="query-{qid}.csv"'
+    assert response.headers["x-result-rows"] == "3"
+    assert response.headers["x-result-arrow-bytes"] == str(_arrow_size(THREE_ROWS))
+    assert "content-length" not in response.headers
+    assert response.content == b'"name","n"\r\n"a,b",1\r\n"\xc3\xa9",2\r\n,3\r\n'
+
+
+def test_a_csv_larger_than_one_piece_downloads_whole_through_the_route(
+    client: TestClient,
+) -> None:
+    """A body of several `FILE_PIECE_BYTES` pieces arrives whole and in order."""
+    from lakana_server.result_files import FILE_PIECE_BYTES, csv_pieces
+
+    _environment(client)
+    rows = 100_000
+    table = pa.table(
+        {"i": pa.array(range(rows), pa.int64()), "s": [f"value {n:08d}" for n in range(rows)]}
+    )
+    expected = b"".join(csv_pieces(table))
+    assert len(expected) > 2 * FILE_PIECE_BYTES
+    qid = _sized(client, table)
+    response = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert response.headers["x-result-rows"] == str(rows)
+    assert response.content == expected
+
+
+def test_xlsx_result_is_a_zip_with_the_spreadsheet_media_type(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    response = client.get(result_url(qid, "format=xlsx"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == XLSX
+    assert response.headers["content-disposition"] == f'attachment; filename="query-{qid}.xlsx"'
+    assert "content-length" not in response.headers
+    assert response.content.startswith(b"PK\x03\x04")
+
+
+def test_arrow_result_now_has_the_disposition_and_still_the_same_bytes(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    response = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+    assert response.headers["content-type"] == "application/vnd.apache.arrow.file"
+    assert response.headers["content-disposition"] == f'attachment; filename="query-{qid}.arrow"'
+    assert response.headers["x-result-rows"] == "3"
+    assert "content-length" not in response.headers
+    assert pa.ipc.open_file(pa.BufferReader(response.content)).read_all().equals(THREE_ROWS)
+
+
+def test_a_whole_result_download_writes_one_export_event_per_format(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.get(result_url(qid, "format=json"), headers=AUTH_HEADER).status_code == 200
+    assert _exports(client) == []
+    for result_format in ("arrow", "csv", "xlsx"):
+        got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert got.status_code == 200, got.text
+    detail = {"query_id": qid, "rows": 3, "size_bytes": _arrow_size(THREE_ROWS)}
+    assert _exports(client) == [
+        (admin, {**detail, "format": "arrow"}),
+        (admin, {**detail, "format": "csv"}),
+        (admin, {**detail, "format": "xlsx"}),
+    ]
+
+
+def test_a_download_of_another_principals_run_is_404_and_writes_no_export_event(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    bob = person(client, "bob", "ANALYST")
+    carol = person(client, "carol", "ADMIN")
+    for headers in (bob, carol):
+        for result_format in ("arrow", "csv", "xlsx"):
+            refused = client.get(result_url(qid, f"format={result_format}"), headers=headers)
+            assert refused.status_code == 404, (result_format, refused.text)
+    assert _exports(client) == []
+
+
+def test_a_bound_task_token_writes_an_export_event_for_a_file_but_not_for_arrow(
+    client: TestClient,
+) -> None:
+    from lakana_core.auth import BoundTask, PrincipalRef, TaskScope
+    from lakana_core.models import PrincipalType
+    from lakana_server.deps import get_principal
+
+    _environment(client)
+    token_id = uuid.uuid4()
+    qid = stored_result(client, "dev", THREE_ROWS, task_token_id=token_id)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert isinstance(admin, uuid.UUID)
+    scope = TaskScope(
+        environment="dev",
+        asset_scope=[],
+        token_id=token_id,
+        bound=BoundTask(uuid.uuid4(), 1, "gold.scores", ("bronze.events",), ("bronze.events",)),
+    )
+    bound = PrincipalRef(id=admin, name="admin", type=PrincipalType.USER, task_scope=scope)
+    client.app.dependency_overrides[get_principal] = lambda: bound
+    try:
+        arrow = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+        assert arrow.status_code == 200, arrow.text
+        assert _exports(client) == []
+        for result_format in ("csv", "xlsx"):
+            got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+            assert got.status_code == 200, (result_format, got.text)
+    finally:
+        del client.app.dependency_overrides[get_principal]
+    detail = {"query_id": qid, "rows": 3, "size_bytes": _arrow_size(THREE_ROWS)}
+    assert _exports(client) == [
+        (admin, {**detail, "format": "csv"}),
+        (admin, {**detail, "format": "xlsx"}),
+    ]
+
+
+def test_an_xlsx_refusal_is_422_with_the_sentence_and_writes_no_export_event(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lakana_server import result_files
+
+    monkeypatch.setattr(result_files, "XLSX_MAX_ROWS", 2)
+    _environment(client)
+    qid = _sized(client)
+    refused = client.get(result_url(qid, "format=xlsx"), headers=AUTH_HEADER)
+    assert refused.status_code == 422
+    assert refused.json() == {
+        "detail": (
+            "This result has 3 rows; a spreadsheet holds at most 2 below its header row. "
+            f"Download it as CSV instead: lakana query result {qid} --env dev --format csv "
+            f"--out query-{qid}.csv"
+        ),
+        "type": "XlsxRefused",
+    }
+    assert _exports(client) == []
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None
+
+
+def test_paging_parameters_with_a_file_format_are_422(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    for result_format in ("arrow", "csv", "xlsx"):
+        for paging in ("limit=5", "offset=0"):
+            response = client.get(
+                result_url(qid, f"format={result_format}&{paging}"), headers=AUTH_HEADER
+            )
+            assert response.status_code == 422, (result_format, paging)
+            assert response.json()["detail"] == queries_module.WHOLE_RESULT_TAKES_NO_PAGING
+    assert _exports(client) == []
+
+
+def test_a_second_file_of_the_same_person_at_once_is_503_with_retry_after(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    lim = client.app.state.result_file_limiter
+    assert lim.try_acquire(admin) is None
+    for result_format in ("csv", "xlsx"):
+        busy = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert (busy.status_code, busy.headers["Retry-After"], busy.json()) == (
+            503,
+            "1",
+            {
+                "detail": (
+                    "You already have a result file being prepared; wait for it, then try again."
+                ),
+                "type": "ResultFileLimitError",
+            },
+        )
+    lim.release(admin)
+    others = [uuid.uuid4(), uuid.uuid4()]
+    for other in others:
+        assert lim.try_acquire(other) is None
+    full = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert (full.status_code, full.json()["detail"]) == (
+        503,
+        "The server is preparing other result files; try again in a moment.",
+    )
+    assert _exports(client) == []
+
+
+_OPEN_FILES_HELD = (
+    "You already have 2 result files being downloaded; finish or cancel one, then try again."
+)
+
+
+def _open_files_free(client: TestClient, key: object) -> bool:
+    """Say whether `key` holds none of its open result files, leaving the count as it was.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+    key
+        The principal id.
+
+    Returns
+    -------
+    bool
+        Whether both of the principal's open-file places could be taken.
+    """
+    lim = client.app.state.open_result_file_limiter
+    taken = 0
+    while taken < 2 and lim.try_acquire(key) is None:
+        taken += 1
+    for _ in range(taken):
+        lim.release(key)
+    return taken == 2
+
+
+def test_a_third_open_file_of_the_same_person_is_503_and_writes_no_export_event(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    open_files = client.app.state.open_result_file_limiter
+    # Two files still being downloaded: prepared, their bodies not yet ended.
+    assert open_files.try_acquire(admin) is None
+    assert open_files.try_acquire(admin) is None
+    for result_format in ("csv", "xlsx"):
+        busy = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert (busy.status_code, busy.headers["Retry-After"], busy.json()) == (
+            503,
+            "1",
+            {"detail": _OPEN_FILES_HELD, "type": "ResultFileLimitError"},
+        )
+    assert _exports(client) == []
+    # Arrow is streamed from storage and opens no temporary file.
+    assert client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER).status_code == 200
+    # The preparation slot was never taken by the refused requests.
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None
+    client.app.state.result_file_limiter.release(admin)
+    open_files.release(admin)
+    got = client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER)
+    assert got.status_code == 200, got.text
+    open_files.release(admin)
+    assert _open_files_free(client, admin)
+
+
+def test_another_persons_open_files_do_not_hold_up_yours(client: TestClient) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    open_files = client.app.state.open_result_file_limiter
+    other = uuid.uuid4()
+    assert open_files.try_acquire(other) is None
+    assert open_files.try_acquire(other) is None
+    for result_format in ("csv", "xlsx"):
+        got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert got.status_code == 200, (result_format, got.text)
+    assert _open_files_free(client, admin)
+    assert open_files.try_acquire(other) == "own"
+
+
+def test_the_file_slot_and_open_file_are_given_back_when_the_body_ends_or_preparing_fails(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    lim = client.app.state.result_file_limiter
+    for result_format in ("csv", "xlsx"):
+        got = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert got.status_code == 200, (result_format, got.text)
+        assert lim.try_acquire(admin) is None, result_format
+        lim.release(admin)
+        assert _open_files_free(client, admin), result_format
+    exported = len(_exports(client))
+    # A conversion that fails on a value fails while the file is prepared: before the 200
+    # and before the export is recorded.
+    monkeypatch.setattr(queries_module, "write_csv", raising)
+    monkeypatch.setattr(queries_module, "write_xlsx", raising)
+    for result_format in ("csv", "xlsx"):
+        failed = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert failed.status_code == 500, result_format
+        assert lim.try_acquire(admin) is None, result_format
+        lim.release(admin)
+        assert _open_files_free(client, admin), result_format
+    assert len(_exports(client)) == exported
+
+
+class _ClosableRead:
+    """A storage read of an Arrow file that remembers whether it was closed."""
+
+    def __init__(self, pieces: list[bytes]) -> None:
+        """Hold the pieces.
+
+        Parameters
+        ----------
+        pieces
+            What the read yields.
+        """
+        self._pieces = iter(pieces)
+        self.closed = False
+
+    def __iter__(self) -> "_ClosableRead":
+        """Be its own iterator.
+
+        Returns
+        -------
+        _ClosableRead
+            Itself.
+        """
+        return self
+
+    def __next__(self) -> bytes:
+        """Give the next piece.
+
+        Returns
+        -------
+        bytes
+            The piece.
+        """
+        return next(self._pieces)
+
+    def close(self) -> None:
+        """Remember the close."""
+        self.closed = True
+
+
+def _storage_reads(monkeypatch: pytest.MonkeyPatch, closable: bool) -> list[_ClosableRead]:
+    """Make every storage read of a whole file a `_ClosableRead`, or a plain iterator.
+
+    Parameters
+    ----------
+    monkeypatch
+        Patches `FsspecStorage.read_chunks`.
+    closable
+        Whether a read has a `close` (a generator, a storage stream) or not (a plain iterator,
+        which the storage protocol also allows).
+
+    Returns
+    -------
+    list of _ClosableRead
+        The closable reads made, filled as the route reads.
+    """
+    from lakana_core.storage.fsspec_storage import FsspecStorage
+
+    original = FsspecStorage.read_chunks
+    made: list[_ClosableRead] = []
+
+    def read_chunks(self: FsspecStorage, path: str) -> Iterator[bytes]:
+        pieces = list(original(self, path))
+        if not closable:
+            return iter(pieces)
+        made.append(_ClosableRead(pieces))
+        return made[-1]
+
+    monkeypatch.setattr(FsspecStorage, "read_chunks", read_chunks)
+    return made
+
+
+@pytest.mark.parametrize("closable", [True, False], ids=["closable", "plain-iterator"])
+def test_an_arrow_download_streams_a_read_with_or_without_close_and_closes_it_once(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, closable: bool
+) -> None:
+    _environment(client)
+    qid = _sized(client)
+    made = _storage_reads(monkeypatch, closable)
+    response = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+    assert response.status_code == 200, response.text
+    assert pa.ipc.open_file(pa.BufferReader(response.content)).read_all().equals(THREE_ROWS)
+    assert [read.closed for read in made] == ([True] if closable else [])
+
+
+@pytest.mark.parametrize("closable", [True, False], ids=["closable", "plain-iterator"])
+def test_an_arrow_download_whose_export_is_not_recorded_is_500_and_closes_the_read(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, closable: bool
+) -> None:
+    """The storage read opened before the export is recorded is closed when recording fails."""
+    from lakana_core.catalog.query_service import QueryService
+
+    _environment(client)
+    qid = _sized(client)
+    exported = len(_exports(client))
+    made = _storage_reads(monkeypatch, closable)
+    monkeypatch.setattr(QueryService, "record_export", raising)
+    response = client.get(result_url(qid, "format=arrow"), headers=AUTH_HEADER)
+    assert response.status_code == 500
+    assert [read.closed for read in made] == ([True] if closable else [])
+    assert len(_exports(client)) == exported
+
+
+class _Spooled:
+    """Record the temporary files the result route opens, to see that each is closed."""
+
+    def __init__(self) -> None:
+        import tempfile
+
+        self.files: list[IO[bytes]] = []
+        self._open = tempfile.TemporaryFile
+
+    def __call__(self) -> IO[bytes]:
+        """Open a real temporary file and remember it.
+
+        Returns
+        -------
+        file object
+            The temporary file.
+        """
+        opened = self._open()
+        self.files.append(opened)
+        return opened
+
+
+def _download_over_asgi(
+    client: TestClient, qid: str, result_format: str, fail_on: str
+) -> tuple[bool, list[str]]:
+    """Fetch a result file straight through ASGI, with a client that goes away.
+
+    Parameters
+    ----------
+    client
+        Test client for the API; its app has run its lifespan.
+    qid
+        The query's id.
+    result_format
+        ``csv`` or ``xlsx``.
+    fail_on
+        The ASGI message type whose send fails as a client that went away:
+        ``http.response.start`` (the body never starts) or ``http.response.body``.
+
+    Returns
+    -------
+    tuple
+        Whether, when the response started, the caller's file slot was free and the file was
+        counted as one of the caller's open files (one more could be opened, not two), and
+        the types of the messages sent before the failure.
+    """
+    import asyncio
+    import contextlib
+
+    from starlette.requests import ClientDisconnect
+
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    lim = client.app.state.result_file_limiter
+    free_at_start: list[bool] = []
+    sent: list[str] = []
+    path = f"/api/v1/environments/dev/queries/{qid}/result"
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": "",
+        "query_string": f"format={result_format}".encode(),
+        "headers": [
+            (b"host", b"testserver"),
+            (b"authorization", AUTH_HEADER["Authorization"].encode()),
+        ],
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+    }
+
+    requested: list[bool] = []
+
+    async def receive() -> dict[str, Any]:
+        if not requested:
+            requested.append(True)
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.Event().wait()
+        return {}  # pragma: no cover
+
+    async def send(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start" and not free_at_start:
+            free = lim.try_acquire(admin) is None
+            if free:
+                lim.release(admin)
+            open_files = client.app.state.open_result_file_limiter
+            one_more = open_files.try_acquire(admin) is None
+            two_more = one_more and open_files.try_acquire(admin) is None
+            for _ in range(int(one_more) + int(two_more)):
+                open_files.release(admin)
+            free_at_start.append(free and one_more and not two_more)
+        if message["type"] == fail_on:
+            raise OSError("the client went away")
+        sent.append(message["type"])
+        await asyncio.sleep(0)
+
+    async def go() -> None:
+        with contextlib.suppress(OSError, ClientDisconnect):
+            await client.app(scope, receive, send)
+
+    asyncio.run(go())
+    return free_at_start == [True], sent
+
+
+@pytest.mark.parametrize("result_format", ["csv", "xlsx"])
+@pytest.mark.parametrize("fail_on", ["http.response.start", "http.response.body"])
+def test_a_file_streams_without_a_slot_and_its_temporary_file_closes_when_the_client_goes(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, result_format: str, fail_on: str
+) -> None:
+    """A paused or vanished reader holds no file slot; its file closes and stops counting."""
+    _environment(client)
+    qid = _sized(client)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    spooled = _Spooled()
+    monkeypatch.setattr(queries_module.tempfile, "TemporaryFile", spooled)
+    free_at_start, sent = _download_over_asgi(client, qid, result_format, fail_on)
+    assert free_at_start
+    assert "http.response.body" not in sent
+    assert len(spooled.files) == 1
+    assert spooled.files[0].closed
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None
+    assert _open_files_free(client, admin)
+
+
+def test_a_result_without_recorded_sizes_downloads_without_the_size_headers(
+    client: TestClient,
+) -> None:
+    _environment(client)
+    qid = stored_result(client, "dev", THREE_ROWS)
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    for result_format in ("csv", "arrow"):
+        response = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert response.status_code == 200, response.text
+        assert "x-result-rows" not in response.headers
+        assert "x-result-arrow-bytes" not in response.headers
+    csv_detail = {"query_id": qid, "rows": 3, "size_bytes": _arrow_size(THREE_ROWS)}
+    assert _exports(client) == [
+        (admin, {**csv_detail, "format": "csv"}),
+        (admin, {"query_id": qid, "rows": None, "size_bytes": None, "format": "arrow"}),
+    ]
+
+
+def test_a_column_no_file_holds_is_422_before_any_export_or_byte(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A type the flattening does not turn into one a file holds is refused, not cut mid-body."""
+    from lakana_server import result_files
+
+    _environment(client)
+    bignum = pa.opaque(pa.binary(), "bignum", "DuckDB")
+    qid = stored_result(client, "dev", pa.table({"big": pa.array([b"\x05"], bignum)}))
+    admin = query_run_columns(client, qid, "principal_id")["principal_id"]
+    assert client.get(result_url(qid, "format=csv"), headers=AUTH_HEADER).content == (
+        b'"big"\r\n"\\x05"\r\n'
+    )
+    exported = len(_exports(client))
+    monkeypatch.setattr(result_files, "_cell_column", lambda column: column)
+    for result_format in ("csv", "xlsx"):
+        refused = client.get(result_url(qid, f"format={result_format}"), headers=AUTH_HEADER)
+        assert refused.status_code == 422, (result_format, refused.text)
+        assert refused.json()["type"] == "ResultFileRefused"
+        assert f"--format arrow --out query-{qid}.arrow" in refused.json()["detail"]
+    assert len(_exports(client)) == exported
+    assert client.app.state.result_file_limiter.try_acquire(admin) is None

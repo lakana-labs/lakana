@@ -43,6 +43,7 @@ from lakana_core.models import (
     CheckResult,
     JobVersion,
     Namespace,
+    QueryOrigin,
     QueryRun,
     QueryRunStatus,
     Run,
@@ -259,6 +260,15 @@ def _submit(
         run_id=result.run_id,
         check=check,
     )
+
+
+def test_check_rows_are_of_origin_check(
+    session: Session, principal: PrincipalRef, dev: uuid.UUID
+) -> None:
+    """The rows of a check are a run the server wrote, marked as a check's."""
+    query = _submit(session, principal, _checked(session, principal))
+
+    assert query.origin is QueryOrigin.CHECK
 
 
 # --- who may ask ---
@@ -915,9 +925,15 @@ def test_the_query_run_is_ad_hoc_work_and_no_count_of_a_task(
 
 def test_a_run_with_a_target_is_no_count_even_without_a_write_mode(session: Session) -> None:
     """The one definition of a count, also the refusal of a kept table rests on: no target."""
-    unbound = QueryRun(id=uuid.uuid4(), task_run_id=uuid.uuid4(), write_mode=None)
+    unbound = QueryRun(
+        origin=QueryOrigin.TASK, id=uuid.uuid4(), task_run_id=uuid.uuid4(), write_mode=None
+    )
     targeted = QueryRun(
-        id=uuid.uuid4(), task_run_id=uuid.uuid4(), write_mode=None, target_name="silver.t"
+        origin=QueryOrigin.TASK,
+        id=uuid.uuid4(),
+        task_run_id=uuid.uuid4(),
+        write_mode=None,
+        target_name="silver.t",
     )
 
     assert is_check_count(session, unbound) is True

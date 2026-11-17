@@ -1,0 +1,1175 @@
+r"""The whole result of a query as a file: CSV or a spreadsheet, every value exact.
+
+A download is always the whole result, never a page, and it never holds fewer rows or
+other values than the result. Both formats are written from the same flattened table
+(`file_cells`): a nested value becomes its compact JSON text, a binary value ``\x``
+and two lower-case hex digits per byte, a UUID its canonical text, a date or timestamp
+column with a value Python has no date for (DuckDB's ``infinity``, a year after 9999)
+the text DuckDB prints, and SQL NULL an empty field or an empty cell.
+
+- **CSV** (`csv_pieces`, `write_csv`) is RFC 4180 in UTF-8 without a byte-order mark,
+  written by pyarrow in pieces of 10,000 rows. Values are verbatim: a text starting with
+  ``=`` is not escaped, since a spreadsheet user takes xlsx.
+- **xlsx** (`write_xlsx`) keeps a number a number only where a spreadsheet holds it
+  exactly; a larger integer, a long decimal, NaN and infinity are text, and a float32 is
+  the number its shortest text names. What a sheet
+  cannot hold at all (too many rows or columns, a value longer than a cell) is refused
+  with `XlsxRefused` before a byte is written, naming the CSV command instead.
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import math
+import shlex
+import struct
+from collections.abc import AsyncIterator, Callable, Iterator
+from datetime import date, datetime, time
+from decimal import Decimal
+from typing import BinaryIO, cast
+
+import pyarrow as pa
+import pyarrow.compute as pc
+import pyarrow.csv as pa_csv
+import xlsxwriter
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import StreamingResponse
+from starlette.types import Receive, Scope, Send
+from xlsxwriter.format import Format
+from xlsxwriter.worksheet import Worksheet
+
+from lakana_core.errors import ValidationError
+from lakana_core.identifiers import shown
+
+XLSX_MAX_ROWS = 1_048_575
+"""The most rows of one sheet below its header row."""
+
+XLSX_MAX_COLUMNS = 16_384
+"""The most columns of one sheet."""
+
+XLSX_MAX_CELL_CHARS = 32_767
+"""The most characters one cell holds."""
+
+CSV_MEDIA_TYPE = "text/csv; charset=utf-8"
+"""The media type of a CSV result."""
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+"""The media type of a spreadsheet result."""
+
+CSV_BATCH_ROWS = 10_000
+"""The rows of one CSV piece."""
+
+FILE_PIECE_BYTES = 1024 * 1024
+"""The bytes of one piece of a finished CSV or spreadsheet file sent to the client."""
+
+EXACT_INTEGER = 2**53 - 1
+"""The largest integer a spreadsheet's number holds exactly, either sign."""
+
+EXACT_DIGITS = 15
+"""The most significant digits of a decimal that a spreadsheet's number shows exactly."""
+
+NUMBER_DIGITS_FORMAT = ".16G"
+"""How XlsxWriter writes a number into the sheet; a float this does not hold exactly is text."""
+
+FLOAT32_DIGITS = 9
+"""The significant digits that always read back as the same float32."""
+
+_EXTENSIONS = {"arrow": "arrow", "csv": "csv", "xlsx": "xlsx"}
+_EXCEL_FIRST_DAY = date(1900, 1, 1)
+_DATE_FORMAT = "yyyy-mm-dd"
+_TIMESTAMP_FORMAT = "yyyy-mm-dd hh:mm:ss"
+_UTC_FORMAT = 'yyyy-mm-dd hh:mm:ss "UTC"'
+
+
+class XlsxRefused(ValidationError):
+    """A result a spreadsheet cannot hold without losing rows, columns or characters.
+
+    Raised before the first byte of the file is written; mapped to 422. The message names
+    the command that downloads the result as CSV instead.
+    """
+
+
+def result_file_name(query_id: str, result_format: str) -> str:
+    """Name the file of a downloaded result.
+
+    Parameters
+    ----------
+    query_id
+        The query's id.
+    result_format
+        ``arrow``, ``csv`` or ``xlsx``.
+
+    Returns
+    -------
+    str
+        ``query-{id}.{extension}``.
+    """
+    return f"query-{query_id}.{_EXTENSIONS[result_format]}"
+
+
+# --- The flattened cells -----------------------------------------------------------------------
+
+
+def _is_binary(kind: pa.DataType) -> bool:
+    """Say whether a type holds raw bytes.
+
+    Parameters
+    ----------
+    kind : pyarrow.DataType
+        Any type.
+
+    Returns
+    -------
+    bool
+        True for binary, large binary, binary view and fixed-size binary.
+    """
+    return (
+        pa.types.is_binary(kind)
+        or pa.types.is_large_binary(kind)
+        or pa.types.is_binary_view(kind)
+        or pa.types.is_fixed_size_binary(kind)
+    )
+
+
+def _is_nested(kind: pa.DataType) -> bool:
+    """Say whether a type is a list, struct, map or union.
+
+    Parameters
+    ----------
+    kind : pyarrow.DataType
+        Any type.
+
+    Returns
+    -------
+    bool
+        True for every type whose value is made of other values.
+    """
+    return (
+        pa.types.is_list(kind)
+        or pa.types.is_large_list(kind)
+        or pa.types.is_fixed_size_list(kind)
+        or pa.types.is_list_view(kind)
+        or pa.types.is_large_list_view(kind)
+        or pa.types.is_struct(kind)
+        or pa.types.is_map(kind)
+        or pa.types.is_union(kind)
+    )
+
+
+def _hex(value: bytes) -> str:
+    r"""Write bytes as DuckDB prints a blob, every byte escaped.
+
+    Parameters
+    ----------
+    value
+        The bytes.
+
+    Returns
+    -------
+    str
+        ``\x`` and two lower-case hex digits per byte; empty for no bytes.
+    """
+    if not value:
+        return ""
+    return "\\x" + value.hex("\\").replace("\\", "\\x")
+
+
+def _plain(value: object) -> object:
+    """Turn one value inside a nested value into what its JSON text holds exactly.
+
+    Parameters
+    ----------
+    value
+        A value `pyarrow` made; a map arrives as a list of key and value pairs.
+
+    Returns
+    -------
+    object
+        A JSON value: bytes as `_hex` text, NaN and infinities as text, and a decimal,
+        date, time, UUID or interval as its text.
+    """
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "NaN"
+        if math.isinf(value):
+            return "Infinity" if value > 0 else "-Infinity"
+        return value
+    if isinstance(value, bytes):
+        return _hex(value)
+    if isinstance(value, dict):
+        return {str(key): _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return str(value)
+
+
+def _nested_plain(value: object, kind: pa.DataType) -> object:
+    """Turn a nested value into JSON values, following its type for maps.
+
+    Parameters
+    ----------
+    value
+        The value `pyarrow` made of one cell.
+    kind : pyarrow.DataType
+        Its type.
+
+    Returns
+    -------
+    object
+        As `_plain`, with each map entry an object of ``key`` and ``value``.
+    """
+    if value is None:
+        return None
+    if pa.types.is_dictionary(kind):
+        return _nested_plain(value, kind.value_type)
+    if pa.types.is_map(kind):
+        pairs = value if isinstance(value, list) else []
+        return [
+            {
+                "key": _nested_plain(key, kind.key_type),
+                "value": _nested_plain(item, kind.item_type),
+            }
+            for key, item in pairs
+        ]
+    if pa.types.is_struct(kind) and isinstance(value, dict):
+        return {field.name: _nested_plain(value.get(field.name), field.type) for field in kind}
+    if _is_nested(kind) and not pa.types.is_union(kind) and isinstance(value, list):
+        return [_nested_plain(item, kind.value_type) for item in value]
+    return _plain(value)
+
+
+def _as_text(column: pa.ChunkedArray, text: Callable[[object], str]) -> pa.ChunkedArray:
+    """Write every value of a column as text, keeping NULL.
+
+    Parameters
+    ----------
+    column : pyarrow.ChunkedArray
+        The column.
+    text
+        Writes one valid value.
+
+    Returns
+    -------
+    pyarrow.ChunkedArray
+        A large string column.
+    """
+    return pa.chunked_array(
+        [
+            pa.array(
+                [None if value is None else text(value) for value in chunk.to_pylist()],
+                pa.large_string(),
+            )
+            for chunk in column.chunks
+        ],
+        pa.large_string(),
+    )
+
+
+def _cell_column(column: pa.ChunkedArray) -> pa.ChunkedArray:
+    """Flatten one column into what a file cell holds.
+
+    Parameters
+    ----------
+    column : pyarrow.ChunkedArray
+        A column of the result.
+
+    Returns
+    -------
+    pyarrow.ChunkedArray
+        The column itself when a file writes it as it is, otherwise its text.
+    """
+    kind = column.type
+    if pa.types.is_dictionary(kind):
+        return _cell_column(column.cast(kind.value_type))
+    if isinstance(kind, pa.UuidType):
+        return _as_text(column, str)
+    if isinstance(kind, pa.BaseExtensionType):
+        # Any other extension (DuckDB's opaque bignum, JSON, bool8 …) is its storage, written
+        # by the rules of the storage's own type.
+        storage = [chunk.storage for chunk in column.chunks]
+        return _cell_column(pa.chunked_array(storage, kind.storage_type))
+    if pa.types.is_run_end_encoded(kind):
+        decoded = [pc.call_function("run_end_decode", [chunk]) for chunk in column.chunks]
+        return _cell_column(pa.chunked_array(decoded, kind.value_type))
+    if _is_binary(kind):
+        return _as_text(column, lambda value: _hex(value) if isinstance(value, bytes) else "")
+    if _is_nested(kind):
+        return _as_text(column, lambda value: _json_text(_nested_plain(value, kind)))
+    if pa.types.is_string_view(kind):
+        return column.cast(pa.large_string())
+    if pa.types.is_time(kind):
+        return column.cast(pa.string())
+    if pa.types.is_interval(kind):
+        return _as_text(column, _interval_text)
+    if (pa.types.is_date(kind) or pa.types.is_timestamp(kind)) and _outside_python(column):
+        return _duckdb_moments(column)
+    return column
+
+
+_INFINITY = {32: 2**31 - 1, 64: 2**63 - 1}
+"""DuckDB's ``infinity`` of a date (32 bits) or a timestamp (64 bits); minus it is ``-infinity``."""
+
+_PER_SECOND = {"s": 1, "ms": 1_000, "us": 1_000_000, "ns": 1_000_000_000}
+"""The units of a timestamp in one second."""
+
+_EPOCH = date(1970, 1, 1)
+_FIRST_PYTHON_DAY = (date.min - _EPOCH).days
+_LAST_PYTHON_DAY = (date.max - _EPOCH).days
+
+
+def _moment_unit(kind: pa.DataType) -> tuple[pa.DataType, int, int]:
+    """Say how a date or timestamp is stored.
+
+    Parameters
+    ----------
+    kind : pyarrow.DataType
+        A date or timestamp type.
+
+    Returns
+    -------
+    tuple
+        The integer type it is stored as, its units in one day (1 for a 32-bit date) and its
+        units in one second (0 for a 32-bit date).
+    """
+    if pa.types.is_date32(kind):
+        return pa.int32(), 1, 0
+    per_second = 1_000 if pa.types.is_date64(kind) else _PER_SECOND[kind.unit]
+    return pa.int64(), 86_400 * per_second, per_second
+
+
+def _outside_python(column: pa.ChunkedArray) -> bool:
+    """Say whether a date or timestamp column holds a value Python has no date for.
+
+    DuckDB's ``infinity`` and ``-infinity``, a year after 9999 and a year before 1 are such
+    values; `pyarrow` cannot turn them into Python objects, and its own text says they are out
+    of range.
+
+    Parameters
+    ----------
+    column : pyarrow.ChunkedArray
+        A date or timestamp column.
+
+    Returns
+    -------
+    bool
+        True when one value lies outside 0001-01-01 to 9999-12-31.
+    """
+    storage, per_day, _ = _moment_unit(column.type)
+    bounds = pc.call_function("min_max", [column.cast(storage)]).as_py()
+    if bounds["min"] is None:
+        return False
+    first = _FIRST_PYTHON_DAY * per_day
+    last = (_LAST_PYTHON_DAY + 1) * per_day - 1
+    return bounds["min"] < first or bounds["max"] > last
+
+
+def _civil_day(days: int) -> tuple[int, int, int]:
+    """Turn days since 1970-01-01 into a proleptic Gregorian year, month and day of any size.
+
+    Parameters
+    ----------
+    days
+        Days since 1970-01-01; negative before it.
+
+    Returns
+    -------
+    tuple of int
+        The year (0 is 1 BC), the month and the day.
+    """
+    # Howard Hinnant's civil_from_days, on Python's unbounded integers.
+    shifted = days + 719_468
+    era = shifted // 146_097
+    day_of_era = shifted - era * 146_097
+    year_of_era = (
+        day_of_era - day_of_era // 1_460 + day_of_era // 36_524 - day_of_era // 146_096
+    ) // 365
+    day_of_year = day_of_era - (365 * year_of_era + year_of_era // 4 - year_of_era // 100)
+    month_index = (5 * day_of_year + 2) // 153
+    day = day_of_year - (153 * month_index + 2) // 5 + 1
+    month = month_index + 3 if month_index < 10 else month_index - 9
+    year = year_of_era + era * 400 + (1 if month <= 2 else 0)
+    return year, month, day
+
+
+def _duckdb_moment(value: int, kind: pa.DataType) -> str:
+    """Write one stored date or timestamp as DuckDB prints it.
+
+    Parameters
+    ----------
+    value
+        The stored integer.
+    kind : pyarrow.DataType
+        Its date or timestamp type; a timestamp with a time zone is written in UTC.
+
+    Returns
+    -------
+    str
+        ``infinity``, ``-infinity``, or ``YYYY-MM-DD`` with as many year digits as it needs,
+        `` (BC)`` for a year before 1, and for a timestamp the time of day, its fraction
+        without trailing zeros, and ``+00`` when it has a time zone.
+    """
+    storage, per_day, per_second = _moment_unit(kind)
+    infinity = _INFINITY[storage.bit_width]
+    if abs(value) == infinity:
+        return "infinity" if value > 0 else "-infinity"
+    days, rest = divmod(value, per_day)
+    year, month, day = _civil_day(days)
+    text = f"{year if year >= 1 else 1 - year:04d}-{month:02d}-{day:02d}"
+    if year < 1:
+        text += " (BC)"
+    if not pa.types.is_timestamp(kind):
+        return text
+    seconds, fraction = divmod(rest, per_second)
+    hours, seconds = divmod(seconds, 3_600)
+    minutes, seconds = divmod(seconds, 60)
+    text += f" {hours:02d}:{minutes:02d}:{seconds:02d}"
+    if fraction:
+        digits = len(str(per_second)) - 1
+        text += "." + f"{fraction:0{digits}d}".rstrip("0")
+    return text + ("" if kind.tz is None else "+00")
+
+
+def _duckdb_moments(column: pa.ChunkedArray) -> pa.ChunkedArray:
+    """Write a date or timestamp column as DuckDB prints it (Ruling V).
+
+    Parameters
+    ----------
+    column : pyarrow.ChunkedArray
+        A date or timestamp column with a value Python has no date for.
+
+    Returns
+    -------
+    pyarrow.ChunkedArray
+        A large string column, NULL kept.
+    """
+    kind = column.type
+    storage, _, _ = _moment_unit(kind)
+    stored = pa.chunked_array([chunk.cast(storage) for chunk in column.chunks], storage)
+    return _as_text(stored, lambda value: _duckdb_moment(cast(int, value), kind))
+
+
+def _json_text(value: object) -> str:
+    """Write a JSON value compactly, in UTF-8 rather than ASCII escapes.
+
+    Parameters
+    ----------
+    value
+        A value `_plain` made.
+
+    Returns
+    -------
+    str
+        The JSON text.
+    """
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _interval_text(value: object) -> str:
+    """Write a month, day and nanosecond interval as a JSON object of its parts.
+
+    Parameters
+    ----------
+    value
+        The interval `pyarrow` made.
+
+    Returns
+    -------
+    str
+        ``{"months":…,"days":…,"nanoseconds":…}``.
+    """
+    parts = ("months", "days", "nanoseconds")
+    return _json_text({part: getattr(value, part, None) for part in parts})
+
+
+def file_cells(table: pa.Table) -> pa.Table:
+    """Flatten a result into the cells of a CSV or spreadsheet file (R4).
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+
+    Returns
+    -------
+    pyarrow.Table
+        The same rows and column names. A nested value is its compact JSON text (UTF-8, not
+        ASCII-escaped, a map's entries as objects of ``key`` and ``value``), a binary value
+        `_hex` text, a UUID its canonical text, a dictionary its values, a time its text and
+        an interval a JSON object of its parts. A date or timestamp column with a value Python
+        has no date for is the text DuckDB prints (`_duckdb_moment`). Any other extension type
+        is its storage, and a run-end encoded column its values, each flattened by these same
+        rules; every other column is unchanged.
+    """
+    return pa.Table.from_arrays(
+        [_cell_column(column) for column in table.columns], names=table.column_names
+    )
+
+
+# --- CSV ---------------------------------------------------------------------------------------
+
+
+_CSV_OPTIONS = pa_csv.WriteOptions(include_header=True, eol="\r\n", quoting_style="needed")
+
+
+def csv_pieces(table: pa.Table) -> Iterator[bytes]:
+    """Write a result as CSV, one piece at a time (R6).
+
+    The whole result is flattened, and the writer built and the header row written, before
+    this returns: a column the writer cannot hold fails here, before a caller records the
+    export or sends a byte, and a column's type is decided over all its rows (a date column
+    with one value Python has no date for is text in every row).
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+
+    Returns
+    -------
+    Iterator of bytes
+        The header row first, then one piece per `CSV_BATCH_ROWS` rows: RFC 4180 with CRLF row
+        ends, UTF-8 without a byte-order mark, NULL as an empty field, values verbatim.
+    """
+    cells = file_cells(table)
+    sink = io.BytesIO()
+    writer = pa_csv.CSVWriter(sink, cells.schema, write_options=_CSV_OPTIONS)
+    return _csv_rows(cells, writer, sink, _drain(sink))
+
+
+def _csv_rows(
+    cells: pa.Table, writer: pa_csv.CSVWriter, sink: io.BytesIO, header: bytes
+) -> Iterator[bytes]:
+    """Yield the header made already, then the rows, closing the writer on every exit.
+
+    Parameters
+    ----------
+    cells : pyarrow.Table
+        The flattened result (`file_cells`).
+    writer : pyarrow.csv.CSVWriter
+        The writer, which has written the header into `sink`.
+    sink
+        Its buffer.
+    header
+        The header row.
+
+    Yields
+    ------
+    bytes
+        The header, then one piece per `CSV_BATCH_ROWS` rows.
+    """
+    with writer:
+        yield header
+        for start in range(0, cells.num_rows, CSV_BATCH_ROWS):
+            writer.write_table(cells.slice(start, CSV_BATCH_ROWS))
+            yield _drain(sink)
+
+
+def write_csv(table: pa.Table, target: BinaryIO) -> None:
+    """Write a result as one CSV file (R6), as `csv_pieces` makes it.
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+    target
+        A binary file the CSV is written to.
+    """
+    for piece in csv_pieces(table):
+        target.write(piece)
+
+
+class ResultFileRefused(ValidationError):
+    """A result with a column that a CSV or spreadsheet file cannot hold, even as text.
+
+    Raised before the export is recorded and before the first byte; mapped to 422. The
+    message names the command that downloads the result as Arrow instead.
+    """
+
+
+def refuse_unwritable(
+    table: pa.Table, result_format: str, *, query_id: str, environment: str
+) -> None:
+    """Refuse a result whose flattened columns the CSV writer cannot write.
+
+    `file_cells` turns every type Lakana knows into one a file holds; this is the guard for
+    one it does not. A spreadsheet is refused for the same columns: it has no better form
+    for a value CSV cannot hold.
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+    result_format
+        ``csv`` or ``xlsx``, for the message.
+    query_id
+        The query's id, for the Arrow command.
+    environment
+        The environment's name, for the Arrow command.
+
+    Raises
+    ------
+    ResultFileRefused
+        Naming the first such column and its type.
+    """
+    for field in file_cells(table.slice(0, 0)).schema:
+        try:
+            pa_csv.CSVWriter(io.BytesIO(), pa.schema([field]), write_options=_CSV_OPTIONS).close()
+        except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+            raise ResultFileRefused(
+                f"Column {shown(field.name)!r} has the type {shown(str(field.type))}, which a "
+                f"{result_format} file cannot hold. Download it as Arrow instead: lakana query "
+                f"result {query_id} --env {shlex.quote(environment)} --format arrow "
+                f"--out {result_file_name(query_id, 'arrow')}"
+            ) from None
+
+
+def _drain(sink: io.BytesIO) -> bytes:
+    """Take what a writer put into a buffer so far, and empty it.
+
+    Parameters
+    ----------
+    sink
+        The buffer.
+
+    Returns
+    -------
+    bytes
+        Its contents.
+    """
+    piece = sink.getvalue()
+    sink.seek(0)
+    sink.truncate()
+    return piece
+
+
+# --- xlsx --------------------------------------------------------------------------------------
+
+
+def _instead(query_id: str, environment: str) -> str:
+    """Name the command that downloads a refused result as CSV.
+
+    Parameters
+    ----------
+    query_id
+        The query's id.
+    environment
+        The environment's name; quoted for a shell.
+
+    Returns
+    -------
+    str
+        The sentence's end, ``Download it as CSV instead: …``.
+    """
+    return (
+        f"Download it as CSV instead: lakana query result {query_id} "
+        f"--env {shlex.quote(environment)} --format csv --out {result_file_name(query_id, 'csv')}"
+    )
+
+
+def _longest_text(cells: pa.Table) -> tuple[str, int] | None:
+    """Find a column name or text value longer than a cell holds.
+
+    Parameters
+    ----------
+    cells : pyarrow.Table
+        The flattened result.
+
+    Returns
+    -------
+    tuple of (str, int) or None
+        The first such column and the length of its longest value, or `None`.
+    """
+    for name, column in zip(cells.column_names, cells.columns, strict=True):
+        longest = len(name)
+        if pa.types.is_string(column.type) or pa.types.is_large_string(column.type):
+            lengths = pc.call_function("utf8_length", [column])
+            values = pc.call_function("max", [lengths]).as_py()
+            longest = max(longest, values or 0)
+        if longest > XLSX_MAX_CELL_CHARS:
+            return name, longest
+    return None
+
+
+def _refuse_what_a_sheet_cannot_hold(cells: pa.Table, query_id: str, environment: str) -> None:
+    """Refuse a result one sheet cannot hold whole (R5).
+
+    Parameters
+    ----------
+    cells : pyarrow.Table
+        The flattened result.
+    query_id
+        The query's id, for the CSV command.
+    environment
+        The environment's name, for the CSV command.
+
+    Raises
+    ------
+    XlsxRefused
+        For more rows than `XLSX_MAX_ROWS`, more columns than `XLSX_MAX_COLUMNS`, or a value
+        longer than `XLSX_MAX_CELL_CHARS`.
+    """
+    instead = _instead(query_id, environment)
+    if cells.num_rows > XLSX_MAX_ROWS:
+        raise XlsxRefused(
+            f"This result has {cells.num_rows:,} rows; a spreadsheet holds at most "
+            f"{XLSX_MAX_ROWS:,} below its header row. {instead}"
+        )
+    if cells.num_columns > XLSX_MAX_COLUMNS:
+        raise XlsxRefused(
+            f"This result has {cells.num_columns:,} columns; a spreadsheet holds at most "
+            f"{XLSX_MAX_COLUMNS:,}. {instead}"
+        )
+    too_long = _longest_text(cells)
+    if too_long is not None:
+        column, length = too_long
+        raise XlsxRefused(
+            f"A value in column {shown(column)!r} is {length:,} characters long; a spreadsheet "
+            f"cell holds at most {XLSX_MAX_CELL_CHARS:,}. {instead}"
+        )
+
+
+_Put = Callable[[Worksheet, int, int, object], object]
+"""Writes one valid value into a cell: the sheet, row, column and value."""
+
+
+def _put_text(sheet: Worksheet, row: int, col: int, value: object) -> object:
+    """Write a value as text, never as a formula.
+
+    Parameters
+    ----------
+    sheet
+        The sheet.
+    row
+        The row, from 0.
+    col
+        The column, from 0.
+    value
+        The value; its `str` is written.
+
+    Returns
+    -------
+    object
+        What `write_string` returns.
+    """
+    return sheet.write_string(row, col, value if isinstance(value, str) else str(value))
+
+
+def _put_integer(sheet: Worksheet, row: int, col: int, value: object) -> object:
+    """Write an integer as a number when a sheet holds it exactly, otherwise as text.
+
+    Parameters
+    ----------
+    sheet
+        The sheet.
+    row
+        The row, from 0.
+    col
+        The column, from 0.
+    value
+        The integer.
+
+    Returns
+    -------
+    object
+        What the write returns.
+    """
+    number = cast(int, value)
+    if -EXACT_INTEGER <= number <= EXACT_INTEGER:
+        return sheet.write_number(row, col, number)
+    return sheet.write_string(row, col, str(number))
+
+
+def _put_float(sheet: Worksheet, row: int, col: int, value: object) -> object:
+    """Write a float as a number when the sheet holds it exactly, otherwise as its text.
+
+    NaN and the infinities are text, and so is a double whose 16 significant digits
+    (`NUMBER_DIGITS_FORMAT`) do not read back as the same double.
+
+    Parameters
+    ----------
+    sheet
+        The sheet.
+    row
+        The row, from 0.
+    col
+        The column, from 0.
+    value
+        The float.
+
+    Returns
+    -------
+    object
+        What the write returns.
+    """
+    number = cast(float, value)
+    if math.isnan(number):
+        return sheet.write_string(row, col, "NaN")
+    if math.isinf(number):
+        return sheet.write_string(row, col, "Infinity" if number > 0 else "-Infinity")
+    written = float(format(number, NUMBER_DIGITS_FORMAT))
+    if written != number:
+        # XlsxWriter writes a number's 16 significant digits; this double needs 17.
+        return sheet.write_string(row, col, repr(number))
+    return sheet.write_number(row, col, number)
+
+
+def _float32_text(value: float) -> str:
+    """Write a float32 in the fewest significant digits that read back as the same float32.
+
+    Parameters
+    ----------
+    value
+        A finite float32, widened to a Python float.
+
+    Returns
+    -------
+    str
+        Its shortest text: ``0.1`` for the float32 nearest 0.1, never more than 9 digits.
+    """
+    for digits in range(1, FLOAT32_DIGITS):
+        text = f"{value:.{digits}g}"
+        try:
+            read_back = struct.unpack("f", struct.pack("f", float(text)))[0]
+        except OverflowError:  # a short text near the largest float32 rounds past it
+            continue
+        if read_back == value:
+            return text
+    return f"{value:.{FLOAT32_DIGITS}g}"
+
+
+def _put_float32(sheet: Worksheet, row: int, col: int, value: object) -> object:
+    """Write a float32 as the number its shortest text names, as CSV writes it.
+
+    Widened to a double, the float32 nearest 0.1 is 0.10000000149011612, which needs 17
+    digits; its own shortest text, ``0.1``, names the same float32.
+
+    Parameters
+    ----------
+    sheet
+        The sheet.
+    row
+        The row, from 0.
+    col
+        The column, from 0.
+    value
+        The float32, widened to a Python float.
+
+    Returns
+    -------
+    object
+        What the write returns.
+    """
+    number = cast(float, value)
+    if not math.isfinite(number):
+        return _put_float(sheet, row, col, number)
+    return _put_float(sheet, row, col, float(_float32_text(number)))
+
+
+def _put_decimal(sheet: Worksheet, row: int, col: int, value: object) -> object:
+    """Write a decimal as a number up to 15 significant digits, otherwise as its text.
+
+    Parameters
+    ----------
+    sheet
+        The sheet.
+    row
+        The row, from 0.
+    col
+        The column, from 0.
+    value
+        The `Decimal`.
+
+    Returns
+    -------
+    object
+        What the write returns.
+    """
+    number = cast(Decimal, value)
+    if len(number.normalize().as_tuple().digits) > EXACT_DIGITS:
+        return sheet.write_string(row, col, str(number))
+    return sheet.write_number(row, col, float(number))
+
+
+def _put_moment(number_format: Format) -> _Put:
+    """Make a writer of dates or timestamps in a number format.
+
+    A value before 1900, which a spreadsheet has no date for, is written as ISO text.
+
+    Parameters
+    ----------
+    number_format
+        The workbook's format for the column.
+
+    Returns
+    -------
+    callable
+        Writes one `date` or naive `datetime`.
+    """
+
+    def put(sheet: Worksheet, row: int, col: int, value: object) -> object:
+        """Write one date or timestamp.
+
+        Parameters
+        ----------
+        sheet
+            The sheet.
+        row
+            The row, from 0.
+        col
+            The column, from 0.
+        value
+            A `date` or a naive `datetime` (in UTC for a column with a time zone).
+
+        Returns
+        -------
+        object
+            What the write returns.
+        """
+        when = cast(date, value)
+        day = when.date() if isinstance(when, datetime) else when
+        if day < _EXCEL_FIRST_DAY:
+            text = when.isoformat(sep=" ") if isinstance(when, datetime) else when.isoformat()
+            return sheet.write_string(row, col, text)
+        moment = when if isinstance(when, datetime) else datetime.combine(when, time())
+        return sheet.write_datetime(row, col, moment, number_format)
+
+    return put
+
+
+def _put_boolean(sheet: Worksheet, row: int, col: int, value: object) -> object:
+    """Write a boolean.
+
+    Parameters
+    ----------
+    sheet
+        The sheet.
+    row
+        The row, from 0.
+    col
+        The column, from 0.
+    value
+        The boolean.
+
+    Returns
+    -------
+    object
+        What `write_boolean` returns.
+    """
+    return sheet.write_boolean(row, col, bool(value))
+
+
+def _sheet_column(
+    column: pa.ChunkedArray, formats: dict[str, Format]
+) -> tuple[pa.ChunkedArray, _Put]:
+    """Choose how a flattened column is written into a sheet.
+
+    Parameters
+    ----------
+    column : pyarrow.ChunkedArray
+        A column of `file_cells`.
+    formats
+        The workbook's number formats, by name: ``date``, ``timestamp`` and ``utc``.
+
+    Returns
+    -------
+    tuple
+        The column as it is read row by row, and the writer of one of its values. A timestamp
+        with a time zone is read in UTC; one in nanoseconds that a microsecond cannot hold is
+        written as its text, and so is any type without a writer of its own.
+    """
+    kind = column.type
+    if pa.types.is_integer(kind):
+        return column, _put_integer
+    if pa.types.is_float32(kind):
+        return column, _put_float32
+    if pa.types.is_floating(kind):
+        return column.cast(pa.float64()), _put_float
+    if pa.types.is_decimal(kind):
+        return column, _put_decimal
+    if pa.types.is_boolean(kind):
+        return column, _put_boolean
+    if pa.types.is_date(kind):
+        return column, _put_moment(formats["date"])
+    if pa.types.is_timestamp(kind):
+        try:
+            micro = column.cast(pa.timestamp("us"), safe=True)
+        except pa.ArrowInvalid:
+            return column.cast(pa.string()), _put_text
+        return micro, _put_moment(formats["timestamp" if kind.tz is None else "utc"])
+    if pa.types.is_duration(kind):
+        return column.cast(pa.int64()), _put_integer
+    return column, _put_text
+
+
+def write_xlsx(table: pa.Table, target: BinaryIO, *, query_id: str, environment: str) -> None:
+    """Write a result as one spreadsheet, or refuse it before writing anything (R4, R5).
+
+    The workbook is built with XlsxWriter's constant memory mode, one row at a time; its
+    temporary files follow `TMPDIR`. The header row holds the column names.
+
+    Parameters
+    ----------
+    table : pyarrow.Table
+        The result.
+    target
+        A seekable binary file the finished workbook is written to.
+    query_id
+        The query's id, for the refusal's CSV command.
+    environment
+        The environment's name, for the refusal's CSV command.
+
+    Raises
+    ------
+    XlsxRefused
+        If one sheet cannot hold the result whole; nothing is written to `target`.
+    """
+    cells = file_cells(table)
+    _refuse_what_a_sheet_cannot_hold(cells, query_id, environment)
+    workbook = xlsxwriter.Workbook(target, {"constant_memory": True})
+    try:
+        sheet = workbook.add_worksheet()
+        formats: dict[str, Format] = {
+            "date": workbook.add_format({"num_format": _DATE_FORMAT}),
+            "timestamp": workbook.add_format({"num_format": _TIMESTAMP_FORMAT}),
+            "utc": workbook.add_format({"num_format": _UTC_FORMAT}),
+        }
+        columns = [_sheet_column(column, formats) for column in cells.columns]
+        for col, name in enumerate(cells.column_names):
+            sheet.write_string(0, col, name)
+        row = 1
+        for start in range(0, cells.num_rows, CSV_BATCH_ROWS):
+            values = [column.slice(start, CSV_BATCH_ROWS).to_pylist() for column, _ in columns]
+            puts = [put for _, put in columns]
+            for offset in range(len(values[0]) if values else 0):
+                for col, put in enumerate(puts):
+                    value = values[col][offset]
+                    if value is not None:
+                        put(sheet, row, col, value)
+                row += 1
+    finally:
+        workbook.close()
+
+
+# --- The response ------------------------------------------------------------------------------
+
+
+def file_pieces(target: BinaryIO) -> Iterator[bytes]:
+    """Read a finished file from its start in pieces of `FILE_PIECE_BYTES`.
+
+    Parameters
+    ----------
+    target
+        The file `write_csv` or `write_xlsx` wrote.
+
+    Yields
+    ------
+    bytes
+        The next piece; never empty.
+    """
+    target.seek(0)
+    while piece := target.read(FILE_PIECE_BYTES):
+        yield piece
+
+
+def _next_piece(pieces: Iterator[bytes]) -> bytes | None:
+    """Make the next piece of a file, on a worker thread.
+
+    Parameters
+    ----------
+    pieces
+        The file's pieces.
+
+    Returns
+    -------
+    bytes or None
+        The piece, or `None` at the end.
+    """
+    return next(pieces, None)
+
+
+async def _body(pieces: Iterator[bytes]) -> AsyncIterator[bytes]:
+    """Send a file's pieces, each made in the threadpool.
+
+    Parameters
+    ----------
+    pieces
+        The file's pieces; reading, converting or writing one may take a while.
+
+    Yields
+    ------
+    bytes
+        The next piece.
+    """
+    while (piece := await run_in_threadpool(_next_piece, pieces)) is not None:
+        yield piece
+
+
+class ResultFileResponse(StreamingResponse):
+    """A whole query result as a file, streamed, with what it is and how big the run said it was.
+
+    No `Content-Length` is promised: an Arrow file is read from storage while it is sent, and
+    the route does not count the bytes of a CSV or spreadsheet file it prepared. The response
+    takes no file slot: the route gives it back once the file is prepared. It closes what it
+    read from exactly once, when the body ends, fails, or is never sent because the client
+    went away; for a prepared file, `close` also stops counting it as one of the caller's open
+    result files.
+
+    Parameters
+    ----------
+    pieces
+        The file's pieces.
+    media_type
+        Its media type.
+    file_name
+        The name `Content-Disposition` offers.
+    rows
+        The run's `result_rows`; the `X-Result-Rows` header is left out when `None`.
+    arrow_bytes
+        The run's `result_bytes`; the `X-Result-Arrow-Bytes` header is left out when `None`.
+    close
+        Closes what the pieces are read from (a storage iterator, a temporary file).
+    """
+
+    def __init__(
+        self,
+        pieces: Iterator[bytes],
+        *,
+        media_type: str,
+        file_name: str,
+        rows: int | None,
+        arrow_bytes: int | None,
+        close: Callable[[], object],
+    ) -> None:
+        headers = {"Content-Disposition": f'attachment; filename="{file_name}"'}
+        if rows is not None:
+            headers["X-Result-Rows"] = str(rows)
+        if arrow_bytes is not None:
+            headers["X-Result-Arrow-Bytes"] = str(arrow_bytes)
+        super().__init__(_body(pieces), media_type=media_type, headers=headers)
+        self._pieces = pieces
+        self._close = close
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        """Send the response, then close its source.
+
+        Parameters
+        ----------
+        scope
+            The ASGI scope.
+        receive
+            The ASGI receive channel.
+        send
+            The ASGI send channel.
+        """
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            try:
+                close = getattr(self._pieces, "close", None)
+                if close is not None:
+                    close()
+            finally:
+                self._close()

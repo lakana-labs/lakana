@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import tempfile
 import uuid
-from datetime import timedelta
-from typing import Any, Literal
+from collections.abc import Callable
+from datetime import datetime, timedelta
+from typing import IO, Any, Literal
 
 import pyarrow as pa
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -12,15 +14,23 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.preview import PREVIEW_ROW_LIMIT, previewed_table
-from lakana_core.catalog.query_service import QUERY_LIST_MAX, QueryService, WriteTarget
+from lakana_core.catalog.query_service import (
+    QUERY_LIST_MAX,
+    QueryListItem,
+    QueryService,
+    WriteTarget,
+)
 from lakana_core.errors import ConflictError, ValidationError
-from lakana_core.models import QueryRun, QueryRunStatus, WriteMode
+from lakana_core.models import QueryOrigin, QueryRun, QueryRunStatus, WriteMode
 from lakana_core.runs.waiting import WaitReason
 from lakana_core.secrets.keys import KeyProvider
+from lakana_core.storage.base import Storage
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.api.platform.listing import set_next_cursor, split_values
 from lakana_server.api.platform.schemas import (
+    QueryEnvironmentOut,
     QueryListOut,
+    QueryListPageOut,
     QueryStatusOut,
     QuerySubmit,
     QuerySubmitOut,
@@ -28,7 +38,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.concurrency import ThreadSafeConcurrencyLimiter
+from lakana_server.concurrency import OPEN_RESULT_FILES_PER_PRINCIPAL, ThreadSafeConcurrencyLimiter
 from lakana_server.deps import (
     check_statement,
     get_key_provider,
@@ -37,7 +47,17 @@ from lakana_server.deps import (
     get_session,
     with_break_glass,
 )
-from lakana_server.errors import ResultPageLimitError
+from lakana_server.errors import ResultFileLimitError, ResultPageLimitError
+from lakana_server.result_files import (
+    CSV_MEDIA_TYPE,
+    XLSX_MEDIA_TYPE,
+    ResultFileResponse,
+    file_pieces,
+    refuse_unwritable,
+    result_file_name,
+    write_csv,
+    write_xlsx,
+)
 from lakana_server.result_json import DEFAULT_PAGE_ROWS, MAX_PAGE_ROWS, json_page
 
 router = APIRouter(
@@ -47,8 +67,21 @@ router = APIRouter(
     responses=errors(401),
 )
 
+all_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/queries",
+    tags=["queries"],
+    responses=errors(401),
+)
+"""The queries of every environment the caller may query, and those environments."""
 
-def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
+_SQL_SHOWN = frozenset({QueryOrigin.WRITTEN, QueryOrigin.WRITE})
+"""The origins whose SQL the status read gives back: what the submitter wrote themselves."""
+
+
+def _status_out(
+    run: QueryRun, waiting: WaitReason | None, include_sql: bool = True
+) -> QueryStatusOut:
     """Build the status document of a query run.
 
     Parameters
@@ -57,6 +90,8 @@ def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
         The query run.
     waiting
         Why it has not started (`QueryService.waiting_for`), or `None`.
+    include_sql
+        `False` leaves `sql` out whatever the origin: for a caller who is not the submitter.
 
     Returns
     -------
@@ -79,6 +114,15 @@ def _status_out(run: QueryRun, waiting: WaitReason | None) -> QueryStatusOut:
         schema_diff=run.schema_diff,
         maintenance=run.maintenance,
         error_cause=run.error_cause,
+        origin=run.origin.value,
+        sql=run.sql_text if include_sql and run.origin in _SQL_SHOWN else None,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        result_rows=run.result_rows,
+        result_bytes=run.result_bytes,
+        error_line=run.error_line,
+        error_column=run.error_column,
         waiting_for=None if waiting is None else waiting.to_json(),
     )
 
@@ -90,6 +134,8 @@ def list_queries(
     include_ended: bool = Query(default=False),
     status: list[str] = Query(default=[], max_length=16),
     submitter: str | None = Query(default=None, max_length=255),
+    origin: list[str] = Query(default=[], max_length=16),
+    since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=QUERY_LIST_MAX),
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
@@ -102,9 +148,10 @@ def list_queries(
     `MANAGE_ENVIRONMENT` sees every query of the environment; everyone else sees the queries
     they submitted. The list never shows SQL text, error messages or results. The cursor of
     the next page is in the `X-Next-Cursor` response header and is absent on the last page;
-    send the same filters with every page. Answers 404 when the environment does not exist.
-    Answers 503 when a manager's page shows someone else's queries and the audit entry for
-    that could not be written; nothing is listed then.
+    send the same filters with every page. Answers 404 when the environment does not exist,
+    and 422 for an unknown status or origin or a `since` without a time zone. Answers 503
+    when a manager's page shows someone else's queries and the audit entry for that could not
+    be written; nothing is listed then.
 
     Parameters
     ----------
@@ -113,14 +160,21 @@ def list_queries(
     response
         The response, to set the cursor header on.
     include_ended
-        Also list the queries that ended in the last 24 hours.
+        Also list the queries that ended in the last 24 hours (or since `since`).
     status
         Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`,
         `cancelled`; any letter case); repeat the parameter or separate the values with commas.
-        An ended status lists the ended queries of the last 24 hours, with or without
-        `include_ended`.
+        An ended status lists the ended queries of the last 24 hours (or since `since`), with
+        or without `include_ended`.
     submitter
         Only queries submitted by the principal with this name.
+    origin
+        Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`,
+        `task`); repeat the parameter or separate the values with commas.
+    since
+        The ended queries listed are those that ended at or after this ISO 8601 time, with a
+        time zone (`2026-10-18T00:00:00Z`), of any age, instead of those of the last 24 hours;
+        given, they are listed with or without `include_ended`.
     limit
         Most rows returned (1 to 200).
     cursor
@@ -153,24 +207,154 @@ def list_queries(
         include_ended=include_ended,
         status=split_values(status),
         submitter=submitter,
+        origin=split_values(origin),
+        since=since,
         limit=limit,
         cursor=cursor,
     )
     set_next_cursor(response, next_cursor)
+    return [_list_out(item) for item in items]
+
+
+def _list_out(item: QueryListItem) -> QueryListOut:
+    """Build one row of a query list.
+
+    Parameters
+    ----------
+    item
+        The row `QueryService` listed.
+
+    Returns
+    -------
+    QueryListOut
+        The row as the routes answer it.
+    """
+    return QueryListOut(
+        id=str(item.id),
+        environment=item.environment,
+        origin=item.origin,
+        submitter=item.submitter,
+        kind=item.kind,
+        target=item.target,
+        status=item.status,
+        created_at=item.created_at,
+        started_at=item.started_at,
+        finished_at=item.finished_at,
+        error_cause=item.error_cause,
+        waiting_for=None if item.waiting_for is None else item.waiting_for.to_json(),
+    )
+
+
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_queries`.
+# jscpd:ignore-start
+@all_router.get("", response_model=QueryListPageOut, responses=errors(403, 404, 503))
+def list_all_queries(
+    environment: str | None = Query(default=None, max_length=255),
+    include_ended: bool = Query(default=False),
+    status: list[str] = Query(default=[], max_length=16),
+    submitter: str | None = Query(default=None, max_length=255),
+    origin: list[str] = Query(default=[], max_length=16),
+    since: datetime | None = None,
+    limit: int = Query(default=100, ge=1, le=QUERY_LIST_MAX),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    queries: QueryService = Depends(get_query_service),
+) -> QueryListPageOut:
+    """List the queries of every environment you may query.
+
+    Without `environment`, lists the queries of every environment where you hold
+    `SUBMIT_QUERY` or `MANAGE_ENVIRONMENT`, in the order of the list of one environment:
+    running, then queued, then (when asked) ended. Where you hold `MANAGE_ENVIRONMENT` you see
+    everyone's queries, elsewhere your own; a task's token sees its own. An environment where
+    you hold neither is left out, so this is never a 403 or a 404. With `environment`, it
+    answers exactly what `GET /api/v1/environments/{env}/queries` answers, with its 403 and
+    404, in this body. Each row names its `environment`. Send `next_cursor` back as `cursor`
+    with the same filters for the next page; a cursor of the list of one environment is
+    refused with 422 here.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    include_ended
+        Also list the queries that ended in the last 24 hours (or since `since`).
+    status
+        Only queries in these statuses (`queued`, `running`, `succeeded`, `failed`,
+        `cancelled`; any letter case); repeat the parameter or separate the values with commas.
+    submitter
+        Only queries submitted by the principal with this name.
+    origin
+        Only queries of these origins (`written`, `preview`, `check`, `write`, `maintenance`,
+        `task`); repeat the parameter or separate the values with commas.
+    since
+        The ended queries listed are those that ended at or after this ISO 8601 time, with a
+        time zone, of any age, instead of those of the last 24 hours; given, they are listed
+        with or without `include_ended`.
+    limit
+        Most rows returned (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    queries
+        The query service for this request.
+
+    Returns
+    -------
+    QueryListPageOut
+        The rows and the cursor of the next page (`null` on the last).
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403, with `environment` only, as the list of one environment.
+    lakana_core.errors.NotFoundError
+        Mapped to 404, with `environment` only, if it does not exist.
+    lakana_core.errors.AuditUnavailableError
+        Mapped to 503 with `Retry-After`, if a manager's page shows or targets someone else's
+        queries and its `ACTIVITY_VIEWED` audit row could not be written; nothing is listed.
+    """
+    # jscpd:ignore-end
+    items, next_cursor = queries.list_all_queries_page(
+        principal,
+        environment=environment,
+        include_ended=include_ended,
+        status=split_values(status),
+        submitter=submitter,
+        origin=split_values(origin),
+        since=since,
+        limit=limit,
+        cursor=cursor,
+    )
+    return QueryListPageOut(items=[_list_out(item) for item in items], next_cursor=next_cursor)
+
+
+@all_router.get("/environments", response_model=list[QueryEnvironmentOut])
+def list_query_environments(
+    principal: PrincipalRef = Depends(get_principal),
+    queries: QueryService = Depends(get_query_service),
+) -> list[QueryEnvironmentOut]:
+    """List the environments where you may submit a query.
+
+    Every environment where you hold `SUBMIT_QUERY`, sorted by name, and whether it is
+    protected. Empty when there is none; never a 403.
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    queries
+        The query service for this request.
+
+    Returns
+    -------
+    list of QueryEnvironmentOut
+        The environments.
+    """
     return [
-        QueryListOut(
-            id=str(item.id),
-            submitter=item.submitter,
-            kind=item.kind,
-            target=item.target,
-            status=item.status,
-            created_at=item.created_at,
-            started_at=item.started_at,
-            finished_at=item.finished_at,
-            error_cause=item.error_cause,
-            waiting_for=None if item.waiting_for is None else item.waiting_for.to_json(),
-        )
-        for item in items
+        QueryEnvironmentOut(name=env.name, protected=env.protected)
+        for env in queries.query_environments(principal)
     ]
 
 
@@ -243,7 +427,10 @@ def get_query_status(
     """Show a query's status.
 
     Needs `SUBMIT_QUERY` on the environment. Only the principal that submitted the query can
-    see it; for anyone else the answer is 404, as for a query that does not exist.
+    see it; for anyone else the answer is 404, as for a query that does not exist. Besides the
+    status, it names the run's `origin`, its times, the size of a stored result and the
+    position of a syntax error. It gives back the run's `sql` for `written` and `write` runs
+    only; for a preview, a check, maintenance or a task's query it is `null`.
 
     Parameters
     ----------
@@ -322,7 +509,8 @@ def cancel_query(
         if it is still running.
     """
     run = queries.cancel_query(principal, env, query_id)
-    return _status_out(run, queries.waiting_for(run))
+    # A manager may cancel another person's run, but never reads its SQL.
+    return _status_out(run, queries.waiting_for(run), include_sql=run.principal_id == principal.id)
 
 
 #: What a succeeded run without a result did instead, by write mode (`None` is a read); a verb
@@ -339,20 +527,26 @@ _NO_RESULT_CLAUSES: dict[WriteMode | None, str] = {
 }
 
 
+ARROW_MEDIA_TYPE = "application/vnd.apache.arrow.file"
+"""The media type of the result as an Arrow IPC file."""
+
 _RESULT_CONTENT: dict[int | str, dict[str, Any]] = {
     200: {
         "model": ResultPageOut,
         "description": (
-            "The whole result as an Arrow IPC file (`format=arrow`, the default), or one page "
-            "of it as JSON (`format=json`)."
+            "The whole result as an Arrow IPC file (`format=arrow`, the default), as CSV "
+            "(`format=csv`) or as a spreadsheet (`format=xlsx`), or one page of it as JSON "
+            "(`format=json`)."
         ),
-        "content": {"application/vnd.apache.arrow.file": {}},
+        "content": {ARROW_MEDIA_TYPE: {}, CSV_MEDIA_TYPE: {}, XLSX_MEDIA_TYPE: {}},
     }
 }
-"""The two media types of a result, for the OpenAPI document; JSON is `ResultPageOut`."""
+"""The four media types of a result, for the OpenAPI document; JSON is `ResultPageOut`."""
 
-ARROW_TAKES_NO_PAGING = "limit and offset apply to format=json; the Arrow result is always whole."
-"""The 422 for `limit` or `offset` with the Arrow result."""
+WHOLE_RESULT_TAKES_NO_PAGING = (
+    "limit and offset apply to format=json; arrow, csv and xlsx are always the whole result."
+)
+"""The 422 for `limit` or `offset` with a whole-result format."""
 
 PREVIEW_PAGE_TOO_LONG = (
     f"A preview shows at most {PREVIEW_ROW_LIMIT} rows; ask with limit={PREVIEW_ROW_LIMIT} or less."
@@ -361,6 +555,12 @@ PREVIEW_PAGE_TOO_LONG = (
 
 _OWN_PAGE_BUSY = "You already have a result page being prepared; wait for it, then try again."
 _ALL_PAGES_BUSY = "The server is preparing other result pages; try again in a moment."
+_OWN_FILE_BUSY = "You already have a result file being prepared; wait for it, then try again."
+_ALL_FILES_BUSY = "The server is preparing other result files; try again in a moment."
+_OPEN_FILES_HELD = (
+    f"You already have {OPEN_RESULT_FILES_PER_PRINCIPAL} result files being downloaded; finish "
+    "or cancel one, then try again."
+)
 
 
 def _duration_ms(run: QueryRun) -> int | None:
@@ -416,15 +616,181 @@ def _json_result(
     )
 
 
+def _nothing() -> None:
+    """Do nothing: the Arrow result takes no file slot and has nothing of its own to close."""
+
+
+def _closer(
+    target: IO[bytes], open_files: ThreadSafeConcurrencyLimiter, key: uuid.UUID
+) -> Callable[[], None]:
+    """Make the one function that closes a prepared result file and stops counting it as open.
+
+    Parameters
+    ----------
+    target
+        The temporary file.
+    open_files
+        The open result files, per principal.
+    key
+        The principal the file counts against.
+
+    Returns
+    -------
+    callable
+        Closes `target`, then gives back its place in `open_files`. `ResultFileResponse` calls
+        it exactly once, when the body ends, fails or is never sent.
+    """
+
+    def close() -> None:
+        try:
+            target.close()
+        finally:
+            open_files.release(key)
+
+    return close
+
+
+def _whole_result(
+    run: QueryRun,
+    env: str,
+    result_format: Literal["arrow", "csv", "xlsx"],
+    *,
+    storage: Storage,
+    limiter: ThreadSafeConcurrencyLimiter,
+    open_files: ThreadSafeConcurrencyLimiter,
+    principal: PrincipalRef,
+    queries: QueryService,
+) -> ResultFileResponse:
+    """Prepare the whole result as a file, record the export, and stream it.
+
+    Every refusal is decided before the export is recorded, and the export is committed
+    before the first byte. The Arrow file is streamed from storage as it is stored and takes
+    no file slot. CSV and xlsx read the stored file whole, as a JSON page does (the worker
+    bounds its size), and are written whole into a temporary file while they hold one of the
+    caller's file slots; the slot is given back once the file is written, and the finished
+    file is then sent from disk in pieces without one. Each such file also counts as one of
+    the caller's open result files (`OPEN_RESULT_FILES_PER_PRINCIPAL`), from before it is read
+    until the temporary file is closed: when the body ends, fails or is never sent, or when
+    preparing it fails. That bounds what one person keeps in TMPDIR.
+
+    Parameters
+    ----------
+    run
+        The succeeded read, which the caller may read.
+    env
+        Its environment.
+    result_format
+        ``arrow``, ``csv`` or ``xlsx``.
+    storage
+        The environment's storage.
+    limiter
+        The file slots.
+    open_files
+        The open result files per principal.
+    principal
+        The caller.
+    queries
+        Records the export.
+
+    Returns
+    -------
+    ResultFileResponse
+        The file, with `Content-Disposition` and the sizes the run recorded.
+
+    Raises
+    ------
+    ResultFileLimitError
+        If the caller already holds `OPEN_RESULT_FILES_PER_PRINCIPAL` open result files, or
+        already has a file being prepared, or every slot is taken; before any read or audit.
+    lakana_server.result_files.XlsxRefused
+        If one sheet cannot hold the result whole.
+    lakana_server.result_files.ResultFileRefused
+        If a column has a type no CSV or spreadsheet file holds.
+    """
+    location = run.result_location
+    assert location is not None  # nosec B101 -- the route answered 409 for a run without one
+    query_id = str(run.id)
+    name = result_file_name(query_id, result_format)
+    if result_format == "arrow":
+        chunks = storage.read_chunks(location)
+        try:
+            queries.record_export(
+                principal, env, run, "arrow", rows=run.result_rows, size_bytes=run.result_bytes
+            )
+        except BaseException:
+            close = getattr(chunks, "close", None)
+            if close is not None:
+                close()
+            raise
+        return ResultFileResponse(
+            chunks,
+            media_type=ARROW_MEDIA_TYPE,
+            file_name=name,
+            rows=run.result_rows,
+            arrow_bytes=run.result_bytes,
+            close=_nothing,
+        )
+    if open_files.try_acquire(principal.id) is not None:
+        raise ResultFileLimitError(_OPEN_FILES_HELD)
+    busy = limiter.try_acquire(principal.id)
+    if busy is not None:
+        open_files.release(principal.id)
+        raise ResultFileLimitError(_OWN_FILE_BUSY if busy == "own" else _ALL_FILES_BUSY)
+    target = None
+    try:
+        content = storage.read(location)
+        table = pa.ipc.open_file(pa.BufferReader(content)).read_all()
+        refuse_unwritable(table, result_format, query_id=query_id, environment=env)
+        # A route defined with `def` already runs in the threadpool, so the file is written
+        # off the event loop; the temporary file follows TMPDIR.
+        target = tempfile.TemporaryFile()  # ruff: ignore[open-file-with-context-handler] -- the response closes it
+        if result_format == "csv":
+            write_csv(table, target)
+            media_type = CSV_MEDIA_TYPE
+        else:
+            write_xlsx(table, target, query_id=query_id, environment=env)
+            media_type = XLSX_MEDIA_TYPE
+        queries.record_export(
+            principal,
+            env,
+            run,
+            result_format,
+            rows=table.num_rows if run.result_rows is None else run.result_rows,
+            size_bytes=len(content) if run.result_bytes is None else run.result_bytes,
+        )
+    except BaseException:
+        try:
+            if target is not None:
+                target.close()
+        finally:
+            open_files.release(principal.id)
+        raise
+    finally:
+        # The slot bounds the memory of preparing a file; a finished file is sent from disk
+        # without one, so a client that reads slowly holds none of the process's slots.
+        limiter.release(principal.id)
+    return ResultFileResponse(
+        file_pieces(target),
+        media_type=media_type,
+        file_name=name,
+        rows=run.result_rows,
+        arrow_bytes=run.result_bytes,
+        close=_closer(target, open_files, principal.id),
+    )
+
+
 @router.get("/{query_id}/result", responses={**_RESULT_CONTENT, **errors(403, 404, 409, 503)})
 def get_query_result(
     env: str,
     query_id: uuid.UUID,
     request: Request,
-    result_format: Literal["arrow", "json"] = Query(
+    result_format: Literal["arrow", "json", "csv", "xlsx"] = Query(
         "arrow",
         alias="format",
-        description="`arrow` for the whole result as an Arrow IPC file, `json` for one page.",
+        description=(
+            "`arrow` for the whole result as an Arrow IPC file, `csv` or `xlsx` for the whole "
+            "result as CSV or a spreadsheet, `json` for one page."
+        ),
     ),
     limit: int | None = Query(
         None,
@@ -448,17 +814,29 @@ def get_query_result(
 ) -> Response:
     """Fetch a query's result.
 
-    Returns the rows of a finished read as an Arrow IPC file, or with `format=json` one page
-    of them as JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for
-    a preview at most its 100 rows. The JSON page is bounded: at most 4 MiB, each cell at most
-    64 KiB, with cut values marked; it names the columns masked for you and, for a preview,
-    the table. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the
-    result; for anyone else the answer is 404. Answers 409 unless the query has succeeded, or
-    when it succeeded without being a read (it wrote to a table, created a view or was
-    maintenance): only a read has result rows. Answers 422 for `limit` or `offset` with the
-    Arrow result, and for a preview's page longer than 100 rows. Answers 503 with
-    `Retry-After: 1` while you already have a JSON page being prepared, or the server is
-    preparing as many as it allows at once.
+    Returns the rows of a finished read as a whole file: an Arrow IPC file (the default), CSV
+    (`format=csv`: RFC 4180, UTF-8 without a byte-order mark, values verbatim) or a spreadsheet
+    (`format=xlsx`: one sheet below a header row; numbers a spreadsheet would round, NaN and
+    infinity are text, a timestamp with a time zone is in UTC). A file is always the whole
+    result, never a page; it is streamed, so no `Content-Length` is promised. It names itself
+    in `Content-Disposition` (`query-ID.arrow`, `.csv`, `.xlsx`) and carries the run's row
+    count and Arrow size as `X-Result-Rows` and `X-Result-Arrow-Bytes` when the run recorded
+    them. Each download of a file is audited as `QUERY_RESULT_EXPORTED`, except an Arrow
+    download by a token bound to a task attempt. With `format=json` it returns one page as
+    JSON: at most `limit` rows (1 to 1,000, 100 by default) from `offset`, and for a preview at
+    most its 100 rows.
+    The JSON page is bounded: at most 4 MiB, each cell at most 64 KiB, with cut values marked;
+    it names the columns masked for you and, for a preview, the table; it is not audited as an
+    export. Needs `SUBMIT_QUERY` on the environment. Only the submitter can fetch the result;
+    for anyone else the answer is 404. Answers 409 unless the query has succeeded, or when it
+    succeeded without being a read (it wrote to a table, created a view or was maintenance):
+    only a read has result rows. Answers 422 for `limit` or `offset` with a file, for a
+    preview's page longer than 100 rows, and for a spreadsheet of more than 1,048,575 rows or
+    16,384 columns or with a value longer than 32,767 characters, naming the CSV download
+    instead, and for a CSV or spreadsheet of a column whose type no file holds, naming the
+    Arrow download. Answers 503 with `Retry-After: 1` while you already have a JSON page or a CSV or
+    spreadsheet file being prepared, while 2 of your CSV or spreadsheet files are still being
+    downloaded, or while the server is preparing as many as it allows at once.
 
     Parameters
     ----------
@@ -467,9 +845,10 @@ def get_query_result(
     query_id
         The query's id.
     request
-        The request, used to reach the JSON page limiter.
+        The request, used to reach the JSON page and result file limiters.
     result_format
-        ``arrow`` (the default) or ``json``, from the `format` query parameter.
+        ``arrow`` (the default), ``csv``, ``xlsx`` or ``json``, from the `format` query
+        parameter.
     limit
         The rows of a JSON page; `DEFAULT_PAGE_ROWS` when not given.
     offset
@@ -493,25 +872,41 @@ def get_query_result(
     Returns
     -------
     Response
-        The result's raw Arrow IPC bytes, or one page of it as UTF-8 JSON (`ResultPageOut`).
+        The whole result as a streamed file (`ResultFileResponse`), or one page of it as
+        UTF-8 JSON (`ResultPageOut`).
 
     Raises
     ------
     lakana_core.errors.NotFoundError
         Mapped to 404 by `install_exception_handlers`, if the query does not
-        exist or was submitted by another principal.
+        exist or was submitted by another principal; nothing is audited as an export.
     lakana_core.errors.ConflictError
         Mapped to 409, if the query has not finished yet, or if it succeeded but is not a
         read (it wrote to a table, created a view or was a maintenance run): only a read has
         result rows, and the message names ``lakana query status ID --env ENV`` to see what
         it did.
     lakana_core.errors.ValidationError
-        Mapped to 422: `limit` or `offset` with the Arrow result (`ARROW_TAKES_NO_PAGING`), or
-        a preview's page longer than its rows (`PREVIEW_PAGE_TOO_LONG`).
+        Mapped to 422: `limit` or `offset` with a whole-result format
+        (`WHOLE_RESULT_TAKES_NO_PAGING`), or a preview's page longer than its rows
+        (`PREVIEW_PAGE_TOO_LONG`).
+    lakana_server.result_files.XlsxRefused
+        Mapped to 422, before the first byte and with no export recorded: the result has more
+        rows or columns than one sheet holds, or a value longer than a cell. The message names
+        ``lakana query result ID --env ENV --format csv --out query-ID.csv`` instead.
+    lakana_server.result_files.ResultFileRefused
+        Mapped to 422, before the first byte and with no export recorded: a column has a type
+        that neither CSV nor a spreadsheet holds. The message names the Arrow download instead.
     lakana_server.errors.ResultPageLimitError
         Mapped to 503 with `Retry-After: 1`: the caller already has a JSON page being
         prepared, or every slot of this process is taken. The slot is given back once the
         page's bytes are built, before they are sent.
+    lakana_server.errors.ResultFileLimitError
+        Mapped to 503 with `Retry-After: 1`, before any read or audit: the caller already has
+        a CSV or spreadsheet file being prepared (one at a time), or this process prepares two
+        already. The slot is held while the file is written to a temporary file and given back
+        before its first byte is sent, so a slow reader holds none. Also when the caller
+        already holds 2 prepared files whose responses have not closed them yet (being
+        downloaded, or not yet started), which bounds the temporary files one person keeps.
     """
     run = queries.get_query_run(principal, env, query_id)
     if run.status != QueryRunStatus.SUCCEEDED:
@@ -524,12 +919,19 @@ def get_query_result(
             "download. "
             f"See what it did with: lakana query status {query_id} --env {env}"
         )
-    if result_format == "arrow":
+    if result_format != "json":
         if limit is not None or offset is not None:
-            raise ValidationError(ARROW_TAKES_NO_PAGING)
-        resolved = StorageResolver(session, key_provider).for_environment(env)
-        content = resolved.storage.read(run.result_location)
-        return Response(content=content, media_type="application/vnd.apache.arrow.file")
+            raise ValidationError(WHOLE_RESULT_TAKES_NO_PAGING)
+        return _whole_result(
+            run,
+            env,
+            result_format,
+            storage=StorageResolver(session, key_provider).for_environment(env).storage,
+            limiter=request.app.state.result_file_limiter,
+            open_files=request.app.state.open_result_file_limiter,
+            principal=principal,
+            queries=queries,
+        )
     preview = previewed_table(run)
     if preview is not None and limit is not None and limit > PREVIEW_ROW_LIMIT:
         raise ValidationError(PREVIEW_PAGE_TOO_LONG)
