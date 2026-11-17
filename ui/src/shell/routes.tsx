@@ -110,6 +110,15 @@ export function appRoutes(
             return { element: <AccountScreen /> };
           },
         },
+        {
+          // Bookmarks and sent links to the old Access area lead to its places in Settings.
+          path: "access/*",
+          hydrateFallbackElement: <></>,
+          lazy: async () => {
+            const { MovedAccess } = await import("../settings/MovedAccess");
+            return { element: <MovedAccess /> };
+          },
+        },
         { path: "*", element: <NotFound /> },
       ],
     },
