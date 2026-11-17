@@ -247,7 +247,11 @@ describe("RunDetail", () => {
     renderRun({ status: 200, body: { ...FAILED, actions: [] } });
 
     expect(await screen.findByRole("link", { name: "Logs" })).toBeInTheDocument();
-    expect(screen.queryByRole("button")).toBeNull();
+    for (const name of ["Cancel run", "Resume"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    // What reads stays beside each failure: Show source, Log and Open table.
+    expect(screen.getAllByRole("button", { name: "Show source" }).length).toBeGreaterThan(0);
   });
 
   it("offers Cancel for a running run the actions list, and no Resume", async () => {

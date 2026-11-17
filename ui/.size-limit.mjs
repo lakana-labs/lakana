@@ -89,7 +89,9 @@ const NAMED_LIMITS = [
   // Measured 4.7 kB (2026-11-17) + 10 %: a run, shared by the job page and the run page: read
   // every 2 s while active, its facts, its tasks, Cancel with its question, Resume, Logs, and the
   // failed read with Try again.
-  { name: "a run", prefix: "RunDetail-", limit: "5.17 kB" },
+  // Raised to the measured 5.34 kB (2026-11-17) + 10 % with a failed task's second line: the failure
+  // with its code, cause and next step, Log, Open table and Show rows of each failed check.
+  { name: "a run", prefix: "RunDetail-", limit: "5.87 kB" },
   // Measured 324 B (2026-11-17) + 10 %: a task's page, for now its heading and breadcrumb.
   { name: "the task page", prefix: "TaskPage-", limit: "0.36 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
@@ -246,7 +248,13 @@ const NAMED_LIMITS = [
   // the table's calls moved to manage- (above); the limit holds.
   // Measured 9.76 kB (2026-11-16) with the lazy import of an artifact's Versions tab; the limit
   // holds.
-  { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
+  // Measured 9.41 kB (2026-11-17) + 10 %: Defined in's file dialog moved out to SourceButton- (below),
+  // which the table page and a failed task's Show source share; the limit falls with the chunk.
+  { name: "a table's page", prefix: "TablePage-", limit: "10.35 kB" },
+  // Measured 5.59 kB (2026-11-17) + 10 %: Show source, the file's dialog with its numbered lines and
+  // the visible marks, which the table page's Defined in and a failed task's controls share; it
+  // loads with whichever of the two is opened first.
+  { name: "Show source", prefix: "SourceButton-", limit: "6.15 kB" },
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
   // the cells as text and the Value panel. It loads only when the Preview tab is opened.

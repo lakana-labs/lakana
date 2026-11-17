@@ -137,6 +137,16 @@
       "why": "Why"
     }
   },
+  "failure": {
+    "cause": "Cause:",
+    "nextStep": "Next step:"
+  },
+  "task": {
+    "log": "Log",
+    "showSource": "Show source",
+    "openTable": "Open table",
+    "showRows": "Show rows of {{check}}"
+  },
   "cancel": {
     "button": "Cancel run",
     "title": "Cancel the run of {{name}}?",

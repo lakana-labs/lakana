@@ -152,3 +152,24 @@
 .list-scroll.jobs-tasks-scroll .list {
   min-width: 640px;
 }
+
+/* A task's second line: why it failed, and the controls beside it. */
+.jobs-task-why td {
+  padding-block: var(--space-2) var(--space-3);
+}
+
+.jobs-failure {
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.jobs-failure-label {
+  color: var(--color-text-muted);
+}
+
+.jobs-task-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2) var(--space-4);
+}

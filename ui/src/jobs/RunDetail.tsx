@@ -18,7 +18,6 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
 import { getRun, type RunOut, type TaskRunOut } from "../api/jobs";
-import { formatRows } from "../catalog/format";
 import { Page } from "../shell/Page";
 import { useLivePoll } from "../shell/useLivePoll";
 import { useWhen } from "../shell/useWhen";
@@ -33,7 +32,8 @@ import { LIVE_EVERY_MS } from "./poll";
 import { isGone, PollProblem } from "./PollProblem";
 import { Reading } from "./Reading";
 import { CancelRunButton, ResumeRunButton } from "./RunControls";
-import { failureCode, isActive, runStatusKind, taskStatusKind } from "./status";
+import { isActive, runStatusKind } from "./status";
+import { TaskRow } from "./TaskRow";
 
 /**
  * The task the run's Logs opens: the failed task that ended first, then by asset, as the server
@@ -50,64 +50,6 @@ function firstFailed(run: RunOut): TaskRunOut | undefined {
         String(a.finished_at).localeCompare(String(b.finished_at)) ||
         a.asset.localeCompare(b.asset),
     )[0];
-}
-
-/** Properties of {@link TaskRow}. */
-interface TaskRowProps {
-  /** The run's environment. */
-  readonly environment: string;
-  /** The run's id. */
-  readonly runId: string;
-  /** The task. */
-  readonly task: TaskRunOut;
-}
-
-/**
- * One task: its state, its asset as the link to its page, how long it ran, the rows it wrote, its
- * attempt when it retried or failed, and its failure code, or why a waiting task waits.
- *
- * @param props - The task and its run.
- * @param props.environment - The run's environment.
- * @param props.runId - The run's id.
- * @param props.task - The task.
- * @returns The row.
- */
-function TaskRow({ environment, runId, task }: TaskRowProps): JSX.Element {
-  const { t, i18n } = useTranslation();
-  const retried = task.max_attempts > 1 && (task.attempt > 1 || task.status === "failed");
-  return (
-    <tr>
-      <td>
-        <StatusLabel kind={taskStatusKind(task.status)} />
-      </td>
-      <td>
-        <Link className="row-name" to={taskPath(environment, runId, task.asset)}>
-          <VisibleText text={task.asset} />
-        </Link>
-      </td>
-      <td className="number">
-        {task.started_at !== null &&
-          task.finished_at !== null &&
-          formatDuration(secondsBetween(task.started_at, task.finished_at), t)}
-      </td>
-      <td className="number">
-        {task.rows_written !== null && formatRows(task.rows_written, i18n.language)}
-      </td>
-      <td>{retried && t("jobs.run.attempt", { n: task.attempt, max: task.max_attempts })}</td>
-      <td>
-        {task.failure !== null ? (
-          <span className="jobs-code">{failureCode(task.failure.code)}</span>
-        ) : (
-          task.waiting_for !== null && <VisibleText text={task.waiting_for.message} />
-        )}
-      </td>
-      <td>
-        <span className="chevron" aria-hidden="true">
-          ›
-        </span>
-      </td>
-    </tr>
-  );
 }
 
 /** Properties of {@link RunBody}. */
@@ -204,7 +146,7 @@ function RunBody({ environment, run, controls }: RunBodyProps): JSX.Element {
             </thead>
             <tbody>
               {run.tasks.map((task) => (
-                <TaskRow key={task.asset} environment={environment} runId={run.id} task={task} />
+                <TaskRow key={task.asset} environment={environment} run={run} task={task} />
               ))}
             </tbody>
           </table>

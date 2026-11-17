@@ -13,7 +13,7 @@ import {
   showCheckRows,
   startJob,
 } from "./jobs";
-import type { CheckResultOut, TaskAttemptOut, TriggerOut, WaitingOut } from "./jobs";
+import type { TaskAttemptOut, TriggerOut, WaitingOut } from "./jobs";
 
 import { aFailure, aJob, aJobRun, aTask, aTaskLog, JOB_RUN_ID } from "../test/jobs";
 import { fakeServer } from "../test/server";
@@ -190,10 +190,10 @@ describe("the job calls", () => {
   });
 
   it("reads a failed run with its checks and its waiting task, a deploy trigger and attempts", async () => {
-    const check: CheckResultOut = {
+    const check = {
       name: "silver.orders/no_nulls",
       table: "silver.orders",
-      outcome: "failed",
+      outcome: "failed" as const,
       failing_rows: 3,
     };
     const waiting: WaitingOut = { code: "upstream", message: "It waits for silver.orders." };
