@@ -7,14 +7,15 @@ import type { AreaModule } from "./routes";
 import { queryRoutes } from "../test/queries";
 import { renderShell } from "../test/render";
 
+// The area, its address and the heading it opens on: Settings opens on its first place, Status.
 const shippedAreas = [
-  ["Home", "/"],
-  ["Catalog", "/catalog"],
-  ["Queries", "/queries"],
-  ["Jobs", "/jobs"],
-  ["Connections", "/connections"],
-  ["Access", "/access"],
-  ["Settings", "/settings"],
+  ["Home", "/", "Home"],
+  ["Catalog", "/catalog", "Catalog"],
+  ["Queries", "/queries", "Queries"],
+  ["Jobs", "/jobs", "Jobs"],
+  ["Connections", "/connections", "Connections"],
+  ["Access", "/access", "Access"],
+  ["Settings", "/settings", "Status"],
 ] as const;
 
 /**
@@ -31,13 +32,13 @@ function currentLinks(): string[] {
 }
 
 describe("appRoutes", () => {
-  it.each(shippedAreas)("%s has its own URL, heading and title", async (name, path) => {
+  it.each(shippedAreas)("%s has its own URL, heading and title", async (name, path, heading) => {
     renderShell(path);
 
-    expect(await screen.findByRole("heading", { level: 1, name })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
     // A screen loaded on demand renders outside act(), so its title effect may come a moment later.
     await waitFor(() => {
-      expect(document.title).toBe(`${name} · Lakana`);
+      expect(document.title).toBe(`${heading} · Lakana`);
     });
     expect(currentLinks()).toEqual([name]);
   });

@@ -39,9 +39,10 @@ export interface SettingsPlace {
  * The spec's full order is: Status, Environments, Repositories, Access (People, Groups, Grants,
  * Tokens, Secrets, Row filters & masks, Access file, What I may do), Sign-in (Invites, Recovery
  * links), Configuration. A new place is one entry here, at its place in that order, plus its
- * loader in `placePages.ts`.
+ * loader in `placePages.ts` (kept literal, `as const`, so that file can tell the pages from the
+ * groups and refuse a page without a loader).
  */
-export const SETTINGS_PLACES: readonly SettingsPlace[] = [
+export const SETTINGS_PLACES = [
   {
     id: "status",
     path: "status",
@@ -69,7 +70,7 @@ export const SETTINGS_PLACES: readonly SettingsPlace[] = [
     below: false,
     visible: (viewer) => viewer.admin,
   },
-];
+] as const satisfies readonly SettingsPlace[];
 
 /**
  * The places this person is shown, in list order.

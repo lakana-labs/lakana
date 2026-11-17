@@ -7,14 +7,15 @@ const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 const LIVE_ANNOUNCER = "[data-live-announcer]";
 const KEY = "lakana.preferences";
 
+// The area, its address and the heading it opens on: Settings opens on its first place, Status.
 const AREAS = [
-  ["Home", "/"],
-  ["Catalog", "/catalog"],
-  ["Queries", "/queries"],
-  ["Jobs", "/jobs"],
-  ["Connections", "/connections"],
-  ["Access", "/access"],
-  ["Settings", "/settings"],
+  ["Home", "/", "Home"],
+  ["Catalog", "/catalog", "Catalog"],
+  ["Queries", "/queries", "Queries"],
+  ["Jobs", "/jobs", "Jobs"],
+  ["Connections", "/connections", "Connections"],
+  ["Access", "/access", "Access"],
+  ["Settings", "/settings", "Status"],
 ] as const;
 
 /**
@@ -50,9 +51,9 @@ for (const theme of ["light", "dark"] as const) {
       });
 
       test("every area has no axe violations", async ({ page }) => {
-        for (const [name, path] of AREAS) {
+        for (const [, path, heading] of AREAS) {
           await page.goto(path);
-          await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+          await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
           // An administrator has access: Home never tells them to ask for it.
           await expect(page.getByText(/no access yet/)).toHaveCount(0);
           expect(await violations(page), path).toEqual([]);
@@ -84,9 +85,9 @@ for (const theme of ["light", "dark"] as const) {
         page.on("request", (request) => requests.push(request.url()));
 
         await page.goto("/");
-        for (const [name] of AREAS) {
+        for (const [name, , heading] of AREAS) {
           await page.getByRole("link", { name, exact: true }).click();
-          await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+          await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
         }
         await page.waitForLoadState("networkidle");
 
@@ -101,9 +102,9 @@ for (const theme of ["light", "dark"] as const) {
         // A violation of the content security policy shows up here.
         const errors = consoleErrors(page);
 
-        for (const [name, path] of AREAS) {
+        for (const [, path, heading] of AREAS) {
           await page.goto(path);
-          await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+          await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
         }
         // The picture is read with the CSRF header and shown from a blob: URL, which the policy
         // allows; a blocked one would not load and would show up as an error.
@@ -169,9 +170,9 @@ for (const theme of ["light", "dark"] as const) {
       test("no horizontal scroll at 768 px and at 1280 px", async ({ page }) => {
         for (const width of [768, 1280]) {
           await page.setViewportSize({ width, height: 800 });
-          for (const [name, path] of AREAS) {
+          for (const [, path, heading] of AREAS) {
             await page.goto(path);
-            await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+            await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
             const overflow = await page.evaluate(
               () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
             );
@@ -198,9 +199,9 @@ for (const theme of ["light", "dark"] as const) {
     });
 
     test("no horizontal scroll and no axe violations on every area", async ({ page }) => {
-      for (const [name, path] of AREAS) {
+      for (const [, path, heading] of AREAS) {
         await page.goto(path);
-        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );
