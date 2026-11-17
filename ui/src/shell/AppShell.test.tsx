@@ -66,6 +66,27 @@ describe("AppShell", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
   });
 
+  it("leaves the focus alone when the first load is redirected", async () => {
+    renderShell("/settings");
+    const heading = await screen.findByRole("heading", { level: 1, name: "Status" });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    expect(heading).not.toHaveFocus();
+  });
+
+  it("focuses the heading when a move to a redirecting address lands on its place", async () => {
+    const { router } = renderShell("/jobs");
+    await screen.findByRole("heading", { level: 1, name: "Jobs" });
+
+    await act(() => router.navigate("/settings"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Status" })).toHaveFocus();
+  });
+
   it("focuses the heading again when returning to the first page", async () => {
     const { router } = renderShell("/catalog");
     await screen.findByRole("heading", { level: 1, name: "Catalog" });

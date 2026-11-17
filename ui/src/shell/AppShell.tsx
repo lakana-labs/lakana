@@ -92,14 +92,19 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   const keepFocus =
     navigationType === NavigationType.Push &&
     (location.state as { keepFocus?: unknown } | null)?.keepFocus === true;
+  // A redirect the first load lands on (/settings to its first place) is the page opening, not
+  // a move: the skip link stays the first stop. A redirect after a move still focuses.
+  const moved = useRef(false);
   useEffect(() => {
     if (location.pathname !== shownPath.current) {
       shownPath.current = location.pathname;
-      if (!keepFocus) {
+      const firstRedirect = navigationType === NavigationType.Replace && !moved.current;
+      moved.current ||= navigationType !== NavigationType.Replace;
+      if (!keepFocus && !firstRedirect) {
         main.current?.querySelector("h1")?.focus();
       }
     }
-  }, [location.pathname, keepFocus]);
+  }, [location.pathname, keepFocus, navigationType]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {

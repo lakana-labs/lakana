@@ -29,18 +29,35 @@ describe("SettingsScreen", () => {
   });
 
   it("focuses the heading of a place that loads after the move, not on the first load", async () => {
-    renderShell("/settings/status");
+    // Recovery links is opened by no other test in this file: its lazy chunk must still be
+    // loading when the link is chosen (the lazy components are shared across the file).
+    renderShell("/settings/status", {
+      routes: { "GET /api/v1/recovery-links": { status: 200, body: [] } },
+    });
     const status = await screen.findByRole("heading", { level: 1, name: "Status" });
     expect(status).not.toHaveFocus();
 
     const nav = screen.getByRole("navigation", { name: "Settings places" });
-    await userEvent.click(within(nav).getByRole("link", { name: "Sign-in" }));
+    await userEvent.click(within(nav).getByRole("link", { name: "Recovery links" }));
 
-    const heading = await screen.findByRole("heading", { level: 1, name: "Sign-in" });
+    const heading = await screen.findByRole("heading", { level: 1, name: "Recovery links" });
     await waitFor(() => {
       expect(heading).toHaveFocus();
     });
   });
+
+  it.each(["/settings", "/settings/access"])(
+    "leaves the focus alone on a direct visit to %s",
+    async (path) => {
+      renderShell(path, { routes: { "GET /api/v1/principals": { status: 200, body: [] } } });
+      const heading = await screen.findByRole("heading", { level: 1 });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+
+      expect(heading).not.toHaveFocus();
+    },
+  );
 
   it("lists every place for an administrator and marks the current one", async () => {
     renderShell("/settings/sign-in", {

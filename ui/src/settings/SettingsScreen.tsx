@@ -14,7 +14,14 @@ import {
   useEffect,
   useRef,
 } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router";
+import {
+  Navigate,
+  NavigationType,
+  Route,
+  Routes,
+  useLocation,
+  useNavigationType,
+} from "react-router";
 
 import { NotFound } from "../shell/NotFound";
 import { GroupEntry } from "./GroupEntry";
@@ -78,10 +85,18 @@ function FocusHeading({ moved }: { readonly moved: RefObject<boolean> }): null {
 export function AreaScreen(): JSX.Element {
   const { pathname } = useLocation();
   const opened = useRef(pathname);
-  const moved = useRef(false);
+  const navigationType = useNavigationType();
+  // Arriving by a move (a click on Settings in the sidebar) already counts as one.
+  const moved = useRef(navigationType === NavigationType.Push);
   useEffect(() => {
-    moved.current = pathname !== opened.current;
-  }, [pathname]);
+    if (navigationType === NavigationType.Replace) {
+      // A redirect (/settings to Status, a group to its first place) settles where the visit
+      // opened; it is not the person moving.
+      opened.current = pathname;
+    } else {
+      moved.current ||= pathname !== opened.current;
+    }
+  }, [pathname, navigationType]);
   return (
     <Routes>
       <Route element={<SettingsLayout />}>
