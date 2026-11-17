@@ -1,5 +1,5 @@
 /**
- * A person in Access: their picture, their passkeys and sessions, and the way back in when they
+ * A person in Settings › Access › People: their picture, their passkeys and sessions, and the way back in when they
  * lost their passkeys.
  *
  * @packageDocumentation
@@ -22,6 +22,7 @@ import { SessionsPanel } from "../sign-in/SessionsPanel";
 import { useSession } from "../sign-in/SessionProvider";
 import { RecoveryDialog } from "./RecoveryDialog";
 import { markedText } from "../shell/VisibleText";
+import "../settings/settingsStrings";
 
 /** Who the page is about, as far as recovering them goes. */
 type Kind = "own" | "service" | "admin" | "person";
@@ -91,8 +92,9 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
       title={name}
       headingRef={focus.target}
       trail={[
-        { to: "/access", label: t("areas.access.name") },
-        { to: "/access", label: t("access.people.tab") },
+        { to: "/settings", label: t("areas.settings.name") },
+        { to: "/settings/access", label: t("settings.places.access") },
+        { to: "/settings/access/people", label: t("settings.places.people") },
       ]}
       action={
         kind === "person" && (

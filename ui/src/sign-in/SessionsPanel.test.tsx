@@ -76,7 +76,7 @@ describe("SessionsPanel", () => {
 
   it("ends another person's sessions and lists none afterwards", async () => {
     let open: unknown[] = [THERE];
-    const { user, server } = renderShell("/access/people/kim", {
+    const { user, server } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim/permissions": { status: 200, body: { permissions: [] } },
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
@@ -102,7 +102,7 @@ describe("SessionsPanel", () => {
   });
 
   it("ends nothing when the administrator cancels", async () => {
-    const { user, server } = renderShell("/access/people/kim", {
+    const { user, server } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim/permissions": { status: 200, body: { permissions: [] } },
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },

@@ -1,5 +1,5 @@
 /**
- * The Access area's screen, loaded on demand: People, Invites, Recovery links and each person.
+ * Settings' People place, loaded on demand: the list of people and each person's page below it.
  *
  * @packageDocumentation
  */
@@ -7,10 +7,8 @@ import type { JSX } from "react";
 import { Route, Routes, useParams } from "react-router";
 
 import { NotFound } from "../shell/NotFound";
-import { InvitesPage } from "./InvitesPage";
 import { PeoplePage } from "./PeoplePage";
 import { PersonPage } from "./PersonPage";
-import { RecoveryLinksPage } from "./RecoveryLinksPage";
 
 /**
  * A person's page, new for each person, so nothing read for one shows for another.
@@ -23,17 +21,15 @@ function PersonRoute(): JSX.Element {
 }
 
 /**
- * Renders the place the address names under `/access`.
+ * Renders the place the address names under `/settings/access/people`: the list, or a person.
  *
  * @returns The place.
  */
-export function AreaScreen(): JSX.Element {
+export function PeopleRoutes(): JSX.Element {
   return (
     <Routes>
       <Route index element={<PeoplePage />} />
-      <Route path="invites" element={<InvitesPage />} />
-      <Route path="recovery-links" element={<RecoveryLinksPage />} />
-      <Route path="people/:name" element={<PersonRoute />} />
+      <Route path=":name" element={<PersonRoute />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
