@@ -17,7 +17,7 @@ import {
 } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 
 import { listQueryEnvironments, type QueryEnvironmentOut } from "../api/queries";
 import { CopyLine } from "../shell/CopyLine";
@@ -162,7 +162,8 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
   const location = useLocation();
   const state = location.state as QueriesState | null;
   const query = useQueryRun();
-  const { opened, error: savedError } = useOpenedSaved(address);
+  const saved = useOpenedSaved(address);
+  const { opened, error: savedError } = saved;
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
   const [sql, setSql] = useState("");
@@ -334,9 +335,17 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
       )}
       {state?.note !== undefined && <QueryNote note={state.note} />}
       {savedError !== null && (
-        <p role="alert" className="step-error queries-alert">
-          {savedError}
-        </p>
+        // The server's cause, then the next step: Try again when another read may help, and a
+        // new query in every case.
+        <div role="alert" className="step-error queries-alert">
+          <p>{savedError}</p>
+          {saved.retryable && (
+            <Button className="button" onPress={saved.reload}>
+              {t("queries.tryAgain")}
+            </Button>
+          )}
+          <Link to="/queries">{t("queries.newQuery")}</Link>
+        </div>
       )}
       {opened !== null && opened.sql === undefined && (
         <>

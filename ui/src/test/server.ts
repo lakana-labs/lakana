@@ -25,7 +25,7 @@ interface SentRequest {
 }
 
 /** What a route answers: a status and an optional JSON body, or a file. */
-interface FakeAnswer {
+export interface FakeAnswer {
   /** The status code. */
   readonly status: number;
   /** The JSON body. */

@@ -37,6 +37,13 @@ export interface OpenedSaved {
   readonly opened: SavedQueryOut | null;
   /** Why the saved query the address names could not be read; null otherwise. */
   readonly error: string | null;
+  /**
+   * Whether reading it again may help: not after a 403 or a 404 (no right to it, or it is gone);
+   * false while nothing failed.
+   */
+  readonly retryable: boolean;
+  /** Reads the saved query again. */
+  readonly reload: () => void;
 }
 
 /**
@@ -56,12 +63,20 @@ export function useOpenedSaved(address: QueriesAddress | null): OpenedSaved {
     [environment, id],
   );
   const read = useResource(load);
+  const { reload } = read;
   if (address === null) {
-    return { opened: null, error: null };
+    return { opened: null, error: null, retryable: false, reload };
   }
   if (address.kind === "run") {
-    return { opened: carried, error: null };
+    return { opened: carried, error: null, retryable: false, reload };
   }
   const fresh = [carried, read.data].find((saved) => saved?.id === address.id) ?? null;
-  return { opened: fresh, error: fresh === null ? read.error : null };
+  const error = fresh === null ? read.error : null;
+  const status = read.failure?.status;
+  return {
+    opened: fresh,
+    error,
+    retryable: error !== null && status !== 403 && status !== 404,
+    reload,
+  };
 }

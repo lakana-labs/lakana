@@ -16,7 +16,7 @@ import {
   WAITING,
 } from "../test/queries";
 import { renderShell } from "../test/render";
-import type { FakeRoute } from "../test/server";
+import type { FakeAnswer, FakeRoute } from "../test/server";
 import { catalogCache } from "./editor/catalog";
 import { EditorSkeleton, RunLine } from "./QueryWork";
 import type { QueryRunState } from "./useQueryRun";
@@ -862,6 +862,48 @@ describe("the Queries screen's work", () => {
       "There is no saved query with this id.",
     );
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+  });
+
+  it("a saved query that is gone or refused offers a new query, not Try again", async () => {
+    const { user, router } = renderShell(SAVED_PATH, {
+      routes: routes({
+        [`GET ${SAVED_ONE}`]: {
+          status: 404,
+          body: { type: "NotFoundError", detail: "There is no saved query with this id." },
+        },
+      }),
+    });
+    const alert = await screen.findByRole("alert");
+
+    expect(within(alert).queryByRole("button", { name: "Try again" })).toBeNull();
+    await user.click(within(alert).getByRole("link", { name: "Start a new query" }));
+
+    expect(router.state.location.pathname).toBe("/queries");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
+  });
+
+  it("a saved query whose read failed opens with Try again", async () => {
+    const answers: FakeAnswer[] = [
+      { status: 503, body: { type: "Unavailable", detail: "The server is busy." } },
+      { status: 200, body: aSavedQuery() },
+    ];
+    const { user } = renderShell(SAVED_PATH, {
+      routes: routes({ [`GET ${SAVED_ONE}`]: () => answers.shift() as FakeAnswer }),
+    });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The server is busy.");
+    expect(within(alert).getByRole("link", { name: "Start a new query" })).toHaveAttribute(
+      "href",
+      "/queries",
+    );
+
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
   });
 
   it("back at a new query no run shows, and the remembered environment is read again", async () => {

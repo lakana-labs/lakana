@@ -213,6 +213,11 @@ An administrator who opens someone else's private saved query sees its name, its
 environment, the line "You may not read the SQL of this query.", an empty editor and **Delete…**;
 **Run** and **Save…** stay off.
 
+A saved query's address that cannot be opened, because the query was deleted or you may no longer
+see it, shows the server's sentence and **Start a new query**; **Run** and **Save…** stay off. When
+the read failed for another reason, such as a server that could not be reached, **Try again** reads
+it once more.
+
 **Recent** lists the queries you wrote in the last 30 days, newest first, with their state, how long
 they ran and their environment. One opens on its own address with its SQL, its state and, while the
 server keeps it, its result.
