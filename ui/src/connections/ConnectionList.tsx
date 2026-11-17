@@ -12,11 +12,10 @@ import { Link } from "react-router";
 
 import {
   type ConnectionEnvironmentOut,
-  type ConnectionLastTestOut,
   type ConnectionOut,
+  type ConnectionQueuedTestOut,
   listConnectionEnvironments,
   listConnections,
-  requestConnectionTest,
 } from "../api";
 import { Unknown } from "../catalog/cells";
 import { ListSkeleton } from "../catalog/ListSkeleton";
@@ -28,19 +27,21 @@ import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
-import { PendingButton } from "../shell/PendingButton";
 import { shellQuote } from "../shell/shellQuote";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
-import { problemText } from "../sign-in/messages";
 import { whereText } from "./kinds";
 import { connectionPath, NEW_CONNECTION_PATH } from "./paths";
 import { readFilter, writeFilter } from "./remember";
+import { TestAll } from "./TestAll";
+import { TestButton } from "./TestButton";
 import { TestStatus } from "./TestStatus";
 import { useNow } from "./useNow";
+import { FollowedAnswers, testKey, useOpenTests } from "./useOpenTests";
 import "./connectionStrings";
 
-/** Properties of {@link ConnectionRows}. */
+/** Properties of {@link ConnectionRows} and {@link ConnectionTable}. */
 interface ConnectionRowsProps {
   /** The environments whose connections the person may read. */
   readonly environments: readonly ConnectionEnvironmentOut[];
@@ -53,7 +54,183 @@ interface ConnectionRowsProps {
 }
 
 /**
- * Renders the filter and the table, or the words for a filter with no connection.
+ * Renders the table of one filter, Test all below it, and follows every open test on screen.
+ * What a read of a followed connection answers takes the place of its row; nothing of it
+ * outlives the filter, since a new filter mounts a new table.
+ *
+ * @param props - The environments and the filter.
+ * @param props.environments - The environments the person may read.
+ * @param props.first - The first environment's name.
+ * @param props.filter - The environment filtered by, or null.
+ * @returns The table, or the words for a filter with no connection.
+ */
+function ConnectionTable({
+  environments,
+  first,
+  filter,
+}: Omit<ConnectionRowsProps, "onFilter">): JSX.Element {
+  const { t } = useTranslation();
+  const now = useNow();
+  const pages = useCursorPages(filter ?? "", (cursor) => listConnections(filter, cursor));
+  // The latest of each connection a Test, Test all or read of the follower handed over.
+  const [answers, setAnswers] = useState<ReadonlyMap<string, ConnectionOut>>(new Map());
+  const replace = useCallback((row: ConnectionOut) => {
+    setAnswers((previous) => new Map(previous).set(testKey(row.environment, row.name), row));
+  }, []);
+  const rows = (pages.items ?? []).map(
+    (row) => answers.get(testKey(row.environment, row.name)) ?? row,
+  );
+  const follow = useOpenTests(rows, replace);
+  const region = useFocusAfter<HTMLDivElement>(follow.failed);
+
+  const queued = (environment: string, items: readonly ConnectionQueuedTestOut[]): void => {
+    setAnswers((previous) => {
+      const next = new Map(previous);
+      for (const item of items) {
+        const key = testKey(environment, item.connection);
+        const row = next.get(key) ?? pages.items?.find(({ name }) => name === item.connection);
+        if (row !== undefined) {
+          next.set(key, {
+            ...row,
+            last_test: { state: "queued", outcome: null, finished_at: null, id: item.test_id },
+          });
+        }
+      }
+      return next;
+    });
+    follow.open(items.map(({ connection }) => ({ environment, name: connection })));
+  };
+
+  const testable = environments
+    .filter(({ name }) => filter === null || name === filter)
+    .some(({ actions }) => actions.includes("test"));
+  const none = pages.items?.length === 0 && !pages.busy && !pages.hasMore;
+  if (none) {
+    return (
+      <div className="empty">
+        <p>
+          {filter === null
+            ? t("connections.list.none")
+            : t("connections.list.noneIn", { environment: markedText(filter) })}
+        </p>
+        <p>{t("connections.list.noneCommand")}</p>
+        <CopyLine
+          text={`lakana connection create NAME --env ${shellQuote(filter ?? first)} --kind directory --root ROOT --path PATH`}
+          copyLabel={t("connections.list.copy")}
+        />
+      </div>
+    );
+  }
+  return (
+    <>
+      <ViewList
+        pages={pages}
+        rowCount={rows.length}
+        empty=""
+        region={t("connections.list.region")}
+        regionRef={region.target}
+        rowsOpen
+        scroll="connections-scroll"
+        head={
+          <tr>
+            <th scope="col">{t("connections.list.name")}</th>
+            <th scope="col">{t("connections.list.kind")}</th>
+            <th scope="col" className="narrow-hide">
+              {t("connections.list.where")}
+            </th>
+            <th scope="col">{t("connections.list.environment")}</th>
+            <th scope="col">{t("connections.list.status")}</th>
+            <th scope="col" className="number narrow-hide">
+              {t("connections.list.usedBy")}
+            </th>
+            <th scope="col">
+              <span className="visually-hidden">{t("connections.list.test")}</span>
+            </th>
+            <th scope="col">
+              <span className="visually-hidden">{t("list.open")}</span>
+            </th>
+          </tr>
+        }
+      >
+        {rows.map((row) => {
+          const key = testKey(row.environment, row.name);
+          const where = whereText(row.kind, row.address);
+          const used = row.declared_by.length;
+          const usedText =
+            used === 0
+              ? t("connections.list.usedNone")
+              : t("connections.list.used", { count: used });
+          return (
+            <tr key={key}>
+              <td>
+                <Link className="row-name" to={connectionPath(row.environment, row.name)}>
+                  <VisibleText text={row.name} />
+                </Link>
+                <span className="second narrow-only">
+                  {t("connections.list.narrowSecond", {
+                    where: markedText(where),
+                    used: usedText,
+                  })}
+                </span>
+                {follow.stuck.has(key) && (
+                  <span className="second">{t("connections.follow.stuck")}</span>
+                )}
+              </td>
+              <td>{t(`connections.kinds.${row.kind}.name`)}</td>
+              <td className="narrow-hide">
+                <VisibleText text={where} breakable />
+              </td>
+              <td>
+                <EnvironmentLabel environment={row.environment} />
+              </td>
+              <td>
+                <TestStatus connection={row} now={now} queuedSince={follow.queuedSince.get(key)} />
+              </td>
+              <td className="number narrow-hide">
+                {used === 0 ? <Unknown words={usedText} /> : usedText}
+              </td>
+              <td>
+                {row.actions.includes("test") && (
+                  <TestButton connection={row} onStarted={replace} />
+                )}
+              </td>
+              <td>
+                <span className="chevron" aria-hidden="true">
+                  ›
+                </span>
+              </td>
+            </tr>
+          );
+        })}
+      </ViewList>
+      {follow.failed && (
+        <ReadFailed
+          message={t("connections.follow.failed")}
+          onRetry={() => {
+            region.arm();
+            follow.retry();
+          }}
+        />
+      )}
+      {testable &&
+        (filter === null ? (
+          <p className="connections-test-all">{t("connections.testAll.choose")}</p>
+        ) : (
+          <FollowedAnswers value={answers}>
+            <TestAll
+              environment={filter}
+              onQueued={(items) => {
+                queued(filter, items);
+              }}
+            />
+          </FollowedAnswers>
+        ))}
+    </>
+  );
+}
+
+/**
+ * Renders the filter and, below it, the table of the environment chosen.
  *
  * @param props - The environments and the filter.
  * @param props.environments - The environments the person may read.
@@ -69,36 +246,6 @@ function ConnectionRows({
   onFilter,
 }: ConnectionRowsProps): JSX.Element {
   const { t } = useTranslation();
-  const now = useNow();
-  const pages = useCursorPages(filter ?? "", (cursor) => listConnections(filter, cursor));
-  // A test requested here, shown until the list is read again; and the refusal of one.
-  const [tests, setTests] = useState<Readonly<Record<string, ConnectionLastTestOut>>>({});
-  const [refusals, setRefusals] = useState<Readonly<Record<string, string>>>({});
-  const [working, setWorking] = useState<ReadonlySet<string>>(new Set());
-
-  const rows = (pages.items ?? []).map((row): ConnectionOut => {
-    const test = tests[`${row.environment}/${row.name}`];
-    return test === undefined ? row : { ...row, last_test: test };
-  });
-
-  const test = async (row: ConnectionOut): Promise<void> => {
-    const id = `${row.environment}/${row.name}`;
-    setWorking((previous) => new Set(previous).add(id));
-    setRefusals((previous) =>
-      Object.fromEntries(Object.entries(previous).filter(([other]) => other !== id)),
-    );
-    try {
-      const requested = await requestConnectionTest(row.environment, row.name);
-      setTests((previous) => ({ ...previous, [id]: requested }));
-    } catch (failure: unknown) {
-      setRefusals((previous) => ({ ...previous, [id]: problemText(t, failure) }));
-    } finally {
-      setWorking((previous) => new Set([...previous].filter((other) => other !== id)));
-    }
-  };
-
-  const none = pages.items?.length === 0 && !pages.busy && !pages.hasMore;
-  const commandEnvironment = filter ?? first;
   return (
     <>
       <EnvironmentPicker
@@ -108,113 +255,12 @@ function ConnectionRows({
         all={t("connections.list.all")}
         onChange={onFilter}
       />
-      {none ? (
-        <div className="empty">
-          <p>
-            {filter === null
-              ? t("connections.list.none")
-              : t("connections.list.noneIn", { environment: markedText(filter) })}
-          </p>
-          <p>{t("connections.list.noneCommand")}</p>
-          <CopyLine
-            text={`lakana connection create NAME --env ${shellQuote(commandEnvironment)} --kind directory --root ROOT --path PATH`}
-            copyLabel={t("connections.list.copy")}
-          />
-        </div>
-      ) : (
-        <ViewList
-          pages={pages}
-          rowCount={rows.length}
-          empty=""
-          region={t("connections.list.region")}
-          rowsOpen
-          scroll="connections-scroll"
-          head={
-            <tr>
-              <th scope="col">{t("connections.list.name")}</th>
-              <th scope="col">{t("connections.list.kind")}</th>
-              <th scope="col" className="narrow-hide">
-                {t("connections.list.where")}
-              </th>
-              <th scope="col">{t("connections.list.environment")}</th>
-              <th scope="col">{t("connections.list.status")}</th>
-              <th scope="col" className="number narrow-hide">
-                {t("connections.list.usedBy")}
-              </th>
-              <th scope="col">
-                <span className="visually-hidden">{t("connections.list.test")}</span>
-              </th>
-              <th scope="col">
-                <span className="visually-hidden">{t("list.open")}</span>
-              </th>
-            </tr>
-          }
-        >
-          {rows.map((row) => {
-            const id = `${row.environment}/${row.name}`;
-            const where = whereText(row.kind, row.address);
-            const used = row.declared_by.length;
-            const usedText =
-              used === 0
-                ? t("connections.list.usedNone")
-                : t("connections.list.used", { count: used });
-            const open = row.last_test?.state === "queued" || row.last_test?.state === "running";
-            return (
-              <tr key={id}>
-                <td>
-                  <Link className="row-name" to={connectionPath(row.environment, row.name)}>
-                    <VisibleText text={row.name} />
-                  </Link>
-                  <span className="second narrow-only">
-                    {t("connections.list.narrowSecond", {
-                      where: markedText(where),
-                      used: usedText,
-                    })}
-                  </span>
-                  {refusals[id] !== undefined && (
-                    <span className="step-error second" role="alert">
-                      {refusals[id]}
-                    </span>
-                  )}
-                </td>
-                <td>{t(`connections.kinds.${row.kind}.name`)}</td>
-                <td className="narrow-hide">
-                  <VisibleText text={where} breakable />
-                </td>
-                <td>
-                  <EnvironmentLabel environment={row.environment} />
-                </td>
-                <td>
-                  <TestStatus connection={row} now={now} />
-                </td>
-                <td className="number narrow-hide">
-                  {used === 0 ? <Unknown words={usedText} /> : usedText}
-                </td>
-                <td>
-                  {row.actions.includes("test") && (
-                    <PendingButton
-                      className="button"
-                      pending={working.has(id)}
-                      isDisabled={open}
-                      aria-label={t("connections.list.testNamed", { name: markedText(row.name) })}
-                      onPress={() => {
-                        void test(row);
-                      }}
-                    >
-                      {open ? t("connections.list.testing") : t("connections.list.test")}
-                    </PendingButton>
-                  )}
-                </td>
-                <td>
-                  <span className="chevron" aria-hidden="true">
-                    ›
-                  </span>
-                </td>
-              </tr>
-            );
-          })}
-        </ViewList>
-      )}
+      <ConnectionTable
+        key={filter ?? ""}
+        environments={environments}
+        first={first}
+        filter={filter}
+      />
     </>
   );
 }

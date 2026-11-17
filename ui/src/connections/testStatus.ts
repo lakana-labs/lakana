@@ -9,10 +9,8 @@ import type { ConnectionOut } from "../api";
 import { relativeTime } from "../catalog/format";
 import type { StatusKind } from "../status/status";
 import { OUTCOMES } from "./kinds";
+import { NO_WORKER_AFTER_MS } from "./useOpenTests";
 import "./connectionStrings";
-
-/** How long a test stays queued before the status adds "no worker yet" (the CLI's wait). */
-const NO_WORKER_AFTER_MS = 120_000;
 
 /** The status of a connection's last test, ready to draw. */
 export interface TestStatusView {

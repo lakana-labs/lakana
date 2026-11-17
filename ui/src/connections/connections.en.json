@@ -133,5 +133,17 @@
     "noEnvironment": "You may not read the connections of any environment yet. Ask an administrator for READ_ENVIRONMENT on one.",
     "noEnvironmentCommand": "Then list them from the command line:",
     "narrowSecond": "{{where}} · {{used}}"
+  },
+  "testAll": {
+    "button": "Test all in {{environment}}",
+    "choose": "Choose an environment to test all of its connections.",
+    "testing_one": "Testing {{count}} connection in {{environment}}…",
+    "testing_other": "Testing {{count}} connections in {{environment}}…",
+    "tested_one": "Tested {{count}} connection in {{environment}}: {{ok}} OK, {{failed}} not OK.",
+    "tested_other": "Tested {{count}} connections in {{environment}}: {{ok}} OK, {{failed}} not OK."
+  },
+  "follow": {
+    "failed": "Could not read the test's progress.",
+    "stuck": "No worker finished this test within 10 minutes; Test again closes it as failed and starts a new one."
   }
 }

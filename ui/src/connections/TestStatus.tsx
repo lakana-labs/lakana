@@ -17,7 +17,7 @@ export interface TestStatusProps {
   /** The present, in milliseconds since the epoch. */
   readonly now: number;
   /** When the screen first saw the test queued, for "no worker yet". */
-  readonly queuedSince?: number;
+  readonly queuedSince?: number | undefined;
 }
 
 /**

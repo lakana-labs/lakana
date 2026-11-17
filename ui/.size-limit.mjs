@@ -50,7 +50,11 @@ const NAMED_LIMITS = [
   // environment, last test with its time and used by, the remembered environment filter, Test
   // per row, the empty and no-environment states and the clock that ages "2 hours ago") and the
   // screen's strings. The kinds' words and fields come with the form's chunk.
-  { name: "Connections", prefix: "ConnectionsScreen-", limit: "5.47 kB" },
+  // Raised to the measured 6.92 kB (2026-11-17) + 10 %: Test per row with its 409 read, Test all
+  // in an environment with its always-mounted status line, and the follower of open tests (fast,
+  // then slow, three failures and Try again, ten minutes and stuck, one read per connection or
+  // the environment's list in pages of 200).
+  { name: "Connections", prefix: "ConnectionsScreen-", limit: "7.62 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
   // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected

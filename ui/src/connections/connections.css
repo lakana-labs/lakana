@@ -34,3 +34,15 @@
     display: block;
   }
 }
+
+/* Test all below the table: the button with its refusal beside it, then its status line. */
+.connections-test-all {
+  margin-top: var(--space-4);
+}
+
+.connections-test-all-act {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
