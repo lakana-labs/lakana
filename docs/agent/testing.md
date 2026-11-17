@@ -608,6 +608,11 @@ comparison. Inside table lines, padding and in-cell alignment are therefore not 
 comparison does this; `--fix` writes the run's real text, and when any line of a table changes it
 takes the whole table (top border to bottom border) from the run, so the widths stay consistent.
 
+Where a line wraps is not compared either: the terminal breaks a long line at its width, and
+masked values of another length move the break. If the lines differ, the comparison reads every
+run of lines outside a table as one line with single spaces and compares again, so a sentence
+that wraps after another word passes; a changed word still fails. Table lines stay lines.
+
 A mask hides a change too, so add one only for a value that really differs per run, and
 prefer a narrow pattern. Table width depends on the terminal: an example that quotes tables
 sets `COLUMNS` as the page shows them (`export COLUMNS=120`).

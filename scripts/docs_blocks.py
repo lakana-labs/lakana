@@ -715,6 +715,39 @@ def comparable(line: str) -> str:
     return _PADDING.sub(" ", _RULE.sub("─", line)).rstrip()
 
 
+def unwrapped(lines: Sequence[str]) -> list[str]:
+    """Join the lines of each stretch of text, for a comparison only.
+
+    A terminal wraps a long line at its width, and the masked parts of a line (a snapshot id,
+    a time) differ in length from run to run, so the wrap point moves. Every run of
+    consecutive lines without a box-drawing character becomes one line whose white space is a
+    single space; a table line stays a line of its own. Never write the result into a page.
+
+    Parameters
+    ----------
+    lines
+        Masked lines, as `comparable` leaves them.
+
+    Returns
+    -------
+    list of str
+        The table lines and, between them, one line per stretch of text.
+    """
+    out: list[str] = []
+    text: list[str] = []
+    for line in lines:
+        if _TABLE_LINE.search(line):
+            if text:
+                out.append(" ".join(text))
+                text = []
+            out.append(line)
+        else:
+            text += line.split()
+    if text:
+        out.append(" ".join(text))
+    return out
+
+
 def redact(text: str) -> str:
     """Replace the secret part of every token in `text` with ``<secret>``.
 
@@ -805,6 +838,27 @@ def _captured_text(captured: Path | None, value: str) -> str | None:
         return None
 
 
+def _same_output(shown: str, printed: str) -> bool:
+    """Say whether a block and a run match once masked, ignoring where lines wrap.
+
+    Parameters
+    ----------
+    shown
+        The block's body.
+    printed
+        What the example printed.
+
+    Returns
+    -------
+    bool
+        ``True`` if the masked lines are equal, or equal once each stretch of text outside a
+        table is read as one line.
+    """
+    page = [comparable(mask(x)) for x in _lines(shown) if not is_progress(x)]
+    run = [comparable(mask(x)) for x in _lines(printed) if not is_progress(x)]
+    return page == run or unwrapped(page) == unwrapped(run)
+
+
 def _merge(shown: str, printed: str) -> str:
     """Bring a block up to date with a run, keeping the page's own values.
 
@@ -826,6 +880,8 @@ def _merge(shown: str, printed: str) -> str:
         The new body, each line ending in a newline.
     """
     page, run = _lines(shown), _lines(redact(printed))
+    if _same_output(shown, printed):
+        return shown if shown.endswith("\n") else shown + "\n"
     page_rest = [x for x in page if not is_progress(x)]
     run_rest = [x for x in run if not is_progress(x)]
     matcher = difflib.SequenceMatcher(
@@ -891,7 +947,7 @@ def _output_problem(
     """
     page = [comparable(mask(x)) for x in _lines(block.body) if not is_progress(x)]
     run = [comparable(mask(x)) for x in _lines(printed) if not is_progress(x)]
-    if page == run:
+    if page == run or unwrapped(page) == unwrapped(run):
         return None
     diff = "\n".join(
         difflib.unified_diff(page, run, "the page", f"the run ({value})", lineterm="", n=2)

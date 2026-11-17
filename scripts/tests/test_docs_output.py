@@ -486,3 +486,40 @@ def test_fix_keeps_an_unchanged_table_as_the_page_shows_it(tmp_path: Path) -> No
     fix(root, root / "docs/site", None, captures)
     text = (root / "docs/site/p.md").read_text(encoding="utf-8")
     assert "```text\nnew\n" + _table(LONG_ID) + "```" in text
+
+
+WRAPPED_PAGE = (
+    "Fired: t: schema changed (snapshot 5033228317085625887, 05 Nov 00:33 UTC);\ncheck it\n"
+)
+WRAPPED_RUN = (
+    "Fired: t: schema changed (snapshot 503322831708562588, 05 Nov 00:33 UTC); check\nit\n"
+)
+
+
+def test_a_sentence_wrapped_at_another_word_is_not_a_difference(tmp_path: Path) -> None:
+    """The wrap point moves with the length of masked values; the words are what count."""
+    root, captures = _tree(tmp_path, BLOCK, WRAPPED_PAGE, WRAPPED_RUN)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_changed_word_in_wrapped_text_still_fails(tmp_path: Path) -> None:
+    """Unwrapping does not hide a different word."""
+    root, captures = _tree(tmp_path, BLOCK, WRAPPED_PAGE, WRAPPED_RUN.replace("check", "look"))
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_text_does_not_join_a_table_line(tmp_path: Path) -> None:
+    """A line moved across a table is a difference."""
+    shown = "intro\n" + _table("ok")
+    root, captures = _tree(tmp_path, BLOCK, shown, _table("ok") + "intro\n")
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_fix_keeps_a_page_that_differs_only_in_wrapping(tmp_path: Path) -> None:
+    """A block that matches apart from its line breaks is left as written."""
+    root, captures = _tree(tmp_path, BLOCK, WRAPPED_PAGE, WRAPPED_RUN)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "```text\n" + WRAPPED_PAGE + "```" in text
