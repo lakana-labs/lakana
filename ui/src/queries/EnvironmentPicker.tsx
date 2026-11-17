@@ -44,8 +44,8 @@ function EnvironmentName({ environment }: EnvironmentNameProps): JSX.Element {
     <>
       <span className="env-protected" aria-hidden="true">
         ●
-      </span>
-      <VisibleText text={environment.name} />
+      </span>{" "}
+      <VisibleText text={environment.name} />{" "}
       <span className="env-protected">
         <span aria-hidden="true">· </span>
         {t("queries.environment.protected")}

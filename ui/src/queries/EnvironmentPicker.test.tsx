@@ -17,7 +17,7 @@ describe("EnvironmentPicker", () => {
     await user.click(screen.getByRole("button", { name: "Environment: dev" }));
     const options = screen.getAllByRole("option");
 
-    expect(options.map((option) => option.textContent)).toEqual(["dev", "●prod· protected"]);
+    expect(options.map((option) => option.textContent)).toEqual(["dev", "● prod · protected"]);
     expect(within(options[1] as HTMLElement).getByText("●")).toHaveAttribute("aria-hidden", "true");
     await user.click(options[1] as HTMLElement);
     expect(onChange).toHaveBeenCalledWith("prod");
@@ -27,7 +27,7 @@ describe("EnvironmentPicker", () => {
     render(<EnvironmentPicker environments={QUERY_ENVIRONMENTS} value="prod" onChange={vi.fn()} />);
 
     const trigger = screen.getByRole("button", { name: "Environment: prod, protected" });
-    expect(trigger).toHaveTextContent("●prod· protected");
+    expect(trigger).toHaveTextContent("● prod · protected");
     expect(screen.getByText("Environment")).toBeInTheDocument();
   });
 
