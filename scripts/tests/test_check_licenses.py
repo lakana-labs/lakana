@@ -595,3 +595,11 @@ def test_main_fails_on_a_stale_unknown_entry(
     monkeypatch.setattr("scripts.check_licenses.REPO_ROOT", tmp_path)
     assert main() == 1
     assert "stale UNKNOWN_PYTHON_LICENCES entry" in capsys.readouterr().err
+
+
+def test_a_permissive_python_package_is_not_a_violation() -> None:
+    """A named, permissive licence passes without a listing."""
+    assert (
+        find_violations([{"Name": "ok", "License": "MIT License", "Version": "1"}], frozenset())
+        == []
+    )
