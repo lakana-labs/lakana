@@ -28,3 +28,14 @@ export function formatDuration(seconds: number, t: TFunction): string {
   }
   return t("jobs.duration.hours", { h: Math.floor(minutes / 60), m: minutes % 60 });
 }
+
+/**
+ * Seconds between two timestamps.
+ *
+ * @param from - The start (ISO 8601).
+ * @param to - The end (ISO 8601); now by default.
+ * @returns The seconds.
+ */
+export function secondsBetween(from: string, to?: string): number {
+  return ((to === undefined ? Date.now() : Date.parse(to)) - Date.parse(from)) / 1_000;
+}

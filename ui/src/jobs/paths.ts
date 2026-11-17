@@ -44,9 +44,12 @@ export function taskPath(environment: string, runId: string, asset: string): str
  * while a repository's name may hold slashes.
  *
  * @param ref - Home's reference to a job.
- * @returns The repository and the job; null for a reference without a slash.
+ * @returns The repository and the job; null for a reference without a slash, or with an empty
+ *   repository or job.
  */
 export function splitJobRef(ref: string): { repository: string; job: string } | null {
   const slash = ref.lastIndexOf("/");
-  return slash < 0 ? null : { repository: ref.slice(0, slash), job: ref.slice(slash + 1) };
+  const repository = ref.slice(0, Math.max(slash, 0));
+  const job = ref.slice(slash + 1);
+  return slash < 0 || repository === "" || job === "" ? null : { repository, job };
 }

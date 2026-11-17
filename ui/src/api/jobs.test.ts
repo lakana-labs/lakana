@@ -13,14 +13,7 @@ import {
   showCheckRows,
   startJob,
 } from "./jobs";
-import type {
-  CheckResultOut,
-  NotifyOut,
-  TaskAttemptOut,
-  TaskStatus,
-  TriggerOut,
-  WaitingOut,
-} from "./jobs";
+import type { CheckResultOut, TaskAttemptOut, TriggerOut, WaitingOut } from "./jobs";
 
 import { aFailure, aJob, aJobRun, aTask, aTaskLog, JOB_RUN_ID } from "../test/jobs";
 import { fakeServer } from "../test/server";
@@ -182,7 +175,7 @@ describe("the job calls", () => {
     expect(ACTIVE_RUN_STATUSES).toEqual(["queued", "running"]);
   });
 
-  it("reads a failed run with its checks, its waiting task and a job that notifies", async () => {
+  it("reads a failed run with its checks and its waiting task, a deploy trigger and attempts", async () => {
     const check: CheckResultOut = {
       name: "silver.orders/no_nulls",
       table: "silver.orders",
@@ -190,7 +183,6 @@ describe("the job calls", () => {
       failing_rows: 3,
     };
     const waiting: WaitingOut = { code: "upstream", message: "It waits for silver.orders." };
-    const failed: TaskStatus = "failed";
     const attempt: TaskAttemptOut = {
       attempt: 1,
       worker: "w1",
@@ -204,19 +196,18 @@ describe("the job calls", () => {
       cpu_seconds: null,
       bytes_read: null,
     };
-    const notify: NotifyOut = { format: "slack", events: ["failed"], secret: "alerts-webhook" };
     const trigger: TriggerOut = { kind: "deploy" };
     const run = aJobRun({
       status: "failed",
       failed_tasks: 1,
       tasks: [
-        aTask({ status: failed, failure: aFailure("check_blocked"), checks: [check] }),
+        aTask({ status: "failed", failure: aFailure("check_blocked"), checks: [check] }),
         aTask({ asset: "gold.sales", status: "pending", waiting_for: waiting }),
       ],
     });
     fakeServer({
       [`GET /api/v1/environments/prod/runs/${JOB_RUN_ID}`]: { status: 200, body: run },
-      [`GET ${JOBS}`]: { status: 200, body: aJob({ notify, triggers: [trigger] }) },
+      [`GET ${JOBS}`]: { status: 200, body: aJob({ triggers: [trigger] }) },
       [`GET /api/v1/environments/prod/runs/${JOB_RUN_ID}/tasks/silver.orders/log`]: {
         status: 200,
         body: aTaskLog({ attempts: [attempt] }),
@@ -224,7 +215,7 @@ describe("the job calls", () => {
     });
 
     expect(await getRun("prod", JOB_RUN_ID)).toEqual(run);
-    expect((await getJob("prod", "analytics", "nightly_sales")).notify).toEqual(notify);
+    expect((await getJob("prod", "analytics", "nightly_sales")).triggers).toEqual([trigger]);
     expect((await getTaskLog("prod", JOB_RUN_ID, "silver.orders", 0)).attempts).toEqual([attempt]);
   });
 });

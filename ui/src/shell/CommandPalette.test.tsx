@@ -162,7 +162,10 @@ describe("CommandPalette", () => {
     await user.keyboard("jobs");
     await user.keyboard("{ArrowDown}{Enter}");
 
-    expect(router.state.location.pathname).toBe("/jobs");
+    // Jobs loads its screen on demand: the router commits the address once the chunk is in.
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/jobs");
+    });
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

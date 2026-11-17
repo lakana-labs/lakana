@@ -3,3 +3,147 @@
   font-family: var(--font-mono);
   font-size: var(--type-code-size);
 }
+
+/* A failure code, the word the reference documents. */
+.jobs-code {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+/* The job page: the facts, the runs and the selected run, one panel under the other, 24 px apart.
+   Each is a flat panel; a table in it scrolls in its own region, so 320 px never scrolls sideways. */
+.jobs-panels {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+/* Run now and the schedule's button beside the heading; under it on a narrow screen. */
+.jobs-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+/* A control with its refusal under it. */
+.jobs-control {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.jobs-control:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* What a control did, or why the server refused it; empty, it keeps no room. */
+.jobs-note,
+.jobs-reading,
+.jobs-waiting,
+.jobs-why {
+  margin: 0 0 var(--space-3);
+  overflow-wrap: anywhere;
+}
+
+.jobs-note:empty,
+.jobs-reading:empty {
+  margin: 0;
+}
+
+.jobs-control .jobs-note,
+.jobs-control .step-status,
+.jobs-control .step-error {
+  margin: 0;
+}
+
+/* A panel's heading: the title step. */
+.jobs-panel-heading {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-line);
+  font-weight: var(--type-title-weight);
+}
+
+/* The runs' heading with its two menus beside it; they go under it on a narrow screen. */
+.jobs-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+.jobs-panel-head .jobs-panel-heading {
+  margin: 0;
+}
+
+.jobs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.jobs-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.jobs-filter label {
+  color: var(--color-text-muted);
+}
+
+/* The facts of a job and of a run: the term beside its answer, or above it when narrow. */
+.jobs-facts dl,
+.jobs-facts-list {
+  margin: 0 0 var(--space-3);
+}
+
+.jobs-fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.jobs-fact dt {
+  flex: 0 0 128px;
+  color: var(--color-text-muted);
+}
+
+.jobs-fact dd {
+  flex: 1 1 160px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Cancel, Resume and Logs of a run. */
+.jobs-run-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.jobs-run-controls:empty {
+  margin: 0;
+}
+
+/* The two tables: no narrower than their columns need, scrolling in their own region; more
+   specific than the Catalog's wider minimum, which stays in the document once it was loaded. */
+.list-scroll.jobs-runs-scroll .list {
+  min-width: 560px;
+}
+
+.list-scroll.jobs-tasks-scroll .list {
+  min-width: 640px;
+}

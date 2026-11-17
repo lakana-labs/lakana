@@ -1,32 +1,35 @@
 /**
- * A run's page: for now its id under its breadcrumb; the run's detail comes in the next changes.
+ * A run's page: the run with its facts, controls and tasks, under the breadcrumb through its job.
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
-import { useTranslation } from "react-i18next";
+import { type JSX, useCallback, useRef } from "react";
 import { useParams } from "react-router";
 
-import { Page } from "../shell/Page";
+import { recordOpened } from "../api";
+import type { RunOut } from "../api/jobs";
+import { useMe } from "../shell/me";
 import "./jobStrings";
+import { RunDetail } from "./RunDetail";
 
 /**
- * Renders a run's page.
+ * Renders the run the address names and records it, once read, as opened for Home.
  *
- * @returns The page of the run the address names.
+ * @returns The page.
  */
 export function RunPage(): JSX.Element {
-  const { t } = useTranslation();
   const { env = "", id = "" } = useParams();
-  return (
-    <Page
-      title={t("jobs.runTitle", { id })}
-      trail={[
-        { to: "/jobs", label: t("areas.jobs.name") },
-        { to: "/jobs", label: env },
-      ]}
-    >
-      <></>
-    </Page>
+  const me = useMe();
+  const recorded = useRef(new Set<string>());
+  const record = useCallback(
+    (run: RunOut) => {
+      if (!recorded.current.has(run.id)) {
+        recorded.current.add(run.id);
+        // Recently opened is a convenience: a failed record is not the person's concern.
+        recordOpened(me.name, "run", env, run.id).catch(() => undefined);
+      }
+    },
+    [me.name, env],
   );
+  return <RunDetail environment={env} runId={id} level={1} onRunChanged={record} />;
 }

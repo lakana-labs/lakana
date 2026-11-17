@@ -16,7 +16,7 @@ describe("the Jobs screen", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "nightly" })).toBeInTheDocument();
 
     await router.navigate("/jobs/prod/runs/r1");
-    expect(await screen.findByRole("heading", { level: 1, name: "Run r1" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Run" })).toBeInTheDocument();
 
     await router.navigate("/jobs/prod/runs/r1/tasks/silver.sales");
     expect(

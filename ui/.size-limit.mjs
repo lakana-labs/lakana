@@ -72,11 +72,24 @@ const NAMED_LIMITS = [
   // Measured 1.1 kB (2026-11-17) + 10 %: the Jobs area's screen, for now its routes (a job, a run and
   // a task, each a page of its own below), the area's page at /jobs and the screen's strings. The
   // lists, facts and logs come in the next changes.
-  { name: "Jobs", prefix: "JobsScreen-", limit: "1.21 kB" },
+  // Raised to the measured 2.68 kB (2026-11-17) + 10 %: the strings of the job and run pages
+  // (facts, runs, a run's facts and tasks, the controls and their notes) and the skeleton that
+  // says "Loading the job…" or "Loading the run…" while their chunks load.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "2.95 kB" },
   // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
-  { name: "the job page", prefix: "JobPage-", limit: "0.31 kB" },
+  // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and
+  // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
+  // words, the selection, after each deploy, where it notifies, why a start waits), the runs
+  // with Status and Period in the address, paged and read again every 30 s, and the selected run.
+  { name: "the job page", prefix: "JobPage-", limit: "2.92 kB" },
   // Measured 288 B (2026-11-17) + 10 %: a run's page, for now its heading and breadcrumb.
-  { name: "the run page", prefix: "RunPage-", limit: "0.32 kB" },
+  // Raised to the measured 403 B (2026-11-17) + 10 %: the record of the run as opened; the run
+  // itself is in the chunk it shares with the job page (RunDetail-, below).
+  { name: "the run page", prefix: "RunPage-", limit: "0.44 kB" },
+  // Measured 4.7 kB (2026-11-17) + 10 %: a run, shared by the job page and the run page: read
+  // every 2 s while active, its facts, its tasks, Cancel with its question, Resume, Logs, and the
+  // failed read with Try again.
+  { name: "a run", prefix: "RunDetail-", limit: "5.17 kB" },
   // Measured 324 B (2026-11-17) + 10 %: a task's page, for now its heading and breadcrumb.
   { name: "the task page", prefix: "TaskPage-", limit: "0.36 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
@@ -87,7 +100,22 @@ const NAMED_LIMITS = [
   // catalog's numbers and sizes (catalog/format.ts, which names the chunk), shared by the
   // Catalog's menus, the Queries screen's environment picker and result line, and the table
   // page's tabs; never in the first load.
-  { name: "the menus and number formats", prefix: "format-", limit: "18.19 kB" },
+  // Lowered to the measured 443 B (2026-11-17) + 10 %: once the Jobs screen's menus use React
+  // Aria's Select too, the bundler gives it a chunk of its own (Select-, below) and the code the
+  // Select shares with the Catalog's tree another (TreeDropTargetDelegate-, below); this chunk
+  // keeps the catalog's numbers and sizes.
+  { name: "the number formats", prefix: "format-", limit: "0.49 kB" },
+  // Measured 9.85 kB (2026-11-17) + 10 %: React Aria's Select, ListBox and Popover, shared by the
+  // Catalog's Sort by and Order, the Queries screen's environment picker and the Status and
+  // Period of a job's runs; never in the first load.
+  { name: "the menus", prefix: "Select-", limit: "10.84 kB" },
+  // Measured 7.03 kB (2026-11-17) + 10 %: the React Aria collection code the menus share with
+  // the Catalog's tree (the chunk is named after one of its modules); never in the first load.
+  {
+    name: "the menus' and the tree's collections",
+    prefix: "TreeDropTargetDelegate-",
+    limit: "7.73 kB",
+  },
   // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
   // shares with the screens that show a state.
   { name: "the status label", prefix: "StatusLabel-", limit: "0.27 kB" },

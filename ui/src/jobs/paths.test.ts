@@ -20,7 +20,9 @@ describe("the Jobs addresses", () => {
     expect(splitJobRef("analytics/daily")).toEqual({ repository: "analytics", job: "daily" });
   });
 
-  it("a ref without a slash is null", () => {
+  it("a ref without a slash, or with an empty part, is null", () => {
     expect(splitJobRef("daily")).toBeNull();
+    expect(splitJobRef("analytics/")).toBeNull();
+    expect(splitJobRef("/daily")).toBeNull();
   });
 });
