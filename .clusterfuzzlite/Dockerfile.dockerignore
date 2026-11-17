@@ -1,0 +1,11 @@
+# The build context of .clusterfuzzlite/Dockerfile (BuildKit reads this file in place of the
+# repository's .dockerignore): the lock, the workspace's pyproject files uv needs to read it,
+# lakana-core's source and the harnesses.
+*
+!pyproject.toml
+!uv.lock
+!packages/*/pyproject.toml
+!packages/lakana-core/src/
+!fuzz/
+!.clusterfuzzlite/build.sh
+**/__pycache__
