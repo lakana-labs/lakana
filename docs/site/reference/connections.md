@@ -315,9 +315,10 @@ lakana audit list --kind connection --env dev
 
 `list` has a `last_test` column and `show` a `Last test:` line: `never tested`, `queued`,
 `running`, or the outcome and when it finished, followed by `(before the last change)` when the
-connection changed after it. With `MANAGE_CONNECTION`, `show` adds who ran it and its message
-(`by dana: password authentication failed ...`), and for an open test its id (`queued (--id ID)`),
-which `lakana connection test NAME --id ID` shows. For an outcome other than `ok`, `show` prints
+connection changed after it. With `MANAGE_CONNECTION`, an open test also says when it was
+requested (`queued at 2026-11-17T08:00:00+00:00`), and `show` adds who ran a test and its message
+(`by dana: password authentication failed ...`), and for an open test its id
+(`queued at ... (--id ID)`), which `lakana connection test NAME --id ID` shows. For an outcome other than `ok`, `show` prints
 what to do next on standard error.
 
 `--output json` prints the record of the REST answer (below) for `show`, `create` and `update`.

@@ -926,7 +926,10 @@ def test_show_prints_the_managers_last_test_with_message_and_who(tmp_path: Path)
         "password authentication failed for user reader"
     )
     assert "lakana connection update NAME --values-stdin" in done.stderr
-    assert f"Last test:   queued (--id {_TEST_ID})" in queued.stdout.splitlines()
+    assert (
+        f"Last test:   queued at 2026-11-17T08:00:00+00:00 (--id {_TEST_ID})"
+        in queued.stdout.splitlines()
+    )
 
 
 def test_show_prints_a_readers_last_test_with_the_next_step_on_stderr(tmp_path: Path) -> None:
@@ -970,3 +973,39 @@ def test_a_test_before_the_last_change_says_so(tmp_path: Path) -> None:
     running = LastConnectionTest(state="running", outcome=None, finished_at=None)
     assert last_test_text(running, datetime(2026, 11, 17, 9, 0, tzinfo=UTC)) == "running"
     assert last_test_text(None, datetime(2026, 11, 17, 9, 0, tzinfo=UTC)) == "never tested"
+
+
+def test_an_open_test_says_when_it_was_requested_to_whoever_gets_that_time(
+    tmp_path: Path,
+) -> None:
+    """A manager's open test names its request time; a reader, who never gets it, sees the state."""
+    managers = _tested(
+        state="running",
+        outcome=None,
+        finished_at=None,
+        id=_TEST_ID,
+        created_at=_DONE_AT,
+        message=None,
+        requested_by="dana",
+    )
+    readers = {**_S3, "last_test": {"state": "queued", "outcome": None, "finished_at": None}}
+    api = FakeApi()
+    api.on("GET", _BASE, json={"items": [managers, readers], "next_cursor": None})
+
+    result = invoke(make_state(tmp_path, api), "connection", "list", "--env", "prod")
+
+    assert result.exit_code == 0, result.output
+    rows = {line.split("│")[1].strip(): line for line in result.stdout.splitlines() if "│" in line}
+    assert "running at 2026-11-17T08:00:00+00:00" in rows["crm-db"]
+    assert rows["landing"].rstrip("│ ").endswith("queued")
+    reader = LastConnectionTest(state="queued", outcome=None, finished_at=None)
+    manager = LastConnectionTest(
+        state="queued",
+        outcome=None,
+        finished_at=None,
+        id=_TEST_ID,
+        created_at=datetime(2026, 11, 17, 8, 0, tzinfo=UTC),
+    )
+    changed = datetime(2026, 11, 17, 9, 0, tzinfo=UTC)
+    assert last_test_text(reader, changed) == "queued"
+    assert last_test_text(manager, changed) == "queued at 2026-11-17T08:00:00+00:00"

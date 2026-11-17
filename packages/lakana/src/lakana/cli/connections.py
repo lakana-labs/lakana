@@ -565,13 +565,16 @@ def last_test_text(test: LastConnectionTest | None, updated_at: datetime) -> str
     Returns
     -------
     str
-        ``never tested``, ``queued``, ``running``, or ``<outcome> at <ISO time>``; followed by
-        `` (before the last change)`` when it finished before `updated_at`.
+        ``never tested``; ``queued`` or ``running``, with ``at <ISO time>`` of the request when
+        the server sent it (to a holder of the right to manage connections); or
+        ``<outcome> at <ISO time>``, followed by `` (before the last change)`` when it finished
+        before `updated_at`.
     """
     if test is None:
         return "never tested"
     if test.state != "done":
-        return _output.inline(test.state)
+        state = _output.inline(test.state)
+        return state if test.created_at is None else f"{state} at {test.created_at.isoformat()}"
     return _finished(test) + _before_change(test, updated_at)
 
 
@@ -587,13 +590,13 @@ def _last_test_line(connection: Connection) -> str:
     -------
     str
         `last_test_text` for a reader. For a holder of the right to manage connections, an open
-        test adds its id, and a done one who ran it and its message.
+        test adds its id after when it was requested, and a done one who ran it and its message.
     """
     test = connection.last_test
     if test is None or test.id is None:
         return last_test_text(test, connection.updated_at)
     if test.state != "done":
-        return f"{_output.inline(test.state)} (--id {_output.inline(test.id)})"
+        return f"{last_test_text(test, connection.updated_at)} (--id {_output.inline(test.id)})"
     who = _output.inline(test.requested_by or "(unknown)")
     line = f"{_finished(test)} by {who}{_before_change(test, connection.updated_at)}"
     return f"{line}: {_output.inline(test.message)}" if test.message else line

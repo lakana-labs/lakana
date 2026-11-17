@@ -11,6 +11,8 @@ is always set.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query
 from pydantic import SecretStr
 
@@ -56,16 +58,20 @@ def _to_out(view: ConnectionView) -> ConnectionOut:
     last_test = None
     if view.last_test is not None:
         test = view.last_test
+        detail: dict[str, Any] = {}
+        if test.detail is not None:
+            detail = {
+                "id": test.detail.id,
+                "created_at": test.detail.created_at,
+                "message": test.detail.message,
+                "requested_by": test.detail.requested_by,
+            }
         last_test = ConnectionLastTestOut(
             state=test.state.value,
             outcome=None if test.outcome is None else test.outcome.value,
             finished_at=test.finished_at,
+            **detail,
         )
-        if test.detail is not None:
-            last_test.id = test.detail.id
-            last_test.created_at = test.detail.created_at
-            last_test.message = test.detail.message
-            last_test.requested_by = test.detail.requested_by
     return ConnectionOut(
         name=view.name,
         kind=view.kind.value,
@@ -81,7 +87,7 @@ def _to_out(view: ConnectionView) -> ConnectionOut:
         updated_at=view.updated_at,
         environment=view.environment,
         last_test=last_test,
-        actions=list(view.actions),  # ty: ignore[invalid-argument-type]
+        actions=list(view.actions),
     )
 
 

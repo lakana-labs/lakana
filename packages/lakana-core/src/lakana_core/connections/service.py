@@ -34,7 +34,7 @@ import uuid
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -109,7 +109,9 @@ _TEST_STUCK = (
     "log (`docker compose logs worker`, or the `lakana local` terminal)"
 )
 _CLEAR_SECRET = "secret"  # nosec B105 -- the word a caller clears, not a credential
-CONNECTION_ACTIONS: tuple[str, ...] = ("test", "update", "delete", "name_secret")
+ConnectionAction = Literal["test", "update", "delete", "name_secret"]
+"""A word of a connection's `actions`."""
+CONNECTION_ACTIONS: tuple[ConnectionAction, ...] = ("test", "update", "delete", "name_secret")
 """The words a connection's `actions` may hold, in this order.
 
 ``test``, ``update`` and ``delete`` need `MANAGE_CONNECTION` on the environment. ``name_secret``
@@ -250,7 +252,7 @@ class ConnectionView:
     updated_at: datetime
     environment: str
     last_test: LastTest | None
-    actions: tuple[str, ...]
+    actions: tuple[ConnectionAction, ...]
 
 
 def missing_connections(
@@ -679,7 +681,7 @@ class ConnectionService:
         secret = self._used_secret(row)
         creator = self._session.get(Principal, row.created_by)
         manages, manages_secrets = rights
-        actions: tuple[str, ...] = ()
+        actions: tuple[ConnectionAction, ...] = ()
         if manages:
             actions = CONNECTION_ACTIONS if manages_secrets else CONNECTION_ACTIONS[:3]
         return ConnectionView(
