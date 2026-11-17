@@ -43,6 +43,14 @@ const NAMED_LIMITS = [
   // move to a namespace once the tree read after its creation arrives, and the quoted
   // environment of the deploy command; the limit holds.
   { name: "Catalog", prefix: "CatalogScreen-", limit: "32.6 kB" },
+  // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
+  // import of the SQL editor with the screen's strings.
+  { name: "Queries", prefix: "QueriesScreen-", limit: "0.6 kB" },
+  // Measured 125.08 kB (2026-11-17) + 10 %: the SQL editor, almost all of it CodeMirror 6 (state,
+  // view, commands, language, lang-sql's grammar and keywords, autocomplete, lint) with the
+  // Still Water theme, the run keys, the error mark and the sources' registry. It loads only when
+  // the Queries screen opens, never in the first load.
+  { name: "the SQL editor", prefix: "SqlEditor-", limit: "137.6 kB" },
   // Measured 3.6 kB (2026-11-16) + 10 %: the Catalog's views other than All, loaded when one is
   // chosen: the choice of an environment, the Dropped list with its paging, Undrop and its
   // dialog with the reason of a protected environment, the hook that reads the protection and
@@ -271,6 +279,8 @@ export default [
   // imports react-router's useNavigate, which split the router's chunk of the first load into
   // two (hooks- and lib-), and the exports between them cost 1.55 kB. vite.config.ts keeps
   // react-router in one chunk (codeSplitting.groups); it measures 208.57 kB, and the limit holds.
+  // Measured 210.29 kB (2026-11-17) with the Queries area's loader in the routes (210.05 kB
+  // before); CodeMirror stays in its own chunk, and the limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the

@@ -1,0 +1,105 @@
+/**
+ * The editor in Still Water: its theme and its syntax highlighting, from the tokens only.
+ *
+ * @remarks
+ * The editor lives in an open shadow root, which the custom properties of `tokens.css` reach by
+ * inheritance, so every value here is a `var(--…)`. CodeMirror's lint marks draw with `data:`
+ * images, which the content security policy's `img-src` refuses; the theme replaces both with
+ * plain CSS (a wavy underline and a filled dot), so no image is asked for.
+ * @packageDocumentation
+ */
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
+import type { Extension } from "@codemirror/state";
+import { EditorView } from "@codemirror/view";
+import { tags } from "@lezer/highlight";
+
+/** The editor's surfaces, text, selection, cursor, gutter, focus and floating parts. */
+export const stillWaterTheme: Extension = EditorView.theme({
+  "&": {
+    color: "var(--color-text)",
+    backgroundColor: "var(--color-surface)",
+    fontSize: "var(--type-code-size)",
+  },
+  "&.cm-focused": {
+    outline: "var(--focus-ring)",
+    outlineOffset: "var(--focus-offset)",
+  },
+  ".cm-scroller": {
+    fontFamily: "var(--font-mono)",
+    lineHeight: "var(--type-code-line)",
+  },
+  ".cm-content": {
+    caretColor: "var(--color-accent)",
+    padding: "var(--space-2) 0",
+  },
+  ".cm-line": {
+    padding: "0 var(--space-2)",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--color-accent)",
+  },
+  "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection":
+    {
+      backgroundColor: "var(--color-accent-bg)",
+    },
+  ".cm-gutters": {
+    backgroundColor: "var(--color-surface)",
+    color: "var(--color-text-faint)",
+    borderRight: "1px solid var(--color-line)",
+  },
+  ".cm-tooltip": {
+    backgroundColor: "var(--color-float)",
+    color: "var(--color-text)",
+    border: "1px solid var(--color-edge)",
+    borderRadius: "var(--radius-control)",
+    boxShadow: "var(--shadow-float)",
+  },
+  ".cm-tooltip-autocomplete > ul": {
+    fontFamily: "var(--font-mono)",
+  },
+  ".cm-tooltip-autocomplete > ul > li[aria-selected]": {
+    backgroundColor: "var(--color-accent-bg)",
+    color: "var(--color-text)",
+  },
+  ".cm-completionDetail, .cm-completionInfo": {
+    color: "var(--color-text-muted)",
+  },
+  ".cm-diagnostic-error": {
+    borderLeftColor: "var(--color-bad)",
+  },
+  ".cm-lintRange-error": {
+    backgroundImage: "none",
+    textDecoration: "underline wavy var(--color-bad)",
+    textDecorationSkipInk: "none",
+  },
+  ".cm-lint-marker-error": {
+    content: "none",
+    backgroundColor: "var(--color-bad)",
+    borderRadius: "var(--radius-round)",
+    width: "var(--space-2)",
+    height: "var(--space-2)",
+    margin: "var(--space-1) auto",
+  },
+  // Forced colours drop backgrounds; the dot keeps the system's text colour.
+  "@media (forced-colors: active)": {
+    ".cm-lint-marker-error": {
+      forcedColorAdjust: "none",
+      backgroundColor: "CanvasText",
+    },
+  },
+});
+
+/**
+ * The highlighting of SQL, muted: keywords in the text colour at weight 500, strings and numbers
+ * muted, comments faint and in italic. No second accent.
+ */
+export const stillWaterHighlight: Extension = syntaxHighlighting(
+  HighlightStyle.define([
+    { tag: [tags.keyword, tags.operatorKeyword], color: "var(--color-text)", fontWeight: "500" },
+    {
+      tag: [tags.string, tags.special(tags.string), tags.number, tags.bool, tags.null],
+      color: "var(--color-text-muted)",
+    },
+    { tag: tags.comment, color: "var(--color-text-faint)", fontStyle: "italic" },
+  ]),
+);

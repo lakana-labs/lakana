@@ -149,6 +149,20 @@ describe("appRoutes", () => {
     expect(await screen.findByText("Loaded on demand")).toBeInTheDocument();
   });
 
+  it("/queries lazy-loads its screen, with the SQL editor in a shadow root", async () => {
+    renderShell("/queries");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Queries" })).toBeInTheDocument();
+    const host = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>(".sql-editor");
+      expect(found?.shadowRoot).toBeTruthy();
+      return found;
+    });
+    expect(
+      within(host?.shadowRoot as unknown as HTMLElement).getByRole("textbox", { name: "SQL" }),
+    ).toBeInTheDocument();
+  });
+
   it("never loads the page of an area outside the user's access", async () => {
     const load = vi.fn(() => Promise.resolve({ AreaScreen: () => <p>Loaded on demand</p> }));
     renderShell("/jobs", { access: new Set(["home"]), pages: { jobs: load } });

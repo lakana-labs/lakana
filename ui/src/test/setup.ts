@@ -1,6 +1,6 @@
 /**
- * Test setup that every Vitest file runs first: the DOM matchers of jest-dom, object URLs
- * (which jsdom lacks), a 3 s wait for `findBy*` and `waitFor`, and a clean document, `fetch`,
+ * Test setup that every Vitest file runs first: the DOM matchers of jest-dom, object URLs and
+ * `execCommand` (which jsdom lacks), a 3 s wait for `findBy*` and `waitFor`, and a clean document, `fetch`,
  * CSRF token, picture cache and local storage after each test.
  *
  * @packageDocumentation
@@ -29,6 +29,9 @@ Object.assign(URL, {
   },
   revokeObjectURL: () => undefined,
 });
+
+// jsdom has no execCommand, which CodeMirror's focus() calls (the SQL editor's focusAt).
+Object.assign(Document.prototype, { execCommand: () => false });
 
 afterEach(() => {
   cleanup();
