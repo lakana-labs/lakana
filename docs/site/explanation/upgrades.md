@@ -733,7 +733,7 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   `lakana runs list --all-environments`, `lakana runs failed` and
   `lakana deploys list --all-environments` ([Find a run](../how-to/find-a-run.md)). A newer
   package against an older server says that the server has no such route.
-- Migration `0083` adds three indexes: `ix_runs_created_at_id` and `ix_runs_finished_at` on
+- Migration `0084` adds three indexes: `ix_runs_created_at_id` and `ix_runs_finished_at` on
   `runs`, and `ix_deploy_runs_created_at_id` on `deploy_runs`. They serve the runs and deploys
   lists across environments and the failed-runs list. On a large Postgres `runs` table the
   index build blocks writes to the table while it runs. Nothing has to be done: the upgrade runs

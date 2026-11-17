@@ -6557,13 +6557,13 @@ def test_0082_creates_saved_queries_with_both_owner_keys_and_the_check(
         engine.dispose()
 
 
-_REVISION_0083 = "f6b1d4e8a273"
+_REVISION_0083 = "b6d2f8a4c913"
 
 
-def test_0083_adds_the_run_list_indexes_and_drops_them_on_downgrade(
-    migrated_db: MigratedDb,
-) -> None:
-    """Revision `0083`: three indexes on `runs` and `deploy_runs`, for every-environment lists.
+def test_0083_replaces_the_connection_tests_index(migrated_db: MigratedDb) -> None:
+    """Revision `0083`: `(connection_id, created_at)` replaces the index on `connection_id`.
+
+    The rows are kept; the downgrade restores the single-column index.
 
     Parameters
     ----------
@@ -6571,6 +6571,69 @@ def test_0083_adds_the_run_list_indexes_and_drops_them_on_downgrade(
         Copies the file migrated to the revision the test starts from.
     """
     db_path = migrated_db(_REVISION_0082)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    connection_id = uuid.uuid4().hex
+
+    def indexes() -> dict[str | None, list[str | None]]:
+        return {
+            i["name"]: list(i["column_names"])
+            for i in inspect(engine).get_indexes("connection_tests")
+        }
+
+    try:
+        assert "ix_connection_tests_connection_id" in indexes()
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            for state in ("DONE", "QUEUED"):
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO connection_tests (id, connection_id, environment_id,"
+                        " requested_by, state, created_at) VALUES (:id, :connection, :env,"
+                        " :who, :state, :now)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "connection": connection_id,
+                        "env": uuid.uuid4().hex,
+                        "who": uuid.uuid4().hex,
+                        "state": state,
+                        "now": _utc_text(),
+                    },
+                )
+        command.upgrade(config, _REVISION_0083)
+        found = indexes()
+        assert found["ix_connection_tests_connection_id_created_at"] == [
+            "connection_id",
+            "created_at",
+        ]
+        assert "ix_connection_tests_connection_id" not in found
+        with engine.connect() as connection:
+            assert (
+                connection.execute(sa.text("SELECT count(*) FROM connection_tests")).scalar() == 2
+            )
+        command.downgrade(config, _REVISION_0082)
+        restored = indexes()
+        assert restored["ix_connection_tests_connection_id"] == ["connection_id"]
+        assert "ix_connection_tests_connection_id_created_at" not in restored
+    finally:
+        engine.dispose()
+
+
+_REVISION_0084 = "f6b1d4e8a273"
+
+
+def test_0084_adds_the_run_list_indexes_and_drops_them_on_downgrade(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0084`: three indexes on `runs` and `deploy_runs`, for every-environment lists.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0083)
     config = Config(str(ALEMBIC_INI))
     engine = create_engine(f"sqlite:///{db_path}")
 
@@ -6584,11 +6647,11 @@ def test_0083_adds_the_run_list_indexes_and_drops_them_on_downgrade(
         assert "ix_runs_created_at_id" not in indexes()
         assert "ix_runs_finished_at" not in indexes()
         assert "ix_deploy_runs_created_at_id" not in deploy_indexes()
-        command.upgrade(config, _REVISION_0083)
+        command.upgrade(config, _REVISION_0084)
         assert indexes()["ix_runs_created_at_id"] == ["created_at", "id"]
         assert indexes()["ix_runs_finished_at"] == ["finished_at"]
         assert deploy_indexes()["ix_deploy_runs_created_at_id"] == ["created_at", "id"]
-        command.downgrade(config, _REVISION_0082)
+        command.downgrade(config, _REVISION_0083)
         assert "ix_runs_created_at_id" not in indexes()
         assert "ix_runs_finished_at" not in indexes()
         assert "ix_deploy_runs_created_at_id" not in deploy_indexes()

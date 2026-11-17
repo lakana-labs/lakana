@@ -5342,6 +5342,22 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   `reason: secret_unreadable` (`decrypt_secret_row` logs why, without a value). The S1 binding
   rules above decide which secret that can be; their tests are in `test_connection_service.py`,
   and `test_connection_fetch.py` pins that a moved or revoked secret is never sent.
+- **What a reader sees of a test.** `last_test` on a connection answer (`ConnectionOut`, every
+  route that answers one, and `GET /api/v1/connections`) carries `state`, `outcome` and
+  `finished_at` for anyone with `READ_ENVIRONMENT`. Its `message`, `id`, time requested
+  (`created_at`) and `requested_by` are absent, not `null`, for a caller without
+  `MANAGE_CONNECTION` on the environment: `ConnectionService._view` leaves them unset, and the
+  routes answer with `response_model_exclude_unset=True`, so a field cannot come back as `null`
+  by default. Why: the message can name paths under an ingestion root, the hosts and ports the
+  worker reached and the server's own words (threat model, "Malicious or compromised task
+  code"), while the outcome is a fixed word whose cause and next step are public
+  (`docs/site/reference/connections.md`). Test all
+  (`POST /api/v1/environments/{env}/connection-tests`) is the same probe once per connection of a
+  page: it needs `MANAGE_CONNECTION` and no passkey touch, as a single test does, and writes the
+  same `CONNECTION_TESTED` events (`state: queued`) per connection it queues; a stuck test it
+  closes first (open over 10 minutes) also writes one, `state: done` and `outcome: failed`, as
+  `ConnectionTestQueue.close` records it for the test's requester; a connection with an open test
+  under 10 minutes old gets that test back and writes nothing.
 - **The answer.** `TaskConnectionOut` carries the settings with a `ca_certificate` in full (the
   helper needs it) and `endpoints` from `connections.endpoints.endpoints`, the list the worker's
   egress grants and the binding's audit `url` use too. `Cache-Control: no-store`,
@@ -7091,6 +7107,22 @@ violations `lint-ban.test.ts` lints); CodeQL (`codeql.yml`) runs on every pull r
 to `main` and weekly; both upload SARIF to code scanning. OpenSSF Scorecard (`scorecard.yml`) runs
 on every push to `main`, weekly and on a branch-protection change, and publishes its score for the
 README badge; read the results at <https://scorecard.dev/viewer/?uri=github.com/lakana-labs/lakana>.
+
+**An npm advisory may be let through only for a dev dependency, until a date, tracked by an
+issue.** The `npm audit` job runs `scripts/npm_audit.py ui tools/jscpd`, which runs
+`npm audit --json` in each directory and fails on every advisory (severity `low` and above) except
+one listed in `scripts/npm-audit-allowlist.toml`. Each `[[advisory]]` entry names the GHSA id, the
+package, the reason, the tracking issue and an `until` date, and the script fails when an entry's
+`until` has come (from that day on, as osv-scanner's `ignoreUntil`), when its package appears
+anywhere in the production tree (`npm ls --package-lock-only --omit=dev --all`, any version), and
+when no audited lock reports it any more, so the entry goes when the fix lands. osv-scanner, which
+reads the `osv-scanner.toml` next to each lock it scans, ignores the same advisory with
+`[[IgnoredVulns]]`, the same `ignoreUntil` and a reason naming the issue;
+`scripts/tests/test_npm_audit.py` keeps the two lists equal. The job's probe also requires the
+script to fail on lodash 4.17.20 with `ui/` audited beside it, so the allowlist swallows nothing
+else. Add an entry only on the maintainer's decision, with a tracking issue that says why it is
+acceptable; the first is GHSA-fc5q-39xc-vjpf in `picomatch` (dev tooling of `ui/`, until
+2026-12-01, #709).
 
 ### Image scan
 

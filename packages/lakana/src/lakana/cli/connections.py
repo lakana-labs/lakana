@@ -11,15 +11,17 @@ from __future__ import annotations
 import inspect
 import sys
 from collections.abc import Callable, Mapping
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
 import typer
 
-from lakana._models import Connection, ConnectionTest
+from lakana._http import every_page
+from lakana._models import Connection, ConnectionTest, LastConnectionTest
 from lakana.cli import _output
-from lakana.cli._state import CliError, confirm, resolve_environment, state_of
+from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.secrets import read_stdin, read_values
 
 connection_app = typer.Typer(
@@ -514,6 +516,117 @@ def _declared(connection: Connection) -> str:
     )
 
 
+def _finished(test: LastConnectionTest) -> str:
+    """Write what a finished test found and when.
+
+    Parameters
+    ----------
+    test
+        A done test.
+
+    Returns
+    -------
+    str
+        ``<outcome> at <ISO time>``.
+    """
+    when = test.finished_at.isoformat() if test.finished_at is not None else "(unknown)"
+    return f"{_output.inline(test.outcome or 'failed')} at {when}"
+
+
+def _before_change(test: LastConnectionTest, updated_at: datetime) -> str:
+    """Say that a test finished before the connection's last change, when it did.
+
+    Parameters
+    ----------
+    test
+        The test.
+    updated_at
+        When the connection was last changed.
+
+    Returns
+    -------
+    str
+        `` (before the last change)``, or nothing.
+    """
+    if test.finished_at is not None and test.finished_at < updated_at:
+        return " (before the last change)"
+    return ""
+
+
+def last_test_text(test: LastConnectionTest | None, updated_at: datetime) -> str:
+    """Write a connection's last test in a few words, as every reader may see it.
+
+    Parameters
+    ----------
+    test
+        Its last test, or `None` when it was never tested.
+    updated_at
+        When the connection was last changed.
+
+    Returns
+    -------
+    str
+        ``never tested``; ``queued`` or ``running``, with ``at <ISO time>`` of the request when
+        the server sent it (to a holder of the right to manage connections); or
+        ``<outcome> at <ISO time>``, followed by `` (before the last change)`` when it finished
+        before `updated_at`.
+    """
+    if test is None:
+        return "never tested"
+    if test.state != "done":
+        state = _output.inline(test.state)
+        return state if test.created_at is None else f"{state} at {test.created_at.isoformat()}"
+    return _finished(test) + _before_change(test, updated_at)
+
+
+_NOT_SAID = "(server does not say)"
+"""The last test of a server older than `last_test`, which sends no `environment` either."""
+
+
+def _last_test_cell(connection: Connection) -> str:
+    """Write the last test as `list` prints it, or say that the server does not send it.
+
+    Parameters
+    ----------
+    connection
+        The connection.
+
+    Returns
+    -------
+    str
+        `last_test_text`, or ``(server does not say)`` when the answer has no `environment`:
+        a server that sends none predates `last_test`, so ``never tested`` would be false.
+    """
+    if connection.environment is None:
+        return _NOT_SAID
+    return last_test_text(connection.last_test, connection.updated_at)
+
+
+def _last_test_line(connection: Connection) -> str:
+    """Write the last test as `show` prints it: with its message and who ran it, when sent.
+
+    Parameters
+    ----------
+    connection
+        The connection.
+
+    Returns
+    -------
+    str
+        `last_test_text` for a reader. For a holder of the right to manage connections, an open
+        test adds its id after when it was requested, and a done one who ran it and its message.
+        ``(server does not say)`` for a server older than `last_test`, as `_last_test_cell`.
+    """
+    test = connection.last_test
+    if test is None or test.id is None:
+        return _last_test_cell(connection)
+    if test.state != "done":
+        return f"{last_test_text(test, connection.updated_at)} (--id {_output.inline(test.id)})"
+    who = _output.inline(test.requested_by or "(unknown)")
+    line = f"{_finished(test)} by {who}{_before_change(test, connection.updated_at)}"
+    return f"{line}: {_output.inline(test.message)}" if test.message else line
+
+
 @connection_app.command("create")
 @_with_kind_options
 def create(
@@ -569,8 +682,21 @@ def create(
 
 
 @connection_app.command("list")
-def list_connections(ctx: typer.Context, env: _ENV = None) -> None:
-    """List the connections of an environment, newest first.
+def list_connections(
+    ctx: typer.Context,
+    env: _ENV = None,
+    all_environments: Annotated[
+        bool,
+        typer.Option(
+            "--all-environments",
+            help="The connections of every environment you may read, with an environment column.",
+        ),
+    ] = False,
+) -> None:
+    """List the connections of an environment, newest first, with each one's last test.
+
+    With --all-environments, the connections of every environment you may read, newest first
+    over all of them.
 
     Parameters
     ----------
@@ -578,24 +704,44 @@ def list_connections(ctx: typer.Context, env: _ENV = None) -> None:
         The Typer context.
     env
         The environment.
+    all_environments
+        List every environment you may read instead of one; not with `--env`.
+
+    Raises
+    ------
+    CliError
+        If `--all-environments` is given with `--env`.
     """
     state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    connections = list(state.client().connections.iter(environment))
+    if all_environments and env is not None:
+        raise CliError("--all-environments lists every environment; leave out --env.")
+    resource = state.client().connections
+    if all_environments:
+        connections = list(resource.iter_all())
+        columns = ["name", "environment", "kind", "address", "secret", "declared_by", "last_test"]
+    else:
+        connections = list(resource.iter(resolve_environment(state, env)))
+        columns = ["name", "kind", "address", "secret", "declared_by", "last_test"]
     _output.emit(
         state,
         connections,
-        columns=["name", "kind", "address", "secret", "declared_by"],
-        derived={"address": lambda row: _pairs(row.address), "declared_by": _declared},
-        droppable=["declared_by", "secret"],
+        columns=columns,
+        derived={
+            "address": lambda row: _pairs(row.address),
+            "declared_by": _declared,
+            "last_test": _last_test_cell,
+        },
+        droppable=["declared_by", "secret", "last_test"],
     )
 
 
 @connection_app.command("show")
 def show(ctx: typer.Context, name: str, env: _ENV = None) -> None:
-    """Show connection NAME: its address, settings, secret's name and the assets that declare it.
+    """Show connection NAME: its address, settings, secret, declaring assets and last test.
 
-    A CA certificate shows as its SHA-256 fingerprint; a secret's values never show.
+    A CA certificate shows as its SHA-256 fingerprint; a secret's values never show. The last
+    test shows its outcome and when; with the right to manage connections, also who ran it and
+    its message. What to do about an outcome that is not ``ok`` goes to standard error.
 
     Parameters
     ----------
@@ -617,11 +763,16 @@ def show(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         f"Settings:    {_pairs(connection.settings)}",
         f"Secret:      {_output.inline(connection.secret or '(none)')}",
         f"Declared by: {_declared(connection)}",
+        f"Last test:   {_last_test_line(connection)}",
         f"Created:     {connection.created_at.isoformat()} by "
         f"{_output.inline(connection.created_by or '(unknown)')}",
         f"Updated:     {connection.updated_at.isoformat()}",
     ]
     sys.stdout.write(_output.safe_text("\n".join(lines)) + "\n")
+    last = connection.last_test
+    advice = next_step(last.outcome) if last is not None and last.state == "done" else None
+    if advice:
+        _output.next_step(state, advice)
 
 
 @connection_app.command("update")
@@ -785,8 +936,13 @@ def _test_line(test: ConnectionTest) -> str:
 @connection_app.command("test")
 def test(
     ctx: typer.Context,
-    name: str,
+    name: Annotated[
+        str | None, typer.Argument(help="The connection; leave it out with --all.")
+    ] = None,
     env: _ENV = None,
+    all_connections: Annotated[
+        bool, typer.Option("--all", help="Test every connection of the environment.")
+    ] = False,
     no_wait: Annotated[
         bool, typer.Option("--no-wait", help="Queue the test and print its id; don't wait.")
     ] = False,
@@ -795,33 +951,47 @@ def test(
         typer.Option("--id", help="Show an earlier test of NAME instead of starting one."),
     ] = None,
 ) -> None:
-    """Test connection NAME: a worker checks that its host can be reached.
+    """Test connection NAME, or with --all every connection: a worker checks each host.
 
     Prints ``ok: <message>`` or ``<outcome>: <message>`` with what to do next; exits 1 unless the
-    outcome is ``ok``. Waits up to 120 seconds for a worker.
+    outcome is ``ok``. With --all, prints ``<name>: <outcome>: <message>`` for each connection,
+    sorted by name, and exits 1 unless every outcome is ``ok``; a connection whose test is
+    already open gets that test. Waits up to 120 seconds for a worker.
 
     Parameters
     ----------
     ctx
         The Typer context.
     name
-        The connection's name.
+        The connection's name; not with `--all`.
     env
         The environment.
+    all_connections
+        Test every connection of the environment instead of one.
     no_wait
         Print the test's id without waiting for the outcome.
     test_id
-        Show this earlier test instead of starting one.
+        Show this earlier test instead of starting one; not with `--all`.
 
     Raises
     ------
     CliError
-        If a worker did not finish the test in time (exit 1).
+        If neither or both of NAME and `--all` are given, or `--id` with `--all` (exit 2); if a
+        worker did not finish the test in time (exit 1).
     typer.Exit
         With code 1 when the outcome is not ``ok``.
     """
+    if name is not None and all_connections:
+        raise CliError("Give a connection NAME or --all, not both.")
+    if name is None and not all_connections:
+        raise CliError("Give a connection NAME, or --all for every connection of the environment.")
+    if all_connections and test_id is not None:
+        raise CliError("--id shows one test; leave out --all.")
     state = state_of(ctx)
     environment = resolve_environment(state, env)
+    if name is None:
+        _test_all(state, environment, no_wait=no_wait)
+        return
     try:
         result = state.client().connections.test(
             environment, name, wait=not no_wait, test_id=test_id
@@ -844,6 +1014,81 @@ def test(
     if advice:
         _output.next_step(state, advice)
     raise typer.Exit(1)
+
+
+def _test_all(state: CliState, environment: str, *, no_wait: bool) -> None:
+    """Test every connection of an environment and print one line per connection, by name.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment.
+    no_wait
+        Print each test's id (``queued`` or ``already open``) without waiting.
+
+    Raises
+    ------
+    CliError
+        If a worker did not finish every test in time (exit 1); the message names the open ones.
+    typer.Exit
+        With code 1 when an outcome is not ``ok``.
+    """
+    resource = state.client().connections
+    if no_wait:
+        queued = sorted(
+            every_page(lambda cursor: resource.queue_tests(environment, cursor=cursor)),
+            key=lambda item: item.connection,
+        )
+        if state.output == "json":
+            _output.print_json(queued)
+            return
+        for item in queued:
+            how = "queued" if item.queued else "already open"
+            line = f"{_output.inline(item.connection)}: {how} {_output.inline(item.test_id)}"
+            sys.stdout.write(_output.safe_text(line) + "\n")
+        if queued:
+            _output.next_step(
+                state,
+                "Look at one with lakana connection test NAME "
+                f"--env {_output.inline(environment)} --id ID",
+            )
+        else:
+            _no_connections(state, environment)
+        return
+    try:
+        tests = resource.test_all(environment)
+    except TimeoutError as exc:
+        raise CliError(str(exc), 1, kind="ConnectionTestTimeout") from exc
+    if state.output == "json":
+        _output.print_json(dict(sorted(tests.items())))
+    elif not tests:
+        _no_connections(state, environment)
+    else:
+        for connection, result in sorted(tests.items()):
+            line = f"{_output.inline(connection)}: {_test_line(result)}"
+            sys.stdout.write(_output.safe_text(line) + "\n")
+    failed = sorted({result.outcome or "failed" for result in tests.values()} - {"ok"})
+    for outcome in failed:
+        advice = next_step(outcome)
+        if advice:
+            _output.next_step(state, f"{_output.inline(outcome)}: {advice}")
+    if failed:
+        raise typer.Exit(1)
+
+
+def _no_connections(state: CliState, environment: str) -> None:
+    """Say that an environment has no connection to test.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    environment
+        The environment.
+    """
+    sys.stdout.write(f"Environment {_output.inline(environment)} has no connections.\n")
 
 
 def register(app: typer.Typer) -> None:

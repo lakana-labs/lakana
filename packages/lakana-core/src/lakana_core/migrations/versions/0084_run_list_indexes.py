@@ -7,7 +7,7 @@
 are `ix_runs_created_at_id`, `ix_runs_finished_at` and `ix_deploy_runs_created_at_id`.
 
 Revision ID: f6b1d4e8a273
-Revises: e9f3a6b2d847
+Revises: b6d2f8a4c913
 Create Date: 2026-11-17 10:00:00.000000
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "f6b1d4e8a273"
-down_revision: str | Sequence[str] | None = "e9f3a6b2d847"
+down_revision: str | Sequence[str] | None = "b6d2f8a4c913"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
