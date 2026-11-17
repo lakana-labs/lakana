@@ -608,6 +608,20 @@ comparison. Inside table lines, padding and in-cell alignment are therefore not 
 comparison does this; `--fix` writes the run's real text, and when any line of a table changes it
 takes the whole table (top border to bottom border) from the run, so the widths stay consistent.
 
+Where a line wraps is not compared either: the terminal breaks a long line at its width, and
+masked values of another length move the break. If the lines differ, the comparison joins line
+`n + 1` to line `n` only when the terminal had to break there (`n`, a space and the first word
+of `n + 1` do not fit in the console width), `n + 1` is not blank and has the same indent, does
+not start a list item (`- `, `1. `), and neither is a table line (a line that starts with, or
+holds two, box-drawing characters; `+---+` rules; `| a | b |` rows; `--- ---` headers). The
+masks then run on the joined text, so a mask with a space in it (an alert time) matches across
+a wrap. The width is the last `export COLUMNS=N` of the example's `run.sh` above the region (put the
+export before the first region it should apply to; the checker's own environment never counts,
+so the result does not depend on who runs it); with no export, the longest line that is not a table line, so there
+one long unwrapped line in a block switches the joining off. Blank lines, indentation, spacing
+inside a line, list items and tables still count, and one stray `│` in a sentence does not make
+it a table. `--fix` keeps the page's own line breaks in a stretch where only the wrap differs.
+
 A mask hides a change too, so add one only for a value that really differs per run, and
 prefer a narrow pattern. Table width depends on the terminal: an example that quotes tables
 sets `COLUMNS` as the page shows them (`export COLUMNS=120`).
