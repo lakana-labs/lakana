@@ -67,6 +67,14 @@
   background: var(--color-surface);
 }
 
+/* The editor's own element fills the host; CodeMirror's root inside it does too (theme.ts). */
+.sql-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .queries-editor-skeleton {
   padding: var(--space-3);
   color: var(--color-text-muted);

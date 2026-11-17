@@ -4,7 +4,7 @@ import { act, render, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-import { registerEditorSource } from "./extensions";
+import { editorSources, registerEditorSource } from "./extensions";
 import SqlEditor, { type SqlEditorHandle } from "./SqlEditor";
 
 type Props = ComponentProps<typeof SqlEditor>;
@@ -180,6 +180,59 @@ describe("SqlEditor", () => {
     view.contentDOM.blur();
     api?.focus();
     expect(view.hasFocus).toBe(true);
+  });
+
+  it("format lays the text out as an edit undo takes back, and leaves text it cannot read", async () => {
+    let api: SqlEditorHandle | undefined;
+    const onChange = vi.fn();
+    const { container } = render(
+      <SqlEditor
+        {...props({
+          onChange,
+          handle: (given) => {
+            api = given;
+          },
+        })}
+      />,
+    );
+    const view = viewOf(container);
+
+    await act(async () => {
+      expect(await api?.format()).toBe(true);
+    });
+    expect(view.state.doc.toString()).toBe("SELECT\n  *\nFROM\n  gold.station_ranking");
+    expect(onChange).toHaveBeenLastCalledWith("SELECT\n  *\nFROM\n  gold.station_ranking");
+
+    type(view, " where name = 'unclosed");
+    const unreadable = view.state.doc.toString();
+    await act(async () => {
+      expect(await api?.format()).toBe(false);
+    });
+    expect(view.state.doc.toString()).toBe(unreadable);
+  });
+
+  it("completes the chosen environment's names, and none without an environment", () => {
+    const catalog = (): string[] =>
+      editorSources()
+        .map((source) => source.id)
+        .filter((id) => id === "catalog");
+    const { rerender, unmount } = render(<SqlEditor {...props()} />);
+    expect(catalog()).toEqual(["catalog"]);
+
+    rerender(<SqlEditor {...props({ environment: "dev" })} />);
+    expect(catalog()).toEqual(["catalog"]);
+    rerender(<SqlEditor {...props({ environment: null })} />);
+    expect(catalog()).toEqual([]);
+    rerender(<SqlEditor {...props({ environment: "prod" })} />);
+    unmount();
+    expect(catalog()).toEqual([]);
+  });
+
+  it("starts without the catalog's help when no environment is chosen", () => {
+    const { container } = render(<SqlEditor {...props({ environment: null })} />);
+
+    expect(viewOf(container).state.doc.toString()).toBe(SQL);
+    expect(editorSources().map((source) => source.id)).not.toContain("catalog");
   });
 
   it("runs on Mod-Enter and cancels on Escape", () => {

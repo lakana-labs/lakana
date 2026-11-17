@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { type JSX, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 
@@ -127,6 +128,8 @@ function Work({ environments, address }: WorkProps): JSX.Element {
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
   const [sql, setSql] = useState("");
+  // Whether the last Format could not read the text; the next edit takes the line away.
+  const [unreadable, setUnreadable] = useState(false);
   const [remembered] = useState(readEnvironment);
   // A choice holds for the address it was made at; another run's address brings its own.
   const at = address === null ? "" : `${address.environment}/${address.id}`;
@@ -183,6 +186,16 @@ function Work({ environments, address }: WorkProps): JSX.Element {
         <p className="queries-name">
           <VisibleText text={name} />
         </p>
+        <Button
+          className="button"
+          onPress={() => {
+            void editor.current?.format().then((formatted) => {
+              setUnreadable(!formatted);
+            });
+          }}
+        >
+          {t("queries.format")}
+        </Button>
         <EnvironmentPicker
           environments={environments}
           value={environment}
@@ -212,7 +225,10 @@ function Work({ environments, address }: WorkProps): JSX.Element {
         <Suspense fallback={<EditorSkeleton />}>
           <SqlEditor
             value={sql}
-            onChange={setSql}
+            onChange={(changed) => {
+              setSql(changed);
+              setUnreadable(false);
+            }}
             onRun={run}
             onCancel={query.cancel}
             readOnly={false}
@@ -225,6 +241,11 @@ function Work({ environments, address }: WorkProps): JSX.Element {
           />
         </Suspense>
       </div>
+      {unreadable && (
+        <p role="alert" className="step-error queries-alert">
+          {t("queries.formatUnreadable")}
+        </p>
+      )}
       {query.cancelRefusal !== null && (
         <p role="alert" className="step-error queries-alert">
           {t("queries.cancelRefused", { problem: problemText(t, query.cancelRefusal) })}

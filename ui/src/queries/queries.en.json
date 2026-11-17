@@ -9,6 +9,8 @@
   },
   "cancel": "Cancel",
   "cancelling": "Cancelling…",
+  "format": "Format",
+  "formatUnreadable": "Format could not read this SQL; run it to see the server's reason.",
   "loadingEditor": "Loading the editor…",
   "environment": {
     "label": "Environment",

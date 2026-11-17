@@ -444,6 +444,63 @@ describe("the Queries screen's work", () => {
     ).toBeInTheDocument();
   });
 
+  it("Format replaces the text and keeps the run state", async () => {
+    const shell = renderShell(RUN_PATH, { routes: routes() });
+    expect(await screen.findByRole("grid")).toBeInTheDocument();
+    const view = await editor();
+    type(view, "select station_id from gold.station_ranking");
+    const before = sent(shell).length;
+
+    await shell.user.click(screen.getByRole("button", { name: "Format" }));
+
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("SELECT\n  station_id\nFROM\n  gold.station_ranking");
+    });
+    expect(
+      screen.getByRole("grid", { name: "Result of Query 0b1c2d3e, rows" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 row · 1.0 s")).toBeInTheDocument();
+    expect(shell.router.state.location.pathname).toBe(RUN_PATH);
+    expect(sent(shell)).toHaveLength(before);
+    expect(screen.queryByText(/Format could not read/)).toBeNull();
+
+    // Run sends the formatted text.
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => {
+      expect(
+        shell.server.sent.find((request) => request.method === "POST" && request.path === PROD_RUNS)
+          ?.body,
+      ).toEqual({ sql: "SELECT\n  station_id\nFROM\n  gold.station_ranking" });
+    });
+  });
+
+  it("Format of unreadable SQL says so and leaves the text", async () => {
+    const shell = renderShell("/queries", { routes: routes() });
+    const view = await editor();
+    type(view, "select 'unclosed from gold.station_ranking");
+
+    await shell.user.click(screen.getByRole("button", { name: "Format" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Format could not read this SQL; run it to see the server's reason.",
+    );
+    expect(view.state.doc.toString()).toBe("select 'unclosed from gold.station_ranking");
+
+    // The next edit takes the line away.
+    act(() => {
+      view.dispatch({ changes: { from: view.state.doc.length, insert: "'" } });
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("the editor fills its resizable host, so a click below short SQL lands in it", () => {
+    const css = readFileSync(resolve(import.meta.dirname, "queries.css"), "utf8");
+    expect(css).toMatch(/\.queries-editor\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/);
+    expect(css).toMatch(/\.sql-editor\s*{[^}]*display:\s*flex;[^}]*flex:\s*1 1 auto;/);
+    const theme = readFileSync(resolve(import.meta.dirname, "editor/theme.ts"), "utf8");
+    expect(theme).toMatch(/"&":\s*{[^}]*flex:\s*"1 1 auto"/);
+  });
+
   it("the toolbar and the result wrap at 320 px", async () => {
     renderShell(RUN_PATH, { routes: routes() });
     await screen.findByRole("grid");

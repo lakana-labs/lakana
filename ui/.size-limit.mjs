@@ -57,6 +57,8 @@ const NAMED_LIMITS = [
   // refused cancel; the limit holds.
   // Raised to the measured 5.86 kB (2026-11-17) + 10 % with the downloads (two buttons, the
   // command for a result too large for the browser, the file name and their sentences).
+  // Measured 6.17 kB (2026-11-17) with Format and its line for SQL it cannot read; the limit
+  // holds.
   { name: "Queries", prefix: "QueriesScreen-", limit: "6.45 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
@@ -74,7 +76,16 @@ const NAMED_LIMITS = [
   // view, commands, language, lang-sql's grammar and keywords, autocomplete, lint) with the
   // Still Water theme, the run keys, the error mark and the sources' registry. It loads only when
   // the Queries screen opens, never in the first load.
+  // Measured 127.11 kB (2026-11-17) with completion and hover from the catalog (its cache, the
+  // names after FROM, a namespace or an alias, the column under the pointer) and the loader of
+  // Format; the limit holds.
   { name: "the SQL editor", prefix: "SqlEditor-", limit: "137.6 kB" },
+  // Measured 18.36 kB (2026-11-17) + 10 %: Format, sql-formatter with its DuckDB dialect only,
+  // loaded on the first press of Format, never with the editor or in the first load.
+  { name: "Format", prefix: "formatSql-", limit: "20.2 kB" },
+  // Measured 398 B (2026-11-17) + 10 %: the catalog's list and tree calls (api/catalog.ts), which
+  // the Catalog shares with the SQL editor's completion; never in the first load.
+  { name: "the catalog's calls", prefix: "catalog-", limit: "0.44 kB" },
   // Measured 3.6 kB (2026-11-16) + 10 %: the Catalog's views other than All, loaded when one is
   // chosen: the choice of an environment, the Dropped list with its paging, Undrop and its
   // dialog with the reason of a protected environment, the hook that reads the protection and
@@ -101,7 +112,9 @@ const NAMED_LIMITS = [
   // Measured 1.91 kB (2026-11-16) + 10 %: the break-glass reason field, the confirm row, the hook
   // that reads the protection and the actions' strings, shared by the table's Actions, the
   // Catalog's views and the place menu.
-  { name: "the reason and confirm row", prefix: "ProtectedReason-", limit: "2.1 kB" },
+  // Raised to the measured 2.1 kB (2026-11-17: 2,101 B, 1 B over once the SQL editor's catalog
+  // calls changed the minifier's names; the code is unchanged) + 10 %.
+  { name: "the reason and confirm row", prefix: "ProtectedReason-", limit: "2.31 kB" },
   // Measured 1.94 kB (2026-11-16) + 10 %: the Catalog's place menu with New namespace and Delete
   // namespace, their dialogs and the strings of the places, loaded once the tree is known and an
   // environment or a namespace is chosen.
@@ -319,6 +332,10 @@ export default [
   // the text field's chunk for one of its own once the environment picker's Select shared it
   // (+0.39 kB), and the entry names the screen's new shared chunks and keeps the focus on Run
   // after its move to the run's address; the editor stays out of it, and the limit holds.
+  // Measured 211.31 kB (2026-11-17, 210.99 kB before): the SQL editor's completion reads the
+  // catalog through api/catalog.ts and api/table.ts, so the bundler moved the API client
+  // (api/client.ts) out of the messages' chunk into one of its own that index.html preloads, and
+  // the exports between them cost 0.32 kB. No editor or formatter code is in it; the limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the

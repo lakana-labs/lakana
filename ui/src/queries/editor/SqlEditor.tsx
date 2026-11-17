@@ -17,8 +17,16 @@ import { Annotation, Compartment, EditorState, type Extension, Prec } from "@cod
 import { drawSelection, EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { type JSX, useEffect, useEffectEvent, useRef, useState, useSyncExternalStore } from "react";
 
+import { catalogCache } from "./catalog";
+import { catalogCompletion } from "./completion";
 import { clearOnEdit, errorDiagnostic, errorPosition } from "./errorMark";
-import { editorSources, sourceExtension, subscribeEditorSources } from "./extensions";
+import {
+  editorSources,
+  registerEditorSource,
+  sourceExtension,
+  subscribeEditorSources,
+} from "./extensions";
+import { columnHover } from "./hover";
 import { runKeys } from "./keys";
 import { stillWaterHighlight, stillWaterTheme } from "./theme";
 
@@ -31,6 +39,13 @@ export interface SqlEditorHandle {
   focusAt(line: number, column: number): void;
   /** Focuses the editor. */
   focus(): void;
+  /**
+   * Formats the text (the formatter loads on the first call) as an edit of its own, which undo
+   * takes back; leaves it as it is when the formatter cannot read it.
+   *
+   * @returns Whether the text could be read and was formatted.
+   */
+  format(): Promise<boolean>;
 }
 
 /** The server's error position and sentence, which the editor marks. */
@@ -87,19 +102,30 @@ function settings(readOnly: boolean, label: string): Extension {
 }
 
 /**
+ * The hover of an environment's catalog.
+ *
+ * @param environment - The environment, or null for none.
+ * @returns The extension; none without an environment.
+ */
+function catalogHover(environment: string | null): Extension {
+  return environment === null ? [] : columnHover(catalogCache(environment));
+}
+
+/**
  * Renders the editor in an open shadow root on its host element.
  *
  * @param props - The text, the callbacks, the read-only flag, the error and the name.
  * @returns The host element.
  */
 export default function SqlEditor(props: SqlEditorProps): JSX.Element {
-  const { value, readOnly, label, error } = props;
+  const { value, readOnly, label, error, environment } = props;
   // The host as state: the view is created once React has attached it.
   const [host, setHost] = useState<HTMLDivElement | null>(null);
   const editor = useRef<EditorView | null>(null);
   const [compartments] = useState(() => ({
     settings: new Compartment(),
     sources: new Compartment(),
+    catalog: new Compartment(),
   }));
   const sources = useSyncExternalStore(subscribeEditorSources, editorSources);
 
@@ -147,6 +173,20 @@ export default function SqlEditor(props: SqlEditorProps): JSX.Element {
     });
   }, [compartments, sources]);
 
+  // The catalog of the chosen environment completes names, through the sources' registry, and
+  // explains a column under the pointer.
+  useEffect(() => {
+    editor.current?.dispatch({
+      effects: compartments.catalog.reconfigure(catalogHover(environment)),
+    });
+    return environment === null
+      ? undefined
+      : registerEditorSource({
+          id: "catalog",
+          completion: catalogCompletion(catalogCache(environment)),
+        });
+  }, [compartments, environment]);
+
   const create = useEffectEvent((shadow: ShadowRoot): EditorView => {
     const created = EditorState.create({
       doc: value,
@@ -163,6 +203,7 @@ export default function SqlEditor(props: SqlEditorProps): JSX.Element {
         stillWaterTheme,
         stillWaterHighlight,
         compartments.settings.of(settings(readOnly, label)),
+        compartments.catalog.of(catalogHover(environment)),
         // A source's commands come before the default keymap; Ctrl/⌘ Enter stays the run key.
         Prec.high(compartments.sources.of(sourceExtension(sources))),
         EditorView.updateListener.of((update) => {
@@ -189,6 +230,18 @@ export default function SqlEditor(props: SqlEditorProps): JSX.Element {
       },
       focus: () => {
         view.focus();
+      },
+      format: async () => {
+        const { formatSql } = await import("./formatSql");
+        const formatted = await formatSql(view.state.doc.toString());
+        if (formatted === null) {
+          return false;
+        }
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: formatted },
+          userEvent: "input.format",
+        });
+        return true;
       },
     });
     return view;

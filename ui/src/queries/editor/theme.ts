@@ -15,7 +15,10 @@ import { tags } from "@lezer/highlight";
 
 /** The editor's surfaces, text, selection, cursor, gutter, focus and floating parts. */
 export const stillWaterTheme: Extension = EditorView.theme({
+  // The editor fills its resizable host, so a click below short SQL lands in it.
   "&": {
+    flex: "1 1 auto",
+    minHeight: "0",
     color: "var(--color-text)",
     backgroundColor: "var(--color-surface)",
     fontSize: "var(--type-code-size)",
@@ -63,6 +66,20 @@ export const stillWaterTheme: Extension = EditorView.theme({
   },
   ".cm-completionDetail, .cm-completionInfo": {
     color: "var(--color-text-muted)",
+  },
+  // A column explained under the pointer: its name and type in the code face, then its
+  // description.
+  ".cm-column-hover": {
+    maxWidth: "24rem",
+    padding: "var(--space-2) var(--space-3)",
+  },
+  ".cm-column-name": {
+    fontFamily: "var(--font-mono)",
+  },
+  ".cm-column-description": {
+    marginTop: "var(--space-1)",
+    color: "var(--color-text-muted)",
+    overflowWrap: "anywhere",
   },
   ".cm-diagnostic-error": {
     borderLeftColor: "var(--color-bad)",
