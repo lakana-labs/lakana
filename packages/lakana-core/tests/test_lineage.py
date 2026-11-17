@@ -98,6 +98,42 @@ def test_a_union_whose_branches_name_a_column_differently_is_untraceable(sql: st
     assert extract_lineage(sql) == {"id": []}
 
 
+@pytest.mark.parametrize("error", [ValueError("something else"), UnicodeError("bad text")])
+def test_any_other_value_error_from_sqlglot_s_lineage_still_escapes(
+    error: ValueError, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only "Could not find ..." means an untraceable column; another `ValueError` is a bug.
+
+    Parameters
+    ----------
+    error
+        What the stand-in for `sqlglot.lineage.lineage` raises.
+    monkeypatch
+        Replaces `sqlglot.lineage.lineage`.
+    """
+
+    def failing(*_args: object, **_kwargs: object) -> sqlglot.lineage.Node:
+        """Raise the error.
+
+        Parameters
+        ----------
+        *_args
+            Ignored.
+        **_kwargs
+            Ignored.
+
+        Raises
+        ------
+        ValueError
+            Always, `error`.
+        """
+        raise error
+
+    monkeypatch.setattr(sqlglot.lineage, "lineage", failing)
+    with pytest.raises(type(error)):
+        extract_lineage("SELECT id FROM bronze.weather")
+
+
 def test_a_bare_values_list_has_no_traceable_column() -> None:
     """A `VALUES` list reads no table, so its columns trace to nothing."""
     assert extract_lineage("VALUES (1, 'a')") == {}
