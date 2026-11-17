@@ -37,6 +37,8 @@ describe("testStatus", () => {
       kind: "never",
       glyph: null,
       word: "never tested",
+      lead: "never tested",
+      trail: "",
       when: null,
     });
   });
@@ -52,7 +54,7 @@ describe("testStatus", () => {
         "en",
         i18next.t,
       ),
-    ).toEqual({ kind: state, glyph, word, when: null });
+    ).toEqual({ kind: state, glyph, word, lead: word, trail: "", when: null });
   });
 
   it("queued for two minutes says no worker yet", () => {
@@ -72,6 +74,8 @@ describe("testStatus", () => {
       kind: "ok",
       glyph: "succeeded",
       word: "OK · 2 hours ago",
+      lead: "OK · ",
+      trail: "",
       when: "2 hours ago",
     });
   });
@@ -81,6 +85,8 @@ describe("testStatus", () => {
       kind: "failed",
       glyph: "failed",
       word: "credentials · 1 day ago",
+      lead: "credentials · ",
+      trail: "",
       when: "1 day ago",
     });
   });
@@ -90,6 +96,8 @@ describe("testStatus", () => {
       kind: "stale",
       glyph: null,
       word: "tested before the last change · 3 days ago",
+      lead: "tested before the last change · ",
+      trail: "",
       when: "3 days ago",
     });
     expect(status({ outcome: "credentials" }, 3 * DAY, 2 * DAY).glyph).toBeNull();
@@ -112,5 +120,14 @@ describe("testStatus", () => {
   it("a minute ago or less is just now", () => {
     expect(status({}, 30_000)).toMatchObject({ word: "OK · just now", when: "just now" });
     expect(status({}, 0).when).toBe("just now");
+  });
+
+  it("splits the line around the time wherever a translation puts it", () => {
+    i18next.addResource("en", "translation", "connections.status.ok", "{{when}}: fine");
+    try {
+      expect(status({})).toMatchObject({ word: "2 hours ago: fine", lead: "", trail: ": fine" });
+    } finally {
+      i18next.addResource("en", "translation", "connections.status.ok", "OK · {{when}}");
+    }
   });
 });

@@ -35,18 +35,17 @@ export function TestStatus({ connection, now, queuedSince }: TestStatusProps): J
   const { t, i18n } = useTranslation();
   const view = testStatus(connection, now, i18n.language, t, queuedSince);
   const muted = view.kind === "never" || view.kind === "stale";
-  // The line ends with the time, so what comes before it is the word.
-  const words = view.when === null ? view.word : view.word.slice(0, -view.when.length);
   return (
     <span className={muted ? "test-status test-status-muted" : "test-status"}>
       {view.glyph !== null && <StatusGlyph kind={view.glyph} />}
       <span>
-        {words}
+        {view.lead}
         {view.when !== null && (
           <time dateTime={connection.last_test?.finished_at ?? connection.updated_at}>
             {view.when}
           </time>
         )}
+        {view.trail}
       </span>
     </span>
   );
