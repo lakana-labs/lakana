@@ -703,6 +703,23 @@ read: a query over it fails with "View 'gold.v' could not be read. Ask its owner
 Its owner creates the view again with `ORDER BY` in place of `SORT BY`
 ([SQL in queries](../reference/sql-in-queries.md#table-t-and-sort-by)).
 
+### Runs and deploys of every environment, and the failed runs
+
+- Three routes are new: `GET /api/v1/runs` and `GET /api/v1/deploys` list the runs and the
+  deploys of every environment you may read with one cursor, and `GET /api/v1/runs/failed` lists
+  the jobs whose newest finished run of the last 7 days failed, with the first failed task and
+  why. An environment you may not read is left out; it is never a `403`. The runs lists, as
+  before, need `READ_ENVIRONMENT`: everyone who may read the environment sees its runs.
+- Needs your attention on Home now lists failed runs to everyone who may read the environment,
+  not only to administrators, by the same rule as `GET /api/v1/runs/failed`.
+- A run carries `total_tasks` and `ended_tasks`, also in lists. In the SDK, `Runs.list_all`,
+  `Runs.iter_all`, `Runs.failed` and `Deploys.list_all` are new; in the CLI,
+  `lakana runs list --all-environments`, `lakana runs failed` and
+  `lakana deploys list --all-environments` ([Find a run](../how-to/find-a-run.md)). A newer
+  package against an older server says that the server has no such route.
+- Migration `0083` adds an index for the deploys list. Nothing has to be done: the upgrade runs
+  with the others.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

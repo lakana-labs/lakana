@@ -7,7 +7,13 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any, NamedTuple
 
-from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
+from lakana._http import (
+    NEXT_CURSOR_HEADER,
+    HttpTransport,
+    every_page,
+    query_params,
+    route_of_a_newer_server,
+)
 from lakana._models import (
     Deploy,
     DeployAccepted,
@@ -22,6 +28,9 @@ from lakana._routes import ROUTES
 from lakana.errors import DeployFailed, JobStartsNotRecorded
 from lakana.resources.queries import waiting_for_from_json
 from lakana.resources.tables import actions_from_json
+
+_LIST_ALL_INSTEAD = "list one environment with `lakana deploys list --env ENV`"
+"""What to do instead of `Deploys.list_all` against a server without `GET /api/v1/deploys`."""
 
 
 def _when(value: str | None) -> datetime | None:
@@ -329,17 +338,19 @@ class Deploys:
         lakana.errors.PermissionDenied
             With `environment`, if you may not read it.
         lakana.errors.NotFound
-            If `environment` or `repository` does not exist.
+            If `environment` or `repository` does not exist; or, with a sentence saying so, if
+            the server is older than this package and has no `GET /api/v1/deploys`.
         lakana.errors.ValidationError
             If `limit` is outside 1 to 200 or `cursor` is not one the server issued for this
             list.
         """
-        response = self._transport.request(
-            ROUTES["deploys.list_all"],
-            params=query_params(
-                environment=environment, repository=repository, limit=limit, cursor=cursor
-            ),
-        )
+        with route_of_a_newer_server("GET /api/v1/deploys", _LIST_ALL_INSTEAD):
+            response = self._transport.request(
+                ROUTES["deploys.list_all"],
+                params=query_params(
+                    environment=environment, repository=repository, limit=limit, cursor=cursor
+                ),
+            )
         body = response.json()
         return DeployPage(
             items=[deploy_from_json(item) for item in body["items"]],

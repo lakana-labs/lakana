@@ -3674,6 +3674,11 @@ class Run:
         The words of what your rights allow on it: ``cancel``, ``resume``. Rights only; offer a
         control when the word is listed and the run's state allows it. Empty from a
         server that predates them.
+    total_tasks
+        How many tasks the run has, also in listings; 0 from a server that predates the field.
+    ended_tasks
+        How many of them ended (``succeeded``, ``failed``, ``upstream_failed`` or
+        ``cancelled``), also in listings; 0 from a server that predates the field.
     """
 
     id: str
@@ -3700,6 +3705,45 @@ class Run:
     notifications: list[Notification] = field(default_factory=list)
     failed_tasks: int = 0
     actions: tuple[str, ...] = ()
+    total_tasks: int = 0
+    ended_tasks: int = 0
+
+
+@dataclass(frozen=True)
+class FailedRun:
+    """A job, or a repository's runs of no job, whose newest finished run failed.
+
+    Parameters
+    ----------
+    run
+        The run, without tasks.
+    task
+        The asset of its first failed task (the earliest to end, then the smallest asset);
+        `None` when the run failed without a failed task, and then `run.error_message` says why.
+    failure
+        That task's failure; `None` exactly when `task` is.
+    """
+
+    run: Run
+    task: str | None
+    failure: Failure | None
+
+
+@dataclass(frozen=True)
+class FailedRuns:
+    """The failed runs of every environment you may read, newest end first.
+
+    Parameters
+    ----------
+    items
+        One entry per job (or per repository, for its runs of no job) whose newest finished run
+        within seven days failed.
+    truncated
+        Whether more were left out; narrow with an environment.
+    """
+
+    items: tuple[FailedRun, ...]
+    truncated: bool
 
 
 @dataclass(frozen=True)

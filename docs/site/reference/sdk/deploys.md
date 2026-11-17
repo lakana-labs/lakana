@@ -104,7 +104,7 @@ Returns: `DeployPage`. The deploys, newest first, and the cursor for the next pa
 | Error | When |
 |---|---|
 | `lakana.PermissionDenied` | With `environment`, if you may not read it. |
-| `lakana.NotFound` | If `environment` or `repository` does not exist. |
+| `lakana.NotFound` | If `environment` or `repository` does not exist; or, with a sentence saying so, if the server is older than this package and has no `GET /api/v1/deploys`. |
 | `lakana.ValidationError` | If `limit` is outside 1 to 200 or `cursor` is not one the server issued for this list. |
 
 ### `client.deploys.iter_all`

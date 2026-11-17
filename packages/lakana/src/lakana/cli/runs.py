@@ -9,10 +9,10 @@ from typing import Annotated
 
 import typer
 
-from lakana._models import CheckResult, Notification, Run, RunTask, WorkerInfo
+from lakana._models import CheckResult, FailedRun, Notification, Run, RunTask, WorkerInfo
 from lakana.cli import _output
 from lakana.cli._paging import more_results, parse_since
-from lakana.cli._state import CliState, resolve_environment, state_of
+from lakana.cli._state import CliError, CliState, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown, withheld_line
 from lakana.cli.deploys import resolve_repository
@@ -790,6 +790,13 @@ def follow_run(
 def list_runs(
     ctx: typer.Context,
     env: _ENV = None,
+    all_environments: Annotated[
+        bool,
+        typer.Option(
+            "--all-environments",
+            help="The runs of every environment you may read, with an environment column.",
+        ),
+    ] = False,
     repo: Annotated[str | None, typer.Option("--repo", help="Only this repository.")] = None,
     status: Annotated[
         list[str] | None,
@@ -827,7 +834,8 @@ def list_runs(
 ) -> None:
     """List runs, newest first.
 
-    A long list prints a "More results" line with the command that shows the next page.
+    --all-environments lists the runs of every environment you may read at once. A long list
+    prints a "More results" line with the command that shows the next page.
 
     Parameters
     ----------
@@ -835,6 +843,8 @@ def list_runs(
         The Typer context.
     env
         Environment.
+    all_environments
+        List every environment you may read instead of one; not with `--env`.
     repo
         Repository filter.
     status
@@ -849,25 +859,49 @@ def list_runs(
         Most runs returned (1 to 200); the server's default when omitted.
     cursor
         The cursor of the page to show.
+
+    Raises
+    ------
+    CliError
+        If `--all-environments` is given with `--env` (exit 2).
     """
     state = state_of(ctx)
-    environment = resolve_environment(state, env)
-    page = state.client().runs.list_page(
-        environment,
-        repository=repo,
-        status=status,
-        trigger=trigger,
-        job=job,
-        since=parse_since(since),
-        limit=limit,
-        cursor=cursor,
+    if all_environments and env is not None:
+        raise CliError("Choose one: --env ENV or --all-environments.")
+    runs = state.client().runs
+    environment = None if all_environments else resolve_environment(state, env)
+    since_at = parse_since(since)
+    if environment is None:
+        page = runs.list_all(
+            repository=repo,
+            status=status,
+            trigger=trigger,
+            job=job,
+            since=since_at,
+            limit=limit,
+            cursor=cursor,
+        )
+    else:
+        page = runs.list_page(
+            environment,
+            repository=repo,
+            status=status,
+            trigger=trigger,
+            job=job,
+            since=since_at,
+            limit=limit,
+            cursor=cursor,
+        )
+    columns = (
+        [_RUN_COLUMNS[0], "environment", *_RUN_COLUMNS[1:]] if all_environments else _RUN_COLUMNS
     )
-    _output.emit(state, page.items, columns=_RUN_COLUMNS, droppable=_RUN_DROPPABLE)
+    _output.emit(state, page.items, columns=columns, droppable=_RUN_DROPPABLE)
     more_results(
         state,
         ["lakana", "runs", "list"],
         {
             "--env": environment,
+            "--all-environments": all_environments,
             "--repo": repo,
             "--status": status,
             "--trigger": trigger,
@@ -1228,3 +1262,96 @@ def emit_workers(state: CliState, workers: list[WorkerInfo]) -> None:
             "caches": _CACHES_NOTE,
         },
     )
+
+
+_FAILED_COLUMNS = ["environment", "name", "id", "finished_at", "task", "code"]
+_FAILED_DROPPABLE = ["code", "task", "finished_at", "environment"]
+"""What `runs failed` leaves out first on a narrow terminal: the name and the id stay."""
+
+
+def _failed_name(entry: FailedRun) -> str:
+    """Name what failed: the run's job, or its repository for a run of no job.
+
+    Parameters
+    ----------
+    entry
+        The failed run.
+
+    Returns
+    -------
+    str
+        The job, or the repository.
+    """
+    return entry.run.job or entry.run.repository
+
+
+def _failed_why(entry: FailedRun) -> str:
+    """Say why a run failed, on one line.
+
+    Parameters
+    ----------
+    entry
+        The failed run.
+
+    Returns
+    -------
+    str
+        The cause and the next step of its failed task; the run's own message when no task
+        failed (a code-integrity failure, say); empty when the server sent neither.
+    """
+    if entry.failure is not None:
+        return (
+            f"{_output.inline(entry.failure.cause, _PROGRESS_REASON_LIMIT)} "
+            f"{_output.inline(entry.failure.next_step, _PROGRESS_REASON_LIMIT)}"
+        )
+    return _output.inline(entry.run.error_message or "", _PROGRESS_REASON_LIMIT)
+
+
+@runs_app.command("failed")
+def failed_runs(
+    ctx: typer.Context,
+    env: _ENV = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", min=1, max=200, help="Most failed runs to list (default 50)."),
+    ] = None,
+) -> None:
+    """List the jobs whose newest finished run failed, with why.
+
+    The rule is Home's "Needs your attention": per job, or per repository for runs of no job,
+    the newest run that finished in the last 7 days, when it failed. Without --env it spans
+    every environment you may read; the profile's environment is not applied.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    env
+        Only this environment.
+    limit
+        Most entries returned (1 to 200); the server's default when omitted.
+    """
+    state = state_of(ctx)
+    failed = state.client().runs.failed(environment=env, limit=limit)
+    if state.output == "json":
+        _output.emit(state, failed)
+        return
+    _output.emit(
+        state,
+        list(failed.items),
+        columns=_FAILED_COLUMNS,
+        droppable=_FAILED_DROPPABLE,
+        derived={
+            "environment": lambda e: e.run.environment,
+            "name": _failed_name,
+            "id": lambda e: e.run.id,
+            "finished_at": lambda e: e.run.finished_at,
+            "task": lambda e: e.task or "",
+            "code": lambda e: "" if e.failure is None else e.failure.code,
+        },
+    )
+    for entry in failed.items:
+        name = _output.inline(_failed_name(entry))
+        typer.echo(f"{name} ({_output.inline(entry.run.environment)}): {_failed_why(entry)}")
+    if failed.truncated:
+        typer.echo("More failed runs than shown; narrow with --env.")

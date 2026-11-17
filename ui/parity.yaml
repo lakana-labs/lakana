@@ -151,6 +151,7 @@
 "row-filter revoke": { class: ui, part: 7 }
 "run": { class: ui, part: 5 }
 "runs cancel": { class: ui, part: 5 }
+"runs failed": { class: ui, part: 5 }
 "runs list": { class: ui, part: 5 }
 "runs logs": { class: ui, part: 5 }
 "runs resume": { class: ui, part: 5 }

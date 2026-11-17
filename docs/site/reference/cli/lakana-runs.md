@@ -15,11 +15,12 @@ Usage: `lakana runs list [OPTIONS]`
 
 List runs, newest first.
 
-A long list prints a "More results" line with the command that shows the next page.
+--all-environments lists the runs of every environment you may read at once. A long list prints a "More results" line with the command that shows the next page.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
+| `--all-environments` | flag | off | The runs of every environment you may read, with an environment column. |
 | `--repo` | text | none | Only this repository. |
 | `--status` | text, repeatable | none | Only runs in this status: queued, running, succeeded, failed or cancelled. Repeat the option or separate the values with commas. |
 | `--trigger` | text, repeatable | none | Only runs started this way: schedule, api, manual or deploy. Repeat the option or separate the values with commas. |
@@ -73,3 +74,16 @@ Resume RUN_ID's failed, upstream_failed and cancelled tasks in a new run.
 |---|---|---|---|
 | `RUN_ID` | text | required |  |
 | `--env` | text | none | Environment (default: the profile's). |
+
+## `lakana runs failed`
+
+Usage: `lakana runs failed [OPTIONS]`
+
+List the jobs whose newest finished run failed, with why.
+
+The rule is Home's "Needs your attention": per job, or per repository for runs of no job, the newest run that finished in the last 7 days, when it failed. Without --env it spans every environment you may read; the profile's environment is not applied.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `--env` | text | none | Environment (default: the profile's). |
+| `--limit` | whole number, 1 to 200 | none | Most failed runs to list (default 50). |

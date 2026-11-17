@@ -9,6 +9,7 @@ from test_resources_jobs import _RUN
 
 from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
+from lakana._models import Failure
 from lakana.resources.queries import _status_from_json
 from lakana.resources.runs import Runs, run_from_json
 
@@ -162,3 +163,43 @@ def test_task_history_asks_for_a_page_and_parses_the_entries() -> None:
 def test_a_listed_run_reads_actions_and_an_older_server_gives_none() -> None:
     assert run_from_json(_RUN).actions == ()
     assert run_from_json({**_RUN, "actions": ["cancel"]}).actions == ("cancel",)
+
+
+def test_run_reads_task_counts_and_an_older_server_gives_zero() -> None:
+    older = run_from_json(_RUN)
+    assert (older.total_tasks, older.ended_tasks) == (0, 0)
+    counted = run_from_json({**_RUN, "total_tasks": 5, "ended_tasks": 3})
+    assert (counted.total_tasks, counted.ended_tasks) == (5, 3)
+
+
+def test_failed_reads_items_task_failure_and_truncated() -> None:
+    seen: list[httpx.Request] = []
+    failure = {"code": "timeout", "cause": "It ran too long.", "next_step": "Raise the timeout."}
+    body = {
+        "items": [
+            {"run": {**_RUN, "status": "failed"}, "task": "silver.clean", "failure": failure},
+            {
+                "run": {**_RUN, "status": "failed", "error_message": "Code changed."},
+                "task": None,
+                "failure": None,
+            },
+        ],
+        "truncated": True,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    failed = Runs(HttpTransport(_CONFIG, http_client=client)).failed(environment="prod", limit=7)
+    assert seen[0].url.path == "/api/v1/runs/failed"
+    assert dict(seen[0].url.params) == {"environment": "prod", "limit": "7"}
+    assert failed.truncated is True
+    first, second = failed.items
+    assert (first.task, first.failure) == (
+        "silver.clean",
+        Failure("timeout", "It ran too long.", "Raise the timeout."),
+    )
+    assert first.run.status == "failed"
+    assert (second.task, second.failure, second.run.error_message) == (None, None, "Code changed.")
