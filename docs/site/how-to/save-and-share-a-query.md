@@ -1,7 +1,8 @@
 # Save and share a query
 
 After this guide you can keep a query under a name, share it with the people who work in the same
-environment, find it again, change it, and delete it, from the terminal and from Python. You need
+environment, find it again, change it, and delete it, from the terminal, from Python and in the web
+interface. You need
 an environment where you may run queries (the `ANALYST` role gives that right); see
 [Getting started](../tutorials/getting-started.md).
 
@@ -180,5 +181,38 @@ They name the saved query's id and name, its visibility and its owner, and never
 
 ## In the web interface
 
-The Queries screen of the web interface will offer the same: save the query you wrote, open one of
-your saved queries or a shared one, and share or delete it.
+The **Queries** screen keeps your saved queries beside the editor, under **Saved**; on a narrow
+window they are behind the **Queries ▾** button. **Show**, above the lists, narrows them (and
+**Recent**) to one environment, or shows **All environments**.
+
+**Save the query in the editor:**
+
+1. Choose its environment under **Environment**, and write the SQL.
+2. Press **Save…**. Give it a **Name**, and under **Who may run it** choose **Only me** or
+   **Everyone who can run queries in dev**. The window names the environment it is saved in.
+3. Press **Save as new**. The screen moves to the saved query's own address, which you can
+   bookmark or send to a colleague who may see it.
+
+A name you already use in that environment is refused in the window with the server's sentence;
+what you typed stays, so you can change the name.
+
+**Open one:** choose its name under **Saved**. Its SQL comes into the editor, and **Environment**
+moves to its environment. A shared one says **everyone**; one that is not yours says "by" and its
+owner, or **former owner**.
+
+**Change one of yours:** open it, edit, press **Save…**, then **Save**. **Save as new** keeps the
+old one and saves a copy instead, for example under a new name. A saved query that is not yours
+offers only **Save as new**, as your own copy. If you moved **Environment** to another environment,
+only **Save as new** is offered, in that environment: a saved query's environment never changes.
+
+**Delete one:** open it, press **Delete…**, and **Delete** in the window that asks "Delete the saved
+query …?". The SQL stays in the editor and its runs stay under **Recent**; the screen says
+"Deleted …".
+
+An administrator who opens someone else's private saved query sees its name, its owner and its
+environment, the line "You may not read the SQL of this query.", an empty editor and **Delete…**;
+**Run** and **Save…** stay off.
+
+**Recent** lists the queries you wrote in the last 30 days, newest first, with their state, how long
+they ran and their environment. One opens on its own address with its SQL, its state and, while the
+server keeps it, its result.
