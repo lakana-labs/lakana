@@ -67,6 +67,7 @@ def _to_out(view: DeployRunView, actions: Sequence[str] = ()) -> DeployOut:
         diff=view.diff,
         project_version_id=view.job_version_id,
         principal_id=view.principal_id,
+        submitted_by=view.submitted_by,
         created_at=view.created_at,
         started_at=view.started_at,
         finished_at=view.finished_at,
@@ -75,6 +76,7 @@ def _to_out(view: DeployRunView, actions: Sequence[str] = ()) -> DeployOut:
         warnings=view.warnings,
         waiting_for=None if view.waiting_for is None else view.waiting_for.to_json(),
         job_starts=[DeployJobStartOut(**dataclasses.asdict(start)) for start in view.job_starts],
+        jobs=None if view.jobs is None else list(view.jobs),
         actions=list(actions),
     )
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import Select, and_, delete, func, insert, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -854,6 +854,11 @@ class DeployRunView:
         The jobs with ``on_deploy: true`` a successful deploy started, by name: the run, the
         start that waits, or why a job was not started (`lakana_core.projects.deploy_jobs`).
         Empty for a run that starts no job.
+    submitted_by
+        The name of the principal that submitted the run; `None` once that principal is deleted.
+    jobs
+        The sorted names of the jobs the run's project version defines (`DeployService.get`
+        only); `None` when the run made no project version, and in a listing.
     """
 
     id: uuid.UUID
@@ -876,6 +881,8 @@ class DeployRunView:
     warnings: list[str] = field(default_factory=list)
     waiting_for: WaitReason | None = None
     job_starts: tuple[DeployJobStart, ...] = ()
+    submitted_by: str | None = None
+    jobs: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -1071,6 +1078,7 @@ class DeployService:
         run: DeployRun,
         reader: PrincipalRef | None = None,
         reads: _WarningReads | None = None,
+        submitted_by: str | None = None,
     ) -> DeployRunView:
         """Build the API view of a run.
 
@@ -1090,6 +1098,8 @@ class DeployService:
         reads
             What earlier calls of a listing already read for the warnings; a new one when
             `None`.
+        submitted_by
+            The submitting principal's name (`_runs_with_submitter` reads it with the run).
 
         Returns
         -------
@@ -1142,6 +1152,7 @@ class DeployService:
             diff=diff,
             job_version_id=run.job_version_id,
             principal_id=run.principal_id,
+            submitted_by=submitted_by,
             created_at=run.created_at,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -1158,6 +1169,62 @@ class DeployService:
                 environment=env_name,
             ),
         )
+
+    def _runs_with_submitter(self) -> Select[*tuple[Any, ...]]:
+        """Start a select of deploy runs, each with the name of the principal that submitted it.
+
+        One left join, so a page of runs costs no lookup per row, and a run whose submitter was
+        deleted (`principal_id` is `None`) pairs with `None`. Every list of deploys starts here.
+
+        Returns
+        -------
+        Select
+            ``(DeployRun, Principal.name)`` rows, not yet filtered or ordered.
+        """
+        return select(DeployRun, Principal.name).outerjoin(
+            Principal, Principal.id == DeployRun.principal_id
+        )
+
+    def _submitter_name(self, run: DeployRun) -> str | None:
+        """Read the name of the principal that submitted one run.
+
+        Parameters
+        ----------
+        run
+            The row.
+
+        Returns
+        -------
+        str or None
+            The name, or `None` when the principal was deleted.
+        """
+        if run.principal_id is None:
+            return None
+        return self._session.execute(
+            select(Principal.name).where(Principal.id == run.principal_id)
+        ).scalar_one_or_none()
+
+    def _project_jobs(self, run: DeployRun) -> tuple[str, ...] | None:
+        """Name the jobs of the project version a run made.
+
+        Parameters
+        ----------
+        run
+            The row.
+
+        Returns
+        -------
+        tuple of str or None
+            The sorted names, or `None` when the run made no project version.
+        """
+        if run.job_version_id is None:
+            return None
+        manifest = self._session.execute(
+            select(JobVersion.manifest_json).where(JobVersion.id == run.job_version_id)
+        ).scalar_one_or_none()
+        if manifest is None:
+            return None
+        return tuple(sorted(manifest_jobs(manifest)))
 
     def _starts_lost(self, run: DeployRun) -> bool:
         """Say whether a start the deploy left pending will never be made.
@@ -2089,7 +2156,7 @@ class DeployService:
             self._session.rollback()
             ci_refusal(self._authz, p, environment, ALREADY_USED_MESSAGE)
         self._session.commit()
-        return self._view(run)
+        return self._view(run, submitted_by=self._submitter_name(run))
 
     def _authorize_read(self, p: PrincipalRef, environment: str) -> Environment:
         """Authorize READ_ENVIRONMENT and return the environment.
@@ -2153,7 +2220,11 @@ class DeployService:
         ).scalar_one_or_none()
         if run is None or (p.ci_scope is not None and run.ci_token_id != p.ci_scope.token_id):
             raise NotFoundError(f"No deploy {run_id} in {environment}.")
-        return dataclasses.replace(self._view(run, p), waiting_for=self.waiting_for(run))
+        return dataclasses.replace(
+            self._view(run, p, submitted_by=self._submitter_name(run)),
+            waiting_for=self.waiting_for(run),
+            jobs=self._project_jobs(run),
+        )
 
     def waiting_for(self, run: DeployRun) -> WaitReason | None:
         """Say why a run has not started, when it is still `QUEUED`.
@@ -2261,7 +2332,7 @@ class DeployService:
         if limit < 1:
             raise ValidationError(f"limit must be at least 1, got {limit}.")
         position = None if cursor is None else decode_cursor("deploys", cursor)
-        query = select(DeployRun).where(DeployRun.environment_id == env.id)
+        query = self._runs_with_submitter().where(DeployRun.environment_id == env.id)
         if repository is not None:
             query = query.where(DeployRun.repository_id == self._repository(repository).id)
         if position is not None:
@@ -2271,17 +2342,18 @@ class DeployService:
                     and_(DeployRun.created_at == position.at, DeployRun.id < position.id),
                 )
             )
-        runs = list(
+        rows = list(
             self._session.execute(
                 query.order_by(DeployRun.created_at.desc(), DeployRun.id.desc()).limit(limit + 1)
-            ).scalars()
+            ).all()
         )
-        page = runs[:limit]
+        page = rows[:limit]
         next_cursor = None
-        if len(runs) > limit:
-            next_cursor = encode_cursor("deploys", page[-1].created_at, page[-1].id)
+        if len(rows) > limit:
+            last = page[-1][0]
+            next_cursor = encode_cursor("deploys", last.created_at, last.id)
         reads = _WarningReads()
-        return [self._view(run, p, reads) for run in page], next_cursor
+        return [self._view(run, p, reads, name) for run, name in page], next_cursor
 
     def deployments(self, p: PrincipalRef, environment: str) -> list[DeploymentView]:
         """List the current project version per repository.

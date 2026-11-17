@@ -320,6 +320,11 @@ orphan, which you can then drop (see
 An asset file may hold tabs and line breaks but no other control characters; a deploy and a dry
 run refuse it, naming the file and the line.
 
+`lakana deploys list` has a `submitted_by` column, the name of who queued each deploy (empty once
+that account is deleted). `lakana deploys show` adds `submitted_by` and `jobs`, the jobs the
+deploy's project version defines, sorted and comma-separated (empty for a deploy that made no project version);
+the history carries no `jobs`.
+
 A deploy prints the resolved SHA and a diff, and when the project has checks, a list of them under
 `Checks:`, and one `warning:` line on stderr for each table that is kept after a failed check and
 whose asset the deploy removes (see [Check your data](check-your-data.md)), and one for each table

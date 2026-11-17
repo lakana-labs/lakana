@@ -111,6 +111,7 @@ Answer fields: `DeployOut`
 | `diff` | mapping of text to list of text or null | yes |  |
 | `project_version_id` | text (uuid) or null | yes |  |
 | `principal_id` | text (uuid) or null | yes |  |
+| `submitted_by` | text or null | no |  |
 | `created_at` | text (date-time) | yes |  |
 | `started_at` | text (date-time) or null | yes |  |
 | `finished_at` | text (date-time) or null | yes |  |
@@ -118,6 +119,7 @@ Answer fields: `DeployOut`
 | `checks` | mapping of text to list of mapping of text to text or null | no |  |
 | `warnings` | list of text | no |  |
 | `waiting_for` | mapping of text to any or null | no | Why this is waiting, or null when it is not: a stable `code`, one sentence in `message`, and the numbers the sentence uses. |
+| `jobs` | list of text or null | no |  |
 | `job_starts` | list of `DeployJobStartOut` | no |  |
 | `actions` | list of text | no |  |
 

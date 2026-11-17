@@ -3017,6 +3017,9 @@ class Deploy:
         The project version made current.
     principal_id
         Who submitted it.
+    submitted_by
+        The name of who submitted it; `None` once that principal is deleted, and from a server
+        that predates the field.
     created_at
         Queued at.
     started_at
@@ -3038,6 +3041,10 @@ class Deploy:
     job_starts
         The jobs with `on_deploy: true` the deploy started, by name; empty for a run that
         starts no job and from a server that predates the field.
+    jobs
+        The sorted names of the jobs the deploy's project version defines; set on the single
+        read only. `None` in a listing, for a run that made no project version and from a
+        server that predates the field.
     actions
         The words of what your rights allow on it: ``rollback``. Rights only; offer a
         control when the word is listed and the deploy's state allows it. Empty from a
@@ -3065,6 +3072,8 @@ class Deploy:
     waiting_for: WaitingFor | None = None
     job_starts: tuple[DeployJobStart, ...] = ()
     actions: tuple[str, ...] = ()
+    submitted_by: str | None = None
+    jobs: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

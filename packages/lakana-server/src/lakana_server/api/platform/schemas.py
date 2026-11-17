@@ -4266,6 +4266,9 @@ class DeployOut(BaseModel):
         The project version it made current.
     principal_id
         Who submitted it.
+    submitted_by
+        The name of the principal that submitted it, in the history and the single read; null
+        once that principal is deleted.
     created_at
         Queued at.
     started_at
@@ -4285,6 +4288,10 @@ class DeployOut(BaseModel):
         Why a queued deploy has not started: a stable `code`, one sentence in `message` that
         names the next step, and the numbers it uses; null when it is not waiting. Set on the
         single read (`GET .../deploys/{id}`) only, null in the history.
+    jobs
+        The sorted names of the jobs the deploy's project version defines. Set on the single
+        read only; null in the history, and for a run that made no project version (queued,
+        failed, a dry run).
     job_starts
         The jobs with `on_deploy: true` that a successful deploy started, by name, each with
         what came of its start; empty for a run that starts no job (a dry run, a rollback, a
@@ -4307,6 +4314,7 @@ class DeployOut(BaseModel):
     diff: dict[str, list[str]] | None
     project_version_id: uuid.UUID | None
     principal_id: uuid.UUID | None
+    submitted_by: str | None = None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -4320,6 +4328,7 @@ class DeployOut(BaseModel):
             "`message`, and the numbers the sentence uses."
         ),
     )
+    jobs: list[str] | None = None
     job_starts: list[DeployJobStartOut] = Field(default_factory=list)
     actions: list[str] = Field(default_factory=list)
 

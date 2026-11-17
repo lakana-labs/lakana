@@ -10,11 +10,11 @@ import pytest
 from core_test_helpers import _prepared_catalog
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_projects_deploys import _repo
+from test_projects_deploys import _principal, _repo
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
 from lakana_core.errors import NotFoundError, ValidationError
-from lakana_core.models import DeployKind, DeployRun, DeployStatus, Environment
+from lakana_core.models import DeployKind, DeployRun, DeployStatus, Environment, Principal
 from lakana_core.pagination import encode_cursor
 from lakana_core.projects.deploys import DeployService
 
@@ -156,3 +156,45 @@ def test_a_limit_below_one_is_refused(
 ) -> None:
     with pytest.raises(ValidationError, match="limit must be at least 1"):
         _service(session).history_page(principal, "dev", limit=0)
+
+
+def test_the_history_names_who_submitted_each_deploy(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    ada = _principal(session, "ada")
+    first = _deploy(session, env, repo.id, 1)
+    second = _deploy(session, env, repo.id, 2)
+    first.principal_id = principal.id
+    second.principal_id = ada.id
+    session.commit()
+    page, _ = _service(session).history_page(principal, "dev")
+    assert [(v.id, v.submitted_by) for v in page] == [
+        (second.id, "ada"),
+        (first.id, principal.name),
+    ]
+
+
+def test_a_deleted_submitter_is_null(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    ada = _principal(session, "ada")
+    run = _deploy(session, env, repo.id, 1)
+    run.principal_id = ada.id
+    session.commit()
+    session.delete(session.get(Principal, ada.id))
+    session.commit()
+    session.refresh(run)
+    assert run.principal_id is None
+    page, _ = _service(session).history_page(principal, "dev")
+    assert [v.submitted_by for v in page] == [None]
+
+
+def test_the_history_carries_no_jobs(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    _deploy(session, env, repo.id, 1)
+    page, _ = _service(session).history_page(principal, "dev")
+    assert [v.jobs for v in page] == [None]

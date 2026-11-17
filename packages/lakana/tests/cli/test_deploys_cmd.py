@@ -1539,3 +1539,33 @@ def test_a_generated_check_is_marked_in_the_list_of_checks(tmp_path: Path) -> No
         "Checks:\n  gold.fact_sales: key_unique (generated), ref_store_id (generated) (warn), "
         "positive\n"
     ) in result.stdout
+
+
+def test_deploys_list_shows_who(tmp_path: Path) -> None:
+    """The list has a `submitted_by` column after `status`; a deleted submitter is blank."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/environments/dev/deploys",
+        json=[_deploy("succeeded", submitted_by="ada"), _deploy("failed", submitted_by=None)],
+    )
+    result = invoke(make_state(tmp_path, api), "deploys", "list", "--env", "dev", env=_CI)
+    assert result.exit_code == 0, result.output
+    header = _plain(result.stdout).replace("┃", " ").replace("┏", " ").split()
+    assert header.index("submitted_by") == header.index("status") + 1
+    assert "ada" in _plain(result.stdout)
+
+
+def test_deploys_show_lists_the_jobs(tmp_path: Path) -> None:
+    """`deploys show` names who deployed and the jobs, comma-separated; none is empty."""
+    api = FakeApi()
+    path = f"/api/v1/environments/dev/deploys/{_ID}"
+    api.on("GET", path, json=_deploy("succeeded", submitted_by="ada", jobs=["hourly", "nightly"]))
+    state = make_state(tmp_path, api)
+    shown = _plain(invoke(state, "deploys", "show", _ID, "--env", "dev", env=_CI).stdout)
+    assert "submitted_by ada" in shown
+    assert "jobs hourly, nightly" in shown
+    as_json = json.loads(
+        invoke(state, "--output", "json", "deploys", "show", _ID, "--env", "dev").stdout
+    )
+    assert (as_json["submitted_by"], as_json["jobs"]) == ("ada", ["hourly", "nightly"])

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -469,7 +469,15 @@ def list_deploys(
     _output.emit(
         state,
         page.items,
-        columns=["id", "repository", "kind", "status", "resolved_sha", "created_at"],
+        columns=[
+            "id",
+            "repository",
+            "kind",
+            "status",
+            "submitted_by",
+            "resolved_sha",
+            "created_at",
+        ],
         droppable=["kind", "resolved_sha", "repository", "created_at"],
     )
     more_results(
@@ -494,7 +502,12 @@ def show_deploy(ctx: typer.Context, deploy_id: str, env: _ENV = None) -> None:
         Environment.
     """
     state = state_of(ctx)
-    _output.emit(state, state.client().deploys.get(resolve_environment(state, env), deploy_id))
+    _output.emit(
+        state,
+        state.client().deploys.get(resolve_environment(state, env), deploy_id),
+        columns=[f.name for f in fields(Deploy)],
+        derived={"jobs": lambda deploy: "" if deploy.jobs is None else ", ".join(deploy.jobs)},
+    )
 
 
 def _list_deployments(ctx: typer.Context, env: str | None) -> None:

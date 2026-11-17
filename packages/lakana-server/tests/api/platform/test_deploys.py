@@ -579,6 +579,38 @@ def test_a_deploy_body_names_the_jobs_it_started(client: TestClient) -> None:
     assert bare.json()["job_starts"] == []
 
 
+def test_get_deploy_answers_jobs_and_submitted_by(client: TestClient) -> None:
+    """The single read lists the project version's jobs, sorted; the history names who, not jobs."""
+    _setup(client)
+    plain = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    done = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    version = _insert_job_version(
+        client,
+        "dev",
+        {"version": 1, "assets": [], "edges": [], "jobs": {"nightly": {}, "hourly": {}}},
+    )
+    with Session(client.app.state.engine) as session:
+        run = session.get(DeployRun, uuid.UUID(done["id"]))
+        assert run is not None
+        run.status = DeployStatus.SUCCEEDED
+        run.job_version_id = version
+        session.commit()
+
+    shown = client.get(f"/api/v1/environments/dev/deploys/{done['id']}", headers=AUTH_HEADER).json()
+    queued = client.get(
+        f"/api/v1/environments/dev/deploys/{plain['id']}", headers=AUTH_HEADER
+    ).json()
+    history = client.get("/api/v1/environments/dev/deploys", headers=AUTH_HEADER).json()
+
+    assert (shown["jobs"], shown["submitted_by"]) == (["hourly", "nightly"], "admin")
+    assert (queued["jobs"], queued["submitted_by"]) == (None, "admin")
+    assert [(d["jobs"], d["submitted_by"]) for d in history] == [(None, "admin")] * 2
+
+
 def _queue_deploy(client: TestClient) -> str:
     """Queue a deploy of `analytics` and return its id.
 
