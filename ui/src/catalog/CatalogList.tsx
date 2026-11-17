@@ -25,6 +25,7 @@ import { TUTORIAL_URL } from "../shell/docs";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
+import { REDIRECT } from "../shell/redirect";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { CatalogSearch } from "./CatalogSearch";
@@ -188,7 +189,7 @@ export function CatalogList(): JSX.Element {
   // to it. The entry says where it came from.
   useEffect(() => {
     if (restoredAddress !== null) {
-      void navigate(restoredAddress, { replace: true, state: { remembered: true } });
+      void navigate(restoredAddress, { replace: true, state: { ...REDIRECT, remembered: true } });
     }
   }, [restoredAddress, navigate]);
 
@@ -202,7 +203,7 @@ export function CatalogList(): JSX.Element {
       writeChoice(me.name, { environment, namespace });
     } else if (fromMemory) {
       writeChoice(me.name, { environment: null, namespace: null });
-      void navigate(allTablesAddress, { replace: true });
+      void navigate(allTablesAddress, { replace: true, state: REDIRECT });
     }
   }, [root, allTablesAddress, environment, namespace, fromMemory, me.name, navigate]);
 

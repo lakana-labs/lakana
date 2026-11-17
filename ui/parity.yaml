@@ -380,7 +380,7 @@
   {
     class: ui,
     part: 7,
-    note: "Access → People lists and finds people from 1b; the full screen in 7",
+    note: "Settings › Access › People lists and finds people from 1b; the full screen in 7",
   }
 "GET /api/v1/principals/{name}":
   { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }

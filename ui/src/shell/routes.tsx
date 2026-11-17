@@ -30,13 +30,12 @@ export type AreaPages = Partial<Record<AreaId, () => Promise<AreaModule>>>;
 
 /**
  * The screens of the areas that have one; every other area shows its "coming in part N" page.
- * A screen holds the area's places under its path (`/access/invites`), so it owns `<area>/*`.
+ * A screen holds the area's places under its path (`/settings/sign-in/invites`), so it owns `<area>/*`.
  */
 const AREA_PAGES: AreaPages = {
   home: () => import("../home/HomeScreen"),
   catalog: () => import("../catalog/CatalogScreen"),
   queries: () => import("../queries/QueriesScreen"),
-  access: () => import("../access/AccessScreen"),
   settings: () => import("../settings/SettingsScreen"),
 };
 
@@ -109,6 +108,15 @@ export function appRoutes(
           lazy: async () => {
             const { AccountScreen } = await import("../sign-in/AccountScreen");
             return { element: <AccountScreen /> };
+          },
+        },
+        {
+          // Bookmarks and sent links to the old Access area lead to its places in Settings.
+          path: "access/*",
+          hydrateFallbackElement: <></>,
+          lazy: async () => {
+            const { MovedAccess } = await import("../settings/MovedAccess");
+            return { element: <MovedAccess /> };
           },
         },
         { path: "*", element: <NotFound /> },

@@ -239,7 +239,7 @@ If health cannot be read, the tab says why and offers **Try again**.
 ## Access
 
 Access shows what you may do with the table and why. Its address ends in `/access`. It only
-shows; changing access comes with the Access area.
+shows; changing access comes with Settings → Access.
 
 - **What you may do.** Read, Write, Drop and Edit texts, each "Allowed" or "Not allowed". An
   allowed action says how it reaches you, such as "Through the Analyst role on namespace gold in

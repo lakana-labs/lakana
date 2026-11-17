@@ -63,7 +63,7 @@ describe("CommandPalette", () => {
   });
 
   it("lists one Go-to command per visible area, then Help's commands", async () => {
-    const { user } = await shellAtHome({ access: new Set(["home", "catalog", "access"]) });
+    const { user } = await shellAtHome({ access: new Set(["home", "catalog", "settings"]) });
 
     await user.keyboard("{Control>}k{/Control}");
 
@@ -75,7 +75,7 @@ describe("CommandPalette", () => {
     ).toEqual([
       "Go to Home",
       "Go to Catalog",
-      "Go to Access",
+      "Go to Settings",
       "Take the tour again",
       "Keyboard shortcuts",
     ]);
@@ -113,7 +113,7 @@ describe("CommandPalette", () => {
     expect(status).toHaveClass("visually-hidden");
 
     await user.keyboard("go");
-    expect(status).toHaveTextContent("7 results");
+    expect(status).toHaveTextContent("6 results");
     await user.keyboard("{Backspace}{Backspace}conn");
     expect(status).toHaveTextContent("1 result");
     await user.keyboard("zz");
@@ -173,6 +173,6 @@ describe("CommandPalette", () => {
     await user.click(screen.getByRole("button", { name: "Search" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Search" });
-    expect(within(dialog).getAllByRole("menuitem")).toHaveLength(9);
+    expect(within(dialog).getAllByRole("menuitem")).toHaveLength(8);
   });
 });

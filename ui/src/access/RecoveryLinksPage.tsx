@@ -1,5 +1,5 @@
 /**
- * Access → Recovery links: let a person who lost their passkeys back in, see the open links,
+ * Settings › Sign-in › Recovery links: let a person who lost their passkeys back in, see the open links,
  * withdraw one.
  *
  * @packageDocumentation
@@ -16,11 +16,12 @@ import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
-import { AccessFrame } from "./AccessFrame";
 import { personPath } from "./personPath";
 import { RecoveryDialog } from "./RecoveryDialog";
 import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
+import { SettingsFrame } from "../settings/SettingsFrame";
+import "../settings/settingsStrings";
 
 /**
  * Renders the open recovery links; each row opens its person, and is withdrawn in place.
@@ -36,7 +37,8 @@ export function RecoveryLinksPage(): JSX.Element {
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(links.data);
   const [issuing, setIssuing] = useState(false);
   return (
-    <AccessFrame
+    <SettingsFrame
+      title={t("settings.places.recoveryLinks")}
       headingRef={headingRef}
       action={
         <Button
@@ -110,6 +112,6 @@ export function RecoveryLinksPage(): JSX.Element {
           }}
         />
       )}
-    </AccessFrame>
+    </SettingsFrame>
   );
 }
