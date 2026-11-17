@@ -23,6 +23,7 @@ from lakana_core.identity.links import invisible_character_problem
 from lakana_core.identity.passkeys import _passkey_name
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
+from lakana_core.identity.tokens import parse_token
 from lakana_core.models import (
     Environment,
     Group,
@@ -290,7 +291,9 @@ def test_a_stored_token_name_with_a_hidden_character_stays_usable(session: Sessi
     session.commit()
 
     assert [token.name for token in service.list(admin, admin.name)] == [name]
-    assert service.verify(issued.key_id, issued.token.rsplit("_", 1)[1]).id == admin.id
+    parsed = parse_token(issued.token, "lakana_pat")
+    assert parsed is not None
+    assert service.verify(issued.key_id, parsed[1]).id == admin.id
     service.revoke(admin, admin.name, issued.key_id)
     assert all(token.revoked_at is not None for token in service.list(admin, admin.name))
 
