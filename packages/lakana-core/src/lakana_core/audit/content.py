@@ -208,6 +208,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "conflict",
         "in_run",
         "is_protected",
+        # the grant migration `0080` kept of identical ones, on each other copy's
+        # `GRANT_REVOKED` (#673)
+        "kept_grant_id",
         "kept_not_restored",
         "kept_reason",
         "kept_restored",
@@ -231,6 +234,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "shortened",
         # the environments a deploy key was not made in: their secrets are not the caller's
         "skipped",
+        # grants a restore left revoked because an identical one is live, each with that one's
+        # id (#673)
+        "skipped_grants",
         "state",
         "status",
         "stopped",

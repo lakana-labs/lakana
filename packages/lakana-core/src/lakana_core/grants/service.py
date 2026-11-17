@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 
 from sqlalchemy import exists, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
@@ -20,7 +21,8 @@ from lakana_core.auth import (
     permits_each,
 )
 from lakana_core.catalog.identity import namespace_exists, resolve_environment_id, resolve_table_id
-from lakana_core.errors import ConflictError, NotFoundError, ValidationError
+from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError, ValidationError
+from lakana_core.grants import duplicates
 from lakana_core.grants.admin import (
     ADMIN_ONLY_ACTIONS,
     authorize_admin_only,
@@ -385,6 +387,12 @@ class GrantService:
             If `principal`/`group` names a principal or group that doesn't
             exist, or `kind` names an environment, namespace, or table that
             doesn't exist.
+        AlreadyExistsError
+            If the subject already holds a live grant of the same role or action, kind and
+            target (`lakana_core.grants.duplicates`); the sentence names that grant's id.
+        IntegrityError
+            If the database refuses the row for another reason than a twin; with `commit`
+            false, also a twin written since the check, at the caller's flush.
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GRANT` works only with it).
@@ -426,29 +434,62 @@ class GrantService:
             granted_by=p.id,
             granted_at=datetime.now(UTC),
         )
+        subject = f"Principal {principal!r}" if principal is not None else f"Group {group!r}"
+        twin = duplicates.live_twin(self._session, row)
+        if twin is not None:
+            raise AlreadyExistsError(duplicates.twin_message(subject, twin))
+        self._session.add(row)
+        if not commit:
+            self._record_created(p, row, principal=principal, group=group)
+            return row
+        try:
+            self._record_created(p, row, principal=principal, group=group)
+            self._session.commit()
+        except IntegrityError as exc:
+            self._session.rollback()
+            # Another request wrote the same grant since the look above, and the unique index
+            # of live grants refused this one.
+            twin = duplicates.live_twin(self._session, row)
+            if twin is None:
+                raise
+            raise AlreadyExistsError(duplicates.twin_message(subject, twin)) from exc
+        return row
+
+    def _record_created(
+        self, p: PrincipalRef, row: Grant, *, principal: str | None, group: str | None
+    ) -> None:
+        """Audit a new grant and, for instance ADMIN, mark its holders; uncommitted.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        row
+            The new grant, added to the session.
+        principal
+            The person's name as given, or `None`.
+        group
+            The group's name as given, or `None`.
+        """
         AuditService(self._session).record(
             p.id,
             AuditEventType.GRANT_CREATED,
             securable=Securable(
-                kind=kind,
-                environment=environment,
-                namespace=NamespacePath.parse(namespace) if namespace is not None else None,
-                table=table,
+                kind=row.kind,
+                environment=row.environment,
+                namespace=NamespacePath.parse(row.namespace) if row.namespace is not None else None,
+                table=row.table,
             ),
             detail={
                 "grant_id": str(row.id),
                 "principal": principal,
                 "group": group,
-                "role": role.value if role is not None else None,
-                "action": action.value if action is not None else None,
+                "role": row.role.value if row.role is not None else None,
+                "action": row.action.value if row.action is not None else None,
             },
         )
-        self._session.add(row)
-        if role is Role.ADMIN and kind is SecurableKind.INSTANCE:
+        if row.role is Role.ADMIN and row.kind is SecurableKind.INSTANCE:
             mark_admin_holders(self._session)
-        if commit:
-            self._session.commit()
-        return row
 
     def list_grants(
         self,

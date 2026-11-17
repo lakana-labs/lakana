@@ -15,6 +15,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef
 from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
@@ -151,6 +152,10 @@ class PatService:
         ------
         NotFoundError
             If no principal has `principal_name`.
+        ValidationError
+            If `name` holds an invisible or line-breaking character
+            (`refuse_hidden_characters`) or starts or ends with a space
+            (`refuse_outer_whitespace`).
         ConflictError
             If `key_id`/`secret` were given explicitly and that exact
             `key_id` already exists, or a randomly generated `key_id`
@@ -168,6 +173,8 @@ class PatService:
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         require_step_up(p)
+        refuse_hidden_characters(name, what="Token name")
+        refuse_outer_whitespace(name, what="Token name")
         principal = self._get_principal(principal_name)
         fixed_credential = key_id is not None and secret is not None
         if fixed_credential:
