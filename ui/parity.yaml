@@ -8,7 +8,13 @@
 
 "DELETE /api/v1/environments/{env}/saved-queries/{saved_query_id}":
   { class: ui, part: 4, done: true }
-"GET /api/v1/environments/{env}/saved-queries": { class: ui, part: 4, done: true }
+"GET /api/v1/environments/{env}/saved-queries":
+  {
+    class: ui,
+    part: 4,
+    done: true,
+    note: "the Queries screen lists them through GET /api/v1/saved-queries with its environment filter",
+  }
 "GET /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4, done: true }
 "GET /api/v1/saved-queries": { class: ui, part: 4, done: true }
 "POST /api/v1/environments/{env}/saved-queries": { class: ui, part: 4, done: true }
@@ -338,7 +344,13 @@
 "GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
 "GET /api/v1/environments/{env}/orphans": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/project-versions/{project_version_id}": { class: ui, part: 5 }
-"GET /api/v1/environments/{env}/queries": { class: ui, part: 4, done: true }
+"GET /api/v1/environments/{env}/queries":
+  {
+    class: ui,
+    part: 4,
+    done: true,
+    note: "the Queries screen lists them through GET /api/v1/queries with its environment filter",
+  }
 "GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4, done: true }
 "GET /api/v1/environments/{env}/queries/{query_id}/result": { class: ui, part: 4, done: true }
 "GET /api/v1/environments/{env}/runs": { class: ui, part: 5 }
