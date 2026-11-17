@@ -35,9 +35,9 @@ export function SettingsLayout(): JSX.Element {
   return (
     <div className="settings">
       {!folded && (
-        <aside className="settings-places">
+        <div className="settings-places">
           <PlaceList viewer={viewer} />
-        </aside>
+        </div>
       )}
       <div className="settings-place">
         {folded && <PlaceFold viewer={viewer} />}

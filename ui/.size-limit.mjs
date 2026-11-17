@@ -68,10 +68,7 @@ const NAMED_LIMITS = [
   // Measured 9.85 kB (2026-11-17) with the editor's catalog cache (queries/editor/catalog.ts),
   // which the screen now hands to the editor, so that the editor's chunk reaches no API module
   // (see the first load below); the limit holds.
-  // Raised to the measured 10.07 kB (2026-11-17) + 10 %: no Queries code changed; the split of
-  // React Aria's press and hover hooks off the Button chunk (see the first load below) costs it
-  // the imports of one more chunk (+0.06 kB).
-  { name: "Queries", prefix: "QueriesScreen-", limit: "11.08 kB" },
+  { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.
@@ -376,13 +373,6 @@ export default [
   // chunk of its own (-0.17 kB). What is left is the Queries area's loader with the list of chunks
   // it preloads, the focus kept on Run after its move, and the download's type check in the API
   // client.
-  // Raised to 212.4 kB: measured 212.13 kB (2026-11-17; 210.58 kB before in the same build) with
-  // Settings' list of places. None of the frame is in it, and the entry itself is 0.58 kB
-  // smaller, but the bundler split three chunks of the first load once Settings' places loaded on
-  // their own: Page and the not-found state with React Aria's Link left the entry for chunks of
-  // their own when the Settings screen imported the not-available state, and the place chunks
-  // split React Aria's press and hover hooks off the Button chunk; the exports between them cost
-  // 1.55 kB.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -391,7 +381,7 @@ export default [
     name: "JavaScript, first load",
     path: INITIAL.map((name) => `${ASSETS}/${name}`),
     gzip: true,
-    limit: "212.4 kB",
+    limit: "212 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
   // Raised from 8.03 kB: measured 7.42 kB with the Health and Access tabs' rules (their sections,
