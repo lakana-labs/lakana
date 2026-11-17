@@ -9,6 +9,7 @@ import pytest
 
 from scripts.check_licenses import (
     ALLOWLIST,
+    UNKNOWN_PYTHON_LICENCES,
     classify,
     classify_expression,
     find_lockfiles,
@@ -518,3 +519,32 @@ def test_every_allowlist_entry_is_justified_in_the_docstring() -> None:
     doc = allowlist_docstring()
     for name in ALLOWLIST:
         assert f"``{name}``" in doc or name.startswith("lightningcss-")
+
+
+@pytest.mark.parametrize("text", ["UNKNOWN", "unknown", "", "  "])
+def test_an_unlisted_python_package_with_an_unknown_licence_fails(text: str) -> None:
+    """A distribution whose metadata names no licence is a violation unless it is listed."""
+    entries = [{"Name": "mystery-pkg", "License": text}]
+    assert find_violations(entries, frozenset()) == [("mystery-pkg", text, "UNKNOWN")]
+
+
+def test_a_listed_unknown_python_package_passes_in_any_spelling() -> None:
+    """Atheris is listed with its licence and evidence; names compare as PEP 503 does."""
+    assert UNKNOWN_PYTHON_LICENCES["atheris"][0] == "Apache-2.0"
+    assert "LICENSE" in UNKNOWN_PYTHON_LICENCES["atheris"][1]
+    for name in ("atheris", "Atheris"):
+        assert find_violations([{"Name": name, "License": "UNKNOWN"}], frozenset()) == []
+
+
+def test_listing_covers_only_an_unknown_licence() -> None:
+    """A listed package that reports a copyleft licence still fails."""
+    entries = [{"Name": "atheris", "License": "GPL-3.0-only"}]
+    assert find_violations(entries, frozenset()) == [("atheris", "GPL-3.0-only", "GPL")]
+
+
+def test_every_unknown_licence_entry_records_licence_and_evidence() -> None:
+    """Each entry names a licence that is not forbidden and says where it was checked."""
+    for licence, evidence in UNKNOWN_PYTHON_LICENCES.values():
+        assert licence.strip()
+        assert classify(licence) is None
+        assert evidence.strip()

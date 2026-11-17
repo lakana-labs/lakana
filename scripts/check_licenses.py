@@ -109,6 +109,52 @@ comment justifying it, and adding one is a deliberate decision.
 """
 
 
+UNKNOWN_PYTHON_LICENCES: dict[str, tuple[str, str]] = {
+    "atheris": (
+        "Apache-2.0",
+        "installed atheris 3.1.0: dist-info/licenses/LICENSE is the Apache License 2.0 text; "
+        "the package declares no licence field or classifier (checked 2026-11-17)",
+    ),
+}
+"""Python distributions whose metadata names no licence, with the licence found and where.
+
+``pip-licenses`` reports ``UNKNOWN`` for them, and an unknown licence fails the gate unless
+the package is listed here. Each value is ``(licence, evidence)``: the licence read from the
+package's own files and where it was checked. Adding an entry is a deliberate decision."""
+
+
+def _canonical(name: str) -> str:
+    """Normalise a distribution name as PEP 503 does.
+
+    Parameters
+    ----------
+    name
+        The distribution name.
+
+    Returns
+    -------
+    str
+        Lower case, with runs of ``-``, ``_`` and ``.`` as one ``-``.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def is_unknown(license_text: str) -> bool:
+    """Whether package metadata names no usable licence.
+
+    Parameters
+    ----------
+    license_text
+        Licence text as reported by ``pip-licenses``.
+
+    Returns
+    -------
+    bool
+        True for an empty text or ``UNKNOWN``.
+    """
+    return license_text.strip().lower() in {"", "unknown", "none", "n/a"}
+
+
 def _needle_matches(needle: str, lowered: str) -> bool:
     """Match one needle: phrases by substring, short ids as whole tokens.
 
@@ -173,17 +219,25 @@ def find_violations(
         dict with at least ``"Name"`` and ``"License"`` keys.
     allowlist
         Distribution names exempted regardless of their reported licence.
+        An unknown licence fails unless the name is in `UNKNOWN_PYTHON_LICENCES`.
 
     Returns
     -------
     list of tuple of str
         ``(name, license_text, family)`` for each violation, in input order.
     """
-    return [
-        (entry["Name"], entry["License"], family)
-        for entry in entries
-        if entry["Name"] not in allowlist and (family := classify(entry["License"])) is not None
-    ]
+    checked = {_canonical(name) for name in UNKNOWN_PYTHON_LICENCES}
+    violations: list[tuple[str, str, str]] = []
+    for entry in entries:
+        name, text = entry["Name"], entry["License"]
+        if name in allowlist:
+            continue
+        if is_unknown(text):
+            if _canonical(name) not in checked:
+                violations.append((name, text, "UNKNOWN"))
+        elif (family := classify(text)) is not None:
+            violations.append((name, text, family))
+    return violations
 
 
 SKIP_DIRS = frozenset({".git", ".venv", "node_modules", ".worktrees", "__pycache__"})
