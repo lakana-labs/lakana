@@ -11,7 +11,7 @@ import {
   takesSecret,
   whereText,
   type Parts,
-} from "./kinds.ts";
+} from "./kinds";
 
 const keys = (fields: readonly { key: string }[]): string[] => fields.map((field) => field.key);
 const parts = (address: Record<string, unknown>, settings: Record<string, unknown>): Parts => ({
@@ -75,6 +75,10 @@ describe("the kinds", () => {
       "token_url",
     ]);
     expect(keys(kindFields("http", { auth: "api_key" }).settings)).toContain("api_key_in");
+    for (const auth of ["toString", "constructor", "__proto__"]) {
+      expect(keys(kindFields("http", { auth }).settings)).toEqual(["auth", "ca_certificate"]);
+      expect(secretKeys("http", { auth }).required).toEqual([]);
+    }
     expect(keys(kindFields("http", { auth: "mystery" }).settings)).toEqual([
       "auth",
       "ca_certificate",
@@ -142,6 +146,13 @@ describe("movesSecret", () => {
     );
   });
 
+  it("an unknown tls counts as the weakest, as on the server", () => {
+    const at = (tls: string): Parts => parts(db.address, { user: "a", tls });
+    expect(movesSecret("postgresql", at("disable"), at("x"))).toBe(false);
+    expect(movesSecret("postgresql", at("x"), at("disable"))).toBe(false);
+    expect(movesSecret("postgresql", at("require"), at("x"))).toBe(true);
+  });
+
   it("a new, changed or removed CA moves it", () => {
     const withCa = parts(db.address, { ...db.settings, ca_certificate: "sha256:a" });
     expect(movesSecret("postgresql", db, withCa)).toBe(true);
@@ -172,6 +183,13 @@ describe("movesSecret", () => {
     expect(movesSecret("s3", custom, moved(custom))).toBe(false);
     expect(movesSecret("s3", bare, moved(bare))).toBe(true);
     expect(movesSecret("s3", fallback, fallback)).toBe(false);
+    const emptied = (before: Parts, endpoint: string | undefined): Parts =>
+      parts({ ...before.address, endpoint }, before.settings);
+    // An endpoint left empty means the region's default: the same region is no move.
+    expect(movesSecret("s3", fallback, emptied(fallback, ""))).toBe(false);
+    expect(movesSecret("s3", fallback, emptied(fallback, undefined))).toBe(false);
+    expect(movesSecret("s3", bare, emptied(bare, ""))).toBe(false);
+    expect(movesSecret("s3", fallback, emptied(moved(fallback), ""))).toBe(true);
     expect(movesSecret("gcs", fallback, moved(fallback))).toBe(false);
   });
 });

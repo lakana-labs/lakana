@@ -2,13 +2,13 @@
 
 The server has no public list of each kind's fields, so this test reads the private names of
 `lakana_core.connections.kinds` (`_MODELS`, `_AUTH_FIELDS` and the others): a change there that
-the mirror in `ui/src/connections/kinds.json` does not follow fails here.
+the mirror in `ui/src/connections/kinds.mirror.json` does not follow fails here.
 """
 
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args, get_origin
 
 import pytest
 
@@ -17,7 +17,7 @@ from lakana_core.connections.kinds import ConnectionKind
 from lakana_core.models.connection import ConnectionTestOutcome
 
 ROOT = Path(__file__).resolve().parents[2]
-MIRROR: dict[str, Any] = json.loads((ROOT / "ui/src/connections/kinds.json").read_text())
+MIRROR: dict[str, Any] = json.loads((ROOT / "ui/src/connections/kinds.mirror.json").read_text())
 REFERENCE = (ROOT / "docs/site/reference/connections.md").read_text()
 
 
@@ -42,6 +42,25 @@ def _first_column(heading_line: str) -> list[str]:
             break
         cells.append(line.split("|")[1].strip().strip("`"))
     return cells
+
+
+def _literal_choices(annotation: object) -> list[str] | None:
+    """Read the values of a field's `Literal` type, looking through `Optional`.
+
+    Parameters
+    ----------
+    annotation
+        A model field's annotation.
+
+    Returns
+    -------
+    list of str or None
+        The literal's values, or ``None`` when the field is not a literal.
+    """
+    for arm in (annotation, *get_args(annotation)):
+        if get_origin(arm) is Literal:
+            return list(get_args(arm))
+    return None
 
 
 def _mirror_secret(kind: str, auth: str | None) -> tuple[set[str], set[str]]:
@@ -94,6 +113,9 @@ def test_each_kinds_fields_and_required_ones_match_the_servers_models(
         mirrored = {f["key"]: f["required"] for f in MIRROR["kinds"][kind.value][part]}
         actual = {name: field.is_required() for name, field in model.model_fields.items()}
         assert mirrored == actual, f"{kind.value} {part}"
+        choices = {f["key"]: f.get("choices") for f in MIRROR["kinds"][kind.value][part]}
+        literals = {name: _literal_choices(f.annotation) for name, f in model.model_fields.items()}
+        assert choices == literals, f"{kind.value} {part} choices"
 
 
 def test_secret_keys_match_for_every_kind_and_auth() -> None:

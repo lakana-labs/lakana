@@ -3,13 +3,13 @@
  * and the test outcomes.
  *
  * @remarks
- * This is the only reader of `kinds.json`, the UI's one mirror of
+ * This is the only reader of `kinds.mirror.json`, the UI's one mirror of
  * `docs/site/reference/connections.md`. `scripts/tests/test_ui_connection_kinds.py` compares
  * that file with `lakana_core.connections.kinds` and with the reference's tables, so a change
  * on the server that the mirror misses fails there. The server stays the judge of every value.
  * @packageDocumentation
  */
-import mirror from "./kinds.json";
+import mirror from "./kinds.mirror.json";
 
 import type { ConnectionKind, ConnectionTestOutcome } from "../api";
 
@@ -80,7 +80,7 @@ export const OUTCOMES: readonly ConnectionTestOutcome[] = MIRROR.outcomes;
  */
 function httpAuth(settings: Readonly<Record<string, unknown>>): string {
   const auth = settings.auth;
-  return typeof auth === "string" && auth in MIRROR.httpAuth ? auth : "none";
+  return typeof auth === "string" && Object.hasOwn(MIRROR.httpAuth, auth) ? auth : "none";
 }
 
 /**
@@ -173,11 +173,11 @@ function same(before: unknown, after: unknown): boolean {
  * How strongly a `tls` value checks the server.
  *
  * @param settings - The settings.
- * @returns The value's place in the strength order; an unknown value ranks below all.
+ * @returns The value's place in the strength order; an unknown value counts as the weakest, as on the server.
  */
 function tlsStrength(settings: Readonly<Record<string, unknown>>): number {
   const tls = typeof settings.tls === "string" ? settings.tls : "verify-full";
-  return MIRROR.movesSecret.tlsStrength.indexOf(tls);
+  return Math.max(0, MIRROR.movesSecret.tlsStrength.indexOf(tls));
 }
 
 /**
@@ -197,7 +197,7 @@ function s3DefaultEndpoint(region: unknown): string {
  * @remarks
  * This is the server's `moves_secret`, plus the `s3` region rule: the server moves a default
  * endpoint with a new region, so a new `region` while the endpoint is the old region's default
- * (or not set) is an address change.
+ * (or not set) is an address change; an endpoint left empty means its region's default.
  * @param kind - The kind.
  * @param before - The connection as stored.
  * @param after - The connection as the form would send it.
@@ -205,15 +205,29 @@ function s3DefaultEndpoint(region: unknown): string {
  */
 export function movesSecret(kind: ConnectionKind, before: Parts, after: Parts): boolean {
   const { address, settings } = MIRROR.movesSecret;
-  if (address.some((key) => !same(before.address[key], after.address[key]))) return true;
+  const seen = (parts: Parts): Readonly<Record<string, unknown>> =>
+    kind === "s3" ? { ...parts.address, endpoint: s3Endpoint(parts.address) } : parts.address;
+  const [was, now] = [seen(before), seen(after)];
+  if (address.some((key) => !same(was[key], now[key]))) return true;
   if (settings.some((key) => !same(before.settings[key], after.settings[key]))) return true;
   if (tlsStrength(after.settings) < tlsStrength(before.settings)) return true;
-  const endpoint = before.address.endpoint ?? null;
   return (
     kind === "s3" &&
     !same(before.address.region, after.address.region) &&
-    (endpoint === null || endpoint === s3DefaultEndpoint(before.address.region))
+    was.endpoint === s3DefaultEndpoint(before.address.region) &&
+    now.endpoint === was.endpoint
   );
+}
+
+/**
+ * The endpoint an `s3` address means: the one it names, else its region's default.
+ *
+ * @param address - The address.
+ * @returns The endpoint.
+ */
+function s3Endpoint(address: Readonly<Record<string, unknown>>): string {
+  const endpoint = text(address.endpoint);
+  return endpoint === "" ? s3DefaultEndpoint(address.region) : endpoint;
 }
 
 /**
