@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { INVISIBLE } from "../../shell/VisibleText";
+import { INVISIBLE } from "./VisibleText";
 
 /** The name a file is saved under when its path leaves none. */
 const FALLBACK_NAME = "download";

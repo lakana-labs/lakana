@@ -41,7 +41,10 @@ const PROBE_UI = join(SCRATCH, "ui");
 const JSCPD_REPORT = join(SCRATCH, "jscpd-report-ui");
 // Marks a directory this script made, so it never empties one it did not.
 const MARKER = join(SCRATCH, ".lakana-ui-gate-probe");
-const TIMEOUT_MS = 180_000;
+// How long one gate's run may take. The coverage probe runs the whole Vitest suite: it took
+// 182 s in CI on 2026-11-17 with the Queries screen's tests, over the 180 s this was before, so
+// the run was cut and its probe judged a leak. Six minutes leaves room, inside the job's 15.
+const TIMEOUT_MS = 360_000;
 const NOT_COPIED = new Set(["node_modules", "coverage", "test-results", "playwright-report"]);
 
 // An 80-token function: above jscpd's --min-tokens 70, so two copies are a clone.

@@ -5,7 +5,10 @@ import {
   CSRF_STORAGE_KEY,
   DownloadCut,
   DownloadTooLong,
+  WrongFileType,
   api,
+  endSession,
+  onSessionEnd,
   onUnauthorized,
   send,
   setCsrfToken,
@@ -259,6 +262,22 @@ describe("send", () => {
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener.mock.calls[0]?.[0]).toBeInstanceOf(ApiError);
   });
+
+  it("ends the session on a 401 and on endSession, forgetting the token, until they stop listening", async () => {
+    fakeServer({ "GET /api/v1/things": { status: 401, body: { detail: "x", type: "y" } } });
+    const listener = vi.fn();
+    const stop = onSessionEnd(listener);
+
+    await send("GET", "/api/v1/things").catch(() => undefined);
+    expect(listener).toHaveBeenCalledTimes(1);
+    setCsrfToken("csrf-1");
+    endSession();
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+    stop();
+    endSession();
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("api.upload and api.blob", () => {
@@ -312,8 +331,70 @@ describe("api.upload and api.blob", () => {
     expect(server.sent[0]?.headers["x-lakana-background"]).toBeUndefined();
   });
 
-  it("download reads an answer without a body as an empty file", async () => {
+  it("download keeps octet-stream for artifacts", async () => {
+    const server = fakeServer({
+      "GET /api/v1/files/one": { status: 200, blob: new Blob(["bytes"]) },
+    });
+
+    await api.download("/api/v1/files/one", 5);
+
+    expect(server.sent[0]?.headers["accept"]).toBe("application/octet-stream");
+  });
+
+  it("download asks for the type it is given and refuses another", async () => {
+    const server = fakeServer({
+      "GET /api/v1/files/csv": { status: 200, blob: new Blob(["a,b"], { type: "text/csv" }) },
+      "GET /api/v1/files/page": { status: 200, blob: new Blob(["<p>"], { type: "text/html" }) },
+    });
+
+    const csv = await api.download("/api/v1/files/csv", 5, "text/csv");
+    await expect(api.download("/api/v1/files/page", 5, "text/csv")).rejects.toBeInstanceOf(
+      WrongFileType,
+    );
+    await expect(api.download("/api/v1/files/page", 5)).rejects.toBeInstanceOf(WrongFileType);
+
+    expect(await csv.text()).toBe("a,b");
+    expect(server.sent[0]?.headers["accept"]).toBe("text/csv");
+  });
+
+  it("download refuses an answer that names no type", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(c) {
+                c.close();
+              },
+            }),
+            { status: 200 },
+          ),
+        ),
+      ),
+    );
+
+    await expect(api.download("/api/v1/files/one", 5)).rejects.toBeInstanceOf(WrongFileType);
+  });
+
+  it("download refuses an answer without a body that names no type, such as a 204", async () => {
     fakeServer({ "GET /api/v1/files/one": { status: 204 } });
+
+    await expect(api.download("/api/v1/files/one", 5)).rejects.toBeInstanceOf(WrongFileType);
+  });
+
+  it("download reads an answer of the asked type without a body as an empty file", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(null, {
+            status: 200,
+            headers: { "Content-Type": "application/octet-stream" },
+          }),
+        ),
+      ),
+    );
 
     const read = await api.download("/api/v1/files/one", 5);
 
@@ -328,7 +409,14 @@ describe("api.upload and api.blob", () => {
   function streamed(source: UnderlyingDefaultSource<Uint8Array>): void {
     vi.stubGlobal(
       "fetch",
-      vi.fn(() => Promise.resolve(new Response(new ReadableStream(source), { status: 200 }))),
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(new ReadableStream(source), {
+            status: 200,
+            headers: { "Content-Type": "application/octet-stream" },
+          }),
+        ),
+      ),
     );
   }
 

@@ -47,7 +47,7 @@ describe("Recent", () => {
 
   it.each([
     ["gold.station_ranking", "Table", "prod", "/catalog/prod/gold/station_ranking"],
-    ["Query 3f9c2a1b", "Query", "dev", "/queries"],
+    ["Query 3f9c2a1b", "Query", "dev", "/queries/dev/runs/3f9c2a1b-77d0-4c1e-9a55-0c4f5b2e8d11"],
     ["analytics/daily_sales", "Job", "prod", "/jobs"],
     ["Run 8d2e4f60", "Run", "prod", "/jobs"],
   ])("lists %s with its kind and environment, and opens it", async (name, kind, env, path) => {

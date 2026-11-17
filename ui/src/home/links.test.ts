@@ -5,7 +5,6 @@ import { ATTENTION_OBJECTS, isReleaseVersion, objectPath, releaseNotesUrl } from
 describe("links", () => {
   it.each([
     ["table", "prod", "gold.station_ranking", "/catalog/prod/gold/station_ranking"],
-    ["query", "dev", "3f9c2a1b", "/queries"],
     ["job", "prod", "analytics/daily_sales", "/jobs"],
     ["run", "prod", "8d2e4f60", "/jobs"],
     ["check", "prod", "8d2e4f60", "/jobs"],
@@ -17,6 +16,12 @@ describe("links", () => {
       expect(objectPath(kind, environment, ref)).toBe(path);
     },
   );
+
+  it("a query opens its run on the Queries screen", () => {
+    expect(objectPath("query", "dev", "3f9c2a1b")).toBe("/queries/dev/runs/3f9c2a1b");
+    expect(objectPath("query", "my env", "a/b")).toBe("/queries/my%20env/runs/a%2Fb");
+    expect(objectPath("query", null, "3f9c2a1b")).toBe("/queries");
+  });
 
   it("links a table on Home to its page", () => {
     expect(objectPath("table", "prod", "gold.sales.fact_sales")).toBe(

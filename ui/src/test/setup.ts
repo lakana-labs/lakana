@@ -1,7 +1,8 @@
 /**
- * Test setup that every Vitest file runs first: the DOM matchers of jest-dom, object URLs
- * (which jsdom lacks), a 3 s wait for `findBy*` and `waitFor`, and a clean document, `fetch`,
- * CSRF token, picture cache and local storage after each test.
+ * Test setup that every Vitest file runs first: the DOM matchers of jest-dom, object URLs,
+ * `execCommand` and a range's geometry (which jsdom lacks), a 3 s wait for `findBy*` and
+ * `waitFor`, and a clean document, `fetch`, CSRF token, picture cache and local storage after
+ * each test.
  *
  * @packageDocumentation
  */
@@ -28,6 +29,16 @@ Object.assign(URL, {
     return `blob:http://localhost/${String(objectUrls)}`;
   },
   revokeObjectURL: () => undefined,
+});
+
+// jsdom has no execCommand, which CodeMirror's focus() calls (the SQL editor's focusAt).
+Object.assign(Document.prototype, { execCommand: () => false });
+
+// jsdom lays nothing out and has no geometry for a range, which CodeMirror measures when it
+// scrolls the cursor into view (the SQL editor's focusAt) in the next animation frame.
+Object.assign(Range.prototype, {
+  getClientRects: () => [],
+  getBoundingClientRect: () => new DOMRect(),
 });
 
 afterEach(() => {

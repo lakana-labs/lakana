@@ -11,5 +11,6 @@
     "public/theme-boot.js"
   ],
   "project": ["src/**/*.{ts,tsx}", "build/**/*.ts", "e2e/**/*.ts", "e2e-server/**/*.ts"],
-  "ignoreDependencies": ["@ibm/plex-sans", "@ibm/plex-mono"]
+  "ignoreDependencies": ["@ibm/plex-sans", "@ibm/plex-mono"],
+  "ignoreBinaries": ["uv"]
 }

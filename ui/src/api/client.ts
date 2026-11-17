@@ -64,6 +64,15 @@ export class DownloadTooLong extends Error {
   }
 }
 
+/** A download the server answered with another kind of file than the one asked for. */
+export class WrongFileType extends Error {
+  /** Builds the error. */
+  constructor() {
+    super("The server sent a different kind of file than the one asked for.");
+    this.name = "WrongFileType";
+  }
+}
+
 /** A refusal or failure the server answered, with its cause and the next step. */
 export class ApiError extends Error {
   /** The HTTP status; 0 when the server could not be reached. */
@@ -147,6 +156,36 @@ export function onUnauthorized(listener: (error: ApiError) => void): () => void 
   return () => {
     unauthorizedListeners.delete(listener);
   };
+}
+
+const sessionEndListeners = new Set<() => void>();
+
+/**
+ * Listens for the end of the session in this tab: a sign-out, a sign-out everywhere, or an
+ * answer of 401. What one person may see and the page keeps (pictures, the SQL editor's catalog)
+ * is forgotten here, so the next person to sign in in the same tab does not see it.
+ *
+ * @param listener - Called when the session ends.
+ * @returns A function that stops listening.
+ */
+export function onSessionEnd(listener: () => void): () => void {
+  sessionEndListeners.add(listener);
+  return () => {
+    sessionEndListeners.delete(listener);
+  };
+}
+
+/** Tells the listeners of {@link onSessionEnd} that the session ended. */
+function sessionEnded(): void {
+  for (const listener of sessionEndListeners) {
+    listener();
+  }
+}
+
+/** Ends the session in this tab: forgets the CSRF token and tells {@link onSessionEnd}. */
+export function endSession(): void {
+  setCsrfToken(null);
+  sessionEnded();
 }
 
 let stepUpCeremony: (() => Promise<void>) | null = null;
@@ -301,6 +340,7 @@ async function exchangeWith(
       for (const listener of unauthorizedListeners) {
         listener(error);
       }
+      sessionEnded();
     }
     throw error;
   }
@@ -467,13 +507,21 @@ export const api = {
    *
    * @param path - The path under the server.
    * @param limit - The most bytes the file may have, such as the size its manifest records.
+   * @param accept - The media type asked for, sent as `Accept`; the answer's `Content-Type` must
+   *   start with it.
    * @returns The file.
    * @throws {ApiError} for a refusal or an unreachable server.
+   * @throws {WrongFileType} when the answer's `Content-Type` does not start with `accept`.
    * @throws {DownloadCut} when the body's stream breaks before it ends.
    * @throws {DownloadTooLong} when the body passes `limit`; the rest is cancelled unread.
    */
-  async download(path: string, limit: number): Promise<Blob> {
-    const response = await exchangeWith("GET", path, { accept: "application/octet-stream" }, {});
+  async download(path: string, limit: number, accept = "application/octet-stream"): Promise<Blob> {
+    const response = await exchangeWith("GET", path, { accept }, {});
+    // The type first: an answer without a body (a 204 or 205) is no empty file of that type.
+    if (!(response.headers.get("Content-Type") ?? "").startsWith(accept)) {
+      await response.body?.cancel();
+      throw new WrongFileType();
+    }
     if (response.body === null) {
       return new Blob([]);
     }

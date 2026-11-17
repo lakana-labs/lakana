@@ -13,7 +13,7 @@
  * made on another device after it shows here only after signing in again.
  * @packageDocumentation
  */
-import { api, onUnauthorized } from "./client";
+import { api, onSessionEnd } from "./client";
 
 /** The largest picture the server takes: 5 MB, as `PICTURE_MAX_BYTES` on the server. */
 export const PICTURE_MAX_BYTES = 5 * 1024 * 1024;
@@ -207,4 +207,4 @@ export function forgetPictures(): void {
   changed.clear();
 }
 
-onUnauthorized(forgetPictures);
+onSessionEnd(forgetPictures);

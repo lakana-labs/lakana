@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { ApiError, CSRF_STORAGE_KEY, send, setCsrfToken } from "./client";
+import { ApiError, CSRF_STORAGE_KEY, onSessionEnd, send, setCsrfToken } from "./client";
 import {
   dismissNotice,
   getSession,
@@ -53,6 +53,24 @@ describe("session", () => {
 
     expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
     expect(server.sent[1]?.headers).not.toHaveProperty("x-lakana-csrf");
+  });
+
+  it.each([
+    ["signing out", 204, (): Promise<void> => signOut()],
+    ["signing out fails", 500, (): Promise<void> => signOut().catch(() => undefined)],
+    ["signing out everywhere", 204, (): Promise<void> => signOutEverywhere("kim")],
+  ])("ends the session for its listeners after %s", async (_, status, end) => {
+    fakeServer({
+      "DELETE /api/v1/sign-in/session": { status, body: { detail: "x" } },
+      "DELETE /api/v1/principals/kim/sessions": { status: 204 },
+    });
+    const listener = vi.fn();
+    const stop = onSessionEnd(listener);
+
+    await end();
+    stop();
+
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it("signs out everywhere through the person's sessions", async () => {
