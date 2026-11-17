@@ -4,8 +4,8 @@
  *
  * @remarks
  * The values live only in the form's state (and, for `tcp`, in the rows' state below it) until
- * Save sends them; every value input is `type="password"` with autocomplete off, and nothing
- * here logs, stores or renders a value.
+ * Save sends them; every value input is `type="password"` with `autoComplete="new-password"`,
+ * and nothing here logs, stores or renders a value.
  * @packageDocumentation
  */
 import { type JSX, useEffect, useId, useRef, useState } from "react";
@@ -74,8 +74,8 @@ interface PasswordFieldProps {
 }
 
 /**
- * One secret value: a password field with autocomplete off, so the browser neither shows nor
- * keeps it.
+ * One secret value: a password field marked as a new password, so the browser neither fills a
+ * saved one in nor offers to keep it as a login (browsers ignore `off` on a password field).
  *
  * @param props - The label, whether it is needed, and the value.
  * @param props.label - The label.
@@ -89,7 +89,7 @@ function PasswordField({ label, required, value, onChange }: PasswordFieldProps)
     <TextField
       className="field"
       type="password"
-      autoComplete="off"
+      autoComplete="new-password"
       isRequired={required}
       value={value}
       onChange={onChange}

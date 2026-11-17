@@ -308,7 +308,7 @@ describe("ConnectionForm, add", () => {
     });
   });
 
-  it("each secret value input is a password field with autocomplete off", async () => {
+  it("each secret value input is a password field the browser neither fills nor saves", async () => {
     const { user } = renderAdd();
     const kinds = await screen.findByRole("radiogroup", { name: "Kind" });
     // Every input of the secret but the radios, the key file and a tcp key's name.
@@ -323,7 +323,7 @@ describe("ConnectionForm, add", () => {
       expect(inputs).toHaveLength(count);
       for (const input of inputs) {
         expect(input).toHaveAttribute("type", "password");
-        expect(input).toHaveAttribute("autocomplete", "off");
+        expect(input).toHaveAttribute("autocomplete", "new-password");
       }
     };
 
@@ -859,7 +859,7 @@ describe("ConnectionForm, edit", () => {
     await user.click(screen.getByRole("radio", { name: "New values" }));
     const password = screen.getByLabelText("password");
     expect(password).toHaveAttribute("type", "password");
-    expect(password).toHaveAttribute("autocomplete", "off");
+    expect(password).toHaveAttribute("autocomplete", "new-password");
     expect(password).toHaveValue("");
     await user.type(password, PASSWORD);
     await user.click(screen.getByRole("button", { name: "Save" }));
