@@ -1307,10 +1307,16 @@ def _failed_why(entry: FailedRun) -> str:
     return _output.inline(entry.run.error_message or "", _PROGRESS_REASON_LIMIT)
 
 
+_FAILED_ENV = Annotated[
+    str | None,
+    typer.Option("--env", help="Only this environment (default: every environment you may read)."),
+]
+
+
 @runs_app.command("failed")
 def failed_runs(
     ctx: typer.Context,
-    env: _ENV = None,
+    env: _FAILED_ENV = None,
     limit: Annotated[
         int | None,
         typer.Option("--limit", min=1, max=200, help="Most failed runs to list (default 50)."),
@@ -1352,6 +1358,8 @@ def failed_runs(
     )
     for entry in failed.items:
         name = _output.inline(_failed_name(entry))
-        typer.echo(f"{name} ({_output.inline(entry.run.environment)}): {_failed_why(entry)}")
+        why = _failed_why(entry)
+        where = f"{name} ({_output.inline(entry.run.environment)})"
+        typer.echo(f"{where}: {why}" if why.strip() else where)
     if failed.truncated:
         typer.echo("More failed runs than shown; narrow with --env.")

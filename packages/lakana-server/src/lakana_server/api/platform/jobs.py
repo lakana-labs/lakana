@@ -45,6 +45,26 @@ router = APIRouter(
 _JOB = Annotated[str, Path(min_length=1, max_length=255)]
 
 
+def _rights_of(authz: AuthorizationService, principal: PrincipalRef, env: str) -> OperatorRights:
+    """Ask what the caller may do on the jobs of one environment.
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    principal
+        The caller.
+    env
+        The environment.
+
+    Returns
+    -------
+    OperatorRights
+        The caller's operator rights there.
+    """
+    return operator_rights_each(authz, principal, [env])[env]
+
+
 def _job_out(view: JobView, rights: OperatorRights) -> JobOut:
     """Build a job body, with the reason as `WaitReason.to_json` writes it.
 
@@ -158,7 +178,7 @@ def list_jobs(
     list of JobOut
         By repository, then job name.
     """
-    rights = operator_rights_each(authz, principal, [env])[env]
+    rights = _rights_of(authz, principal, env)
     return [_job_out(view, rights) for view in service.list(principal, env, repository)]
 
 
@@ -199,7 +219,7 @@ def get_job(
         The job, as the list shows it.
     """
     view = service.get(principal, env, job, repository)
-    return _job_out(view, operator_rights_each(authz, principal, [env])[env])
+    return _job_out(view, _rights_of(authz, principal, env))
 
 
 @router.post(
@@ -254,7 +274,7 @@ def start_job(
     result = service.start(principal, env, body.repository, job)
     if result.waiting is not None:
         response.status_code = 202
-    return _start_out(result, operator_rights_each(authz, principal, [env])[env])
+    return _start_out(result, _rights_of(authz, principal, env))
 
 
 @router.post("/jobs/{job}/pause", response_model=JobOut, responses=errors(403, 404, 409))
@@ -293,7 +313,7 @@ def pause_job(
         The job.
     """
     view = service.pause(principal, env, body.repository, job)
-    return _job_out(view, operator_rights_each(authz, principal, [env])[env])
+    return _job_out(view, _rights_of(authz, principal, env))
 
 
 @router.post("/jobs/{job}/resume", response_model=JobOut, responses=errors(403, 404))
@@ -332,7 +352,7 @@ def resume_job(
         The job.
     """
     view = service.resume(principal, env, body.repository, job)
-    return _job_out(view, operator_rights_each(authz, principal, [env])[env])
+    return _job_out(view, _rights_of(authz, principal, env))
 
 
 @router.post(

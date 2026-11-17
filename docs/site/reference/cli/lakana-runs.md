@@ -85,5 +85,5 @@ The rule is Home's "Needs your attention": per job, or per repository for runs o
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `--env` | text | none | Environment (default: the profile's). |
+| `--env` | text | none | Only this environment (default: every environment you may read). |
 | `--limit` | whole number, 1 to 200 | none | Most failed runs to list (default 50). |

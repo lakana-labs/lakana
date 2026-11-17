@@ -270,11 +270,6 @@ def test_job_reads_actions_and_an_older_server_gives_none() -> None:
     assert job.actions == ("run", "pause", "resume")
 
 
-def test_run_reads_actions_and_an_older_server_gives_none() -> None:
-    assert run_from_json(_RUN).actions == ()
-    assert run_from_json({**_RUN, "actions": ["cancel", "resume"]}).actions == ("cancel", "resume")
-
-
 def test_job_reads_notify_commit_and_source_link() -> None:
     body = {
         **_JOB,

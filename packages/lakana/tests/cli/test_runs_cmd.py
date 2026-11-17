@@ -2324,6 +2324,24 @@ def test_runs_failed_prints_the_run_message_when_no_task_failed(tmp_path: Path) 
     assert "nightly (prod): The code changed after the deploy." in _plain(result.stdout)
 
 
+def test_runs_failed_prints_no_colon_when_the_server_sent_no_why(tmp_path: Path) -> None:
+    api = FakeApi()
+    row = _failed_row("nightly", "prod", None, None, error_message=None)
+    api.on("GET", "/api/v1/runs/failed", json={"items": [row], "truncated": False})
+    result = invoke(make_state(tmp_path, api), "runs", "failed", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    text = _plain(result.stdout)
+    assert text.endswith("nightly (prod)")
+    assert "nightly (prod):" not in text
+
+
+def test_runs_failed_env_help_says_every_environment_is_the_default(tmp_path: Path) -> None:
+    result = invoke(make_state(tmp_path, FakeApi()), "runs", "failed", "--help", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    text = " ".join(_plain(result.stdout).split())
+    assert "Only this environment (default: every environment you may read)." in text
+
+
 def test_runs_failed_says_when_more_were_cut(tmp_path: Path) -> None:
     api = FakeApi()
     body = {"items": [_failed_row("nightly", "prod", "a.b", "timeout")], "truncated": True}

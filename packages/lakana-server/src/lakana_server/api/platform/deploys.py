@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
@@ -44,6 +44,29 @@ all_deploys_router = APIRouter(
     tags=["deploys"],
     responses=errors(401),
 )
+
+
+def deploy_words(
+    authz: AuthorizationService, principal: PrincipalRef, environments: Iterable[str]
+) -> dict[str, tuple[str, ...]]:
+    """Ask what the caller may do on the deploys of each environment, once.
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    principal
+        The caller.
+    environments
+        The environments of the deploys to answer.
+
+    Returns
+    -------
+    dict of str to tuple of str
+        The deploy words per distinct environment.
+    """
+    rights = operator_rights_each(authz, principal, environments)
+    return {name: deploy_actions(r) for name, r in rights.items()}
 
 
 def _to_out(view: DeployRunView, actions: Sequence[str] = ()) -> DeployOut:
@@ -177,7 +200,7 @@ def list_deploys(
         principal, env, repository=repository, limit=limit, cursor=cursor
     )
     set_next_cursor(response, next_cursor)
-    words = deploy_actions(operator_rights_each(authz, principal, [env])[env])
+    words = deploy_words(authz, principal, [env])[env]
     return [_to_out(view, words) for view in views]
 
 
@@ -213,7 +236,7 @@ def get_deploy(
         The run.
     """
     view = service.get(principal, env, deploy_id)
-    return _to_out(view, deploy_actions(operator_rights_each(authz, principal, [env])[env]))
+    return _to_out(view, deploy_words(authz, principal, [env])[env])
 
 
 def _deployment_out(view: DeploymentView) -> DeploymentOut:
@@ -535,8 +558,7 @@ def list_all_deploys(
     views, next_cursor = service.list_all_deploys_page(
         principal, environment=environment, repository=repository, limit=limit, cursor=cursor
     )
-    rights = operator_rights_each(authz, principal, [view.environment for view in views])
-    words = {name: deploy_actions(right) for name, right in rights.items()}
+    words = deploy_words(authz, principal, [view.environment for view in views])
     return DeployPageOut(
         items=[_to_out(view, words[view.environment]) for view in views], next_cursor=next_cursor
     )
