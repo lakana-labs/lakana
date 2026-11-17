@@ -27,6 +27,7 @@ from lakana._arrow import (
     schema_to_columns,
 )
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
+from lakana._languages import canonical_language
 from lakana._models import (
     AppendResult,
     CheckHealth,
@@ -66,7 +67,13 @@ from lakana._models import (
 )
 from lakana._routes import ROUTES
 from lakana.context import FILES_READ_KEY
-from lakana.errors import Conflict, LakanaConnectionError, LakanaError, ValidationError
+from lakana.errors import (
+    Conflict,
+    InvalidResponse,
+    LakanaConnectionError,
+    LakanaError,
+    ValidationError,
+)
 from lakana.resources.queries import QueryRun
 
 _APPEND_CONTENT_TYPE = "application/vnd.apache.arrow.stream"
@@ -146,6 +153,54 @@ def _write_params(
         params["break_glass_reason"] = break_glass_reason
     if expected_snapshot_id is not None:
         params["expected_snapshot_id"] = str(expected_snapshot_id)
+
+
+def _texts_of(table: Table, column: str | None) -> Table | Column | None:
+    """Find the texts of a table, or of one of its columns.
+
+    Parameters
+    ----------
+    table
+        The table.
+    column
+        The column's name, or `None` for the table's own texts.
+
+    Returns
+    -------
+    Table or Column or None
+        The table, the column, or `None` for a column the table does not show.
+    """
+    if column is None:
+        return table
+    return next((c for c in table.columns if c.name == column), None)
+
+
+def _label_edited(table: Table, column: str | None, label: str, language: str) -> bool:
+    """Whether a table shows `label` as an edit in `language`, for itself or one column.
+
+    Parameters
+    ----------
+    table
+        The table as the server answered it.
+    column
+        The column's name, or `None` for the table's own label.
+    label
+        The label sent, without its surrounding spaces.
+    language
+        The canonical tag the label should be in.
+
+    Returns
+    -------
+    bool
+        `True` when it does.
+    """
+    texts = _texts_of(table, column)
+    return (
+        texts is not None
+        and texts.label == label
+        and texts.label_source == "edited"
+        and texts.label_language == language
+    )
 
 
 def _split_namespace_table(qualified_name: str) -> tuple[str, str]:
@@ -1124,13 +1179,15 @@ class Tables:
         label: str | _Unset | None = _UNSET,
         column: str | None = None,
         lang: str | None = None,
+        label_language: str | None = None,
     ) -> Table:
         """Set the description or label of a table or one of its columns, or reset them.
 
         A text set here is shown instead of the one a deploy publishes from the asset header or a
         translation file, and a deploy never replaces it. Resetting (`None`) removes it, so the
         project's text shows again; a field you leave out stays as it is. Without `lang`, the
-        edit is in the table's main language. Needs to own the table or hold `DROP_TABLE` on it.
+        edit is in the table's main language; `label_language` puts the label in another language
+        than the description. Needs to own the table or hold `DROP_TABLE` on it.
 
         Parameters
         ----------
@@ -1148,6 +1205,9 @@ class Tables:
             The language edited, such as `"fr"`; also the language of the returned texts. Without
             it, the edit is in the table's main language and the returned texts follow your
             profile's language, then the server's main language.
+        label_language
+            The language the label is edited in, such as `"en"`, when it is not `lang`'s; without
+            it, the label is edited in the same language as the description. Needs `label`.
 
         Returns
         -------
@@ -1157,13 +1217,17 @@ class Tables:
         Raises
         ------
         ValueError
-            If neither `description` nor `label` is given.
+            If neither `description` nor `label` is given, or `label_language` without `label`.
         lakana.errors.NotFound
             If the table, or the column, does not exist.
         lakana.errors.PermissionDenied
             Without the right to describe the table.
         lakana.errors.ValidationError
-            If a text breaks its rules or `lang` is not a language tag.
+            If a text breaks its rules, or `lang` or `label_language` is not a language tag.
+        lakana.errors.InvalidResponse
+            With `label_language`, when the server is older than it and edited the label in the
+            description's language instead; the message names that language. A label in another
+            language is read back once to check this.
         """
         body: dict[str, str | None] = {}
         if not isinstance(description, _Unset):
@@ -1172,6 +1236,10 @@ class Tables:
             body["label"] = label
         if not body:
             raise ValueError("give description, label or both; None removes an edit")
+        if label_language is not None:
+            if "label" not in body:
+                raise ValueError("label_language names the language of label; give label with it")
+            body["label_language"] = label_language
         namespace, name = _split_namespace_table(qualified_name)
         path_params = {"env": environment, "path": namespace, "name": name}
         if column is None:
@@ -1185,7 +1253,85 @@ class Tables:
             json=body,
             params=None if lang is None else {"lang": lang},
         )
-        return _table_from_json(response.json())
+        table = _table_from_json(response.json())
+        if label_language is not None:
+            self._check_label_language(
+                environment,
+                qualified_name,
+                table,
+                column=column,
+                label=body["label"],
+                lang=lang,
+                label_language=label_language,
+            )
+        return table
+
+    def _check_label_language(
+        self,
+        environment: str,
+        qualified_name: str,
+        answer: Table,
+        *,
+        column: str | None,
+        label: str | None,
+        lang: str | None,
+        label_language: str,
+    ) -> None:
+        """Make sure the server edited the label in `label_language`, not in `lang`.
+
+        A server older than `label_language` ignores the field and edits the label in the
+        description's language. The answer shows the texts in `lang`, so unless it already shows
+        the new label in its language, the label is read back in that language.
+
+        Parameters
+        ----------
+        environment
+            The environment name.
+        qualified_name
+            Dot-joined `"namespace.table"` name.
+        answer
+            The table the edit answered.
+        column
+            The column edited, or `None` for the table.
+        label
+            The label sent, or `None` for a reset.
+        lang
+            The description's language as sent, or `None` for the table's main language.
+        label_language
+            The label's language as sent.
+
+        Raises
+        ------
+        lakana.errors.InvalidResponse
+            If the label was not edited in `label_language`.
+        """
+        wanted = canonical_language(label_language)
+        saved = canonical_language(lang) if lang is not None else answer.main_language
+        if saved == wanted:
+            return
+        if label is not None and _label_edited(answer, column, label.strip(), wanted):
+            return
+        shown = self.get(environment, qualified_name, lang=label_language)
+        if label is None:
+            texts = _texts_of(shown, column)
+            if texts is None or not (
+                texts.label_source == "edited" and texts.label_language == wanted
+            ):
+                return
+        elif _label_edited(shown, column, label.strip(), wanted):
+            return
+        where = "the description's language" if lang is not None else "the table's main language"
+        done = "saved" if label is not None else "reset"
+        undo = (
+            f" to undo this edit, reset the label with label=None and lang={saved!r}."
+            if label is not None
+            else f" to reset the label in {wanted}, upgrade the server first."
+        )
+        raise InvalidResponse(
+            f"The server ignored label_language: it is older than this SDK, so the label was "
+            f"{done} in {saved}, {where}, not in {wanted}. Upgrade the server to save a label in "
+            f"its own language;{undo}"
+        )
 
     def delete(
         self,

@@ -11,6 +11,7 @@ describe("editLanguage", () => {
 
     expect(editLanguage(shown, { description_language: "de" })).toEqual({
       lang: "de",
+      labelLang: "de",
       named: true,
       fallback: false,
     });
@@ -21,6 +22,7 @@ describe("editLanguage", () => {
 
     expect(editLanguage(shown, { description_language: "en" })).toEqual({
       lang: "en",
+      labelLang: "en",
       named: false,
       fallback: true,
     });
@@ -31,6 +33,7 @@ describe("editLanguage", () => {
 
     expect(editLanguage(shown, { description_language: "en" })).toEqual({
       lang: "en",
+      labelLang: "en",
       named: true,
       fallback: false,
     });
@@ -39,6 +42,7 @@ describe("editLanguage", () => {
   it("does not name the language of a table with one language", () => {
     expect(editLanguage(table(), { description_language: "en" })).toEqual({
       lang: "en",
+      labelLang: "en",
       named: false,
       fallback: false,
     });
@@ -55,9 +59,29 @@ describe("editLanguage", () => {
 
     expect(editLanguage(shown, { description_language: null })).toEqual({
       lang: "en",
+      labelLang: "en",
       named: true,
       fallback: true,
     });
+  });
+
+  it("edits the label in the language it is shown in, apart from the description's", () => {
+    const shown = table({ language: "de", main_language: "en", translations: GERMAN });
+
+    expect(editLanguage(shown, { description_language: "de", label_language: "en" })).toEqual({
+      lang: "de",
+      labelLang: "en",
+      named: true,
+      fallback: false,
+    });
+  });
+
+  it("writes a first label where a first description would go", () => {
+    const shown = table({ language: "de", main_language: "en", translations: GERMAN });
+
+    expect(
+      editLanguage(shown, { description_language: "en", label_language: null }).labelLang,
+    ).toBe("de");
   });
 });
 

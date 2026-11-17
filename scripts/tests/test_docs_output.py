@@ -1,5 +1,6 @@
 """Tests for comparing a page's output blocks with what the examples printed."""
 
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,20 @@ from scripts.docs_blocks import (
     MASKS,
     BlockError,
     check,
+    console_width,
     find_blocks,
     fix,
     is_progress,
     main,
     mask,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the runner's own ``COLUMNS`` out of every test: the width comes from the example."""
+    monkeypatch.delenv("COLUMNS", raising=False)
+
 
 RUN_SH = "#!/usr/bin/env bash\n# docs:start show\necho hi\n# docs:end show\n"
 BLOCK = "<!-- output: demo#show -->\n```text\n{}```\n"
@@ -89,7 +98,9 @@ def test_text_that_is_the_same_on_every_run_is_left_alone(text: str) -> None:
     assert mask(text) == text
 
 
-def _tree(tmp_path: Path, block: str, shown: str, captured: str | None) -> tuple[Path, Path]:
+def _tree(
+    tmp_path: Path, block: str, shown: str, captured: str | None, columns: int | None = None
+) -> tuple[Path, Path]:
     """Build a root with one page, one example and, optionally, one captured region.
 
     Parameters
@@ -102,6 +113,8 @@ def _tree(tmp_path: Path, block: str, shown: str, captured: str | None) -> tuple
         What the page shows.
     captured
         What the example printed, or ``None`` for no capture of the region.
+    columns
+        The ``COLUMNS`` the example exports, or ``None`` for none.
 
     Returns
     -------
@@ -112,7 +125,10 @@ def _tree(tmp_path: Path, block: str, shown: str, captured: str | None) -> tuple
     site.mkdir(parents=True)
     (site / "p.md").write_text(block.format(shown), encoding="utf-8")
     (tmp_path / "docs" / "examples" / "demo").mkdir(parents=True)
-    (tmp_path / "docs" / "examples" / "demo" / "run.sh").write_text(RUN_SH, encoding="utf-8")
+    (tmp_path / "docs" / "examples" / "demo" / "run.sh").write_text(
+        RUN_SH if columns is None else f"export COLUMNS={columns}\n" + RUN_SH,
+        encoding="utf-8",
+    )
     captures = tmp_path / "captures"
     (captures / "demo").mkdir(parents=True)
     if captured is not None:
@@ -486,3 +502,185 @@ def test_fix_keeps_an_unchanged_table_as_the_page_shows_it(tmp_path: Path) -> No
     fix(root, root / "docs/site", None, captures)
     text = (root / "docs/site/p.md").read_text(encoding="utf-8")
     assert "```text\nnew\n" + _table(LONG_ID) + "```" in text
+
+
+WRAPPED_PAGE = (
+    "Fired: t: schema changed (snapshot 5033228317085625887, 05 Nov 00:33 UTC);\ncheck it\n"
+)
+WRAPPED_RUN = (
+    "Fired: t: schema changed (snapshot 503322831708562588, 05 Nov 00:33 UTC); check\nit\n"
+)
+
+
+def test_a_sentence_wrapped_at_another_word_is_not_a_difference(tmp_path: Path) -> None:
+    """The wrap point moves with the length of masked values; the words are what count."""
+    root, captures = _tree(tmp_path, BLOCK, WRAPPED_PAGE, WRAPPED_RUN)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_changed_word_in_wrapped_text_still_fails(tmp_path: Path) -> None:
+    """Unwrapping does not hide a different word."""
+    root, captures = _tree(tmp_path, BLOCK, WRAPPED_PAGE, WRAPPED_RUN.replace("check", "look"))
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_text_does_not_join_a_table_line(tmp_path: Path) -> None:
+    """A line moved across a table is a difference."""
+    shown = "intro\n" + _table("ok")
+    root, captures = _tree(tmp_path, BLOCK, shown, _table("ok") + "intro\n")
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_fix_keeps_a_page_that_differs_only_in_wrapping(tmp_path: Path) -> None:
+    """A block that matches apart from its line breaks is left as written."""
+    root, captures = _tree(tmp_path, BLOCK, WRAPPED_PAGE, WRAPPED_RUN)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "```text\n" + WRAPPED_PAGE + "```" in text
+
+
+LONG = "word " * 19 + "end"
+WIDTH = 100
+
+
+@pytest.mark.parametrize(
+    ("shown", "printed"),
+    [
+        (LONG + "\n\nnext\n", LONG + "\nnext\n"),
+        (LONG + "\n  next\n", LONG + "\nnext\n"),
+        (LONG + "\n- one\n- two\n", LONG + "\n- one - two\n"),
+        (LONG + "\nnext  more\n", LONG + "\nnext more\n"),
+        ("| a | b |\n| c | d |\n", "| a | b | | c | d |\n"),
+        ("+---+---+\n| a | b |\n", "+---+---+ | a | b |\n"),
+    ],
+    ids=[
+        "blank line removed",
+        "indent changed",
+        "list items joined",
+        "spaces inside a line",
+        "markdown table rows joined",
+        "ascii table rows joined",
+    ],
+)
+def test_only_a_wrap_point_is_ignored(tmp_path: Path, shown: str, printed: str) -> None:
+    """Blank lines, indents, spacing, items and table rows all keep counting."""
+    root, captures = _tree(tmp_path, BLOCK, shown, printed, WIDTH)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_wraps_on_both_sides_of_a_table_pass(tmp_path: Path) -> None:
+    """Text before and after a table may wrap elsewhere; the table is compared as before."""
+    shown = LONG + "\nrest\n" + _table("ok") + LONG + "\nrest\n"
+    printed = LONG + " rest\n" + _table("ok") + LONG + " rest\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, printed, WIDTH)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_one_stray_box_character_in_a_sentence_is_still_text(tmp_path: Path) -> None:
+    """A line with a single box character is unwrapped like any sentence."""
+    first = "a │ " + LONG
+    root, captures = _tree(tmp_path, BLOCK, first + "\nrest\n", first + " rest\n", WIDTH + 4)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_fix_keeps_the_pages_wrap_where_only_the_wrap_differs(tmp_path: Path) -> None:
+    """A wrap difference and a real change: only the changed stretch comes from the run."""
+    shown = LONG + "\nrest\n\nold\n"
+    printed = LONG + " rest\n\nnew\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, printed, WIDTH)
+    fix(root, root / "docs/site", None, captures)
+    text = (root / "docs/site/p.md").read_text(encoding="utf-8")
+    assert "```text\n" + LONG + "\nrest\n\nnew\n```" in text
+    assert fix(root, root / "docs/site", None, captures) == []
+
+
+FIRED = (
+    "Fired: silver.orders: schema changed: added amount (snapshot {}, 05 Nov 00:33 UTC); "
+    "check that what reads silver.orders still works"
+)
+
+
+@pytest.mark.parametrize("width", range(30, 90, 3))
+def test_the_fired_line_passes_wrapped_at_any_width(tmp_path: Path, width: int) -> None:
+    """A wrap inside the alert time, or before `changed:` or `silver.orders:`, is no difference."""
+
+    def wrapped(snapshot: str) -> str:
+        """Wrap the sentence the way a terminal of `width` columns does.
+
+        Parameters
+        ----------
+        snapshot
+            The snapshot id in the sentence.
+
+        Returns
+        -------
+        str
+            The wrapped lines.
+        """
+        lines = textwrap.wrap(FIRED.format(snapshot), width, break_long_words=False)
+        return "\n".join(lines) + "\n"
+
+    root, captures = _tree(tmp_path, BLOCK, wrapped(LONG_ID), wrapped(SHORT_ID), width)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_wrap_before_a_long_path_passes(tmp_path: Path) -> None:
+    """The line may end far short of the width when the next word is long."""
+    path = "/srv/lakana/data/warehouse/silver/orders/part-0001.parquet"
+    shown = "Wrote the file to\n" + path + "\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, "Wrote the file to " + path + "\n", 60)
+    assert check(root, root / "docs/site", None, captures) == ([], 0)
+
+
+def test_a_line_that_fits_is_not_joined_to_the_next(tmp_path: Path) -> None:
+    """With the example's width known, a long line that was not wrapped stays a line."""
+    shown = LONG + "\nnext\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, LONG + " next\n", 120)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_a_line_longer_than_the_width_is_never_joined(tmp_path: Path) -> None:
+    """The terminal does not wrap a line it printed too long, so a lost newline is a difference."""
+    shown = LONG + "\nHint: run it\n"
+    root, captures = _tree(tmp_path, BLOCK, shown, LONG + " Hint: run it\n", 60)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_short_key_value_lines_stay_separate(tmp_path: Path) -> None:
+    """Two short fields on one line are a difference at a known width."""
+    root, captures = _tree(tmp_path, BLOCK, "status: ok\nrows: 3\n", "status: ok rows: 3\n", 120)
+    problems, _ = check(root, root / "docs/site", None, captures)
+    assert problems
+
+
+def test_the_width_is_the_export_above_the_region(tmp_path: Path) -> None:
+    """An export after a region does not apply to it."""
+    root, _ = _tree(tmp_path, BLOCK, "x\n", None)
+    run = root / "docs/examples/demo/run.sh"
+    run.write_text(
+        "# docs:start show\necho hi\n# docs:end show\nexport COLUMNS=120\n", encoding="utf-8"
+    )
+    assert console_width(root, "demo#show") is None
+    run.write_text(
+        "export COLUMNS=90\n# docs:start show\necho hi\n# docs:end show\n", encoding="utf-8"
+    )
+    assert console_width(root, "demo#show") == 90
+
+
+def test_the_environments_columns_does_not_set_the_width(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the example's own export counts, never the environment of the checker."""
+    monkeypatch.setenv("COLUMNS", "80")
+    root, _ = _tree(tmp_path, BLOCK, "x\n", None)
+    assert console_width(root, "demo#show") is None
+
+
+def test_an_example_without_a_run_script_has_no_width(tmp_path: Path) -> None:
+    """A missing `run.sh` is no width, not an error."""
+    assert console_width(tmp_path, "nowhere#show") is None

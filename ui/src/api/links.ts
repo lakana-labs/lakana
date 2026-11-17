@@ -11,14 +11,16 @@ import { api, setCsrfToken } from "./client";
 
 /** A link as `POST /api/v1/sign-in/links/describe` answers it. */
 export interface LinkDescriptionOut {
-  /** `setup`, `invite`, `recovery` or `local`. */
-  readonly kind: string;
+  /** What the link is for. The server may add values: compare, and keep a fallback. */
+  readonly kind: "setup" | "invite" | "recovery" | "local";
   /** The principal name the link signs in as (an invite: the account it creates). */
   readonly name: string;
   /** The name to show, when there is one. */
   readonly display_name: string | null;
-  /** `open` for a usable link. */
-  readonly state: string;
+  /**
+   * `open` for a usable link (the only one the server describes). The server may add values: compare, and keep a fallback.
+   */
+  readonly state: "open" | "used" | "expired" | "withdrawn";
 }
 
 /** What signing in answers. */

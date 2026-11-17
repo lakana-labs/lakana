@@ -13,7 +13,8 @@ An old check run of a task is therefore `task`; only runs made after this revisi
 
 The column keeps a database default of `written`, so that a server or worker of the previous
 release, which does not know the column, still inserts runs during an upgrade; they are
-recorded as `written`. The model has no default: new code names an origin everywhere.
+recorded as `written`. The model declares the same database default but no Python default:
+new code names an origin everywhere.
 
 Revision ID: d8e2f5a1c736
 Revises: 15081774c52d
