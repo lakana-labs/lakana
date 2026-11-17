@@ -55,6 +55,15 @@ export class DownloadCut extends Error {
   }
 }
 
+/** A download whose body went on past the size the caller expects; the rest was not read. */
+export class DownloadTooLong extends Error {
+  /** Builds the error. */
+  constructor() {
+    super("The download's body is longer than expected.");
+    this.name = "DownloadTooLong";
+  }
+}
+
 /** A refusal or failure the server answered, with its cause and the next step. */
 export class ApiError extends Error {
   /** The HTTP status; 0 when the server could not be reached. */
@@ -453,17 +462,37 @@ export const api = {
    * Reads a file the person asked to download, such as one file of an artifact version. A link
    * to the API would carry no CSRF token and be refused, so the interface reads the file here and
    * saves it from an object URL. Not a background request: the person acts. A read never asks
-   * for a passkey touch, so there is no step-up retry.
+   * for a passkey touch, so there is no step-up retry. The body is read as a stream and no
+   * further than `limit` bytes: a server or a proxy that sends more is not read to the end.
    *
    * @param path - The path under the server.
+   * @param limit - The most bytes the file may have, such as the size its manifest records.
    * @returns The file.
    * @throws {ApiError} for a refusal or an unreachable server.
    * @throws {DownloadCut} when the body's stream breaks before it ends.
+   * @throws {DownloadTooLong} when the body passes `limit`; the rest is cancelled unread.
    */
-  async download(path: string): Promise<Blob> {
+  async download(path: string, limit: number): Promise<Blob> {
     const response = await exchangeWith("GET", path, { accept: "application/octet-stream" }, {});
+    if (response.body === null) {
+      return new Blob([]);
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array<ArrayBuffer>[] = [];
+    let size = 0;
     try {
-      return await response.blob();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          return new Blob(chunks);
+        }
+        size += value.byteLength;
+        if (size > limit) {
+          await reader.cancel();
+          throw new DownloadTooLong();
+        }
+        chunks.push(value);
+      }
     } catch (error) {
       // A cut connection breaks the stream with a TypeError; nothing else is read here.
       throw error instanceof TypeError ? new DownloadCut() : error;
