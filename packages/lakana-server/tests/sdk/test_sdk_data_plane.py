@@ -86,6 +86,29 @@ def test_sdk_create_append_query_round_trip(
     assert result.cast(data.schema).equals(data)
 
 
+def test_a_result_downloads_as_csv_and_xlsx_against_the_real_app(
+    lakana_client: lakana.Client, client: TestClient, tmp_path: Path
+) -> None:
+    """The SDK saves the server's CSV and spreadsheet of a finished run, byte for byte."""
+    lakana_client.environments.create(
+        "dev", storage={"scheme": "file", "root": f"file://{tmp_path}", "options": {}}
+    )
+    run = lakana_client.queries.submit("SELECT 1 AS n, 'a,b' AS s", environment="dev")
+    _run_worker_once(client, run.id)
+
+    csv_path = tmp_path / "out" / "one.csv"
+    xlsx_path = tmp_path / "out" / "one.xlsx"
+    csv_path.parent.mkdir()
+    csv_size = run.download(csv_path, format="csv")
+    xlsx_size = run.download(xlsx_path, format="xlsx")
+
+    assert csv_path.read_bytes() == b'"n","s"\r\n1,"a,b"\r\n'
+    assert csv_size == csv_path.stat().st_size
+    assert xlsx_path.read_bytes().startswith(b"PK")
+    assert xlsx_size == xlsx_path.stat().st_size
+    assert sorted(p.name for p in csv_path.parent.iterdir()) == ["one.csv", "one.xlsx"]
+
+
 _POLARS_BEFORE_1_37 = tuple(int(part) for part in pl.__version__.split(".")[:2]) < (1, 37)
 """`pa.schema(pl.Schema)` needs Polars' Arrow schema export, which works from Polars 1.37."""
 

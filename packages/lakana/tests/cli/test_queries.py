@@ -249,7 +249,7 @@ def test_sql_refuses_an_invalid_explicit_format_before_submitting(tmp_path: Path
         "--out",
         str(tmp_path / "x.parquet"),
         "--format",
-        "xlsx",
+        "docx",
     )
 
     assert result.exit_code == 2
@@ -273,6 +273,148 @@ def test_query_result_refuses_an_unknown_out_extension_before_fetching(tmp_path:
 
     assert result.exit_code == 2
     assert api.requests == []
+
+
+_CSV = b'n,s\r\n1,"a,b"\r\n'
+_XLSX = b"PK\x03\x04 pretend spreadsheet"
+
+
+def _file_api(content: bytes) -> FakeApi:
+    """Build a fake whose result route serves `content`, whatever the format asked for.
+
+    Parameters
+    ----------
+    content
+        The body of the result route.
+
+    Returns
+    -------
+    FakeApi
+        The fake, with a succeeded run `q1`.
+    """
+    api = FakeApi()
+    run = _status_body("SUCCEEDED")
+    api.on("POST", _Q, status=202, json=run)
+    api.on("GET", f"{_Q}/q1", json=run)
+    api.on("GET", f"{_Q}/q1/result", content=content)
+    return api
+
+
+def _asked_format(api: FakeApi) -> str | None:
+    """Return the `format` of the last request to the result route.
+
+    Parameters
+    ----------
+    api
+        The fake.
+
+    Returns
+    -------
+    str or None
+        The query parameter, or `None` when none was sent.
+    """
+    asked = [r for r in api.requests if r.url.path.endswith("/result")]
+    return asked[-1].url.params.get("format") if asked else None
+
+
+def test_query_result_format_csv_saves_the_servers_bytes(tmp_path: Path) -> None:
+    """`--format csv --out` saves the server's CSV as it is, asked for with `format=csv`."""
+    api = _file_api(_CSV)
+    out = tmp_path / "one.csv"
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "query",
+        "result",
+        "q1",
+        "--env",
+        "dev",
+        "--format",
+        "csv",
+        "--out",
+        str(out),
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert out.read_bytes() == _CSV
+    assert _asked_format(api) == "csv"
+    assert f"Wrote {len(_CSV)} bytes to" in result.stdout
+    assert [p.name for p in tmp_path.iterdir() if p.suffix == ".part"] == []
+
+
+def test_query_result_xlsx_from_the_extension(tmp_path: Path) -> None:
+    """`--out x.xlsx` means `--format xlsx` and saves the server's file."""
+    api = _file_api(_XLSX)
+    out = tmp_path / "one.xlsx"
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "query",
+        "result",
+        "q1",
+        "--env",
+        "dev",
+        "--out",
+        str(out),
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert out.read_bytes() == _XLSX
+    assert _asked_format(api) == "xlsx"
+
+
+def test_query_result_format_csv_without_out_prints_the_csv(tmp_path: Path) -> None:
+    """`--format csv` alone streams the server's CSV to standard output."""
+    api = _file_api(_CSV)
+
+    result = invoke(
+        make_state(tmp_path, api), "query", "result", "q1", "--env", "dev", "--format", "csv"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout_bytes == _CSV  # CRLF as the server sent it, not translated
+    assert _asked_format(api) == "csv"
+
+
+def test_query_result_format_xlsx_without_out_is_exit_2_with_the_sentence(tmp_path: Path) -> None:
+    """A binary file is never printed to a terminal: exit 2 before any request."""
+    api = _file_api(_XLSX)
+
+    result = invoke(
+        make_state(tmp_path, api), "query", "result", "q1", "--env", "dev", "--format", "xlsx"
+    )
+
+    assert result.exit_code == 2
+    assert "--format xlsx writes a binary file; add --out FILE.xlsx" in result.stderr
+    assert api.requests == []
+
+
+def test_query_result_parquet_is_still_written_locally(tmp_path: Path) -> None:
+    """`parquet` is written by the CLI from the Arrow result, not asked of the server."""
+    table = pa.table({"id": [1, 2]})
+    api = _api(table)
+    out = tmp_path / "r.parquet"
+
+    result = invoke(
+        make_state(tmp_path, api), "query", "result", "q1", "--env", "dev", "--out", str(out)
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert pq.read_table(out).equals(table)
+    assert _asked_format(api) is None
+    assert "Wrote 2 rows" in result.stdout
+
+
+def test_sql_out_xlsx_uses_the_server(tmp_path: Path) -> None:
+    """`lakana sql --out x.xlsx` waits for the run, then saves the server's spreadsheet."""
+    api = _file_api(_XLSX)
+    out = tmp_path / "x.xlsx"
+
+    result = invoke(make_state(tmp_path, api), "sql", "SELECT 1", "--env", "dev", "--out", str(out))
+
+    assert result.exit_code == 0, result.stderr
+    assert out.read_bytes() == _XLSX
+    assert _asked_format(api) == "xlsx"
 
 
 def _write_api(mode: str = "replace") -> FakeApi:

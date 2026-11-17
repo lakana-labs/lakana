@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import time
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, BinaryIO, Literal
 
 import pyarrow as pa
 import pyarrow.ipc
@@ -32,6 +34,9 @@ from lakana._models import (
 )
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse, QueryFailed, ServerError, ValidationError
+
+ResultFileFormat = Literal["csv", "xlsx"]
+"""The file formats the server makes of a whole result: CSV and a spreadsheet."""
 
 _EntryList = list[QueryListEntry]
 _EnvironmentList = list[QueryEnvironment]
@@ -469,6 +474,99 @@ class QueryRun:
         _usage.add_bytes_read(len(response.content))
         with pyarrow.ipc.open_file(pa.BufferReader(response.content)) as reader:
             return reader.read_all()
+
+    def write_file(self, target: BinaryIO, *, format: ResultFileFormat) -> int:
+        """Write the server's CSV or spreadsheet of the whole result into `target`.
+
+        The server makes the file and the body is streamed, so memory holds one piece at a
+        time. This SDK reads no spreadsheet: it only moves bytes. Every download of a whole
+        result is recorded in the audit log.
+
+        Parameters
+        ----------
+        target
+            A file opened for binary writing.
+        format
+            ``"csv"`` (RFC 4180, UTF-8, every value as it is) or ``"xlsx"`` (one sheet; values
+            a cell cannot hold are written as text or refused).
+
+        Returns
+        -------
+        int
+            The bytes written.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the query does not exist, or was submitted by another principal.
+        lakana.errors.Conflict
+            If the query has not succeeded yet, or is not a read.
+        lakana.errors.ValidationError
+            If the result cannot be a file of this format; the message says why and, for a
+            spreadsheet, names the command that saves a CSV instead.
+        lakana.errors.ServerError
+            If the server is preparing other result files (status 503, `Retry-After`).
+        lakana.errors.LakanaConnectionError
+            If the server could not be reached, or the body broke before its end; what was
+            written is then incomplete.
+        """
+        written = 0
+        with self._transport.stream(
+            ROUTES["queries.result"],
+            path_params={"env": self.environment, "query_id": self.id},
+            params={"format": format},
+        ) as chunks:
+            for chunk in chunks:
+                target.write(chunk)
+                written += len(chunk)
+        _usage.add_bytes_read(written)
+        return written
+
+    def download(self, path: str | os.PathLike[str], *, format: ResultFileFormat) -> int:
+        """Save the server's CSV or spreadsheet of the whole result at `path`.
+
+        The file is written to `<path>.part` in the same directory and moved onto `path` when
+        it is complete, so `path` never holds half a file. A failure removes the part file
+        and leaves `path` as it was.
+
+        Parameters
+        ----------
+        path
+            Where to save the file. An existing file is replaced.
+        format
+            ``"csv"`` or ``"xlsx"``; see `write_file`.
+
+        Returns
+        -------
+        int
+            The bytes written.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If the query does not exist, or was submitted by another principal.
+        lakana.errors.Conflict
+            If the query has not succeeded yet, or is not a read.
+        lakana.errors.ValidationError
+            If the result cannot be a file of this format.
+        lakana.errors.ServerError
+            If the server is preparing other result files (status 503).
+        lakana.errors.LakanaConnectionError
+            If the server could not be reached, or the body broke before its end.
+        OSError
+            If the file cannot be written.
+        """
+        target = os.fspath(path)
+        part = f"{target}.part"
+        try:
+            with open(part, "wb") as handle:
+                written = self.write_file(handle, format=format)
+            os.replace(part, target)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(part)
+            raise
+        return written
 
     def page(self, *, limit: int = 100, offset: int = 0) -> ResultPage:
         """Fetch one page of this query's result as JSON, cells bounded in size.

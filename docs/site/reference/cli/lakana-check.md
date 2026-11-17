@@ -44,6 +44,6 @@ Prints a table like `lakana sql`; --out writes every row to a file instead.
 | `CHECK` | text | required | The check, as `lakana check list` shows it: table/check. |
 | `--env` | text | none | Environment (default: the profile's). |
 | `--out` | path | none | Write the full result to this file. |
-| `--format` | text | none | parquet, csv or arrow (default: from the extension). |
+| `--format` | text | none | parquet, csv, arrow or xlsx (default: from the extension). |
 | `--max-rows` | whole number, 0 or more | `50` | Most rows to display. |
 | `--timeout` | number | none | Seconds to wait before giving up. |

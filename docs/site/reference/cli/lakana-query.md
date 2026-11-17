@@ -87,5 +87,5 @@ Fetch a finished query's result.
 | `QUERY_ID` | text | required |  |
 | `--env` | text | none | Environment (default: the profile's). |
 | `--out` | path | none | Write the full result to this file. |
-| `--format` | text | none | parquet, csv or arrow (default: from the extension). |
+| `--format` | text | none | parquet, csv, arrow or xlsx (default: from the extension). |
 | `--max-rows` | whole number, 0 or more | `50` | Most rows to display. |

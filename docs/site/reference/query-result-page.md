@@ -3,7 +3,8 @@
 A query that read rows has a result you can fetch as one JSON page, with every cell cut to a size a
 screen can hold. The web interface and `lakana table preview` read this page. The whole result, never
 cut, is a file in Arrow, CSV or a spreadsheet (`format=arrow`, `csv` or `xlsx`; `lakana query
-result`, `lakana sql --out`); see [The whole result as a file](#the-whole-result-as-a-file).
+result`, `lakana sql --out`); see [The whole result as a file](#the-whole-result-as-a-file) and
+[Download a query result](../how-to/download-a-query-result.md).
 
 The page is `GET /api/v1/environments/{env}/queries/{query_id}/result` with the query parameters
 `format=json`, `offset` and `limit`.

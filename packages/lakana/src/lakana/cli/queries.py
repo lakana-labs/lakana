@@ -39,7 +39,7 @@ _ENV = Annotated[str | None, typer.Option("--env", help="Environment (default: t
 OUT = Annotated[Path | None, typer.Option("--out", help="Write the full result to this file.")]
 FORMAT = Annotated[
     str | None,
-    typer.Option("--format", help="parquet, csv or arrow (default: from the extension)."),
+    typer.Option("--format", help="parquet, csv, arrow or xlsx (default: from the extension)."),
 ]
 MAX_ROWS = Annotated[int, typer.Option("--max-rows", min=0, help="Most rows to display.")]
 TIMEOUT = Annotated[
@@ -169,17 +169,27 @@ class Written:
     Parameters
     ----------
     rows
-        Rows written.
+        Rows written, when the CLI wrote them itself (Parquet, Arrow); `None` for a file the
+        server made, whose rows the CLI does not count.
     path
         The file written.
+    size_bytes
+        Bytes written, for a file the server made; `None` otherwise.
     """
 
-    rows: int
+    rows: int | None
     path: str
+    size_bytes: int | None = None
 
 
-def out_format(out: Path | None, fmt: str | None) -> str | None:
-    """Resolve `--out`'s format up front, before any query runs.
+RESULT_FORMATS = ("parquet", "csv", "arrow", "xlsx")
+"""The formats of a result file. `_files.FORMATS` (what `lakana load` reads) stays as it is."""
+_SERVER_FORMATS = ("csv", "xlsx")
+"""The formats the server writes; the CLI saves its bytes. The others are made from Arrow."""
+
+
+def result_format(out: Path | None, fmt: str | None) -> str | None:
+    """Resolve a result's file format up front, before any query runs.
 
     Parameters
     ----------
@@ -191,15 +201,37 @@ def out_format(out: Path | None, fmt: str | None) -> str | None:
     Returns
     -------
     str or None
-        One of `_files.FORMATS`, or `None` without `--out`.
+        One of `RESULT_FORMATS`: `--format`, else the extension of `out`. `None` without
+        either, which prints the result as a table.
+
+    Raises
+    ------
+    CliError
+        If `--format` is not one of `RESULT_FORMATS`, the extension of `out` is unknown, or
+        `xlsx` is asked for without `--out` (exit 2).
     """
-    return None if out is None else _files.infer_format(out, fmt)
+    if fmt is not None and fmt not in RESULT_FORMATS:
+        raise CliError(f"--format must be one of {', '.join(RESULT_FORMATS)}; got {fmt!r}")
+    if out is None:
+        if fmt == "xlsx":
+            raise CliError("--format xlsx writes a binary file; add --out FILE.xlsx")
+        return fmt
+    if fmt is not None:
+        return fmt
+    if out.suffix.lower() == ".xlsx":
+        return "xlsx"
+    try:
+        return _files.infer_format(out, None)
+    except CliError:
+        raise CliError(
+            f"Can't tell the format of {out.name}; pass --format {'|'.join(RESULT_FORMATS)}"
+        ) from None
 
 
 def _render(
     state: CliState, table: pa.Table, out: Path | None, fmt: str | None, max_rows: int
 ) -> None:
-    """Print a result, or write it to `out`.
+    """Print a result, or write it to `out` as Parquet or Arrow.
 
     Parameters
     ----------
@@ -210,7 +242,7 @@ def _render(
     out
         The destination file, if any.
     fmt
-        Its format, already resolved by `out_format`.
+        Its format, already resolved by `result_format`.
     max_rows
         The display cap.
     """
@@ -222,6 +254,43 @@ def _render(
         state,
         f"Wrote {table.num_rows} rows to {_output.inline(str(out))}",
         Written(rows=table.num_rows, path=str(out)),
+    )
+
+
+def _deliver(
+    state: CliState, run: QueryRun, out: Path | None, fmt: str | None, max_rows: int
+) -> None:
+    """Print a finished run's result, or save it to `out`.
+
+    CSV and spreadsheet files are made by the server (always the whole result, and audited
+    there) and saved as they come; without `--out`, CSV is streamed to standard output. Every
+    other output is made from the Arrow result.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    run
+        The query that has succeeded.
+    out
+        The destination file, if any.
+    fmt
+        Its format, already resolved by `result_format`.
+    max_rows
+        The display cap for a table.
+    """
+    if fmt not in _SERVER_FORMATS:
+        _render(state, run.result(), out, fmt, max_rows)
+        return
+    if out is None:
+        run.write_file(sys.stdout.buffer, format=fmt)
+        sys.stdout.buffer.flush()
+        return
+    size = run.download(out, format=fmt)
+    _output.done(
+        state,
+        f"Wrote {size} bytes to {_output.inline(str(out))}",
+        Written(rows=None, path=str(out), size_bytes=size),
     )
 
 
@@ -483,7 +552,7 @@ def show_result(
     out
         Write the full result here instead of printing.
     fmt
-        The file's format, already resolved by `out_format`.
+        The file's format, already resolved by `result_format`.
     max_rows
         The most rows to display.
     timeout
@@ -493,8 +562,7 @@ def show_result(
         run = submit()
     _wait(run, environment, timeout, state)
     with _fetching(run, environment):
-        table = run.result()
-    _render(state, table, out, fmt, max_rows)
+        _deliver(state, run, out, fmt, max_rows)
 
 
 def page_cell(value: object) -> str:
@@ -724,7 +792,7 @@ def sql(
             "--expire-after cannot go with --break-glass: tables in a protected environment "
             "never expire. Leave out --expire-after."
         )
-    fmt = out_format(out, file_format)
+    fmt = result_format(out, file_format)
     text = sys.stdin.read() if query == "-" else query
     environment = resolve_environment(state, env)
     glass = break_glass_reason(break_glass, reason, environment)
@@ -1126,9 +1194,11 @@ def result(
         The most rows to display.
     """
     state = state_of(ctx)
-    fmt = out_format(out, file_format)
-    run = state.client().queries.get(query_id, resolve_environment(state, env))
-    _render(state, run.result(), out, fmt, max_rows)
+    fmt = result_format(out, file_format)
+    environment = resolve_environment(state, env)
+    run = state.client().queries.get(query_id, environment)
+    with _fetching(run, environment):
+        _deliver(state, run, out, fmt, max_rows)
 
 
 def register(app: typer.Typer) -> None:

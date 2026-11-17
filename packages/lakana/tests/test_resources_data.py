@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import io
 import json
 from collections.abc import Callable, Iterator, Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -3616,6 +3618,75 @@ def test_a_query_result_counts_the_bytes_it_downloaded() -> None:
     run.result()
 
     assert _usage.bytes_read() == len(file_bytes)
+
+
+class _BreakingBody(httpx.SyncByteStream):
+    """A response body that sends one piece and then fails, as a dropped connection does."""
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield b"a,b\r\n1,2\r\n"
+        raise httpx.ReadError("connection reset")
+
+
+def test_download_streams_the_server_file_and_replaces_atomically(tmp_path: Path) -> None:
+    """`download` asks for the format, writes `<path>.part` and replaces the target with it."""
+    target = tmp_path / "orders.csv"
+    target.write_bytes(b"old")
+    seen: list[httpx.Request] = []
+    parts_during: list[bool] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        parts_during.append((tmp_path / "orders.csv.part").exists())
+        return httpx.Response(200, content=b"a,b\r\n1,2\r\n")
+
+    run = QueryRun(_transport(handler), id="q1", environment="dev")
+    written = run.download(target, format="csv")
+
+    assert written == len(b"a,b\r\n1,2\r\n")
+    assert target.read_bytes() == b"a,b\r\n1,2\r\n"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["orders.csv"]
+    assert seen[0].url.path == "/api/v1/environments/dev/queries/q1/result"
+    assert dict(seen[0].url.params) == {"format": "csv"}
+    assert parts_during == [True]  # the part file is the one being written
+
+
+def test_download_leaves_no_part_file_when_the_body_breaks(tmp_path: Path) -> None:
+    """A body that breaks half way leaves the old file untouched and no `.part` behind."""
+    target = tmp_path / "orders.csv"
+    target.write_bytes(b"old")
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(200, stream=_BreakingBody())),
+        id="q1",
+        environment="dev",
+    )
+
+    with pytest.raises(LakanaConnectionError):
+        run.download(target, format="csv")
+
+    assert target.read_bytes() == b"old"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["orders.csv"]
+
+
+def test_write_file_raises_the_servers_422_sentence_for_xlsx() -> None:
+    """The refusal's sentence reaches the caller unchanged, and nothing is written."""
+    sentence = (
+        "This result has 2,000,000 rows; a spreadsheet holds at most 1,048,575 below its "
+        "header row. Download it as CSV instead: lakana query result q1 --env dev "
+        "--format csv --out query-q1.csv"
+    )
+    run = QueryRun(
+        _transport(lambda request: httpx.Response(422, json={"detail": sentence})),
+        id="q1",
+        environment="dev",
+    )
+    sink = io.BytesIO()
+
+    with pytest.raises(ValidationError) as caught:
+        run.write_file(sink, format="xlsx")
+
+    assert sentence in str(caught.value)
+    assert sink.getvalue() == b""
 
 
 def test_sdk_health_sends_readers_false_only_when_asked() -> None:

@@ -23,6 +23,7 @@ Every name the `lakana` package exports and every resource of its client, with t
 | `lakana.PayloadTooLarge` | error | [Errors](errors.md) |
 | `lakana.PermissionDenied` | error | [Errors](errors.md) |
 | `lakana.QueryFailed` | error | [Errors](errors.md) |
+| `lakana.ResultFileFormat` | value |  |
 | `lakana.RunFailed` | error | [Errors](errors.md) |
 | `lakana.ServerError` | error | [Errors](errors.md) |
 | `lakana.ValidationError` | error | [Errors](errors.md) |
