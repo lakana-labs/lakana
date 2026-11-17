@@ -679,3 +679,8 @@ def test_the_environments_columns_does_not_set_the_width(
     monkeypatch.setenv("COLUMNS", "80")
     root, _ = _tree(tmp_path, BLOCK, "x\n", None)
     assert console_width(root, "demo#show") is None
+
+
+def test_an_example_without_a_run_script_has_no_width(tmp_path: Path) -> None:
+    """A missing `run.sh` is no width, not an error."""
+    assert console_width(tmp_path, "nowhere#show") is None
