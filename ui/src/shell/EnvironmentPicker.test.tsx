@@ -120,3 +120,23 @@ describe("EnvironmentPicker over any environment choice", () => {
     expect(screen.getByText("●")).toHaveAttribute("aria-hidden", "true");
   });
 });
+
+describe("EnvironmentPicker's hidden select", () => {
+  it("marks a hidden character in the options of the native select", () => {
+    const { container } = render(
+      <EnvironmentPicker
+        environments={[{ name: "pr\u202Eod", protected: false }]}
+        value={null}
+        label="Show"
+        all="All environments"
+        onChange={vi.fn()}
+      />,
+    );
+
+    const options = [...container.querySelectorAll("select option")].map(
+      (option) => option.textContent,
+    );
+    expect(options).toContain("prU+202Eod");
+    expect(options.join("")).not.toContain("\u202E");
+  });
+});

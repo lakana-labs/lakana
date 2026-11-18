@@ -17,6 +17,9 @@ import {
   takeReads,
 } from "./hidden";
 import {
+  ADHOC_MESSAGE,
+  ADHOC_REPOSITORY,
+  DEV_JOB,
   FAILED_CHECK,
   FAILED_ID,
   JOBS_STUBBED,
@@ -59,6 +62,7 @@ const ACCOUNTS = [
 
 /** What `apiTypes()` finds today: each type with a literal-union field, and those fields. */
 const LITERAL_CODES: Record<string, string> = {
+  AllRunsFilter: "status trigger",
   ArtifactKeptOut: "reason",
   ArtifactOut: "actions kind",
   ArtifactVersionDeletedOut: "actions",
@@ -669,6 +673,45 @@ walk("the job, run and task pages mark hidden characters", async ({ page }) => {
 
   // A run that is not there: the server's sentence.
   await visit(page, `/jobs/${env}/runs/${MISSING_ID}`, [MISSING_SENTENCE]);
+  expectOnlyStubbed(paths, JOBS_STUBBED);
+});
+
+walk("the Jobs list marks hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubJobs(poisoned(page));
+  // Running now, Failed (a task's cause and a run's own message) and All jobs.
+  await visit(page, "/jobs", [
+    "daily_sales",
+    "analytics",
+    DEV_JOB,
+    TIMEOUT_CAUSE,
+    ADHOC_MESSAGE,
+    ADHOC_REPOSITORY,
+  ]);
+  await expect(page.getByRole("button", { name: /^Cancel the run of daily_sales/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /^Environment: / }).click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await expectNoRaw(page, "the open filter");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+
+  await page.getByRole("button", { name: /^Cancel the run of daily_sales/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Cancel dialog of a row", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.getByRole("button", { name: /^Pause the schedule of daily_sales/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Pause dialog of a row", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // The search narrows what was read; the rows it keeps still show their marks.
+  await page.getByRole("searchbox", { name: "Search jobs" }).fill(DEV_JOB);
+  await expect(page.getByRole("link", { name: /^daily_sales/ })).toHaveCount(0);
+  await expectMarked(page, "a search", [DEV_JOB]);
   expectOnlyStubbed(paths, JOBS_STUBBED);
 });
 

@@ -163,6 +163,13 @@ environment to anyone who may read it; `--repo` limits it to one repository.
 `lakana job show NAME` lists each trigger of one job on its own line. The [Jobs reference](../reference/jobs.md) has the fields. Under the table, `lakana job list` prints the sentence of each job that waits or cannot start.
 ["Why is it waiting?"](why-is-it-waiting.md#a-waiting-job) explains each one.
 
+In the web interface, **Jobs** in the menu lists every job of the environments you may read under
+**All jobs**: its name, which opens the job's page, its repository and environment, its schedule
+in words ("daily 06:00 Europe/Berlin", with "paused" while it is paused, or "by hand" for a job
+without one), its last run and its next run. **Environment** above the lists shows one
+environment instead of all, and the page remembers your choice; **Search jobs** narrows the lists
+to the jobs and repositories whose names hold the words.
+
 ## Pause and resume
 
 <!-- source: docs/examples/run-a-job/run.sh#pause -->
@@ -197,6 +204,8 @@ Resumed daily_silver in dev; next run 2026-10-15 06:00 Europe/Berlin (04:00 UTC)
 In the web interface, the job's page has **Pause schedule**, which asks first, and **Resume
 schedule** once the schedule is paused. The **Schedule** line then says "paused", or when the next
 run is. Both buttons are there only for someone who may deploy in the environment.
+On the Jobs page, each row of **All jobs** has **Pause**, which asks first in the same way, or
+**Resume**, and **Run**, which starts the job at once.
 
 ## Start a job by hand or from CI
 

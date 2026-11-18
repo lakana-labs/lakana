@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 
 import type { EnvironmentChoice } from "../api/environments";
 import "./environmentStrings";
-import { VisibleText } from "./VisibleText";
+import { markedText, VisibleText } from "./VisibleText";
 
 /** Properties of {@link EnvironmentName}. */
 export interface EnvironmentNameProps {
@@ -162,7 +162,9 @@ export function EnvironmentPicker({
               key={environment.name}
               id={environment.name}
               className="menu-item"
-              textValue={environment.name}
+              // The hidden native select React Aria renders shows this text: marks, not the
+              // characters themselves.
+              textValue={markedText(environment.name)}
             >
               <span className="menu-check" aria-hidden="true" />
               <EnvironmentName environment={environment} />
