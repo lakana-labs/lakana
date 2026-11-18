@@ -178,16 +178,15 @@ token's value. `--limit` and `--cursor` page it, as with `token list --all`. Any
 administrator, and a task or CI token, gets `403`.
 
 An administrator may revoke any task token from the web interface, under Access, Tokens. A person
-may revoke only a task token minted for themselves over REST, as before.
+may revoke only a task token minted for themselves over REST, as before. Minting stays with
+`lakana task-token mint`: a browser is refused (`403`, `TokenOnlyRoute`), so no task token is ever
+shown in the interface.
 
 A task token minted with a personal token works only while that personal token does. Revoking
 the personal token revokes its task tokens too (each gets a `TASK_TOKEN_REVOKED` event with
-`reason` `pat_revoked`). Once the personal token expires, its task tokens get `401` and are no
-longer listed. Once its owner is deactivated, they get `401` too. Deleting the personal token
-deletes them. A task token
-minted before this rule was added lasts until its own `expires_at`. Minting stays with
-`lakana task-token mint`: a browser is refused (`403`, `TokenOnlyRoute`), so no task token is ever
-shown in the interface.
+`reason` `pat_revoked`). Once the personal token expires, or its owner is deactivated, its task
+tokens get `401` and are no longer listed. A task token minted before this rule was added lasts
+until its own `expires_at`.
 
 ## Refusals
 

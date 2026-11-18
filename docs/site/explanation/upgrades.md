@@ -739,7 +739,7 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   index build blocks writes to the table while it runs. Nothing has to be done: the upgrade runs
   with the others.
 
-### A task token ends with the personal token that minted it
+### A task token ends with the personal token that minted it (breaking)
 
 - A task token minted with `lakana task-token mint` now works only while the personal token it
   was minted with does. Revoking that personal token also revokes its task tokens, each with a
@@ -751,8 +751,10 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   `pat_key_id`.
 - Migration `0085` adds the column `source_pat_id` to `task_tokens`. A task token minted before
   the upgrade has none, and lasts until its own expiry, as before. `lakana task-token list` shows
-  them. Nothing has to be done: the upgrade runs with the others. Going back first revokes every
-  live task token whose personal token no longer works (`reason` `pat_ended`).
+  them. Nothing has to be done: the upgrade runs with the others.
+- Going back first revokes every live task token whose personal token no longer works (`reason`
+  `pat_ended`). The link of every other task token is lost with the column: after the downgrade,
+  such a token again lasts until its own expiry, even if its personal token is revoked later.
 
 ## Notes for 0.22.0
 

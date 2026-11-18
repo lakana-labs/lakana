@@ -101,7 +101,7 @@ makes no claim of certification or compliance with any standard.
 - **API tokens are a single factor, by design.** Scripts, CI jobs and the command line use them.
   The server stores only a hash of each token; any token can be revoked at once; CI and task tokens
   expire on their own (a CI token after an hour). A task token minted with a personal token stops
-  working as soon as that personal token is revoked, expires or is deleted, or its owner is
+  working as soon as that personal token is revoked or expires, or its owner is
   deactivated, so revoking a stolen personal token also ends every task token minted with it. A
   task token minted before this rule was added lasts until its own expiry (at most a day by
   default). An administrator can list those tokens (`lakana task-token list`) and revoke them. A

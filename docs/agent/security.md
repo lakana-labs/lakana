@@ -5927,16 +5927,20 @@ fuller text of each part where it already lives.
   token is revoked or expired or its owner is deactivated (`_minting_pat_works`, the same
   conditions as `PatService.verify`). It reads the personal token's row at every authentication
   and before the worker runs a queued query, so there is no window and no sweep, and expiry is
-  covered as well. Deleting the personal token deletes its task tokens. `PatService.revoke` also
-  revokes them in its own transaction (`revoke_task_tokens_of_pat`), each with a
+  covered as well. Deleting the personal token row deletes its task tokens (defensive: no code
+  path deletes a PAT or a principal today). `PatService.revoke`, and the bootstrap recovery
+  that revokes the bootstrap principal's earlier PATs, also revoke them in the same transaction
+  (`revoke_task_tokens_of_pat`), each with a
   `TASK_TOKEN_REVOKED` event of `reason: pat_revoked` and the personal token's `pat_key_id`
   (`TASK_TOKEN_MINTED` carries `pat_key_id` too), so the rows, `GET /api/v1/task-tokens` and the
-  audit log agree. `list_live` also leaves out a task token whose personal token has expired.
+  audit log agree. `list_live` also leaves out a task token whose personal token is revoked or
+  expired, or whose personal token's owner is deactivated.
   **Residual:** a task token minted before `0085` has `source_pat_id` `NULL` and lives until its
   own `expires_at`, at most `max_ttl_seconds` after it was minted. An administrator can list such
   tokens (`GET /task-tokens`) and revoke them, or deactivate their principal. The downgrade of
   `0085` first revokes every live task token whose personal token no longer works (`reason:
-  pat_ended`), so going back does not bring them back to life. Pins:
+  pat_ended`; a token past its own expiry is left alone), so going back does not bring them back
+  to life; every other task token loses its link and again lasts until its own expiry. Pins:
   `test_identity_task_tokens.py` (`test_revoking_the_personal_token_ends_its_task_tokens_only`,
   `test_a_task_token_stops_when_its_personal_token_expires`,
   `test_a_task_token_stops_when_its_personal_tokens_owner_is_deactivated`,
