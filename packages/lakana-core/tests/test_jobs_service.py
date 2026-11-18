@@ -39,6 +39,7 @@ from lakana_core.models import (
     Principal,
     PrincipalType,
     Repository,
+    RepositoryKind,
     Run,
     RunStatus,
     RunTrigger,
@@ -462,6 +463,53 @@ def test_list_shows_the_state_and_the_next_time(
     assert str(first.id) in listed["daily"].waiting_for.message
     assert listed["manual"].last_run_id == first.id
     assert listed["manual"].last_run_trigger == "manual"
+
+
+def test_a_job_view_carries_its_notify_commit_and_source_link(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A job names its notification, its deployed commit and its file on the git host."""
+    deployed.url = "https://github.com/acme/analytics"
+    version = session.scalars(select(JobVersion)).one()
+    manifest = dict(version.manifest_json)
+    jobs = {name: dict(entry) for name, entry in manifest["jobs"].items()}
+    jobs["daily"]["notify"] = {"webhook": "alerts-webhook", "format": "slack"}
+    manifest["jobs"] = jobs
+    version.manifest_json = manifest
+    session.commit()
+    views = {v.name: v for v in _service(session).list(principal, "dev")}
+    daily = views["daily"]
+    assert daily.notify is not None
+    assert (daily.notify.webhook, daily.notify.format) == ("alerts-webhook", "slack")
+    assert daily.commit_sha == "a" * 40
+    assert daily.source_url is not None
+    assert daily.source_url.endswith(f"/blob/{'a' * 40}/lakana.yaml#L1")
+    assert views["manual"].notify is None
+
+
+def test_a_local_repository_has_no_source_link(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A repository on no known host gives the commit but no link."""
+    deployed.kind = RepositoryKind.LOCAL
+    session.commit()
+    view = _service(session).get(principal, "dev", "daily")
+    assert view.commit_sha == "a" * 40
+    assert view.source_url is None
+
+
+def test_a_damaged_notify_is_none(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A webhook that is not text reads as no notification."""
+    version = session.scalars(select(JobVersion)).one()
+    manifest = dict(version.manifest_json)
+    jobs = {name: dict(entry) for name, entry in manifest["jobs"].items()}
+    jobs["daily"]["notify"] = {"webhook": 5, "format": "slack"}
+    manifest["jobs"] = jobs
+    version.manifest_json = manifest
+    session.commit()
+    assert _service(session).get(principal, "dev", "daily").notify is None
 
 
 def test_list_in_the_time_zone_of_the_job(

@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
+from lakana_core.errors import PermissionDenied
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
@@ -47,6 +48,7 @@ from lakana_core.models import (
     Table,
     Worker,
 )
+from lakana_core.runs.service import RunService
 
 _LEASE = 60
 
@@ -275,6 +277,52 @@ def test_a_failed_run_followed_by_a_success_is_not_listed(
     assert svc.for_caller(admin) == ([], False)
 
 
+def test_a_reader_of_the_environment_sees_its_failed_jobs(
+    svc: AttentionService, session: Session
+) -> None:
+    reader = person(session, "rita")
+    grant(session, reader, action=Action.READ_ENVIRONMENT, environment_name="dev")
+    repo, version = deployed_job(session, "dev", "shop", "nightly")
+    run = finished_run(
+        session, repo, version, job="nightly", status=RunStatus.FAILED, finished_at=_ago(hours=1)
+    )
+    other, elsewhere = deployed_job(session, "prod", "books", "nightly")
+    finished_run(
+        session, other, elsewhere, job="nightly", status=RunStatus.FAILED, finished_at=_ago(hours=1)
+    )
+    assert svc.for_caller(reader) == (
+        [AttentionItem("run_failed", "dev", "nightly", str(run.id), _ago(hours=1))],
+        False,
+    )
+
+
+def test_home_and_the_failed_list_agree_for_a_reader_of_one_environment(
+    svc: AttentionService, session: Session
+) -> None:
+    reader = person(session, "rita")
+    grant(session, reader, action=Action.READ_ENVIRONMENT, environment_name="dev")
+    for env in ("dev", "prod", "test"):
+        repo, version = deployed_job(session, env, f"shop_{env}", "nightly")
+        for job, hours in (("nightly", 1), (None, 2)):
+            finished_run(
+                session,
+                repo,
+                version,
+                job=job,
+                status=RunStatus.FAILED,
+                finished_at=_ago(hours=hours),
+            )
+    runs = RunService(session, GrantAuthorization(session))
+    listed, truncated = runs.failed_page(reader)
+    home = [item for item in svc.for_caller(reader)[0] if item.kind == "run_failed"]
+    assert [item.ref for item in home] == [str(row.run.id) for row in listed]
+    assert {row.run.environment for row in listed} == {"dev"}
+    assert [item.title for item in home] == ["nightly", "shop_dev"]
+    assert truncated is False
+    with pytest.raises(PermissionDenied):
+        runs.failed_page(reader, environment="prod")
+
+
 def test_admin_sees_late_tables_open_recovery_links_and_lost_workers(
     svc: AttentionService, admin: PrincipalRef, session: Session
 ) -> None:
@@ -378,6 +426,7 @@ def test_reader_sees_only_tables_they_read_or_opened(
     items, _ = svc.for_caller(analyst)
     assert sorted((item.kind, item.title) for item in items) == [
         ("check_failed", "gold.sales/not_null_id"),
+        ("run_failed", "nightly"),
         ("table_late", "gold.sales"),
         ("table_late", "gold.stock"),
     ]
@@ -462,6 +511,7 @@ def test_reader_sees_no_reference_check_whose_target_they_may_not_read(
         )
     assert sorted((item.kind, item.title) for item in svc.for_caller(reader)[0]) == [
         ("check_failed", "gold.sales/positive"),
+        ("run_failed", "nightly"),
         ("table_late", "gold.sales"),
     ]
 
@@ -481,7 +531,8 @@ def test_reader_sees_their_own_failed_queries_not_others(
     query_of(session, analyst, "prod", status=QueryRunStatus.FAILED)
     items, _ = svc.for_caller(analyst)
     assert [(item.kind, item.environment, item.title, item.ref) for item in items] == [
-        ("query_failed", "dev", f"Query {str(own.id)[:8]}", str(own.id))
+        ("query_failed", "dev", f"Query {str(own.id)[:8]}", str(own.id)),
+        ("run_failed", "dev", "nightly", str(pipeline.id)),
     ]
 
 
@@ -629,7 +680,7 @@ def test_attention_drops_the_rows_of_one_table_whose_right_was_revoked(
             finished_at=_ago(hours=2),
         )
     _table_grants(session, admin, "tess", ["sales", "stock"])
-    assert len(svc.for_caller(reader)[0]) == 4
+    assert len(svc.for_caller(reader)[0]) == 5
     session.execute(
         update(Grant)
         .where(Grant.principal_id == reader.id, Grant.table == "stock")
@@ -638,6 +689,7 @@ def test_attention_drops_the_rows_of_one_table_whose_right_was_revoked(
     session.commit()
     assert sorted((item.kind, item.title) for item in svc.for_caller(reader)[0]) == [
         ("check_failed", "gold.sales/not_null_id"),
+        ("run_failed", "nightly"),
         ("table_late", "gold.sales"),
     ]
 
@@ -679,6 +731,11 @@ def _statements(session: Session, ask: Callable[[], object]) -> int:
 
 
 def test_a_readers_attention_costs_the_same_for_five_tables_or_forty(session: Session) -> None:
+    """The failed-runs rule adds a fixed number of statements, whatever the reader reads."""
+    repo, version = deployed_job(session, "dev", "shop", "nightly")
+    finished_run(
+        session, repo, version, job="nightly", status=RunStatus.FAILED, finished_at=_ago(hours=1)
+    )
     counts = []
     for many in (5, 40):
         reader = person(session, f"reader{many}")

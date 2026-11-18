@@ -8,13 +8,16 @@ from pathlib import Path
 
 import pytest
 from core_test_helpers import _prepared_catalog
+from home_test_helpers import deployed_job, environment, grant, person
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from test_projects_deploys import _repo
+from test_projects_deploys import _principal, _repo
 
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef
-from lakana_core.errors import NotFoundError, ValidationError
-from lakana_core.models import DeployKind, DeployRun, DeployStatus, Environment
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
+from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
+from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.grants.roles import Role
+from lakana_core.models import DeployKind, DeployRun, DeployStatus, Environment, Principal
 from lakana_core.pagination import encode_cursor
 from lakana_core.projects.deploys import DeployService
 
@@ -156,3 +159,194 @@ def test_a_limit_below_one_is_refused(
 ) -> None:
     with pytest.raises(ValidationError, match="limit must be at least 1"):
         _service(session).history_page(principal, "dev", limit=0)
+
+
+def test_the_history_names_who_submitted_each_deploy(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    ada = _principal(session, "ada")
+    first = _deploy(session, env, repo.id, 1)
+    second = _deploy(session, env, repo.id, 2)
+    first.principal_id = principal.id
+    second.principal_id = ada.id
+    session.commit()
+    page, _ = _service(session).history_page(principal, "dev")
+    assert [(v.id, v.submitted_by) for v in page] == [
+        (second.id, "ada"),
+        (first.id, principal.name),
+    ]
+
+
+def test_a_deleted_submitter_is_null(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    ada = _principal(session, "ada")
+    run = _deploy(session, env, repo.id, 1)
+    run.principal_id = ada.id
+    session.commit()
+    session.delete(session.get(Principal, ada.id))
+    session.commit()
+    session.refresh(run)
+    assert run.principal_id is None
+    page, _ = _service(session).history_page(principal, "dev")
+    assert [v.submitted_by for v in page] == [None]
+
+
+def test_the_history_carries_no_jobs(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session)
+    _deploy(session, env, repo.id, 1)
+    page, _ = _service(session).history_page(principal, "dev")
+    assert [v.jobs for v in page] == [None]
+
+
+def _three_environments(session: Session) -> list[DeployRun]:
+    """Persist seven finished deploys over `dev`, `test` and `prod`, one minute apart.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of DeployRun
+        The deploys, oldest first.
+    """
+    envs = {name: environment(session, name) for name in ("dev", "test", "prod")}
+    repos = {name: deployed_job(session, name, f"shop_{name}", "nightly")[0] for name in envs}
+    runs = []
+    for minute, name in enumerate(("dev", "test", "prod", "dev", "prod", "test", "dev")):
+        run = DeployRun(
+            id=uuid.uuid4(),
+            environment_id=envs[name],
+            repository_id=repos[name].id,
+            kind=DeployKind.DEPLOY,
+            status=DeployStatus.SUCCEEDED,
+            created_at=_T0 + timedelta(minutes=minute),
+        )
+        session.add(run)
+        runs.append(run)
+    session.commit()
+    return runs
+
+
+@pytest.fixture
+def admin(session: Session) -> PrincipalRef:
+    """Persist an administrator.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    PrincipalRef
+        Their reference.
+    """
+    ref = person(session, "ada")
+    grant(session, ref, role=Role.ADMIN)
+    return ref
+
+
+def test_all_deploys_pages_every_deploy_once_across_environments(
+    session: Session, admin: PrincipalRef
+) -> None:
+    runs = _three_environments(session)
+    service = DeployService(session, GrantAuthorization(session))
+    seen: list[uuid.UUID] = []
+    environments: list[str] = []
+    cursor = None
+    pages = 0
+    while True:
+        page, cursor = service.list_all_deploys_page(admin, limit=2, cursor=cursor)
+        pages += 1
+        seen += [v.id for v in page]
+        environments += [v.environment for v in page]
+        if cursor is None:
+            break
+    assert (pages, seen) == (4, [r.id for r in reversed(runs)])
+    assert environments == ["dev", "test", "prod", "dev", "prod", "test", "dev"][::-1]
+
+
+def test_all_deploys_skips_environments_you_may_not_read(session: Session) -> None:
+    runs = _three_environments(session)
+    reader = person(session, "rita")
+    grant(session, reader, action=Action.READ_ENVIRONMENT, environment_name="test")
+    service = DeployService(session, GrantAuthorization(session))
+    page, cursor = service.list_all_deploys_page(reader)
+    assert ([v.id for v in page], cursor) == ([runs[5].id, runs[1].id], None)
+    with pytest.raises(PermissionDenied):
+        service.list_all_deploys_page(reader, environment="prod")
+    nobody = person(session, "nora")
+    assert service.list_all_deploys_page(nobody) == ([], None)
+
+
+def test_all_deploys_with_an_environment_is_that_environments_history(
+    session: Session, admin: PrincipalRef
+) -> None:
+    _three_environments(session)
+    service = DeployService(session, GrantAuthorization(session))
+    own, own_cursor = service.history_page(admin, "dev", limit=2)
+    same, same_cursor = service.list_all_deploys_page(admin, environment="dev", limit=2)
+    assert ([v.id for v in same], same_cursor) == ([v.id for v in own], own_cursor)
+    assert own_cursor is not None
+    assert [
+        v.id for v in service.list_all_deploys_page(admin, environment="dev", cursor=own_cursor)[0]
+    ] == [v.id for v in service.history_page(admin, "dev", cursor=own_cursor)[0]]
+    with pytest.raises(NotFoundError):
+        service.list_all_deploys_page(admin, environment="ghost")
+
+
+def test_a_cursor_of_the_per_environment_history_is_refused_by_all_deploys(
+    session: Session, admin: PrincipalRef
+) -> None:
+    _three_environments(session)
+    service = DeployService(session, GrantAuthorization(session))
+    _, per_environment = service.history_page(admin, "dev", limit=1)
+    _, across = service.list_all_deploys_page(admin, limit=1)
+    assert per_environment is not None and across is not None
+    with pytest.raises(ValidationError, match="came from the `deploys` list"):
+        service.list_all_deploys_page(admin, cursor=per_environment)
+    with pytest.raises(ValidationError, match="came from the `all-deploys` list"):
+        service.history_page(admin, "dev", cursor=across)
+    with pytest.raises(ValidationError, match="came from the `all-deploys` list"):
+        service.list_all_deploys_page(admin, environment="dev", cursor=across)
+
+
+def test_all_deploys_filters_by_repository(session: Session, admin: PrincipalRef) -> None:
+    runs = _three_environments(session)
+    page, _ = DeployService(session, GrantAuthorization(session)).list_all_deploys_page(
+        admin, repository="shop_prod"
+    )
+    assert [v.id for v in page] == [runs[4].id, runs[2].id]
+
+
+def test_all_deploys_with_an_unknown_repository_is_not_found(
+    session: Session, admin: PrincipalRef
+) -> None:
+    _three_environments(session)
+    with pytest.raises(NotFoundError, match="ghost"):
+        DeployService(session, GrantAuthorization(session)).list_all_deploys_page(
+            admin, repository="ghost"
+        )
+
+
+def test_all_deploys_asks_the_environments_in_one_batch(
+    session: Session, admin: PrincipalRef
+) -> None:
+    _three_environments(session)
+    batches: list[int] = []
+
+    class Spy(GrantAuthorization):
+        def permits_each(self, principal, questions):  # type: ignore[no-untyped-def]  # ruff: ignore[missing-type-function-argument, missing-return-type-private-function]
+            batches.append(len(questions))
+            return super().permits_each(principal, questions)
+
+    page, _ = DeployService(session, Spy(session)).list_all_deploys_page(admin)
+    assert len(page) == 7
+    assert batches == [3]

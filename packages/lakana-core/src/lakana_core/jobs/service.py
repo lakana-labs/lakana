@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -51,10 +51,18 @@ from lakana_core.models.base import utcnow
 from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.notifications.events import new_delivery
 from lakana_core.notifications.views import DeliveryView, delivery_view
+from lakana_core.projects.browse import browse_url
 from lakana_core.projects.deploys import DeploymentMoved, DeployService
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
-from lakana_core.projects.manifest import job_notify, job_on_deploy, job_schedule, manifest_jobs
+from lakana_core.projects.manifest import (
+    JobNotify,
+    job_notify,
+    job_on_deploy,
+    job_schedule,
+    manifest_jobs,
+)
 from lakana_core.projects.run_policy import RunCaps
+from lakana_core.projects.source_map import SOURCE_LINE
 from lakana_core.runs.service import (
     ActiveRunError,
     NotOnDeploy,
@@ -252,6 +260,13 @@ class JobView:
         When it was created.
     on_deploy
         Whether the job starts after each deploy that changes the project version here.
+    notify
+        Where the job reports (`job_notify`); `None` for a job without a usable `notify:`.
+    commit_sha
+        The commit of the project version deployed here.
+    source_url
+        The link to `lakana.yaml` at that commit on the repository's git host (`browse_url`);
+        `None` for a repository without a known host.
     """
 
     name: str
@@ -273,6 +288,9 @@ class JobView:
     last_run_trigger: str | None
     last_run_at: datetime | None
     on_deploy: bool = False
+    notify: JobNotify | None = None
+    commit_sha: str = ""
+    source_url: str | None = None
 
 
 PROBLEM_NONE = "none"
@@ -487,7 +505,7 @@ class JobService:
 
     def _lock_job(
         self, env: Environment, repo: Repository, job: str, *, removed: bool = False
-    ) -> tuple[Mapping[str, Any], JobSchedule]:
+    ) -> tuple[Mapping[str, Any], JobSchedule, JobVersion]:
         """Lock the deployment's pointer, read the job from its manifest, lock its row.
 
         The order of a deploy (pointer first, rows after), so that none of them can deadlock with
@@ -510,8 +528,9 @@ class JobService:
         Returns
         -------
         tuple
-            The job's entry in the current manifest and its schedule row, locked ``FOR UPDATE``.
-            The pointer stays locked until the caller commits or rolls back.
+            The job's entry in the current manifest, its schedule row, locked ``FOR UPDATE``,
+            and the current project version. The pointer stays locked until the caller commits or
+            rolls back.
 
         Raises
         ------
@@ -561,7 +580,7 @@ class JobService:
                         "now; to run its assets anyway, use `lakana run --select`."
                     )
                 raise NotFoundError(job_missing_message(manifest, job, repo_name, env_name))
-            return entry, row
+            return entry, row, cast("JobVersion", version)
 
     # -- start -------------------------------------------------------------
 
@@ -707,7 +726,7 @@ class JobService:
             repository_by_name(self._session, repository),
         )
         env_id, repo_id = env.id, repo.id
-        _, row = self._lock_job(env, repo, job, removed=True)
+        _, row, _ = self._lock_job(env, repo, job, removed=True)
         active = self._active_run(env_id, repo_id)
         if active is None:
             self._session.rollback()
@@ -872,7 +891,7 @@ class JobService:
         env_id, repo_id, env_name, repo_name, job = env.id, repo.id, env.name, repo.name, row.job
         service = cls(session, GrantAuthorization(session))
         try:
-            entry, row = service._lock_job(env, repo, job)
+            entry, row, _ = service._lock_job(env, repo, job)
         except NotFoundError:
             session.rollback()
             return None
@@ -1093,7 +1112,7 @@ class JobService:
 
     def _deployer_job(
         self, p: PrincipalRef, environment: str, repository: str, job: str, what: str
-    ) -> tuple[Environment, Repository, Mapping[str, Any], JobSchedule]:
+    ) -> tuple[Environment, Repository, Mapping[str, Any], JobSchedule, JobVersion]:
         """Authorize a deployer's change of a job, then look the job up and lock its schedule.
 
         Parameters
@@ -1111,8 +1130,9 @@ class JobService:
 
         Returns
         -------
-        tuple of (Environment, Repository, Mapping, JobSchedule)
-            The environment, the repository, the job's manifest entry and its locked schedule.
+        tuple of (Environment, Repository, Mapping, JobSchedule, JobVersion)
+            The environment, the repository, the job's manifest entry, its locked schedule and
+            the current project version.
 
         Raises
         ------
@@ -1128,8 +1148,8 @@ class JobService:
             environment_by_name(self._session, environment),
             repository_by_name(self._session, repository),
         )
-        entry, row = self._lock_job(env, repo, job)
-        return env, repo, entry, row
+        entry, row, version = self._lock_job(env, repo, job)
+        return env, repo, entry, row, version
 
     # -- pause and resume ----------------------------------------------------
 
@@ -1165,7 +1185,9 @@ class JobService:
         ConflictError
             If the job has no schedule here, so there is nothing to pause.
         """
-        env, repo, entry, row = self._deployer_job(p, environment, repository, job, "pause a job")
+        env, repo, entry, row, version = self._deployer_job(
+            p, environment, repository, job, "pause a job"
+        )
         if job_schedule(entry) is None:
             self._session.rollback()
             raise ConflictError(
@@ -1182,7 +1204,7 @@ class JobService:
                 securable=Securable.environment_scope(environment),
                 detail={"repository": repository, "job": job},
             )
-        view = self._view(env, repo, job, entry, row)
+        view = self._view(env, repo, job, entry, row, version)
         self._session.commit()
         return view
 
@@ -1216,7 +1238,9 @@ class JobService:
         NotFoundError
             If the environment, repository or job does not exist or is not deployed.
         """
-        env, repo, entry, row = self._deployer_job(p, environment, repository, job, "resume a job")
+        env, repo, entry, row, version = self._deployer_job(
+            p, environment, repository, job, "resume a job"
+        )
         if row.paused:
             wanted = job_schedule(entry)
             row.paused = False
@@ -1231,7 +1255,7 @@ class JobService:
                 securable=Securable.environment_scope(environment),
                 detail={"repository": repository, "job": job},
             )
-        view = self._view(env, repo, job, entry, row)
+        view = self._view(env, repo, job, entry, row, version)
         self._session.commit()
         return view
 
@@ -1272,7 +1296,7 @@ class JobService:
         ConflictError
             If the job has no usable `notify:` in the environment (none, or a damaged one).
         """
-        env, repo, entry, _ = self._deployer_job(
+        env, repo, entry, _, _ = self._deployer_job(
             p, environment, repository, job, "send a test message"
         )
         notify = job_notify({"jobs": {job: entry}}, job)
@@ -1359,6 +1383,7 @@ class JobService:
         job: str,
         entry: Mapping[str, Any],
         row: JobSchedule | None,
+        version: JobVersion,
     ) -> JobView:
         """Build a job's view from its manifest entry and its row.
 
@@ -1374,6 +1399,8 @@ class JobService:
             Its entry in the current manifest.
         row
             Its schedule row, if it has one.
+        version
+            The project version deployed now, which gives the commit and the source link.
 
         Returns
         -------
@@ -1446,6 +1473,11 @@ class JobService:
             last_run_trigger=last[2].value if last and last[2] is not None else None,
             last_run_at=last[3] if last else None,
             on_deploy=job_on_deploy(entry),
+            notify=job_notify({"jobs": {job: entry}}, job),
+            commit_sha=version.commit_sha,
+            source_url=browse_url(
+                repo.kind, repo.url, commit=version.commit_sha, path="lakana.yaml", line=SOURCE_LINE
+            ),
         )
 
     def list(
@@ -1498,7 +1530,7 @@ class JobService:
         views: list[JobView] = []
         for repo, version in self._session.execute(query).all():
             for name, entry in sorted(manifest_jobs(version.manifest_json).items()):
-                views.append(self._view(env, repo, name, entry, rows.get((repo.id, name))))
+                views.append(self._view(env, repo, name, entry, rows.get((repo.id, name)), version))
         return views
 
     def get(

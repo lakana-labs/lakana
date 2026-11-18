@@ -296,6 +296,33 @@ def test_read_commands(tmp_path: Path) -> None:
     assert dict(api.requests[-1].url.params) == {"limit": "5", "cursor": "c0"}
 
 
+def test_deploys_list_all_environments_adds_the_environment_column(tmp_path: Path) -> None:
+    api = FakeApi()
+    rows = [_deploy("succeeded", environment="prod"), _deploy("failed", environment="test")]
+    api.on("GET", "/api/v1/deploys", json={"items": rows, "next_cursor": "n1"})
+    result = invoke(
+        make_state(tmp_path, api), "deploys", "list", "--all-environments", "--limit", "5"
+    )
+    assert result.exit_code == 0, result.stderr
+    header = next(line for line in result.stdout.splitlines() if " id " in line)
+    assert header.index("id") < header.index("environment") < header.index("repository")
+    assert "prod" in result.stdout and "test" in result.stdout
+    assert dict(api.requests[0].url.params) == {"limit": "5"}
+    assert "More results: lakana deploys list --all-environments --limit 5 --cursor n1" in (
+        result.stdout
+    )
+
+
+def test_deploys_list_env_and_all_environments_together_is_exit_2(tmp_path: Path) -> None:
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api), "deploys", "list", "--all-environments", "--env", "dev"
+    )
+    assert result.exit_code == 2
+    assert "Choose one: --env ENV or --all-environments." in _plain(result.stderr)
+    assert api.requests == []
+
+
 def test_json_output(tmp_path: Path) -> None:
     """`--output json` prints the finished run."""
     api = _api()
@@ -1539,3 +1566,33 @@ def test_a_generated_check_is_marked_in_the_list_of_checks(tmp_path: Path) -> No
         "Checks:\n  gold.fact_sales: key_unique (generated), ref_store_id (generated) (warn), "
         "positive\n"
     ) in result.stdout
+
+
+def test_deploys_list_shows_who(tmp_path: Path) -> None:
+    """The list has a `submitted_by` column after `status`; a deleted submitter is blank."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/environments/dev/deploys",
+        json=[_deploy("succeeded", submitted_by="ada"), _deploy("failed", submitted_by=None)],
+    )
+    result = invoke(make_state(tmp_path, api), "deploys", "list", "--env", "dev", env=_CI)
+    assert result.exit_code == 0, result.output
+    header = _plain(result.stdout).replace("┃", " ").replace("┏", " ").split()
+    assert header.index("submitted_by") == header.index("status") + 1
+    assert "ada" in _plain(result.stdout)
+
+
+def test_deploys_show_lists_the_jobs(tmp_path: Path) -> None:
+    """`deploys show` names who deployed and the jobs, comma-separated; none is empty."""
+    api = FakeApi()
+    path = f"/api/v1/environments/dev/deploys/{_ID}"
+    api.on("GET", path, json=_deploy("succeeded", submitted_by="ada", jobs=["hourly", "nightly"]))
+    state = make_state(tmp_path, api)
+    shown = _plain(invoke(state, "deploys", "show", _ID, "--env", "dev", env=_CI).stdout)
+    assert "submitted_by ada" in shown
+    assert "jobs hourly, nightly" in shown
+    as_json = json.loads(
+        invoke(state, "--output", "json", "deploys", "show", _ID, "--env", "dev").stdout
+    )
+    assert (as_json["submitted_by"], as_json["jobs"]) == ("ada", ["hourly", "nightly"])

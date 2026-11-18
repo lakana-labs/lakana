@@ -5270,3 +5270,23 @@ def test_a_rollback_restores_the_previous_versions_effects(
         principal, _claimed(session, session.get(DeployRun, view.id)), worker_id="w1"
     )
     assert _clean_effects(session) == {"volume": "block"}
+
+
+def test_get_lists_the_jobs_of_the_deploys_project_version(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """A deploy shows the sorted names of the jobs its project version defines, and who deployed."""
+    repo = _repo(session)
+    run = _deployed_jobs(
+        session, principal, repo, "a" * 40, {"nightly": _job(), "hourly": _job(cron="0 * * * *")}
+    )
+    view = DeployService(session, AllowAllAuthorization()).get(principal, "dev", run.id)
+    assert (view.jobs, view.submitted_by) == (("hourly", "nightly"), principal.name)
+
+
+def test_get_of_a_dry_run_has_no_jobs(session: Session, env: None, principal: PrincipalRef) -> None:
+    """A run that made no project version has no jobs (not an empty list)."""
+    _repo(session)
+    service = DeployService(session, AllowAllAuthorization())
+    queued = service.submit(principal, "dev", repository="analytics", kind=DeployKind.DRY_RUN)
+    assert service.get(principal, "dev", queued.id).jobs is None

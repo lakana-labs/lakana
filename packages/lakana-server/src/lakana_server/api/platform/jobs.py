@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Path, Query, Response
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.jobs.service import JobService, JobView, StartResult, WaitingStart
+from lakana_core.notifications.events import JOB_NOTIFY_EVENTS
 from lakana_core.notifications.views import DeliveryView
+from lakana_core.runs.operator import OperatorRights, job_actions, operator_rights_each, run_actions
 from lakana_server.api.platform.runs import run_out
 from lakana_server.api.platform.schemas import (
     DeliveryOut,
@@ -23,6 +25,7 @@ from lakana_server.api.platform.schemas import (
     JobOut,
     JobRunRequest,
     JobStartOut,
+    NotifyOut,
     NotifyTestOut,
     OnDemandTriggerOut,
     ScheduleTriggerOut,
@@ -30,7 +33,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_job_service, get_principal
+from lakana_server.deps import get_grant_authorization, get_job_service, get_principal
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -42,13 +45,36 @@ router = APIRouter(
 _JOB = Annotated[str, Path(min_length=1, max_length=255)]
 
 
-def _job_out(view: JobView) -> JobOut:
+def _rights_of(authz: AuthorizationService, principal: PrincipalRef, env: str) -> OperatorRights:
+    """Ask what the caller may do on the jobs of one environment.
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    principal
+        The caller.
+    env
+        The environment.
+
+    Returns
+    -------
+    OperatorRights
+        The caller's operator rights there.
+    """
+    return operator_rights_each(authz, principal, [env])[env]
+
+
+def _job_out(view: JobView, rights: OperatorRights) -> JobOut:
     """Build a job body, with the reason as `WaitReason.to_json` writes it.
 
     Parameters
     ----------
     view
         The job.
+    rights
+        What the caller may do in the job's environment; `deploy` decides whether the secret's
+        name is included.
 
     Returns
     -------
@@ -56,7 +82,8 @@ def _job_out(view: JobView) -> JobOut:
         The body.
     """
     fields = dataclasses.asdict(view)
-    del fields["on_deploy"]
+    for name in ("on_deploy", "notify"):
+        del fields[name]
     fields["select"] = list(view.select)
     fields["waiting_for"] = None if view.waiting_for is None else view.waiting_for.to_json()
     triggers: list[ScheduleTriggerOut | DeployTriggerOut | OnDemandTriggerOut] = []
@@ -72,7 +99,14 @@ def _job_out(view: JobView) -> JobOut:
     if view.on_deploy:
         triggers.append(DeployTriggerOut())
     triggers.append(OnDemandTriggerOut())
-    return JobOut(**fields, triggers=triggers)
+    notify = None
+    if view.notify is not None:
+        notify = NotifyOut(
+            format=cast("Literal['json', 'slack', 'teams']", view.notify.format),
+            events=list(JOB_NOTIFY_EVENTS),
+            secret=view.notify.webhook if rights.deploy else None,
+        )
+    return JobOut(**fields, triggers=triggers, actions=list(job_actions(rights)), notify=notify)
 
 
 def _waiting_out(waiting: WaitingStart) -> WaitingStartOut:
@@ -91,13 +125,15 @@ def _waiting_out(waiting: WaitingStart) -> WaitingStartOut:
     return WaitingStartOut(**dataclasses.asdict(waiting), message=waiting.message)
 
 
-def _start_out(result: StartResult) -> JobStartOut:
+def _start_out(result: StartResult, rights: OperatorRights) -> JobStartOut:
     """Build a start body.
 
     Parameters
     ----------
     result
         What the start did.
+    rights
+        What the caller may do in the job's environment.
 
     Returns
     -------
@@ -105,7 +141,7 @@ def _start_out(result: StartResult) -> JobStartOut:
         The run, or the waiting start.
     """
     return JobStartOut(
-        run=None if result.run is None else run_out(result.run),
+        run=None if result.run is None else run_out(result.run, run_actions(rights)),
         waiting=None if result.waiting is None else _waiting_out(result.waiting),
     )
 
@@ -116,6 +152,7 @@ def list_jobs(
     repository: str | None = Query(default=None, max_length=255),
     principal: PrincipalRef = Depends(get_principal),
     service: JobService = Depends(get_job_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[JobOut]:
     """List jobs.
 
@@ -133,13 +170,16 @@ def list_jobs(
         The authenticated caller.
     service
         The job service.
+    authz
+        The authorization service, asked what the caller may do on each job.
 
     Returns
     -------
     list of JobOut
         By repository, then job name.
     """
-    return [_job_out(view) for view in service.list(principal, env, repository)]
+    rights = _rights_of(authz, principal, env)
+    return [_job_out(view, rights) for view in service.list(principal, env, repository)]
 
 
 @router.get("/jobs/{job}", response_model=JobOut, responses=errors(403, 404, 409))
@@ -149,6 +189,7 @@ def get_job(
     repository: str | None = Query(default=None, max_length=255),
     principal: PrincipalRef = Depends(get_principal),
     service: JobService = Depends(get_job_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> JobOut:
     """Show a job.
 
@@ -169,13 +210,16 @@ def get_job(
         The authenticated caller.
     service
         The job service.
+    authz
+        The authorization service, asked what the caller may do on each job.
 
     Returns
     -------
     JobOut
         The job, as the list shows it.
     """
-    return _job_out(service.get(principal, env, job, repository))
+    view = service.get(principal, env, job, repository)
+    return _job_out(view, _rights_of(authz, principal, env))
 
 
 @router.post(
@@ -194,6 +238,7 @@ def start_job(
     response: Response,
     principal: PrincipalRef = Depends(get_principal),
     service: JobService = Depends(get_job_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> JobStartOut:
     """Start a job.
 
@@ -218,6 +263,8 @@ def start_job(
         The authenticated caller.
     service
         The job service.
+    authz
+        The authorization service, asked what the caller may do on each job.
 
     Returns
     -------
@@ -227,7 +274,7 @@ def start_job(
     result = service.start(principal, env, body.repository, job)
     if result.waiting is not None:
         response.status_code = 202
-    return _start_out(result)
+    return _start_out(result, _rights_of(authz, principal, env))
 
 
 @router.post("/jobs/{job}/pause", response_model=JobOut, responses=errors(403, 404, 409))
@@ -237,6 +284,7 @@ def pause_job(
     body: JobRunRequest,
     principal: PrincipalRef = Depends(get_principal),
     service: JobService = Depends(get_job_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> JobOut:
     """Pause a job's schedule.
 
@@ -256,13 +304,16 @@ def pause_job(
         The authenticated caller.
     service
         The job service.
+    authz
+        The authorization service, asked what the caller may do on each job.
 
     Returns
     -------
     JobOut
         The job.
     """
-    return _job_out(service.pause(principal, env, body.repository, job))
+    view = service.pause(principal, env, body.repository, job)
+    return _job_out(view, _rights_of(authz, principal, env))
 
 
 @router.post("/jobs/{job}/resume", response_model=JobOut, responses=errors(403, 404))
@@ -272,6 +323,7 @@ def resume_job(
     body: JobRunRequest,
     principal: PrincipalRef = Depends(get_principal),
     service: JobService = Depends(get_job_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> JobOut:
     """Resume a job's schedule.
 
@@ -291,13 +343,16 @@ def resume_job(
         The authenticated caller.
     service
         The job service.
+    authz
+        The authorization service, asked what the caller may do on each job.
 
     Returns
     -------
     JobOut
         The job.
     """
-    return _job_out(service.resume(principal, env, body.repository, job))
+    view = service.resume(principal, env, body.repository, job)
+    return _job_out(view, _rights_of(authz, principal, env))
 
 
 @router.post(

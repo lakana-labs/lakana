@@ -3120,6 +3120,9 @@ class Deploy:
         The project version made current.
     principal_id
         Who submitted it.
+    submitted_by
+        The name of who submitted it; `None` once that principal is deleted, and from a server
+        that predates the field.
     created_at
         Queued at.
     started_at
@@ -3141,6 +3144,14 @@ class Deploy:
     job_starts
         The jobs with `on_deploy: true` the deploy started, by name; empty for a run that
         starts no job and from a server that predates the field.
+    jobs
+        The sorted names of the jobs the deploy's project version defines; set on the single
+        read only. `None` in a listing, for a run that made no project version and from a
+        server that predates the field.
+    actions
+        The words of what your rights allow on it: ``rollback``. Rights only; offer a
+        control when the word is listed and the deploy's state allows it. Empty from a
+        server that predates them.
     """
 
     id: str
@@ -3163,6 +3174,9 @@ class Deploy:
     warnings: tuple[str, ...] = ()
     waiting_for: WaitingFor | None = None
     job_starts: tuple[DeployJobStart, ...] = ()
+    actions: tuple[str, ...] = ()
+    submitted_by: str | None = None
+    jobs: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -3759,6 +3773,15 @@ class Run:
     failed_tasks
         How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``), also in
         listings; 0 from a server that predates the field.
+    actions
+        The words of what your rights allow on it: ``cancel``, ``resume``. Rights only; offer a
+        control when the word is listed and the run's state allows it. Empty from a
+        server that predates them.
+    total_tasks
+        How many tasks the run has, also in listings; 0 from a server that predates the field.
+    ended_tasks
+        How many of them ended (``succeeded``, ``failed``, ``upstream_failed`` or
+        ``cancelled``), also in listings; 0 from a server that predates the field.
     """
 
     id: str
@@ -3784,6 +3807,46 @@ class Run:
     missed: int = 0
     notifications: list[Notification] = field(default_factory=list)
     failed_tasks: int = 0
+    actions: tuple[str, ...] = ()
+    total_tasks: int = 0
+    ended_tasks: int = 0
+
+
+@dataclass(frozen=True)
+class FailedRun:
+    """A job, or a repository's runs of no job, whose newest finished run failed.
+
+    Parameters
+    ----------
+    run
+        The run, without tasks.
+    task
+        The asset of its first failed task (the earliest to end, then the smallest asset);
+        `None` when the run failed without a failed task, and then `run.error_message` says why.
+    failure
+        That task's failure; `None` exactly when `task` is.
+    """
+
+    run: Run
+    task: str | None
+    failure: Failure | None
+
+
+@dataclass(frozen=True)
+class FailedRuns:
+    """The failed runs of every environment you may read, newest end first.
+
+    Parameters
+    ----------
+    items
+        One entry per job (or per repository, for its runs of no job) whose newest finished run
+        within seven days failed.
+    truncated
+        Whether more were left out; narrow with an environment.
+    """
+
+    items: tuple[FailedRun, ...]
+    truncated: bool
 
 
 @dataclass(frozen=True)
@@ -3812,6 +3875,27 @@ class Trigger:
     timezone: str | None = None
     paused: bool | None = None
     next_run_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class JobNotify:
+    """Where a job reports a failed or recovered run.
+
+    Parameters
+    ----------
+    format
+        How the message is written: ``json``, ``slack`` or ``teams``.
+    events
+        What the job is told of, in the server's order: ``failed``, ``recovered``,
+        ``columns_changed`` and ``health``.
+    secret
+        The name of the environment secret that holds the webhook URL; `None` unless you hold
+        `DEPLOY` on the environment (the URL itself is never sent).
+    """
+
+    format: str
+    events: tuple[str, ...]
+    secret: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3862,6 +3946,19 @@ class Job:
         When it was created.
     triggers
         How the job starts, schedule first; empty from a server that does not send them.
+    actions
+        The words of what your rights allow on it: ``run``, ``pause``, ``resume``. Rights
+        only; offer a control when the word is listed and the job's state allows it. Empty from
+        a server that predates them.
+    commit_sha
+        The commit of the project version deployed in the environment; `None` from a server that
+        predates it.
+    source_url
+        The link to ``lakana.yaml`` at that commit on the repository's git host; `None` for a host
+        Lakana does not know, and from a server that predates it.
+    notify
+        Where the job reports; `None` for a job without a notification, and from a server that
+        predates it.
     """
 
     name: str
@@ -3883,6 +3980,10 @@ class Job:
     last_run_trigger: str | None
     last_run_at: datetime | None
     triggers: tuple[Trigger, ...] = ()
+    actions: tuple[str, ...] = ()
+    commit_sha: str | None = None
+    source_url: str | None = None
+    notify: JobNotify | None = None
 
 
 @dataclass(frozen=True)

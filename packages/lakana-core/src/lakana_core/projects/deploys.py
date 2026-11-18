@@ -14,12 +14,12 @@ import functools
 import re
 import time
 import uuid
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import Select, and_, delete, func, insert, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -139,6 +139,7 @@ from lakana_core.projects.manifest import (
 from lakana_core.projects.model import TargetInfo, resolve_references
 from lakana_core.projects.parse import ParsedAsset, file_references, sql_file_references
 from lakana_core.projects.source_map import GATE_VERSION, ProjectFileRecord, write_source_map
+from lakana_core.runs.failed import run_environments
 from lakana_core.runs.kept import kept_tables
 from lakana_core.runs.pools import PIPELINE
 from lakana_core.runs.waiting import (
@@ -854,6 +855,11 @@ class DeployRunView:
         The jobs with ``on_deploy: true`` a successful deploy started, by name: the run, the
         start that waits, or why a job was not started (`lakana_core.projects.deploy_jobs`).
         Empty for a run that starts no job.
+    submitted_by
+        The name of the principal that submitted the run; `None` once that principal is deleted.
+    jobs
+        The sorted names of the jobs the run's project version defines (`DeployService.get`
+        only); `None` when the run made no project version, and in a listing.
     """
 
     id: uuid.UUID
@@ -876,6 +882,8 @@ class DeployRunView:
     warnings: list[str] = field(default_factory=list)
     waiting_for: WaitReason | None = None
     job_starts: tuple[DeployJobStart, ...] = ()
+    submitted_by: str | None = None
+    jobs: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -1071,6 +1079,7 @@ class DeployService:
         run: DeployRun,
         reader: PrincipalRef | None = None,
         reads: _WarningReads | None = None,
+        submitted_by: str | None = None,
     ) -> DeployRunView:
         """Build the API view of a run.
 
@@ -1090,6 +1099,8 @@ class DeployService:
         reads
             What earlier calls of a listing already read for the warnings; a new one when
             `None`.
+        submitted_by
+            The submitting principal's name (`_runs_with_submitter` reads it with the run).
 
         Returns
         -------
@@ -1142,6 +1153,7 @@ class DeployService:
             diff=diff,
             job_version_id=run.job_version_id,
             principal_id=run.principal_id,
+            submitted_by=submitted_by,
             created_at=run.created_at,
             started_at=run.started_at,
             finished_at=run.finished_at,
@@ -1158,6 +1170,61 @@ class DeployService:
                 environment=env_name,
             ),
         )
+
+    def _runs_with_submitter(self) -> Select[*tuple[Any, ...]]:
+        """Start a select of deploy runs, each with the name of the principal that submitted it.
+
+        One left join, so a page of runs costs no lookup per row, and a run whose submitter was
+        deleted (`principal_id` is `None`) pairs with `None`. Every list of deploys starts here.
+
+        Returns
+        -------
+        Select
+            ``(DeployRun, Principal.name)`` rows, not yet filtered or ordered.
+        """
+        return select(DeployRun, Principal.name).outerjoin(
+            Principal, Principal.id == DeployRun.principal_id
+        )
+
+    def _submitter_name(self, run: DeployRun) -> str | None:
+        """Read the name of the principal that submitted one run.
+
+        Parameters
+        ----------
+        run
+            The row.
+
+        Returns
+        -------
+        str or None
+            The name, or `None` when the principal was deleted.
+        """
+        if run.principal_id is None:
+            return None
+        return self._session.execute(
+            select(Principal.name).where(Principal.id == run.principal_id)
+        ).scalar_one_or_none()
+
+    def _project_jobs(self, run: DeployRun) -> tuple[str, ...] | None:
+        """Name the jobs of the project version a run made.
+
+        Parameters
+        ----------
+        run
+            The row.
+
+        Returns
+        -------
+        tuple of str or None
+            The sorted names, or `None` when the run made no project version.
+        """
+        if run.job_version_id is None:
+            return None
+        # The column is `SET NULL` when the version goes, so a set id names a row that exists.
+        manifest = self._session.execute(
+            select(JobVersion.manifest_json).where(JobVersion.id == run.job_version_id)
+        ).scalar_one()
+        return tuple(sorted(manifest_jobs(manifest)))
 
     def _starts_lost(self, run: DeployRun) -> bool:
         """Say whether a start the deploy left pending will never be made.
@@ -2089,7 +2156,7 @@ class DeployService:
             self._session.rollback()
             ci_refusal(self._authz, p, environment, ALREADY_USED_MESSAGE)
         self._session.commit()
-        return self._view(run)
+        return self._view(run, submitted_by=self._submitter_name(run))
 
     def _authorize_read(self, p: PrincipalRef, environment: str) -> Environment:
         """Authorize READ_ENVIRONMENT and return the environment.
@@ -2153,7 +2220,11 @@ class DeployService:
         ).scalar_one_or_none()
         if run is None or (p.ci_scope is not None and run.ci_token_id != p.ci_scope.token_id):
             raise NotFoundError(f"No deploy {run_id} in {environment}.")
-        return dataclasses.replace(self._view(run, p), waiting_for=self.waiting_for(run))
+        return dataclasses.replace(
+            self._view(run, p, submitted_by=self._submitter_name(run)),
+            waiting_for=self.waiting_for(run),
+            jobs=self._project_jobs(run),
+        )
 
     def waiting_for(self, run: DeployRun) -> WaitReason | None:
         """Say why a run has not started, when it is still `QUEUED`.
@@ -2258,10 +2329,111 @@ class DeployService:
             If `limit` is below 1 or `cursor` is not one this server issued for the deploys list.
         """
         env = self._authorize_read(p, environment)
+        page, next_cursor = self._deploys_page(
+            "deploys", [env.id], repository=repository, limit=limit, cursor=cursor
+        )
+        reads = _WarningReads()
+        return [self._view(run, p, reads, name) for run, name in page], next_cursor
+
+    def list_all_deploys_page(
+        self,
+        p: PrincipalRef,
+        *,
+        environment: str | None = None,
+        repository: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> tuple[list[DeployRunView], str | None]:
+        """List the deploys of every environment the caller may read, one page at a time.
+
+        With `environment`, this is `history_page` of that environment: its rows, its cursor
+        and its refusals. Without it, the environments are the live ones where the caller holds
+        `READ_ENVIRONMENT`, asked in one `permits_each` batch (`run_environments`); one where
+        the caller does not is left out, so the list is never refused. The order and the page
+        are those of `history_page`, over all those environments together, in one statement;
+        the cursor belongs to the ``all-deploys`` list, so a cursor of the per-environment
+        list is refused.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Only this environment, with the answers and refusals of `history_page`.
+        repository
+            Narrow to the deploys of this repository.
+        limit
+            Page size, at least 1.
+        cursor
+            What the previous page returned as its `next_cursor`, sent with the same
+            `repository`.
+
+        Returns
+        -------
+        tuple of (list of DeployRunView, str or None)
+            The page, and the cursor of the next one, or `None` on the last.
+
+        Raises
+        ------
+        PermissionDenied
+            With `environment` only, without READ_ENVIRONMENT.
+        NotFoundError
+            If `environment` or the repository does not exist.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for this list.
+        """
+        if environment is not None:
+            return self.history_page(
+                p, environment, repository=repository, limit=limit, cursor=cursor
+            )
+        names = run_environments(self._session, self._authz, p)
+        page, next_cursor = self._deploys_page(
+            "all-deploys", list(names), repository=repository, limit=limit, cursor=cursor
+        )
+        reads = _WarningReads()
+        return [self._view(run, p, reads, name) for run, name in page], next_cursor
+
+    def _deploys_page(
+        self,
+        kind: str,
+        environment_ids: Collection[uuid.UUID],
+        *,
+        repository: str | None,
+        limit: int,
+        cursor: str | None,
+    ) -> tuple[list[Any], str | None]:
+        """Read one page of the deploy runs of some environments, newest first, in one statement.
+
+        Parameters
+        ----------
+        kind
+            The list the cursor belongs to (``deploys`` or ``all-deploys``).
+        environment_ids
+            The environments listed; the caller has already checked the right on each.
+        repository
+            Only this repository's runs.
+        limit
+            Most runs returned.
+        cursor
+            The `next_cursor` of the previous page.
+
+        Returns
+        -------
+        tuple of (list of Row, str or None)
+            The page as ``(DeployRun, submitter name)`` rows, and the cursor of the next one, or
+            `None` on the last.
+
+        Raises
+        ------
+        NotFoundError
+            If the repository does not exist.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for `kind`.
+        """
         if limit < 1:
             raise ValidationError(f"limit must be at least 1, got {limit}.")
-        position = None if cursor is None else decode_cursor("deploys", cursor)
-        query = select(DeployRun).where(DeployRun.environment_id == env.id)
+        position = None if cursor is None else decode_cursor(kind, cursor)
+        query = self._runs_with_submitter().where(DeployRun.environment_id.in_(environment_ids))
         if repository is not None:
             query = query.where(DeployRun.repository_id == self._repository(repository).id)
         if position is not None:
@@ -2271,17 +2443,17 @@ class DeployService:
                     and_(DeployRun.created_at == position.at, DeployRun.id < position.id),
                 )
             )
-        runs = list(
+        rows = list(
             self._session.execute(
                 query.order_by(DeployRun.created_at.desc(), DeployRun.id.desc()).limit(limit + 1)
-            ).scalars()
+            ).all()
         )
-        page = runs[:limit]
+        page = rows[:limit]
         next_cursor = None
-        if len(runs) > limit:
-            next_cursor = encode_cursor("deploys", page[-1].created_at, page[-1].id)
-        reads = _WarningReads()
-        return [self._view(run, p, reads) for run in page], next_cursor
+        if len(rows) > limit:
+            last = page[-1][0]
+            next_cursor = encode_cursor(kind, last.created_at, last.id)
+        return page, next_cursor
 
     def deployments(self, p: PrincipalRef, environment: str) -> list[DeploymentView]:
         """List the current project version per repository.

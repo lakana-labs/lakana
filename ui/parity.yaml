@@ -164,6 +164,7 @@
 "row-filter revoke": { class: ui, part: 7 }
 "run": { class: ui, part: 5 }
 "runs cancel": { class: ui, part: 5 }
+"runs failed": { class: ui, part: 5 }
 "runs list": { class: ui, part: 5 }
 "runs logs": { class: ui, part: 5 }
 "runs resume": { class: ui, part: 5 }
@@ -277,6 +278,7 @@
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
 "GET /api/v1/connections": { class: ui, part: 6 }
 "GET /api/v1/connections/environments": { class: ui, part: 6 }
+"GET /api/v1/deploys": { class: read, part: 5 }
 "GET /api/v1/environments": { class: ui, part: 8 }
 "GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}": { class: ui, part: 6 }
@@ -404,6 +406,8 @@
 "GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2 }
 "GET /api/v1/row-filters":
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
+"GET /api/v1/runs": { class: ui, part: 5 }
+"GET /api/v1/runs/failed": { class: ui, part: 5 }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
 "GET /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }

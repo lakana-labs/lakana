@@ -168,6 +168,7 @@ def _deploy() -> dict[str, Any]:
         "diff": None,
         "project_version_id": _ID2,
         "principal_id": _ID2,
+        "submitted_by": "svc-etl",
         "created_at": _TIME,
         "started_at": _TIME,
         "finished_at": _TIME2,
