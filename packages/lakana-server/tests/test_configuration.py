@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import enum
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 import pytest
-from pydantic import BaseModel, ConfigDict, SecretStr, create_model
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, create_model
 
 from lakana_server.configuration import (
     PLAIN_SECRETS,
@@ -176,3 +177,18 @@ def test_a_field_that_is_not_a_plain_model_or_a_known_scalar_is_refused(
         setting_names(root)
     with pytest.raises(TypeError, match="LAKANA_ODD"):
         describe_settings(root())
+
+
+class _Level(enum.Enum):
+    LOW = "low"
+    HIGH = "high"
+
+
+def test_an_enum_and_an_annotated_scalar_inside_a_list_are_known_leaves() -> None:
+    """An enum, and a scalar with constraints inside a container, hold no model: both pass."""
+
+    class Root(BaseModel):
+        level: _Level = _Level.LOW
+        ports: list[Annotated[int, Field(ge=1)]] = []
+
+    assert setting_names(Root) == ["LAKANA_LEVEL", "LAKANA_PORTS"]
