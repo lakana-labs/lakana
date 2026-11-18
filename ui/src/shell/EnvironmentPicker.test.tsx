@@ -5,8 +5,9 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import type { EnvironmentChoice } from "../api/environments";
 import { QUERY_ENVIRONMENTS } from "../test/queries";
-import { EnvironmentPicker } from "./EnvironmentPicker";
+import { EnvironmentName, EnvironmentPicker } from "./EnvironmentPicker";
 
 describe("EnvironmentPicker", () => {
   it("lists only the given environments, protected ones with the dot and the word protected", async () => {
@@ -41,7 +42,7 @@ describe("EnvironmentPicker", () => {
     expect(marks[0]).toHaveTextContent("●");
     expect(marks[1]).toHaveTextContent("· protected");
     // Vitest hands CSS imports back empty, so the stylesheet is read directly.
-    const css = readFileSync(resolve(import.meta.dirname, "queries.css"), "utf8");
+    const css = readFileSync(resolve(import.meta.dirname, "environment.css"), "utf8");
     expect(css).toMatch(/\.env-protected\s*{[^}]*color:\s*var\(--color-bad\);/);
   });
 
@@ -80,5 +81,42 @@ describe("EnvironmentPicker", () => {
     );
 
     expect(screen.getByRole("button", { name: "Environment: prU+202Eod" })).toBeInTheDocument();
+  });
+});
+
+describe("EnvironmentPicker over any environment choice", () => {
+  it("takes any environment choice, not only a query's", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const choices: readonly EnvironmentChoice[] = [
+      { name: "dev", protected: false },
+      { name: "prod", protected: true },
+    ];
+    render(
+      <EnvironmentPicker
+        environments={choices}
+        value={null}
+        label="Show"
+        all="All environments"
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Show: All environments" }));
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "All environments",
+      "dev",
+      "● prod · protected",
+    ]);
+    await user.click(options[2] as HTMLElement);
+    expect(onChange).toHaveBeenCalledWith("prod");
+  });
+
+  it("names a protected environment with its mark on its own", () => {
+    render(<EnvironmentName environment={{ name: "prod", protected: true }} />);
+
+    expect(screen.getByText("protected")).toHaveClass("env-protected");
+    expect(screen.getByText("●")).toHaveAttribute("aria-hidden", "true");
   });
 });
