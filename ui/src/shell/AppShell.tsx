@@ -77,7 +77,10 @@ export interface AppShellProps {
  * on the first load, so the skip link stays the first stop). The first load includes the
  * redirects it lands on: a Replace whose state carries the redirect mark (`REDIRECT`, in
  * `./redirect`) made before any other navigation. Every other Replace is a move like a Push,
- * such as a list that replaces a deleted object's page. The person's access and interface
+ * such as a list that replaces a deleted object's page. The move happens in a layout effect, in
+ * the commit that shows the new page, so it comes before the page's own effects: a page that
+ * puts focus somewhere on arrival (a note on what just happened, as `PlaceNote`) does so in an
+ * ordinary effect and wins, without waiting a frame. The person's access and interface
  * state are there for every screen inside; the interface state is read once, when the shell
  * appears.
  *
