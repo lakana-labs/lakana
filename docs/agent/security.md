@@ -5361,6 +5361,25 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   closes first (open over 10 minutes) also writes one, `state: done` and `outcome: failed`, as
   `ConnectionTestQueue.close` records it for the test's requester; a connection with an open test
   under 10 minutes old gets that test back and writes nothing.
+- **The Connections form keeps a secret's values out of the page (M7, #728).** Add connection
+  and Edit never hold a typed value in React state: each value field (a connection's password,
+  key or token, and each `tcp` key's value) is an uncontrolled `type="password"` input
+  (`SecretFields`'s `PasswordField`), read through `useSecretInputs().read` only when Save builds
+  the create or the update, since React copies a controlled input's value into its `value`
+  attribute, a password field's too, where `outerHTML`, a DOM snapshot or a CSS attribute
+  selector would reach it. The `tcp` rows hold only their id and name; a `gcs` key read from a
+  file goes straight into its field. The inputs have no reveal and no `name`, and
+  `autoComplete="new-password"` with `data-1p-ignore` and `data-lpignore`: `new-password` stops
+  the browser filling a saved password in (browsers ignore `off` on a password field); a browser
+  or a password manager that ignores these hints may still offer to save a typed value. The
+  values go only in the one request's body, never in the address, storage, a log or an error. A
+  refused save keeps them as typed (the fields stay mounted); leaving the form drops them with
+  the fields. On Edit, Keep (the default) sends no value and names the bound secret without its
+  values; an optional field left empty is never sent. Pins: `ConnectionForm.test.tsx` (`a secret value never
+  leaves its field`: the page's `outerHTML`, every attribute, the text, the address, both
+  storages and every console call, after a 422 and after a success, on Add, for `tcp` keys and
+  on Edit) and `e2e-server/connections.spec.ts` (the password nowhere on the page after the
+  create).
 - **The answer.** `TaskConnectionOut` carries the settings with a `ca_certificate` in full (the
   helper needs it) and `endpoints` from `connections.endpoints.endpoints`, the list the worker's
   egress grants and the binding's audit `url` use too. `Cache-Control: no-store`,

@@ -648,6 +648,27 @@ describe("ConnectionForm, add", () => {
     expect(screen.getByRole("textbox", { name: "host" })).toHaveAttribute("aria-invalid", "true");
   });
 
+  it("marks a missing password on Save, focuses it, and clears the mark as it is typed", async () => {
+    const { user, server } = renderAdd();
+    await user.type(await screen.findByRole("textbox", { name: "Name" }), "crm");
+    await user.type(screen.getByRole("textbox", { name: "host" }), "db.example.org");
+    await user.type(screen.getByRole("textbox", { name: "database" }), "crm");
+    await user.type(screen.getByRole("textbox", { name: "user" }), "loader");
+    const password = screen.getByLabelText("password");
+    expect(password).not.toHaveAttribute("aria-invalid");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(writes(server)).toEqual([]);
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveFocus();
+    expect(password).toHaveAccessibleDescription((password as HTMLInputElement).validationMessage);
+    expect(password).not.toHaveAccessibleDescription("");
+    await user.type(password, "x");
+    expect(password).not.toHaveAttribute("aria-invalid");
+    expect(password).not.toHaveAttribute("aria-describedby");
+  });
+
   it("after the create goes to the page with the note and Test now", async () => {
     const { user } = renderAdd(MANAGER, {
       "POST /api/v1/environments/dev/connections": created(),
@@ -1008,5 +1029,181 @@ describe("ConnectionForm, edit", () => {
     expect(
       await screen.findByText("Tested before the last change; test it again."),
     ).toBeInTheDocument();
+  });
+});
+
+const SENTINEL = "s3cr3t-sentinel";
+
+/**
+ * Says where the sentinel is outside the request bodies: the page's HTML as it is (text and
+ * every attribute, an input's `value` attribute included), the address, the storages and the
+ * console. A still-open input's live value is not in the HTML.
+ *
+ * @param spies - The console spies.
+ * @returns The places found.
+ */
+function whereIsTheSentinel(
+  spies: readonly { readonly mock: { readonly calls: readonly unknown[] } }[],
+): string[] {
+  const found: string[] = [];
+  if (document.documentElement.outerHTML.includes(SENTINEL)) found.push("html");
+  if (document.body.textContent.includes(SENTINEL)) found.push("text");
+  for (const element of document.querySelectorAll("*")) {
+    for (const attribute of element.attributes) {
+      if (attribute.value.includes(SENTINEL)) found.push(`attribute ${attribute.name}`);
+    }
+  }
+  if (window.location.href.includes(SENTINEL)) found.push("address");
+  if (screen.getByTestId("where").textContent.includes(SENTINEL)) found.push("route");
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index) ?? "";
+      if (`${key}${storage.getItem(key) ?? ""}`.includes(SENTINEL)) found.push("storage");
+    }
+  }
+  for (const spy of spies) {
+    if (JSON.stringify(spy.mock.calls).includes(SENTINEL)) found.push("console");
+  }
+  return found;
+}
+
+/**
+ * Spies on the console.
+ *
+ * @returns The spies.
+ */
+function consoleSpies(): { readonly mock: { readonly calls: readonly unknown[] } }[] {
+  return (["log", "info", "warn", "error", "debug"] as const).map((level) =>
+    vi.spyOn(console, level),
+  );
+}
+
+/**
+ * A write refused with a 422 until `refuse` is false, then answered as `ok`.
+ *
+ * @param ok - The answer once accepted.
+ * @returns The route and the switch.
+ */
+function refusedFirst(ok: FakeRoute): { route: FakeRoute; accept: () => void } {
+  let refuse = true;
+  return {
+    route: (request) =>
+      refuse
+        ? { status: 422, body: { type: "ValidationError", detail: "address.host is not valid." } }
+        : typeof ok === "function"
+          ? ok(request)
+          : ok,
+    accept: () => {
+      refuse = false;
+    },
+  };
+}
+
+/**
+ * The requests that carry the sentinel; none of them in its path or headers.
+ *
+ * @param server - The fake server.
+ * @returns Each one as `METHOD path`.
+ */
+function carryingSentinel(server: FakeServer): string[] {
+  const carrying = server.sent.filter((request) => JSON.stringify(request).includes(SENTINEL));
+  for (const request of carrying) {
+    expect(request.path).not.toContain(SENTINEL);
+    expect(JSON.stringify(request.headers)).not.toContain(SENTINEL);
+  }
+  return carrying.map((request) => `${request.method} ${request.path}`);
+}
+
+describe("ConnectionForm, a secret value never leaves its field", () => {
+  it("on Add, after a refused save and after a successful one", async () => {
+    const spies = consoleSpies();
+    const write = refusedFirst(created());
+    const { user, server } = renderAdd(MANAGER, {
+      "POST /api/v1/environments/dev/connections": write.route,
+    });
+    await user.type(await screen.findByRole("textbox", { name: "Name" }), "crm");
+    await user.type(screen.getByRole("textbox", { name: "host" }), "db.example.org");
+    await user.type(screen.getByRole("textbox", { name: "database" }), "crm");
+    await user.type(screen.getByRole("textbox", { name: "user" }), "loader");
+    const password = screen.getByLabelText("password");
+    expect(password).toHaveAttribute("data-1p-ignore");
+    expect(password).toHaveAttribute("data-lpignore", "true");
+    expect(password).not.toHaveAttribute("name");
+    await user.type(password, SENTINEL);
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("address.host is not valid.");
+    expect(screen.getByLabelText("password")).toHaveValue(SENTINEL);
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    write.accept();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("button", { name: "Test now" })).toBeInTheDocument();
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+    expect(carryingSentinel(server)).toEqual([
+      "POST /api/v1/environments/dev/connections",
+      "POST /api/v1/environments/dev/connections",
+    ]);
+    expect(server.sent.findLast((request) => request.method !== "GET")?.body).toMatchObject({
+      secret_values: { password: SENTINEL },
+    });
+  });
+
+  it("for the keys of a tcp connection", async () => {
+    const spies = consoleSpies();
+    const write = refusedFirst(created());
+    const { user, server } = renderAdd(MANAGER, {
+      "POST /api/v1/environments/dev/connections": write.route,
+    });
+    const kinds = await screen.findByRole("radiogroup", { name: "Kind" });
+    await user.click(within(kinds).getByRole("radio", { name: "TCP" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "ledger");
+    await user.type(screen.getByRole("textbox", { name: "host" }), "ledger.internal");
+    await user.type(screen.getByRole("textbox", { name: "port" }), "7000");
+    await user.click(screen.getByRole("button", { name: "Add a key" }));
+    await user.type(screen.getByRole("textbox", { name: "Key 1 name" }), "api_user");
+    await user.type(screen.getByLabelText("Key 1 value"), `${SENTINEL}-user`);
+    await user.click(screen.getByRole("button", { name: "Add a key" }));
+    await user.type(screen.getByRole("textbox", { name: "Key 2 name" }), "api_key");
+    await user.type(screen.getByLabelText("Key 2 value"), SENTINEL);
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("address.host is not valid.");
+    expect(screen.getByLabelText("Key 2 value")).toHaveValue(SENTINEL);
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    write.accept();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("button", { name: "Test now" })).toBeInTheDocument();
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+    expect(carryingSentinel(server)).toHaveLength(2);
+    expect(server.sent.findLast((request) => request.method !== "GET")?.body).toMatchObject({
+      secret_values: { api_user: `${SENTINEL}-user`, api_key: SENTINEL },
+    });
+  }, 15_000);
+
+  it("on Edit, after a refused save and after a successful one", async () => {
+    const spies = consoleSpies();
+    const write = refusedFirst(saved());
+    const { user, server } = renderEdit(STORED, { [UPDATE]: write.route });
+    await user.click(await screen.findByRole("radio", { name: "New values" }));
+    await user.type(screen.getByLabelText("password"), SENTINEL);
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("address.host is not valid.");
+    expect(screen.getByLabelText("password")).toHaveValue(SENTINEL);
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    write.accept();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText("Saved crm.")).toBeInTheDocument();
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+    expect(carryingSentinel(server)).toEqual([UPDATE, UPDATE]);
+    expect(server.sent.findLast((request) => request.method !== "GET")?.body).toEqual({
+      secret_values: { password: SENTINEL },
+    });
   });
 });

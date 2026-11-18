@@ -3,12 +3,14 @@
  * the environment by name.
  *
  * @remarks
- * The values live only in the form's state (and, for `tcp`, in the rows' state below it) until
- * Save sends them; every value input is `type="password"` with `autoComplete="new-password"`,
- * and nothing here logs, stores or renders a value.
+ * A value is never React state: each value input is an uncontrolled `type="password"` input,
+ * read through {@link SecretInputs} only when Save builds the request, since React copies a
+ * controlled input's value into its `value` attribute, a password field's too. The `tcp` rows
+ * hold only their id and name. Every value input has `autoComplete="new-password"`,
+ * `data-1p-ignore` and `data-lpignore`, and nothing here logs, stores or renders a value.
  * @packageDocumentation
  */
-import { type JSX, useEffect, useId, useRef, useState } from "react";
+import { type JSX, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Button,
   FieldError,
@@ -25,15 +27,59 @@ import { useTranslation } from "react-i18next";
 import type { ConnectionKind } from "../api";
 import { markedText } from "../shell/VisibleText";
 import { TextFileInput } from "./CaCertificateField";
-import { type SecretChoice, typedValues } from "./formBody";
+import type { SecretChoice } from "./formBody";
 import { FREE_KEYS_MAX, SECRET_VALUE_BYTES, secretKeys } from "./kinds";
 import "./formStrings";
 
 /** A `tcp` key's name, as the server takes it. */
 const KEY_NAME = /^[a-z][a-z0-9_]{0,31}$/;
 
-/** The values typed, by key. */
-type Values = Readonly<Record<string, string>>;
+/** The value inputs the secret's fields have mounted, from which Save reads the values. */
+export interface SecretInputs {
+  /** Gives a value input its ref: `id` names the input, `key` the secret key it holds. */
+  readonly field: (id: string, key: string) => (input: HTMLInputElement | null) => void;
+  /** Puts text into the input of a key, as if typed (a key read from a file). */
+  readonly fill: (key: string, text: string) => void;
+  /** The values of the mounted inputs, by key; inputs whose key is not named yet left out. */
+  readonly read: () => Readonly<Record<string, string>>;
+}
+
+/**
+ * Keeps the secret's value inputs, so the values are read from them only when Save sends.
+ *
+ * @returns The inputs' registry.
+ */
+export function useSecretInputs(): SecretInputs {
+  const inputs = useRef(
+    new Map<string, { readonly key: string; readonly input: HTMLInputElement }>(),
+  );
+  const field = useCallback(
+    (id: string, key: string) => (input: HTMLInputElement | null) => {
+      if (input === null) {
+        inputs.current.delete(id);
+      } else {
+        inputs.current.set(id, { key, input });
+      }
+    },
+    [],
+  );
+  const fill = useCallback((key: string, text: string) => {
+    const input = inputs.current.get(key)?.input as HTMLInputElement;
+    input.value = text;
+    // The field's check runs on input, as for a typed value.
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }, []);
+  const read = useCallback(
+    () =>
+      Object.fromEntries(
+        [...inputs.current.values()]
+          .filter(({ key }) => key !== "")
+          .map(({ key, input }) => [key, input.value]),
+      ),
+    [],
+  );
+  return useMemo(() => ({ field, fill, read }), [field, fill, read]);
+}
 
 /** The secret a stored connection holds, as Edit shows it. */
 export interface KeptSecret {
@@ -55,10 +101,12 @@ export interface SecretFieldsProps {
   readonly mayName: boolean;
   /** On Edit, the stored connection's secret; absent on Add. */
   readonly kept?: KeptSecret;
-  /** The secret as the form holds it. */
+  /** The secret as the form holds it; new values stay in their inputs. */
   readonly value: SecretChoice;
   /** Called with the new secret. */
   readonly onChange: (value: SecretChoice) => void;
+  /** The value inputs, read when Save sends. */
+  readonly inputs: SecretInputs;
 }
 
 /** Properties of {@link PasswordField}. */
@@ -67,54 +115,81 @@ interface PasswordFieldProps {
   readonly label: string;
   /** Whether a value is needed. */
   readonly required: boolean;
-  /** The value. */
-  readonly value: string;
-  /** Called with the new value. */
-  readonly onChange: (value: string) => void;
+  /** Gives the input its ref. */
+  readonly inputRef: (input: HTMLInputElement | null) => void;
 }
 
 /**
- * One secret value: a password field marked as a new password, so the browser neither fills a
- * saved one in nor offers to keep it as a login (browsers ignore `off` on a password field).
+ * One secret value: an uncontrolled password field (React Aria's `TextField` is always
+ * controlled), marked as a new password so the browser fills no saved one in (browsers ignore
+ * `off` on a password field), and out of the password managers' reach (`data-1p-ignore`,
+ * `data-lpignore`). Like the form's other fields, a missing value shows once Save is tried: the
+ * field is marked invalid with the browser's sentence, and the first invalid field of the form
+ * takes the focus; typing clears it until the next Save.
  *
- * @param props - The label, whether it is needed, and the value.
+ * @param props - The label, whether it is needed, and the ref.
  * @param props.label - The label.
  * @param props.required - Whether a value is needed.
- * @param props.value - The value.
- * @param props.onChange - Called with the new value.
+ * @param props.inputRef - Gives the input its ref.
  * @returns The field.
  */
-function PasswordField({ label, required, value, onChange }: PasswordFieldProps): JSX.Element {
+function PasswordField({ label, required, inputRef }: PasswordFieldProps): JSX.Element {
+  const id = useId();
+  const error = useId();
+  const [problem, setProblem] = useState<string | null>(null);
   return (
-    <TextField
-      className="field"
-      type="password"
-      autoComplete="new-password"
-      isRequired={required}
-      value={value}
-      onChange={onChange}
-    >
-      <Label>{label}</Label>
-      <Input />
-      <FieldError />
-    </TextField>
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        ref={inputRef}
+        type="password"
+        autoComplete="new-password"
+        spellCheck={false}
+        data-1p-ignore=""
+        data-lpignore="true"
+        required={required}
+        aria-invalid={problem === null ? undefined : true}
+        aria-describedby={problem ? error : undefined}
+        onInvalid={(event) => {
+          const input = event.currentTarget;
+          // No browser bubble; the sentence shows under the field, as React Aria's fields do.
+          event.preventDefault();
+          setProblem(input.validationMessage);
+          const form = input.form as HTMLFormElement;
+          const first = [...form.elements].find(
+            (element) => !(element as HTMLInputElement).validity.valid,
+          );
+          if (first === input) {
+            input.focus();
+          }
+        }}
+        onInput={() => {
+          // The next Save checks it again.
+          setProblem(null);
+        }}
+      />
+      {problem ? (
+        <span id={error} slot="errorMessage">
+          {problem}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
-/** One `tcp` key while it is typed. */
+/** One `tcp` key while it is typed; its value stays in the row's password field. */
 interface Row {
   /** The row's own id, for React. */
   readonly id: number;
   /** The key's name. */
   readonly name: string;
-  /** The key's value. */
-  readonly value: string;
 }
 
 /** Properties of {@link FreeKeys}. */
 interface FreeKeysProps {
-  /** Called with the values by name, each time a row changes. */
-  readonly onChange: (values: Values) => void;
+  /** The value inputs. */
+  readonly inputs: SecretInputs;
 }
 
 /**
@@ -123,11 +198,11 @@ interface FreeKeysProps {
  * Each row's fields and Remove carry its number, so no two controls share a name. A new row's
  * name takes the focus (Add a key goes once there are 16); after a Remove, Add a key takes it.
  *
- * @param props - Where the values go.
- * @param props.onChange - Called with the values by name.
+ * @param props - The value inputs.
+ * @param props.inputs - The value inputs, each under its row's name.
  * @returns The rows.
  */
-function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
+function FreeKeys({ inputs }: FreeKeysProps): JSX.Element {
   const { t } = useTranslation();
   const [rows, setRows] = useState<readonly Row[]>([]);
   const next = useRef(0);
@@ -146,16 +221,8 @@ function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
       add.current?.focus();
     }
   }, [removed]);
-  const change = (changed: readonly Row[]): void => {
-    setRows(changed);
-    onChange(
-      Object.fromEntries(
-        changed.filter(({ name }) => name !== "").map(({ name, value }) => [name, value]),
-      ),
-    );
-  };
-  const update = (id: number, part: Partial<Row>): void => {
-    change(rows.map((row) => (row.id === id ? { ...row, ...part } : row)));
+  const update = (id: number, name: string): void => {
+    setRows(rows.map((row) => (row.id === id ? { ...row, name } : row)));
   };
   return (
     <div className="connection-keys">
@@ -176,7 +243,7 @@ function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
                   : null;
               }}
               onChange={(name) => {
-                update(row.id, { name });
+                update(row.id, name);
               }}
             >
               <Label>{t("connections.form.keyName", { number })}</Label>
@@ -194,15 +261,12 @@ function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
             <PasswordField
               label={t("connections.form.keyValue", { number })}
               required
-              value={row.value}
-              onChange={(value) => {
-                update(row.id, { value });
-              }}
+              inputRef={inputs.field(`key-${String(row.id)}`, row.name)}
             />
             <Button
               className="button"
               onPress={() => {
-                change(rows.filter(({ id }) => id !== row.id));
+                setRows(rows.filter(({ id }) => id !== row.id));
                 setRemoved((count) => count + 1);
               }}
             >
@@ -217,7 +281,7 @@ function FreeKeys({ onChange }: FreeKeysProps): JSX.Element {
           className="button"
           onPress={() => {
             next.current += 1;
-            change([...rows, { id: next.current, name: "", value: "" }]);
+            setRows([...rows, { id: next.current, name: "" }]);
             setAdded(next.current);
           }}
         >
@@ -236,10 +300,8 @@ interface NewValuesProps {
   readonly kind: ConnectionKind;
   /** The settings. */
   readonly settings: Readonly<Record<string, string>>;
-  /** The values typed, by key. */
-  readonly values: Values;
-  /** Called with the values. */
-  readonly onChange: (values: Values) => void;
+  /** The value inputs. */
+  readonly inputs: SecretInputs;
 }
 
 /**
@@ -247,23 +309,19 @@ interface NewValuesProps {
  * the choice of account key or SAS token, then that one; for `gcs` also a file the key is read
  * from; for `tcp` the person's own keys.
  *
- * @param props - The kind, its settings and the values.
+ * @param props - The kind, its settings and the value inputs.
  * @param props.kind - The kind.
  * @param props.settings - The settings.
- * @param props.values - The values typed.
- * @param props.onChange - Called with the values.
+ * @param props.inputs - The value inputs, each under its key.
  * @returns The fields.
  */
-function NewValues({ kind, settings, values, onChange }: NewValuesProps): JSX.Element {
+function NewValues({ kind, settings, inputs }: NewValuesProps): JSX.Element {
   const { t } = useTranslation();
   const { required, optional, oneOf, free } = secretKeys(kind, settings);
   const [picked, setPicked] = useState<string | null>(null);
   if (free) {
-    return <FreeKeys onChange={onChange} />;
+    return <FreeKeys inputs={inputs} />;
   }
-  const set = (key: string) => (value: string) => {
-    onChange({ ...values, [key]: value });
-  };
   const chosen = oneOf === null ? null : (picked ?? (oneOf[0] as string));
   const needed = chosen === null ? required : [chosen];
   return (
@@ -274,9 +332,8 @@ function NewValues({ kind, settings, values, onChange }: NewValuesProps): JSX.El
           orientation="horizontal"
           value={chosen}
           onChange={(key) => {
+            // Only the chosen key is ever sent; the other's field goes, and its value with it.
             setPicked(key);
-            // Only the chosen key is ever sent; the other's value is forgotten.
-            onChange({});
           }}
         >
           <Label>{t("connections.form.azureKey")}</Label>
@@ -288,21 +345,14 @@ function NewValues({ kind, settings, values, onChange }: NewValuesProps): JSX.El
         </RadioGroup>
       )}
       {needed.map((key) => (
-        <PasswordField
-          key={key}
-          label={key}
-          required
-          value={values[key] ?? ""}
-          onChange={set(key)}
-        />
+        <PasswordField key={key} label={key} required inputRef={inputs.field(key, key)} />
       ))}
       {optional.map((key) => (
         <PasswordField
           key={key}
           label={t("connections.form.optional", { field: key })}
           required={false}
-          value={values[key] ?? ""}
-          onChange={set(key)}
+          inputRef={inputs.field(key, key)}
         />
       ))}
       {needed.includes("service_account_json") && (
@@ -311,7 +361,9 @@ function NewValues({ kind, settings, values, onChange }: NewValuesProps): JSX.El
           accept=".json,application/json"
           max={SECRET_VALUE_BYTES}
           tooBig={t("connections.form.keyFileTooBig")}
-          onText={set("service_account_json")}
+          onText={(text) => {
+            inputs.fill("service_account_json", text);
+          }}
         />
       )}
     </>
@@ -389,6 +441,7 @@ function KeepChoice({ name, moves, mayName }: KeepChoiceProps): JSX.Element {
  * @param props.kept - On Edit, the stored connection's secret.
  * @param props.value - The secret as the form holds it.
  * @param props.onChange - Called with the new secret.
+ * @param props.inputs - The value inputs, read when Save sends.
  * @returns The fields.
  */
 export function SecretFields({
@@ -399,12 +452,10 @@ export function SecretFields({
   kept,
   value,
   onChange,
+  inputs,
 }: SecretFieldsProps): JSX.Element {
   const { t } = useTranslation();
   const legend = useId();
-  const values = (next: Values): void => {
-    onChange({ way: "values", values: next });
-  };
   const shown = markedText(environment);
   return (
     <fieldset className="secret-fields">
@@ -461,12 +512,7 @@ export function SecretFields({
       {value.way === "values" && (
         <>
           <p className="connection-hint">{t("connections.form.secretHelp")}</p>
-          <NewValues
-            kind={kind}
-            settings={settings}
-            values={typedValues(value)}
-            onChange={values}
-          />
+          <NewValues kind={kind} settings={settings} inputs={inputs} />
         </>
       )}
     </fieldset>
