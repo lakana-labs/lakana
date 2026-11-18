@@ -196,7 +196,8 @@ def test_revoke_pat_twice_is_idempotent(session: Session, principal: PrincipalRe
     pats = PatService(session, AllowAllAuthorization())
     issued = pats.issue(principal, "alice", name="laptop")
     pats.revoke(principal, "alice", issued.key_id)
-    [pat] = pats.list(principal, "alice")
+    [listed] = pats.list(principal, "alice")
+    pat = listed.token
     first_revoked_at = pat.revoked_at
 
     pats.revoke(principal, "alice", issued.key_id)

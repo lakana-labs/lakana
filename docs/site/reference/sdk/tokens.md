@@ -25,6 +25,7 @@ Returns: `IssuedToken`. The full token value — shown here exactly once.
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal of this name exists. |
+| `lakana.PermissionDenied` | If the call is refused: anyone may list or revoke their own tokens, and a non-administrator creates their own only in the web interface after the passkey touch (`issue` with a token raises this); administrators manage anyone's. |
 
 ### `client.tokens.list`
 
@@ -41,6 +42,60 @@ Returns: `list of Token`. Every PAT for that principal.
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal of this name exists. |
+| `lakana.PermissionDenied` | If the call is refused: anyone may list their own tokens, but only an administrator lists those of another principal. |
+
+### `client.tokens.list_all`
+
+Signature: `client.tokens.list_all(*, owner: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[Token]`
+
+List every owner's live PATs, newest first. Needs the ADMIN role.
+
+The tokens of one page; `list_all_page` also returns the cursor of the next one, and `iter_all` walks every page. Revoked and expired tokens are left out.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `owner` | `str | None` | `None` | Only this principal's tokens. |
+| `limit` | `int | None` | `None` | Most tokens returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `owner` with every page. |
+
+Returns: `list of Token`. Newest first, each with its owner.
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | If `owner` names no principal. |
+| `lakana.PermissionDenied` | If you do not hold the ADMIN role on the instance. |
+
+### `client.tokens.list_all_page`
+
+Signature: `client.tokens.list_all_page(*, owner: str | None = None, limit: int | None = None, cursor: str | None = None) -> TokenPage`
+
+List one page of every owner's live PATs, with the cursor of the next page.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `owner` | `str | None` | `None` | Only this principal's tokens. |
+| `limit` | `int | None` | `None` | Most tokens returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `owner` with every page. |
+
+Returns: `TokenPage`. The tokens, and the cursor for the next page (`None` on the last).
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | If `owner` names no principal. |
+| `lakana.PermissionDenied` | If you do not hold the ADMIN role on the instance. |
+
+### `client.tokens.iter_all`
+
+Signature: `client.tokens.iter_all(*, owner: str | None = None, page_size: int = 100) -> Iterator[Token]`
+
+Yield every owner's live PATs, newest first, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `owner` | `str | None` | `None` | Only this principal's tokens. |
+| `page_size` | `int` | `100` | Tokens per request (1 to 200). |
+
+Returns: `Iterator of Token`. Each token, once.
 
 ### `client.tokens.revoke`
 
@@ -56,3 +111,4 @@ Revoke a PAT.
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal or PAT of these identifiers exists. |
+| `lakana.PermissionDenied` | If the call is refused: anyone may list or revoke their own tokens, and a non-administrator creates their own only in the web interface after the passkey touch (`issue` with a token raises this); administrators manage anyone's. |

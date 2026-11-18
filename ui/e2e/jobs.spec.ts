@@ -1,0 +1,813 @@
+import { expect, type Locator, type Page, test } from "@playwright/test";
+
+import {
+  ADHOC_MESSAGE,
+  ADHOC_REPOSITORY,
+  BLOCKED,
+  DEV,
+  DEV_JOB,
+  ENV,
+  FAILED_CHECK,
+  FAILED_ID,
+  JOB,
+  JOBS_STUBBED,
+  LOG_PIECES,
+  MISSING_ID,
+  REPOSITORY,
+  RESUMED_ID,
+  ROWS_QUERY_ID,
+  RUNNING_ID,
+  SECRET,
+  STARTED_ID,
+  stubJobs,
+  TIMED_OUT,
+  TIMEOUT_CAUSE,
+} from "./jobs";
+import { consoleErrors, violations } from "./session";
+
+const KEY = "lakana.preferences";
+
+/** The Jobs list. */
+const LIST = "/jobs";
+
+/** The job's page. */
+const JOB_PAGE = `/jobs/${ENV}/job/${REPOSITORY}/${JOB}`;
+
+/**
+ * A run's page.
+ *
+ * @param id - The run's id.
+ * @returns The address.
+ */
+function runPage(id: string): string {
+  return `/jobs/${ENV}/runs/${id}`;
+}
+
+/**
+ * A task's page.
+ *
+ * @param id - The run's id.
+ * @param asset - The task.
+ * @returns The address.
+ */
+function taskPage(id: string, asset: string): string {
+  return `${runPage(id)}/tasks/${asset}`;
+}
+
+/**
+ * Opens the job's page and waits for its facts and its runs.
+ *
+ * @param page - The page.
+ * @param query - What follows the address, such as `?run=…`.
+ */
+async function openJob(page: Page, query = ""): Promise<void> {
+  await page.goto(`${JOB_PAGE}${query}`);
+  await expect(page.getByRole("heading", { level: 1, name: JOB })).toBeVisible();
+  await expect(page.getByText(`via secret ${SECRET}`)).toBeVisible();
+  await expect(page.getByRole("region", { name: `Runs of ${JOB}` })).toBeVisible();
+}
+
+/**
+ * Opens a run's page and waits for its tasks.
+ *
+ * @param page - The page.
+ * @param id - The run's id.
+ */
+async function openRun(page: Page, id: string): Promise<void> {
+  await page.goto(runPage(id));
+  await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Tasks of the run" })).toBeVisible();
+}
+
+/**
+ * Opens the timed-out task's page and waits until its log is complete.
+ *
+ * @param page - The page.
+ */
+async function openTask(page: Page): Promise<void> {
+  await page.goto(taskPage(FAILED_ID, TIMED_OUT));
+  await expect(page.getByRole("heading", { level: 1, name: TIMED_OUT })).toBeVisible();
+  await expect(page.getByText("The log is complete.")).toBeVisible({ timeout: 10_000 });
+}
+
+/**
+ * The second line of a task of the run: why it failed and the controls beside it.
+ *
+ * @param page - The page.
+ * @param asset - The task.
+ * @returns The line.
+ */
+function whyLine(page: Page, asset: string): Locator {
+  return page
+    .locator("tr", { has: page.getByRole("link", { name: asset, exact: true }) })
+    .locator("xpath=following-sibling::tr[1]");
+}
+
+/**
+ * Moves the focus with Tab until it is on an element.
+ *
+ * @param target - The element.
+ */
+async function tabOnto(target: Locator): Promise<void> {
+  const page = target.page();
+  for (let step = 0; step < 80; step += 1) {
+    if (await target.evaluate((node) => node === document.activeElement)) {
+      return;
+    }
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Tab never reached the element");
+}
+
+/**
+ * Moves the focus with Shift+Tab until it is on an element before it.
+ *
+ * @param target - The element.
+ */
+async function tabBackOnto(target: Locator): Promise<void> {
+  const page = target.page();
+  for (let step = 0; step < 80; step += 1) {
+    if (await target.evaluate((node) => node === document.activeElement)) {
+      return;
+    }
+    await page.keyboard.press("Shift+Tab");
+  }
+  throw new Error("Shift+Tab never reached the element");
+}
+
+/**
+ * Whether the focus is somewhere on the page rather than on `<body>`.
+ *
+ * @param page - The page.
+ * @returns True when an element other than `<body>` holds it.
+ */
+function focusOnPage(page: Page): Promise<boolean> {
+  return page.evaluate(
+    () => document.activeElement !== null && document.activeElement !== document.body,
+  );
+}
+
+/**
+ * How far the page is wider than the window.
+ *
+ * @param page - The page.
+ * @returns The overflow in pixels; zero or less when nothing scrolls sideways.
+ */
+function sidewaysOverflow(page: Page): Promise<number> {
+  return page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+}
+
+/**
+ * Asserts that a region scrolls sideways inside itself and takes a tab stop.
+ *
+ * @param region - The region.
+ */
+async function scrollsInItself(region: Locator): Promise<void> {
+  await expect(region).toHaveAttribute("tabindex", "0");
+  expect(
+    await region.evaluate((node) => node.scrollWidth > node.clientWidth),
+    "the table is wider than its region",
+  ).toBe(true);
+}
+
+/**
+ * The colour a token resolves to in the page's theme, as `getComputedStyle` writes colours.
+ *
+ * @param page - The page.
+ * @param token - The custom property, such as `--color-accent`.
+ * @returns The colour.
+ */
+function tokenColour(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement("span");
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue(name);
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  }, token);
+}
+
+/**
+ * Asserts that every link in the page's main region but a button is drawn in the accent, not
+ * in the browser's own link colour.
+ *
+ * @param page - The page.
+ * @param where - The page's name in a failure.
+ */
+async function expectAccentLinks(page: Page, where: string): Promise<void> {
+  const accent = await tokenColour(page, "--color-accent");
+  const links = await page
+    .locator("main a:not(.button)")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => ({ text: node.textContent, colour: getComputedStyle(node).color })),
+    );
+  expect(links.length, where).toBeGreaterThan(0);
+  expect(
+    links.filter((link) => link.colour !== accent),
+    `${where}: links in a colour other than the accent`,
+  ).toEqual([]);
+}
+
+/**
+ * Sets the page's visibility as a background tab or a tab brought back would, and tells it.
+ *
+ * @param page - The page.
+ * @param state - `hidden` or `visible`.
+ */
+async function showAs(page: Page, state: "hidden" | "visible"): Promise<void> {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => value });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, state);
+}
+
+/**
+ * Opens the Jobs list and waits for its three sections.
+ *
+ * @param page - The page.
+ * @param query - What follows the address, such as `?environment=dev`.
+ */
+async function openList(page: Page, query = ""): Promise<void> {
+  await page.goto(`${LIST}${query}`);
+  await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: /^Running now/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Every job listed" })).toBeVisible();
+}
+
+/**
+ * The gaps between the visible content of every two neighbouring cells of the page's tables:
+ * their text and pictures, without what is hidden for the eye.
+ *
+ * @param page - The page.
+ * @returns Each gap, with its table, row and cell.
+ */
+function cellGaps(page: Page): Promise<{ where: string; gap: number }[]> {
+  return page.evaluate(() => {
+    const out: { where: string; gap: number }[] = [];
+    document.querySelectorAll("table").forEach((table, index) => {
+      table.querySelectorAll("tbody tr").forEach((tr, row) => {
+        const spans = [...tr.querySelectorAll("td")].map((td) => {
+          const rects: DOMRect[] = [];
+          const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            const parent = node.parentElement;
+            if (
+              (node.textContent ?? "").trim() !== "" &&
+              parent?.closest(".visually-hidden") === null
+            ) {
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              rects.push(range.getBoundingClientRect());
+            }
+          }
+          td.querySelectorAll("svg, img").forEach((picture) => {
+            rects.push(picture.getBoundingClientRect());
+          });
+          return rects.length === 0
+            ? null
+            : {
+                left: Math.min(...rects.map((rect) => rect.left)),
+                right: Math.max(...rects.map((rect) => rect.right)),
+              };
+        });
+        for (let cell = 0; cell + 1 < spans.length; cell += 1) {
+          const here = spans[cell];
+          const next = spans[cell + 1];
+          if (here && next) {
+            out.push({
+              where: `table ${String(index)} row ${String(row)} cell ${String(cell)}`,
+              gap: next.left - here.right,
+            });
+          }
+        }
+      });
+    });
+    return out;
+  });
+}
+
+for (const theme of ["light", "dark"] as const) {
+  for (const density of ["roomy", "compact"] as const) {
+    test.describe(`the Jobs list, ${theme}, ${density}`, () => {
+      test.beforeEach(async ({ page }) => {
+        await stubJobs(page);
+        await page.addInitScript(
+          ([key, value]) => {
+            if (window.localStorage.getItem(key ?? "") === null) {
+              window.localStorage.setItem(key ?? "", value ?? "");
+            }
+          },
+          [KEY, JSON.stringify({ theme, density, language: "en" })],
+        );
+      });
+
+      test("axe finds nothing on the list, the open filter, a search with no hits and the Cancel and Pause dialogs", async ({
+        page,
+      }) => {
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        await expect(page.getByText(ADHOC_MESSAGE)).toBeVisible();
+        expect(await violations(page), "the list").toEqual([]);
+
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await expect(page.getByRole("listbox")).toBeVisible();
+        expect(await violations(page), "the open filter").toEqual([]);
+        await page.keyboard.press("Escape");
+
+        await page.getByRole("button", { name: `Cancel the run of ${JOB}` }).click();
+        const cancel = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(cancel).toBeVisible();
+        expect(await violations(page), "the Cancel dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(cancel).toBeHidden();
+
+        await page.getByRole("button", { name: `Pause the schedule of ${JOB}` }).click();
+        const pause = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await expect(pause).toBeVisible();
+        expect(await violations(page), "the Pause dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(pause).toBeHidden();
+
+        await page.getByRole("searchbox", { name: "Search jobs" }).fill("no-such-job");
+        await expect(page.getByText("Nothing here matches the search.")).toHaveCount(3);
+        expect(await violations(page), "a search with no hits").toEqual([]);
+      });
+
+      test("at least 24 px between the content of every two neighbouring cells", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        const gaps = await cellGaps(page);
+        expect(gaps.length).toBeGreaterThanOrEqual(10);
+        const tight = gaps.filter((entry) => entry.gap < 24);
+        expect(tight, JSON.stringify(tight)).toEqual([]);
+      });
+
+      test("the filter, the search, the links and the controls work by keyboard alone", async ({
+        page,
+      }) => {
+        await openList(page);
+        const filter = page.getByRole("button", { name: "Environment: All environments" });
+        await tabOnto(filter);
+        await page.keyboard.press("Enter");
+        await expect(page.getByRole("listbox")).toBeVisible();
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(/\?environment=prod$/);
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeFocused();
+        await expect(page.getByRole("link", { name: DEV_JOB })).toHaveCount(0);
+
+        await page.keyboard.press("Tab");
+        await expect(page.getByRole("searchbox", { name: "Search jobs" })).toBeFocused();
+        await page.keyboard.type("daily");
+        await expect(page).toHaveURL(/q=daily/);
+
+        const cancel = page.getByRole("button", { name: `Cancel the run of ${JOB}` });
+        await tabOnto(cancel);
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(cancel).toBeFocused();
+
+        const pause = page.getByRole("button", { name: `Pause the schedule of ${JOB}` });
+        await tabOnto(pause);
+        await page.keyboard.press("Enter");
+        const asked = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await asked.getByRole("button", { name: "Pause schedule" }).press("Enter");
+        await expect(page.getByText(`Paused the schedule of ${JOB}.`)).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: `Resume the schedule of ${JOB}` }),
+        ).toBeFocused();
+
+        const jobLink = page
+          .getByRole("region", { name: "Every job listed" })
+          .getByRole("link", { name: JOB });
+        await tabBackOnto(jobLink);
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+        await expect(page.getByRole("heading", { level: 1, name: JOB })).toBeVisible();
+      });
+
+      test("a control's press does not open its row", async ({ page }) => {
+        await openList(page);
+        const run = page.getByRole("button", { name: `Run ${JOB}` });
+        await run.click();
+        await expect(page.getByText(`Started a run of ${JOB}.`)).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`${LIST}$`));
+        await expect(run).toBeFocused();
+        // The run it queued shows under Running now once the list is read again.
+        await expect(
+          page
+            .getByRole("region", { name: "Runs running now" })
+            .getByText("Queued", { exact: true }),
+        ).toHaveCount(2);
+      });
+
+      test("no horizontal scroll at 320 px, each list scrolling in its own region", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+        for (const region of ["Runs running now", "Runs that failed", "Every job listed"]) {
+          await scrollsInItself(page.getByRole("region", { name: region }));
+        }
+        expect(await violations(page), "the list at 320 px").toEqual([]);
+      });
+
+      test("the filter is remembered across a reload; Back and Forward keep the filter and the search", async ({
+        page,
+      }) => {
+        await openList(page);
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: DEV }).click();
+        await expect(page).toHaveURL(/\?environment=dev$/);
+        await page.getByRole("searchbox", { name: "Search jobs" }).fill("orders");
+        await expect(page).toHaveURL(/\?environment=dev&q=orders$/);
+
+        await page.goto(LIST);
+        await expect(page.getByRole("button", { name: "Environment: dev" })).toBeVisible();
+        await expect(page.getByRole("link", { name: JOB })).toHaveCount(0);
+        await expect(page.getByRole("link", { name: DEV_JOB }).first()).toBeVisible();
+
+        await page.goto(`${LIST}?environment=prod&q=daily`);
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeVisible();
+        await page
+          .getByRole("region", { name: "Every job listed" })
+          .getByRole("link", { name: JOB })
+          .click();
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+        await page.goBack();
+        await expect(page).toHaveURL(/\?environment=prod&q=daily$/);
+        await expect(page.getByRole("searchbox", { name: "Search jobs" })).toHaveValue("daily");
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeVisible();
+        await page.goForward();
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+      });
+
+      test("the list is not read while the tab is hidden, and is read at once when shown", async ({
+        page,
+      }) => {
+        let reads = 0;
+        page.on("request", (request) => {
+          if (new URL(request.url()).pathname === "/api/v1/runs") {
+            reads += 1;
+          }
+        });
+        await page.clock.install();
+        await openList(page);
+        await expect.poll(() => reads).toBe(1);
+
+        await showAs(page, "hidden");
+        await page.clock.runFor(120_000);
+        expect(reads, "no read while hidden").toBe(1);
+
+        await showAs(page, "visible");
+        await expect.poll(() => reads, { timeout: 2_000 }).toBe(2);
+      });
+
+      test("the list asks only for stubbed routes and logs no console error", async ({ page }) => {
+        const errors = consoleErrors(page);
+        const requests: string[] = [];
+        page.on("request", (request) => {
+          requests.push(new URL(request.url()).pathname);
+        });
+
+        await openList(page);
+        await expect(page.getByText(ADHOC_MESSAGE)).toBeVisible();
+        await expect(page.getByRole("link", { name: ADHOC_REPOSITORY, exact: true })).toBeVisible();
+        await page.getByRole("button", { name: `Run ${JOB}` }).click();
+        await expect(page.getByText(`Started a run of ${JOB}.`)).toBeVisible();
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: DEV }).click();
+        await expect(page.getByRole("link", { name: JOB })).toHaveCount(0);
+        await page.getByRole("link", { name: `Logs of the run of ${ADHOC_REPOSITORY}` }).click();
+        await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
+
+        const api = requests.filter((path) => path.startsWith("/api/"));
+        expect(api).toContain("/api/v1/runs/failed");
+        expect(api.filter((path) => !JOBS_STUBBED.includes(path))).toEqual([]);
+        expect(errors.filter((line) => !line.includes("404"))).toEqual([]);
+      });
+    });
+
+    test.describe(`the job, run and task pages, ${theme}, ${density}`, () => {
+      let sent: string[] = [];
+
+      test.beforeEach(async ({ page }) => {
+        sent = await stubJobs(page);
+        await page.addInitScript(
+          ([key, value]) => {
+            if (window.localStorage.getItem(key ?? "") === null) {
+              window.localStorage.setItem(key ?? "", value ?? "");
+            }
+          },
+          [KEY, JSON.stringify({ theme, density, language: "en" })],
+        );
+      });
+
+      test("axe finds nothing on the job page, a run, a task with its log, Show source and the Cancel and Pause dialogs", async ({
+        page,
+      }) => {
+        await openJob(page);
+        await expect(page.getByRole("button", { name: "Cancel run" })).toBeVisible();
+        expect(await violations(page), "the job page").toEqual([]);
+
+        await page.getByRole("button", { name: "Pause schedule" }).click();
+        const pause = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await expect(pause).toBeVisible();
+        expect(await violations(page), "the Pause dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(pause).toBeHidden();
+
+        await page.getByRole("button", { name: "Cancel run" }).click();
+        const cancel = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(cancel).toBeVisible();
+        expect(await violations(page), "the Cancel dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(cancel).toBeHidden();
+
+        await openRun(page, FAILED_ID);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        expect(await violations(page), "a failed run").toEqual([]);
+        await whyLine(page, BLOCKED).getByRole("button", { name: "Show source" }).click();
+        const source = page.getByRole("dialog", { name: "Where fact_sales is defined" });
+        await expect(source.getByText("models/gold/fact_sales.sql")).toBeVisible();
+        expect(await violations(page), "the Show source dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(source).toBeHidden();
+
+        await openTask(page);
+        await expect(page.getByRole("region", { name: `Attempts of ${TIMED_OUT}` })).toBeVisible();
+        expect(await violations(page), "a task with its log").toEqual([]);
+
+        await page.goto(runPage(MISSING_ID));
+        await expect(page.getByRole("alert")).toContainText(`Run ${MISSING_ID} does not exist`);
+        expect(await violations(page), "a run that is not there").toEqual([]);
+      });
+
+      test("every link is drawn in the accent, and the selected run's row in the accent's tint", async ({
+        page,
+      }) => {
+        await openJob(page);
+        const selected = page
+          .getByRole("region", { name: `Runs of ${JOB}` })
+          .locator("tr", { has: page.locator('a.row-name[aria-current="true"]') });
+        await expect(selected).toHaveCount(1);
+        const tint = await tokenColour(page, "--color-accent-bg");
+        await expect(selected).toHaveCSS("background-color", tint);
+        await expect(page.getByRole("link", { name: /open in repository/ })).toBeVisible();
+        await expectAccentLinks(page, "the job page");
+
+        await openRun(page, FAILED_ID);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        await expect(page.locator("a.jobs-code").first()).toBeVisible();
+        await expectAccentLinks(page, "a failed run");
+
+        await openTask(page);
+        await expectAccentLinks(page, "a task");
+      });
+
+      test("the breadcrumbs lead from a task back to its run, its job and Jobs", async ({
+        page,
+      }) => {
+        await openJob(page);
+        const trail = page.getByRole("navigation", { name: "Breadcrumb" });
+        await expect(trail.getByRole("link")).toHaveText(["Jobs", ENV]);
+
+        await openTask(page);
+        await expect(trail.getByRole("link")).toHaveText(["Jobs", ENV, JOB, /^Run of /]);
+        await expect(trail).toContainText(TIMED_OUT);
+        await trail.getByRole("link", { name: /^Run of / }).click();
+        await expect(page).toHaveURL(new RegExp(`${runPage(FAILED_ID)}$`));
+        await expect(trail.getByRole("link")).toHaveText(["Jobs", ENV, JOB]);
+        await trail.getByRole("link", { name: JOB }).click();
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+        await expect(page.getByRole("heading", { level: 1, name: JOB })).toBeVisible();
+        await trail.getByRole("link", { name: "Jobs" }).click();
+        await expect(page).toHaveURL(/\/jobs$/);
+      });
+
+      test("Run now, Pause and Resume schedule, Cancel, Resume, Log, Show source and Show rows work by keyboard alone", async ({
+        page,
+      }) => {
+        // Run now: the new run is selected, the note says so, the focus stays on the button.
+        await openJob(page);
+        const runNow = page.getByRole("button", { name: "Run now" });
+        await tabOnto(runNow);
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`\\?run=${STARTED_ID}$`));
+        await expect(
+          page.getByRole("status").filter({ hasText: `Started a run of ${JOB}.` }),
+        ).toBeVisible();
+        await expect(runNow).toBeFocused();
+
+        // Pause asks first; Escape returns the focus to the button.
+        const pause = page.getByRole("button", { name: "Pause schedule" });
+        await tabOnto(pause);
+        await page.keyboard.press("Enter");
+        const ask = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await expect(ask).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(ask).toBeHidden();
+        await expect(pause).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(ask).toBeVisible();
+        await tabOnto(ask.getByRole("button", { name: "Pause schedule" }));
+        await page.keyboard.press("Enter");
+        await expect(ask).toBeHidden();
+        const resume = page.getByRole("button", { name: "Resume schedule" });
+        await expect(resume).toBeFocused();
+        await expect(page.getByText(/· paused$/)).toBeVisible();
+        await page.keyboard.press("Enter");
+        await expect(pause).toBeFocused();
+        await expect(page.getByText(/next run/)).toBeVisible();
+        expect(sent).toEqual([
+          `POST /api/v1/environments/${ENV}/jobs/${JOB}/runs`,
+          `POST /api/v1/environments/${ENV}/jobs/${JOB}/pause`,
+          `POST /api/v1/environments/${ENV}/jobs/${JOB}/resume`,
+        ]);
+
+        // Cancel asks first; Escape returns the focus; once cancelled the focus is on the run.
+        await openRun(page, RUNNING_ID);
+        const cancel = page.getByRole("button", { name: "Cancel run" });
+        await tabOnto(cancel);
+        await page.keyboard.press("Enter");
+        const question = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(question).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(cancel).toBeFocused();
+        await page.keyboard.press("Enter");
+        await tabOnto(question.getByRole("button", { name: "Cancel run" }));
+        await page.keyboard.press("Enter");
+        await expect(question).toBeHidden();
+        await expect(page.locator(".jobs-facts-list")).toContainText("Cancelled", {
+          timeout: 10_000,
+        });
+        expect(await focusOnPage(page), "the focus is never on <body>").toBe(true);
+
+        // Resume opens the new run, its heading holding the focus.
+        await openRun(page, FAILED_ID);
+        await tabOnto(page.getByRole("button", { name: "Resume" }));
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`${runPage(RESUMED_ID)}$`));
+        await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
+
+        // Show source opens the file; Escape returns the focus to the button.
+        await openRun(page, FAILED_ID);
+        const source = whyLine(page, BLOCKED).getByRole("button", { name: "Show source" });
+        await tabOnto(source);
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", { name: "Where fact_sales is defined" });
+        await expect(dialog.getByText("models/gold/fact_sales.sql")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(source).toBeFocused();
+
+        // Log opens the task's page.
+        await tabOnto(whyLine(page, TIMED_OUT).getByRole("link", { name: "Log" }));
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`${taskPage(FAILED_ID, TIMED_OUT)}$`));
+        await expect(page.getByText("The log is complete.")).toBeVisible({ timeout: 10_000 });
+        expect(await focusOnPage(page), "the focus is never on <body>").toBe(true);
+
+        // Show rows opens the check's rows on the Queries screen.
+        await openRun(page, FAILED_ID);
+        await tabOnto(page.getByRole("button", { name: `Show rows of ${FAILED_CHECK}` }));
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`/queries/${ENV}/runs/${ROWS_QUERY_ID}$`));
+      });
+
+      test("no horizontal scroll at 320 px, the tasks and the attempts scrolling in their own region", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await openJob(page, `?run=${FAILED_ID}`);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        expect(await sidewaysOverflow(page), "the job page").toBeLessThanOrEqual(0);
+        await scrollsInItself(page.getByRole("region", { name: "Tasks of the run" }));
+
+        await openRun(page, FAILED_ID);
+        expect(await sidewaysOverflow(page), "a run").toBeLessThanOrEqual(0);
+        await scrollsInItself(page.getByRole("region", { name: "Tasks of the run" }));
+        expect(await violations(page), "a run at 320 px").toEqual([]);
+
+        await openTask(page);
+        expect(await sidewaysOverflow(page), "a task").toBeLessThanOrEqual(0);
+        await scrollsInItself(page.getByRole("region", { name: `Attempts of ${TIMED_OUT}` }));
+        // The log wraps instead.
+        const log = page.getByRole("region", { name: `Log of ${TIMED_OUT}` });
+        expect(await log.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+        expect(await violations(page), "a task at 320 px").toEqual([]);
+      });
+
+      test("the log grows over three polls, then is complete and read no more", async ({
+        page,
+      }) => {
+        const offsets: string[] = [];
+        page.on("request", (request) => {
+          const url = new URL(request.url());
+          if (url.pathname.endsWith(`/tasks/${TIMED_OUT}/log`)) {
+            offsets.push(url.searchParams.get("offset") ?? "");
+          }
+        });
+        await page.goto(taskPage(FAILED_ID, TIMED_OUT));
+        const log = page.getByRole("region", { name: `Log of ${TIMED_OUT}` });
+        await expect(log).toContainText(LOG_PIECES[0]);
+        await expect(page.getByText("Following the log…")).toBeVisible();
+        await expect(log).toContainText(LOG_PIECES[1]);
+        await expect(log).toContainText(LOG_PIECES[2]);
+        await expect(page.getByText("The log is complete.")).toBeVisible();
+        expect(await log.textContent()).toBe(LOG_PIECES.join(""));
+        await expect(page.getByRole("button", { name: "Save log" })).toBeVisible();
+        await page.waitForTimeout(2_500);
+        expect(offsets).toEqual([
+          "0",
+          String(LOG_PIECES[0].length),
+          String(LOG_PIECES[0].length + LOG_PIECES[1].length),
+        ]);
+      });
+
+      test("a running run is not read while the tab is hidden, and is read at once when shown", async ({
+        page,
+      }) => {
+        let reads = 0;
+        page.on("request", (request) => {
+          if (new URL(request.url()).pathname.endsWith(`/runs/${RUNNING_ID}`)) {
+            reads += 1;
+          }
+        });
+        await openRun(page, RUNNING_ID);
+        await expect.poll(() => reads, { timeout: 5_000 }).toBeGreaterThan(1);
+
+        await showAs(page, "hidden");
+        const hidden = reads;
+        await page.waitForTimeout(5_000);
+        expect(reads, "no read while hidden").toBe(hidden);
+
+        await showAs(page, "visible");
+        await expect.poll(() => reads, { timeout: 1_000 }).toBe(hidden + 1);
+      });
+
+      test("the pages ask only for stubbed routes and log no console error", async ({ page }) => {
+        const errors = consoleErrors(page);
+        const requests: string[] = [];
+        page.on("request", (request) => {
+          requests.push(new URL(request.url()).pathname);
+        });
+
+        await openJob(page);
+        await page.getByRole("button", { name: "Run now" }).click();
+        await expect(page).toHaveURL(new RegExp(`\\?run=${STARTED_ID}$`));
+        await page.getByRole("button", { name: "Pause schedule" }).click();
+        await page
+          .getByRole("dialog", { name: `Pause the schedule of ${JOB}?` })
+          .getByRole("button", { name: "Pause schedule" })
+          .click();
+        await page.getByRole("button", { name: "Resume schedule" }).click();
+        await expect(page.getByRole("button", { name: "Pause schedule" })).toBeVisible();
+
+        await openRun(page, FAILED_ID);
+        await whyLine(page, BLOCKED).getByRole("button", { name: "Show source" }).click();
+        await expect(
+          page.getByRole("dialog").getByText("models/gold/fact_sales.sql"),
+        ).toBeVisible();
+        await page.keyboard.press("Escape");
+        await page.getByRole("link", { name: "Logs" }).click();
+        await expect(page.getByText("The log is complete.")).toBeVisible({ timeout: 10_000 });
+        await page.goto(runPage(MISSING_ID));
+        await expect(page.getByRole("alert")).toBeVisible();
+
+        const api = requests.filter((path) => path.startsWith("/api/"));
+        expect(api).toContain(`/api/v1/environments/${ENV}/jobs/${JOB}`);
+        expect(api.filter((path) => !JOBS_STUBBED.includes(path))).toEqual([]);
+        // A 404 the page shows as a sentence is the browser's log line, not the page's error.
+        expect(errors.filter((line) => !line.includes("404"))).toEqual([]);
+      });
+
+      test("Home's failed run opens the run's page", async ({ page }) => {
+        await page.goto("/");
+        const attention = page.getByRole("region", { name: "Needs your attention" });
+        await attention.getByRole("link", { name: new RegExp(JOB) }).click();
+        await expect(page).toHaveURL(new RegExp(`${runPage(FAILED_ID)}$`));
+        await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+      });
+    });
+  }
+}

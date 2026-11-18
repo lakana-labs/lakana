@@ -615,6 +615,10 @@ _DEPLOY_CHECKS = {
         "the narrowing",
     ),
     "lakana-core/src/lakana_core/ci_oidc/scope.py:ci_refusal": (1, "audits a refusal, no check"),
+    "lakana-core/src/lakana_core/runs/operator.py:operator_rights_each": (
+        1,
+        "a question, no check; the deploy words are never offered to a CI token (ci_scope)",
+    ),
     "lakana-core/src/lakana_core/grants/service.py:GrantService.may_deploy_somewhere": (
         1,
         "a question, no check; a CI token sees only its own scope",

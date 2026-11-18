@@ -5,83 +5,12 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import {
-  Button,
-  Label,
-  ListBox,
-  ListBoxItem,
-  Popover,
-  Select,
-  SelectValue,
-} from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { TABLE_SORTS } from "../api";
 import type { SortOrder } from "../api";
+import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { type CatalogView, defaultOrder } from "./view";
-
-/** One choice of a menu. */
-interface Choice<T extends string> {
-  /** What the choice sets. */
-  readonly id: T;
-  /** The words it is written as. */
-  readonly text: string;
-}
-
-/**
- * One menu: a label, the chosen word on a button and the choices in a popover.
- *
- * @template T - The ids of the choices.
- * @param props - The label, the choices and the chosen one.
- * @param props.label - The menu's name.
- * @param props.choices - The choices, in order.
- * @param props.selected - The id of the chosen one.
- * @param props.onChoose - Called with the id of a choice.
- * @returns The menu.
- */
-function Menu<T extends string>({
-  label,
-  choices,
-  selected,
-  onChoose,
-}: {
-  readonly label: string;
-  readonly choices: readonly Choice<T>[];
-  readonly selected: T;
-  readonly onChoose: (id: T) => void;
-}): JSX.Element {
-  return (
-    <Select
-      className="sort-select"
-      value={selected}
-      onChange={(key) => {
-        // The only keys are those of the choices.
-        onChoose(String(key) as T);
-      }}
-    >
-      <Label>{label}</Label>
-      <Button className="button">
-        <SelectValue />
-        <span aria-hidden="true">▾</span>
-      </Button>
-      <Popover className="float" placement="bottom end">
-        <ListBox className="menu">
-          {choices.map((choice) => (
-            <ListBoxItem
-              key={choice.id}
-              id={choice.id}
-              className="menu-item"
-              textValue={choice.text}
-            >
-              <span className="menu-check" aria-hidden="true" />
-              {choice.text}
-            </ListBoxItem>
-          ))}
-        </ListBox>
-      </Popover>
-    </Select>
-  );
-}
 
 /** Properties of {@link SortControl}. */
 export interface SortControlProps {
@@ -109,7 +38,7 @@ export function SortControl({ view, onChange }: SortControlProps): JSX.Element {
   const orders: readonly SortOrder[] = first === "asc" ? ["asc", "desc"] : ["desc", "asc"];
   return (
     <div className="sort-control">
-      <Menu
+      <ChoiceMenu
         label={t("catalog.sortBy")}
         choices={TABLE_SORTS.map((sort) => ({ id: sort, text: t(`catalog.columns.${sort}`) }))}
         selected={view.sort}
@@ -117,7 +46,7 @@ export function SortControl({ view, onChange }: SortControlProps): JSX.Element {
           onChange({ ...view, sort, order: defaultOrder(sort) });
         }}
       />
-      <Menu
+      <ChoiceMenu
         label={t("catalog.order")}
         choices={orders.map((order) => ({
           id: order,

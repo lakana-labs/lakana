@@ -12,6 +12,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    JsonValue,
     SecretStr,
     StrictBool,
     field_validator,
@@ -2343,16 +2344,26 @@ class TokenOut(BaseModel):
         The public lookup key.
     name
         The label given at issuance.
+    owner
+        The name of the principal the token signs in as.
+    created_at
+        When the token was issued.
     last_used_at
         When this PAT last successfully authenticated a request, or `None`
         if never.
+    expires_at
+        When the token stops working, or `None` if it never expires.
+    revoked_at
+        When the token was revoked, or `None` while it is not.
     """
 
     key_id: str
     name: str
+    owner: str
+    created_at: datetime
     last_used_at: datetime | None = None
-
-    model_config = {"from_attributes": True}
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
 
 
 class TaskTokenMintIn(BaseModel):
@@ -2401,6 +2412,67 @@ class TaskTokenMintOut(BaseModel):
 
     key_id: str
     token: str
+
+
+class TaskTokenOut(BaseModel):
+    """One listed task token: what it is for, never its value.
+
+    Parameters
+    ----------
+    key_id
+        The public lookup key, which revokes the token.
+    principal
+        The name of the principal the token signs in as.
+    environment
+        The one environment the token acts in.
+    asset_scope
+        The asset patterns the token may act on; for a token bound to a task, that task's
+        asset and its declared inputs.
+    issued_at
+        When the token was minted.
+    expires_at
+        When the token stops working.
+    run_id
+        The run whose task the token was minted for, or `None` for a token minted over REST.
+    job
+        That run's job, or `None`.
+    asset
+        The asset of that task, or `None`.
+    """
+
+    key_id: str
+    principal: str
+    environment: str
+    asset_scope: list[str]
+    issued_at: datetime
+    expires_at: datetime
+    run_id: uuid.UUID | None = None
+    job: str | None = None
+    asset: str | None = None
+
+
+class ConfigurationSettingOut(BaseModel):
+    """One setting of the running server, never carrying a secret's value.
+
+    Parameters
+    ----------
+    name
+        The environment variable that sets it.
+    value
+        The value in its JSON form; always `null` for a secret.
+    secret
+        Whether the setting holds a credential.
+    has_value
+        Whether the setting holds a value; for a secret, "set" or "not set".
+    source
+        `set` when the environment or the `.env` file gave it, else `default`.
+    """
+
+    name: str
+    value: JsonValue = None
+    secret: bool
+    has_value: bool
+    source: Literal["set", "default"]
 
 
 class GrantCreate(BaseModel):
@@ -2515,6 +2587,48 @@ class GrantOut(BaseModel):
     granted_at: datetime
     note: str | None = None
     principal: SubjectPrincipalOut | None = None
+    group: str | None = None
+
+
+class HeldGrantOut(BaseModel):
+    """Response body for a grant the caller holds, directly or through a group.
+
+    It carries nothing about other people: no `granted_by` and no principal id.
+
+    Parameters
+    ----------
+    id
+        The grant's id.
+    role
+        The role template the principal holds, or `None` if a raw action was granted.
+    action
+        The raw action the principal holds, or `None` if a role was granted.
+    kind
+        Which tier of the securable hierarchy this grant applies to.
+    environment
+        The environment this grant applies to, if any.
+    namespace
+        The dot-joined namespace path this grant applies to, if any.
+    table
+        The table this grant applies to, if any.
+    granted_at
+        When this grant was created.
+    note
+        ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant of
+        `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`; `None` otherwise.
+    group
+        The name of the group the grant is held through, or `None` for a direct grant.
+    """
+
+    id: uuid.UUID
+    role: Role | None
+    action: Action | None
+    kind: SecurableKind
+    environment: str | None
+    namespace: str | None
+    table: str | None
+    granted_at: datetime
+    note: str | None = None
     group: str | None = None
 
 
@@ -3213,8 +3327,8 @@ class AttentionItemOut(BaseModel):
     kind
         `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal
         fired), `check_failed` (a check's newest result failed or errored), `query_failed`
-        (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two,
-        and failed runs, only for administrators.
+        (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two
+        only for administrators, failed runs for everyone who may read the environment.
     environment
         The environment's name; `null` for a recovery link and a worker.
     title
@@ -4442,6 +4556,9 @@ class DeployOut(BaseModel):
         The project version it made current.
     principal_id
         Who submitted it.
+    submitted_by
+        The name of the principal that submitted it, in the history and the single read; null
+        once that principal is deleted.
     created_at
         Queued at.
     started_at
@@ -4461,10 +4578,18 @@ class DeployOut(BaseModel):
         Why a queued deploy has not started: a stable `code`, one sentence in `message` that
         names the next step, and the numbers it uses; null when it is not waiting. Set on the
         single read (`GET .../deploys/{id}`) only, null in the history.
+    jobs
+        The sorted names of the jobs the deploy's project version defines. Set on the single
+        read only; null in the history, and for a run that made no project version (queued,
+        failed, a dry run).
     job_starts
         The jobs with `on_deploy: true` that a successful deploy started, by name, each with
         what came of its start; empty for a run that starts no job (a dry run, a rollback, a
         failed deploy, a deploy of the commit already current).
+    actions
+        The words of what the caller's rights allow on it: ``rollback``. Rights only, as for a
+        table's `actions`: offer a control only when the word is listed and the deploy's state
+        allows it (Roll back for a succeeded deploy); the server decides every request again.
     """
 
     id: uuid.UUID
@@ -4479,6 +4604,7 @@ class DeployOut(BaseModel):
     diff: dict[str, list[str]] | None
     project_version_id: uuid.UUID | None
     principal_id: uuid.UUID | None
+    submitted_by: str | None = None
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
@@ -4492,7 +4618,24 @@ class DeployOut(BaseModel):
             "`message`, and the numbers the sentence uses."
         ),
     )
+    jobs: list[str] | None = None
     job_starts: list[DeployJobStartOut] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+
+
+class DeployPageOut(BaseModel):
+    """One page of the deploys of every environment the caller may read, newest first.
+
+    Parameters
+    ----------
+    items
+        The deploys of the page; each names its `environment`, and `jobs` is `null`.
+    next_cursor
+        Pass back as `cursor` with the same `repository` for the next page; `null` on the last.
+    """
+
+    items: list[DeployOut]
+    next_cursor: str | None
 
 
 class DeploymentOut(BaseModel):
@@ -5077,6 +5220,16 @@ class RunOut(BaseModel):
     failed_tasks
         How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in
         listings.
+    total_tasks
+        How many tasks the run has; also in listings.
+    ended_tasks
+        How many of its tasks ended (``succeeded``, ``failed``, ``upstream_failed`` or
+        ``cancelled``); also in listings, so a list can show a running run's progress.
+    actions
+        The words of what the caller's rights allow on it: ``cancel``, ``resume``. Rights
+        only, as for a table's `actions`: offer a control only when the word is listed and the
+        run's state allows it (Cancel for a queued or running run, Resume for a finished one
+        that did not succeed); the server decides every request again.
     """
 
     id: uuid.UUID
@@ -5102,6 +5255,59 @@ class RunOut(BaseModel):
     missed: int = 0
     notifications: list[NotificationOut] = Field(default_factory=list)
     failed_tasks: int = 0
+    total_tasks: int = 0
+    ended_tasks: int = 0
+    actions: list[str] = Field(default_factory=list)
+
+
+class FailedRunOut(BaseModel):
+    """A job whose newest finished run failed, with its first cause.
+
+    Parameters
+    ----------
+    run
+        The run, without tasks, with `actions`.
+    task
+        The asset of its first failed task (the earliest to end, then the smallest asset); null
+        when the run failed without a failed task, whose `run.error_message` says why.
+    failure
+        That task's failure; null with `task`.
+    """
+
+    run: RunOut
+    task: str | None
+    failure: FailureOut | None
+
+
+class RunPageOut(BaseModel):
+    """One page of the runs of every environment the caller may read, newest first.
+
+    Parameters
+    ----------
+    items
+        The runs of the page, without tasks; each names its `environment`.
+    next_cursor
+        Pass back as `cursor` with the same filters for the next page; `null` on the last.
+    """
+
+    items: list[RunOut]
+    next_cursor: str | None
+
+
+class FailedRunsOut(BaseModel):
+    """The failed runs list: the rule of Home's failed runs, everywhere the caller may read.
+
+    Parameters
+    ----------
+    items
+        One row per job (or per repository, for its runs of no job) whose newest finished run
+        within seven days failed, newest end first.
+    truncated
+        Whether more rows were left out; narrow with `environment`.
+    """
+
+    items: list[FailedRunOut]
+    truncated: bool
 
 
 class JobRunRequest(BaseModel):
@@ -5223,6 +5429,26 @@ TriggerOut = Annotated[
 """One way a job starts. A client must ignore a ``kind`` it does not know: kinds may be added."""
 
 
+class NotifyOut(BaseModel):
+    """Where a job reports, without the address.
+
+    Parameters
+    ----------
+    format
+        ``json``, ``slack`` or ``teams``.
+    events
+        The events the job receives: ``failed``, ``recovered``, ``columns_changed``, ``health``.
+    secret
+        The name of the environment secret that holds the webhook URL. Present only for a caller
+        who holds `DEPLOY` on the environment (and is no CI token); absent, not null, for anyone
+        else. The URL itself never leaves the server.
+    """
+
+    format: Literal["json", "slack", "teams"]
+    events: list[str]
+    secret: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
 class JobOut(BaseModel):
     """One job and the platform's state for it.
 
@@ -5272,6 +5498,18 @@ class JobOut(BaseModel):
         How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule
         in this environment, a ``deploy`` trigger when it starts after each deploy here, and the
         ``on_demand`` trigger every job has, last. Kinds may be added.
+    actions
+        The words of what the caller's rights allow on it: ``run``, ``pause``, ``resume``.
+        Rights only, as for a table's `actions`: offer a control only when the word is listed
+        and the job's state allows it (Pause for an unpaused job with a schedule, Resume for a
+        paused one); the server decides every request again.
+    commit_sha
+        The commit of the project version deployed in the environment.
+    source_url
+        The link to ``lakana.yaml`` at that commit on the repository's git host; null for a
+        repository without a known host.
+    notify
+        Where the job reports; null for a job without a usable `notify:`.
     """
 
     name: str
@@ -5293,6 +5531,10 @@ class JobOut(BaseModel):
     last_run_trigger: str | None
     last_run_at: datetime | None
     triggers: list[TriggerOut]
+    actions: list[str] = Field(default_factory=list)
+    commit_sha: str
+    source_url: str | None
+    notify: NotifyOut | None = None
 
 
 class TaskAttemptOut(BaseModel):

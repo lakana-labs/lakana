@@ -1,6 +1,7 @@
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 const AT = "2026-11-10T08:00:00Z";
@@ -34,6 +35,8 @@ afterEach(() => {
 });
 
 describe("Attention", () => {
+  beforeAll(preloadJobsScreen);
+
   it("says Nothing needs your attention when the list is empty", async () => {
     renderShell("/");
 
@@ -41,9 +44,9 @@ describe("Attention", () => {
   });
 
   it.each([
-    ["daily_sales", "Run failed", "prod", "/jobs"],
+    ["daily_sales", "Run failed", "prod", "/jobs/prod/runs/run-1"],
     ["gold.station_ranking", "Late", "prod", "/catalog/prod/gold/station_ranking"],
-    ["not_null_station_id", "Check failed", "dev", "/jobs"],
+    ["not_null_station_id", "Check failed", "dev", "/jobs/dev/runs/run-2"],
     ["Query 3f9c2a1b", "Query failed", "dev", "/queries/dev/runs/3f9c2a1b-q"],
     ["sam", "Recovery link open", "Instance", "/settings/sign-in/recovery-links"],
     ["worker-2.internal", "Worker down", "Instance", "/settings/status"],

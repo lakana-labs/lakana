@@ -173,6 +173,29 @@ Answer fields: `PermissionsOut`
 | `permissions` | list of `PermissionOut` | yes |  |
 | `note` | text or null | yes |  |
 
+## `GET /api/v1/principals/{name}/grants`
+
+List the grants a principal holds
+
+The live grants naming the principal and those of every group it belongs to now, newest first, each with the group's name (`null` for a direct grant). A caller may ask about itself with a session or a personal token, with no right at all; about anyone else it needs the `ADMIN` role on the instance, and a task or CI token may not ask even about its own principal. The refusal comes before any lookup, so it never says whether the principal exists; an administrator gets 404 for one that does not. It carries nothing about other people: no `granted_by`, no principal id.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `name` | path | yes | text | The principal asked about. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `HeldGrantOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
 ## `GET /api/v1/principals/{name}/sessions`
 
 List a person's open browser sessions

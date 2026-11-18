@@ -401,9 +401,10 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   `reason: csrf` or `token_only_route`, rate-limited like any failed sign-in. Double-submit
   would not hold: on loopback, other ports are the same site and receive the cookie. Together
   with `SameSite=Strict` and the guard's Origin rule this is defence in depth.
-- **Token-only routes.** `POST /api/v1/task-tokens` and `DELETE /api/v1/task-tokens/{key_id}`
-  refuse the cookie (403 `TokenOnlyRoute`, `deps.TOKEN_ONLY_ROUTES`, matched on the route
-  template): minting a task token from a browser would put a token in the interface.
+- **Token-only routes.** `POST /api/v1/task-tokens` refuses the cookie (403 `TokenOnlyRoute`,
+  `deps.TOKEN_ONLY_ROUTES`, matched on the route template): minting a task token from a browser
+  would put a token in the interface. `DELETE /api/v1/task-tokens/{key_id}` is no longer in the
+  set (M7 part 7): revoking puts no token in a browser.
 - **Background polls do not keep a session alive.** A request with `X-Lakana-Background: 1`
   never extends the idle timeout; `last_seen_at` is written at most once a minute otherwise.
 - **Ending other people's sessions and changing the session lengths** need the ADMIN role and,
@@ -587,7 +588,7 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   the request's session was read (the app clock in the server), so a test that moves
   `app.state.clock` ages a touch for every route alike:
   - API tokens and the accounts they act for: `POST /api/v1/principals/{name}/tokens` (personal
-    and service-account tokens), `POST /api/v1/principals` (a new service account is the first
+    and service-account tokens, one's own included), `POST /api/v1/principals` (a new service account is the first
     step to a token for it), `DELETE /api/v1/principals/{name}` (deactivating a person);
   - rights: `POST /api/v1/grants`, `DELETE /api/v1/grants/{grant_id}`,
     `PUT|DELETE /api/v1/groups/{name}/members/{principal_name}`, `DELETE /api/v1/groups/{name}`
@@ -639,8 +640,9 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   without `purge` is a data operation undone with restore and asks for no touch; with `purge` it
   is a drop of every table and asks (#619). The
   passkey registration answer needs no touch of its own: it answers the challenge of the step-up
-  options route. Task tokens are absent: their routes are token-only
-  (`TOKEN_ONLY_ROUTES`) and a session never reaches them. The parity test's session has a fresh
+  options route. Minting a task token is absent: the route is token-only
+  (`TOKEN_ONLY_ROUTES`) and a session never reaches it; revoking one is in `NO_STEP_UP` (it
+  removes access). The parity test's session has a fresh
   touch, so session and token still answer alike there.
 - **Removal** needs step-up; nobody removes their own last passkey that works at this address
   (one of an earlier public address does not count; 409: add another, or
@@ -1159,8 +1161,12 @@ without `detail`: it is asked with `permits(MANAGE_ENVIRONMENT)`, which applies 
 
 | List | Who | Kinds and the right asked per row |
 |---|---|---|
-| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin` for a person's own token or session; a task or CI token is refused here and is never `admin`, #542) | `run_failed` (the newest finished run of each environment, repository and job, when it failed within 7 days), `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
-| Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now (one `permits_each` for all of them: a fixed number of statements per environment, however many tables; pin: `test_a_readers_attention_costs_the_same_for_five_tables_or_forty`); a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No runs, links or workers. |
+| Needs your attention | administrator (`holds_instance_admin`: `ADMIN` on the instance, as `whoami`'s `admin` for a person's own token or session; a task or CI token is refused here and is never `admin`, #542) | `run_failed` as for anyone else, which here is every environment, `table_late` (every table whose newest freshness row, `newest_freshness`, fired; candidates are the newest 200 tables whose newest freshness row is fired, ranked in one statement, since the sweep records a row only on a change), `check_failed` (the newest result of each check within 7 days, when failed or errored), `recovery_link_open` (`open_links`, as `LinkService.list_open`), `worker_lost` (heartbeat older than the lease by `db_now`, not replaced by a restart on its host: `replaced_by_restart`, shared with the instance status), `query_failed` (their own, as for anyone else). The `ADMIN` role holds every right these need, so nothing more is asked. |
+| Needs your attention | anyone (every caller who is not an administrator; the administrator's row above lists the same `run_failed`) | `run_failed`: the newest finished run of each environment, repository and job (a run outside a job ranks with its repository's), when it failed within 7 days, so a later success or cancelled run hides an earlier failure; only in the environments where `READ_ENVIRONMENT` holds (everyone who may read the environment, as the runs list; `RUN` alone lists nothing), asked in one `permits_each` batch over the live environments (`lakana_core.runs.failed`: `run_environments`, `failed_runs`, shared with `GET /api/v1/runs/failed`, so the two never disagree; pins: `test_a_reader_of_the_environment_sees_its_failed_jobs`, `test_home_and_the_failed_list_agree_for_a_reader_of_one_environment`, `test_run_alone_does_not_list_the_environments_failures`, `test_the_environments_are_asked_in_one_batch`). The title is the job, or the repository for a run of no job. |
+| Failed runs (`GET /api/v1/runs/failed`, not a Home list: any caller, a task or CI token too, within its scope) | anyone | The same `failed_runs` rows as Home's `run_failed`, newest end first, at most `limit` (1 to 200) with `truncated`; an environment the caller may not read is left out, never a `403` or `404`. With `environment`, `authorize(READ_ENVIRONMENT)` first, as `list_runs_page` (`403` audited, `404` for an unknown environment). Each row adds the run's first failed task (`failed`, earliest `finished_at`, then asset) and its `failure` (codes and sentences only, `unknown` kept), or null for a run-level failure whose `run.error_message` is the why, and `run.actions` from one `permits_each` over the page's environments (pins: `test_get_failed_runs_answers_items_with_task_failure_and_actions`, `test_get_failed_runs_without_any_right_is_an_empty_list`, `test_failed_page_with_an_environment_you_may_not_read_is_refused`). |
+| Runs of every environment (`GET /api/v1/runs`; the per-environment `GET /api/v1/environments/{env}/runs` needs `READ_ENVIRONMENT` as well) | anyone | `list_all_runs_page` without `environment` reads the live environments once through `run_environments`, which asks `READ_ENVIRONMENT` on each in one `permits_each` batch, then pages the runs of those environments in one statement, `created_at desc, id desc`, with the `all-runs` cursor kind (a cursor of the per-environment list is a `422`, and the reverse). An environment the caller may not read is left out, so without `environment` it is never a `403` or `404`; with `environment` it is `list_runs_page`: `authorize(READ_ENVIRONMENT)` first (`403` audited, `404` for an unknown environment). |
+| Deploys of every environment (`GET /api/v1/deploys`; the per-environment `GET /api/v1/environments/{env}/deploys` needs `READ_ENVIRONMENT` as well) | anyone | `DeployService.list_all_deploys_page` without `environment` reads the live environments once and asks `READ_ENVIRONMENT` on each in one `permits_each` batch (`run_environments`, shared with the runs lists), then pages the deploys of those environments in one statement, `created_at desc, id desc`, with the `all-deploys` cursor kind (a cursor of the per-environment list is a `422`, and the reverse). An environment the caller may not read is left out, so without `environment` it is never a `403` or `404`; with `environment` it is `history_page`: `authorize(READ_ENVIRONMENT)` first (`403` audited, `404` for an unknown environment). Each item's `actions` come from one `operator_rights_each` batch over the page's environments; `jobs` is null in the listing (pins: `test_all_deploys_skips_environments_you_may_not_read`, `test_all_deploys_asks_the_environments_in_one_batch`, `test_get_all_deploys_without_any_right_is_an_empty_page`). |
+| Needs your attention | anyone else | `table_late` and `check_failed` only among the tables they read within 7 days (`table_reads`) or opened (`recent_opens`), each kept while `READ_TABLE` holds on it now (one `permits_each` for all of them: a fixed number of statements per environment, however many tables; pin: `test_a_readers_attention_costs_the_same_for_five_tables_or_forty`); a check also needs `READ_ENVIRONMENT` (the check list's right) and is left out when it is a generated reference check whose target they may not read (`ReferenceCheckFilter`, as `check list`). `query_failed`: their own failed ad-hoc queries within 7 days (`task_run_id IS NULL`; a pipeline's query is its run's failure), only where they still hold `SUBMIT_QUERY`, as the query's own page shows it only to its submitter. No links or workers. |
 | Your work | a caller with `may_deploy_somewhere` | The repositories they created (`created_by`) or deployed (`deploy_runs.principal_id`); environments and jobs (`JobService.list`, asked only after `permits(READ_ENVIRONMENT)`) only where they may read the environment; nothing without a readable environment (the repository listing's right). Anyone else gets two empty lists. |
 
 A row's `title` is a name: a job (the repository for a run of no job), a dotted table name, a check's
@@ -1255,7 +1261,7 @@ rules, not rules of its own.
 | Start by hand or through the API (`POST .../jobs/{job}/runs`) | `RUN` on the environment, checked first | The same call as `lakana run` (`RunService.prepare_start`): the run principal is the bound service account, or in a protected environment without one the refusal of `lakana run`; in an unprotected one the caller. A paused job can be started. `trigger` is `api` when the caller is a service account and `manual` otherwise, set by core from the principal, never taken from the request. A task token never reaches the route (`RUN` is not in `TASK_TOKEN_ACTIONS`). |
 | Test a job's webhook (`.../jobs/{job}/notify-test`) | `DEPLOY` on the environment | Queues one delivery of the event `test` (no run). Audited in the same transaction (`NOTIFICATION_TESTED`; `detail`: `repository`, `job`, `environment`, `delivery_id`; never the URL or the secret). Reading it back (`GET .../notifications/{id}`) needs `DEPLOY`, `RUN` or `READ_ENVIRONMENT`: a test has no run, so the run-read rule alone would lock out the deployer who started it, and its `last_result` is one of the fixed reasons. A holder of the deploy right can therefore read any delivery in the environment; each holds only fixed reasons. The run view's `notifications` follow the run-read rule. |
 | Pause and resume (`.../pause`, `.../resume`) | `DEPLOY` on the environment | `DEPLOY` is environment-scoped, not per repository: a holder can pause and resume the jobs of every repository there. Audited in the same transaction (`JOB_PAUSED`, `JOB_RESUMED`; `detail`: `repository`, `job`); pausing a paused job or resuming one that is not paused changes nothing and writes no event. A job without a schedule refuses a pause. |
-| List and show (`GET .../jobs`, `GET .../jobs/{job}`) | `READ_ENVIRONMENT` | Filtered as the deploy views are: all or nothing for the environment. `show` is `list` filtered to one name; its `triggers` (schedule, on demand) are read from the same view. |
+| List and show (`GET .../jobs`, `GET .../jobs/{job}`) | `READ_ENVIRONMENT` | Filtered as the deploy views are: all or nothing for the environment. `show` is `list` filtered to one name; its `triggers` (schedule, on demand) are read from the same view. `notify` (`format`, `events`) is read by every reader; its `secret` (the secret's name) only for `DEPLOY` on the environment and never a CI token (`OperatorRights.deploy`), and the key is absent, not `null`, for anyone else; the webhook URL is never read for this (pin: `test_notify_secret_is_absent_not_null_without_deploy`). `commit_sha` and `source_url` (`browse_url` of `lakana.yaml` at the commit) carry nothing of the file. |
 | A start after a deploy (`on_deploy: true`, #102) | `RUN` on the environment, of the principal that deployed (`deploy_runs.principal_id`), checked first | The worker calls `JobService.start(deployer, ..., trigger=DEPLOY)` after `record_deploy` committed (`jobs/on_deploy.py`), through the worker's `AuditingAuthorization`: a refusal is `AUTHORIZATION_DENIED` and becomes the outcome `not_started`/`lacks_run` on the deploy run (`deploy_runs.job_starts_json`); the deploy is never rolled back. Run principal, protection, waiting start and audit are a start by hand's (`RUN_STARTED`/`JOB_START_WAITING` with trigger `deploy`, actor the deployer; a waiting one is checked again as `manual`). Only a deploy whose pointer moved to another project version stores the starts (`record_deploy`, same transaction as the swap); a dry run, a rollback, a failed deploy and a deploy of the current commit store none. A CI deploy is checked **with** the token's scope (`run_deploy` passes `authorize_deploy`'s `CiScope` on). Its rule's opt-in `start_on_deploy_jobs` (default off; `CiTrustRuleService`, `ADMIN` only, audited, raises the revision) is the only grant: `start_jobs_after_deploy` marks the scope `starting_deploy_jobs` (never set from a request) and `GrantAuthorization._ci_deploy_job_start` then allows `RUN` on the scope's own environment, without the account's grants; without the opt-in `_ci_scope_refusal` refuses it and the job is `not_started`/`lacks_run`, with a message naming the setting. `RUN_STARTED` carries `ci_rule_id` and `allowed_by: start_on_deploy_jobs`; the immediate start resolves the token again after the deploy committed, right before each job's start (`_recheck`, `deploy_jobs_scope`: same revision, the rule's repository), never the scope of the claim, else that job and every later one is `not_started`/`lacks_run` and audited `JOB_START_DROPPED` (`requester_lacks_run`, actor none, `ci_rule_id`); a parked start stores `ci_rule_id` and `ci_token_id` and is resolved the same way when it starts, else dropped as `requester_lacks_run`. A rule-allowed start also needs the job to be `on_deploy` in the project version it runs (`RunService.prepare_start` raises `NotOnDeploy`), else it is dropped and audited `JOB_START_DROPPED` with reason `not_on_deploy` (a deploy by hand may have moved the pointer meanwhile). A CI request that merges into a waiting scheduled start keeps `ci_rule_id` and `allowed_by` in its `JOB_START_WAITING` detail (`test_ci_deploy_jobs.py`, `test_deploy_ci_token.py`, `test_ci_deploy_jobs_postgres_integration.py`). A deployer deactivated since the claim, checked before each start, starts nothing more (`refused`, audited `JOB_START_DROPPED` with `requester_inactive`), also with a bound run principal. The jobs are read from the project version made current (`version.manifest_json`). A start still `pending` a lease after `finished_at` is shown as `lost`, never retried. Pins: `test_jobs_on_deploy.py`, the worker's `test_deploy.py`, `test_jobs_integration.py`. |
 | A scheduled start | none: no caller | The deploy that declared the schedule and the binding of the run principal are the authorization. It writes only as the bound principal (`_choose_run_as(..., bound_only=True)`), never as a caller, and refuses without one. `RUN_STARTED` is attributed to that principal. |
 
@@ -3996,11 +4002,11 @@ carries any of the three, and a grant below instance scope never satisfied these
   returns the token once in the HTTP response only, task tokens go to the child's stdin, and
   `PatService`, `TaskTokenService` and the auth paths log no token; a test pins that the
   bootstrap emits no `lakana_pat_` string at any level.
-- **A principal's own tokens** stay administrator-only: issuing, listing and revoking a personal
-  access token needs `MANAGE_TOKEN` whoever it is for. This element adds no self-service; that
-  belongs to the sign-in design (#32).
-- **Call sites.** `test_admin_only_call_sites.py` enumerates the thirteen call sites (four in
-  `grants/service.py`, six in `identity/groups.py`, three in `identity/pats.py`) and fails on
+- **Tokens of someone else** stay administrator-only: issuing, listing and revoking a personal
+  access token for another principal needs `MANAGE_TOKEN` and the `ADMIN` role. One's own tokens
+  follow "Settings and Access: tokens, configuration, own grants (M7 parts 7 and 8)".
+- **Call sites.** `test_admin_only_call_sites.py` enumerates the fifteen call sites (five in
+  `grants/service.py`, six in `identity/groups.py`, four in `identity/pats.py`) and fails on
   any other module that names one of the three actions. A new call site must go through the
   helper and into that test's `_GUARDED`.
 - **Not covered by the rule** (accepted, see "What is explicitly not defended"): a holder of
@@ -5059,7 +5065,7 @@ work.
   unconditionally (`__repr_args__`), never just ones matching a secret-looking key name;
   `scheme` and `root` stay visible. `DatabaseConfig.url` reprs with its password hidden via
   `sqlalchemy.engine.make_url(...).render_as_string(hide_password=True)`, falling back to
-  full redaction if the URL doesn't parse. `SecretsConfig.master_key` reprs as `***` when
+  full redaction if the URL doesn't parse. `SecretsConfig.master_key` is a `SecretStr` (read it with `master_key_text()`) and reprs as `***` when
   set, `None` when unset. Both `lakana_core.config.Settings` and `lakana_server.settings.Settings`
   inherit this through their nested fields with no override of their own — pydantic's default
   repr calls each nested model's own `__repr__`. `hide_input_in_errors=True` on
@@ -5891,6 +5897,80 @@ fuller text of each part where it already lives.
 | `actions` | The words (`drop`, `rebuild`, …) the reader's rights allow, from one `permits_each` batch per list, no audit event. Rights only: the server decides each request again, and git ownership, protection, step-up and state still refuse. The batch asks `READ_TABLE` too, and the file is named only to a reader. | The `actions` row of the same table. Pins: `test_row_actions.py`. |
 | Audit events | `NAMESPACE_CREATED`, `NAMESPACE_DROPPED`, `TABLE_CREATED` (external), `ARTIFACT_UPLOAD_ABORTED`, `TABLE_REBUILT` (with a `TABLE_DROPPED` of `reason: rebuild`), each in the transaction of its change. No detail names a repository or a deployed file's path, because the log is read with `READ_AUDIT_LOG` alone. A refused change writes no event. | "Audit log": the part 3b bullet. |
 | Paged lists | Dropped tables, expiring tables, namespaces, orphans and artifacts return 100 rows by default. A row the caller may not read is filtered out before the page is cut (`page_in_order` takes only readable rows), and a forged cursor reveals nothing a plain list would not. | `lakana_core.pagination.page_in_order`. Pins: the forged-cursor tests of each list, `test_an_unreadable_artifact_sorting_first_does_not_cost_the_reader_a_page`. |
+
+## Settings and Access: tokens, configuration, own grants (M7 parts 7 and 8)
+
+- **One's own tokens (`PatService`).** The administrator is asked first
+  (`may_manage_tokens`: `MANAGE_TOKEN` permitted and the `ADMIN` role): an administrator keeps
+  today's path for every principal, and `issue` asks a browser session for the step-up. Anyone
+  else acting on their own name through a personal credential (`principal_name == p.name`, no
+  task or CI scope) may list and revoke their own tokens with a personal token or a session, with
+  no step-up, since revoking removes access. They create one only with `p.session` and after the
+  step-up. Any other credential is refused with `OWN_TOKEN_FROM_BROWSER`, audited as
+  `AUTHORIZATION_DENIED` (`operation: issue_token`, `reason: not_from_a_browser`). Why: a stolen
+  token cannot mint a replacement personal token. An administrator's token still may issue (R1, for
+  review): the CLI and the bootstrap need it, and it was the rule before. Everyone else, about
+  anyone else's tokens, goes through `authorize_admin_only` before any lookup, so the refusal
+  never says whether the principal exists. A token has exactly its owner's rights, and
+  deactivating the owner stops every token (`PatService.verify`). Pins: `test_identity_pats.py`
+  (`test_a_token_cannot_create_its_owners_token`,
+  `test_a_person_creates_their_own_token_from_a_fresh_session_only`,
+  `test_someone_elses_tokens_are_403_whether_or_not_they_exist`,
+  `test_a_self_made_token_stops_when_its_owner_is_deactivated`), `test_tokens.py`.
+
+- **Scope of the rule.** It is "no token can create a personal token": a stolen token cannot
+  mint a replacement personal token. A personal token whose owner holds `MINT_TASK_TOKEN` can still
+  mint a task token (`TaskTokenService.mint`), bounded by `max_ttl_seconds`. That is an accepted
+  residual: minting task tokens stays in the CLI by the spec, and `MINT_TASK_TOKEN` is granted
+  separately.
+- **The denial row** (`not_from_a_browser`) is written unconditionally, as `TaskTokenService.mint`
+  and `revoke` do, not through `DenialAuditLimiter`.
+- **Local mode.** A stolen non-administrator personal token could mint a local sign-in link, enrol
+  a first passkey within `FIRST_PASSKEY_WINDOW` and then create a personal token. Local mode is
+  single-machine and that passkey is already a persistent credential. The last hop is new: before
+  this change a non-administrator could never create a personal token, and with local sign-in a
+  stolen non-administrator token can now go local link, session, first passkey, step-up, new
+  personal token. This is accepted, because local mode runs on loopback and the enrolled passkey
+  is already a lasting credential.
+- **The task-token list (`TaskTokenService.list_live`, `GET /api/v1/task-tokens`).** Administrator
+  only (`authorize_admin_only(MANAGE_TOKEN)`): listing them is administering tokens, and a task or
+  CI token is refused. Live tokens only (not revoked, not expired), newest first by
+  `(issued_at, id)`. It holds no secret: `TaskTokenOut` has no `secret_hash` and no token value
+  (`test_get_task_tokens_never_holds_a_secret`). An `environment` no token names gives `[]`, not
+  404: the column is free text and an administrator learns nothing new from it. Names and the run,
+  job and asset of a bound token are read for the page in one statement.
+- **Revoking a task token from a browser.** `DELETE /api/v1/task-tokens/{key_id}` left
+  `TOKEN_ONLY_ROUTES` (R4; not in the spec's list, found while building it): the spec has
+  administrators revoke task tokens in Access, Tokens, which a cookie could not do there. Revoking
+  puts no token in the browser, the reason the set exists, and takes no step-up (it removes
+  access). `TaskTokenService.revoke` keeps its rules unchanged: an administrator revokes any;
+  anyone else only a token minted for themselves over REST, with one refusal and one audit row
+  for another's, a bound token or an unknown key id
+  (`test_a_non_administrators_session_cannot_revoke_anothers_task_token`). `POST` stays
+  token-only.
+- **The configuration (`GET /api/v1/settings/configuration`, `describe_settings`).** Read-only, the
+  server process's own settings, one entry per leaf in the order of `Settings`. Administrator only
+  (`require_principal_admin`, the ADMIN role with a personal credential, the rule of the sign-in
+  settings' PATCH): a task or CI token is 403, and reading records nothing. A secret never carries a
+  value: `value` is `null` and `has_value` says set or not set. A setting is a secret when its
+  annotation contains `SecretStr`, or its name is in `PLAIN_SECRETS`; `database.url` stays `str`
+  (core's `DatabaseConfig`, read as text by every engine factory, already redacted in `repr`) and is
+  in `PLAIN_SECRETS` instead of becoming `SecretStr` (R6). `source` is `set` when every step of the
+  path is in `model_fields_set` (environment and `.env` alike, also a value equal to its default).
+  Pins: `test_no_secret_value_reaches_the_answer` (sentinels in the master key, the bootstrap
+  secret, the database password and the index URL; none in `response.text`) and the guard
+  `test_every_secret_looking_setting_is_masked_or_reviewed` (a new setting whose name looks like a
+  credential fails until it is a `SecretStr` or goes in `REVIEWED_NOT_SECRET` with its reason).
+- **One's own grants (`GrantService.held_grants`, `GET /api/v1/principals/{name}/grants`).** The
+  rule of `explain` (R8): asking about oneself (`principal_name == p.name`, no task or CI scope)
+  needs no right at all; anyone else, and a task or CI token even about its own principal, goes
+  through `authorize_admin_only(MANAGE_GRANT)` before any lookup, so the 403 has one text for a
+  principal that exists and one that does not (`test_someone_elses_grants_are_403_whether_or_not_they_exist`);
+  an administrator gets 404 for an unknown name. The rows are the principal's unrevoked grants and
+  those of every group it belongs to now, in one statement. The answer is `HeldGrantOut`, not
+  `GrantOut`: it leaves out `granted_by` and `principal_id`, the ids of other people, so the route
+  tells a person nothing about anyone else (`test_get_own_grants_has_no_other_persons_id` pins the
+  exact keys). The group appears by name only.
 
 ## Governed table creation and append (M4a)
 

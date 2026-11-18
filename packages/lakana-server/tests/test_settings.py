@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pydantic
 import pytest
+from pydantic import SecretStr
 
 from lakana_core.config import ArtifactsConfig, DatabaseConfig, HealthConfig, SecretsConfig
 from lakana_server.settings import PublicOrigin, Settings, UiConfig
@@ -29,7 +30,18 @@ def test_settings_repr_redacts_nested_secrets() -> None:
 
     # Behaviour is unchanged: the real values are still reachable.
     assert settings.database.url == "postgresql+pg8000://user:hunter2@db.internal/lakana"
-    assert settings.secrets.master_key == "dGhpc2lzYXNlY3JldGtleQ=="
+    assert settings.secrets.master_key_text() == "dGhpc2lzYXNlY3JldGtleQ=="
+
+
+def test_the_bootstrap_secret_is_a_secret_str(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`LAKANA_BOOTSTRAP_PAT_SECRET` is held as `SecretStr` and stays out of `repr`."""
+    monkeypatch.setenv("LAKANA_BOOTSTRAP_PAT_SECRET", "s3cr3t")
+
+    settings = Settings(database=DB)
+
+    assert isinstance(settings.bootstrap_pat_secret, SecretStr)
+    assert settings.bootstrap_pat_secret.get_secret_value() == "s3cr3t"
+    assert "s3cr3t" not in repr(settings)
 
 
 def test_repo_roots_must_be_absolute(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

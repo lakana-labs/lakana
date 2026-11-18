@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.identity.task_tokens import TaskTokenService
-from lakana_server.api.platform.schemas import TaskTokenMintIn, TaskTokenMintOut
+from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.schemas import TaskTokenMintIn, TaskTokenMintOut, TaskTokenOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import get_principal, get_task_token_service
@@ -17,6 +18,62 @@ router = APIRouter(
     tags=["task-tokens"],
     responses=errors(401),
 )
+
+
+@router.get("", response_model=list[TaskTokenOut], responses=errors(403))
+def list_task_tokens(
+    response: Response,
+    environment: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: TaskTokenService = Depends(get_task_token_service),
+) -> list[TaskTokenOut]:
+    """List the live task tokens.
+
+    Lists the task tokens that are neither revoked nor expired, newest first, each with the
+    principal it signs in as, its environment and asset scope, its dates and, for a token a
+    worker minted for a task, the run, job and asset. The token values are never included.
+    Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the
+    next page is in the `X-Next-Cursor` response header and is absent on the last page. An
+    `environment` no token names gives an empty list, not a 404.
+
+    Parameters
+    ----------
+    response
+        The response, for the cursor header.
+    environment
+        Only the tokens of this environment; every environment when left out.
+    limit
+        Most tokens returned (1 to 200).
+    cursor
+        The `X-Next-Cursor` of the previous page; send the same `environment`.
+    principal
+        The authenticated caller.
+    service
+        The task-token service for this request.
+
+    Returns
+    -------
+    list of TaskTokenOut
+        The tokens of this page.
+    """
+    page = service.list_live(principal, environment=environment, limit=limit, cursor=cursor)
+    set_next_cursor(response, page.next_cursor)
+    return [
+        TaskTokenOut(
+            key_id=listed.token.key_id,
+            principal=listed.principal,
+            environment=listed.token.environment,
+            asset_scope=listed.token.asset_scope,
+            issued_at=listed.token.issued_at,
+            expires_at=listed.token.expires_at,
+            run_id=listed.run_id,
+            job=listed.job,
+            asset=listed.asset,
+        )
+        for listed in page.items
+    ]
 
 
 @router.post("", response_model=TaskTokenMintOut, status_code=201, responses=errors(403, 404))

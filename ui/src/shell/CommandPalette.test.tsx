@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 let field: HTMLInputElement | null = null;
@@ -25,6 +26,8 @@ async function shellAtHome(
 }
 
 describe("CommandPalette", () => {
+  beforeAll(preloadJobsScreen);
+
   it.each([
     ["Control", { ctrlKey: true }],
     ["Meta", { metaKey: true }],
@@ -162,7 +165,10 @@ describe("CommandPalette", () => {
     await user.keyboard("jobs");
     await user.keyboard("{ArrowDown}{Enter}");
 
-    expect(router.state.location.pathname).toBe("/jobs");
+    // Jobs loads its screen on demand: the router commits the address once the chunk is in.
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/jobs");
+    });
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toHaveFocus();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

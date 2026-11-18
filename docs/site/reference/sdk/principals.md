@@ -108,6 +108,25 @@ Returns: `Permissions`. One entry per action the server asks for on such an obje
 | `lakana.PermissionDenied` | About another principal, without the `ADMIN` role on the instance. |
 | `lakana.NotFound` | For an administrator: no such principal, environment, namespace or table. |
 
+### `client.principals.grants`
+
+Signature: `client.principals.grants(name: str) -> list[HeldGrant]`
+
+List the live grants a principal holds, directly and through its groups.
+
+Newest first, each with the name of the group it comes through (`None` for a direct grant). Anyone may ask about themselves, with a personal token or in the web interface; asking about another principal needs the `ADMIN` role on the instance, and a task or CI token may not ask even about its own principal.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | The principal. |
+
+Returns: `list of HeldGrant`. The grants; they say nothing about who made them.
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | About another principal, or through a task or CI token, without the `ADMIN` role. |
+| `lakana.NotFound` | For an administrator: no such principal. |
+
 ### `client.principals.deactivate`
 
 Signature: `client.principals.deactivate(name: str, *, override_reason: str | None = None) -> None`

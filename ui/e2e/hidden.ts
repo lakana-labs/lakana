@@ -21,17 +21,21 @@ const API_TYPES = apiTypes();
 
 /**
  * Fields `src/api` types as `string` but documents as a code the interface translates (`item`,
- * `causes`, `via`, a check's `outcome`), by type. An override in one sends the screen down a
- * branch the server never takes, which the named values of a step then miss. A code the interface
- * compares is a union of string literals in `src/api`, which the check finds by type. Every other
- * `string` field carries an override, even where the same name is a code in another type.
+ * `causes`, `via`, a check's `outcome`, a failure's `code`, a job's notification `events`, an
+ * attempt's `outcome`), by type. An override in one sends the screen down a branch the server
+ * never takes, which the named values of a step then miss. A code the interface compares is a
+ * union of string literals in `src/api`, which the check finds by type. Every other `string`
+ * field carries an override, even where the same name is a code in another type.
  */
 export const STRING_CODES: Readonly<Record<string, readonly string[]>> = {
   BrowserSessionOut: ["via"],
   CheckHealthOut: ["outcome"],
+  FailureOut: ["code"],
   HealthSummaryOut: ["item"],
   InstanceStatusOut: ["causes"],
+  NotifyOut: ["events"],
   SessionOut: ["via"],
+  TaskAttemptOut: ["outcome"],
 };
 
 /**
@@ -51,8 +55,12 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["action","allowed","reason","via"]': "PermissionOut",
   '["action","environment","granted_at","granted_by","group","group_id","id","kind","namespace","note","principal","principal_id","role","table"]':
     "GrantOut",
+  '["actions","cancel_requested","commit_sha","created_at","ended_tasks","environment","error_message","failed_tasks","finished_at","id","job","kind","repository","selection","started_at","status","tasks","total_tasks","trigger","triggered_by"]':
+    "RunOut",
   '["actions","commit_sha","created_at","created_by","deleted_at","deleted_by","deleted_versions","file_count","files","is_directory","manifest_sha256","project_version_id","run_id","size_bytes","task_run_id","version"]':
     "ArtifactVersionOut",
+  '["actions","commit_sha","cron","downstream","environment","last_run_at","last_run_id","last_run_status","name","next_run_at","notify","paused","repository","select","source_url","state","timezone","triggers","upstream","waiting_for","waits_for_run_id"]':
+    "JobOut",
   '["actions","count","name","namespaces"]': "TableTreeOut.environments",
   '["actions","count","path"]': "TableTreeOut.environments.namespaces",
   '["actions","created_at","current_version","defined_by","keep_versions","kind","name","namespace","size_bytes","uuid","versions"]':
@@ -70,8 +78,13 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["alert","band","column","effect","id","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
     "HealthSignalOut",
   '["artifact","created_at","expires_at","upload_id"]': "ArtifactUploadOut",
+  '["asset","attempt","checks","failure","finished_at","kind","max_attempts","rows_written","started_at","status","waiting_for"]':
+    "TaskRunOut",
   '["at","column","id","table","target","target_column","target_exists"]': "ModelReferenceOut",
   '["at","environment","kind","ref","title"]': "AttentionItemOut",
+  '["attempt","bytes_read","cpu_seconds","error_message","failure","finished_at","outcome","peak_memory_bytes","rows_written","started_at","worker"]':
+    "TaskAttemptOut",
+  '["attempts","complete","more","next_offset","reset","text"]': "TaskLogOut",
   '["audience","complete","hidden","local","steps"]': "GetStartedOut",
   '["backup_eligible","created_at","disabled_reason","id","last_used_at","name","usable_here"]':
     "PasskeyOut",
@@ -85,6 +98,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["browse_url","commit","defined","deployed_at","line","path","project_version_id","repository"]':
     "TableDefinitionOut",
   '["capped","items","next_cursor"]': "TableListPageOut",
+  '["cause","code","next_step"]': "FailureOut",
   '["causes","detail","state","workers_alive","workers_total"]': "InstanceStatusOut",
   '["check","error","failing_rows","finished_at","kept","name","not_published","on_failure","outcome","rollback_outcome","run_id"]':
     "CheckHealthOut",
@@ -92,6 +106,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["checks","grain","hidden_references","key","key_none","kind","measures","references"]':
     "TableModelOut",
   '["claimed_by","kind","name","size"]': "RawEntryOut",
+  '["code","message"]': "WaitingOut",
   '["column","column_type","kind","language","matched","snippet","translated"]': "TableMatchOut",
   '["column","table"]': "MaskedColumnOut",
   '["columns","columns_cut","duration_ms","masked_columns","masked_columns_cut","next_offset","preview","row_count","row_cut","rows"]':
@@ -105,8 +120,11 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["created_at","finished_at","host_keys","id","kind","message","outcome","state"]':
     "RepositoryProbeOut",
   '["created_at","id","kind","subject"]': "NoticeOut",
+  '["cron","kind","next_run_at","paused","timezone"]': "ScheduleTriggerOut",
   '["days","expires_at","kept","last_activity_at","name","namespace","never","on","set_at","set_by","source","uuid"]':
     "TableRetentionOut",
+  '["deleted_at","is_protected","name","properties","purge_after","retention_days","storage_root","storage_secret_ref"]':
+    "EnvironmentOut",
   '["description","description_language","description_source","label","label_language","label_source","name","nullable","terms","type"]':
     "ColumnOut",
   '["detail","type"]': "ErrorBody",
@@ -123,6 +141,9 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["environment","kind","opened_at","ref"]': "RecentOut",
   '["environment","last_deploy_at","last_deploy_status"]': "WorkEnvironmentOut",
   '["environments","name"]': "WorkRepositoryOut",
+  '["events","format","secret"]': "NotifyOut",
+  '["failing_rows","name","outcome","table"]': "CheckResultOut",
+  '["failure","run","task"]': "FailedRunOut",
   '["fingerprint","line","type"]': "HostKeyOut",
   '["get_started_hidden","tour_seen","update_note_seen"]': "InterfaceStateOut",
   '["grant_id","group","kind","role","scope"]': "ViaOut",
@@ -133,10 +154,10 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["high"]': "HealthBandOut",
   '["id","name","principal_type"]': "SubjectPrincipalOut",
   '["is_active","name","picture","type"]': "PrincipalOut",
-  '["is_protected","name"]': "OwnerOut",
+  '["is_protected","name"]': "EnvironmentOut",
   '["item","others","state","text"]': "HealthSummaryOut",
   '["items","next_cursor","path"]': "RawPageOut",
-  '["items","next_cursor"]': "TableListPageOut",
+  '["items","next_cursor"]': "RunPageOut",
   '["items","truncated"]': "AttentionOut",
   '["job","last_commit_at","seconds","source"]': "HealthObservedOut",
   '["jobs","repositories"]': "WorkOut",
@@ -144,6 +165,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["kind","lower","upper"]': "HealthObservedOut",
   '["kind","name"]': "OwnerOut",
   '["kind","source","target"]': "GraphEdgeOut",
+  '["kind"]': "DeployTriggerOut",
   '["last_read_at","principal","read_count"]': "ReaderOut",
   '["memory_limit_bytes","memory_used_bytes","slots_busy","slots_total","workers"]':
     "StatusDetailOut",

@@ -741,6 +741,9 @@ def render_settings(sources: Sequence[tuple[str, type[BaseSettings]]]) -> str:
         "the server and every worker share. How to set them: [Deploy with",
         "Compose](../how-to/deploy-with-compose.md).",
         "",
+        "An administrator sees the running server's values, with a secret only as set or not set,",
+        "with `lakana configuration` or `GET /api/v1/settings/configuration`.",
+        "",
     ]
     for group, entries in groups.items():
         title = f"`LAKANA_{group.upper()}__*`" if group else "General"

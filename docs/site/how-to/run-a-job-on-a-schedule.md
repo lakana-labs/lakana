@@ -163,6 +163,13 @@ environment to anyone who may read it; `--repo` limits it to one repository.
 `lakana job show NAME` lists each trigger of one job on its own line. The [Jobs reference](../reference/jobs.md) has the fields. Under the table, `lakana job list` prints the sentence of each job that waits or cannot start.
 ["Why is it waiting?"](why-is-it-waiting.md#a-waiting-job) explains each one.
 
+In the web interface, **Jobs** in the menu lists every job of the environments you may read under
+**All jobs**: its name, which opens the job's page, its repository and environment, its schedule
+in words ("daily 06:00 Europe/Berlin", with "paused" while it is paused, or "by hand" for a job
+without one), its last run and its next run. **Environment** above the lists shows one
+environment instead of all, and the page remembers your choice; **Search jobs** narrows the lists
+to the jobs and repositories whose names hold the words.
+
 ## Pause and resume
 
 <!-- source: docs/examples/run-a-job/run.sh#pause -->
@@ -193,6 +200,12 @@ Resumed daily_silver in dev; next run 2026-10-15 06:00 Europe/Berlin (04:00 UTC)
 - A resume counts from now. The times that passed while the job was paused do not fire.
 - A pause survives a deploy of the same job. A deploy that changes the cron expression recomputes
   the next time and keeps the pause.
+
+In the web interface, the job's page has **Pause schedule**, which asks first, and **Resume
+schedule** once the schedule is paused. The **Schedule** line then says "paused", or when the next
+run is. Both buttons are there only for someone who may deploy in the environment.
+On the Jobs page, each row of **All jobs** has **Pause**, which asks first in the same way, or
+**Resume**, and **Run**, which starts the job at once.
 
 ## Start a job by hand or from CI
 
@@ -269,6 +282,11 @@ run. A script that needs the result follows the run it names with `lakana runs s
 A start by hand follows the rules of `lakana run` for who the run writes as: the bound run
 principal if there is one; in an unprotected environment otherwise the caller; in a protected one
 without a principal it is refused with a message that says to bind one.
+
+In the web interface, **Run now** on the job's page starts the job at once; it is there for anyone
+with `RUN` on the environment. The new run shows below the job's runs, and the page says "Started
+a run of" the job. When the project is busy, the page says that the start waits and links to the
+run it waits for.
 
 ## Start a job after each deploy
 

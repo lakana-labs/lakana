@@ -98,6 +98,18 @@ SQL out. Leaving the screen lets the query run on; **Recent**, beside the editor
 and **Saved** holds the queries you keep ([Save and share a query](save-and-share-a-query.md#in-the-web-interface)).
 Someone who may not run queries anywhere yet sees why, and the command to use meanwhile.
 
+## Jobs
+
+**Jobs** in the menu shows first what runs now and what failed, then every job. **Running now**
+lists the queued and running runs with how far each has come, and **Cancel**; **Failed, needs
+attention** lists the same failed runs as Home, each with why it failed, **Resume** and **Logs**;
+**All jobs** lists each job with its schedule, its last and next run, **Run** and **Pause** or
+**Resume**. Each row names its environment; **Environment** shows one of them instead of all and
+is remembered, and **Search jobs** narrows the three lists. A row opens its run or its job
+([Find a run](find-a-run.md#find-what-failed-in-every-environment),
+[Run a job on a schedule](run-a-job-on-a-schedule.md#see-the-jobs)). A control is there only for
+someone who may use it.
+
 ## The boxes, top to bottom
 
 The order is the same for everyone; what you may do changes what is inside the boxes.
@@ -107,21 +119,21 @@ The order is the same for everyone; what you may do changes what is inside the b
 2. **Get started**, while it has an open step and you have not hidden it. See
    [Get started](#get-started).
 3. **Status**: whether the instance works. See [Healthy, Degraded, Down](#healthy-degraded-down).
-4. **Needs your attention**: what failed, is late or waits for you, newest first. An
-   administrator sees failed runs anywhere, late tables, failed checks, open recovery links and
-   workers that are down. Everyone else sees failed checks and late tables among the tables they
-   read or opened recently, and their own failed queries. With nothing to report it says
+4. **Needs your attention**: what failed, is late or waits for you, newest first. Everyone sees
+   the jobs whose last run failed in the environments they may read. An administrator also sees
+   late tables, failed checks, open recovery links and workers that are down. Everyone else also
+   sees failed checks and late tables among the tables they read or opened recently, and their
+   own failed queries. With nothing to report it says
    "Nothing needs your attention."
 5. **Recently opened**: the tables you opened, kept on the server so the list follows you to
-   another browser. A table's row opens its page, and a query's its run on the Queries screen.
-   Jobs and runs appear here once their pages arrive in a later release.
+   another browser. A table's row opens its page, a query's its run on the Queries screen, and a
+   job's or a run's its page under Jobs.
 6. **Your work**, only if you may deploy: your jobs with their last run, and the repositories
    you connected or deployed with the last deploy in each environment.
 
 A row opens its object when you click anywhere on it. A table opens its page, and a query its run
 on the Queries screen; a table whose environment or namespace is not known shows its name without
-a link. Until the screen for jobs arrives in a later release, a job's row opens that area's page,
-which names the command to use meanwhile.
+a link. A job opens its page under Jobs, and a failed run the run's page.
 
 Home reads the status every 30 seconds and Needs your attention every minute, and only while
 its browser tab is visible. These reads do not count as activity, so a Home left open does not

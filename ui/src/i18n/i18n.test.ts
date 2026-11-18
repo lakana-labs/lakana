@@ -129,6 +129,16 @@ it("ships no string of the Queries screen in the first load, and importing it re
   );
 });
 
+it("ships no string of the Jobs screen in the first load, and importing it registers them", async () => {
+  const i18n = initI18n();
+
+  expect(i18n.exists("jobs.runNow")).toBe(false);
+
+  await import("../jobs/JobsScreen");
+
+  expect(i18n.t("jobs.runNow")).toBe("Run now");
+});
+
 it("marks a hidden character in every interpolated value, and leaves other values as they are", () => {
   const i18n = initI18n();
   i18n.addResource(
@@ -169,4 +179,13 @@ it("names Access as a place of Settings, not an area or a tour step, and ships t
   await import("../settings/SettingsScreen");
 
   expect(i18n.t("settings.places.people")).toBe("People");
+});
+
+it("the environment picker registers its own strings", async () => {
+  const i18n = initI18n();
+
+  await import("../shell/EnvironmentPicker");
+
+  expect(i18n.t("environment.protected")).toBe("protected");
+  expect(i18n.t("environment.label")).toBe("Environment");
 });

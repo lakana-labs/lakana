@@ -23,7 +23,7 @@ from lakana_core.config import DatabaseConfig, SecretsConfig
 from lakana_server.api.platform.sign_in import client_bucket, network_bucket
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
-from lakana_server.deps import PASSKEY_FIRST_ROUTES
+from lakana_server.deps import PASSKEY_FIRST_ROUTES, TOKEN_ONLY_ROUTES
 from lakana_server.settings import Settings, UiConfig
 from tests.conftest import _TEST_MASTER_KEY, AUTH_HEADER, PUBLIC, write_ui_dist
 from tests.server_test_helpers import session_headers, signed_in
@@ -465,7 +465,7 @@ def test_a_session_that_needs_a_passkey_may_do_nothing_else(
     body = None if method in {"GET", "DELETE", "HEAD"} else {}
     r = client.request(method, url, headers=headers, json=body)
     assert r.status_code == 403, r.text
-    expected = "TokenOnlyRoute" if "/task-tokens" in path else "PasskeyRequired"
+    expected = "TokenOnlyRoute" if (method, path) in TOKEN_ONLY_ROUTES else "PasskeyRequired"
     assert r.json()["type"] == expected
     if expected == "PasskeyRequired":
         assert "Add a passkey first" in r.json()["detail"]

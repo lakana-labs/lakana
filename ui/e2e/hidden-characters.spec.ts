@@ -16,6 +16,20 @@ import {
   STRING_CODES,
   takeReads,
 } from "./hidden";
+import {
+  ADHOC_MESSAGE,
+  ADHOC_REPOSITORY,
+  DEV_JOB,
+  FAILED_CHECK,
+  FAILED_ID,
+  JOBS_STUBBED,
+  MISSING_ID,
+  MISSING_SENTENCE,
+  SECRET,
+  stubJobs,
+  TIMED_OUT,
+  TIMEOUT_CAUSE,
+} from "./jobs";
 import { MANAGE_STUBBED, stubGitOwned, stubManagement } from "./manage";
 import { PLACES_STUBBED, stubPlaces } from "./places";
 import { ADMIN_SESSION, signInAsAdmin, STUBBED } from "./session";
@@ -48,26 +62,33 @@ const ACCOUNTS = [
 
 /** What `apiTypes()` finds today: each type with a literal-union field, and those fields. */
 const LITERAL_CODES: Record<string, string> = {
+  AllRunsFilter: "status trigger",
   ArtifactKeptOut: "reason",
   ArtifactOut: "actions kind",
   ArtifactVersionDeletedOut: "actions",
   ArtifactVersionOut: "actions",
   AttentionItemOut: "kind",
+  CheckResultOut: "outcome",
   ColumnOut: "description_source label_source",
+  DeployTriggerOut: "kind",
   DroppedTableOut: "actions",
   ExternalTableOut: "format",
   GetStartedOut: "audience",
   GetStartedStepOut: "id",
+  GrantOut: "kind role",
   GraphEdgeOut: "kind",
   GraphNodeOut: "kind",
-  GrantOut: "kind role",
   HealthBandOut: "basis weekday",
   HealthObservedOut: "kind reason source",
   HealthSummaryOut: "state",
   InstanceStatusOut: "state",
+  JobOut: "actions last_run_status",
+  JobRunFilter: "status",
   LastMaintenanceOut: "status",
   LinkDescriptionOut: "kind state",
   ListTablesQuery: "order sort",
+  NotifyOut: "format",
+  OnDemandTriggerOut: "kind",
   OrphanOut: "actions kind",
   OwnerOut: "kind",
   QueryListItemOut: "origin status",
@@ -77,8 +98,10 @@ const LITERAL_CODES: Record<string, string> = {
   RecentOut: "kind",
   RepositoryCreate: "kind",
   RepositoryProbeOut: "kind outcome state",
+  RunOut: "actions kind status trigger",
   SavedQueryIn: "visibility",
   SavedQueryOut: "actions visibility",
+  ScheduleTriggerOut: "kind",
   ScopeOut: "kind",
   SubjectPrincipalOut: "principal_type",
   TableDefinitionFileOut: "reason",
@@ -88,6 +111,7 @@ const LITERAL_CODES: Record<string, string> = {
   TableRetentionOut: "kept source",
   "TableTreeOut.environments": "actions",
   "TableTreeOut.environments.namespaces": "actions",
+  TaskRunOut: "kind status",
   ViaOut: "kind role",
 };
 
@@ -610,6 +634,93 @@ walk("the notes and refusals of the place menu mark hidden characters", async ({
   await expect(refused.getByRole("alert")).toBeVisible();
   await expectMarked(page, "a refused registration", ["No file matches 'raw/none/*.csv'."]);
   expectOnlyStubbed(paths, PLACES_STUBBED);
+});
+
+walk("the job, run and task pages mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubJobs(poisoned(page));
+  const env = n("prod");
+  await visit(page, `/jobs/${env}/job/${n("analytics")}/${n("daily_sales")}`, [
+    "daily_sales",
+    "analytics",
+    SECRET,
+    "Waits for silver.orders to finish.",
+  ]);
+  await page.getByRole("button", { name: "Pause schedule" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Pause dialog", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Cancel run" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Cancel dialog", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // The failed check's name is the label of its Show rows button.
+  await visit(page, `/jobs/${env}/runs/${FAILED_ID}`, [
+    TIMED_OUT,
+    TIMEOUT_CAUSE,
+    "daily_sales",
+    FAILED_CHECK,
+  ]);
+  await expect(page.getByRole("button", { name: /^Show rows of .*U\+202E$/ })).toBeVisible();
+  await page
+    .getByRole("row")
+    .filter({ has: page.getByRole("button", { name: /^Show rows of / }) })
+    .getByRole("button", { name: "Show source" })
+    .click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Show source dialog", ["models/gold/fact_sales.sql"]);
+  await page.keyboard.press("Escape");
+
+  await page.goto(`/jobs/${env}/runs/${FAILED_ID}/tasks/${n(TIMED_OUT)}`);
+  await expect(page.getByText("The log is complete.")).toBeVisible({ timeout: 10_000 });
+  await expectMarked(page, "a task with its log", [TIMED_OUT, "w-7f3a", TIMEOUT_CAUSE]);
+  // Each piece of the log ends in the override, so the log shows three marks.
+  await expect(page.getByRole("region", { name: /^Log of / }).locator(".char-mark")).toHaveCount(3);
+
+  // A run that is not there: the server's sentence.
+  await visit(page, `/jobs/${env}/runs/${MISSING_ID}`, [MISSING_SENTENCE]);
+  expectOnlyStubbed(paths, JOBS_STUBBED);
+});
+
+walk("the Jobs list marks hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubJobs(poisoned(page));
+  // Running now, Failed (a task's cause and a run's own message) and All jobs.
+  await visit(page, "/jobs", [
+    "daily_sales",
+    "analytics",
+    DEV_JOB,
+    TIMEOUT_CAUSE,
+    ADHOC_MESSAGE,
+    ADHOC_REPOSITORY,
+  ]);
+  await expect(page.getByRole("button", { name: /^Cancel the run of daily_sales/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /^Environment: / }).click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await expectNoRaw(page, "the open filter");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+
+  await page.getByRole("button", { name: /^Cancel the run of daily_sales/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Cancel dialog of a row", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.getByRole("button", { name: /^Pause the schedule of daily_sales/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Pause dialog of a row", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // The search narrows what was read; the rows it keeps still show their marks.
+  await page.getByRole("searchbox", { name: "Search jobs" }).fill(DEV_JOB);
+  await expect(page.getByRole("link", { name: /^daily_sales/ })).toHaveCount(0);
+  await expectMarked(page, "a search", [DEV_JOB]);
+  expectOnlyStubbed(paths, JOBS_STUBBED);
 });
 
 // Last, so that the walks before it have run in this worker: an entry no stub serves is stale.

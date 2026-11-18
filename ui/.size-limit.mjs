@@ -70,6 +70,69 @@ const NAMED_LIMITS = [
   // which the screen now hands to the editor, so that the editor's chunk reaches no API module
   // (see the first load below); the limit holds.
   { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
+  // Measured 1.1 kB (2026-11-17) + 10 %: the Jobs area's screen, for now its routes (a job, a run and
+  // a task, each a page of its own below), the area's page at /jobs and the screen's strings. The
+  // lists, facts and logs come in the next changes.
+  // Raised to the measured 2.68 kB (2026-11-17) + 10 %: the strings of the job and run pages
+  // (facts, runs, a run's facts and tasks, the controls and their notes) and the skeleton that
+  // says "Loading the job…" or "Loading the run…" while their chunks load.
+  // Raised to the measured 3.16 kB (2026-11-17) + 10 %: the strings of the task page (its facts,
+  // the attempts' columns and outcomes, the log's status lines, notes and Save log) and the
+  // skeleton that says "Loading the task…" while its chunk loads.
+  // Measured 3.33 kB (2026-11-18) with the heading of the Jobs list at /jobs, which the screen
+  // renders itself so the shell's focus finds it, the lazy import of the list, and the words of
+  // the list's skeleton and of the controls in a row; the list's own strings load with the list
+  // (JobsList-, below). The limit holds.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "3.48 kB" },
+  // Measured 4.75 kB (2026-11-18) + 10 %: the Jobs list at /jobs, loaded on demand: the
+  // environment filter (remembered, in the address) and the search, Running now (the first 50
+  // queued and running runs with their progress and Cancel), Failed, needs attention (the
+  // server's rows with the failing task's code, cause and next step, Resume and Logs) and All
+  // jobs (each environment's jobs, four read at once, with their schedule, last and next run,
+  // Run and Pause or Resume), each read every 30 s while the tab is visible, and their strings.
+  // Measured 4.91 kB (2026-11-18) after review: the sections start afresh for each filter, and a
+  // failed run with neither a failed task nor a message says the reference's internal cause; the
+  // limit holds.
+  { name: "the Jobs list", prefix: "JobsList-", limit: "5.23 kB" },
+  // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
+  // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and
+  // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
+  // words, the selection, after each deploy, where it notifies, why a start waits), the runs
+  // with Status and Period in the address, paged and read again every 30 s, and the selected run.
+  // Raised to the measured 2.95 kB (2026-11-18) + 10 %: without `?run=` the run shown is kept
+  // while the list holds it, so a newer run does not replace the run being read.
+  // Lowered to the measured 2.75 kB (2026-11-18) + 10 %: Run now and Pause or Resume schedule
+  // moved into a chunk the job page shares with the Jobs list (JobControls-, on the shared limit).
+  { name: "the job page", prefix: "JobPage-", limit: "3.03 kB" },
+  // Measured 288 B (2026-11-17) + 10 %: a run's page, for now its heading and breadcrumb.
+  // Raised to the measured 403 B (2026-11-17) + 10 %: the record of the run as opened; the run
+  // itself is in the chunk it shares with the job page (RunDetail-, below).
+  { name: "the run page", prefix: "RunPage-", limit: "0.44 kB" },
+  // Measured 4.7 kB (2026-11-17) + 10 %: a run, shared by the job page and the run page: read
+  // every 2 s while active, its facts, its tasks, Cancel with its question, Resume, Logs, and the
+  // failed read with Try again.
+  // Raised to the measured 5.34 kB (2026-11-17) + 10 % with a failed task's second line: the failure
+  // with its code, cause and next step, Log, Open table and Show rows of each failed check.
+  // Lowered to the measured 2.14 kB (2026-11-17) + 10 %: the run's reads, its title and
+  // breadcrumb, a task's row with its failure line and controls moved into a chunk the run shares
+  // with the task page (useRun-, below).
+  // Lowered to the measured 1.83 kB (2026-11-18) + 10 %: Cancel and Resume moved into a chunk the
+  // run shares with the Jobs list (RunControls-, on the shared limit).
+  { name: "a run", prefix: "RunDetail-", limit: "2.01 kB" },
+  // Measured 4.11 kB (2026-11-17) + 10 %: what a run and a task's page share: the run read every
+  // 2 s while active, its title and breadcrumb, a task's row, its failure line with the code,
+  // cause and next step, and the controls beside it (Log, Show source, Open table, Show rows),
+  // the failed read with Try again and the reading skeleton.
+  // Lowered to the measured 2.35 kB (2026-11-18) + 10 %: the failure line with its code, cause and
+  // next step, the controls it shares and the screen's states moved into a chunk the run and task
+  // pages share with the Jobs list's Failed, needs attention (FailureLine-, on the shared limit).
+  { name: "a run and a task", prefix: "useRun-", limit: "2.59 kB" },
+  // Measured 324 B (2026-11-17) + 10 %: a task's page, for now its heading and breadcrumb.
+  // Raised to the measured 2.7 kB (2026-11-17) + 10 %: the task's facts, its attempts (a table of
+  // ten columns with the outcomes in words) and its log, followed every 2 s from the byte offset,
+  // caught up at most 16 pieces in a row, kept to 2,000,000 characters cut at a line, drawn in
+  // memoised parts of 200 lines, with the command that prints it whole and Save log.
+  { name: "the task page", prefix: "TaskPage-", limit: "2.97 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.
@@ -78,7 +141,22 @@ const NAMED_LIMITS = [
   // catalog's numbers and sizes (catalog/format.ts, which names the chunk), shared by the
   // Catalog's menus, the Queries screen's environment picker and result line, and the table
   // page's tabs; never in the first load.
-  { name: "the menus and number formats", prefix: "format-", limit: "18.19 kB" },
+  // Lowered to the measured 443 B (2026-11-17) + 10 %: once the Jobs screen's menus use React
+  // Aria's Select too, the bundler gives it a chunk of its own (Select-, below) and the code the
+  // Select shares with the Catalog's tree another (TreeDropTargetDelegate-, below); this chunk
+  // keeps the catalog's numbers and sizes.
+  { name: "the number formats", prefix: "format-", limit: "0.49 kB" },
+  // Measured 9.85 kB (2026-11-17) + 10 %: React Aria's Select, ListBox and Popover, shared by the
+  // Catalog's Sort by and Order, the Queries screen's environment picker and the Status and
+  // Period of a job's runs; never in the first load.
+  { name: "the menus", prefix: "Select-", limit: "10.84 kB" },
+  // Measured 7.03 kB (2026-11-17) + 10 %: the React Aria collection code the menus share with
+  // the Catalog's tree (the chunk is named after one of its modules); never in the first load.
+  {
+    name: "the menus' and the tree's collections",
+    prefix: "TreeDropTargetDelegate-",
+    limit: "7.73 kB",
+  },
   // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
   // shares with the screens that show a state.
   { name: "the status label", prefix: "StatusLabel-", limit: "0.27 kB" },
@@ -213,7 +291,13 @@ const NAMED_LIMITS = [
   // the table's calls moved to manage- (above); the limit holds.
   // Measured 9.76 kB (2026-11-16) with the lazy import of an artifact's Versions tab; the limit
   // holds.
-  { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
+  // Measured 9.41 kB (2026-11-17) + 10 %: Defined in's file dialog moved out to SourceButton- (below),
+  // which the table page and a failed task's Show source share; the limit falls with the chunk.
+  { name: "a table's page", prefix: "TablePage-", limit: "10.35 kB" },
+  // Measured 5.59 kB (2026-11-17) + 10 %: Show source, the file's dialog with its numbered lines and
+  // the visible marks, which the table page's Defined in and a failed task's controls share; it
+  // loads with whichever of the two is opened first.
+  { name: "Show source", prefix: "SourceButton-", limit: "6.15 kB" },
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
   // the cells as text and the Value panel. It loads only when the Preview tab is opened.
@@ -376,6 +460,10 @@ export default [
   // chunk of its own (-0.17 kB). What is left is the Queries area's loader with the list of chunks
   // it preloads, the focus kept on Run after its move, and the download's type check in the API
   // client.
+  // Measured 209.82 kB (2026-11-18; 209.81 kB on main in the same build) with the Jobs list, all
+  // of it on demand: the environment picker that the Queries screen and the list now share is a
+  // chunk of its own (remembered-), and the entry's list of the chunks it preloads names it; the
+  // rest is the length of other chunks' hashed names. The limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -414,10 +502,16 @@ export default [
   // Measured 9.32 kB (2026-11-17) with the library beside the editor, its lists and the popover
   // of a narrow screen; the list frame's rules moved from the Catalog's stylesheets into
   // screen.css, so they apply wherever the frame is used. The limit holds.
-  // Raised to the measured 10.16 kB (2026-11-18) + 10 %: the lazily loaded stylesheets grew, the
-  // first-load one (index-*.css) did not. Browse… of New external table adds RawBrowser's own
-  // (the trail, the hint and the scrolling listing) and the Location field's wrapping row in
-  // the Catalog's.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.18 kB" },
+  // Raised to the measured 10.59 kB (2026-11-18) + 10 %: the Jobs screen's stylesheet (0.77 kB:
+  // the job's facts, the runs list and its filters, a run's tasks with their failure lines, the
+  // attempts and the log that wraps at 320 px), loaded with the Jobs screen only.
+  // Measured 10.84 kB (2026-11-18) with the Jobs list's rules (the filter and search row, the
+  // controls in a row above its link, the three tables' widths and the line under a cut list) and
+  // the environment picker's rules, which the Queries and Jobs stylesheets import; the first
+  // load's stylesheet is unchanged. The limit holds.
+  // Measured 11.17 kB (2026-11-18) with Browse… of New external table (RawBrowser's trail, hint
+  // and scrolling listing, and the Location field's wrapping row in the Catalog's stylesheet); the
+  // first load's stylesheet is unchanged. The limit holds.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.65 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

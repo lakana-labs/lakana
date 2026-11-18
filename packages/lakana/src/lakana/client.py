@@ -40,6 +40,7 @@ from lakana.resources.catalog import Catalog
 from lakana.resources.checks import Checks
 from lakana.resources.ci_trust_rules import CiTrustRules, exchange_id_token
 from lakana.resources.column_masks import ColumnMasks
+from lakana.resources.configuration import Configuration
 from lakana.resources.connections import Connections
 from lakana.resources.deploys import Deployments, Deploys, OrphanTables, ProjectVersions
 from lakana.resources.environments import Environments
@@ -124,6 +125,7 @@ class Client:
         self.groups = Groups(self._transport)
         self.tokens = Tokens(self._transport)
         self.task_tokens = TaskTokens(self._transport)
+        self.configuration = Configuration(self._transport)
         self.sign_in = SignIn(self._transport)
         self.invites = Invites(self._transport)
         self.recovery_links = RecoveryLinks(self._transport)

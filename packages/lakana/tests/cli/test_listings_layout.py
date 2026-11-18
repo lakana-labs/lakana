@@ -168,6 +168,7 @@ def _deploy() -> dict[str, Any]:
         "diff": None,
         "project_version_id": _ID2,
         "principal_id": _ID2,
+        "submitted_by": "svc-etl",
         "created_at": _TIME,
         "started_at": _TIME,
         "finished_at": _TIME2,
@@ -468,8 +469,18 @@ _LISTINGS = {
     "tokens": _Listing(
         ("token", "list", "svc-etl"),
         "/api/v1/principals/svc-etl/tokens",
-        [{"key_id": "k1a2b3c4", "name": "ci-pipeline-token", "last_used_at": _TIME}],
-        whole=(("last_used_at", _TIME),),
+        [
+            {
+                "key_id": "k1a2b3c4",
+                "name": "ci-pipeline-token",
+                "owner": "svc-etl",
+                "created_at": _TIME,
+                "last_used_at": _TIME,
+                "expires_at": None,
+                "revoked_at": None,
+            }
+        ],
+        whole=(("created_at", _TIME), ("last_used_at", _TIME)),
         headers=("key_id", "name"),
         key="ci-pipeline-token",
     ),

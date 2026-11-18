@@ -1609,11 +1609,41 @@ class Token:
     last_used_at
         When this PAT last successfully authenticated a request, or `None`
         if never.
+    owner
+        The name of the principal the token signs in as; `None` from a server that does not
+        say.
+    created_at
+        When the token was issued; `None` from a server that does not say.
+    expires_at
+        When the token stops working, or `None` if it never expires (or the server does not
+        say).
+    revoked_at
+        When the token was revoked, or `None` while it is not (or the server does not say).
     """
 
     key_id: str
     name: str
     last_used_at: datetime | None
+    owner: str | None = None
+    created_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class TokenPage:
+    """One page of every owner's live tokens, newest first.
+
+    Parameters
+    ----------
+    items
+        The tokens on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[Token]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
@@ -1854,6 +1884,86 @@ class MintedTaskToken:
 
     key_id: str
     token: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class TaskToken:
+    """One listed task token: what it is for, never its value.
+
+    Parameters
+    ----------
+    key_id
+        The public lookup key, which `task_tokens.revoke` takes.
+    principal
+        The name of the principal the token signs in as.
+    environment
+        The one environment the token acts in.
+    asset_scope
+        The asset patterns it may act on; for a token bound to a task, that task's asset
+        and its declared inputs.
+    issued_at
+        When the token was minted.
+    expires_at
+        When the token stops working.
+    run_id
+        The run whose task the token was minted for; `None` for a token minted over REST.
+    job
+        That run's job, or `None`.
+    asset
+        The asset of that task, or `None`.
+    """
+
+    key_id: str
+    principal: str
+    environment: str
+    asset_scope: list[str]
+    issued_at: datetime
+    expires_at: datetime
+    run_id: str | None = None
+    job: str | None = None
+    asset: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskTokenPage:
+    """One page of the live task tokens, newest first.
+
+    Parameters
+    ----------
+    items
+        The tokens on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[TaskToken]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class ConfiguredSetting:
+    """One setting of the running server, never carrying a secret's value.
+
+    Parameters
+    ----------
+    name
+        The environment variable that sets it, such as ``LAKANA_RUN__LEASE_SECONDS``.
+    value
+        The value as JSON; always ``None`` for a secret.
+    secret
+        Whether the setting holds a credential.
+    has_value
+        Whether the setting holds a value. For a secret, this is "set" or "not set".
+    source
+        ``"set"`` when the server's environment gave it (also when it equals the default),
+        else ``"default"``.
+    """
+
+    name: str
+    value: object
+    secret: bool
+    has_value: bool
+    source: str
 
 
 @dataclass(frozen=True)
@@ -2124,6 +2234,49 @@ class Permissions:
     scope: Scope
     permissions: list[Permission]
     note: str | None
+
+
+@dataclass(frozen=True)
+class HeldGrant:
+    """A live grant a principal holds, directly or through a group.
+
+    It names nobody else: not who granted it, not an id of the holder.
+
+    Parameters
+    ----------
+    id
+        The grant's id.
+    role
+        The role granted, or `None` for a single action.
+    action
+        The single action granted, or `None` for a role.
+    kind
+        ``INSTANCE``, ``ENVIRONMENT``, ``NAMESPACE`` or ``TABLE``.
+    environment
+        The environment, below the instance.
+    namespace
+        The dot-joined namespace, for a namespace or a table.
+    table
+        The table, for a table.
+    granted_at
+        When the grant was made.
+    note
+        ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant that works only
+        with the `ADMIN` role; `None` otherwise.
+    group
+        The name of the group the grant is held through, or `None` for a direct grant.
+    """
+
+    id: str
+    role: str | None
+    action: str | None
+    kind: str
+    environment: str | None
+    namespace: str | None
+    table: str | None
+    granted_at: datetime
+    note: str | None
+    group: str | None
 
 
 # jscpd:ignore-end
@@ -3120,6 +3273,9 @@ class Deploy:
         The project version made current.
     principal_id
         Who submitted it.
+    submitted_by
+        The name of who submitted it; `None` once that principal is deleted, and from a server
+        that predates the field.
     created_at
         Queued at.
     started_at
@@ -3141,6 +3297,14 @@ class Deploy:
     job_starts
         The jobs with `on_deploy: true` the deploy started, by name; empty for a run that
         starts no job and from a server that predates the field.
+    jobs
+        The sorted names of the jobs the deploy's project version defines; set on the single
+        read only. `None` in a listing, for a run that made no project version and from a
+        server that predates the field.
+    actions
+        The words of what your rights allow on it: ``rollback``. Rights only; offer a
+        control when the word is listed and the deploy's state allows it. Empty from a
+        server that predates them.
     """
 
     id: str
@@ -3163,6 +3327,9 @@ class Deploy:
     warnings: tuple[str, ...] = ()
     waiting_for: WaitingFor | None = None
     job_starts: tuple[DeployJobStart, ...] = ()
+    actions: tuple[str, ...] = ()
+    submitted_by: str | None = None
+    jobs: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -3759,6 +3926,15 @@ class Run:
     failed_tasks
         How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``), also in
         listings; 0 from a server that predates the field.
+    actions
+        The words of what your rights allow on it: ``cancel``, ``resume``. Rights only; offer a
+        control when the word is listed and the run's state allows it. Empty from a
+        server that predates them.
+    total_tasks
+        How many tasks the run has, also in listings; 0 from a server that predates the field.
+    ended_tasks
+        How many of them ended (``succeeded``, ``failed``, ``upstream_failed`` or
+        ``cancelled``), also in listings; 0 from a server that predates the field.
     """
 
     id: str
@@ -3784,6 +3960,46 @@ class Run:
     missed: int = 0
     notifications: list[Notification] = field(default_factory=list)
     failed_tasks: int = 0
+    actions: tuple[str, ...] = ()
+    total_tasks: int = 0
+    ended_tasks: int = 0
+
+
+@dataclass(frozen=True)
+class FailedRun:
+    """A job, or a repository's runs of no job, whose newest finished run failed.
+
+    Parameters
+    ----------
+    run
+        The run, without tasks.
+    task
+        The asset of its first failed task (the earliest to end, then the smallest asset);
+        `None` when the run failed without a failed task, and then `run.error_message` says why.
+    failure
+        That task's failure; `None` exactly when `task` is.
+    """
+
+    run: Run
+    task: str | None
+    failure: Failure | None
+
+
+@dataclass(frozen=True)
+class FailedRuns:
+    """The failed runs of every environment you may read, newest end first.
+
+    Parameters
+    ----------
+    items
+        One entry per job (or per repository, for its runs of no job) whose newest finished run
+        within seven days failed.
+    truncated
+        Whether more were left out; narrow with an environment.
+    """
+
+    items: tuple[FailedRun, ...]
+    truncated: bool
 
 
 @dataclass(frozen=True)
@@ -3812,6 +4028,27 @@ class Trigger:
     timezone: str | None = None
     paused: bool | None = None
     next_run_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class JobNotify:
+    """Where a job reports a failed or recovered run.
+
+    Parameters
+    ----------
+    format
+        How the message is written: ``json``, ``slack`` or ``teams``.
+    events
+        What the job is told of, in the server's order: ``failed``, ``recovered``,
+        ``columns_changed`` and ``health``.
+    secret
+        The name of the environment secret that holds the webhook URL; `None` unless you hold
+        `DEPLOY` on the environment (the URL itself is never sent).
+    """
+
+    format: str
+    events: tuple[str, ...]
+    secret: str | None = None
 
 
 @dataclass(frozen=True)
@@ -3862,6 +4099,19 @@ class Job:
         When it was created.
     triggers
         How the job starts, schedule first; empty from a server that does not send them.
+    actions
+        The words of what your rights allow on it: ``run``, ``pause``, ``resume``. Rights
+        only; offer a control when the word is listed and the job's state allows it. Empty from
+        a server that predates them.
+    commit_sha
+        The commit of the project version deployed in the environment; `None` from a server that
+        predates it.
+    source_url
+        The link to ``lakana.yaml`` at that commit on the repository's git host; `None` for a host
+        Lakana does not know, and from a server that predates it.
+    notify
+        Where the job reports; `None` for a job without a notification, and from a server that
+        predates it.
     """
 
     name: str
@@ -3883,6 +4133,10 @@ class Job:
     last_run_trigger: str | None
     last_run_at: datetime | None
     triggers: tuple[Trigger, ...] = ()
+    actions: tuple[str, ...] = ()
+    commit_sha: str | None = None
+    source_url: str | None = None
+    notify: JobNotify | None = None
 
 
 @dataclass(frozen=True)

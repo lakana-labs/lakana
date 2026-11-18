@@ -35,6 +35,9 @@ const SIGN_IN_SETTINGS = {
 
 const AT = "2026-11-10T08:00:00Z";
 
+/** The failed run of `daily_sales` that Home's "Needs your attention" names (`jobs.ts` answers it). */
+export const FAILED_RUN_ID = "8a1f4c2e-6b3d-4e5f-9a7b-0c1d2e3f4a5b";
+
 /** What Home reads, for an administrator of a team's instance in its first weeks. */
 const HOME: Record<string, unknown> = {
   "/api/v1/status": {
@@ -65,7 +68,7 @@ const HOME: Record<string, unknown> = {
   },
   "/api/v1/home/attention": {
     items: [
-      { kind: "run_failed", environment: "prod", title: "daily_sales", ref: "run-1", at: AT },
+      { kind: "run_failed", environment: "prod", title: "daily_sales", ref: FAILED_RUN_ID, at: AT },
       {
         kind: "table_late",
         environment: "prod",
@@ -752,6 +755,9 @@ const PICTURE =
 /** Where the Queries screen asks where one may query; none here (`queries.ts` lists some). */
 const QUERY_ENVIRONMENTS = "/api/v1/queries/environments";
 
+/** The environments the person may read; none here (`jobs.ts` lists two). */
+const ENVIRONMENTS = "/api/v1/environments";
+
 /** The paths the stubs answer; any other request to the API is a test failure. */
 export const STUBBED = [
   "/api/v1/sign-in/session",
@@ -780,14 +786,15 @@ export const STUBBED = [
   `${PREVIEW_RUN_PATH}/result`,
   `${PREVIEW_RUN_PATH}/cancel`,
   QUERY_ENVIRONMENTS,
+  ENVIRONMENTS,
 ];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
  * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture,
- * Settings' People (under Access) and Sign-in (the session lengths), and no environment to run a
- * query in (`stubQueries` adds two).
+ * Settings' People (under Access) and Sign-in (the session lengths), no environment to run a
+ * query in (`stubQueries` adds two) and no environment to read jobs in (`stubJobs` adds two).
  *
  * @param page - The page.
  */
@@ -907,6 +914,10 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   );
   await page.route(
     (url) => url.pathname === QUERY_ENVIRONMENTS,
+    (route) => route.fulfill({ json: [] }),
+  );
+  await page.route(
+    (url) => url.pathname === ENVIRONMENTS,
     (route) => route.fulfill({ json: [] }),
   );
 }

@@ -1,6 +1,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 const AT = "2026-11-10T08:00:00Z";
@@ -22,6 +23,8 @@ async function region(): Promise<HTMLElement> {
 }
 
 describe("Recent", () => {
+  beforeAll(preloadJobsScreen);
+
   it("says that opened tables appear here, and that the rest follows later", async () => {
     renderShell("/");
 
@@ -29,7 +32,7 @@ describe("Recent", () => {
     await within(list).findByText(/Nothing opened yet/);
     // Only the table page records an open so far: say so.
     expect(list).toHaveTextContent(
-      "Nothing opened yet. The tables you open will show here; queries, jobs and runs follow once their pages arrive in a later release.",
+      "Nothing opened yet. The tables, queries, jobs and runs you open will show here.",
     );
   });
 
@@ -48,8 +51,8 @@ describe("Recent", () => {
   it.each([
     ["gold.station_ranking", "Table", "prod", "/catalog/prod/gold/station_ranking"],
     ["Query 3f9c2a1b", "Query", "dev", "/queries/dev/runs/3f9c2a1b-77d0-4c1e-9a55-0c4f5b2e8d11"],
-    ["analytics/daily_sales", "Job", "prod", "/jobs"],
-    ["Run 8d2e4f60", "Run", "prod", "/jobs"],
+    ["analytics/daily_sales", "Job", "prod", "/jobs/prod/job/analytics/daily_sales"],
+    ["Run 8d2e4f60", "Run", "prod", "/jobs/prod/runs/8d2e4f60-1b3a-4c5d-8e9f-a0b1c2d3e4f5"],
   ])("lists %s with its kind and environment, and opens it", async (name, kind, env, path) => {
     const { user, router, server } = renderShell("/", {
       routes: { "GET /api/v1/principals/admin/recent": { status: 200, body: RECENT } },

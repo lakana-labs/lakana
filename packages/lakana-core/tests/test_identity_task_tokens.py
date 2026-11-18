@@ -1,15 +1,27 @@
 """Tests for TaskTokenService."""
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
+from core_test_helpers import _prepared_catalog, python_task_run
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import lakana_core.identity.task_tokens as task_tokens_module
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind, TaskScope
+from lakana_core.audit.authorization import AuditingAuthorization
+from lakana_core.audit.denial_limiter import DenialAuditLimiter
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    CiScope,
+    PrincipalRef,
+    SecurableKind,
+    TaskScope,
+)
 from lakana_core.errors import (
     AuthenticationError,
     ConflictError,
@@ -17,8 +29,10 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
+from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
-from lakana_core.identity.task_tokens import TaskTokenService
+from lakana_core.identifiers import NamespacePath
+from lakana_core.identity.task_tokens import ListedTaskToken, TaskTokenService
 from lakana_core.identity.tokens import GeneratedToken, hash_secret, parse_token
 from lakana_core.models import (
     AuditEvent,
@@ -26,6 +40,7 @@ from lakana_core.models import (
     Grant,
     Principal,
     PrincipalType,
+    Run,
     TaskToken,
 )
 
@@ -420,3 +435,176 @@ def test_a_non_admin_revokes_only_its_own_rest_minted_token(session: Session) ->
     assert all(e.principal_id == holder.id for e in events)
     with pytest.raises(NotFoundError):
         service.revoke(admin, "nonexistent")
+
+
+def _listing_service(session: Session) -> TaskTokenService:
+    """Build the service as production does: grants, wrapped to audit denials.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    TaskTokenService
+        The service whose authorization is the grants' own.
+    """
+    authz = AuditingAuthorization(GrantAuthorization(session), session, DenialAuditLimiter(10_000))
+    return TaskTokenService(session, authz)
+
+
+def _administrator(session: Session) -> PrincipalRef:
+    """Persist a user holding the `ADMIN` role on the instance.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    PrincipalRef
+        The administrator, authenticated with a personal token.
+    """
+    ref = _admin(session)
+    return replace(ref, credential="pat")
+
+
+def _stamped(
+    session: Session, key_id: str, *, minutes_ago: int, **changes: datetime | uuid.UUID | int
+) -> None:
+    """Move a token's issue time into the past and set other columns.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    key_id
+        The token's key id.
+    minutes_ago
+        How long ago it was issued.
+    **changes
+        Other columns to set.
+    """
+    row = session.execute(select(TaskToken).where(TaskToken.key_id == key_id)).scalar_one()
+    row.issued_at = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    for column, value in changes.items():
+        setattr(row, column, value)
+    session.commit()
+
+
+def test_list_live_pages_unrevoked_unexpired_tokens_newest_first(
+    session: Session, tmp_path: Path
+) -> None:
+    """A REST token and a bound one are live; a revoked and an expired one are not."""
+    admin = _administrator(session)
+    _prepared_catalog(
+        session,
+        tmp_path,
+        AllowAllAuthorization(),
+        namespaces=[NamespacePath.from_parts(["bronze"])],
+        tables=[],
+    )
+    plain = _add_principal(session, "worker-1")
+    minting = TaskTokenService(session, AllowAllAuthorization())
+    rest = minting.mint(
+        admin, "worker-1", environment="dev", asset_scope=["gold.a"], ttl_seconds=3600
+    )
+    revoked = minting.mint(
+        admin, "worker-1", environment="dev", asset_scope=["gold.b"], ttl_seconds=3600
+    )
+    expired = minting.mint(
+        admin, "worker-1", environment="dev", asset_scope=["gold.c"], ttl_seconds=3600
+    )
+    task = python_task_run(session, admin.id, asset="gold.scores", claim=2)
+    run = session.get(Run, task.run_id)
+    assert run is not None
+    run.job = "nightly"
+    session.commit()
+    bound = minting.mint_for_task(task.id, 2, ttl_seconds=3600)
+    _stamped(session, rest.key_id, minutes_ago=30)
+    _stamped(session, revoked.key_id, minutes_ago=20, revoked_at=datetime.now(UTC))
+    _stamped(
+        session,
+        expired.key_id,
+        minutes_ago=10,
+        expires_at=datetime.now(UTC) - timedelta(minutes=1),
+    )
+    _stamped(session, bound.key_id, minutes_ago=5)
+    service = _listing_service(session)
+
+    first = service.list_live(admin, limit=1)
+    assert first.next_cursor is not None
+    second = service.list_live(admin, limit=1, cursor=first.next_cursor)
+
+    listed = [*first.items, *second.items]
+    assert second.next_cursor is None
+    assert all(isinstance(item, ListedTaskToken) for item in listed)
+    assert [item.token.key_id for item in listed] == [bound.key_id, rest.key_id]
+    newer, older = listed
+    assert (newer.principal, newer.run_id, newer.job, newer.asset) == (
+        admin.name,
+        run.id,
+        "nightly",
+        "gold.scores",
+    )
+    assert newer.token.asset_scope == ["bronze.stations", "gold.scores", "silver.weather"]
+    assert older.token.asset_scope == ["gold.a"]
+    assert (older.principal, older.run_id, older.job, older.asset) == (plain.name, None, None, None)
+
+
+def test_list_live_filters_by_environment_and_an_unknown_one_is_empty(session: Session) -> None:
+    """`environment` keeps one environment's tokens; a name no token has is an empty page."""
+    admin = _administrator(session)
+    _add_principal(session, "worker-1")
+    minting = TaskTokenService(session, AllowAllAuthorization())
+    dev = minting.mint(admin, "worker-1", environment="dev", asset_scope=[], ttl_seconds=60)
+    minting.mint(admin, "worker-1", environment="prod", asset_scope=[], ttl_seconds=60)
+    service = _listing_service(session)
+
+    assert [i.token.key_id for i in service.list_live(admin, environment="dev").items] == [
+        dev.key_id
+    ]
+    empty = service.list_live(admin, environment="nowhere")
+    assert (empty.items, empty.next_cursor) == ([], None)
+
+
+def test_list_live_is_for_an_administrator_only(session: Session) -> None:
+    """`MINT_TASK_TOKEN` without `ADMIN`, and an administrator's task or CI token, are refused."""
+    admin = _administrator(session)
+    holder = _holder(session)
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            principal_id=holder.id,
+            action=Action.MINT_TASK_TOKEN,
+            kind=SecurableKind.INSTANCE,
+            granted_by=admin.id,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    task = replace(
+        admin,
+        credential="task",
+        task_scope=TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4()),
+    )
+    ci = replace(
+        admin,
+        credential="ci",
+        ci_scope=CiScope(
+            token_id=uuid.uuid4(),
+            rule_id=uuid.uuid4(),
+            environment="dev",
+            environment_id=uuid.uuid4(),
+            repository="sales",
+            repository_id=uuid.uuid4(),
+            kinds=frozenset(),
+            sha=None,
+        ),
+    )
+    service = _listing_service(session)
+    for ref in (holder, task, ci):
+        with pytest.raises(PermissionDenied):
+            service.list_live(ref)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import httpx
+import pytest
 from conftest import FakeApi, invoke, make_state
 
 _BOB = {"name": "bob", "type": "SERVICE_ACCOUNT", "is_active": True, "held_admin": False}
@@ -154,6 +156,114 @@ def test_token_list_and_revoke(tmp_path: Path) -> None:
     assert "k9" in invoke(make_state(tmp_path, api), "token", "list", "bob").stdout
     assert invoke(make_state(tmp_path, api), "token", "revoke", "bob", "k9").exit_code == 2
     assert invoke(make_state(tmp_path, api), "token", "revoke", "bob", "k9", "--yes").exit_code == 0
+
+
+_TOKEN_ROW = {
+    "key_id": "k9",
+    "name": "ci",
+    "owner": "bob",
+    "created_at": "2026-11-01T09:00:00Z",
+    "last_used_at": None,
+    "expires_at": None,
+    "revoked_at": None,
+}
+
+
+def test_token_list_without_a_name_lists_your_own(tmp_path: Path) -> None:
+    """The name comes from `whoami`."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/whoami",
+        json={"name": "bob", "type": "USER", "task_token": None, "ci_token": None},
+    )
+    api.on("GET", "/api/v1/principals/bob/tokens", json=[_TOKEN_ROW])
+
+    result = invoke(make_state(tmp_path, api), "token", "list")
+
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.path == "/api/v1/principals/bob/tokens"
+    assert "k9" in result.stdout
+
+
+def test_token_list_all_has_an_owner_column(tmp_path: Path) -> None:
+    """`--all` lists every owner's tokens, pages them and names the next page."""
+    api = FakeApi()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[_TOKEN_ROW], headers={"X-Next-Cursor": "n1"})
+
+    api.routes["GET", "/api/v1/tokens"] = respond
+
+    result = invoke(make_state(tmp_path, api), "token", "list", "--all", "--limit", "5")
+
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"limit": "5"}
+    assert "owner" in result.stdout
+    assert "bob" in result.stdout
+    assert "More results: lakana token list --all --limit 5 --cursor n1" in result.stdout
+
+
+def test_token_list_all_with_a_name_is_exit_2(tmp_path: Path) -> None:
+    """A name and `--all` contradict each other."""
+    result = invoke(make_state(tmp_path, FakeApi()), "token", "list", "bob", "--all")
+    assert result.exit_code == 2
+    assert "--all lists every owner's tokens; leave out PRINCIPAL." in result.stderr
+
+
+@pytest.mark.parametrize("option", [["--limit", "5"], ["--cursor", "c"]])
+def test_token_list_limit_without_all_is_exit_2(tmp_path: Path, option: list[str]) -> None:
+    """Paging options belong to `--all`."""
+    result = invoke(make_state(tmp_path, FakeApi()), "token", "list", *option)
+    assert result.exit_code == 2
+    assert "--limit and --cursor page the --all list." in result.stderr
+
+
+_TASK_TOKEN_ROW = {
+    "key_id": "t1",
+    "principal": "worker-1",
+    "environment": "dev",
+    "asset_scope": ["gold.*"],
+    "issued_at": "2026-11-01T09:00:00Z",
+    "expires_at": "2026-11-01T10:00:00Z",
+    "run_id": None,
+    "job": None,
+    "asset": None,
+}
+
+
+def test_task_token_list_without_env_lists_every_environment(tmp_path: Path) -> None:
+    """No `environment` query parameter is sent, though the profile has a default."""
+    api = FakeApi()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[_TASK_TOKEN_ROW], headers={"X-Next-Cursor": "n1"})
+
+    api.routes["GET", "/api/v1/task-tokens"] = respond
+
+    result = invoke(make_state(tmp_path, api), "task-token", "list", "--limit", "5")
+
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"limit": "5"}
+    assert "t1" in result.stdout
+    assert "worker-1" in result.stdout
+    assert "More results: lakana task-token list --limit 5 --cursor n1" in result.stdout
+
+
+def test_task_token_list_with_env(tmp_path: Path) -> None:
+    """`--env` filters, and the next page's command keeps it."""
+    api = FakeApi()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[_TASK_TOKEN_ROW], headers={"X-Next-Cursor": "n2"})
+
+    api.routes["GET", "/api/v1/task-tokens"] = respond
+
+    result = invoke(make_state(tmp_path, api), "task-token", "list", "--env", "dev")
+
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"environment": "dev"}
+    assert "More results: lakana task-token list --env dev --cursor n2" in result.stdout
 
 
 def test_task_token_mint_and_revoke(tmp_path: Path) -> None:

@@ -2199,3 +2199,164 @@ def test_run_show_json_has_the_raw_numbers(tmp_path: Path) -> None:
         1288490188,
     )
     assert second["bytes_read"] is None
+
+
+def _failed_row(
+    job: str | None, environment: str, task: str | None, code: str | None, **run: object
+) -> dict[str, object]:
+    """Build a `FailedRunOut` body.
+
+    Parameters
+    ----------
+    job
+        The job of the run, or `None` for a run of no job.
+    environment
+        The environment.
+    task
+        The first failed task, or `None` for a run-level failure.
+    code
+        Its failure code, or `None`.
+    **run
+        Fields of the run to change.
+
+    Returns
+    -------
+    dict
+        The body.
+    """
+    failure = (
+        None
+        if code is None
+        else {"code": code, "cause": f"The {code} cause.", "next_step": f"The {code} step."}
+    )
+    return {
+        "run": {
+            **_run("failed"),
+            "environment": environment,
+            "job": job,
+            "finished_at": "2026-10-03T12:05:00+00:00",
+            **run,
+        },
+        "task": task,
+        "failure": failure,
+    }
+
+
+def test_runs_list_all_environments_adds_the_environment_column(tmp_path: Path) -> None:
+    api = FakeApi()
+    rows = [{**_run("failed"), "environment": "prod"}, {**_run("succeeded"), "environment": "test"}]
+    api.on("GET", "/api/v1/runs", json={"items": rows, "next_cursor": "n1"})
+    result = invoke(
+        make_state(tmp_path, api),
+        "runs",
+        "list",
+        "--all-environments",
+        "--repo",
+        "analytics",
+        "--limit",
+        "5",
+        env=_CI,
+    )
+    assert result.exit_code == 0, result.stderr
+    header = next(line for line in result.stdout.splitlines() if " id " in line)
+    assert header.index("id") < header.index("environment") < header.index("repository")
+    assert "prod" in result.stdout and "test" in result.stdout
+    assert dict(api.requests[0].url.params) == {"repository": "analytics", "limit": "5"}
+    assert (
+        "More results: lakana runs list --all-environments --repo analytics --limit 5 --cursor n1"
+        in result.stdout
+    )
+
+
+def test_runs_list_env_and_all_environments_together_is_exit_2(tmp_path: Path) -> None:
+    api = FakeApi()
+    result = invoke(
+        make_state(tmp_path, api), "runs", "list", "--all-environments", "--env", "dev", env=_CI
+    )
+    assert result.exit_code == 2
+    assert "Choose one: --env ENV or --all-environments." in _plain(result.stderr)
+    assert api.requests == []
+
+
+def test_runs_failed_prints_rows_and_the_cause_and_next_step(tmp_path: Path) -> None:
+    api = FakeApi()
+    body = {
+        "items": [
+            _failed_row("nightly", "prod", "silver.clean", "timeout"),
+            _failed_row(None, "test", "gold.daily", "memory"),
+        ],
+        "truncated": False,
+    }
+    api.on("GET", "/api/v1/runs/failed", json=body)
+    result = invoke(make_state(tmp_path, api), "runs", "failed", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {}
+    header = next(line for line in result.stdout.splitlines() if "environment" in line)
+    assert [
+        header.index(c) for c in ("environment", "name", "id", "finished_at", "task", "code")
+    ] == sorted(
+        header.index(c) for c in ("environment", "name", "id", "finished_at", "task", "code")
+    )
+    text = _plain(result.stdout)
+    assert "nightly (prod): The timeout cause. The timeout step." in text
+    assert "analytics (test): The memory cause. The memory step." in text
+    assert "More failed runs" not in text
+
+
+def test_runs_failed_sends_env_and_limit(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", "/api/v1/runs/failed", json={"items": [], "truncated": False})
+    result = invoke(
+        make_state(tmp_path, api), "runs", "failed", "--env", "prod", "--limit", "3", env=_CI
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"environment": "prod", "limit": "3"}
+
+
+def test_runs_failed_prints_the_run_message_when_no_task_failed(tmp_path: Path) -> None:
+    api = FakeApi()
+    row = _failed_row(
+        "nightly", "prod", None, None, error_message="The code changed after the deploy."
+    )
+    api.on("GET", "/api/v1/runs/failed", json={"items": [row], "truncated": False})
+    result = invoke(make_state(tmp_path, api), "runs", "failed", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    assert "nightly (prod): The code changed after the deploy." in _plain(result.stdout)
+
+
+def test_runs_failed_prints_no_colon_when_the_server_sent_no_why(tmp_path: Path) -> None:
+    api = FakeApi()
+    row = _failed_row("nightly", "prod", None, None, error_message=None)
+    api.on("GET", "/api/v1/runs/failed", json={"items": [row], "truncated": False})
+    result = invoke(make_state(tmp_path, api), "runs", "failed", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    text = _plain(result.stdout)
+    assert text.endswith("nightly (prod)")
+    assert "nightly (prod):" not in text
+
+
+def test_runs_failed_env_help_says_every_environment_is_the_default(tmp_path: Path) -> None:
+    result = invoke(make_state(tmp_path, FakeApi()), "runs", "failed", "--help", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    text = " ".join(_plain(result.stdout).split())
+    assert "Only this environment (default: every environment you may read)." in text
+
+
+def test_runs_failed_json_keeps_the_items_and_the_truncated_flag(tmp_path: Path) -> None:
+    api = FakeApi()
+    body = {"items": [_failed_row("nightly", "prod", "a.b", "timeout")], "truncated": True}
+    api.on("GET", "/api/v1/runs/failed", json=body)
+    result = invoke(make_state(tmp_path, api), "--output", "json", "runs", "failed", env=_CI)
+    assert result.exit_code == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"items", "truncated"}
+    assert payload["truncated"] is True
+    assert [(i["run"]["job"], i["task"]) for i in payload["items"]] == [("nightly", "a.b")]
+
+
+def test_runs_failed_says_when_more_were_cut(tmp_path: Path) -> None:
+    api = FakeApi()
+    body = {"items": [_failed_row("nightly", "prod", "a.b", "timeout")], "truncated": True}
+    api.on("GET", "/api/v1/runs/failed", json=body)
+    result = invoke(make_state(tmp_path, api), "runs", "failed", env=_CI)
+    assert "More failed runs than shown; narrow with --env." in _plain(result.stdout)

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from lakana_core.ci_oidc.config import CiOidcConfig
@@ -535,7 +535,7 @@ class Settings(BaseSettings):
     database: DatabaseConfig
     bootstrap_admin: str = "admin"
     bootstrap_pat_key_id: str | None = None
-    bootstrap_pat_secret: str | None = None
+    bootstrap_pat_secret: SecretStr | None = None
     bootstrap_token_file: Path | None = None
     secrets: SecretsConfig = SecretsConfig()
     task_tokens: TaskTokensConfig = TaskTokensConfig()

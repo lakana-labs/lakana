@@ -1,6 +1,7 @@
 """Tests for PatService."""
 
 import uuid
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -9,17 +10,39 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import lakana_core.identity.pats as pats_module
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef
-from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError
-from lakana_core.identity.pats import PatService
+from lakana_core.audit.authorization import AuditingAuthorization
+from lakana_core.audit.denial_limiter import DenialAuditLimiter
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    CiScope,
+    PrincipalRef,
+    SecurableKind,
+    SessionContext,
+    TaskScope,
+)
+from lakana_core.errors import (
+    AuthenticationError,
+    ConflictError,
+    NotFoundError,
+    PermissionDenied,
+    StepUpRequired,
+    ValidationError,
+)
+from lakana_core.grants.admin import admin_only_message, may_manage_tokens
+from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.grants.roles import Role
+from lakana_core.identity.pats import OWN_TOKEN_FROM_BROWSER, ListedPat, PatService
 from lakana_core.identity.tokens import GeneratedToken, hash_secret, parse_token
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    Grant,
     PersonalAccessToken,
     Principal,
     PrincipalType,
 )
+from lakana_core.pagination import encode_cursor
 
 
 def _admin(session: Session) -> PrincipalRef:
@@ -124,8 +147,8 @@ def test_verify_updates_last_used_at(session: Session) -> None:
 
     service.verify(issued.key_id, secret)
 
-    [pat] = service.list(_admin(session), "alice")
-    assert pat.last_used_at is not None
+    [listed] = service.list(_admin(session), "alice")
+    assert listed.token.last_used_at is not None
 
 
 def test_verify_rejects_an_expired_pat(session: Session) -> None:
@@ -178,7 +201,8 @@ def test_list_never_exposes_a_secret_or_its_hash(session: Session) -> None:
     _add_principal(session, "alice")
     service = PatService(session, AllowAllAuthorization())
     service.issue(_admin(session), "alice", name="laptop")
-    [pat] = service.list(_admin(session), "alice")
+    [listed] = service.list(_admin(session), "alice")
+    pat = listed.token
     assert not hasattr(pat, "secret")
     assert pat.name == "laptop"
 
@@ -368,3 +392,398 @@ def test_only_bootstrap_if_needed_marks_a_pat_as_bootstrap(session: Session) -> 
         session.execute(select(PersonalAccessToken.key_id, PersonalAccessToken.bootstrap)).all()
     )
     assert flags == {plain.key_id: False, named.key_id: False, marked.key_id: True}
+
+
+def _auditing(session: Session) -> AuditingAuthorization:
+    """Build the production pairing: grants, wrapped to audit denials.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    AuditingAuthorization
+        The wrapper around `GrantAuthorization`.
+    """
+    return AuditingAuthorization(GrantAuthorization(session), session, DenialAuditLimiter(10_000))
+
+
+def _person(session: Session, name: str, *, admin: bool = False) -> PrincipalRef:
+    """Persist an active user, with the `ADMIN` role on the instance when asked.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    name
+        The user's name.
+    admin
+        Whether the user holds `ADMIN` at instance scope.
+
+    Returns
+    -------
+    PrincipalRef
+        A personal-token reference to the user.
+    """
+    row = _add_principal(session, name)
+    ref = PrincipalRef(id=row.id, name=name, type=row.type, credential="pat")
+    if admin:
+        session.add(
+            Grant(
+                id=uuid.uuid4(),
+                principal_id=row.id,
+                role=Role.ADMIN,
+                kind=SecurableKind.INSTANCE,
+                granted_by=row.id,
+                granted_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    return ref
+
+
+def _in_browser(ref: PrincipalRef, *, touched_minutes_ago: int | None) -> PrincipalRef:
+    """Give a reference a browser session whose last passkey touch is some minutes old.
+
+    Parameters
+    ----------
+    ref
+        The person.
+    touched_minutes_ago
+        Age of the last touch at `verified_at`; `None` for no touch.
+
+    Returns
+    -------
+    PrincipalRef
+        The reference with a `SessionContext`.
+    """
+    now = datetime.now(UTC)
+    touched = None if touched_minutes_ago is None else now - timedelta(minutes=touched_minutes_ago)
+    context = SessionContext(
+        session_id=uuid.uuid4(),
+        key_id="abc",
+        via="passkey",
+        created_at=now,
+        last_touch_at=touched,
+        source_pat_id=None,
+        verified_at=now,
+    )
+    return replace(ref, credential="session", session=context)
+
+
+def _task_ref(ref: PrincipalRef) -> PrincipalRef:
+    """Make a task-token reference for a person.
+
+    Parameters
+    ----------
+    ref
+        The person.
+
+    Returns
+    -------
+    PrincipalRef
+        The same person, authenticated with a task token.
+    """
+    scope = TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4())
+    return replace(ref, credential="task", task_scope=scope)
+
+
+def _ci_ref(ref: PrincipalRef) -> PrincipalRef:
+    """Make a CI-token reference for a person.
+
+    Parameters
+    ----------
+    ref
+        The person.
+
+    Returns
+    -------
+    PrincipalRef
+        The same person, authenticated with a CI token.
+    """
+    scope = CiScope(
+        token_id=uuid.uuid4(),
+        rule_id=uuid.uuid4(),
+        environment="dev",
+        environment_id=uuid.uuid4(),
+        repository="sales",
+        repository_id=uuid.uuid4(),
+        kinds=frozenset(),
+        sha=None,
+    )
+    return replace(ref, credential="ci", ci_scope=scope)
+
+
+def _denials(session: Session) -> list[dict[str, object]]:
+    """Read the details of the recorded denials, oldest first.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of dict
+        One detail dictionary per `AUTHORIZATION_DENIED` row.
+    """
+    rows = session.execute(
+        select(AuditEvent)
+        .where(AuditEvent.event_type == AuditEventType.AUTHORIZATION_DENIED)
+        .order_by(AuditEvent.occurred_at)
+    ).scalars()
+    return [row.detail for row in rows]
+
+
+def _tokens_of(session: Session, ref: PrincipalRef) -> list[PersonalAccessToken]:
+    """Read every token row of a person.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ref
+        The person.
+
+    Returns
+    -------
+    list of PersonalAccessToken
+        Their rows.
+    """
+    return list(
+        session.execute(
+            select(PersonalAccessToken).where(PersonalAccessToken.principal_id == ref.id)
+        ).scalars()
+    )
+
+
+def test_a_token_cannot_create_its_owners_token(session: Session) -> None:
+    """A stolen token of a non-administrator cannot mint a replacement."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    with pytest.raises(PermissionDenied) as refused:
+        service.issue(bob, "bob", name="mine")
+    assert str(refused.value) == OWN_TOKEN_FROM_BROWSER
+    assert _denials(session) == [{"operation": "issue_token", "reason": "not_from_a_browser"}]
+    assert _tokens_of(session, bob) == []
+    with pytest.raises(PermissionDenied):
+        service.issue(_task_ref(bob), "bob", name="mine")
+    with pytest.raises(PermissionDenied):
+        service.issue(_ci_ref(bob), "bob", name="mine")
+    assert _tokens_of(session, bob) == []
+
+
+def test_a_person_creates_their_own_token_from_a_fresh_session_only(session: Session) -> None:
+    """A browser session with a stale touch is asked to step up; a fresh one creates the token."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    with pytest.raises(StepUpRequired):
+        service.issue(_in_browser(bob, touched_minutes_ago=16), "bob", name="laptop")
+    assert _tokens_of(session, bob) == []
+    issued = service.issue(_in_browser(bob, touched_minutes_ago=1), "bob", name="laptop")
+    [row] = _tokens_of(session, bob)
+    assert row.principal_id == bob.id
+    assert row.key_id == issued.key_id
+    [event] = session.execute(
+        select(AuditEvent).where(AuditEvent.event_type == AuditEventType.PAT_ISSUED)
+    ).scalars()
+    assert event.detail["issuer"] == "bob"
+    assert event.detail["subject"] == "bob"
+
+
+def test_a_person_lists_and_revokes_their_own_tokens_with_a_pat_or_a_session(
+    session: Session,
+) -> None:
+    """Listing and revoking one's own tokens need no step-up and work with either credential."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    first = service.issue(_in_browser(bob, touched_minutes_ago=0), "bob", name="one")
+    second = service.issue(_in_browser(bob, touched_minutes_ago=0), "bob", name="two")
+    stale = _in_browser(bob, touched_minutes_ago=60)
+    for ref in (bob, stale):
+        assert {t.token.key_id for t in service.list(ref, "bob")} == {first.key_id, second.key_id}
+    service.revoke(bob, "bob", first.key_id)
+    service.revoke(stale, "bob", second.key_id)
+    assert all(t.revoked_at is not None for t in _tokens_of(session, bob))
+
+
+def test_task_and_ci_tokens_may_not_list_or_revoke_their_owners_tokens(session: Session) -> None:
+    """A task or CI token is not a personal credential."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    issued = service.issue(_in_browser(bob, touched_minutes_ago=0), "bob", name="one")
+    for ref in (_task_ref(bob), _ci_ref(bob)):
+        with pytest.raises(PermissionDenied):
+            service.list(ref, "bob")
+        with pytest.raises(PermissionDenied):
+            service.revoke(ref, "bob", issued.key_id)
+
+
+@pytest.mark.parametrize("holds_the_action", [False, True])
+def test_someone_elses_tokens_are_403_whether_or_not_they_exist(
+    session: Session, holds_the_action: bool
+) -> None:
+    """The refusal comes before any lookup, so it never says whether a principal exists.
+
+    With a single-action grant of `MANAGE_TOKEN` the refusal is `admin_only_message`; without
+    any grant it is the authorization's own. Either way it is one text for every method and
+    for a person who exists and one who does not.
+    """
+    bob = _person(session, "bob")
+    ada = _person(session, "ada", admin=True)
+    if holds_the_action:
+        session.add(
+            Grant(
+                id=uuid.uuid4(),
+                principal_id=bob.id,
+                action=Action.MANAGE_TOKEN,
+                kind=SecurableKind.INSTANCE,
+                granted_by=ada.id,
+                granted_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    service = PatService(session, _auditing(session))
+    messages: set[str] = set()
+    for subject in ("ada", "nobody"):
+        for call in (
+            lambda s=subject: service.list(bob, s),
+            lambda s=subject: service.revoke(bob, s, "key"),
+            lambda s=subject: service.issue(bob, s, name="x"),
+        ):
+            with pytest.raises(PermissionDenied) as refused:
+                call()
+            messages.add(str(refused.value))
+    assert len(messages) == 1
+    assert not any(name in text for text in messages for name in ("ada", "nobody"))
+    if holds_the_action:
+        assert messages == {admin_only_message(Action.MANAGE_TOKEN)}
+
+
+def test_an_administrator_still_issues_with_a_token(session: Session) -> None:
+    """An administrator keeps today's rule, which the CLI and the bootstrap rely on."""
+    ada = _person(session, "ada", admin=True)
+    _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    service.issue(ada, "bob", name="for-bob")
+    service.issue(ada, "ada", name="for-me")
+    assert len(_tokens_of(session, ada)) == 1
+
+
+def test_may_manage_tokens(session: Session) -> None:
+    """Only an administrator's personal credential, or the bootstrap, may manage tokens."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    authz = _auditing(session)
+    assert may_manage_tokens(session, authz, ada)
+    assert may_manage_tokens(session, AllowAllAuthorization(), bob)
+    assert not may_manage_tokens(session, authz, bob)
+    assert not may_manage_tokens(session, authz, _task_ref(ada))
+    assert _denials(session) == []
+
+
+def test_a_self_made_token_stops_when_its_owner_is_deactivated(session: Session) -> None:
+    """A token a person made for themselves ends with their account."""
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    issued = service.issue(_in_browser(bob, touched_minutes_ago=1), "bob", name="laptop")
+    parsed = parse_token(issued.token, "lakana_pat")
+    assert parsed is not None
+    session.execute(select(Principal).where(Principal.name == "bob")).scalar_one().is_active = False
+    session.commit()
+    with pytest.raises(AuthenticationError):
+        service.verify(*parsed)
+
+
+def _stamp(
+    session: Session, ref: PrincipalRef, name: str, *, minutes_ago: int, **changes: datetime
+) -> str:
+    """Issue a token for `ref`, then move its creation time and set other columns.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ref
+        The owner.
+    name
+        The token's label.
+    minutes_ago
+        How long ago it was created.
+    **changes
+        Other columns to set (`revoked_at`, `expires_at`).
+
+    Returns
+    -------
+    str
+        The token's key id.
+    """
+    issued = PatService(session, AllowAllAuthorization()).issue(ref, ref.name, name=name)
+    row = session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.key_id == issued.key_id)
+    ).scalar_one()
+    row.created_at = datetime.now(UTC) - timedelta(minutes=minutes_ago)
+    for column, value in changes.items():
+        setattr(row, column, value)
+    session.commit()
+    return issued.key_id
+
+
+def test_list_all_pages_every_live_token_once_newest_first(session: Session) -> None:
+    """Five tokens over three owners, one revoked and one expired: three live ones, once each."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    cy = _person(session, "cy")
+    now = datetime.now(UTC)
+    oldest = _stamp(session, ada, "a", minutes_ago=50)
+    _stamp(session, bob, "revoked", minutes_ago=40, revoked_at=now)
+    newest = _stamp(session, cy, "c", minutes_ago=10)
+    _stamp(session, bob, "expired", minutes_ago=30, expires_at=now - timedelta(minutes=1))
+    middle = _stamp(session, bob, "b", minutes_ago=20)
+    service = PatService(session, _auditing(session))
+
+    first = service.list_all(ada, limit=2)
+    assert first.next_cursor is not None
+    second = service.list_all(ada, limit=2, cursor=first.next_cursor)
+
+    seen = [(listed.token.key_id, listed.owner) for listed in (*first.items, *second.items)]
+    assert seen == [(newest, "cy"), (middle, "bob"), (oldest, "ada")]
+    assert all(isinstance(listed, ListedPat) for listed in first.items)
+    assert second.next_cursor is None
+    with pytest.raises(ValidationError):
+        service.list_all(ada, cursor=encode_cursor("grants", now, uuid.uuid4()))
+
+
+def test_list_all_filters_by_owner_and_404s_an_unknown_one(session: Session) -> None:
+    """`owner` keeps one person's live tokens; a name nobody has is not found."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    _stamp(session, ada, "a", minutes_ago=5)
+    mine = _stamp(session, bob, "b", minutes_ago=4)
+    service = PatService(session, _auditing(session))
+
+    assert [listed.token.key_id for listed in service.list_all(ada, owner="bob").items] == [mine]
+    with pytest.raises(NotFoundError):
+        service.list_all(ada, owner="nobody")
+
+
+def test_list_all_is_for_an_administrator_only(session: Session) -> None:
+    """A person, and the administrator's own task token, are refused."""
+    ada = _person(session, "ada", admin=True)
+    bob = _person(session, "bob")
+    service = PatService(session, _auditing(session))
+    for ref in (bob, _task_ref(ada)):
+        with pytest.raises(PermissionDenied):
+            service.list_all(ref)
+
+
+def test_list_returns_each_token_with_its_owner(session: Session) -> None:
+    """`list` answers `ListedPat` items carrying the owner's name."""
+    bob = _person(session, "bob")
+    _stamp(session, bob, "laptop", minutes_ago=1)
+    [listed] = PatService(session, _auditing(session)).list(bob, "bob")
+    assert isinstance(listed, ListedPat)
+    assert listed.owner == "bob"
+    assert listed.token.name == "laptop"

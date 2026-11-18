@@ -156,7 +156,7 @@ class SecretsConfig(BaseModel):
 
     model_config = ConfigDict(hide_input_in_errors=True)
 
-    master_key: str | None = None
+    master_key: SecretStr | None = None
     accept_format_1: bool = False
 
     @field_validator("accept_format_1", mode="before")
@@ -191,6 +191,16 @@ class SecretsConfig(BaseModel):
             "must be true or false, e.g. LAKANA_SECRETS__ACCEPT_FORMAT_1=true. It is false "
             "unless you set old-format secrets to be read (see the upgrade page)."
         )
+
+    def master_key_text(self) -> str | None:
+        """Return the master key as text.
+
+        Returns
+        -------
+        str or None
+            The key, or ``None`` when none is set.
+        """
+        return None if self.master_key is None else self.master_key.get_secret_value()
 
     def __repr_args__(self) -> Iterable[tuple[str | None, Any]]:
         """Yield the `master_key` field redacted, then `accept_format_1`.

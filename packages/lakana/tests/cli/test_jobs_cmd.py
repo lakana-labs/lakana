@@ -222,6 +222,39 @@ def test_show_of_a_paused_schedule_and_of_a_job_without_one(tmp_path: Path) -> N
     assert "schedule 0" not in manual and "on demand" in manual
 
 
+_NOTIFY = {
+    "format": "slack",
+    "events": ["failed", "recovered", "columns_changed", "health"],
+}
+
+
+def test_job_show_prints_the_notification_with_its_secret_for_a_deployer(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_JOBS}/daily", json=_job(notify={**_NOTIFY, "secret": "alerts-webhook"}))
+    result = invoke(make_state(tmp_path, api), "job", "show", "daily", "--env", "dev")
+    assert result.exit_code == 0, result.output
+    assert (
+        "slack, on failed, recovered, columns_changed, health; via secret alerts-webhook"
+        in _plain(result.stdout)
+    )
+
+
+def test_job_show_prints_the_notification_without_a_secret_for_a_reader(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_JOBS}/daily", json=_job(notify=_NOTIFY))
+    result = invoke(make_state(tmp_path, api), "job", "show", "daily", "--env", "dev")
+    out = _plain(result.stdout)
+    assert "slack, on failed, recovered, columns_changed, health" in out
+    assert "via secret" not in out
+
+
+def test_job_show_prints_none_without_a_notification(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_JOBS}/daily", json=_job())
+    result = invoke(make_state(tmp_path, api), "job", "show", "daily", "--env", "dev")
+    assert "notify none" in _plain(result.stdout)
+
+
 def test_show_as_json_is_the_whole_object(tmp_path: Path) -> None:
     api = FakeApi()
     api.on("GET", f"{_JOBS}/daily", json=_job())

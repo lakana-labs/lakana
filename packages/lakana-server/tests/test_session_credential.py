@@ -271,19 +271,11 @@ def test_sign_in_routes_answer_409_with_the_interface_off(
     assert "LAKANA_UI__ENABLED" in r.json()["detail"]
 
 
-@pytest.mark.parametrize(
-    ("method", "path"), [("POST", "/api/v1/task-tokens"), ("DELETE", "/api/v1/task-tokens/k")]
-)
-def test_token_only_routes_ignore_the_cookie(client: TestClient, method: str, path: str) -> None:
-    """Task tokens are minted and revoked with a token only, never from a browser."""
+def test_token_only_routes_ignore_the_cookie(client: TestClient) -> None:
+    """Task tokens are minted with a token only, never from a browser (revoking is let through)."""
     name, value, csrf = signed_in(client, "admin", touched_at=None)
-    body = {"environment": "dev", "asset_scope": [], "ttl_seconds": 300}
-    r = client.request(
-        method,
-        path,
-        headers=session_headers(name, value, csrf),
-        json=body if method == "POST" else None,
-    )
+    body = {"principal": "admin", "environment": "dev", "asset_scope": [], "ttl_seconds": 300}
+    r = client.post("/api/v1/task-tokens", headers=session_headers(name, value, csrf), json=body)
     assert r.status_code == 403, r.text
     assert r.json()["type"] == "TokenOnlyRoute"
     assert "lakana" in r.json()["detail"]
@@ -543,7 +535,7 @@ def test_csrf_and_token_only_refusals_are_audited(client: TestClient) -> None:
     key_id = value.split("_")[0]
     r = client.patch("/api/v1/whoami", headers=session_headers(name, value), json={})
     assert r.status_code == 401
-    r = client.delete("/api/v1/task-tokens/k", headers=session_headers(name, value, csrf))
+    r = client.post("/api/v1/task-tokens", headers=session_headers(name, value, csrf), json={})
     assert r.status_code == 403
     assert _failed_rows(client) == [
         {"key_id": key_id, "credential": "session", "reason": "csrf"},

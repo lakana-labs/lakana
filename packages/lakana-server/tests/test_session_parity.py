@@ -111,6 +111,9 @@ STATEFUL_READS: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/principals/{name}/tokens"): (
         "a token request writes that token's own `last_used_at` before the list is read"
     ),
+    ("GET", "/api/v1/tokens"): (
+        "a token request writes that token's own `last_used_at` before the list is read"
+    ),
 }
 """Reads whose body the credential's own use changes, with the reason: status only."""
 

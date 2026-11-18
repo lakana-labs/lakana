@@ -21,6 +21,7 @@
 "PUT /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4, done: true }
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
 "access explain": { class: ui, part: 7 }
+"access grants": { class: read, part: 7 }
 "access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
 "access plan": { class: git, reason: "pre-commit validation of an access file" }
 "access status": { class: read, part: 7 }
@@ -47,7 +48,7 @@
 "audit list": { class: ui, part: 8 }
 "bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
 "check list": { class: read, part: 5 }
-"check rows": { class: ui, part: 5 }
+"check rows": { class: ui, part: 5, done: true }
 "ci-trust create": { class: ui, part: 7 }
 "ci-trust delete": { class: ui, part: 7 }
 "ci-trust disable": { class: ui, part: 7 }
@@ -59,6 +60,7 @@
 "column-mask create": { class: ui, part: 7 }
 "column-mask list": { class: ui, part: 7 }
 "column-mask revoke": { class: ui, part: 7 }
+"configuration": { class: read, part: 8 }
 "connection create": { class: ui, part: 6 }
 "connection delete": { class: ui, part: 6 }
 "connection list": { class: ui, part: 6 }
@@ -104,13 +106,13 @@
 "invite create": { class: ui, part: 1 }
 "invite list": { class: ui, part: 1 }
 "invite withdraw": { class: ui, part: 1 }
-"job list": { class: read, part: 5 }
+"job list": { class: read, part: 5, done: true }
 "job notification": { class: ui, part: 5 }
 "job notify-test": { class: ui, part: 5 }
-"job pause": { class: ui, part: 5 }
-"job resume": { class: ui, part: 5 }
-"job run": { class: ui, part: 5 }
-"job show": { class: read, part: 5 }
+"job pause": { class: ui, part: 5, done: true }
+"job resume": { class: ui, part: 5, done: true }
+"job run": { class: ui, part: 5, done: true }
+"job show": { class: read, part: 5, done: true }
 "load": { class: git, reason: "load of a local file; UI file load is #224/#29, optional in M7" }
 "login": { class: ui, part: 1 }
 "logout": { class: ui, part: 1 }
@@ -164,11 +166,12 @@
 "row-filter list": { class: ui, part: 7 }
 "row-filter revoke": { class: ui, part: 7 }
 "run": { class: ui, part: 5 }
-"runs cancel": { class: ui, part: 5 }
+"runs cancel": { class: ui, part: 5, done: true }
+"runs failed": { class: ui, part: 5, done: true }
 "runs list": { class: ui, part: 5 }
-"runs logs": { class: ui, part: 5 }
-"runs resume": { class: ui, part: 5 }
-"runs show": { class: ui, part: 5 }
+"runs logs": { class: ui, part: 5, done: true }
+"runs resume": { class: ui, part: 5, done: true }
+"runs show": { class: ui, part: 5, done: true }
 "scheduler status": { class: ui, part: 8 }
 "search": { class: ui, part: 1 }
 "secret bind": { class: ui, part: 7 }
@@ -224,6 +227,7 @@
 "table undrop": { class: ui, part: 3, done: true }
 "table rebuild": { class: ui, part: 3, done: true }
 "task history": { class: read, part: 5 }
+"task-token list": { class: ui, part: 7 }
 "task-token mint":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
 "task-token revoke": { class: ui, part: 7 }
@@ -278,6 +282,7 @@
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
 "GET /api/v1/connections": { class: ui, part: 6 }
 "GET /api/v1/connections/environments": { class: ui, part: 6 }
+"GET /api/v1/deploys": { class: read, part: 5 }
 "GET /api/v1/environments": { class: ui, part: 8 }
 "GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}": { class: ui, part: 6 }
@@ -302,8 +307,8 @@
 "GET /api/v1/environments/{env}/graph/lineage": { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/graph/neighbours":
   { class: read, part: 3, note: "the Lineage tab does not use it" }
-"GET /api/v1/environments/{env}/jobs": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/jobs": { class: read, part: 5, done: true }
+"GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5, done: true }
 "GET /api/v1/environments/{env}/jobs/{job}/tasks/{task}/attempts": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/namespaces": { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}": { class: read, part: 3 }
@@ -358,10 +363,11 @@
   }
 "GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4, done: true }
 "GET /api/v1/environments/{env}/queries/{query_id}/result": { class: ui, part: 4, done: true }
-"GET /api/v1/environments/{env}/runs": { class: ui, part: 5 }
-"GET /api/v1/environments/{env}/runs/{run_id}": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/runs":
+  { class: ui, part: 5, done: true, note: "the job page lists its job's runs with this filter" }
+"GET /api/v1/environments/{env}/runs/{run_id}": { class: ui, part: 5, done: true }
 "GET /api/v1/environments/{env}/runs/{run_id}/checks": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log": { class: ui, part: 5, done: true }
 "GET /api/v1/environments/{env}/search": { class: ui, part: 1 }
 "GET /api/v1/environments/{env}/terms": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/terms/{key}": { class: read, part: 3 }
@@ -388,6 +394,7 @@
 "GET /api/v1/principals/{name}":
   { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
 "GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
+"GET /api/v1/principals/{name}/grants": { class: read, part: 7 }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
   {
@@ -407,7 +414,10 @@
 "GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2 }
 "GET /api/v1/row-filters":
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
+"GET /api/v1/runs": { class: ui, part: 5, done: true }
+"GET /api/v1/runs/failed": { class: ui, part: 5, done: true }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
+"GET /api/v1/settings/configuration": { class: read, part: 8 }
 "GET /api/v1/settings/sign-in":
   { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
@@ -417,6 +427,8 @@
 "GET /api/v1/tables/tree": { class: read, part: 3, done: true }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
+"GET /api/v1/task-tokens": { class: ui, part: 7 }
+"GET /api/v1/tokens": { class: ui, part: 7 }
 "GET /api/v1/whoami": { class: read, part: 1 }
 "GET /api/v1/workers": { class: ui, part: 8 }
 "PATCH /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
@@ -463,9 +475,9 @@
     note: "only the rollback form is in the UI; the CLI deploy of a new commit is Git",
   }
 "POST /api/v1/environments/{env}/jobs/{job}/notify-test": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/jobs/{job}/resume": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/jobs/{job}/runs": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/jobs/{job}/resume": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/jobs/{job}/runs": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/namespaces": { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads":
   { class: git, reason: "artifact upload" }
@@ -503,9 +515,9 @@
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4, done: true }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4, done: true }
 "POST /api/v1/environments/{env}/runs": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/purge-rows": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }

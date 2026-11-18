@@ -7,9 +7,18 @@ from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from typing import Any, cast
 
-from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param, query_params
+from lakana._http import (
+    NEXT_CURSOR_HEADER,
+    HttpTransport,
+    csv_param,
+    every_page,
+    query_params,
+    route_of_a_newer_server,
+)
 from lakana._models import (
     AttemptResources,
+    FailedRun,
+    FailedRuns,
     Failure,
     ImpactUse,
     ImpactWarning,
@@ -33,6 +42,14 @@ from lakana.resources.checks import check_result_from_json
 from lakana.resources.queries import waiting_for_from_json
 
 _FINISHED = frozenset({"succeeded", "failed", "cancelled"})
+_LIST_ALL_INSTEAD = "list one environment with `lakana runs list --env ENV`"
+"""What to do instead of `Runs.list_all` against a server without `GET /api/v1/runs`."""
+
+_FAILED_INSTEAD = (
+    "read the runs of one environment with `lakana runs list --env ENV --status failed`"
+)
+"""What to do instead of `Runs.failed` against a server without `GET /api/v1/runs/failed`."""
+
 _RunList = list[Run]
 _WorkerList = list[WorkerInfo]
 
@@ -239,6 +256,9 @@ def run_from_json(data: dict[str, Any]) -> Run:
         missed=data.get("missed", 0),
         notifications=[notification_from_json(n) for n in data.get("notifications", ())],
         failed_tasks=data.get("failed_tasks", 0),
+        actions=tuple(data.get("actions", [])),
+        total_tasks=data.get("total_tasks", 0),
+        ended_tasks=data.get("ended_tasks", 0),
     )
 
 
@@ -303,8 +323,8 @@ class Runs:
         )
         return run_from_json(response.json())
 
-    # `list`, `list_page` and `iter` take the same filters and each documents them: a public
-    # method states its own parameters.
+    # `list`, `list_page`, `iter`, `list_all` and `iter_all` take the same filters and each
+    # documents them: a public method states its own parameters.
     # jscpd:ignore-start
     def list(
         self,
@@ -482,7 +502,184 @@ class Runs:
                 return
             cursor = page.next_cursor
 
+    def list_all(
+        self,
+        *,
+        environment: str | None = None,
+        repository: str | None = None,
+        status: str | Sequence[str] | None = None,
+        trigger: str | Sequence[str] | None = None,
+        job: str | None = None,
+        since: datetime | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> RunPage:
+        """List one page of the runs of every environment you may read, newest first.
+
+        The environments are those where you hold `READ_ENVIRONMENT`; one where you do not is
+        left out, so this is never refused for a missing right. The order is that of `list`,
+        over all those environments, and each run names its `environment`. With `environment`,
+        this is `list_page` of that environment.
+
+        Parameters
+        ----------
+        environment
+            Only this environment; then a missing right or environment is refused as by `list`.
+        repository
+            Only this repository's runs.
+        status
+            Only runs in this status or one of these (``queued``, ``running``, ``succeeded``,
+            ``failed``, ``cancelled``).
+        trigger
+            Only runs started this way or one of these (``schedule``, ``api``, ``manual``,
+            ``deploy``).
+        job
+            Only runs of this job.
+        since
+            Only runs created at or after this time, which needs a time zone.
+        limit
+            Most runs returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor` of this list. Send the same filters with every page.
+
+        Returns
+        -------
+        RunPage
+            The runs, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            With `environment`, if you may not read it.
+        lakana.errors.NotFound
+            If `environment` or `repository` does not exist; or, with a sentence saying so, if
+            the server is older than this package and has no `GET /api/v1/runs`.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200, a filter value is unknown, `since` has no time zone,
+            or `cursor` is not one the server issued for this list.
+        """
+        with route_of_a_newer_server("GET /api/v1/runs", _LIST_ALL_INSTEAD):
+            response = self._transport.request(
+                ROUTES["runs.list_all"],
+                params=query_params(
+                    environment=environment,
+                    repository=repository,
+                    status=csv_param(status),
+                    trigger=csv_param(trigger),
+                    job=job,
+                    since=None if since is None else since.isoformat(),
+                    limit=limit,
+                    cursor=cursor,
+                ),
+            )
+        body = response.json()
+        return RunPage(
+            items=[run_from_json(item) for item in body["items"]],
+            next_cursor=body["next_cursor"],
+        )
+
+    def iter_all(
+        self,
+        *,
+        environment: str | None = None,
+        repository: str | None = None,
+        status: str | Sequence[str] | None = None,
+        trigger: str | Sequence[str] | None = None,
+        job: str | None = None,
+        since: datetime | None = None,
+        page_size: int = 100,
+    ) -> Iterator[Run]:
+        """Yield every matching run of every environment you may read, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            Only this environment.
+        repository
+            Only this repository's runs.
+        status
+            Only runs in this status or one of these.
+        trigger
+            Only runs started this way or one of these.
+        job
+            Only runs of this job.
+        since
+            Only runs created at or after this time, which needs a time zone.
+        page_size
+            Runs per request (1 to 200).
+
+        Yields
+        ------
+        Run
+            Each run, once, in the order of `list_all`.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            As `list_all`.
+        """
+        yield from every_page(
+            lambda cursor: self.list_all(
+                environment=environment,
+                repository=repository,
+                status=status,
+                trigger=trigger,
+                job=job,
+                since=since,
+                limit=page_size,
+                cursor=cursor,
+            )
+        )
+
     # jscpd:ignore-end
+
+    def failed(self, *, environment: str | None = None, limit: int | None = None) -> FailedRuns:
+        """List the jobs whose newest finished run failed, in every environment you may read.
+
+        The rule is Home's "Needs your attention": per job (or per repository, for runs of no
+        job) the newest finished run of the last seven days, kept when it failed; a later
+        cancelled run hides an earlier failure. Each entry names the first failed task and its
+        failure; a run that failed without a failed task has neither, and its `error_message`
+        says why.
+
+        Parameters
+        ----------
+        environment
+            Only this environment; then a missing right or environment is refused as by `list`.
+        limit
+            Most entries returned (1 to 200); `None` leaves it to the server (50).
+
+        Returns
+        -------
+        FailedRuns
+            The entries, newest end first, and whether more were left out.
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            With `environment`, if you may not read it.
+        lakana.errors.NotFound
+            If `environment` does not exist; or, with a sentence saying so, if the server is
+            older than this package and has no `GET /api/v1/runs/failed`.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200.
+        """
+        with route_of_a_newer_server("GET /api/v1/runs/failed", _FAILED_INSTEAD):
+            response = self._transport.request(
+                ROUTES["runs.failed"], params=query_params(environment=environment, limit=limit)
+            )
+        body = response.json()
+        return FailedRuns(
+            items=tuple(
+                FailedRun(
+                    run=run_from_json(item["run"]),
+                    task=item["task"],
+                    failure=failure_from_json(item["failure"]),
+                )
+                for item in body["items"]
+            ),
+            truncated=body["truncated"],
+        )
 
     def get(self, environment: str, run_id: str) -> Run:
         """Show one run with its tasks.

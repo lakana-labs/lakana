@@ -445,14 +445,16 @@ export const api = {
    * list never asks for a passkey touch, so there is no step-up retry.
    *
    * @param path - The path under the server, with its query.
+   * @param options - Whether the read is a background poll; no by default.
    * @returns The parsed page, for the caller to type, and the cursor of the next one, null on
    *   the last.
    * @throws {ApiError} for a refusal or an unreachable server.
    */
   async page(
     path: string,
+    options: RequestOptions = {},
   ): Promise<{ readonly body: unknown; readonly nextCursor: string | null }> {
-    const response = await exchangeWith("GET", path, { accept: "application/json" }, {});
+    const response = await exchangeWith("GET", path, { accept: "application/json" }, options);
     return {
       body: await json<unknown>(response),
       nextCursor: response.headers.get("X-Next-Cursor"),

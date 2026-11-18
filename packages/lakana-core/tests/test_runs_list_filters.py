@@ -8,12 +8,15 @@ from pathlib import Path
 
 import pytest
 from core_test_helpers import _prepared_catalog
+from home_test_helpers import deployed_job, finished_run, grant, person
 from sqlalchemy.orm import Session
 from test_projects_dag import make_asset
 from test_projects_deploys import _deployed, _repo
 
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef
-from lakana_core.errors import NotFoundError, ValidationError
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
+from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
+from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.grants.roles import Role
 from lakana_core.models import JobVersion, Run, RunStatus, RunTrigger
 from lakana_core.pagination import encode_cursor
 from lakana_core.projects.run_policy import RunCaps
@@ -268,3 +271,183 @@ def test_list_runs_is_the_first_page_without_a_cursor(
         runs[2].id,
         runs[1].id,
     ]
+
+
+def _three_environments(session: Session) -> list[Run]:
+    """Persist seven finished runs over `dev`, `test` and `prod`, one minute apart.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    list of Run
+        The runs, oldest first.
+    """
+    runs = []
+    repos = {
+        env: deployed_job(session, env, f"shop_{env}", "nightly") for env in ("dev", "test", "prod")
+    }
+    for minute, env in enumerate(("dev", "test", "prod", "dev", "prod", "test", "dev")):
+        repo, version = repos[env]
+        runs.append(
+            finished_run(
+                session,
+                repo,
+                version,
+                job="nightly" if minute % 2 else None,
+                status=RunStatus.FAILED if minute < 3 else RunStatus.SUCCEEDED,
+                finished_at=_T0 + timedelta(minutes=minute),
+            )
+        )
+    return runs
+
+
+def _grants(session: Session) -> GrantAuthorization:
+    """Build the real authorization.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    GrantAuthorization
+        Authorization from grants.
+    """
+    return GrantAuthorization(session)
+
+
+@pytest.fixture
+def admin(session: Session) -> PrincipalRef:
+    """Persist an administrator.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    PrincipalRef
+        Their reference.
+    """
+    ref = person(session, "ada")
+    grant(session, ref, role=Role.ADMIN)
+    return ref
+
+
+def test_all_runs_pages_every_run_once_across_environments(
+    session: Session, admin: PrincipalRef
+) -> None:
+    runs = _three_environments(session)
+    service = RunService(session, _grants(session))
+    seen: list[uuid.UUID] = []
+    environments: list[str] = []
+    cursor = None
+    pages = 0
+    while True:
+        page, cursor = service.list_all_runs_page(admin, limit=2, cursor=cursor)
+        pages += 1
+        seen += [v.id for v in page]
+        environments += [v.environment for v in page]
+        if cursor is None:
+            break
+    assert (pages, seen) == (4, [r.id for r in reversed(runs)])
+    assert environments == ["dev", "test", "prod", "dev", "prod", "test", "dev"][::-1]
+
+
+def test_all_runs_skips_environments_you_may_not_read(session: Session) -> None:
+    runs = _three_environments(session)
+    reader = person(session, "rita")
+    grant(session, reader, action=Action.READ_ENVIRONMENT, environment_name="test")
+    service = RunService(session, _grants(session))
+    page, cursor = service.list_all_runs_page(reader)
+    assert ([v.id for v in page], cursor) == ([runs[5].id, runs[1].id], None)
+    with pytest.raises(PermissionDenied):
+        service.list_all_runs_page(reader, environment="prod")
+    nobody = person(session, "nora")
+    assert service.list_all_runs_page(nobody) == ([], None)
+
+
+def test_all_runs_with_an_environment_is_that_environments_list(
+    session: Session, admin: PrincipalRef
+) -> None:
+    _three_environments(session)
+    service = RunService(session, _grants(session))
+    own, own_cursor = service.list_runs_page(admin, "dev", limit=2)
+    same, same_cursor = service.list_all_runs_page(admin, environment="dev", limit=2)
+    assert ([v.id for v in same], same_cursor) == ([v.id for v in own], own_cursor)
+    assert own_cursor is not None
+    assert [
+        v.id for v in service.list_all_runs_page(admin, environment="dev", cursor=own_cursor)[0]
+    ] == [v.id for v in service.list_runs_page(admin, "dev", cursor=own_cursor)[0]]
+    with pytest.raises(NotFoundError):
+        service.list_all_runs_page(admin, environment="ghost")
+
+
+def test_a_cursor_of_the_per_environment_list_is_refused_by_all_runs(
+    session: Session, admin: PrincipalRef
+) -> None:
+    _three_environments(session)
+    service = RunService(session, _grants(session))
+    _, per_environment = service.list_runs_page(admin, "dev", limit=1)
+    _, across = service.list_all_runs_page(admin, limit=1)
+    assert per_environment is not None and across is not None
+    with pytest.raises(ValidationError, match="came from the `runs` list"):
+        service.list_all_runs_page(admin, cursor=per_environment)
+    with pytest.raises(ValidationError, match="came from the `all-runs` list"):
+        service.list_runs_page(admin, "dev", cursor=across)
+    with pytest.raises(ValidationError, match="came from the `all-runs` list"):
+        service.list_all_runs_page(admin, environment="dev", cursor=across)
+
+
+def test_all_runs_filters_by_status_trigger_job_repository_and_since(
+    session: Session, admin: PrincipalRef
+) -> None:
+    runs = _three_environments(session)
+    for run, trigger in zip(runs, (RunTrigger.SCHEDULE, RunTrigger.API) * 4, strict=False):
+        run.trigger = trigger
+    session.commit()
+    service = RunService(session, _grants(session))
+
+    def ids(page: tuple[list, str | None]) -> list[uuid.UUID]:
+        return [v.id for v in page[0]]
+
+    assert ids(service.list_all_runs_page(admin, status=["failed"])) == [
+        runs[2].id,
+        runs[1].id,
+        runs[0].id,
+    ]
+    assert ids(service.list_all_runs_page(admin, trigger=["api"])) == [
+        runs[5].id,
+        runs[3].id,
+        runs[1].id,
+    ]
+    assert ids(service.list_all_runs_page(admin, job="nightly", status=["succeeded"])) == [
+        runs[5].id,
+        runs[3].id,
+    ]
+    assert ids(service.list_all_runs_page(admin, repository="shop_prod")) == [
+        runs[4].id,
+        runs[2].id,
+    ]
+    assert ids(service.list_all_runs_page(admin, since=_T0 + timedelta(minutes=5))) == [
+        runs[6].id,
+        runs[5].id,
+    ]
+    with pytest.raises(ValidationError):
+        service.list_all_runs_page(admin, status=["bogus"])
+    with pytest.raises(ValidationError):
+        service.list_all_runs_page(admin, since=datetime(2026, 1, 1))
+
+
+def test_all_runs_with_an_unknown_repository_is_not_found(
+    session: Session, admin: PrincipalRef
+) -> None:
+    _three_environments(session)
+    with pytest.raises(NotFoundError):
+        RunService(session, _grants(session)).list_all_runs_page(admin, repository="ghost")

@@ -144,10 +144,10 @@ route with its parameters, its request body and its answers.
 - [Glossary](rest/glossary.md): 2 routes
 - [Graph](rest/graph.md): 4 routes
 - [Artifacts](rest/artifacts.md): 12 routes
-- [Principals](rest/principals.md): 14 routes
+- [Principals](rest/principals.md): 15 routes
 - [Groups](rest/groups.md): 6 routes
-- [Tokens](rest/tokens.md): 3 routes
-- [Task tokens](rest/task-tokens.md): 2 routes
+- [Tokens](rest/tokens.md): 4 routes
+- [Task tokens](rest/task-tokens.md): 3 routes
 - [Grants](rest/grants.md): 3 routes
 - [Row filters](rest/row-filters.md): 3 routes
 - [Column masks](rest/column-masks.md): 3 routes
@@ -155,8 +155,8 @@ route with its parameters, its request body and its answers.
 - [Connections](rest/connections.md): 11 routes
 - [Repositories](rest/repositories.md): 8 routes
 - [Package indexes](rest/package-indexes.md): 5 routes
-- [Deploys](rest/deploys.md): 9 routes
-- [Runs](rest/runs.md): 12 routes
+- [Deploys](rest/deploys.md): 10 routes
+- [Runs](rest/runs.md): 14 routes
 - [Jobs](rest/jobs.md): 7 routes
 - [Audit](rest/audit.md): 1 route
 - [CI trust rules](rest/ci-trust-rules.md): 8 routes
@@ -164,7 +164,7 @@ route with its parameters, its request body and its answers.
 - [Auth](rest/auth.md): 1 route
 - [Whoami](rest/whoami.md): 2 routes
 - [Sign in](rest/sign-in.md): 18 routes
-- [Settings](rest/settings.md): 2 routes
+- [Settings](rest/settings.md): 3 routes
 - [Info](rest/info.md): 1 route
 - [Status](rest/status.md): 1 route
 - [Interface](rest/interface.md): 4 routes
