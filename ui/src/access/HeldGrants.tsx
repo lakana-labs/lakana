@@ -14,7 +14,7 @@ import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
 import "./accessStrings";
 import { groupPath } from "./paths";
-import { actionWords, roleName, roleSummary, whereText } from "./words";
+import { roleSummary, whatWords, whereText } from "./words";
 
 /** Properties of {@link HeldGrants}. */
 export interface HeldGrantsProps {
@@ -64,11 +64,7 @@ export function HeldGrants({ grants, label, linkGroups }: HeldGrantsProps): JSX.
             return (
               <tr key={grant.id}>
                 <td>
-                  <span className="row-name">
-                    {grant.role !== null
-                      ? roleName(t, grant.role)
-                      : grant.action !== null && actionWords(t, grant.action)}
-                  </span>
+                  <span className="row-name">{whatWords(t, grant)}</span>
                   {second !== null && <span className="second">{second}</span>}
                 </td>
                 <td>{whereText(t, grant)}</td>

@@ -53,11 +53,9 @@ describe("GroupsPage", () => {
 
     await user.type(screen.getByRole("searchbox", { name: "Find groups" }), "zz");
 
-    await waitFor(() => {
-      expect(router.state.location.search).toBe("?q=zz");
-    });
+    expect(await screen.findByText("Reading the groups…")).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?q=zz");
     expect(screen.queryByRole("link", { name: "analysts" })).toBeNull();
-    expect(screen.getByText("Reading the groups…")).toBeInTheDocument();
     answer.release({ status: 200, body: [] });
     expect(await screen.findByText("No group matches “zz”.")).toBeInTheDocument();
     expect(server.sent.at(-1)?.path).toBe("/api/v1/groups?q=zz&limit=50");
@@ -74,8 +72,16 @@ describe("GroupsPage", () => {
   });
 
   it("clearing the search lists every group again", async () => {
-    const { user, router } = renderShell(`${PATH}?q=ops`, { routes: groupRoutes() });
+    const { user, router } = renderShell(`${PATH}?q=ops`, {
+      routes: groupRoutes({
+        "GET /api/v1/groups": (request) => ({
+          status: 200,
+          body: request.path.includes("q=ops") ? [{ name: "ops" }] : [{ name: "analysts" }],
+        }),
+      }),
+    });
     const field = await screen.findByRole("searchbox", { name: "Find groups" });
+    await screen.findByRole("link", { name: "ops" });
 
     await user.clear(field);
 

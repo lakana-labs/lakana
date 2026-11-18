@@ -8,7 +8,7 @@ import { type JSX, useCallback, useEffect, useId, useRef, useState } from "react
 import { useTranslation } from "react-i18next";
 
 import { listEnvironments } from "../api/environments";
-import { type Action, ACTIONS, type HeldGrantOut, listHeldGrants } from "../api/grants";
+import { type HeldGrantOut, listHeldGrants } from "../api/grants";
 import { myPermissions, type PermissionsOut } from "../api/table";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { SettingsFrame } from "../settings/SettingsFrame";
@@ -20,7 +20,7 @@ import { problemText } from "../sign-in/messages";
 import "./access.css";
 import "./accessStrings";
 import { HeldGrants } from "./HeldGrants";
-import { actionWords } from "./words";
+import { actionWords, isAction } from "./words";
 
 /** How many environments are asked about at once. */
 const READS_IN_FLIGHT = 4;
@@ -30,16 +30,6 @@ type ScopeRead =
   | { readonly state: "reading"; readonly again: boolean }
   | { readonly state: "read"; readonly again: boolean; readonly answer: PermissionsOut }
   | { readonly state: "failed"; readonly again: boolean; readonly error: string };
-
-/**
- * Whether a code is one of the actions the interface has words for.
- *
- * @param code - The server's code.
- * @returns True for a known action.
- */
-function isAction(code: string): code is Action {
-  return (ACTIONS as readonly string[]).includes(code);
-}
 
 /** The key of the whole instance among the scopes; no environment's name is empty. */
 const INSTANCE = "";

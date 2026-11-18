@@ -2,7 +2,7 @@ import i18next from "i18next";
 import { describe, expect, it } from "vitest";
 
 import { ACTIONS, ROLES } from "../api/grants";
-import { actionWords, roleName, roleSummary, whereText } from "./words";
+import { actionWords, roleName, roleSummary, whatWords, whereText } from "./words";
 
 const t = i18next.t.bind(i18next);
 
@@ -17,6 +17,13 @@ describe("words", () => {
     }
     expect(actionWords(t, "SUBMIT_QUERY")).toBe("Run queries");
     expect(roleSummary(t, "ANALYST")).toBe("Read tables and run queries");
+  });
+
+  it("says what a grant gives, an unknown action as its code", () => {
+    expect(whatWords(t, { role: "VIEWER", action: null })).toBe("VIEWER");
+    expect(whatWords(t, { role: null, action: "DEPLOY" })).toBe("Deploy");
+    expect(whatWords(t, { role: null, action: "FLY" })).toBe("FLY");
+    expect(whatWords(t, { role: null, action: null })).toBe("");
   });
 
   it("writes where a grant is", () => {
