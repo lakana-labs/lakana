@@ -20,6 +20,12 @@ export const GROUPS_PATH = "/settings/access/groups";
 /** The address of Grants. */
 const GRANTS_PATH = "/settings/access/grants";
 
+/** The address's names of the server's parameters that it names otherwise. */
+const ADDRESS_NAMES: Readonly<Record<string, string>> = {
+  principal_name: "principal",
+  group_name: "group",
+};
+
 /**
  * The address of a group's page.
  *
@@ -37,26 +43,10 @@ export function groupPath(name: string): string {
  * @returns The path, with its query when a filter is set.
  */
 export function grantsPath(filter: Partial<GrantFilter>): string {
-  const { who = null, what = null, where = null } = filter;
   const query = new URLSearchParams();
-  if (who !== null) {
-    query.set(who.kind, who.name);
-  }
-  if (what !== null) {
-    query.set(what.kind, what.kind === "role" ? what.role : what.action);
-  }
-  if (where !== null) {
-    if (where.kind === "INSTANCE") {
-      query.set("kind", "INSTANCE");
-    } else {
-      query.set("environment", where.environment);
-      if (where.kind !== "ENVIRONMENT") {
-        query.set("namespace", where.namespace);
-        if (where.kind === "TABLE") {
-          query.set("table", where.table);
-        }
-      }
-    }
+  // The server's query, without the page size, and with the address's shorter names for who.
+  for (const [key, value] of grantQuery({ ...NO_FILTER, ...filter })) {
+    if (key !== "limit") query.set(ADDRESS_NAMES[key] ?? key, value);
   }
   const text = query.toString();
   return text === "" ? GRANTS_PATH : `${GRANTS_PATH}?${text}`;
