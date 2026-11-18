@@ -8,6 +8,7 @@ import type { PrincipalOut } from "../api/access";
 import type { ManagedScopeOut } from "../api/accessFile";
 import type { HeldGrantOut } from "../api/grants";
 import type { EnvironmentOut } from "../api/environments";
+import type { SecretOut } from "../api/secrets";
 import type { GrantOut, PermissionsOut } from "../api/table";
 import type { FakeRoute } from "./server";
 
@@ -186,3 +187,26 @@ export const STEP_UP_ROUTES: Record<string, FakeRoute> = {
 
 /** A session with no passkey touch: a guarded action asks for one first. */
 export const STALE_SESSION: FakeRoute = { status: 200, body: { step_up_until: null } };
+
+/**
+ * A secret.
+ *
+ * @param over - What differs from dev's pypi-corp, used by the package index corp.
+ * @returns The secret.
+ */
+export function aSecret(over: Partial<SecretOut> = {}): SecretOut {
+  return {
+    id: "s1",
+    name: "pypi-corp",
+    environment: "dev",
+    created_by: "p1",
+    created_at: "2026-11-01T10:00:00Z",
+    rotated_at: null,
+    format_version: 2,
+    key_id: "env:0123456789abcdef",
+    use: "package_index",
+    use_target: "corp",
+    use_target_url: "https://pkgs.example.org/simple",
+    ...over,
+  };
+}
