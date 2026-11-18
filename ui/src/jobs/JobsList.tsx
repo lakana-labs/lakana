@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
+import { type JSX, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { listEnvironments } from "../api/environments";
@@ -12,9 +12,13 @@ import { ReadFailed } from "../catalog/ReadFailed";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { useResource } from "../shell/useResource";
+import { AllJobs } from "./AllJobs";
+import { FailedRuns } from "./FailedRuns";
 import "./jobStrings";
+import "./listStrings";
 import { JobsSearch } from "./JobsSearch";
 import { Reading } from "./Reading";
+import { RunningNow } from "./RunningNow";
 import { useJobsFilter } from "./useJobsFilter";
 
 /** The command that lists an environment's jobs. */
@@ -31,6 +35,12 @@ export function JobsList(): JSX.Element {
   const { t } = useTranslation();
   const environments = useResource(listEnvironments);
   const filter = useJobsFilter(environments.data);
+  // A control that acted reads every section again at once: a run started or resumed shows
+  // under Running now, a cancelled one leaves it, a paused schedule changes All jobs.
+  const [reloadKey, setReloadKey] = useState(0);
+  const onChanged = useCallback(() => {
+    setReloadKey((previous) => previous + 1);
+  }, []);
   const listed = environments.data;
   let content: JSX.Element;
   if (listed === undefined) {
@@ -62,15 +72,28 @@ export function JobsList(): JSX.Element {
           <JobsSearch query={filter.query} onSearch={filter.setQuery} />
         </div>
         <div className="jobs-panels">
-          <section className="flat-panel">
-            <h2 className="jobs-panel-heading">{t("jobs.list.running.heading", { count: 0 })}</h2>
-          </section>
-          <section className="flat-panel">
-            <h2 className="jobs-panel-heading">{t("jobs.list.failed.heading", { count: 0 })}</h2>
-          </section>
-          <section className="flat-panel">
-            <h2 className="jobs-panel-heading">{t("jobs.list.all.heading")}</h2>
-          </section>
+          <RunningNow
+            environment={filter.environment}
+            query={filter.query}
+            reloadKey={reloadKey}
+            onChanged={onChanged}
+          />
+          <FailedRuns
+            environment={filter.environment}
+            query={filter.query}
+            reloadKey={reloadKey}
+            onChanged={onChanged}
+          />
+          <AllJobs
+            environments={
+              filter.environment === null
+                ? listed.map((environment) => environment.name)
+                : [filter.environment]
+            }
+            query={filter.query}
+            reloadKey={reloadKey}
+            onChanged={onChanged}
+          />
         </div>
       </>
     );

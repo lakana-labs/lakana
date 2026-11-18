@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
-import { preloadJobsScreen } from "../test/jobs";
+import { aFailedRun, aJob, aJobRun, preloadJobsScreen } from "../test/jobs";
 import { jobsListRoutes } from "../test/jobsList";
 import { renderShell } from "../test/render";
 
@@ -80,5 +80,68 @@ describe("JobsList", () => {
       screen.getByRole("button", { name: "Environment: prod, protected" }),
     ).toBeInTheDocument();
     expect(within(document.body).queryByRole("listbox")).toBeNull();
+  });
+
+  it("the search narrows all three sections", async () => {
+    const weekly = aJobRun({
+      id: "r-weekly",
+      job: "weekly_report",
+      repository: "finance",
+      status: "running",
+      tasks: [],
+      finished_at: null,
+    });
+    const { user, router } = renderShell("/jobs", {
+      routes: jobsListRoutes({
+        running: [aJobRun({ status: "running", tasks: [], finished_at: null }), weekly],
+        failed: [aFailedRun()],
+        prod: [aJob(), aJob({ name: "weekly_report", repository: "finance" })],
+      }),
+    });
+
+    await screen.findByRole("heading", { level: 2, name: "Running now (2)" });
+    await user.type(screen.getByRole("searchbox", { name: "Search jobs" }), "week");
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Running now (1)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Failed, needs attention (0)" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Nothing here matches the search.")).toBeInTheDocument();
+    const jobs = screen.getByRole("region", { name: "Every job listed" });
+    expect(
+      within(jobs)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["weekly_report"]);
+    expect(router.state.location.search).toBe("?q=week");
+  });
+
+  it("an action reads the sections again", async () => {
+    const { user, server } = renderShell("/jobs", {
+      routes: {
+        ...jobsListRoutes({ prod: [aJob()] }),
+        "POST /api/v1/environments/prod/jobs/nightly_sales/runs": {
+          status: 201,
+          body: { run: aJobRun({ id: "r-new", status: "queued" }), waiting: null },
+        },
+      },
+    });
+
+    const run = await screen.findByRole("button", { name: "Run nightly_sales" });
+    const reads = (path: string): number =>
+      server.sent.filter((request) => request.path.split("?")[0] === path).length;
+    await waitFor(() => {
+      expect(reads("/api/v1/runs")).toBe(1);
+    });
+    await user.click(run);
+
+    await waitFor(() => {
+      expect(reads("/api/v1/runs")).toBe(2);
+    });
+    expect(reads("/api/v1/runs/failed")).toBe(2);
+    expect(reads("/api/v1/environments/prod/jobs")).toBe(2);
+    expect(reads("/api/v1/environments/dev/jobs")).toBe(2);
   });
 });

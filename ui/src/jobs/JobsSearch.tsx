@@ -8,6 +8,7 @@ import { Input, Label, SearchField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import "./jobStrings";
+import "./listStrings";
 
 /** Properties of {@link JobsSearch}. */
 export interface JobsSearchProps {

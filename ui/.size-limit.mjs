@@ -79,7 +79,18 @@ const NAMED_LIMITS = [
   // Raised to the measured 3.16 kB (2026-11-17) + 10 %: the strings of the task page (its facts,
   // the attempts' columns and outcomes, the log's status lines, notes and Save log) and the
   // skeleton that says "Loading the task…" while its chunk loads.
+  // Measured 3.33 kB (2026-11-18) with the heading of the Jobs list at /jobs, which the screen
+  // renders itself so the shell's focus finds it, the lazy import of the list, and the words of
+  // the list's skeleton and of the controls in a row; the list's own strings load with the list
+  // (JobsList-, below). The limit holds.
   { name: "Jobs", prefix: "JobsScreen-", limit: "3.48 kB" },
+  // Measured 4.75 kB (2026-11-18) + 10 %: the Jobs list at /jobs, loaded on demand: the
+  // environment filter (remembered, in the address) and the search, Running now (the first 50
+  // queued and running runs with their progress and Cancel), Failed, needs attention (the
+  // server's rows with the failing task's code, cause and next step, Resume and Logs) and All
+  // jobs (each environment's jobs, four read at once, with their schedule, last and next run,
+  // Run and Pause or Resume), each read every 30 s while the tab is visible, and their strings.
+  { name: "the Jobs list", prefix: "JobsList-", limit: "5.23 kB" },
   // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
   // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and
   // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
@@ -87,7 +98,9 @@ const NAMED_LIMITS = [
   // with Status and Period in the address, paged and read again every 30 s, and the selected run.
   // Raised to the measured 2.95 kB (2026-11-18) + 10 %: without `?run=` the run shown is kept
   // while the list holds it, so a newer run does not replace the run being read.
-  { name: "the job page", prefix: "JobPage-", limit: "3.25 kB" },
+  // Lowered to the measured 2.75 kB (2026-11-18) + 10 %: Run now and Pause or Resume schedule
+  // moved into a chunk the job page shares with the Jobs list (JobControls-, on the shared limit).
+  { name: "the job page", prefix: "JobPage-", limit: "3.03 kB" },
   // Measured 288 B (2026-11-17) + 10 %: a run's page, for now its heading and breadcrumb.
   // Raised to the measured 403 B (2026-11-17) + 10 %: the record of the run as opened; the run
   // itself is in the chunk it shares with the job page (RunDetail-, below).
@@ -100,12 +113,17 @@ const NAMED_LIMITS = [
   // Lowered to the measured 2.14 kB (2026-11-17) + 10 %: the run's reads, its title and
   // breadcrumb, a task's row with its failure line and controls moved into a chunk the run shares
   // with the task page (useRun-, below).
-  { name: "a run", prefix: "RunDetail-", limit: "2.35 kB" },
+  // Lowered to the measured 1.83 kB (2026-11-18) + 10 %: Cancel and Resume moved into a chunk the
+  // run shares with the Jobs list (RunControls-, on the shared limit).
+  { name: "a run", prefix: "RunDetail-", limit: "2.01 kB" },
   // Measured 4.11 kB (2026-11-17) + 10 %: what a run and a task's page share: the run read every
   // 2 s while active, its title and breadcrumb, a task's row, its failure line with the code,
   // cause and next step, and the controls beside it (Log, Show source, Open table, Show rows),
   // the failed read with Try again and the reading skeleton.
-  { name: "a run and a task", prefix: "useRun-", limit: "4.52 kB" },
+  // Lowered to the measured 2.35 kB (2026-11-18) + 10 %: the failure line with its code, cause and
+  // next step, the controls it shares and the screen's states moved into a chunk the run and task
+  // pages share with the Jobs list's Failed, needs attention (FailureLine-, on the shared limit).
+  { name: "a run and a task", prefix: "useRun-", limit: "2.59 kB" },
   // Measured 324 B (2026-11-17) + 10 %: a task's page, for now its heading and breadcrumb.
   // Raised to the measured 2.7 kB (2026-11-17) + 10 %: the task's facts, its attempts (a table of
   // ten columns with the outcomes in words) and its log, followed every 2 s from the byte offset,
@@ -435,6 +453,10 @@ export default [
   // chunk of its own (-0.17 kB). What is left is the Queries area's loader with the list of chunks
   // it preloads, the focus kept on Run after its move, and the download's type check in the API
   // client.
+  // Measured 209.82 kB (2026-11-18; 209.81 kB on main in the same build) with the Jobs list, all
+  // of it on demand: the environment picker that the Queries screen and the list now share is a
+  // chunk of its own (remembered-), and the entry's list of the chunks it preloads names it; the
+  // rest is the length of other chunks' hashed names. The limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -476,6 +498,10 @@ export default [
   // Raised to the measured 10.59 kB (2026-11-18) + 10 %: the Jobs screen's stylesheet (0.77 kB:
   // the job's facts, the runs list and its filters, a run's tasks with their failure lines, the
   // attempts and the log that wraps at 320 px), loaded with the Jobs screen only.
+  // Measured 10.84 kB (2026-11-18) with the Jobs list's rules (the filter and search row, the
+  // controls in a row above its link, the three tables' widths and the line under a cut list) and
+  // the environment picker's rules, which the Queries and Jobs stylesheets import; the first
+  // load's stylesheet is unchanged. The limit holds.
   { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.65 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];
