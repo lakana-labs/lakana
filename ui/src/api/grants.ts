@@ -52,71 +52,33 @@ export const ACTIONS = [
 /** An action. */
 export type Action = (typeof ACTIONS)[number];
 
-/** Who a grant is for: a person or service account, or a group, by name. */
-export interface GrantWho {
-  /** A principal or a group. */
-  readonly kind: "principal" | "group";
-  /** The name. */
-  readonly name: string;
-}
-
-/** A grant that gives a role. */
-interface WhatRole {
-  /** A role. */
-  readonly kind: "role";
-  /** The role. */
-  readonly role: Role;
-}
-
-/** A grant that gives one action. */
-interface WhatAction {
-  /** A single action. */
-  readonly kind: "action";
-  /** The action. */
-  readonly action: Action;
-}
+/**
+ * Who a grant is for: a person or service account, or a group, by name.
+ *
+ * @remarks
+ * The filter types are written as unions of object types, not interfaces, so the hidden-character
+ * check (`e2e/api-types.ts`, which reads interfaces) never takes an answer for one of them.
+ */
+export type GrantWho =
+  | { readonly kind: "principal"; readonly name: string }
+  | { readonly kind: "group"; readonly name: string };
 
 /** What a grant gives: a role or one action. */
-export type GrantWhat = WhatRole | WhatAction;
+export type GrantWhat =
+  | { readonly kind: "role"; readonly role: Role }
+  | { readonly kind: "action"; readonly action: Action };
 
-/** A grant on the whole instance. */
-interface WhereInstance {
-  /** The instance. */
-  readonly kind: "INSTANCE";
-}
-
-/** A grant on an environment. */
-interface WhereEnvironment {
-  /** An environment. */
-  readonly kind: "ENVIRONMENT";
-  /** The environment. */
-  readonly environment: string;
-}
-
-/** A grant on a namespace. */
-interface WhereNamespace {
-  /** A namespace. */
-  readonly kind: "NAMESPACE";
-  /** The environment. */
-  readonly environment: string;
-  /** The dotted namespace. */
-  readonly namespace: string;
-}
-
-/** A grant on a table. */
-interface WhereTable {
-  /** A table. */
-  readonly kind: "TABLE";
-  /** The environment. */
-  readonly environment: string;
-  /** The dotted namespace. */
-  readonly namespace: string;
-  /** The table. */
-  readonly table: string;
-}
-
-/** What a grant is on. */
-export type GrantWhere = WhereInstance | WhereEnvironment | WhereNamespace | WhereTable;
+/** What a grant is on: the instance, an environment, a namespace or a table. */
+export type GrantWhere =
+  | { readonly kind: "INSTANCE" }
+  | { readonly kind: "ENVIRONMENT"; readonly environment: string }
+  | { readonly kind: "NAMESPACE"; readonly environment: string; readonly namespace: string }
+  | {
+      readonly kind: "TABLE";
+      readonly environment: string;
+      readonly namespace: string;
+      readonly table: string;
+    };
 
 /** The filters of the grants list; each null for any. */
 export interface GrantFilter {
