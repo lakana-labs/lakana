@@ -768,7 +768,9 @@ describe("the Queries screen's work", () => {
     await waitFor(() => {
       expect(save).toHaveFocus();
     });
-    expect(document.querySelector(".queries-name")).toHaveTextContent(/^Late trains$/);
+    await waitFor(() => {
+      expect(document.querySelector(".queries-name")).toHaveTextContent(/^Late trains$/);
+    });
   });
 
   it("Save after a run of a saved query updates it and keeps the run's address", async () => {
