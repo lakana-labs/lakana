@@ -13,10 +13,10 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import NamespacePath
 from lakana_core.models import RowFilter
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.policy.shown import ShownPolicy
+from lakana_server.api.platform.namespace_forms import dotted_namespace, joined_namespace
 from lakana_server.api.platform.schemas import RowFilterCreate, RowFilterOut
 from lakana_server.api.platform.subjects import SubjectNames, subject_names
 from lakana_server.api.responses import errors
@@ -35,38 +35,6 @@ router = APIRouter(
     tags=["row-filters"],
     responses=errors(401),
 )
-
-
-def _dotted_to_joined(namespace: str) -> str:
-    """Convert a dot-joined namespace path to its unit-separator storage form.
-
-    Parameters
-    ----------
-    namespace
-        A dotted path such as ``"gold.sales"``.
-
-    Returns
-    -------
-    str
-        The unit-separator-joined storage form.
-    """
-    return NamespacePath.from_parts(namespace.split(".")).joined()
-
-
-def _joined_to_dotted(namespace: str) -> str:
-    """Convert a stored unit-separator namespace path to its dotted form.
-
-    Parameters
-    ----------
-    namespace
-        The unit-separator-joined storage form.
-
-    Returns
-    -------
-    str
-        The dot-joined display form.
-    """
-    return ".".join(NamespacePath.parse(namespace).parts)
 
 
 def _to_out(row: RowFilter, shown: ShownPolicy, names: SubjectNames) -> RowFilterOut:
@@ -92,7 +60,7 @@ def _to_out(row: RowFilter, shown: ShownPolicy, names: SubjectNames) -> RowFilte
         principal_id=row.principal_id,
         group_id=row.group_id,
         environment=row.environment,
-        namespace=_joined_to_dotted(row.namespace),
+        namespace=dotted_namespace(row.namespace),
         table=row.table,
         expression=shown.expression,
         created_by=row.created_by,
@@ -156,7 +124,7 @@ def create_row_filter(
         principal=body.principal,
         group=body.group,
         environment=body.environment,
-        namespace=_dotted_to_joined(body.namespace),
+        namespace=joined_namespace(body.namespace),
         table=body.table,
         expression=body.expression,
     )
@@ -220,7 +188,7 @@ def list_row_filters(
         rows = service.list_for_group(principal, group_name)
     elif environment is not None and namespace is not None and table is not None:
         rows = service.list_for_table(
-            principal, environment=environment, namespace=_dotted_to_joined(namespace), table=table
+            principal, environment=environment, namespace=joined_namespace(namespace), table=table
         )
     else:
         raise ValidationError(

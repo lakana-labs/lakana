@@ -31,6 +31,7 @@ from lakana_core.identity.groups import GroupService
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService
+from lakana_core.identity.task_tokens import TaskTokenService
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
@@ -41,6 +42,7 @@ from lakana_core.models import (
     Principal,
     PrincipalType,
     SignInLink,
+    TaskToken,
 )
 
 
@@ -751,3 +753,37 @@ def test_the_bootstrap_still_creates_the_first_administrator(
         admin, principal="admin", role=Role.VIEWER, kind=SecurableKind.INSTANCE
     )
     assert len(PatService(session, real).list(admin, "admin")) == 1
+
+
+def test_recovery_revokes_the_task_tokens_of_the_pats_it_revokes(
+    session: Session, tmp_path: Path
+) -> None:
+    """A task token minted with the old bootstrap PAT is revoked with it, and audited."""
+    bootstrap_if_needed(session, "admin", key_id="testkey", secret="testsecret")
+    signed_in = PatService(session, AllowAllAuthorization()).verify("testkey", "testsecret")
+    minted = TaskTokenService(session, AllowAllAuthorization()).mint(
+        signed_in, "admin", environment="dev", asset_scope=[], ttl_seconds=60
+    )
+    [grant] = (
+        session.execute(select(Grant).where(Grant.principal_id == signed_in.id)).scalars().all()
+    )
+    grant.revoked_at = datetime.now(UTC)
+    session.commit()
+
+    bootstrap_if_needed(session, "admin", token_file=tmp_path / "token")
+
+    row = session.execute(select(TaskToken).where(TaskToken.key_id == minted.key_id)).scalar_one()
+    assert row.revoked_at is not None
+    [event] = (
+        session.execute(
+            select(AuditEvent).where(AuditEvent.event_type == AuditEventType.TASK_TOKEN_REVOKED)
+        )
+        .scalars()
+        .all()
+    )
+    assert event.principal_id == signed_in.id
+    assert (event.detail["key_id"], event.detail["reason"], event.detail["pat_key_id"]) == (
+        minted.key_id,
+        "pat_revoked",
+        "testkey",
+    )

@@ -4094,3 +4094,88 @@ def test_0084_on_postgres() -> None:
         with engine.connect() as conn:
             assert {row[0] for row in conn.execute(query)} == before
         engine.dispose()
+
+
+def test_0085_on_postgres() -> None:
+    """0085 adds the cascading `source_pat_id`; the downgrade revokes a revoked PAT's live tokens.
+
+    A token past its own expiry is left alone.
+    """
+    revision_0084 = "f6b1d4e8a273"
+    revision_0085 = "532b5154629b"
+    now = datetime.now(UTC)
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0084)
+        migrate.upgrade(url, revision_0085)
+        engine = sqlalchemy.create_engine(url)
+        assert _alembic_version(engine) == revision_0085
+        principal, live_pat, dead_pat = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        with engine.begin() as conn:
+            rule = conn.execute(
+                sqlalchemy.text(
+                    "SELECT confdeltype FROM pg_constraint WHERE conname ="
+                    " 'fk_task_tokens_source_pat_id_personal_access_tokens'"
+                )
+            ).scalar_one()
+            assert rule == "c"
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO principals (id, type, name, is_active, created_at, updated_at) "
+                    "VALUES (:id, 'USER', 'minter', true, :now, :now)"
+                ),
+                {"id": principal, "now": now},
+            )
+            for pat, revoked in ((live_pat, None), (dead_pat, now)):
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO personal_access_tokens (id, principal_id, key_id,"
+                        " secret_hash, name, created_at, revoked_at, bootstrap)"
+                        " VALUES (:id, :owner, :key, 'h', 'laptop', :now, :revoked, false)"
+                    ),
+                    {
+                        "id": pat,
+                        "owner": principal,
+                        "key": pat.hex[:16],
+                        "now": now,
+                        "revoked": revoked,
+                    },
+                )
+                conn.execute(
+                    sqlalchemy.text(
+                        "INSERT INTO task_tokens (id, principal_id, environment, asset_scope,"
+                        " key_id, secret_hash, issued_at, expires_at, source_pat_id) VALUES"
+                        " (:id, :principal, 'dev', '[]', :key, 'h', :now, :later, :pat)"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "principal": principal,
+                        "key": f"task-{pat.hex[:8]}",
+                        "now": now,
+                        "later": now + timedelta(hours=1),
+                        "pat": pat,
+                    },
+                )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO task_tokens (id, principal_id, environment, asset_scope,"
+                    " key_id, secret_hash, issued_at, expires_at, source_pat_id) VALUES"
+                    " (:id, :principal, 'dev', '[]', 'task-expired', 'h', :then, :then, :pat)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "principal": principal,
+                    "then": now - timedelta(hours=1),
+                    "pat": dead_pat,
+                },
+            )
+        migrate.downgrade(url, revision_0084)
+        assert _alembic_version(engine) == revision_0084
+        with engine.connect() as conn:
+            revoked = set(
+                conn.execute(
+                    sqlalchemy.text("SELECT key_id FROM task_tokens WHERE revoked_at IS NOT NULL")
+                ).scalars()
+            )
+        assert revoked == {f"task-{dead_pat.hex[:8]}"}
+        engine.dispose()

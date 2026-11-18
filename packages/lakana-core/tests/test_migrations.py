@@ -16,7 +16,7 @@ import shutil
 import sqlite3
 import uuid
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -6655,5 +6655,136 @@ def test_0084_adds_the_run_list_indexes_and_drops_them_on_downgrade(
         assert "ix_runs_created_at_id" not in indexes()
         assert "ix_runs_finished_at" not in indexes()
         assert "ix_deploy_runs_created_at_id" not in deploy_indexes()
+    finally:
+        engine.dispose()
+
+
+_REVISION_0085 = "532b5154629b"
+
+
+def test_0085_links_task_tokens_to_their_pat_and_revokes_orphans_on_downgrade(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0085`: `task_tokens.source_pat_id`, a cascading foreign key and its index.
+
+    The downgrade revokes, with a `TASK_TOKEN_REVOKED` event, each live task token whose PAT
+    is revoked, expired or owned by a deactivated principal, since the release before reads a
+    token by its own row only. A token of a working PAT, and one without a PAT, stay live; a
+    token past its own expiry is left alone and gets no event.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0084)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    later = (now + timedelta(hours=1)).isoformat(sep=" ")
+    earlier = (now - timedelta(hours=1)).isoformat(sep=" ")
+    stamp = now.isoformat(sep=" ")
+    active, inactive = uuid.uuid4().hex, uuid.uuid4().hex
+    pats = {
+        "live": (active, None, later),
+        "revoked": (active, earlier, None),
+        "expired": (active, None, earlier),
+        "owner_inactive": (inactive, None, None),
+    }
+    pat_ids = {name: uuid.uuid4().hex for name in pats}
+
+    def columns() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("task_tokens")}
+
+    try:
+        assert "source_pat_id" not in columns()
+        command.upgrade(config, _REVISION_0085)
+        assert "source_pat_id" in columns()
+        assert {
+            (tuple(fk["constrained_columns"]), fk["referred_table"], fk["options"].get("ondelete"))
+            for fk in inspect(engine).get_foreign_keys("task_tokens")
+        } >= {(("source_pat_id",), "personal_access_tokens", "CASCADE")}
+        assert {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("task_tokens")}[
+            "ix_task_tokens_source_pat_id"
+        ] == ["source_pat_id"]
+        with engine.begin() as connection:
+            for principal, is_active in ((active, True), (inactive, False)):
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO principals (id, type, name, is_active, created_at,"
+                        " updated_at) VALUES (:id, 'USER', :name, :active, :now, :now)"
+                    ),
+                    {"id": principal, "name": principal[:8], "active": is_active, "now": stamp},
+                )
+            for name, (owner, revoked_at, expires_at) in pats.items():
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO personal_access_tokens (id, principal_id, key_id,"
+                        " secret_hash, name, created_at, expires_at, revoked_at, bootstrap)"
+                        " VALUES (:id, :owner, :key, 'h', :name, :now, :expires, :revoked, 0)"
+                    ),
+                    {
+                        "id": pat_ids[name],
+                        "owner": owner,
+                        "key": f"pat-{name}",
+                        "name": name,
+                        "now": stamp,
+                        "expires": expires_at,
+                        "revoked": revoked_at,
+                    },
+                )
+            for name in (*pats, "none"):
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO task_tokens (id, principal_id, environment, asset_scope,"
+                        " key_id, secret_hash, issued_at, expires_at, source_pat_id) VALUES"
+                        " (:id, :principal, 'dev', '[]', :key, 'h', :now, :later, :pat)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "principal": active,
+                        "key": f"task-{name}",
+                        "now": stamp,
+                        "later": later,
+                        "pat": pat_ids.get(name),
+                    },
+                )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO task_tokens (id, principal_id, environment, asset_scope,"
+                    " key_id, secret_hash, issued_at, expires_at, source_pat_id) VALUES"
+                    " (:id, :principal, 'dev', '[]', 'task-long-expired', 'h', :then, :then,"
+                    " :pat)"
+                ),
+                {
+                    "id": uuid.uuid4().hex,
+                    "principal": active,
+                    "then": earlier,
+                    "pat": pat_ids["revoked"],
+                },
+            )
+        command.downgrade(config, _REVISION_0084)
+        assert "source_pat_id" not in columns()
+        with engine.connect() as connection:
+            revoked = {
+                key
+                for (key,) in connection.execute(
+                    sa.text("SELECT key_id FROM task_tokens WHERE revoked_at IS NOT NULL")
+                )
+            }
+            events = [
+                json.loads(detail)
+                for (detail,) in connection.execute(
+                    sa.text(
+                        "SELECT detail FROM audit_events WHERE event_type = 'TASK_TOKEN_REVOKED'"
+                    )
+                )
+            ]
+        assert revoked == {"task-revoked", "task-expired", "task-owner_inactive"}
+        assert sorted((e["key_id"], e["reason"], e["pat_key_id"]) for e in events) == [
+            ("task-expired", "pat_ended", "pat-expired"),
+            ("task-owner_inactive", "pat_ended", "pat-owner_inactive"),
+            ("task-revoked", "pat_ended", "pat-revoked"),
+        ]
     finally:
         engine.dispose()
