@@ -198,5 +198,23 @@
     "earlier": "Earlier lines are not shown here.",
     "empty": "The task wrote nothing to its log.",
     "save": "Save log"
+  },
+  "list": {
+    "loading": "Loading the jobs…",
+    "environment": "Environment",
+    "allEnvironments": "All environments",
+    "search": "Search jobs",
+    "noEnvironment": "You may not read any environment yet. Ask an administrator for a role in one.",
+    "noEnvironmentCli": "Meanwhile, list an environment's jobs from the command line:",
+    "copy": "Copy command",
+    "running": {
+      "heading": "Running now ({{count}})"
+    },
+    "failed": {
+      "heading": "Failed, needs attention ({{count}})"
+    },
+    "all": {
+      "heading": "All jobs"
+    }
   }
 }

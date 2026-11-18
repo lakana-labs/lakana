@@ -1,3 +1,6 @@
+/* The environment picker's rules, which the Queries and Jobs screens share. */
+@import "../shell/environment.css";
+
 /* The Jobs screen's own rules: a cron expression shown as it is. */
 .jobs-verbatim {
   font-family: var(--font-mono);
@@ -17,6 +20,19 @@
   flex-direction: column;
   gap: var(--space-5);
   min-width: 0;
+}
+
+/* The list's environment filter and its search, side by side; under one another when narrow. */
+.jobs-find {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-5);
+}
+
+.jobs-find .field {
+  margin: 0;
 }
 
 /* Run now and the schedule's button beside the heading; under it on a narrow screen. */

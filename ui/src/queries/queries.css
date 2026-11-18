@@ -1,3 +1,6 @@
+/* The environment picker's rules, which the Queries and Jobs screens share. */
+@import "../shell/environment.css";
+
 /* The Queries screen: the library of saved and recent queries, and the work column with its
    toolbar, the editor and the result. Below 640 px the library is not rendered (useFolded), and
    the work takes the whole width. */
