@@ -327,10 +327,11 @@ export function getTable(ref: TableRef): Promise<TableOut> {
 }
 
 /**
- * Asks what a person may do on a table.
+ * Asks what a person may do on an object, or on the whole instance when none is named.
  *
  * @param person - The person's principal name.
- * @param scope - The object: an environment, a namespace in it, or a table.
+ * @param scope - The object: an environment, a namespace in it, or a table; none for the
+ *   instance.
  * @param scope.environment - The environment.
  * @param scope.namespace - The dotted namespace.
  * @param scope.table - The table.
@@ -339,8 +340,12 @@ export function getTable(ref: TableRef): Promise<TableOut> {
  */
 export function myPermissions(
   person: string,
-  scope: { environment: string; namespace?: string; table?: string },
+  scope?: { environment: string; namespace?: string; table?: string },
 ): Promise<PermissionsOut> {
+  const base = `/api/v1/principals/${encodeURIComponent(person)}/permissions`;
+  if (scope === undefined) {
+    return api.request<PermissionsOut>("GET", base);
+  }
   const query = new URLSearchParams({ environment: scope.environment });
   for (const key of ["namespace", "table"] as const) {
     const value = scope[key];
@@ -348,10 +353,7 @@ export function myPermissions(
       query.set(key, value);
     }
   }
-  return api.request<PermissionsOut>(
-    "GET",
-    `/api/v1/principals/${encodeURIComponent(person)}/permissions?${query.toString()}`,
-  );
+  return api.request<PermissionsOut>("GET", `${base}?${query.toString()}`);
 }
 
 /** The person or service account a grant, row filter or column mask is for. */

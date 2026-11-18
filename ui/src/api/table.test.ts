@@ -84,6 +84,16 @@ describe("table", () => {
     expect(server.sent[1]?.path).toBe("/api/v1/principals/kim%20lee/permissions?environment=prod");
   });
 
+  it("asks about the instance when no object is named", async () => {
+    const server = fakeServer({
+      "GET /api/v1/principals/kim/permissions": { status: 200, body: { permissions: [] } },
+    });
+
+    await myPermissions("kim");
+
+    expect(server.sent[0]?.path).toBe("/api/v1/principals/kim/permissions");
+  });
+
   it("reads health for seven days, without the readers when asked", async () => {
     const server = fakeServer({
       "GET /api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales/health": {

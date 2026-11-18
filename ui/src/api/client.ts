@@ -44,7 +44,16 @@ export interface RequestOptions {
    * sent on `pagehide`.
    */
   readonly keepalive?: boolean;
+  /**
+   * An action the server guards with a passkey touch: the session is read first, and when its
+   * touch is missing or ends within {@link STEP_UP_MARGIN_MS}, the touch is asked for before the
+   * request is sent, so the person is never refused first.
+   */
+  readonly stepUpFirst?: boolean;
 }
+
+/** How long before the session's passkey touch ends a guarded action asks for a new one. */
+export const STEP_UP_MARGIN_MS = 60_000;
 
 /** A download whose body stream broke before it ended, such as a connection cut in the middle. */
 export class DownloadCut extends Error {
@@ -215,6 +224,29 @@ function sharedStepUp(ceremony: () => Promise<void>): Promise<void> {
 export function setStepUp(ceremony: () => Promise<void>): void {
   stepUpCeremony = ceremony;
   stepUpUnderWay = null;
+}
+
+/**
+ * Asks for the passkey touch when the session's is missing or about to end; nothing before a
+ * ceremony is set.
+ *
+ * @throws {ApiError} when the session cannot be read; whatever the ceremony throws.
+ */
+async function stepUpIfStale(): Promise<void> {
+  const ceremony = stepUpCeremony;
+  if (ceremony === null) {
+    return;
+  }
+  const session = await send<{ readonly step_up_until: string | null }>(
+    "GET",
+    "/api/v1/sign-in/session",
+    undefined,
+    { background: true },
+  );
+  const until = session.step_up_until === null ? 0 : Date.parse(session.step_up_until);
+  if (until - Date.now() <= STEP_UP_MARGIN_MS) {
+    await sharedStepUp(ceremony);
+  }
 }
 
 /** The body of a refusal, as far as the interface reads it. */
@@ -411,15 +443,16 @@ function needsStepUp(error: unknown): boolean {
 /** The interface's way into the REST API. */
 export const api = {
   /**
-   * Sends a request. When the action needs a fresh passkey touch (403 `StepUpRequired`), runs
-   * the step-up ceremony (one for all requests waiting at once) and sends the request once
-   * more; a background request never asks.
+   * Sends a request. With `stepUpFirst`, asks for a passkey touch first when the session's is
+   * stale. When the action needs a fresh passkey touch (403 `StepUpRequired`), runs the step-up
+   * ceremony (one for all requests waiting at once) and sends the request once more; a
+   * background request never asks.
    *
    * @template T - The JSON the route answers.
    * @param method - The HTTP method.
    * @param path - The path under the server.
    * @param body - The JSON body, if any.
-   * @param options - Whether the request is a background poll.
+   * @param options - Whether the request is a background poll or asks for a touch first.
    * @returns The parsed answer; undefined for 204.
    * @throws {ApiError} for a refusal, after at most one step-up.
    */
@@ -429,6 +462,9 @@ export const api = {
     body?: unknown,
     options: RequestOptions = {},
   ): Promise<T> {
+    if (options.stepUpFirst === true) {
+      await stepUpIfStale();
+    }
     try {
       return await send<T>(method, path, body, options);
     } catch (error) {
