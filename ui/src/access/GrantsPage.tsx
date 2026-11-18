@@ -4,7 +4,8 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useRef, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useRef, useState } from "react";
+import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
@@ -23,6 +24,11 @@ import { ManagedNote } from "./ManagedNote";
 import { filterKey, grantsPath, readGrantFilter } from "./paths";
 import { useAccessStatus } from "./useAccessStatus";
 
+// Add grant's form loads when it is opened, not with the list.
+const AddGrantDialog = lazy(() =>
+  import("./AddGrantDialog").then((module) => ({ default: module.AddGrantDialog })),
+);
+
 /**
  * Renders the filters (kept in the address), the list under the filter's key, and the one
  * action, Add grant. Until the access files' status is read nothing can be changed; where an
@@ -40,8 +46,10 @@ export function GrantsPage(): JSX.Element {
   const environments = useResource(loadEnvironments);
   const heading = useRef<HTMLHeadingElement>(null);
   const [note, setNote] = useState("");
-  const [round] = useState(0);
+  const [round, setRound] = useState(0);
+  const [adding, setAdding] = useState(false);
   const scopes = status.data?.scopes ?? null;
+  const choices = environments.data ?? [];
   const managedInstance = scopes === null ? undefined : managedScopeOf(scopes, null);
   const go = (next: GrantFilter, step: FilterStep): void => {
     setParams(new URLSearchParams(grantsPath(next).split("?")[1] ?? ""), {
@@ -49,7 +57,22 @@ export function GrantsPage(): JSX.Element {
     });
   };
   return (
-    <SettingsFrame title={t("settings.places.grants")} headingRef={heading}>
+    <SettingsFrame
+      title={t("settings.places.grants")}
+      headingRef={heading}
+      action={
+        managedInstance === null && (
+          <Button
+            className="button button-primary"
+            onPress={() => {
+              setAdding(true);
+            }}
+          >
+            {t("access.grants.add")}
+          </Button>
+        )
+      }
+    >
       {status.error !== null && (
         <ReadFailed
           message={t("access.managed.readFailed", { sentence: status.error })}
@@ -62,7 +85,7 @@ export function GrantsPage(): JSX.Element {
       {managedInstance !== undefined && managedInstance !== null && (
         <ManagedNote scope={managedInstance} command={t("access.managed.grantCommand")} />
       )}
-      <GrantFilters filter={filter} environments={environments.data ?? []} onChange={go} />
+      <GrantFilters filter={filter} environments={choices} onChange={go} />
       <p className="step-status" role="status">
         {note}
       </p>
@@ -80,6 +103,23 @@ export function GrantsPage(): JSX.Element {
           go(NO_FILTER, "push");
         }}
       />
+      {adding && scopes !== null && (
+        <Suspense fallback={null}>
+          <AddGrantDialog
+            start={filter}
+            environments={choices}
+            scopes={scopes}
+            onClose={() => {
+              setAdding(false);
+            }}
+            onGranted={() => {
+              setAdding(false);
+              setNote(t("access.grants.granted"));
+              setRound((previous) => previous + 1);
+            }}
+          />
+        </Suspense>
+      )}
     </SettingsFrame>
   );
 }

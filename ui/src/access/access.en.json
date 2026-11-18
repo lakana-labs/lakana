@@ -192,7 +192,8 @@
     "namespaceNeeded": "Name the namespace.",
     "tableNeeded": "Name the table.",
     "grant": "Grant",
-    "choose": "Choose…"
+    "choose": "Choose…",
+    "whatNeeded": "Choose a role or an action."
   },
   "person": {
     "heading": "Grants and groups",

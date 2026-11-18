@@ -87,14 +87,10 @@ describe("grants", () => {
     });
     setStepUp(() => Promise.resolve());
     const body = {
-      principal: null,
       group: "analysts",
       role: "ANALYST",
-      action: null,
       kind: "ENVIRONMENT",
       environment: "dev",
-      namespace: null,
-      table: null,
     } as const;
 
     await createGrant(body);

@@ -190,24 +190,24 @@ export async function listGrants(
   return { items: page.body as readonly GrantOut[], nextCursor: page.nextCursor };
 }
 
-/** A new grant, as `POST /api/v1/grants` takes it. */
+/** A new grant, as `POST /api/v1/grants` takes it; a field left out is none. */
 export interface GrantCreateIn {
-  /** The principal it is for, or null for a group. */
-  readonly principal: string | null;
-  /** The group it is for, or null for a principal. */
-  readonly group: string | null;
-  /** The role it gives, or null for one action. */
-  readonly role: Role | null;
-  /** The action it gives, or null for a role. */
-  readonly action: Action | null;
+  /** The principal it is for, unless a group. */
+  readonly principal?: string;
+  /** The group it is for, unless a principal. */
+  readonly group?: string;
+  /** The role it gives, unless one action. */
+  readonly role?: Role;
+  /** The action it gives, unless a role. */
+  readonly action?: Action;
   /** The level it is on. */
   readonly kind: ScopeOut["kind"];
   /** The environment, unless on the instance. */
-  readonly environment: string | null;
+  readonly environment?: string;
   /** The dotted namespace, on a namespace or a table. */
-  readonly namespace: string | null;
+  readonly namespace?: string;
   /** The table, on a table. */
-  readonly table: string | null;
+  readonly table?: string;
 }
 
 /**
