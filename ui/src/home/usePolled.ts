@@ -3,9 +3,8 @@
  *
  * @packageDocumentation
  */
-import { useEffect } from "react";
-
-import { type Resource, useResource } from "../shell/useResource";
+import { type Resource } from "../shell/useResource";
+import { useLivePoll } from "../shell/useLivePoll";
 
 /**
  * Reads with `load` now and every `everyMs` after, skipping a turn while the browser tab is
@@ -18,17 +17,5 @@ import { type Resource, useResource } from "../shell/useResource";
  * @returns The answer, the error and `reload`.
  */
 export function usePolled<T>(load: () => Promise<T>, everyMs: number): Resource<T> {
-  const resource = useResource(load);
-  const { reload } = resource;
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        reload();
-      }
-    }, everyMs);
-    return () => {
-      clearInterval(timer);
-    };
-  }, [reload, everyMs]);
-  return resource;
+  return useLivePoll(load, { everyMs, active: true });
 }
