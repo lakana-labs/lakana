@@ -150,6 +150,45 @@ async function scrollsInItself(region: Locator): Promise<void> {
 }
 
 /**
+ * The colour a token resolves to in the page's theme, as `getComputedStyle` writes colours.
+ *
+ * @param page - The page.
+ * @param token - The custom property, such as `--color-accent`.
+ * @returns The colour.
+ */
+function tokenColour(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement("span");
+    probe.style.color = getComputedStyle(document.documentElement).getPropertyValue(name);
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  }, token);
+}
+
+/**
+ * Asserts that every link in the page's main region but a button is drawn in the accent, not
+ * in the browser's own link colour.
+ *
+ * @param page - The page.
+ * @param where - The page's name in a failure.
+ */
+async function expectAccentLinks(page: Page, where: string): Promise<void> {
+  const accent = await tokenColour(page, "--color-accent");
+  const links = await page
+    .locator("main a:not(.button)")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => ({ text: node.textContent, colour: getComputedStyle(node).color })),
+    );
+  expect(links.length, where).toBeGreaterThan(0);
+  expect(
+    links.filter((link) => link.colour !== accent),
+    `${where}: links in a colour other than the accent`,
+  ).toEqual([]);
+}
+
+/**
  * Sets the page's visibility as a background tab or a tab brought back would, and tells it.
  *
  * @param page - The page.
@@ -217,6 +256,28 @@ for (const theme of ["light", "dark"] as const) {
         await page.goto(runPage(MISSING_ID));
         await expect(page.getByRole("alert")).toContainText(`Run ${MISSING_ID} does not exist`);
         expect(await violations(page), "a run that is not there").toEqual([]);
+      });
+
+      test("every link is drawn in the accent, and the selected run's row in the accent's tint", async ({
+        page,
+      }) => {
+        await openJob(page);
+        const selected = page
+          .getByRole("region", { name: `Runs of ${JOB}` })
+          .locator("tr", { has: page.locator('a.row-name[aria-current="true"]') });
+        await expect(selected).toHaveCount(1);
+        const tint = await tokenColour(page, "--color-accent-bg");
+        await expect(selected).toHaveCSS("background-color", tint);
+        await expect(page.getByRole("link", { name: /open in repository/ })).toBeVisible();
+        await expectAccentLinks(page, "the job page");
+
+        await openRun(page, FAILED_ID);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        await expect(page.locator("a.jobs-code").first()).toBeVisible();
+        await expectAccentLinks(page, "a failed run");
+
+        await openTask(page);
+        await expectAccentLinks(page, "a task");
       });
 
       test("the breadcrumbs lead from a task back to its run, its job and Jobs", async ({

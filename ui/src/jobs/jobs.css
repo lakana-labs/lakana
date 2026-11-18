@@ -214,3 +214,32 @@
 .jobs-log-note p {
   margin: 0 0 var(--space-2);
 }
+
+/* The links in a sentence (a failure's code, a waiting job's or a note's run, open in repository):
+   the accent, underlined on hover in the accent's hover shade, as the Catalog's and Home's.
+   Unstyled they are the browser's blue, which the dark theme's ground cannot carry (WCAG 1.4.3).
+   They keep the browser's underline: colour alone does not set them apart from the text around
+   them (WCAG 1.4.1, axe's link-in-text-block). */
+.jobs-failure a,
+.jobs-waiting a,
+.jobs-note a,
+.jobs-fact a {
+  color: var(--color-accent);
+}
+
+.jobs-failure a:hover,
+.jobs-waiting a:hover,
+.jobs-note a:hover,
+.jobs-fact a:hover {
+  color: var(--color-accent-hover);
+}
+
+/* The run the panel below shows: the current place, as in the Catalog's tree, a tint of the
+   accent and a heavier name, never colour alone. */
+.jobs-runs-scroll tr:has(a.row-name[aria-current="true"]) {
+  background: var(--color-accent-bg);
+}
+
+.jobs-runs-scroll a.row-name[aria-current="true"] {
+  font-weight: 500;
+}
