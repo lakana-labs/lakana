@@ -517,47 +517,33 @@ def read_baseline(path: Path) -> int:
     return value
 
 
-def _package_of(test: TestTime) -> str:
-    """Name the directory whose tests share one `conftest` tree.
+def _warm_up_plan(
+    test: TestTime, warm_from: Sequence[TestTime], flagged: Sequence[TestTime]
+) -> dict[str, object]:
+    """Write down what the warm-up plugin needs to pick a candidate's warm-up.
 
     Parameters
     ----------
     test
-        A test from a junit report.
-
-    Returns
-    -------
-    str
-        ``packages/<name>`` for a package's test, otherwise the file's top directory.
-    """
-    parts = Path(test.file).parts
-    return "/".join(parts[:2]) if parts[:1] == ("packages",) and len(parts) > 2 else parts[0]
-
-
-def _warm_up_plan(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> dict[str, object]:
-    """Write down what the warm-up plugin needs to pick each candidate's warm-up.
-
-    Parameters
-    ----------
-    group
-        The candidates of one package.
+        The candidate its process is started for.
     warm_from
         Every test the reports hold.
+    flagged
+        Every candidate of this re-run: none of them warms another up.
 
     Returns
     -------
     dict
-        ``candidates``: their node ids; ``seconds``: the shard time of every other test of
-        their files that ran, the only tests that may warm them up.
+        ``candidates``: its node id; ``seconds``: the shard time of every other test of its
+        file that ran and was not flagged, the only tests that may warm it up.
     """
-    candidates = [test.nodeid for test in group]
-    files = {test.file for test in group}
+    skip = {t.nodeid for t in flagged} | {test.nodeid}
     seconds = {
-        test.nodeid: test.seconds
-        for test in warm_from
-        if test.file in files and not test.skipped and test.nodeid not in candidates
+        other.nodeid: other.seconds
+        for other in warm_from
+        if other.file == test.file and not other.skipped and other.nodeid not in skip
     }
-    return {"candidates": candidates, "seconds": seconds}
+    return {"candidates": [test.nodeid], "seconds": seconds}
 
 
 def remeasure(
@@ -618,14 +604,16 @@ def _remeasure_once(
     warm_from: Sequence[TestTime],
     tag: str,
 ) -> dict[str, float]:
-    """Run tests again once, on their own and serially, under coverage as in the shards.
+    """Run tests again once, each in a fresh pytest process, under coverage as in the shards.
 
-    Each package's tests run in a pytest process of their own: every package has a module
-    named `conftest`, and in one process the first one imported would shadow the others. Each
-    process collects the candidates' files, and the plugin `scripts.remeasure_warm_up` keeps
-    only the candidates, each after the cheapest other test of its module that uses all its
-    session- and module-scoped fixtures: that test takes the one-off setup a shard charges
-    to whichever test runs first, and its time is not counted.
+    Each candidate gets a process of its own: run one after another in a shared process, the
+    later ones were timed under the load the earlier ones left (imports, caches, memory) and
+    unrelated tests of 2.5 to 2.7 s failed the ratchet. A process of its own also keeps every
+    package's `conftest` apart (in one process the first one imported shadows the others). The
+    process collects the candidate's file, and the plugin `scripts.remeasure_warm_up` keeps only
+    the candidate, after the cheapest other test of its module that uses all its session- and
+    module-scoped fixtures: that test takes the one-off setup a shard charges to whichever test
+    runs first, and its time is not counted.
 
     Parameters
     ----------
@@ -645,23 +633,19 @@ def _remeasure_once(
     Returns
     -------
     dict
-        Seconds by node id, for the candidates the new reports hold; a package whose report
-        cannot be read adds nothing.
+        Seconds by node id, each read from the report of the candidate's own process; a
+        candidate whose report cannot be read adds nothing.
     """
-    groups: dict[str, list[TestTime]] = {}
-    for test in tests:
-        groups.setdefault(_package_of(test), []).append(test)
-    wanted = {test.nodeid for test in tests}
     seconds: dict[str, float] = {}
-    for index, group in enumerate(groups.values()):
+    for index, test in enumerate(tests):
         report = workdir / f"remeasured-{tag}{index}.xml"
         plan = workdir / f"warm-up-{tag}{index}.json"
-        plan.write_text(json.dumps(_warm_up_plan(group, warm_from)))
+        plan.write_text(json.dumps(_warm_up_plan(test, warm_from, tests)))
         command = [
             sys.executable,
             "-m",
             "pytest",
-            *dict.fromkeys(test.file for test in group),
+            test.file,
             "-q",
             "-p",
             "no:cacheprovider",
@@ -680,15 +664,12 @@ def _remeasure_once(
         }
         run(command, env=env, check=False)
         try:
-            seconds.update(
-                {
-                    t.nodeid: t.seconds
-                    for t in parse_junit(report.read_text())
-                    if not t.skipped and t.nodeid in wanted
-                }
-            )
+            measured = parse_junit(report.read_text())
         except (OSError, ValueError):
             continue
+        seconds.update(
+            {t.nodeid: t.seconds for t in measured if not t.skipped and t.nodeid == test.nodeid}
+        )
     return seconds
 
 

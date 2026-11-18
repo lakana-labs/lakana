@@ -649,38 +649,56 @@ def test_remeasure_runs_the_tests_under_coverage_apart_from_the_run(tmp_path: Pa
     assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage.remeasured.0-0")
 
 
-def test_remeasure_runs_each_package_in_its_own_process(tmp_path: Path) -> None:
-    """Two packages' tests never share a pytest process: each has a `conftest` of its own.
+def test_remeasure_runs_each_test_in_a_fresh_process_of_its_own(tmp_path: Path) -> None:
+    """One pytest process per flagged test, never two candidates in one.
 
-    In one process the first package's `conftest` module shadows the next one's, and a test
-    importing from its own `conftest` fails to collect (PR #521's run).
+    In one process the candidates ran after each other under the load the earlier ones left
+    (imports, caches, memory, a busy runner), and unrelated tests of 2.5 to 2.7 s failed the
+    ratchet. Each process also gets its own report, plan and coverage file, so no run reads
+    another's numbers; two packages never share a process either, as each has a `conftest`.
     """
     calls: list[tuple[list[str], dict[str, str]]] = []
     tests = [
         TestTime("packages/lakana-core/tests/test_x.py", "a", 2.5, slow=False, skipped=False),
         TestTime("packages/lakana/tests/cli/test_app.py", "b", 2.5, slow=False, skipped=False),
-        TestTime("packages/lakana-core/tests/test_y.py", "c", 2.5, slow=False, skipped=False),
+        TestTime("packages/lakana-core/tests/test_x.py", "c", 2.6, slow=False, skipped=False),
         TestTime("scripts/tests/test_z.py", "d", 2.5, slow=False, skipped=False),
     ]
     seconds = remeasure(tests, tmp_path, run=_rerun(calls))
     assert seconds == {t.nodeid: 0.3 for t in tests}
-    groups = [sorted(c for c in command if c.endswith(".py")) for command, _ in calls]
-    assert sorted(groups) == sorted(
-        [
-            ["packages/lakana-core/tests/test_x.py", "packages/lakana-core/tests/test_y.py"],
-            ["packages/lakana/tests/cli/test_app.py"],
-            ["scripts/tests/test_z.py"],
-        ]
-    )
+    assert len(calls) == len(tests)
+    plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in calls]
+    assert [plan["candidates"] for plan in plans] == [[t.nodeid] for t in tests]
+    files = [[c for c in command if c.endswith(".py")] for command, _ in calls]
+    assert files == [[t.file] for t in tests]
     reports = {next(c for c in command if c.startswith("--junitxml=")) for command, _ in calls}
-    plans = {env[WARM_UP_ENV] for _, env in calls}
-    assert len(reports) == len(plans) == len(calls)
+    coverage = {env["COVERAGE_FILE"] for _, env in calls}
+    assert len(reports) == len({env[WARM_UP_ENV] for _, env in calls}) == len(coverage) == 4
 
 
-def test_remeasure_hands_the_warm_up_plugin_its_candidates_and_the_shard_times(
+def test_remeasure_counts_only_the_test_a_process_was_started_for(tmp_path: Path) -> None:
+    """A report that also times another candidate does not stand in for that one's own run."""
+    tests = [
+        TestTime("a.py", "first", 2.6, slow=False, skipped=False),
+        TestTime("a.py", "second", 2.6, slow=False, skipped=False),
+    ]
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        (candidate,) = json.loads(Path(env[WARM_UP_ENV]).read_text())["candidates"]
+        own = 0.4 if candidate == "a.py::first" else 0.7
+        other = "second" if candidate == "a.py::first" else "first"
+        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        report.write_text(
+            _junit(_case("a.py", candidate.split("::")[1], own), _case("a.py", other, 9.0))
+        )
+
+    assert remeasure(tests, tmp_path, run=run) == {"a.py::first": 0.4, "a.py::second": 0.7}
+
+
+def test_remeasure_hands_the_warm_up_plugin_its_candidate_and_the_shard_times(
     tmp_path: Path,
 ) -> None:
-    """The plugin picks each candidate's warm-up from its files; only candidates are counted.
+    """The plugin picks the candidate's warm-up from its file; only the candidate is counted.
 
     Run on its own, a candidate otherwise pays for the session's fixtures and first imports,
     which no shard charges to it (the run of PR 522 failed on that).
@@ -701,14 +719,18 @@ def test_remeasure_hands_the_warm_up_plugin_its_candidates_and_the_shard_times(
     ]
     seconds = remeasure(candidates, tmp_path, run=_rerun(calls), warm_from=everything)
     assert seconds == {t.nodeid: 0.3 for t in candidates}
-    ((command, env),) = calls
-    assert "-p" in command and "scripts.remeasure_warm_up" in command
-    assert [c for c in command if c.endswith(".py")] == [core, other]
-    plan = json.loads(Path(env[WARM_UP_ENV]).read_text())
-    assert plan == {
-        "candidates": [t.nodeid for t in candidates],
-        "seconds": {f"{core}::quick": 0.01},
-    }
+    assert all("-p" in c and "scripts.remeasure_warm_up" in c for c, _ in calls)
+    assert [[c for c in command if c.endswith(".py")] for command, _ in calls] == [
+        [core],
+        [core],
+        [other],
+    ]
+    plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in calls]
+    assert plans == [
+        {"candidates": [f"{core}::slow"], "seconds": {f"{core}::quick": 0.01}},
+        {"candidates": [f"{core}::slower"], "seconds": {f"{core}::quick": 0.01}},
+        {"candidates": [f"{other}::lonely"], "seconds": {}},
+    ]
 
 
 def _timed(durations: list[float], calls: list[int]) -> Callable[..., None]:
