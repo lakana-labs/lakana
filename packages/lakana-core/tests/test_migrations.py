@@ -6788,3 +6788,51 @@ def test_0085_links_task_tokens_to_their_pat_and_revokes_orphans_on_downgrade(
         ]
     finally:
         engine.dispose()
+
+
+_REVISION_0086 = "4d96fb277743"
+
+
+def test_0086_adds_rotated_at(migrated_db: MigratedDb) -> None:
+    """Revision `0086`: the nullable `secrets.rotated_at`, empty for every existing secret.
+
+    The downgrade drops it and keeps the rows.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0085)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def columns() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("secrets")}
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                sa.text(
+                    "INSERT INTO secrets (id, environment_id, name, ciphertext, nonce,"
+                    " wrapped_data_key, format_version, key_id, created_by, created_at)"
+                    " VALUES (:id, :env, 'pypi-corp', x'00', x'00', x'00', 2, 'env', :who,"
+                    " '2026-10-17 00:00:00')"
+                ),
+                {"id": uuid.uuid4().hex, "env": uuid.uuid4().hex, "who": uuid.uuid4().hex},
+            )
+        assert "rotated_at" not in columns()
+        command.upgrade(config, _REVISION_0086)
+        assert "rotated_at" in columns()
+        with engine.connect() as connection:
+            rows = connection.execute(sa.text("SELECT name, rotated_at FROM secrets")).all()
+        assert [tuple(row) for row in rows] == [("pypi-corp", None)]
+        command.downgrade(config, _REVISION_0085)
+        assert "rotated_at" not in columns()
+        with engine.connect() as connection:
+            assert connection.execute(sa.text("SELECT name FROM secrets")).scalars().all() == [
+                "pypi-corp"
+            ]
+    finally:
+        engine.dispose()

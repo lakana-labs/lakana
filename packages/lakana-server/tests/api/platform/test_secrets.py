@@ -83,6 +83,28 @@ def test_rotate_a_secret(client: TestClient, storage_root: str) -> None:
     assert "values" not in rotated.json()
 
 
+def test_list_shows_when_a_secret_was_rotated(client: TestClient, storage_root: str) -> None:
+    _create_dev_environment(client, storage_root)
+    created = client.post(
+        "/api/v1/environments/dev/secrets",
+        headers=AUTH_HEADER,
+        json={"name": "s3-creds", "values": {"k": "old"}},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["rotated_at"] is None
+    rotated = client.patch(
+        "/api/v1/environments/dev/secrets/s3-creds",
+        headers=AUTH_HEADER,
+        json={"values": {"k": "new"}},
+    )
+    assert rotated.json()["rotated_at"] is not None
+    listed = client.get("/api/v1/environments/dev/secrets", headers=AUTH_HEADER).json()
+    assert [(s["name"], s["rotated_at"]) for s in listed] == [
+        ("s3-creds", rotated.json()["rotated_at"])
+    ]
+    assert listed[0]["created_at"] == created.json()["created_at"]
+
+
 def test_rotate_raises_not_found_for_an_unknown_secret_name(
     client: TestClient, storage_root: str
 ) -> None:

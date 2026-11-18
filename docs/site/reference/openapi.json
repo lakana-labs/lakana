@@ -36424,6 +36424,18 @@
             "format": "date-time",
             "title": "Created At"
           },
+          "rotated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rotated At"
+          },
           "format_version": {
             "type": "integer",
             "title": "Format Version"
@@ -36477,7 +36489,7 @@
           "key_id"
         ],
         "title": "SecretOut",
-        "description": "Response body for a secret. Structurally cannot carry a value or ciphertext field.\n\nParameters\n----------\nid\n    The secret's id.\nname\n    The secret's name.\nenvironment\n    The environment this secret belongs to.\ncreated_by\n    The principal who created this secret.\ncreated_at\n    When this secret was created.\nformat_version\n    How the stored secret is encrypted. 1 is the original format; a\n    secret still at 1 becomes the current format when it is set again.\nkey_id\n    Which key provider and key wrapped the secret's data key. Safe to\n    show: it does not reveal the key.\nuse\n    What the secret is bound to: ``package_index``, ``repository``, ``environment``, or\n    `None` for an unbound secret.\nuse_target\n    The index's or repository's name; `None` otherwise, also when that entry was removed.\nuse_target_url\n    Its URL, which is where the secret is sent (for a connection, every ``host:port`` it\n    sends the secret to, joined by ``, ``); `None` when `use_target` is."
+        "description": "Response body for a secret. Structurally cannot carry a value or ciphertext field.\n\nParameters\n----------\nid\n    The secret's id.\nname\n    The secret's name.\nenvironment\n    The environment this secret belongs to.\ncreated_by\n    The principal who created this secret.\ncreated_at\n    When this secret was created.\nrotated_at\n    When its values were last replaced; `None` before the first rotation, and for a secret\n    whose last rotation came before the server recorded it.\nformat_version\n    How the stored secret is encrypted. 1 is the original format; a\n    secret still at 1 becomes the current format when it is set again.\nkey_id\n    Which key provider and key wrapped the secret's data key. Safe to\n    show: it does not reveal the key.\nuse\n    What the secret is bound to: ``package_index``, ``repository``, ``environment``, or\n    `None` for an unbound secret.\nuse_target\n    The index's or repository's name; `None` otherwise, also when that entry was removed.\nuse_target_url\n    Its URL, which is where the secret is sent (for a connection, every ``host:port`` it\n    sends the secret to, joined by ``, ``); `None` when `use_target` is."
       },
       "SecretRotate": {
         "properties": {

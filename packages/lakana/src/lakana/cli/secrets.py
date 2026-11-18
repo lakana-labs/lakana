@@ -252,8 +252,16 @@ def list_secrets(ctx: typer.Context, env: _ENV = None) -> None:
             "key_id",
             "created_by",
             "created_at",
+            "rotated_at",
         ],
-        droppable=["created_by", "environment", "key_id", "format_version", "use_target"],
+        droppable=[
+            "created_by",
+            "environment",
+            "key_id",
+            "format_version",
+            "rotated_at",
+            "use_target",
+        ],
     )
 
 

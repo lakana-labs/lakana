@@ -57,6 +57,7 @@ def _to_out(secret: Secret, environment_name: str, service: SecretService) -> Se
         environment=environment_name,
         created_by=secret.created_by,
         created_at=secret.created_at,
+        rotated_at=secret.rotated_at,
         format_version=secret.format_version,
         key_id=secret.key_id,
         use=secret.use_kind.value if secret.use_kind is not None else None,

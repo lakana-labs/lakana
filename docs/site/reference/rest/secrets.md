@@ -48,6 +48,7 @@ Answer fields: `SecretOut`
 | `environment` | text | yes |  |
 | `created_by` | text (uuid) | yes |  |
 | `created_at` | text (date-time) | yes |  |
+| `rotated_at` | text (date-time) or null | no |  |
 | `format_version` | whole number | yes |  |
 | `key_id` | text | yes |  |
 | `use` | text or null | no |  |
@@ -118,6 +119,7 @@ Answer fields: `SecretOut`
 | `environment` | text | yes |  |
 | `created_by` | text (uuid) | yes |  |
 | `created_at` | text (date-time) | yes |  |
+| `rotated_at` | text (date-time) or null | no |  |
 | `format_version` | whole number | yes |  |
 | `key_id` | text | yes |  |
 | `use` | text or null | no |  |
@@ -190,6 +192,7 @@ Answer fields: `SecretOut`
 | `environment` | text | yes |  |
 | `created_by` | text (uuid) | yes |  |
 | `created_at` | text (date-time) | yes |  |
+| `rotated_at` | text (date-time) or null | no |  |
 | `format_version` | whole number | yes |  |
 | `key_id` | text | yes |  |
 | `use` | text or null | no |  |

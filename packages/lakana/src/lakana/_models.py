@@ -2436,6 +2436,9 @@ class Secret:
     use_target_url
         Its URL, which is where the secret is sent, when there is one (for a connection,
         every ``host:port`` it sends the secret to, joined by ``, ``).
+    rotated_at
+        When its values were last replaced; `None` before the first rotation, and from a server
+        that does not record it.
     """
 
     id: str
@@ -2448,6 +2451,7 @@ class Secret:
     use: str | None = None
     use_target: str | None = None
     use_target_url: str | None = None
+    rotated_at: datetime | None = None
 
 
 @dataclass(frozen=True)

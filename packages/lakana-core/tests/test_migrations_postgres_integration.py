@@ -4179,3 +4179,28 @@ def test_0085_on_postgres() -> None:
             )
         assert revoked == {f"task-{dead_pat.hex[:8]}"}
         engine.dispose()
+
+
+def test_0086_on_postgres() -> None:
+    """0086 adds the nullable `secrets.rotated_at`; the downgrade drops it."""
+    revision_0085 = "532b5154629b"
+    revision_0086 = "4d96fb277743"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0085)
+        engine = sqlalchemy.create_engine(url)
+        query = sqlalchemy.text(
+            "SELECT is_nullable FROM information_schema.columns"
+            " WHERE table_name = 'secrets' AND column_name = 'rotated_at'"
+        )
+        with engine.connect() as conn:
+            assert conn.execute(query).all() == []
+        migrate.upgrade(url, revision_0086)
+        assert _alembic_version(engine) == revision_0086
+        with engine.connect() as conn:
+            assert conn.execute(query).scalar_one() == "YES"
+        migrate.downgrade(url, revision_0085)
+        assert _alembic_version(engine) == revision_0085
+        with engine.connect() as conn:
+            assert conn.execute(query).all() == []
+        engine.dispose()

@@ -2998,6 +2998,9 @@ class SecretOut(BaseModel):
         The principal who created this secret.
     created_at
         When this secret was created.
+    rotated_at
+        When its values were last replaced; `None` before the first rotation, and for a secret
+        whose last rotation came before the server recorded it.
     format_version
         How the stored secret is encrypted. 1 is the original format; a
         secret still at 1 becomes the current format when it is set again.
@@ -3019,6 +3022,7 @@ class SecretOut(BaseModel):
     environment: str
     created_by: uuid.UUID
     created_at: datetime
+    rotated_at: datetime | None = None
     format_version: int
     key_id: str
     use: str | None = None

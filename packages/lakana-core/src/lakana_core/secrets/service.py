@@ -195,7 +195,7 @@ def rotate_values(
 ) -> None:
     """Encrypt new values into a secret under a fresh data key; no authorization, no commit.
 
-    The caller has authorized and commits. Adds `SECRET_ROTATED`.
+    The caller has authorized and commits. Adds `SECRET_ROTATED` and sets `rotated_at` to now.
 
     Parameters
     ----------
@@ -234,6 +234,7 @@ def rotate_values(
     secret.wrapped_data_key = encrypted.wrapped_data_key
     secret.format_version = encrypted.format_version
     secret.key_id = encrypted.key_id
+    secret.rotated_at = datetime.now(UTC)
 
 
 def _noun(use: SecretUse) -> str:

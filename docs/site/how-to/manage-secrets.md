@@ -146,6 +146,7 @@ The listing shows, for each secret:
 | `key_id` | Which key provider and which key wrapped the secret's data key: `env:` and 16 characters for a master key from `LAKANA_SECRETS__MASTER_KEY`, or just `env` for a secret stored in the original format. It does not reveal the key. |
 | `use`, `use_target` | What the secret is bound to: `package_index`, `repository`, `connection` or `environment`, and the name of the index, repository or connection. Both are empty when it is unbound. `use_target` is also empty for `environment`, and for an index or repository that was removed; `use` then still names the kind. A connection's secret lives in the connection's environment; deleting the connection, or clearing its secret, leaves the secret unbound. |
 | `created_by`, `created_at` | Who created it and when. |
+| `rotated_at` | When its values were last replaced, empty before the first rotation (and for a secret last rotated before Lakana recorded it). |
 
 ## Secrets stored in the old format
 

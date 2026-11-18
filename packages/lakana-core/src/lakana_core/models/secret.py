@@ -63,6 +63,9 @@ class Secret(Base):
     pointing at the gone id, so it never becomes unbound by itself; deleting a connection
     unbinds its secrets (`lakana_core.connections.service`).
 
+    `rotated_at` is when the values were last replaced (`NULL` until the first rotation; a
+    rotation before the column existed left none).
+
     Soft-deleted on revoke (`revoked_by`/`revoked_at`), matching every
     other model's convention: the encrypted blob is harmless at rest
     even after revocation, and the row has real audit value once the
@@ -94,6 +97,7 @@ class Secret(Base):
     key_id: Mapped[str] = mapped_column(String(64))
     created_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("principals.id"))
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    rotated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     revoked_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("principals.id"), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     use_kind: Mapped[SecretUseKind | None] = mapped_column(
