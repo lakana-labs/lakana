@@ -28,7 +28,20 @@
     "csv": "CSV",
     "json": "JSON",
     "parquet": "Parquet",
-    "confirm": "Register"
+    "confirm": "Register",
+    "browse": "Browse…",
+    "browseLabel": "Files under raw/",
+    "browseTrail": "Folder",
+    "browseHint": "Open a folder, or choose a file: the location takes its folder and every file there with its ending.",
+    "browseRootHint": "A table reads the files of one folder below raw/: open a folder first.",
+    "browseRegion": "Folders and files in {{path}}",
+    "browseEmpty": "Nothing in {{path}}.",
+    "browseName": "Name",
+    "browseSize": "Size",
+    "browseInUse": "In use",
+    "inUseBy": "in use by {{table}}",
+    "inUse": "in use",
+    "useFolder": "Use this folder"
   },
   "note": {
     "created": "Created namespace {{namespace}}.",

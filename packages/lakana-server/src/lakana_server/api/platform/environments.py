@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.orphaned_locations import DEFAULT_OLDER_THAN_DAYS
@@ -17,6 +17,9 @@ from lakana_server.api.platform.schemas import (
     EnvironmentUsageOut,
     OrphanedLocationsDeleteIn,
     OrphanedLocationsOut,
+    RawClaimOut,
+    RawEntryOut,
+    RawPageOut,
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -537,3 +540,63 @@ def delete_orphaned_locations(
         principal, name, older_than_days=body.older_than_days
     )
     return OrphanedLocationsOut.model_validate(report)
+
+
+@router.get("/{env}/raw", response_model=RawPageOut, responses=errors(403, 404, 502, 503))
+def list_raw(
+    env: str,
+    path: str = Query(
+        default="raw", max_length=1024, description="The folder: raw, or a folder below it."
+    ),
+    cursor: str | None = Query(default=None, max_length=4096),
+    limit: int = Query(default=100, ge=1, le=200),
+    principal: PrincipalRef = Depends(get_principal),
+    catalog: CatalogService = Depends(get_catalog),
+) -> RawPageOut:
+    """List one folder of `raw/`, to choose the location of an external table.
+
+    One level of one folder, one page at a time: its folders and files (with their sizes), in
+    key order. An entry inside an external table's folder says so, and names the table when you
+    may read it. Needs `CREATE_TABLE` on an existing namespace of the environment, the right to
+    register an external table there; each folder read is recorded in the audit log
+    (`ACTIVITY_VIEWED`, view `raw_files`), once per folder within
+    `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. Answers 403 without that right, 404 when the
+    environment does not exist, 422 for a path that is not `raw` or a folder below it (no `..`,
+    no leading `/`), a cursor of another list, or a storage that is neither local nor S3 (it
+    cannot list one page without reading the whole folder), 502 when the storage refused the
+    environment's credentials and 503 when it did not answer or the read could not be recorded.
+
+    Parameters
+    ----------
+    env
+        Environment name.
+    path
+        The folder, such as ``raw/orders``.
+    cursor
+        The `next_cursor` of the previous page.
+    limit
+        Most entries returned (1 to 200).
+    principal
+        The authenticated caller.
+    catalog
+        The catalog service for this request.
+
+    Returns
+    -------
+    RawPageOut
+        The folder, its entries and the next cursor.
+    """
+    page = catalog.list_raw(principal, env, path=path, cursor=cursor, limit=limit)
+    return RawPageOut(
+        path=page.path,
+        items=[
+            RawEntryOut(
+                name=item.name,
+                kind=item.kind,
+                size=item.size,
+                claimed_by=RawClaimOut(table=item.claimed_by) if item.claimed else None,
+            )
+            for item in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )

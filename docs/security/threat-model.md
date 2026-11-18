@@ -1051,6 +1051,47 @@ table's own id suffix could otherwise nest one table's directory inside another'
 rule catches that case specifically. A table failing the id-suffix check must be re-created;
 there is no in-place migration for an existing table's location.
 
+### Browsing raw/ (#672)
+
+`GET /api/v1/environments/{env}/raw` (Browse… in New external table, `lakana raw ls`,
+`client.raw.list`) lists the names and sizes of the folders and files under an environment's
+`raw/`, never a file's contents. It is a listing of storage that the catalog does not describe, so
+it is held to these controls:
+
+- **Who.** Only a caller who may register an external table in an existing namespace of the
+  environment (`CREATE_TABLE` on a namespace, asked in one `permits_each` batch, so a task token
+  is narrowed to its declared namespaces as registration narrows it); anyone else is refused
+  before storage is read, recorded as `AUTHORIZATION_DENIED` when the environment-wide right is
+  missing too. Browsing only reads, so the protected-environment guard of registration
+  (`ProtectedWriteGuard`) is not asked: in a protected environment a holder of the right may list
+  `raw/` without a break-glass reason, which registering there still needs.
+- **Where.** The folder must be `raw` or a folder below it: no leading `/`, no empty, `.` or `..`
+  part, no NUL, at most 1,024 characters (`parse_raw_folder`), then `confine_to_root` as the
+  registration does. One level of one folder per call, and at most 200 entries returned. No
+  backend holds the whole folder for a page: S3 is asked for one `ListObjectsV2` page (and, for a
+  store that answers short pages while truncated, at most ten); the local backend streams the
+  directory's names through a heap of the page's size, so memory stays bounded, though each page
+  still walks the directory's names once, and `stat`s only the files it returns; a symlink is
+  never listed. Any other backend (Azure among them) has no listing that stops after a page and
+  is refused with 422 ("type the location instead"). A cursor carries the last key as hex, so a
+  name with any character resumes the listing, and is refused when folder and key exceed
+  S3's 1,024-byte key; a local name that is not UTF-8 is left out.
+- **Claims.** An entry inside another external table's claim is marked; the table is named only
+  to a reader with `READ_TABLE` on it. A folder that only holds a claim further down is not
+  marked, so its free neighbours stay reachable; registering it is still refused by
+  `check_claim_free`.
+- **Audit.** Each folder read writes `ACTIVITY_VIEWED` (`view: raw_files`, the environment as
+  scope, the folder as targeting key), once per reader and folder within
+  `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`, before the answer is returned; if it cannot be written the
+  read is refused (503) and shows nothing.
+
+**Residuals, stated as such.** A holder of `CREATE_TABLE` on one namespace sees the names and
+sizes of every file under `raw/`, those in other tables' folders included, whether or not they may
+read those tables (the maintainer's choice A on #672: the dialog's own right, not a right per
+folder). The marker says that some table holds a folder without naming it, which a registration
+attempt already said (`That directory is already claimed by another table.`). With
+`LAKANA_VIEW_AUDIT__ENABLED=false` the reads are not recorded.
+
 ### Unattended deletion of table locations (#90)
 
 The worker's location sweep deletes table data with no person in the loop, so what it may delete

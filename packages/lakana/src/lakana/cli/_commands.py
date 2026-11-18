@@ -103,6 +103,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "query saved show": ("saved_queries.get",),
     "query saved update": ("saved_queries.get", "saved_queries.update"),
     "query saved delete": ("saved_queries.delete",),
+    "raw ls": ("raw.list", "raw.iter"),
     "principal create": ("principals.create",),
     "principal list": ("principals.list", "principals.list_page", "principals.iter"),
     "principal get": ("principals.get",),
