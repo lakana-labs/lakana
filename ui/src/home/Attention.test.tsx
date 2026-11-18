@@ -1,6 +1,7 @@
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 const AT = "2026-11-10T08:00:00Z";
@@ -34,6 +35,8 @@ afterEach(() => {
 });
 
 describe("Attention", () => {
+  beforeAll(preloadJobsScreen);
+
   it("says Nothing needs your attention when the list is empty", async () => {
     renderShell("/");
 

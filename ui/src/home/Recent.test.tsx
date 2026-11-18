@@ -1,6 +1,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 const AT = "2026-11-10T08:00:00Z";
@@ -22,6 +23,8 @@ async function region(): Promise<HTMLElement> {
 }
 
 describe("Recent", () => {
+  beforeAll(preloadJobsScreen);
+
   it("says that opened tables appear here, and that the rest follows later", async () => {
     renderShell("/");
 

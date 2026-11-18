@@ -168,3 +168,13 @@ export function anAttempt(over: Partial<TaskAttemptOut> = {}): TaskAttemptOut {
     ...over,
   };
 }
+
+/**
+ * Loads the Jobs screen's chunk ahead of a file's tests (`beforeAll(preloadJobsScreen)`). `/jobs`
+ * loads its screen on demand, and the first load of that chunk transforms the whole Jobs area:
+ * under coverage on CI that takes longer than a `findBy` waits. Loaded here, a test that opens a
+ * Jobs address waits only for the router, and still goes through the route's `lazy`.
+ */
+export async function preloadJobsScreen(): Promise<void> {
+  await import("../jobs/JobsScreen");
+}

@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 let field: HTMLInputElement | null = null;
@@ -25,6 +26,8 @@ async function shellAtHome(
 }
 
 describe("CommandPalette", () => {
+  beforeAll(preloadJobsScreen);
+
   it.each([
     ["Control", { ctrlKey: true }],
     ["Meta", { metaKey: true }],
