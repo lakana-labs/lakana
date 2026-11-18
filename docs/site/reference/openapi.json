@@ -18169,6 +18169,155 @@
         }
       }
     },
+    "/api/v1/deploys": {
+      "get": {
+        "tags": [
+          "deploys"
+        ],
+        "summary": "List the deploys of every environment you may read",
+        "description": "Without `environment`, lists the deploys of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue for this list.",
+        "operationId": "list_all_deploys_api_v1_deploys_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "repository",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            },
+            "description": "Only this repository's deploys."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/runs": {
       "post": {
         "tags": [
@@ -20467,6 +20616,334 @@
           },
           "403": {
             "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List the runs of every environment you may read",
+        "description": "Without `environment`, lists the runs of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server did not issue for this list.",
+        "operationId": "list_all_runs_api_v1_runs_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment."
+          },
+          {
+            "name": "repository",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Repository"
+            },
+            "description": "Narrow to this repository."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "default": [],
+              "title": "Status"
+            },
+            "description": "Narrow to these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`); repeat the parameter or write them comma-separated."
+          },
+          {
+            "name": "trigger",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 16,
+              "default": [],
+              "title": "Trigger"
+            },
+            "description": "Narrow to these triggers (`schedule`, `api`, `manual`, `deploy`), given as `status` is."
+          },
+          {
+            "name": "job",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Job"
+            },
+            "description": "Narrow to this job."
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Since"
+            },
+            "description": "Narrow to runs created at or after this ISO 8601 time; a time zone is required."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Page size (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs/failed": {
+      "get": {
+        "tags": [
+          "runs"
+        ],
+        "summary": "List the jobs whose newest finished run failed",
+        "description": "Lists, for every environment you may read (`READ_ENVIRONMENT`), each job whose newest finished run within the last seven days failed (or, for runs outside a job, each repository's), newest end first: the same rule as Home's Needs your attention, so the two never disagree. A later success or a later cancelled run hides an earlier failure. Each row names the run's first failed task and why it failed; a run that failed without a failed task has `task` and `failure` null and says why in `run.error_message`. An environment you may not read is left out, never refused. With `environment`, only its runs: 403 without `READ_ENVIRONMENT` on it and 404 when it does not exist. Answers 422 for a `limit` outside 1 to 200. `truncated` says more rows were left out.",
+        "operationId": "list_failed_runs_api_v1_runs_failed_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only this environment's runs."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Most rows returned (1 to 200)."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailedRunsOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
             "content": {
               "application/json": {
                 "schema": {
@@ -25271,7 +25748,7 @@
           "home"
         ],
         "summary": "Show what needs your attention",
-        "description": "An administrator sees the jobs whose newest finished run failed in the last seven days, the late tables, the checks whose newest result failed or errored, the open recovery links, the lost workers and their own queries that failed in that time. Anyone else sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first. A task or CI token is refused with 403: this is a person's list.",
+        "description": "Everyone sees the jobs whose newest finished run failed in the last seven days, in every environment they may read (`READ_ENVIRONMENT`), by the rule of `GET /api/v1/runs/failed`. An administrator also sees the late tables, the checks whose newest result failed or errored, the open recovery links, the lost workers and their own queries that failed in that time. Anyone else also sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first. A task or CI token is refused with 403: this is a person's list.",
         "operationId": "read_attention_api_v1_home_attention_get",
         "parameters": [
           {
@@ -26634,7 +27111,7 @@
           "at"
         ],
         "title": "AttentionItemOut",
-        "description": "One row of Needs your attention on Home.\n\nParameters\n----------\nkind\n    `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal\n    fired), `check_failed` (a check's newest result failed or errored), `query_failed`\n    (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two,\n    and failed runs, only for administrators.\nenvironment\n    The environment's name; `null` for a recovery link and a worker.\ntitle\n    The object's name: a job, a dotted table name, a check, `Query` and the first eight\n    characters of its id, the person a recovery link signs in, a worker's host. Never a\n    value, an error text or SQL.\nref\n    The object the row opens: a run's id (a failed run or check), a dotted table name, a\n    query's id, a recovery link's id or a worker's id.\nat\n    When it happened."
+        "description": "One row of Needs your attention on Home.\n\nParameters\n----------\nkind\n    `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal\n    fired), `check_failed` (a check's newest result failed or errored), `query_failed`\n    (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two\n    only for administrators, failed runs for everyone who may read the environment.\nenvironment\n    The environment's name; `null` for a recovery link and a worker.\ntitle\n    The object's name: a job, a dotted table name, a check, `Query` and the first eight\n    characters of its id, the person a recovery link signs in, a worker's host. Never a\n    value, an error text or SQL.\nref\n    The object the row opens: a run's id (a failed run or check), a dotted table name, a\n    query's id, a recovery link's id or a worker's id.\nat\n    When it happened."
       },
       "AttentionOut": {
         "properties": {
@@ -29168,6 +29645,17 @@
             ],
             "title": "Principal Id"
           },
+          "submitted_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submitted By"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -29242,12 +29730,33 @@
             "title": "Waiting For",
             "description": "Why this is waiting, or null when it is not: a stable `code`, one sentence in `message`, and the numbers the sentence uses."
           },
+          "jobs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jobs"
+          },
           "job_starts": {
             "items": {
               "$ref": "#/components/schemas/DeployJobStartOut"
             },
             "type": "array",
             "title": "Job Starts"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -29269,7 +29778,36 @@
           "finished_at"
         ],
         "title": "DeployOut",
-        "description": "Response body for a deploy run.\n\nParameters\n----------\nid\n    The run's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nkind\n    ``deploy``, ``dry_run`` or ``rollback``.\nstatus\n    ``queued``, ``running``, ``succeeded`` or ``failed``.\nrequested_ref\n    Ref or SHA asked for.\nresolved_sha\n    The commit fetched.\nrollback_to_project_version_id\n    A rollback's target.\nerror_message\n    Why it failed.\ndiff\n    Table names per change category.\nproject_version_id\n    The project version it made current.\nprincipal_id\n    Who submitted it.\ncreated_at\n    Queued at.\nstarted_at\n    Claimed at.\nfinished_at\n    Finished at.\nhidden_adopted\n    Adopted tables left out of `diff` because the caller may not read them.\nchecks\n    The checks the project has, table to ``[{\"check\", \"on_failure\"}]``; `None` for a run\n    without checks.\nwarnings\n    What the deploy leaves for its owner to act on, as sentences (a removed asset whose\n    table is kept after a failed check; a removed table or column that other repositories\n    declare something on, shown only to a reader who may see it).\nwaiting_for\n    Why a queued deploy has not started: a stable `code`, one sentence in `message` that\n    names the next step, and the numbers it uses; null when it is not waiting. Set on the\n    single read (`GET .../deploys/{id}`) only, null in the history.\njob_starts\n    The jobs with `on_deploy: true` that a successful deploy started, by name, each with\n    what came of its start; empty for a run that starts no job (a dry run, a rollback, a\n    failed deploy, a deploy of the commit already current)."
+        "description": "Response body for a deploy run.\n\nParameters\n----------\nid\n    The run's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nkind\n    ``deploy``, ``dry_run`` or ``rollback``.\nstatus\n    ``queued``, ``running``, ``succeeded`` or ``failed``.\nrequested_ref\n    Ref or SHA asked for.\nresolved_sha\n    The commit fetched.\nrollback_to_project_version_id\n    A rollback's target.\nerror_message\n    Why it failed.\ndiff\n    Table names per change category.\nproject_version_id\n    The project version it made current.\nprincipal_id\n    Who submitted it.\nsubmitted_by\n    The name of the principal that submitted it, in the history and the single read; null\n    once that principal is deleted.\ncreated_at\n    Queued at.\nstarted_at\n    Claimed at.\nfinished_at\n    Finished at.\nhidden_adopted\n    Adopted tables left out of `diff` because the caller may not read them.\nchecks\n    The checks the project has, table to ``[{\"check\", \"on_failure\"}]``; `None` for a run\n    without checks.\nwarnings\n    What the deploy leaves for its owner to act on, as sentences (a removed asset whose\n    table is kept after a failed check; a removed table or column that other repositories\n    declare something on, shown only to a reader who may see it).\nwaiting_for\n    Why a queued deploy has not started: a stable `code`, one sentence in `message` that\n    names the next step, and the numbers it uses; null when it is not waiting. Set on the\n    single read (`GET .../deploys/{id}`) only, null in the history.\njobs\n    The sorted names of the jobs the deploy's project version defines. Set on the single\n    read only; null in the history, and for a run that made no project version (queued,\n    failed, a dry run).\njob_starts\n    The jobs with `on_deploy: true` that a successful deploy started, by name, each with\n    what came of its start; empty for a run that starts no job (a dry run, a rollback, a\n    failed deploy, a deploy of the commit already current).\nactions\n    The words of what the caller's rights allow on it: ``rollback``. Rights only, as for a\n    table's `actions`: offer a control only when the word is listed and the deploy's state\n    allows it (Roll back for a succeeded deploy); the server decides every request again."
+      },
+      "DeployPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DeployOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "DeployPageOut",
+        "description": "One page of the deploys of every environment the caller may read, newest first.\n\nParameters\n----------\nitems\n    The deploys of the page; each names its `environment`, and `jobs` is `null`.\nnext_cursor\n    Pass back as `cursor` with the same `repository` for the next page; `null` on the last."
       },
       "DeployTriggerOut": {
         "properties": {
@@ -29808,6 +30346,64 @@
         ],
         "title": "ExternalTableOut",
         "description": "Response body for a registered raw-zone table.\n\nThe wire field is still named `\"schema\"` (`Field(alias=\"schema\")`); the\nPython attribute is `table_schema`, not `schema`, because `BaseModel`\nitself defines a (deprecated, v1-compat) `schema()` method, and pydantic\nwarns at class-definition time that a field named `schema` shadows it\n. `populate_by_name=True` keeps construction\nby either name working — `tables.py` builds this from a dict keyed\n`\"schema\"` — and `serialize_by_alias=True` keeps the JSON key `schema`\nfor callers that call `.model_dump()` directly instead of going through\nFastAPI's `response_model` (which already serializes by alias).\n\nParameters\n----------\nname\n    Table name.\nnamespace\n    Dot-joined namespace path.\nlocation_pattern\n    The glob it was registered with.\nformat\n    Its file format.\nschema\n    The inferred column-name-to-type mapping."
+      },
+      "FailedRunOut": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/RunOut"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task"
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailureOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "run",
+          "task",
+          "failure"
+        ],
+        "title": "FailedRunOut",
+        "description": "A job whose newest finished run failed, with its first cause.\n\nParameters\n----------\nrun\n    The run, without tasks, with `actions`.\ntask\n    The asset of its first failed task (the earliest to end, then the smallest asset); null\n    when the run failed without a failed task, whose `run.error_message` says why.\nfailure\n    That task's failure; null with `task`."
+      },
+      "FailedRunsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FailedRunOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "title": "FailedRunsOut",
+        "description": "The failed runs list: the rule of Home's failed runs, everywhere the caller may read.\n\nParameters\n----------\nitems\n    One row per job (or per repository, for its runs of no job) whose newest finished run\n    within seven days failed, newest end first.\ntruncated\n    Whether more rows were left out; narrow with `environment`."
       },
       "FailureOut": {
         "properties": {
@@ -31205,6 +31801,38 @@
             },
             "type": "array",
             "title": "Triggers"
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
+          },
+          "commit_sha": {
+            "type": "string",
+            "title": "Commit Sha"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "notify": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotifyOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -31227,10 +31855,12 @@
           "last_run_status",
           "last_run_trigger",
           "last_run_at",
-          "triggers"
+          "triggers",
+          "commit_sha",
+          "source_url"
         ],
         "title": "JobOut",
-        "description": "One job and the platform's state for it.\n\nParameters\n----------\nname\n    The job's name.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nselect\n    The selection's patterns.\nupstream\n    Whether ancestors are added.\ndownstream\n    Whether descendants are added.\ncron\n    The cron expression, or null for a job without a schedule here.\ntimezone\n    The schedule's IANA zone, or null without a schedule.\nstate\n    ``scheduled``, ``paused``, ``waiting`` (a start waits for the active run),\n    ``waiting to start`` (a start waits and the project is free), ``no schedule``,\n    ``no run principal`` or ``run principal unusable``.\npaused\n    Whether the schedule is paused.\nnext_run_at\n    The next scheduled time (UTC), or null.\nnext_run_local\n    The same moment in the job's zone, ISO 8601 with the offset.\nwaiting_for\n    Why a start waits (`job_waits`, `job_starts_soon`) or why the schedule cannot start\n    (`no_run_principal`, `run_principal_unusable`): a stable `code` and one sentence in\n    `message`; null otherwise.\nwaits_for_run_id\n    For ``waiting``, the run it waits for.\nlast_run_id\n    The job's latest run, if any.\nlast_run_status\n    Its status.\nlast_run_trigger\n    What started it.\nlast_run_at\n    When it was created.\ntriggers\n    How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule\n    in this environment, a ``deploy`` trigger when it starts after each deploy here, and the\n    ``on_demand`` trigger every job has, last. Kinds may be added."
+        "description": "One job and the platform's state for it.\n\nParameters\n----------\nname\n    The job's name.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nselect\n    The selection's patterns.\nupstream\n    Whether ancestors are added.\ndownstream\n    Whether descendants are added.\ncron\n    The cron expression, or null for a job without a schedule here.\ntimezone\n    The schedule's IANA zone, or null without a schedule.\nstate\n    ``scheduled``, ``paused``, ``waiting`` (a start waits for the active run),\n    ``waiting to start`` (a start waits and the project is free), ``no schedule``,\n    ``no run principal`` or ``run principal unusable``.\npaused\n    Whether the schedule is paused.\nnext_run_at\n    The next scheduled time (UTC), or null.\nnext_run_local\n    The same moment in the job's zone, ISO 8601 with the offset.\nwaiting_for\n    Why a start waits (`job_waits`, `job_starts_soon`) or why the schedule cannot start\n    (`no_run_principal`, `run_principal_unusable`): a stable `code` and one sentence in\n    `message`; null otherwise.\nwaits_for_run_id\n    For ``waiting``, the run it waits for.\nlast_run_id\n    The job's latest run, if any.\nlast_run_status\n    Its status.\nlast_run_trigger\n    What started it.\nlast_run_at\n    When it was created.\ntriggers\n    How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule\n    in this environment, a ``deploy`` trigger when it starts after each deploy here, and the\n    ``on_demand`` trigger every job has, last. Kinds may be added.\nactions\n    The words of what the caller's rights allow on it: ``run``, ``pause``, ``resume``.\n    Rights only, as for a table's `actions`: offer a control only when the word is listed\n    and the job's state allows it (Pause for an unpaused job with a schedule, Resume for a\n    paused one); the server decides every request again.\ncommit_sha\n    The commit of the project version deployed in the environment.\nsource_url\n    The link to ``lakana.yaml`` at that commit on the repository's git host; null for a\n    repository without a known host.\nnotify\n    Where the job reports; null for a job without a usable `notify:`."
       },
       "JobRunRequest": {
         "properties": {
@@ -32173,6 +32803,44 @@
         ],
         "title": "NotificationOut",
         "description": "One notification of a run.\n\nParameters\n----------\nid\n    The delivery id: the ``delivery_id`` a receiver sees, and what\n    ``GET /environments/{env}/notifications/{id}`` takes.\nevent\n    ``failed``, ``recovered``, ``columns_changed``, ``health`` or ``test``.\nstate\n    ``pending``, ``delivered`` or ``failed``.\nattempts\n    Attempts made so far.\nmax_attempts\n    Attempts before the delivery counts as failed.\nlast_result\n    A short text on the last attempt; never the URL.\ndelivered_at\n    When it was delivered."
+      },
+      "NotifyOut": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "slack",
+              "teams"
+            ],
+            "title": "Format"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
+          }
+        },
+        "type": "object",
+        "required": [
+          "format",
+          "events"
+        ],
+        "title": "NotifyOut",
+        "description": "Where a job reports, without the address.\n\nParameters\n----------\nformat\n    ``json``, ``slack`` or ``teams``.\nevents\n    The events the job receives: ``failed``, ``recovered``, ``columns_changed``, ``health``.\nsecret\n    The name of the environment secret that holds the webhook URL. Present only for a caller\n    who holds `DEPLOY` on the environment (and is no CI token); absent, not null, for anyone\n    else. The URL itself never leaves the server."
       },
       "NotifyTestOut": {
         "properties": {
@@ -34703,6 +35371,23 @@
             "type": "integer",
             "title": "Failed Tasks",
             "default": 0
+          },
+          "total_tasks": {
+            "type": "integer",
+            "title": "Total Tasks",
+            "default": 0
+          },
+          "ended_tasks": {
+            "type": "integer",
+            "title": "Ended Tasks",
+            "default": 0
+          },
+          "actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Actions"
           }
         },
         "type": "object",
@@ -34726,7 +35411,36 @@
           "tasks"
         ],
         "title": "RunOut",
-        "description": "One run.\n\nParameters\n----------\nid\n    Run id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nproject_version_id\n    The project version it runs.\ncommit_sha\n    Its commit.\nkind\n    ``full``, ``selection`` or ``resume``.\nstatus\n    Run status.\ncancel_requested\n    Whether a cancel was requested.\ntriggered_by\n    Who started it.\nrun_as\n    Who it writes as.\nresumed_from_run_id\n    The run a resume continues.\nselection\n    Patterns and flags.\nerror_message\n    Run-level failure.\ncreated_at\n    Created.\nstarted_at\n    Started.\nfinished_at\n    Finished.\ntasks\n    Task runs (empty in listings).\njob\n    The job the run belongs to; null for an ad-hoc run.\ntrigger\n    ``schedule``, ``api`` (a service account called the API), ``manual`` or ``deploy`` (a\n    deploy started the job as its deployer); null for an ad-hoc run.\nscheduled_for\n    For a scheduled run, the time the schedule named.\nmissed\n    How many earlier scheduled times this run stands in for.\nnotifications\n    The notifications the run queued, oldest first (empty in listings).\nfailed_tasks\n    How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in\n    listings."
+        "description": "One run.\n\nParameters\n----------\nid\n    Run id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nproject_version_id\n    The project version it runs.\ncommit_sha\n    Its commit.\nkind\n    ``full``, ``selection`` or ``resume``.\nstatus\n    Run status.\ncancel_requested\n    Whether a cancel was requested.\ntriggered_by\n    Who started it.\nrun_as\n    Who it writes as.\nresumed_from_run_id\n    The run a resume continues.\nselection\n    Patterns and flags.\nerror_message\n    Run-level failure.\ncreated_at\n    Created.\nstarted_at\n    Started.\nfinished_at\n    Finished.\ntasks\n    Task runs (empty in listings).\njob\n    The job the run belongs to; null for an ad-hoc run.\ntrigger\n    ``schedule``, ``api`` (a service account called the API), ``manual`` or ``deploy`` (a\n    deploy started the job as its deployer); null for an ad-hoc run.\nscheduled_for\n    For a scheduled run, the time the schedule named.\nmissed\n    How many earlier scheduled times this run stands in for.\nnotifications\n    The notifications the run queued, oldest first (empty in listings).\nfailed_tasks\n    How many tasks ended ``failed`` (not ``upstream_failed`` or ``cancelled``); also in\n    listings.\ntotal_tasks\n    How many tasks the run has; also in listings.\nended_tasks\n    How many of its tasks ended (``succeeded``, ``failed``, ``upstream_failed`` or\n    ``cancelled``); also in listings, so a list can show a running run's progress.\nactions\n    The words of what the caller's rights allow on it: ``cancel``, ``resume``. Rights\n    only, as for a table's `actions`: offer a control only when the word is listed and the\n    run's state allows it (Cancel for a queued or running run, Resume for a finished one\n    that did not succeed); the server decides every request again."
+      },
+      "RunPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "RunPageOut",
+        "description": "One page of the runs of every environment the caller may read, newest first.\n\nParameters\n----------\nitems\n    The runs of the page, without tasks; each names its `environment`.\nnext_cursor\n    Pass back as `cursor` with the same filters for the next page; `null` on the last."
       },
       "SavedQueryIn": {
         "properties": {

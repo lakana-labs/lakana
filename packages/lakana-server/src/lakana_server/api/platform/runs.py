@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Annotated
 
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.runs.check_rows import submit_check_rows
 from lakana_core.runs.checks import CheckResultView
+from lakana_core.runs.operator import operator_rights_each, run_actions
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService, RunView, TaskLogView, TaskRunView, WorkerView
 from lakana_server.api.platform.listing import set_next_cursor, split_values
@@ -23,10 +25,14 @@ from lakana_server.api.platform.schemas import (
     CheckResultOut,
     CheckResultPage,
     CheckRowsRequest,
+    FailedRunOut,
+    FailedRunsOut,
+    FailureOut,
     NotificationOut,
     QuerySubmitOut,
     RunCreate,
     RunOut,
+    RunPageOut,
     SchedulerOut,
     TaskAttemptOut,
     TaskHistoryEntryOut,
@@ -50,6 +56,12 @@ router = APIRouter(
 scheduler_router = APIRouter(
     route_class=AuthenticateFirstRoute, prefix="/api/v1", tags=["runs"], responses=errors(401)
 )
+all_runs_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/runs",
+    tags=["runs"],
+    responses=errors(401),
+)
 
 
 def _task_out(task: TaskRunView) -> TaskRunOut:
@@ -71,13 +83,38 @@ def _task_out(task: TaskRunView) -> TaskRunOut:
     return TaskRunOut(**fields)
 
 
-def run_out(view: RunView) -> RunOut:
+def run_words(
+    authz: AuthorizationService, principal: PrincipalRef, environments: Iterable[str]
+) -> dict[str, tuple[str, ...]]:
+    """Ask what the caller may do on the runs of each environment, once.
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    principal
+        The caller.
+    environments
+        The environments of the runs to answer.
+
+    Returns
+    -------
+    dict of str to tuple of str
+        The run words per distinct environment.
+    """
+    rights = operator_rights_each(authz, principal, environments)
+    return {name: run_actions(r) for name, r in rights.items()}
+
+
+def run_out(view: RunView, actions: Sequence[str] = ()) -> RunOut:
     """Build a run body.
 
     Parameters
     ----------
     view
         The run.
+    actions
+        The words of what the caller's rights allow on it (`lakana_core.runs.operator`).
 
     Returns
     -------
@@ -88,7 +125,7 @@ def run_out(view: RunView) -> RunOut:
     fields["project_version_id"] = fields.pop("job_version_id")
     fields["tasks"] = [_task_out(task) for task in view.tasks]
     fields["notifications"] = [NotificationOut(**vars(n)) for n in view.notifications]
-    return RunOut(**fields)
+    return RunOut(**fields, actions=list(actions))
 
 
 def _log_out(view: TaskLogView) -> TaskLogOut:
@@ -138,6 +175,7 @@ def start_run(
     body: RunCreate,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Start a run.
 
@@ -157,6 +195,8 @@ def start_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
@@ -166,7 +206,8 @@ def start_run(
     selection = Selection(
         patterns=tuple(body.select), upstream=body.upstream, downstream=body.downstream
     )
-    return run_out(service.start(principal, env, body.repository, selection))
+    view = service.start(principal, env, body.repository, selection)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.get("/runs", response_model=list[RunOut], responses=errors(403, 404))
@@ -182,6 +223,7 @@ def list_runs(
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[RunOut]:
     """List runs.
 
@@ -218,6 +260,8 @@ def list_runs(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
@@ -236,7 +280,8 @@ def list_runs(
         cursor=cursor,
     )
     set_next_cursor(response, next_cursor)
-    return [run_out(v) for v in views]
+    words = run_words(authz, principal, [env])[env]
+    return [run_out(v, words) for v in views]
 
 
 @router.get(
@@ -303,6 +348,7 @@ def get_run(
     run_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Show a run.
 
@@ -319,13 +365,16 @@ def get_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
     RunOut
         The run.
     """
-    return run_out(service.get(principal, env, run_id))
+    view = service.get(principal, env, run_id)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.get(
@@ -470,6 +519,7 @@ def cancel_run(
     run_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Cancel a run.
 
@@ -486,13 +536,16 @@ def cancel_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
     RunOut
         The run with `cancel_requested`.
     """
-    return run_out(service.cancel(principal, env, run_id))
+    view = service.cancel(principal, env, run_id)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.post(
@@ -503,6 +556,7 @@ def resume_run(
     run_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> RunOut:
     """Resume a run.
 
@@ -522,13 +576,16 @@ def resume_run(
         The authenticated caller.
     service
         The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
 
     Returns
     -------
     RunOut
         The new run.
     """
-    return run_out(service.resume(principal, env, run_id))
+    view = service.resume(principal, env, run_id)
+    return run_out(view, run_words(authz, principal, [env])[env])
 
 
 @router.get(
@@ -624,6 +681,137 @@ def list_workers(
         the memory it last reported.
     """
     return [worker_out(w) for w in service.list_workers(principal)]
+
+
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_runs`, with `environment`.
+# jscpd:ignore-start
+@all_runs_router.get("", response_model=RunPageOut, responses=errors(403, 404))
+def list_all_runs(
+    environment: str | None = Query(default=None, max_length=255),
+    repository: str | None = Query(default=None, max_length=255),
+    status: list[str] = Query(default=[], max_length=16),
+    trigger: list[str] = Query(default=[], max_length=16),
+    job: str | None = Query(default=None, max_length=255),
+    since: datetime | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> RunPageOut:
+    # jscpd:ignore-end
+    """List the runs of every environment you may read.
+
+    Without `environment`, lists the runs of every environment where you hold
+    `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left
+    out, so this is never a 403 or a 404. With `environment`, it answers exactly what
+    `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run
+    names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with
+    the same filters for the next page; a cursor of the list of one environment is refused with
+    422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to
+    200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server
+    did not issue for this list.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    repository
+        Narrow to this repository.
+    status
+        Narrow to these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`); repeat
+        the parameter or write them comma-separated.
+    trigger
+        Narrow to these triggers (`schedule`, `api`, `manual`, `deploy`), given as `status` is.
+    job
+        Narrow to this job.
+    since
+        Narrow to runs created at or after this ISO 8601 time; a time zone is required.
+    limit
+        Page size (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
+
+    Returns
+    -------
+    RunPageOut
+        The runs and the cursor of the next page (`null` on the last).
+    """
+    views, next_cursor = service.list_all_runs_page(
+        principal,
+        environment=environment,
+        repository=repository,
+        status=split_values(status),
+        trigger=split_values(trigger),
+        job=job,
+        since=since,
+        limit=limit,
+        cursor=cursor,
+    )
+    words = run_words(authz, principal, [view.environment for view in views])
+    return RunPageOut(
+        items=[run_out(view, words[view.environment]) for view in views], next_cursor=next_cursor
+    )
+
+
+@all_runs_router.get("/failed", response_model=FailedRunsOut, responses=errors(403, 404))
+def list_failed_runs(
+    environment: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=50, ge=1, le=200),
+    principal: PrincipalRef = Depends(get_principal),
+    service: RunService = Depends(get_run_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> FailedRunsOut:
+    """List the jobs whose newest finished run failed.
+
+    Lists, for every environment you may read (`READ_ENVIRONMENT`), each job whose newest
+    finished run within the last seven days failed (or, for runs outside a job, each
+    repository's), newest end first: the same rule as Home's Needs your attention, so the two
+    never disagree. A later success or a later cancelled run hides an earlier failure. Each row
+    names the run's first failed task and why it failed; a run that failed without a failed task
+    has `task` and `failure` null and says why in `run.error_message`. An environment you may
+    not read is left out, never refused. With `environment`, only its runs: 403 without
+    `READ_ENVIRONMENT` on it and 404 when it does not exist. Answers 422 for a `limit` outside
+    1 to 200. `truncated` says more rows were left out.
+
+    Parameters
+    ----------
+    environment
+        Only this environment's runs.
+    limit
+        Most rows returned (1 to 200).
+    principal
+        The authenticated caller.
+    service
+        The run service.
+    authz
+        The authorization service, asked what the caller may do on each run.
+
+    Returns
+    -------
+    FailedRunsOut
+        The rows and whether more were left out.
+    """
+    views, truncated = service.failed_page(principal, environment=environment, limit=limit)
+    words = run_words(authz, principal, [view.run.environment for view in views])
+    return FailedRunsOut(
+        items=[
+            FailedRunOut(
+                run=run_out(view.run, words[view.run.environment]),
+                task=view.task,
+                failure=None if view.failure is None else FailureOut(**view.failure.to_json()),
+            )
+            for view in views
+        ],
+        truncated=truncated,
+    )
 
 
 def worker_out(w: WorkerView) -> WorkerOut:

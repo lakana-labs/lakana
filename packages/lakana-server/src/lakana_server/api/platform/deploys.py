@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Iterable, Sequence
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 
-from lakana_core.auth import PrincipalRef
+from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.models import DeployKind
 from lakana_core.projects.deploys import DeploymentView, DeployRunView, DeployService
+from lakana_core.runs.operator import deploy_actions, operator_rights_each
 from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.schemas import (
     DeployAccepted,
@@ -20,6 +22,7 @@ from lakana_server.api.platform.schemas import (
     DeployJobStartOut,
     DeploymentOut,
     DeployOut,
+    DeployPageOut,
     OrphanOut,
     OrphansOut,
     ProjectVersionOut,
@@ -27,7 +30,7 @@ from lakana_server.api.platform.schemas import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.deps import get_deploy_service, get_principal
+from lakana_server.deps import get_deploy_service, get_grant_authorization, get_principal
 
 router = APIRouter(
     route_class=AuthenticateFirstRoute,
@@ -35,15 +38,46 @@ router = APIRouter(
     tags=["deploys"],
     responses=errors(401),
 )
+all_deploys_router = APIRouter(
+    route_class=AuthenticateFirstRoute,
+    prefix="/api/v1/deploys",
+    tags=["deploys"],
+    responses=errors(401),
+)
 
 
-def _to_out(view: DeployRunView) -> DeployOut:
+def deploy_words(
+    authz: AuthorizationService, principal: PrincipalRef, environments: Iterable[str]
+) -> dict[str, tuple[str, ...]]:
+    """Ask what the caller may do on the deploys of each environment, once.
+
+    Parameters
+    ----------
+    authz
+        The authorization service.
+    principal
+        The caller.
+    environments
+        The environments of the deploys to answer.
+
+    Returns
+    -------
+    dict of str to tuple of str
+        The deploy words per distinct environment.
+    """
+    rights = operator_rights_each(authz, principal, environments)
+    return {name: deploy_actions(r) for name, r in rights.items()}
+
+
+def _to_out(view: DeployRunView, actions: Sequence[str] = ()) -> DeployOut:
     """Build a response body.
 
     Parameters
     ----------
     view
         The run's view.
+    actions
+        The words of what the caller's rights allow on it (`lakana_core.runs.operator`).
 
     Returns
     -------
@@ -63,6 +97,7 @@ def _to_out(view: DeployRunView) -> DeployOut:
         diff=view.diff,
         project_version_id=view.job_version_id,
         principal_id=view.principal_id,
+        submitted_by=view.submitted_by,
         created_at=view.created_at,
         started_at=view.started_at,
         finished_at=view.finished_at,
@@ -71,6 +106,8 @@ def _to_out(view: DeployRunView) -> DeployOut:
         warnings=view.warnings,
         waiting_for=None if view.waiting_for is None else view.waiting_for.to_json(),
         job_starts=[DeployJobStartOut(**dataclasses.asdict(start)) for start in view.job_starts],
+        jobs=None if view.jobs is None else list(view.jobs),
+        actions=list(actions),
     )
 
 
@@ -125,6 +162,7 @@ def list_deploys(
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[DeployOut]:
     """List an environment's deploys.
 
@@ -150,6 +188,8 @@ def list_deploys(
         The authenticated caller.
     service
         The deploy service.
+    authz
+        The authorization service, asked what the caller may do on each deploy.
 
     Returns
     -------
@@ -160,7 +200,8 @@ def list_deploys(
         principal, env, repository=repository, limit=limit, cursor=cursor
     )
     set_next_cursor(response, next_cursor)
-    return [_to_out(view) for view in views]
+    words = deploy_words(authz, principal, [env])[env]
+    return [_to_out(view, words) for view in views]
 
 
 @router.get("/deploys/{deploy_id}", response_model=DeployOut, responses=errors(403, 404))
@@ -169,6 +210,7 @@ def get_deploy(
     deploy_id: uuid.UUID,
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> DeployOut:
     """Show one deploy.
 
@@ -185,13 +227,16 @@ def get_deploy(
         The authenticated caller.
     service
         The deploy service.
+    authz
+        The authorization service, asked what the caller may do on each deploy.
 
     Returns
     -------
     DeployOut
         The run.
     """
-    return _to_out(service.get(principal, env, deploy_id))
+    view = service.get(principal, env, deploy_id)
+    return _to_out(view, deploy_words(authz, principal, [env])[env])
 
 
 def _deployment_out(view: DeploymentView) -> DeploymentOut:
@@ -459,4 +504,61 @@ def list_orphans(
         ],
         hidden=report.hidden,
         next_cursor=report.next_cursor,
+    )
+
+
+# Each list route declares and documents its own query parameters, which the OpenAPI document and
+# the REST reference are built from; these repeat those of `list_deploys`, with `environment`.
+# jscpd:ignore-start
+@all_deploys_router.get("", response_model=DeployPageOut, responses=errors(403, 404))
+def list_all_deploys(
+    environment: str | None = Query(default=None, max_length=255),
+    repository: str | None = Query(default=None, max_length=255),
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
+    principal: PrincipalRef = Depends(get_principal),
+    service: DeployService = Depends(get_deploy_service),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> DeployPageOut:
+    # jscpd:ignore-end
+    """List the deploys of every environment you may read.
+
+    Without `environment`, lists the deploys of every environment where you hold
+    `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left
+    out, so this is never a 403 or a 404. With `environment`, it answers exactly what
+    `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each
+    deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send
+    `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of
+    the list of one environment is refused with 422 here. Answers 404 when `repository` does
+    not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue
+    for this list.
+
+    Parameters
+    ----------
+    environment
+        Only this environment.
+    repository
+        Only this repository's deploys.
+    limit
+        Page size (1 to 200).
+    cursor
+        The `next_cursor` of the previous page.
+    principal
+        The authenticated caller.
+    service
+        The deploy service.
+    authz
+        The authorization service, asked what the caller may do on each deploy.
+
+    Returns
+    -------
+    DeployPageOut
+        The deploys and the cursor of the next page (`null` on the last).
+    """
+    views, next_cursor = service.list_all_deploys_page(
+        principal, environment=environment, repository=repository, limit=limit, cursor=cursor
+    )
+    words = deploy_words(authz, principal, [view.environment for view in views])
+    return DeployPageOut(
+        items=[_to_out(view, words[view.environment]) for view in views], next_cursor=next_cursor
     )

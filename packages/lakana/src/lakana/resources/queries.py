@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import time
-from collections.abc import Callable, Generator, Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from typing import Any, BinaryIO, Literal
 
@@ -21,6 +21,7 @@ from lakana._http import (
     every_page,
     query_params,
     retry_wait,
+    route_of_a_newer_server,
 )
 from lakana._models import (
     MaskedColumn,
@@ -35,7 +36,6 @@ from lakana._models import (
 from lakana._routes import ROUTES
 from lakana.errors import (
     InvalidResponse,
-    NotFound,
     QueryFailed,
     ServerError,
     ValidationError,
@@ -296,43 +296,6 @@ _LIST_ALL_INSTEAD = "list one environment with `lakana query list --env ENV`"
 
 _ENVIRONMENTS_INSTEAD = "see the environments with `lakana env list`"
 """What to do instead of `Queries.environments` against a server without that route."""
-
-
-@contextlib.contextmanager
-def _route_of_a_newer_server(route: str, instead: str) -> Generator[None]:
-    """Say that the server is too old when it answers a route with the router's bare 404.
-
-    A route the server does not have is answered by its router: 404 with ``Not Found`` and no
-    Lakana error type. A Lakana 404 (an unknown environment, say) names its type and is left
-    as it is.
-
-    Parameters
-    ----------
-    route
-        The route, as ``GET /api/v1/...``.
-    instead
-        What the caller can do on that server, after "Upgrade the server, or".
-
-    Yields
-    ------
-    None
-        While the request is sent.
-
-    Raises
-    ------
-    lakana.errors.NotFound
-        With a sentence naming the route and the upgrade, for a 404 without an error type.
-    """
-    try:
-        yield
-    except NotFound as exc:
-        if exc.error_type is not None:
-            raise
-        raise NotFound(
-            f"This server does not have {route}; it is older than this lakana package. "
-            f"Upgrade the server, or {instead}.",
-            status=exc.status,
-        ) from exc
 
 
 _PAGE_BUSY_TYPE = "ResultPageLimitError"
@@ -884,7 +847,7 @@ class Queries:
             time zone, or `cursor` is not one the server issued for this list.
         """
         params = _list_params(include_ended, status, submitter, origin, since, limit, cursor)
-        with _route_of_a_newer_server("GET /api/v1/queries", _LIST_ALL_INSTEAD):
+        with route_of_a_newer_server("GET /api/v1/queries", _LIST_ALL_INSTEAD):
             response = self._transport.request(
                 ROUTES["queries.list_all"],
                 params=query_params(environment=environment, **params),
@@ -966,7 +929,7 @@ class Queries:
             With a sentence saying so, if the server is older than this package and has no
             `GET /api/v1/queries/environments`.
         """
-        with _route_of_a_newer_server("GET /api/v1/queries/environments", _ENVIRONMENTS_INSTEAD):
+        with route_of_a_newer_server("GET /api/v1/queries/environments", _ENVIRONMENTS_INSTEAD):
             response = self._transport.request(ROUTES["queries.environments"])
         return [
             QueryEnvironment(name=item["name"], protected=item["protected"])

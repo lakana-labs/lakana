@@ -45,6 +45,7 @@ ROUTES: dict[str, Route] = {
     "deploys.create": Route("POST", "/api/v1/environments/{env}/deploys"),
     "deploys.list": Route("GET", "/api/v1/environments/{env}/deploys"),
     "deploys.get": Route("GET", "/api/v1/environments/{env}/deploys/{deploy_id}"),
+    "deploys.list_all": Route("GET", "/api/v1/deploys"),
     "deployments.list": Route("GET", "/api/v1/environments/{env}/deployments"),
     "deployments.set_run_as": Route("PUT", "/api/v1/environments/{env}/deployments/{repo}/run-as"),
     "deployments.clear_run_as": Route(
@@ -55,6 +56,8 @@ ROUTES: dict[str, Route] = {
         "GET", "/api/v1/environments/{env}/project-versions/{project_version_id}"
     ),
     "orphans.list": Route("GET", "/api/v1/environments/{env}/orphans"),
+    "runs.list_all": Route("GET", "/api/v1/runs"),
+    "runs.failed": Route("GET", "/api/v1/runs/failed"),
     "runs.start": Route("POST", "/api/v1/environments/{env}/runs"),
     "runs.list": Route("GET", "/api/v1/environments/{env}/runs"),
     "runs.get": Route("GET", "/api/v1/environments/{env}/runs/{run_id}"),

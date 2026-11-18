@@ -152,6 +152,17 @@ out=$(lakana --output json runs list --env dev --status succeeded,failed,cancell
 python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == [], sys.argv[1]' "$out"
 out=$(lakana --output json runs list --env dev --status succeeded --since 2020-01-01 --limit 5)
 python3 -c 'import json,sys; r=json.loads(sys.argv[1]); assert len(r) == 1 and r[0]["status"] == "succeeded", r' "$out"
+# docs:start find-failed-everywhere
+lakana runs failed
+lakana runs failed --env dev --limit 20
+# docs:end find-failed-everywhere
+out=$(lakana --output json runs failed)
+python3 -c 'import json,sys; r=json.loads(sys.argv[1]); assert r == {"items": [], "truncated": False}, r' "$out"
+# docs:start find-runs-everywhere
+lakana runs list --all-environments --status running
+# docs:end find-runs-everywhere
+out=$(lakana --output json runs list --all-environments --status succeeded --limit 5)
+python3 -c 'import json,sys; r=json.loads(sys.argv[1]); assert [x["status"] for x in r] == ["succeeded"] and r[0]["environment"] == "dev", r' "$out"
 # docs:start find-person-query
 lakana query list --env dev --status failed --submitter admin
 # docs:end find-person-query

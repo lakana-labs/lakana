@@ -6618,3 +6618,42 @@ def test_0083_replaces_the_connection_tests_index(migrated_db: MigratedDb) -> No
         assert "ix_connection_tests_connection_id_created_at" not in restored
     finally:
         engine.dispose()
+
+
+_REVISION_0084 = "f6b1d4e8a273"
+
+
+def test_0084_adds_the_run_list_indexes_and_drops_them_on_downgrade(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0084`: three indexes on `runs` and `deploy_runs`, for every-environment lists.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0083)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def indexes() -> dict[str | None, list[str | None]]:
+        return {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("runs")}
+
+    def deploy_indexes() -> dict[str | None, list[str | None]]:
+        return {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("deploy_runs")}
+
+    try:
+        assert "ix_runs_created_at_id" not in indexes()
+        assert "ix_runs_finished_at" not in indexes()
+        assert "ix_deploy_runs_created_at_id" not in deploy_indexes()
+        command.upgrade(config, _REVISION_0084)
+        assert indexes()["ix_runs_created_at_id"] == ["created_at", "id"]
+        assert indexes()["ix_runs_finished_at"] == ["finished_at"]
+        assert deploy_indexes()["ix_deploy_runs_created_at_id"] == ["created_at", "id"]
+        command.downgrade(config, _REVISION_0083)
+        assert "ix_runs_created_at_id" not in indexes()
+        assert "ix_runs_finished_at" not in indexes()
+        assert "ix_deploy_runs_created_at_id" not in deploy_indexes()
+    finally:
+        engine.dispose()

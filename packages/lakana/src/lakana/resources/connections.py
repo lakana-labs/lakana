@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import datetime
 from typing import Any
 
-from lakana._http import HttpTransport, every_page, query_params
+from lakana._http import HttpTransport, every_page, query_params, route_of_a_newer_server
 from lakana._models import (
     Connection,
     ConnectionEnvironment,
@@ -21,7 +21,6 @@ from lakana._models import (
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
 from lakana.resources.artifacts import _ODD_ANSWER, _object
-from lakana.resources.queries import _route_of_a_newer_server
 
 _LIST_ALL_INSTEAD = "list one environment with `lakana connection list --env ENV`"
 """What to do instead of `Connections.list_all` against a server without that route."""
@@ -513,7 +512,7 @@ class Connections:
             If `limit` is outside 1 to 200 or `cursor` is not one the server issued for this
             list.
         """
-        with _route_of_a_newer_server("GET /api/v1/connections", _LIST_ALL_INSTEAD):
+        with route_of_a_newer_server("GET /api/v1/connections", _LIST_ALL_INSTEAD):
             response = self._transport.request(
                 ROUTES["connections.list_all"],
                 params=query_params(environment=environment, limit=limit, cursor=cursor),
@@ -559,9 +558,7 @@ class Connections:
         lakana.errors.InvalidResponse
             If the answer is not a list of environments.
         """
-        with _route_of_a_newer_server(
-            "GET /api/v1/connections/environments", _ENVIRONMENTS_INSTEAD
-        ):
+        with route_of_a_newer_server("GET /api/v1/connections/environments", _ENVIRONMENTS_INSTEAD):
             response = self._transport.request(ROUTES["connections.environments"])
         try:
             body = response.json()
@@ -782,7 +779,7 @@ class Connections:
             If `limit` is outside 1 to 200 or `cursor` is not one the server issued for the
             environment's connection list.
         """
-        with _route_of_a_newer_server(
+        with route_of_a_newer_server(
             "POST /api/v1/environments/{environment_name}/connection-tests", _TEST_ALL_INSTEAD
         ):
             response = self._transport.request(

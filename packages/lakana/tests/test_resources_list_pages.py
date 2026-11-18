@@ -235,6 +235,38 @@ def test_iter_all_follows_every_page() -> None:
     assert all(r.url.params["limit"] == "1" for r in seen)
 
 
+def test_list_all_deploys_sends_the_filters_and_reads_the_cursor_from_the_body() -> None:
+    seen: list[httpx.Request] = []
+    row = {**_DEPLOY, "environment": "prod"}
+    deploys = Deploys(_object_transport([{"items": [row], "next_cursor": "d1"}], seen))
+    page = deploys.list_all(environment="prod", repository="analytics", limit=5, cursor="d0")
+    assert seen[0].url.path == "/api/v1/deploys"
+    assert dict(seen[0].url.params) == {
+        "environment": "prod",
+        "repository": "analytics",
+        "limit": "5",
+        "cursor": "d0",
+    }
+    assert page.next_cursor == "d1"
+    assert [(d.id, d.environment) for d in page.items] == [(_DEPLOY["id"], "prod")]
+    deploys.list_all()
+    assert dict(seen[1].url.params) == {}
+
+
+def test_iter_all_deploys_follows_every_page() -> None:
+    seen: list[httpx.Request] = []
+    bodies = [
+        {"items": [_DEPLOY], "next_cursor": "d1"},
+        {"items": [_DEPLOY], "next_cursor": "d2"},
+        {"items": [_DEPLOY], "next_cursor": None},
+    ]
+    deploys = Deploys(_object_transport(bodies, seen))
+    assert len(list(deploys.iter_all(repository="analytics", page_size=1))) == 3
+    assert [r.url.params.get("cursor") for r in seen] == [None, "d1", "d2"]
+    assert all(r.url.params["repository"] == "analytics" for r in seen)
+    assert all(r.url.params["limit"] == "1" for r in seen)
+
+
 def test_query_environments_reads_name_and_protection() -> None:
     seen: list[httpx.Request] = []
 
@@ -263,11 +295,29 @@ def _answering(status: int, body: dict[str, Any]) -> Queries:
     Queries
         The resource.
     """
+    return Queries(_answering_transport(status, body))
+
+
+def _answering_transport(status: int, body: dict[str, Any]) -> HttpTransport:
+    """Build a transport over a server that answers every request the same.
+
+    Parameters
+    ----------
+    status
+        The status of every answer.
+    body
+        The JSON body of every answer.
+
+    Returns
+    -------
+    HttpTransport
+        The transport.
+    """
     client = httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(status, json=body)),
         base_url=_CONFIG.url,
     )
-    return Queries(HttpTransport(_CONFIG, http_client=client))
+    return HttpTransport(_CONFIG, http_client=client)
 
 
 _LIST_ALL_TOO_OLD = (
@@ -299,6 +349,43 @@ def test_an_older_server_without_the_route_is_named_as_too_old(
         message,
         404,
         None,
+    )
+
+
+@pytest.mark.parametrize(
+    ("call", "route", "instead"),
+    [
+        (
+            lambda t: Runs(t).list_all(),
+            "GET /api/v1/runs",
+            "list one environment with `lakana runs list --env ENV`",
+        ),
+        (
+            lambda t: list(Runs(t).iter_all()),
+            "GET /api/v1/runs",
+            "list one environment with `lakana runs list --env ENV`",
+        ),
+        (
+            lambda t: Runs(t).failed(),
+            "GET /api/v1/runs/failed",
+            "read the runs of one environment with `lakana runs list --env ENV --status failed`",
+        ),
+        (
+            lambda t: Deploys(t).list_all(),
+            "GET /api/v1/deploys",
+            "list one environment with `lakana deploys list --env ENV`",
+        ),
+    ],
+)
+def test_an_older_server_without_a_cross_environment_route_is_named_as_too_old(
+    call: Callable[[HttpTransport], object], route: str, instead: str
+) -> None:
+    """Runs and deploys say what queries say: the route is missing, upgrade or list one."""
+    with pytest.raises(NotFound) as caught:
+        call(_answering_transport(404, {"detail": "Not Found"}))
+    assert str(caught.value) == (
+        f"This server does not have {route}; it is older than this lakana package. "
+        f"Upgrade the server, or {instead}."
     )
 
 
@@ -466,3 +553,49 @@ def test_artifacts_list_page_sends_the_paging_and_reads_defined_by_and_keep_vers
     plain = {k: v for k, v in _ARTIFACT.items() if k not in ("defined_by", "keep_versions")}
     one = Artifacts(_transport([([plain], None)], [])).list("dev")[0]
     assert (one.defined_by, one.keep_versions) == (None, None)
+
+
+def test_list_all_runs_sends_the_filters_and_reads_the_cursor_from_the_body() -> None:
+    seen: list[httpx.Request] = []
+    row = {**_RUN, "environment": "prod"}
+    runs = Runs(_object_transport([{"items": [row], "next_cursor": "r1"}], seen))
+    since = datetime(2026, 10, 1, 12, 0, tzinfo=timezone(timedelta(hours=2)))
+    page = runs.list_all(
+        environment="prod",
+        repository="analytics",
+        status=["failed", "cancelled"],
+        trigger="schedule",
+        job="nightly",
+        since=since,
+        limit=5,
+        cursor="r0",
+    )
+    assert seen[0].url.path == "/api/v1/runs"
+    assert dict(seen[0].url.params) == {
+        "environment": "prod",
+        "repository": "analytics",
+        "status": "failed,cancelled",
+        "trigger": "schedule",
+        "job": "nightly",
+        "since": "2026-10-01T12:00:00+02:00",
+        "limit": "5",
+        "cursor": "r0",
+    }
+    assert page.next_cursor == "r1"
+    assert [(r.id, r.environment) for r in page.items] == [(_RUN["id"], "prod")]
+    runs.list_all()
+    assert dict(seen[1].url.params) == {}
+
+
+def test_iter_all_runs_follows_every_page() -> None:
+    seen: list[httpx.Request] = []
+    bodies = [
+        {"items": [_RUN], "next_cursor": "r1"},
+        {"items": [_RUN], "next_cursor": "r2"},
+        {"items": [_RUN], "next_cursor": None},
+    ]
+    runs = Runs(_object_transport(bodies, seen))
+    assert len(list(runs.iter_all(status="failed", page_size=1))) == 3
+    assert [r.url.params.get("cursor") for r in seen] == [None, "r1", "r2"]
+    assert all(r.url.params["status"] == "failed" for r in seen)
+    assert all(r.url.params["limit"] == "1" for r in seen)

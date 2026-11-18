@@ -24,6 +24,7 @@ from lakana.errors import (
     InvalidResponse,
     LakanaConnectionError,
     LakanaError,
+    NotFound,
     ValidationError,
     raise_for_response,
 )
@@ -197,6 +198,43 @@ def _next_cursor(cursor: str, seen: set[str]) -> str:
         )
     seen.add(cursor)
     return cursor
+
+
+@contextlib.contextmanager
+def route_of_a_newer_server(route: str, instead: str) -> Generator[None]:
+    """Say that the server is too old when it answers a route with the router's bare 404.
+
+    A route the server does not have is answered by its router: 404 with ``Not Found`` and no
+    Lakana error type. A Lakana 404 (an unknown environment, say) names its type and is left
+    as it is.
+
+    Parameters
+    ----------
+    route
+        The route, as ``GET /api/v1/...``.
+    instead
+        What the caller can do on that server, after "Upgrade the server, or".
+
+    Yields
+    ------
+    None
+        While the request is sent.
+
+    Raises
+    ------
+    lakana.errors.NotFound
+        With a sentence naming the route and the upgrade, for a 404 without an error type.
+    """
+    try:
+        yield
+    except NotFound as exc:
+        if exc.error_type is not None:
+            raise
+        raise NotFound(
+            f"This server does not have {route}; it is older than this lakana package. "
+            f"Upgrade the server, or {instead}.",
+            status=exc.status,
+        ) from exc
 
 
 def every_page(fetch: Callable[[str | None], _Page[_T_co]]) -> Iterator[_T_co]:

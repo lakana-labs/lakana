@@ -579,6 +579,38 @@ def test_a_deploy_body_names_the_jobs_it_started(client: TestClient) -> None:
     assert bare.json()["job_starts"] == []
 
 
+def test_get_deploy_answers_jobs_and_submitted_by(client: TestClient) -> None:
+    """The single read lists the project version's jobs, sorted; the history names who, not jobs."""
+    _setup(client)
+    plain = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    done = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    version = _insert_job_version(
+        client,
+        "dev",
+        {"version": 1, "assets": [], "edges": [], "jobs": {"nightly": {}, "hourly": {}}},
+    )
+    with Session(client.app.state.engine) as session:
+        run = session.get(DeployRun, uuid.UUID(done["id"]))
+        assert run is not None
+        run.status = DeployStatus.SUCCEEDED
+        run.job_version_id = version
+        session.commit()
+
+    shown = client.get(f"/api/v1/environments/dev/deploys/{done['id']}", headers=AUTH_HEADER).json()
+    queued = client.get(
+        f"/api/v1/environments/dev/deploys/{plain['id']}", headers=AUTH_HEADER
+    ).json()
+    history = client.get("/api/v1/environments/dev/deploys", headers=AUTH_HEADER).json()
+
+    assert (shown["jobs"], shown["submitted_by"]) == (["hourly", "nightly"], "admin")
+    assert (queued["jobs"], queued["submitted_by"]) == (None, "admin")
+    assert [(d["jobs"], d["submitted_by"]) for d in history] == [(None, "admin")] * 2
+
+
 def _queue_deploy(client: TestClient) -> str:
     """Queue a deploy of `analytics` and return its id.
 
@@ -713,3 +745,72 @@ def test_orphans_say_what_they_are_and_page(client: TestClient) -> None:
     assert second["next_cursor"] is None
     bad = client.get(url, params={"cursor": "nonsense"}, headers=AUTH_HEADER)
     assert bad.status_code == 422
+
+
+def test_deploy_actions_offer_rollback_to_deployers_only(client: TestClient) -> None:
+    """A reader reads the deploy with no word; an administrator is offered `rollback`."""
+    _setup(client)
+    queued = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    )
+    path = f"/api/v1/environments/dev/deploys/{queued.json()['id']}"
+    reader = _reader(client)
+    for header, words in ((AUTH_HEADER, ["rollback"]), (reader, [])):
+        assert client.get(path, headers=header).json()["actions"] == words
+        listed = client.get("/api/v1/environments/dev/deploys", headers=header).json()
+        assert [d["actions"] for d in listed] == [words]
+
+
+_ALL = "/api/v1/deploys"
+
+
+def test_get_all_deploys_answers_items_next_cursor_actions_and_who(client: TestClient) -> None:
+    """Deploys come newest first with their environment, actions and submitter, one cursor."""
+    _setup(client)
+    ids = [
+        client.post(
+            "/api/v1/environments/dev/deploys",
+            headers=AUTH_HEADER,
+            json={"repository": "analytics"},
+        ).json()["id"]
+        for _ in range(3)
+    ]
+    first = client.get(_ALL, headers=AUTH_HEADER, params={"limit": 2})
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert [d["id"] for d in body["items"]] == ids[:0:-1]
+    assert {d["environment"] for d in body["items"]} == {"dev"}
+    assert {d["submitted_by"] for d in body["items"]} == {"admin"}
+    assert [d["actions"] for d in body["items"]] == [["rollback"]] * 2
+    assert body["items"][0]["jobs"] is None
+    assert body["next_cursor"] is not None
+    rest = client.get(_ALL, headers=AUTH_HEADER, params={"limit": 2, "cursor": body["next_cursor"]})
+    assert rest.status_code == 200, rest.text
+    assert [d["id"] for d in rest.json()["items"]] == [ids[0]]
+    assert rest.json()["next_cursor"] is None
+    per_environment = client.get(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, params={"limit": 1}
+    )
+    refused = client.get(
+        _ALL, headers=AUTH_HEADER, params={"cursor": per_environment.headers["X-Next-Cursor"]}
+    )
+    assert refused.status_code == 422, refused.text
+    assert client.get(_ALL).status_code == 401
+
+
+def test_get_all_deploys_without_any_right_is_an_empty_page(client: TestClient) -> None:
+    """A caller who may read no environment gets an empty page; naming one is 403."""
+    _setup(client)
+    client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    )
+    nobody = _token_for(client, "nobody")
+    answer = client.get(_ALL, headers=nobody)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {"items": [], "next_cursor": None}
+    assert client.get(_ALL, headers=nobody, params={"environment": "dev"}).status_code == 403
+
+
+def test_get_all_deploys_with_an_unknown_environment_is_404(client: TestClient) -> None:
+    answer = client.get(_ALL, headers=AUTH_HEADER, params={"environment": "ghost"})
+    assert answer.status_code == 404, answer.text

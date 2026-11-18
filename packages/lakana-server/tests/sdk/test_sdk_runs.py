@@ -65,6 +65,37 @@ def test_start_get_list_log_and_wait(lakana_client: lakana.Client, client: TestC
     assert lakana_client.scheduler.status().active_runs == 0
 
 
+def test_failed_and_list_all_against_the_real_app(
+    lakana_client: lakana.Client, client: TestClient
+) -> None:
+    """Both cross-environment reads reach the real routes and read their bodies."""
+    _deploy(client)
+    run = lakana_client.runs.start("dev", "analytics")
+    assert lakana_client.runs.failed().items == ()
+    _finish(client, run.id, RunStatus.FAILED, TaskStatus.FAILED)
+    now = datetime.now(UTC)
+    with Session(client.app.state.engine) as session:
+        row = session.get(Run, uuid.UUID(run.id))
+        assert row is not None
+        row.finished_at = now
+        for t in session.query(TaskRun).filter(TaskRun.run_id == row.id):
+            t.finished_at = now
+        session.commit()
+    failed = lakana_client.runs.failed()
+    assert failed.truncated is False
+    (entry,) = failed.items
+    assert (entry.run.id, entry.run.environment, entry.run.status) == (run.id, "dev", "failed")
+    assert (entry.task, entry.failure is not None) == ("silver.clean", True)
+    assert entry.run.total_tasks == 1
+    assert lakana_client.runs.failed(environment="dev", limit=1).items == failed.items
+    page = lakana_client.runs.list_all(status="failed")
+    assert ([r.id for r in page.items], page.next_cursor) == ([run.id], None)
+    assert [r.id for r in lakana_client.runs.iter_all(environment="dev", page_size=1)] == [run.id]
+    assert lakana_client.runs.list_all(status="queued").items == []
+    with pytest.raises(ValidationError):
+        lakana_client.runs.list_all(limit=0)
+
+
 def test_wait_raises_run_failed_and_times_out(
     lakana_client: lakana.Client, client: TestClient
 ) -> None:
