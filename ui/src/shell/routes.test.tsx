@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { Page } from "./Page";
 import type { AreaModule } from "./routes";
 
+import { aConnection, connectionRoutes } from "../test/connections";
 import { preloadJobsScreen } from "../test/jobs";
 import { queryRoutes } from "../test/queries";
 import { renderShell } from "../test/render";
@@ -171,6 +172,20 @@ describe("appRoutes", () => {
     renderShell("/jobs/prod/runs/r1");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Run" })).toBeInTheDocument();
+  });
+
+  it("/connections lazy-loads its screen", async () => {
+    renderShell("/connections", {
+      routes: connectionRoutes([aConnection()], [{ name: "prod", actions: ["create", "test"] }]),
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Connections" }),
+    ).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "crm" })).toHaveAttribute(
+      "href",
+      "/connections/prod/crm",
+    );
   });
 
   it("never loads the page of an area outside the user's access", async () => {

@@ -1,4 +1,4 @@
-/* The environment picker's rules, which the Queries and Jobs screens share. */
+/* The environment picker's rules, which the Queries, Jobs and Connections screens share. */
 @import "../shell/environment.css";
 
 /* The area's three tab pages: wider than a detail page, as the Catalog's list is, so that their
