@@ -21,10 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
-from typer.testing import CliRunner, Result
 
-from lakana.cli._state import CliState
-from lakana.cli.app import build_app
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
 from lakana_core.grants.authorization import GrantAuthorization
@@ -32,37 +29,10 @@ from lakana_core.models import Base
 from lakana_server.app import create_app
 from lakana_server.settings import Settings
 from lakana_worker.poller import poll_once
-from tests.cli.conftest import ADMIN_TOKEN, make_cli_state
+from tests.cli.conftest import ADMIN_TOKEN, make_cli_state, run_cli
 from tests.server_test_helpers import SeaweedFsContainer
 
 pytestmark = pytest.mark.integration
-
-
-def _invoke(state: CliState, *args: str, input: str | None = None) -> Result:
-    """Run one CLI command in-process against `state`.
-
-    Matches `conftest.py`'s `invoke_cli` fixture; duplicated here because
-    this test builds its own app and `TestClient` rather than using the
-    `client` fixture that fixture depends on.
-
-    Parameters
-    ----------
-    state
-        The CLI state to invoke against.
-    args
-        The command-line arguments.
-    input
-        Text fed to stdin, if any.
-
-    Returns
-    -------
-    typer.testing.Result
-        The invocation result.
-    """
-    env = {name: None for name in ("LAKANA_OUTPUT", "LAKANA_PROFILE", "LAKANA_TOKEN", "LAKANA_URL")}
-    env["COLUMNS"] = "200"
-    env.update({"FORCE_COLOR": None, "PY_COLORS": None, "NO_COLOR": "1"})
-    return CliRunner().invoke(build_app(), list(args), obj=state, input=input, env=env)
 
 
 def test_cli_round_trip_against_postgres_and_seaweedfs(tmp_path: Path) -> None:
@@ -126,7 +96,7 @@ def test_cli_round_trip_against_postgres_and_seaweedfs(tmp_path: Path) -> None:
             worker_thread.start()
             try:
                 state = make_cli_state(client, tmp_path)
-                run = partial(_invoke, state)
+                run = partial(run_cli, state)
 
                 result = run(
                     "login",

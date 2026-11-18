@@ -4,7 +4,16 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type JSX,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { RouterProvider } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import {
@@ -68,7 +77,10 @@ export interface AppShellProps {
  * on the first load, so the skip link stays the first stop). The first load includes the
  * redirects it lands on: a Replace whose state carries the redirect mark (`REDIRECT`, in
  * `./redirect`) made before any other navigation. Every other Replace is a move like a Push,
- * such as a list that replaces a deleted object's page. The person's access and interface
+ * such as a list that replaces a deleted object's page. The move happens in a layout effect, in
+ * the commit that shows the new page, so it comes before the page's own effects: a page that
+ * puts focus somewhere on arrival (a note on what just happened, as `PlaceNote`) does so in an
+ * ordinary effect and wins, without waiting a frame. The person's access and interface
  * state are there for every screen inside; the interface state is read once, when the shell
  * appears.
  *
@@ -100,7 +112,10 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   // a move: the skip link stays the first stop. A redirect after a move still focuses.
   const moved = useRef(false);
   const redirect = navigationType === NavigationType.Replace && isRedirect(location.state);
-  useEffect(() => {
+  // A layout effect, so focus moves in the commit that shows the new page: a passive effect
+  // runs in a later task, and until then the page is on screen with focus left on the link
+  // that was pressed (or on nothing), where a key press would go.
+  useLayoutEffect(() => {
     if (location.pathname !== shownPath.current) {
       shownPath.current = location.pathname;
       const firstRedirect = redirect && !moved.current;
