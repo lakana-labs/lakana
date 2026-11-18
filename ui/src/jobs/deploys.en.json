@@ -35,10 +35,10 @@
     "removed": "{{job}}: removed by the rollback",
     "back": "{{job}}: back with the rollback",
     "noJobs": "{{repository}} defines no job in either version.",
+    "noTargetJobs": "The server did not say which jobs that version defines, so the rollback is not offered here. Close this and open it again; if it stays so, ask the operator to check the server's version.",
     "protected": "{{environment}} is protected.",
     "jobs": "Jobs the rollback changes",
-    "confirm": "Roll back",
-    "cancel": "Cancel"
+    "confirm": "Roll back"
   },
   "note": {
     "rolling": "Rolling back {{repository}} in {{environment}} to {{commit}}…",

@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
@@ -16,11 +16,27 @@ import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
-import { DeployRow } from "./DeployRow";
+import { deployCommit, DeployRow } from "./DeployRow";
 import "./deployStrings";
 import { Environments, type SomeEnvironments } from "./Environments";
 import { mayRollBackTo } from "./rollbackable";
+import { RollbackNote } from "./RollbackNote";
 import { useJobsFilter } from "./useJobsFilter";
+
+// The rollback's question is its own chunk, read when Roll back to this… is first pressed.
+const RollbackDialog = lazy(() =>
+  import("./RollbackDialog").then((m) => ({ default: m.RollbackDialog })),
+);
+
+/** A rollback the server accepted, which the note follows. */
+interface Rolled {
+  /** The rollback's id. */
+  readonly id: string;
+  /** The repository. */
+  readonly repository: string;
+  /** The commit, as the list writes it. */
+  readonly commit: string;
+}
 
 /** The Repository menu's choice of every repository; a repository's choice is `repo:` and its name. */
 const ALL_REPOSITORIES = "all";
@@ -29,19 +45,25 @@ const ALL_REPOSITORIES = "all";
 interface DeploysOfProps {
   /** The environment whose deploys are listed. */
   readonly environment: string;
+  /** Whether it is protected. */
+  readonly protectedEnvironment: boolean;
 }
 
 /**
  * One environment's deploys: the Repository menu (every repository, then those deployed there,
  * in the address as `?repository=`), the line that says why its current versions could not be
  * read, and the deploys, 50 a page with Show more. They are not read again on their own: a
- * deploy is the person's own act.
+ * deploy is the person's own act, and the list and the current versions are read again once a
+ * rollback the person asked for ended. Roll back to this… opens the rollback's question; once
+ * the server accepted the rollback, the focus is back on the row's button and the note under the
+ * list follows it. A row that leaves the list with the focus in it hands the focus to the note.
  *
- * @param props - The environment.
+ * @param props - The environment and its protection.
  * @param props.environment - The environment.
+ * @param props.protectedEnvironment - Whether it is protected.
  * @returns The menu and the list.
  */
-function DeploysOf({ environment }: DeploysOfProps): JSX.Element {
+function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.Element {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const repository = params.get("repository");
@@ -61,10 +83,41 @@ function DeploysOf({ environment }: DeploysOfProps): JSX.Element {
   if (repository !== null && !current.has(repository)) {
     repositories.push(repository);
   }
-  const [, setRolling] = useState<DeployOut | null>(null);
+  const [rolling, setRolling] = useState<DeployOut | null>(null);
+  const [rolled, setRolled] = useState<Rolled | null>(null);
+  const { reload: reloadPages } = pages;
+  const { reload: reloadDeployments } = deployments;
+  const onEnded = useCallback(() => {
+    reloadPages();
+    reloadDeployments();
+  }, [reloadPages, reloadDeployments]);
+  const area = useRef<HTMLDivElement>(null);
+  const note = useRef<HTMLDivElement>(null);
+  const inside = useRef(false);
+  useEffect(() => {
+    const element = area.current;
+    const onFocusIn = (): void => {
+      inside.current = true;
+    };
+    const onFocusOut = (event: FocusEvent): void => {
+      inside.current = element?.contains(event.relatedTarget as Node | null) === true;
+    };
+    element?.addEventListener("focusin", onFocusIn);
+    element?.addEventListener("focusout", onFocusOut);
+    return () => {
+      element?.removeEventListener("focusin", onFocusIn);
+      element?.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+  // Only once the rows change: a dialog that closes hands the focus back to its button itself.
+  useEffect(() => {
+    if (inside.current && document.activeElement === document.body) {
+      note.current?.focus();
+    }
+  }, [pages.items]);
   const rows = pages.items ?? [];
   return (
-    <>
+    <div ref={area}>
       <div className="jobs-find">
         <ChoiceMenu
           className="jobs-filter"
@@ -139,7 +192,40 @@ function DeploysOf({ environment }: DeploysOfProps): JSX.Element {
           />
         ))}
       </ViewList>
-    </>
+      {/* The status region stays in place, so the note is announced when it arrives. */}
+      <div className="jobs-rollback-note" role="status" tabIndex={-1} ref={note}>
+        {rolled !== null && (
+          <RollbackNote
+            key={rolled.id}
+            environment={environment}
+            repository={rolled.repository}
+            commit={rolled.commit}
+            deployId={rolled.id}
+            onEnded={onEnded}
+          />
+        )}
+      </div>
+      {rolling !== null && (
+        <Suspense fallback={null}>
+          <RollbackDialog
+            environment={environment}
+            deploy={rolling}
+            protectedEnvironment={protectedEnvironment}
+            onAccepted={(id) => {
+              setRolled({
+                id,
+                repository: rolling.repository,
+                commit: deployCommit(rolling) ?? "",
+              });
+              setRolling(null);
+            }}
+            onCancel={() => {
+              setRolling(null);
+            }}
+          />
+        </Suspense>
+      )}
+    </div>
   );
 }
 
@@ -176,7 +262,11 @@ function DeploysList({ environments }: DeploysListProps): JSX.Element {
       </div>
       {/* Each environment's list starts afresh: no row or current version of the previous one
           stays while its own are read. */}
-      <DeploysOf key={chosen.name} environment={chosen.name} />
+      <DeploysOf
+        key={chosen.name}
+        environment={chosen.name}
+        protectedEnvironment={chosen.protected}
+      />
     </>
   );
 }

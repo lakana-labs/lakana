@@ -15,13 +15,13 @@ import { useJobsFilter } from "./useJobsFilter";
 export const STATE_CHOICES = ["all", "queued,running", "succeeded", "failed", "cancelled"] as const;
 
 /** A choice of the State menu. */
-export type StateChoice = (typeof STATE_CHOICES)[number];
+type StateChoice = (typeof STATE_CHOICES)[number];
 
 /** The choices of the Trigger menu, each the address's `trigger`; `all` is no narrowing. */
 export const TRIGGER_CHOICES = ["all", "schedule", "manual", "api", "deploy"] as const;
 
 /** A choice of the Trigger menu. */
-export type TriggerChoice = (typeof TRIGGER_CHOICES)[number];
+type TriggerChoice = (typeof TRIGGER_CHOICES)[number];
 
 /** What the Runs tab is filtered by, as the address holds it. */
 export interface RunsChoice {

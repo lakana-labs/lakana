@@ -5,7 +5,7 @@
  */
 
 /** The periods a list of runs can cover, and their length in days; `all` has none. */
-export const PERIODS = { "24h": 1, "7d": 7, "30d": 30, all: null } as const;
+const PERIODS = { "24h": 1, "7d": 7, "30d": 30, all: null } as const;
 
 /** A choice of the Period menu. */
 export type Period = keyof typeof PERIODS;

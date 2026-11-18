@@ -4,7 +4,8 @@ import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { DeployOut } from "../api/jobs";
-import { aDeploy, aDeployment, ENVIRONMENTS } from "../test/jobs";
+import { aDeploy, aDeployment, DEPLOY_VERSION, ENVIRONMENTS } from "../test/jobs";
+import { held } from "../test/pending";
 import { type FakeAnswer, type FakeRoute, fakeServer } from "../test/server";
 import { DeploysTab } from "./DeploysTab";
 
@@ -183,6 +184,80 @@ describe("DeploysTab", () => {
     expect(
       await within(region).findByRole("button", { name: "Roll back analytics to 4f9d2a7" }),
     ).toBeInTheDocument();
+  });
+
+  it("after a rollback the focus returns to the rows button and the list is read again", async () => {
+    let rolledBack = false;
+    let reads = 0;
+    const read = held();
+    const rollbackRow = aDeploy({
+      id: "d-rollback",
+      kind: "rollback",
+      requested_ref: null,
+      project_version_id: aDeploy().project_version_id,
+      created_at: "2026-11-18T08:00:00Z",
+    });
+    const { server, user } = renderTab(
+      () => list(rolledBack ? [rollbackRow, NOW, aDeploy()] : [NOW, aDeploy()]),
+      "/jobs/deploys?environment=prod",
+      () => ({
+        status: 200,
+        body: [rolledBack ? aDeployment({ project_version_id: DEPLOY_VERSION }) : CURRENT],
+      }),
+    );
+    server.route({
+      "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
+      "GET /api/v1/environments/prod/deploys/d-rollback": async () => {
+        reads += 1;
+        const answer = await read.route();
+        rolledBack = true;
+        return answer;
+      },
+      [`GET /api/v1/environments/prod/deploys/${aDeploy().id}`]: {
+        status: 200,
+        body: aDeploy({ jobs: [] }),
+      },
+      "POST /api/v1/environments/prod/deploys": {
+        status: 202,
+        body: { id: "d-rollback", status: "queued" },
+      },
+    });
+
+    const button = await screen.findByRole("button", { name: "Roll back analytics to 4f9d2a7" });
+    await user.click(button);
+    const dialog = await screen.findByRole("dialog", { name: "Roll back analytics in prod?" });
+    expect(dialog).toHaveTextContent("prod is protected.");
+    await user.click(await within(dialog).findByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(button).toHaveFocus();
+    });
+
+    await user.click(button);
+    await user.click(await screen.findByRole("button", { name: "Roll back" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(button).toHaveFocus();
+    });
+    expect(screen.getByText("Rolling back analytics in prod to 4f9d2a7…")).toBeInTheDocument();
+    read.release({ status: 200, body: rollbackRow });
+
+    // The note's read finds it succeeded: the list and the current versions are read again, and
+    // the row's button leaves with the focus, which goes to the note.
+    expect(
+      await screen.findByText("Rolled back analytics in prod to 4f9d2a7."),
+    ).toBeInTheDocument();
+    expect(reads).toBe(1);
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(4);
+    });
+    expect(screen.queryByRole("button", { name: "Roll back analytics to 4f9d2a7" })).toBeNull();
+    await waitFor(() => {
+      expect(
+        screen.getByText("Rolled back analytics in prod to 4f9d2a7.").closest("[tabindex]"),
+      ).toHaveFocus();
+    });
   });
 
   it("a choice of environment writes the shared filter", async () => {

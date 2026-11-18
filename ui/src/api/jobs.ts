@@ -625,7 +625,7 @@ export async function showCheckRows(
 }
 
 /** The state of a deploy. */
-export type DeployStatus = "queued" | "running" | "succeeded" | "failed";
+type DeployStatus = "queued" | "running" | "succeeded" | "failed";
 
 /** One deploy of a repository to an environment, as `GET …/deploys` lists it. */
 export interface DeployOut {

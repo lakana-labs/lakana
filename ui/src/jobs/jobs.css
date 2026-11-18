@@ -251,6 +251,24 @@
   color: var(--color-text-muted);
 }
 
+/* The note that follows a rollback, under the Deploys list: it takes the focus when the row whose
+   button had it leaves the list. */
+.jobs-rollback-note {
+  margin-top: var(--space-3);
+}
+
+.jobs-rollback-note:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* The rollback's question: every job it changes, one per line. */
+.jobs-dialog-jobs {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+  overflow-wrap: anywhere;
+}
+
 /* The two tables: no narrower than their columns need, scrolling in their own region; more
    specific than the Catalog's wider minimum, which stays in the document once it was loaded. */
 .list-scroll.jobs-runs-scroll .list {
