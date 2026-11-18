@@ -77,13 +77,15 @@
   "whatIMayDo": {
     "intro": "Your grants, direct and through your groups, and what they let you do. Ask an administrator for more.",
     "grants": "Your grants",
-    "region": "Your grants",
+    "region": "The grants you hold",
     "none": "You hold no grant yet. Ask an administrator for a role in an environment.",
     "addsUp": "What they add up to",
     "instance": "On the whole instance",
     "nothing": "Nothing yet.",
     "reading": "Reading what you may do…",
-    "readFailed": "Lakana could not read what you may do in {{environment}}: {{sentence}}"
+    "readFailed": "Lakana could not read what you may do in {{environment}}: {{sentence}}",
+    "readFailedInstance": "Lakana could not read what you may do on the whole instance: {{sentence}}",
+    "environmentsFailed": "Lakana could not read the environments: {{sentence}}"
   },
   "groups": {
     "find": "Find groups",

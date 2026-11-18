@@ -6,7 +6,7 @@ import { initI18n } from "../i18n/i18n";
 import type { AccessOut } from "../api";
 import { MeContext } from "../shell/me";
 import { GroupEntry } from "./GroupEntry";
-import { placeAt } from "./places";
+import { placeAt, SETTINGS_PLACES, type SettingsPlace } from "./places";
 
 initI18n();
 
@@ -14,16 +14,29 @@ initI18n();
  * Renders the Access group's address for a person, with a stand-in for the page it opens.
  *
  * @param admin - Whether the person is an administrator.
+ * @param places - The registry, when not the real one.
  * @returns The router, for the address it ends on.
  */
-function renderAccess(admin: boolean): ReturnType<typeof createMemoryRouter> {
+function renderAccess(
+  admin: boolean,
+  places?: readonly SettingsPlace[],
+): ReturnType<typeof createMemoryRouter> {
   const group = placeAt("/settings/access");
   if (group === null) throw new Error("no Access group");
   const me: AccessOut = { name: "kim", admin, noAccessYet: false, mayDeploy: false, picture: null };
   const router = createMemoryRouter(
     [
-      { path: "/settings/access", element: <GroupEntry group={group} /> },
+      {
+        path: "/settings/access",
+        element:
+          places === undefined ? (
+            <GroupEntry group={group} />
+          ) : (
+            <GroupEntry group={group} places={places} />
+          ),
+      },
       { path: "/settings/access/people", element: <h1>People page</h1> },
+      { path: "/settings/access/what-i-may-do", element: <h1>What I may do page</h1> },
     ],
     { initialEntries: ["/", "/settings/access"], initialIndex: 1 },
   );
@@ -44,8 +57,18 @@ describe("GroupEntry", () => {
     expect(router.state.historyAction).toBe("REPLACE");
   });
 
+  it("opens What I may do for a person who is not an administrator", async () => {
+    const router = renderAccess(false);
+
+    expect(await screen.findByRole("heading", { name: "What I may do page" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings/access/what-i-may-do");
+  });
+
   it("says the group is not the person's to use when none of its places is listed", () => {
-    renderAccess(false);
+    renderAccess(
+      false,
+      SETTINGS_PLACES.filter((place) => place.id !== "what-i-may-do"),
+    );
 
     expect(screen.getByRole("heading", { level: 1, name: "You cannot use Access" })).toBeVisible();
   });

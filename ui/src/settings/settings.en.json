@@ -5,6 +5,9 @@
   "repositories": "Repositories",
   "access": "Access",
   "people": "People",
+  "groups": "Groups",
+  "grants": "Grants",
+  "whatIMayDo": "What I may do",
   "signIn": "Sign-in",
   "invites": "Invites",
   "recoveryLinks": "Recovery links"

@@ -355,7 +355,7 @@ describe("Interface", () => {
     expect(screen.getByRole("button", { name: "Signed in as admin" })).toBeInTheDocument();
   });
 
-  it("shows Settings to a person without admin rights, with Status only", async () => {
+  it("shows Settings to a person without admin rights, with Status and What I may do", async () => {
     renderInterface("/settings", {
       "GET /api/v1/sign-in/session": { status: 200, body: { ...ADMIN_SESSION, name: "kim" } },
       "GET /api/v1/whoami": { status: 200, body: whoami("kim", false, true) },
@@ -372,7 +372,7 @@ describe("Interface", () => {
       within(places)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Status"]);
+    ).toEqual(["Status", "What I may do"]);
   });
 
   it("shows Settings, and no Access area, to an administrator", async () => {
@@ -417,7 +417,7 @@ describe("Interface", () => {
     );
   });
 
-  it("lists only Status in Settings when the rights cannot be read", async () => {
+  it("lists only Status and What I may do in Settings when the rights cannot be read", async () => {
     renderInterface("/settings", {
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
       "GET /api/v1/whoami": {
@@ -432,7 +432,7 @@ describe("Interface", () => {
       within(places)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Status"]);
+    ).toEqual(["Status", "What I may do"]);
   });
 
   it("disposes the old router once the new one shows", async () => {

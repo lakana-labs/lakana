@@ -157,7 +157,7 @@ test("an encoded address to a hidden place says so and reads nothing", async ({ 
   const errors = consoleErrors(page);
   const paths = apiPaths(page);
   await signInAsAdmin(page);
-  // The same person without admin rights: Settings lists Status alone.
+  // The same person without admin rights: Settings lists Status and What I may do.
   await page.route("**/api/v1/whoami", (route) =>
     route.fulfill({
       json: {
@@ -187,6 +187,7 @@ test("an encoded address to a hidden place says so and reads nothing", async ({ 
     ).toBeVisible();
     await expect(page.getByRole("navigation", { name: PLACES }).getByRole("link")).toHaveText([
       "Status",
+      "What I may do",
     ]);
   }
   await page.waitForLoadState("networkidle");
