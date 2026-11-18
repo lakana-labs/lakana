@@ -14,10 +14,10 @@ from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import NamespacePath
 from lakana_core.models import ColumnMask
 from lakana_core.policy.column_masks import ColumnMaskService
 from lakana_core.policy.shown import ShownPolicy
+from lakana_server.api.platform.namespace_forms import dotted_namespace, joined_namespace
 from lakana_server.api.platform.schemas import ColumnMaskCreate, ColumnMaskOut
 from lakana_server.api.platform.subjects import SubjectNames, subject_names
 from lakana_server.api.responses import errors
@@ -36,38 +36,6 @@ router = APIRouter(
     tags=["column-masks"],
     responses=errors(401),
 )
-
-
-def _dotted_to_joined(namespace: str) -> str:
-    """Convert a dot-joined namespace path to its unit-separator storage form.
-
-    Parameters
-    ----------
-    namespace
-        A dotted path such as ``"gold.sales"``.
-
-    Returns
-    -------
-    str
-        The unit-separator-joined storage form.
-    """
-    return NamespacePath.from_parts(namespace.split(".")).joined()
-
-
-def _joined_to_dotted(namespace: str) -> str:
-    """Convert a stored unit-separator namespace path to its dotted form.
-
-    Parameters
-    ----------
-    namespace
-        The unit-separator-joined storage form.
-
-    Returns
-    -------
-    str
-        The dot-joined display form.
-    """
-    return ".".join(NamespacePath.parse(namespace).parts)
 
 
 def _to_out(row: ColumnMask, shown: ShownPolicy, names: SubjectNames) -> ColumnMaskOut:
@@ -93,7 +61,7 @@ def _to_out(row: ColumnMask, shown: ShownPolicy, names: SubjectNames) -> ColumnM
         principal_id=row.principal_id,
         group_id=row.group_id,
         environment=row.environment,
-        namespace=_joined_to_dotted(row.namespace),
+        namespace=dotted_namespace(row.namespace),
         table=row.table,
         column=shown.column or row.column,
         expression=shown.expression,
@@ -160,7 +128,7 @@ def create_column_mask(
         principal=body.principal,
         group=body.group,
         environment=body.environment,
-        namespace=_dotted_to_joined(body.namespace),
+        namespace=joined_namespace(body.namespace),
         table=body.table,
         column=body.column,
         expression=body.expression,
@@ -225,7 +193,7 @@ def list_column_masks(
         rows = service.list_for_group(principal, group_name)
     elif environment is not None and namespace is not None and table is not None:
         rows = service.list_for_table(
-            principal, environment=environment, namespace=_dotted_to_joined(namespace), table=table
+            principal, environment=environment, namespace=joined_namespace(namespace), table=table
         )
     else:
         raise ValidationError(

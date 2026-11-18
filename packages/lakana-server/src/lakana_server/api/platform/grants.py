@@ -17,10 +17,10 @@ from lakana_core.grants.admin import ineffective_note
 from lakana_core.grants.explain import PermissionReport
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService, scope_filter
-from lakana_core.identifiers import NamespacePath
 from lakana_core.models import Grant
 from lakana_core.pagination import parse_choices
 from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.namespace_forms import dotted_namespace, joined_namespace
 from lakana_server.api.platform.schemas import (
     GrantCreate,
     GrantOut,
@@ -47,42 +47,6 @@ router = APIRouter(
 )
 
 
-def _dotted_to_joined(namespace: str | None) -> str | None:
-    """Convert a dot-joined namespace path to its unit-separator storage form.
-
-    Parameters
-    ----------
-    namespace
-        A dotted path such as ``"gold.sales"``, or `None`.
-
-    Returns
-    -------
-    str or None
-        The unit-separator-joined storage form, or `None` unchanged.
-    """
-    if namespace is None:
-        return None
-    return NamespacePath.from_parts(namespace.split(".")).joined()
-
-
-def _joined_to_dotted(namespace: str | None) -> str | None:
-    """Convert a stored unit-separator namespace path to its dotted form.
-
-    Parameters
-    ----------
-    namespace
-        The unit-separator-joined storage form, or `None`.
-
-    Returns
-    -------
-    str or None
-        The dot-joined display form, or `None` unchanged.
-    """
-    if namespace is None:
-        return None
-    return ".".join(NamespacePath.parse(namespace).parts)
-
-
 def _to_out(grant: Grant, names: SubjectNames) -> GrantOut:
     """Build a response body from a Grant row.
 
@@ -106,7 +70,7 @@ def _to_out(grant: Grant, names: SubjectNames) -> GrantOut:
         action=grant.action,
         kind=grant.kind,
         environment=grant.environment,
-        namespace=_joined_to_dotted(grant.namespace),
+        namespace=dotted_namespace(grant.namespace),
         table=grant.table,
         granted_by=grant.granted_by,
         granted_at=grant.granted_at,
@@ -171,7 +135,7 @@ def create_grant(
         action=body.action,
         kind=body.kind,
         environment=body.environment,
-        namespace=_dotted_to_joined(body.namespace),
+        namespace=joined_namespace(body.namespace),
         table=body.table,
     )
     return _to_out(created, subject_names(session, [created]))

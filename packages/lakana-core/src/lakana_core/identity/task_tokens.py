@@ -6,9 +6,10 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import (
@@ -36,6 +37,7 @@ from lakana_core.models import (
     Environment,
     JobVersion,
     Namespace,
+    PersonalAccessToken,
     Principal,
     Repository,
     Run,
@@ -392,6 +394,36 @@ def _resolve_bound(
     )
 
 
+def _minting_pat_works(session: Session, pat_id: uuid.UUID, now: datetime) -> bool:
+    """Say whether the personal access token a task token was minted with still works.
+
+    The same conditions as `lakana_core.identity.pats.PatService.verify`, read from the row at
+    every authentication: so a task token stops in the same instant as its PAT, whether the PAT
+    was revoked, expired, deleted or its owner deactivated, with no sweep and no window between.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    pat_id
+        The PAT's row id (`TaskToken.source_pat_id`).
+    now
+        The time to check at.
+
+    Returns
+    -------
+    bool
+        `False` if the PAT is gone, revoked or expired, or its owner is missing or inactive.
+    """
+    pat = session.get(PersonalAccessToken, pat_id)
+    if pat is None or pat.revoked_at is not None:
+        return False
+    if pat.expires_at is not None and pat.expires_at <= now:
+        return False
+    owner = session.get(Principal, pat.principal_id)
+    return owner is not None and owner.is_active
+
+
 def resolve_task_token_scope(
     session: Session, token_id: uuid.UUID, *, expected_principal_id: uuid.UUID | None = None
 ) -> TaskScope | None:
@@ -424,7 +456,9 @@ def resolve_task_token_scope(
     -------
     TaskScope or None
         `None` if no `TaskToken` row has this id, it is revoked, expired,
-        its principal is missing or inactive, or `expected_principal_id`
+        its principal is missing or inactive, the personal access token it
+        was minted with (`source_pat_id`) no longer works (`_minting_pat_works`),
+        or `expected_principal_id`
         is given and does not match the row's own `principal_id`. For a
         bound token also `None` unless its task run is `RUNNING`
         with the token's claim counter in the token's environment — a
@@ -437,10 +471,15 @@ def resolve_task_token_scope(
         return None
     if expected_principal_id is not None and task_token.principal_id != expected_principal_id:
         return None
-    if task_token.revoked_at is not None or task_token.expires_at <= datetime.now(UTC):
+    now = datetime.now(UTC)
+    if task_token.revoked_at is not None or task_token.expires_at <= now:
         return None
     principal = session.get(Principal, task_token.principal_id)
     if principal is None or not principal.is_active:
+        return None
+    if task_token.source_pat_id is not None and not _minting_pat_works(
+        session, task_token.source_pat_id, now
+    ):
         return None
     bound: BoundTask | None = None
     if task_token.task_run_id is not None or task_token.claim is not None:
@@ -545,7 +584,10 @@ class TaskTokenService:
         -------
         MintedTaskToken
             The new token, including its full value — shown here and
-            nowhere else afterward.
+            nowhere else afterward. Minted with a personal access token
+            (``p.credential == "pat"``), it records that token
+            (`TaskToken.source_pat_id`, and its key id as ``pat_key_id`` in the
+            `TASK_TOKEN_MINTED` event) and works only while that token does.
 
         Raises
         ------
@@ -600,18 +642,24 @@ class TaskTokenService:
         ).scalar_one_or_none()
         if principal is None:
             raise NotFoundError(f"No principal named {principal_name!r}.")
+        source_pat_id = p.token_id if p.credential == "pat" else None
+        detail: dict[str, object] = {
+            "issuer": p.name,
+            "subject": principal_name,
+            "environment": environment,
+            "asset_scope": list(asset_scope),
+        }
+        if source_pat_id is not None:
+            pat = self._session.get(PersonalAccessToken, source_pat_id)
+            detail["pat_key_id"] = pat.key_id if pat is not None else None
         return self._store(
             actor_id=p.id,
             principal_id=principal.id,
             environment=environment,
             asset_scope=asset_scope,
             ttl_seconds=ttl_seconds,
-            detail={
-                "issuer": p.name,
-                "subject": principal_name,
-                "environment": environment,
-                "asset_scope": list(asset_scope),
-            },
+            detail=detail,
+            source_pat_id=source_pat_id,
         )
 
     def _store(
@@ -625,6 +673,7 @@ class TaskTokenService:
         detail: dict[str, object],
         task_run_id: uuid.UUID | None = None,
         claim: int | None = None,
+        source_pat_id: uuid.UUID | None = None,
     ) -> MintedTaskToken:
         """Insert a token and its `TASK_TOKEN_MINTED` event, retrying one key_id collision.
 
@@ -646,6 +695,8 @@ class TaskTokenService:
             The bound task run, or `None`.
         claim
             The bound claim counter, or `None`.
+        source_pat_id
+            The personal access token it was minted with, or `None`.
 
         Returns
         -------
@@ -677,6 +728,7 @@ class TaskTokenService:
                         expires_at=expires_at,
                         task_run_id=task_run_id,
                         claim=claim,
+                        source_pat_id=source_pat_id,
                     )
                 )
                 AuditService(self._session).record(
@@ -930,7 +982,8 @@ class TaskTokenService:
         AuthenticationError
             If `key_id` is unknown, the secret does not match, or
             `resolve_task_token_scope` finds the token no longer usable —
-            expired, revoked, or its principal deactivated.
+            expired, revoked, its principal deactivated, or the personal
+            access token it was minted with no longer working.
         """
         task_token = self._session.execute(
             select(TaskToken).where(TaskToken.key_id == key_id)
@@ -987,9 +1040,10 @@ class TaskTokenService:
         Returns
         -------
         Page of ListedTaskToken
-            The tokens neither revoked nor expired, by issue time, newest first, equal times
-            by id, each with its principal's name and, for a token bound to a task, its run,
-            job and asset, and the cursor of the next page.
+            The tokens neither revoked nor expired, nor minted with a personal access token that
+            is revoked or has expired or whose owner is deactivated, by issue time, newest
+            first, equal times by id, each with its principal's name and, for a token bound to
+            a task, its run, job and asset, and the cursor of the next page.
 
         Raises
         ------
@@ -1001,8 +1055,25 @@ class TaskTokenService:
             list.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
-        query = select(TaskToken).where(
-            TaskToken.revoked_at.is_(None), TaskToken.expires_at > datetime.now(UTC)
+        now = datetime.now(UTC)
+        minter = aliased(Principal)
+        query = (
+            select(TaskToken)
+            .outerjoin(PersonalAccessToken, PersonalAccessToken.id == TaskToken.source_pat_id)
+            .outerjoin(minter, minter.id == PersonalAccessToken.principal_id)
+            .where(
+                TaskToken.revoked_at.is_(None),
+                TaskToken.expires_at > now,
+                # A token whose PAT is revoked or has expired, or whose PAT's owner is
+                # deactivated, no longer signs in (`_minting_pat_works`), so it is not live. A
+                # token without a PAT has NULL for all three.
+                PersonalAccessToken.revoked_at.is_(None),
+                or_(
+                    PersonalAccessToken.expires_at.is_(None),
+                    PersonalAccessToken.expires_at > now,
+                ),
+                or_(TaskToken.source_pat_id.is_(None), minter.is_active.is_(True)),
+            )
         )
         if environment is not None:
             query = query.where(TaskToken.environment == environment)
@@ -1064,13 +1135,41 @@ def revoke_task_tokens_for_environment(
     int
         The number of task tokens revoked.
     """
+    return _revoke_where(
+        session,
+        actor,
+        TaskToken.environment == environment_name,
+        {"reason": "environment_deleted"},
+    )
+
+
+def _revoke_where(
+    session: Session,
+    actor: PrincipalRef,
+    condition: ColumnElement[bool],
+    reason: dict[str, object],
+) -> int:
+    """Soft-revoke every unrevoked task token that meets a condition, one event each.
+
+    Parameters
+    ----------
+    session
+        Database session; the caller commits.
+    actor
+        Recorded as each `TASK_TOKEN_REVOKED` event's `principal_id` and as `detail.actor`.
+    condition
+        Which task tokens.
+    reason
+        Added to each event's detail: ``reason`` and what it names.
+
+    Returns
+    -------
+    int
+        The number of task tokens revoked.
+    """
     now = datetime.now(UTC)
     tokens = (
-        session.execute(
-            select(TaskToken).where(
-                TaskToken.environment == environment_name, TaskToken.revoked_at.is_(None)
-            )
-        )
+        session.execute(select(TaskToken).where(condition, TaskToken.revoked_at.is_(None)))
         .scalars()
         .all()
     )
@@ -1087,7 +1186,40 @@ def revoke_task_tokens_for_environment(
                 "key_id": token.key_id,
                 "environment": token.environment,
                 "asset_scope": list(token.asset_scope),
-                "reason": "environment_deleted",
+                **reason,
             },
         )
     return len(tokens)
+
+
+def revoke_task_tokens_of_pat(
+    session: Session, actor: PrincipalRef, pat: PersonalAccessToken
+) -> int:
+    """Soft-revoke every unrevoked task token minted with a personal access token.
+
+    Called by `lakana_core.identity.pats.PatService.revoke` before its own commit, so the
+    tokens are revoked in the same transaction as the PAT. Authentication would refuse them
+    anyway (`resolve_task_token_scope` reads the PAT's row every time); this makes the rows and
+    the audit log say so too. Does not authorize on its own: the caller already has.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    actor
+        The principal revoking the PAT; recorded as each `TASK_TOKEN_REVOKED` event's
+        `principal_id` and as `detail.actor`.
+    pat
+        The PAT being revoked.
+
+    Returns
+    -------
+    int
+        The number of task tokens revoked.
+    """
+    return _revoke_where(
+        session,
+        actor,
+        TaskToken.source_pat_id == pat.id,
+        {"reason": "pat_revoked", "pat_key_id": pat.key_id},
+    )

@@ -2,17 +2,26 @@
 
 from __future__ import annotations
 
+import enum
 import re
 from pathlib import Path
+from typing import Annotated, Any, cast
 
 import pytest
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, create_model
 
-from lakana_server.configuration import PLAIN_SECRETS, ConfiguredSetting, describe_settings
+from lakana_server.configuration import (
+    PLAIN_SECRETS,
+    ConfiguredSetting,
+    describe_settings,
+    setting_names,
+)
 from lakana_server.settings import Settings
 
 _REPO = Path(__file__).resolve().parents[3]
 _LOOKS_SECRET = re.compile(
-    r"(?i)(SECRET|PASSWORD|PASSWD|KEY|TOKEN|CREDENTIAL|DSN|URL|PROXY|AUTH|COOKIE|PRIVATE)"
+    r"(?i)(SECRET|PASSWORD|PASSWD|KEY|TOKEN|CREDENTIAL|DSN|URL|PROXY|AUTH|COOKIE|PRIVATE"
+    r"|WEBHOOK|SENTRY)"
 )
 REVIEWED_NOT_SECRET: dict[str, str] = {
     "LAKANA_BOOTSTRAP_PAT_KEY_ID": "the public half of the bootstrap token",
@@ -43,7 +52,8 @@ def _by_name(settings: Settings) -> dict[str, ConfiguredSetting]:
 
 def test_every_secret_looking_setting_is_masked_or_reviewed() -> None:
     described = _by_name(Settings())
-    looking = {name for name in described if _LOOKS_SECRET.search(name)}
+    assert set(setting_names(Settings)) == set(described)
+    looking = {name for name in setting_names(Settings) if _LOOKS_SECRET.search(name)}
     unreviewed = sorted(
         name for name in looking if not described[name].secret and name not in REVIEWED_NOT_SECRET
     )
@@ -114,3 +124,71 @@ def test_values_are_json(monkeypatch: pytest.MonkeyPatch) -> None:
     assert described["LAKANA_REPO_ROOTS"].value == ["/srv/a"]
     assert described["LAKANA_UI__PUBLIC_URL"].value is None
     assert described["LAKANA_UI__PUBLIC_URL"].has_value is False
+
+
+class _Smtp(BaseModel):
+    password: str = ""
+
+
+class _Scalars(BaseModel):
+    plain: str = ""
+    token: SecretStr | None = None
+    many: list[str] = []
+
+
+def test_the_walk_reads_the_classes_so_an_unset_nested_model_is_seen() -> None:
+    """Names come from the annotations of every nested model class, not from one instance."""
+
+    class Root(BaseModel):
+        nested: _Scalars = _Scalars()
+        port: int = 1
+
+    assert setting_names(Root) == [
+        "LAKANA_NESTED__PLAIN",
+        "LAKANA_NESTED__TOKEN",
+        "LAKANA_NESTED__MANY",
+        "LAKANA_PORT",
+    ]
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [_Smtp | None, list[_Smtp], dict[str, _Smtp], tuple[int, _Smtp], object, bytes],
+    ids=[
+        "optional-model",
+        "list-of-models",
+        "dict-of-models",
+        "tuple-with-model",
+        "object",
+        "bytes",
+    ],
+)
+def test_a_field_that_is_not_a_plain_model_or_a_known_scalar_is_refused(
+    annotation: object,
+) -> None:
+    """An optional or listed model, or an unknown type, could hide a credential: refuse it."""
+    root = create_model(
+        "Root",
+        __config__=ConfigDict(arbitrary_types_allowed=True),
+        odd=(cast(Any, annotation), None),
+    )
+
+    with pytest.raises(TypeError, match="LAKANA_ODD"):
+        setting_names(root)
+    with pytest.raises(TypeError, match="LAKANA_ODD"):
+        describe_settings(root())
+
+
+class _Level(enum.Enum):
+    LOW = "low"
+    HIGH = "high"
+
+
+def test_an_enum_and_an_annotated_scalar_inside_a_list_are_known_leaves() -> None:
+    """An enum, and a scalar with constraints inside a container, hold no model: both pass."""
+
+    class Root(BaseModel):
+        level: _Level = _Level.LOW
+        ports: list[Annotated[int, Field(ge=1)]] = []
+
+    assert setting_names(Root) == ["LAKANA_LEVEL", "LAKANA_PORTS"]
