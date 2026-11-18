@@ -1,0 +1,196 @@
+/* The environment picker's rules, which the Queries, Jobs and Connections screens share. */
+@import "../shell/environment.css";
+
+/* The Connections list: its table scrolls inside its own region; below 640 px the where and
+   used-by columns fold under the name, as a second line. */
+.list-scroll.connections-scroll .list {
+  min-width: 0;
+}
+
+.connections-scroll .list .button,
+.connections-scroll .test-status {
+  white-space: nowrap;
+}
+
+/* A status is its glyph and its words, side by side. */
+.test-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Never tested, or tested before the last change: nothing current to claim. */
+.test-status-muted {
+  color: var(--color-text-muted);
+}
+
+.narrow-only {
+  display: none;
+}
+
+@media (max-width: 639.98px) {
+  .narrow-hide {
+    display: none;
+  }
+
+  .narrow-only {
+    display: block;
+  }
+}
+
+/* Test all below the table: the button with its refusal beside it, then its status line. */
+.connections-test-all {
+  margin-top: var(--space-4);
+}
+
+.connections-test-all-act {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* A connection's page: its panels stand apart by more space than lies inside them. */
+.connection-page {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.connection-heading {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-title-size);
+  line-height: var(--type-title-line);
+  font-weight: var(--type-title-weight);
+}
+
+.connection-facts {
+  margin: 0;
+}
+
+.connection-fact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.connection-fact dt {
+  flex: 0 0 140px;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.connection-fact dd {
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A fingerprint is long and has no break of its own. */
+.connection-print {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  word-break: break-all;
+}
+
+.connection-list {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.connection-message {
+  overflow-wrap: anywhere;
+}
+
+/* The note after a create, a save or a delete takes the focus; its ring shows where it is. */
+.connection-note {
+  margin: 0;
+}
+
+.connection-note:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Add: one column of fields; the refusal above it, Save and Cancel below. */
+.connection-form {
+  max-width: 640px;
+  min-width: 0;
+}
+
+.connection-form .env-picker {
+  margin: 0 0 var(--space-4);
+}
+
+/* Each kind's line sits under its name, in line with the name rather than the circle. */
+.connection-kinds .radio-field [slot="description"] {
+  display: block;
+  margin: 0 0 var(--space-2) calc(16px + var(--space-2));
+}
+
+/* The secret is a group of its own, its legend in the look of a label. */
+.secret-fields {
+  min-width: 0;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.secret-fields legend {
+  margin: 0 0 var(--space-2);
+  padding: 0;
+}
+
+.connection-hint {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+}
+
+/* A tcp key: its name, its value and Remove side by side, wrapping at 320 px. */
+.connection-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0 var(--space-3);
+  margin: 0 0 var(--space-2);
+}
+
+.connection-key .button {
+  margin: 0 0 var(--space-4);
+}
+
+.connection-keys > p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.connection-ca-read {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+/* The sentence under a file input, in the look of a field's description. */
+.file-note {
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+}
+
+.connection-form .file-input {
+  max-width: 100%;
+  padding: var(--space-1) var(--space-2);
+}

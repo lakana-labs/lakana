@@ -52,6 +52,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "BrowserSessionOut",
   '["absolute_expires_at","display_name","name","needs_passkey","offer_passkey","step_up_until","type","via"]':
     "SessionOut",
+  '["access_key_id","prefix"]': "-",
   '["action","allowed","reason","via"]': "PermissionOut",
   '["action","environment","granted_at","granted_by","group","group_id","id","kind","namespace","note","principal","principal_id","role","table"]':
     "GrantOut",
@@ -59,6 +60,9 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "RunOut",
   '["actions","commit_sha","created_at","created_by","deleted_at","deleted_by","deleted_versions","file_count","files","is_directory","manifest_sha256","project_version_id","run_id","size_bytes","task_run_id","version"]':
     "ArtifactVersionOut",
+  '["actions","address","created_at","created_by","declared_by","environment","kind","last_test","name","secret","settings","updated_at"]':
+    "ConnectionOut",
+  '["actions","name"]': "ConnectionEnvironmentOut",
   '["actions","commit_sha","cron","downstream","environment","last_run_at","last_run_id","last_run_status","name","next_run_at","notify","paused","repository","select","source_url","state","timezone","triggers","upstream","waiting_for","waits_for_run_id"]':
     "JobOut",
   '["actions","count","name","namespaces"]': "TableTreeOut.environments",
@@ -82,13 +86,17 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "TaskRunOut",
   '["at","column","id","table","target","target_column","target_exists"]': "ModelReferenceOut",
   '["at","environment","kind","ref","title"]': "AttentionItemOut",
+  '["asset","repository"]': "ConnectionOut.declared_by",
   '["attempt","bytes_read","cpu_seconds","error_message","failure","finished_at","outcome","peak_memory_bytes","rows_written","started_at","worker"]':
     "TaskAttemptOut",
   '["attempts","complete","more","next_offset","reset","text"]': "TaskLogOut",
   '["audience","complete","hidden","local","steps"]': "GetStartedOut",
+  '["auth"]': "-",
+  '["base_url"]': "-",
   '["backup_eligible","created_at","disabled_reason","id","last_used_at","name","usable_here"]':
     "PasskeyOut",
   '["binary"]': "-",
+  '["bucket","endpoint","region"]': "-",
   '["bound","column","created_at","created_by","environment","expression","group","group_id","id","namespace","principal","principal_id","table"]':
     "ColumnMaskOut",
   '["bound","created_at","created_by","environment","expression","group","group_id","id","namespace","principal","principal_id","table"]':
@@ -111,6 +119,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["column","table"]': "MaskedColumnOut",
   '["columns","columns_cut","duration_ms","masked_columns","masked_columns_cut","next_offset","preview","row_count","row_cut","rows"]':
     "ResultPageOut",
+  '["created_at","finished_at","id","message","outcome","requested_by","state"]':
+    "ConnectionLastTestOut",
   '["connection_kind","distance","id","kind","name"]': "GraphNodeOut",
   '["count","environments"]': "TableTreeOut",
   '["created_at","display_name","expires_at","id","name"]': "OpenInviteOut",
@@ -120,6 +130,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["created_at","finished_at","host_keys","id","kind","message","outcome","state"]':
     "RepositoryProbeOut",
   '["created_at","id","kind","subject"]': "NoticeOut",
+  '["database","host","port"]': "-",
   '["cron","kind","next_run_at","paused","timezone"]': "ScheduleTriggerOut",
   '["days","expires_at","kept","last_activity_at","name","namespace","never","on","set_at","set_by","source","uuid"]':
     "TableRetentionOut",
@@ -141,6 +152,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["environment","kind","opened_at","ref"]': "RecentOut",
   '["environment","last_deploy_at","last_deploy_status"]': "WorkEnvironmentOut",
   '["environments","name"]': "WorkRepositoryOut",
+  '["finished_at","outcome","state"]': "ConnectionTestOut",
   '["events","format","secret"]': "NotifyOut",
   '["failing_rows","name","outcome","table"]': "CheckResultOut",
   '["failure","run","task"]': "FailedRunOut",
@@ -157,7 +169,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["is_protected","name"]': "EnvironmentOut",
   '["item","others","state","text"]': "HealthSummaryOut",
   '["items","next_cursor","path"]': "RawPageOut",
-  '["items","next_cursor"]': "RunPageOut",
+  '["items","next_cursor"]': "WirePage",
   '["items","truncated"]': "AttentionOut",
   '["job","last_commit_at","seconds","source"]': "HealthObservedOut",
   '["jobs","repositories"]': "WorkOut",
@@ -172,6 +184,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["name","type"]': "ResultColumnOut",
   '["name"]': "OwnerOut",
   '["nulls","rate","values"]': "HealthObservedOut",
+  '["path","root"]': "NamespaceOut",
   '["path","properties"]': "NamespaceOut",
   '["path","repository"]': "DefinedByOut",
   '["path","sha256","size"]': "ArtifactFileOut",
@@ -180,6 +193,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   // A preview's `{table}`: the one type whose fields it fills exactly is the claim of an entry of
   // raw/ (#672); `table` is free text in both, so it carries the override either way.
   '["table"]': "RawEntryOut.claimed_by",
+  '["tls","user"]': "-",
   '["version"]': "InfoOut",
   "[]": "-",
   '["actions","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':

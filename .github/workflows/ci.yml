@@ -146,11 +146,12 @@ jobs:
   # gates' proofs add to the gates' time (#586): `ui (gates)` runs every gate of
   # `npm --prefix ui run check` and the coverage ratchet; `ui (gate proofs)` builds the interface
   # again (about a second) and runs `prove-gates`, which shows each gate still fails on a
-  # violation (split off because the two together ran over the "ui (*)" budget); `ui (e2e smoke)`
-  # and `ui (e2e server)` each build the interface again and run one Playwright suite on
-  # Chromium. The required check `ui` waits for the four. They run on drafts too, and only when
-  # the interface, a tool its gates run or this workflow changed; the four scope steps are the
-  # same (scripts/tests/test_workflows.py). See docs/agent/testing.md, "The ui/ gates".
+  # violation (split off because the two together ran over the "ui (*)" budget);
+  # `ui (e2e smoke, N/2)` (two shards) and `ui (e2e server)` each build the interface again and
+  # run one Playwright suite, or a shard of it, on Chromium. The required check `ui` waits for the
+  # four. They run on drafts too, and only when the interface, a tool its gates run or this
+  # workflow changed; the four scope steps are the same (scripts/tests/test_workflows.py).
+  # See docs/agent/testing.md, "The ui/ gates".
   ui-gates:
     name: ui (gates)
     needs: changes
@@ -265,13 +266,19 @@ jobs:
           npm ci --ignore-scripts --prefix tools/jscpd
           npm --prefix ui run prove-gates
 
-  # The Playwright smoke test on Chromium against the production build, its API routes stubbed.
+  # The Playwright smoke test on Chromium against the production build, its API routes stubbed,
+  # in two shards side by side (Playwright's --shard splits it by file), so that it stays inside
+  # the "ui (*)" time budget as the screens add to it.
   ui-e2e-smoke:
-    name: ui (e2e smoke)
+    name: ui (e2e smoke, ${{ matrix.shard }}/2)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -306,7 +313,7 @@ jobs:
         run: npx --prefix ui playwright install --with-deps chromium
       - if: steps.scope.outputs.run == 'true'
         name: Playwright smoke test (Chromium)
-        run: npm --prefix ui run e2e:smoke
+        run: npm --prefix ui run e2e:smoke -- --shard=${{ matrix.shard }}/2
 
   # The sign-in end to end: a real lakana-server on a fresh SQLite database serves the build
   # that was just made (Firefox and WebKit run nightly in canary.yml).
@@ -373,7 +380,7 @@ jobs:
           failed=0
           for pair in "gates:$GATES" "gate proofs:$GATE_PROOFS" "e2e smoke:$E2E_SMOKE" "e2e server:$E2E_SERVER"; do
             if [ "${pair#*:}" != "success" ]; then
-              echo "::error::The job 'ui (${pair%%:*})' ended with '${pair#*:}': its log names the failing step."
+              echo "::error::The job 'ui (${pair%%:*})' ended with '${pair#*:}' (for e2e smoke, one of its shards 'ui (e2e smoke, N/2)'): its log names the failing step."
               failed=1
             fi
           done

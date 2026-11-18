@@ -11,6 +11,9 @@ useDefault = true
 description = "Fake fixture tokens in SDK/CLI tests, and code lines misread as keys"
 regexTarget = "line"
 regexes = [
+  # Two made-up passwords in the Connections screen's tests (#714).
+  '''const PASSWORD = "p4ss-w0rd-of-the-e2e";''',
+  '''const PASSWORD = "Tr0ub4dor-and-3-horses";''',
   # A truncated, unusable key fragment in a connection-validation test that checks a pasted key is refused.
   '''MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg''',
   '''lakana_pat_abc123_x_y-z_secret''',

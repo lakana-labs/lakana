@@ -47,6 +47,39 @@ const NAMED_LIMITS = [
   // (the Sort by and Order menus) moved into a chunk the Catalog shares with the Queries screen's
   // environment picker (format-, below).
   { name: "Catalog", prefix: "CatalogScreen-", limit: "18 kB" },
+  // Measured 4.97 kB (2026-11-17) + 10 %: the Connections list (its table with the kind, where,
+  // environment, last test with its time and used by, the remembered environment filter, Test
+  // per row, the empty and no-environment states and the clock that ages "2 hours ago") and the
+  // screen's strings. The kinds' words and fields come with the form's chunk.
+  // Raised to the measured 6.92 kB (2026-11-17) + 10 %: Test per row with its 409 read, Test all
+  // in an environment with its always-mounted status line, and the follower of open tests (fast,
+  // then slow, three failures and Try again, ten minutes and stuck, one read per connection or
+  // the environment's list in pages of 200).
+  // Raised to the measured 7.22 kB (2026-11-17) + 10 %: Test all's line says when following
+  // stopped, and the follower drops deleted connections.
+  // Raised to the measured 9.58 kB (2026-11-17) + 10 %: a connection's page (its facts, the last
+  // test with its cause and next step, the declaring assets) and Delete with its dialog.
+  // Measured 10.51 kB (2026-11-17) with the route to Add, loaded on demand, and its loading
+  // words; the limit holds.
+  // Raised to the measured 10.93 kB (2026-11-17) + 10 %: the route to Edit, which reads the
+  // connection (its skeleton, Try again and not-found state in the Edit page) before the form
+  // loads on demand.
+  { name: "Connections", prefix: "ConnectionsScreen-", limit: "12.02 kB" },
+  // Measured 4.71 kB (2026-11-17) + 10 %: Add a connection, loaded on demand by its route: the
+  // environment and the nine kinds, the name checked on blur, each kind's fields (http's after
+  // its auth, the CA certificate read from a file), the secret as password fields or an existing
+  // secret's name (azure's choice, gcs's key file, tcp's own keys), Save with the passkey touch,
+  // and the form's strings.
+  // Measured 4.83 kB (2026-11-17) with numbered tcp key rows, the focus on a new row and one
+  // azure key and at most 16 tcp keys in the body; the limit holds.
+  // Raised to the measured 6.4 kB (2026-11-17) + 10 %: Edit of a connection: its fields from
+  // the stored ones, the body of only what changed, the CA certificate's fingerprints with
+  // Remove, and the secret kept, given again, another or none, asked again when a change could
+  // send it somewhere new.
+  // Raised to the measured 6.56 kB (2026-11-17) + 10 %: Edit says who may edit where the
+  // person may not, refuses a moving change without new values for everyone, keeps a pending
+  // Remove of the CA certificate past a refused file, and starts an s3 default endpoint empty.
+  { name: "Add or edit a connection", prefix: "ConnectionForm-", limit: "7.22 kB" },
   // Measured 541 B (2026-11-17) + 10 %: the Queries screen, for now its heading and the lazy
   // import of the SQL editor with the screen's strings.
   // Raised to the measured 4.83 kB (2026-11-17) + 10 %: the environment picker with its protected
@@ -184,8 +217,9 @@ const NAMED_LIMITS = [
   // keeps the catalog's numbers and sizes.
   { name: "the number formats", prefix: "format-", limit: "0.49 kB" },
   // Measured 9.85 kB (2026-11-17) + 10 %: React Aria's Select, ListBox and Popover, shared by the
-  // Catalog's Sort by and Order, the Queries screen's environment picker and the Status and
-  // Period of a job's runs; never in the first load.
+  // Catalog's Sort by and Order, the environment picker of the Queries and Connections screens
+  // and the Status and Period of a job's runs; never in the first load. Measured 9.82 kB
+  // (2026-11-18) with the Connections screen among its importers; the limit holds.
   { name: "the menus", prefix: "Select-", limit: "10.84 kB" },
   // Measured 7.03 kB (2026-11-17) + 10 %: the React Aria collection code the menus share with
   // the Catalog's tree (the chunk is named after one of its modules); never in the first load.
@@ -501,6 +535,19 @@ export default [
   // of it on demand: the environment picker that the Queries screen and the list now share is a
   // chunk of its own (remembered-), and the entry's list of the chunks it preloads names it; the
   // rest is the length of other chunks' hashed names. The limit holds.
+  // Measured 209.93 kB (2026-11-18; 209.8 kB on main in the same build) with the Connections
+  // area's loader and the list of chunks it preloads (+0.12 kB); the limit holds. The
+  // environment picker's Select, which the Connections list imports, would split React Aria's
+  // form code in two as the Jobs screen's menus would; vite.config.ts's `form` chunk group keeps
+  // it in one chunk.
+  // Measured 209.95 kB (2026-11-18; 209.82 kB on main in the same build) with the Jobs list and
+  // the Connections screen together (+0.13 kB, the Connections area's loader and its list of
+  // preloaded chunks): the environment picker the three screens share is now a chunk of its own
+  // (EnvironmentPicker-), apart from the storage helpers (remembered-). The limit holds.
+  // Measured 209.91 kB (2026-11-18; 209.82 kB on main in the same build) with the Connections
+  // filter kept through shell/remembered.ts as the Jobs filter is: the picker and the storage
+  // helpers are one chunk again (remembered-, as on main), and the first load holds +0.09 kB, the
+  // Connections area's loader and its list of preloaded chunks. The limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -539,6 +586,10 @@ export default [
   // Measured 9.32 kB (2026-11-17) with the library beside the editor, its lists and the popover
   // of a narrow screen; the list frame's rules moved from the Catalog's stylesheets into
   // screen.css, so they apply wherever the frame is used. The limit holds.
+  // Raised to the measured 10.57 kB (2026-11-18) + 10 %: the Connections screen's rules (the
+  // list's narrow columns, a status's glyph beside its words, Test all's row, a connection's
+  // page with its facts and fingerprints, the form's single column, the secret's group and the
+  // tcp key rows wrapping at 320 px) on top of Settings' frame (9.85 kB on main).
   // Raised to the measured 10.59 kB (2026-11-18) + 10 %: the Jobs screen's stylesheet (0.77 kB:
   // the job's facts, the runs list and its filters, a run's tasks with their failure lines, the
   // attempts and the log that wraps at 320 px), loaded with the Jobs screen only.
@@ -546,9 +597,20 @@ export default [
   // controls in a row above its link, the three tables' widths and the line under a cut list) and
   // the environment picker's rules, which the Queries and Jobs stylesheets import; the first
   // load's stylesheet is unchanged. The limit holds.
+  // Raised to the measured 11.4 kB (2026-11-18) + 10 %: the Connections and the Jobs screens'
+  // stylesheets together (10.67 kB on main), each loaded with its screen only; the first load's
+  // index stylesheet is the same as main's.
+  // Measured 11.58 kB (2026-11-18) with the Jobs list's rules beside the Connections screen's;
+  // the first load's index stylesheet is the same as main's. The limit holds.
+  // Measured 11.61 kB (2026-11-18) with the environment picker's rules imported by the
+  // Connections stylesheet too, so the picker is laid out even when Connections is the first
+  // screen opened; the first load's index stylesheet is the same as main's. The limit holds.
   // Measured 11.17 kB (2026-11-18) with Browse… of New external table (RawBrowser's trail, hint
   // and scrolling listing, and the Location field's wrapping row in the Catalog's stylesheet); the
   // first load's stylesheet is unchanged. The limit holds.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.65 kB" },
+  // Measured 11.93 kB (2026-11-18) with Browse… of New external table beside the Connections and
+  // Jobs screens' stylesheets; the first load's index stylesheet is the same as main's. The limit
+  // holds.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "12.54 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

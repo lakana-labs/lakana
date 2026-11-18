@@ -33,8 +33,8 @@ export interface PlaceNoteProps {
 /**
  * Renders the note as a status line above the result line and puts the focus on it when it
  * arrives, since the control that caused it is gone; also after the shell's move to the heading
- * of a new page. A namespace the tree leaves out (its creator may not read the namespaces and it
- * holds no readable table) is named with the reason.
+ * of a new page, which comes first. A namespace the tree leaves out (its creator may not read
+ * the namespaces and it holds no readable table) is named with the reason.
  *
  * @param props - The note.
  * @param props.note - What happened.
@@ -45,18 +45,9 @@ export function PlaceNote({ note }: PlaceNoteProps): JSX.Element {
   const line = useRef<HTMLParagraphElement>(null);
   const { placeNote, namespace, environment, artifact } = note;
   useEffect(() => {
+    // After a move to another page the shell has already given the new heading the focus (in a
+    // layout effect, which runs before this one), so the note takes it from there.
     line.current?.focus();
-    // After a move to another page the shell gives the new heading the focus in an effect that
-    // runs after this one: take it back on the next frame, unless something else has it by then.
-    const frame = requestAnimationFrame(() => {
-      const focused = document.activeElement;
-      if (focused === document.body || focused?.matches("h1.page-title") === true) {
-        line.current?.focus();
-      }
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-    };
   }, [placeNote, namespace, environment, artifact]);
   return (
     <p className="catalog-result" role="status" tabIndex={-1} ref={line}>

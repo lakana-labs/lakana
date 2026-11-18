@@ -1,0 +1,192 @@
+{
+  "kinds": {
+    "postgresql": {
+      "name": "PostgreSQL",
+      "line": "A PostgreSQL database, read with a user and password over TLS."
+    },
+    "mariadb": {
+      "name": "MariaDB",
+      "line": "A MariaDB or MySQL database, read with a user and password."
+    },
+    "sqlite-file": {
+      "name": "SQLite file",
+      "line": "A SQLite file under an ingestion root of the worker."
+    },
+    "http": {
+      "name": "HTTP API",
+      "line": "An HTTPS API, with no auth, a bearer token, basic auth, an API key or OAuth2."
+    },
+    "s3": {
+      "name": "S3",
+      "line": "An S3 bucket, or a store that speaks S3, with an access key."
+    },
+    "gcs": {
+      "name": "Google Cloud Storage",
+      "line": "A Google Cloud Storage bucket, with a service account key."
+    },
+    "azure": {
+      "name": "Azure Blob Storage",
+      "line": "An Azure Blob Storage container, with an account key or a SAS token."
+    },
+    "directory": {
+      "name": "Directory",
+      "line": "A directory of files under an ingestion root of the worker."
+    },
+    "tcp": {
+      "name": "TCP",
+      "line": "Any host and port, for your own client, with secret keys of your choice."
+    }
+  },
+  "outcomes": {
+    "ok": {
+      "word": "OK",
+      "cause": "The source can be reached."
+    },
+    "dns": {
+      "word": "host name",
+      "cause": "The host name did not resolve.",
+      "next": "Check the host name: Edit the connection."
+    },
+    "refused": {
+      "word": "refused",
+      "cause": "The host refused the connection.",
+      "next": "Check the port and the source's firewall."
+    },
+    "timeout": {
+      "word": "timeout",
+      "cause": "The connection did not answer in time.",
+      "next": "Check the host, the port and the network path between the worker and the source."
+    },
+    "tls": {
+      "word": "TLS",
+      "cause": "The TLS handshake failed: the server's certificate is not trusted, or the server offers only TLS older than 1.2.",
+      "next": "Give the connection your CA certificate (Edit), or upgrade the server to TLS 1.2 or newer."
+    },
+    "not_allowed": {
+      "word": "not allowed",
+      "cause": "The address is one a task may not reach.",
+      "next": "Use an address that can be reached from outside the Lakana stack."
+    },
+    "root_unavailable": {
+      "word": "root missing",
+      "cause": "The worker does not have the ingestion root.",
+      "next": "Check the root, or ask the operator to give it to the worker."
+    },
+    "not_found": {
+      "word": "not found",
+      "cause": "The path under the root, or the bucket or container, does not exist.",
+      "next": "Check the path, bucket or container: Edit the connection."
+    },
+    "credentials": {
+      "word": "credentials",
+      "cause": "The source refused the secret.",
+      "next": "Give the secret again: Edit the connection and enter new values."
+    },
+    "failed": {
+      "word": "failed",
+      "cause": "The check failed in another way, or no worker finished it within 10 minutes.",
+      "next": "Read the worker's log, then test again."
+    }
+  },
+  "tls": {
+    "verify-full": "encrypted, certificate checked",
+    "require": "encrypted, certificate not checked",
+    "disable": "not encrypted"
+  },
+  "auth": {
+    "none": "none",
+    "bearer": "bearer token",
+    "basic": "basic",
+    "api_key": "API key",
+    "oauth2": "OAuth2 client credentials"
+  },
+  "status": {
+    "never": "never tested",
+    "queued": "queued",
+    "queuedNoWorker": "queued · no worker yet",
+    "running": "testing…",
+    "stale": "tested before the last change · {{when}}",
+    "ok": "OK · {{when}}",
+    "failed": "{{word}} · {{when}}",
+    "justNow": "just now"
+  },
+  "list": {
+    "add": "Add connection",
+    "environment": "Environment",
+    "all": "All environments",
+    "region": "Connections",
+    "name": "Name",
+    "kind": "Kind",
+    "where": "Where",
+    "status": "Status",
+    "usedBy": "Used by",
+    "used_one": "1 asset",
+    "used_other": "{{count}} assets",
+    "usedNone": "No assets",
+    "test": "Test",
+    "testNamed": "Test {{name}}",
+    "testing": "Testing…",
+    "testingNamed": "Testing… {{name}}",
+    "none": "No connections yet.",
+    "noneIn": "No connections in {{environment}} yet.",
+    "noneCommand": "Add one from the command line:",
+    "copy": "Copy command",
+    "noEnvironment": "You may not read the connections of any environment yet. Ask an administrator for READ_ENVIRONMENT on one.",
+    "noEnvironmentCommand": "Then list them from the command line:",
+    "narrowSecond": "{{where}} · {{used}}"
+  },
+  "testAll": {
+    "button": "Test all in {{environment}}",
+    "choose": "Choose an environment to test all of its connections.",
+    "testing_one": "Testing {{count}} connection in {{environment}}…",
+    "testing_other": "Testing {{count}} connections in {{environment}}…",
+    "tested_one": "Tested {{count}} connection in {{environment}}: {{ok}} OK, {{failed}} not OK.",
+    "tested_other": "Tested {{count}} connections in {{environment}}: {{ok}} OK, {{failed}} not OK.",
+    "stopped_one": "Stopped following {{count}} test in {{environment}}; see the rows.",
+    "stopped_other": "Stopped following {{count}} tests in {{environment}}; see the rows."
+  },
+  "follow": {
+    "failed": "Could not read the test's progress.",
+    "stuck": "No worker finished this test within 10 minutes; Test again closes it as failed and starts a new one."
+  },
+  "page": {
+    "back": "Back to Connections",
+    "testNow": "Test now",
+    "edit": "Edit",
+    "delete": "Delete…",
+    "factsHeading": "Connection",
+    "kind": "Kind",
+    "caCertificate": "CA certificate",
+    "secret": "Secret",
+    "secretNamed": "{{secret}} (its value is never shown)",
+    "secretNone": "none",
+    "created": "Created",
+    "createdBy": "{{who}}, {{when}}",
+    "updated": "Updated",
+    "usedByHeading": "Used by",
+    "declared": "{{repository}}: {{asset}}",
+    "notDeclared": "No deployed asset declares it.",
+    "lastTestHeading": "Last test",
+    "by": "by {{who}}",
+    "stale": "Tested before the last change; test it again.",
+    "noWorker": "No worker has taken this test yet. Check that a worker is running: docker compose ps worker, or the lakana local terminal."
+  },
+  "note": {
+    "created": "Created {{name}}. Test it now to see that a worker can reach it.",
+    "saved": "Saved {{name}}.",
+    "deleted": "Deleted {{name}}."
+  },
+  "form": {
+    "addTitle": "Add connection",
+    "loading": "Loading the form…"
+  },
+  "delete": {
+    "title": "Delete the connection {{name}} in {{environment}}?",
+    "inUseTitle": "{{name}} is still in use",
+    "inUse": "Remove it from the asset's @asset(connections=[...]) in git and deploy, then delete it.",
+    "secret": "Its secret {{secret}} stays in the environment, unbound.",
+    "noSecret": "It has no secret.",
+    "confirm": "Delete",
+    "close": "Close"
+  }
+}

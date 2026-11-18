@@ -708,7 +708,7 @@ UI_GATES = (
 UI_WORK_JOBS = ("ui-gates", "ui-gate-proofs", "ui-e2e-smoke", "ui-e2e-server")
 """The jobs that run the interface's gates side by side; ``ui`` waits for the four (#586)."""
 UI_E2E = {
-    "ui-e2e-smoke": ("run e2e:smoke",),
+    "ui-e2e-smoke": ("run e2e:smoke -- --shard=${{ matrix.shard }}/2",),
     "ui-e2e-server": ("uv sync --all-packages --locked", "run e2e:server -- --project=chromium"),
 }
 """The Playwright command(s) of each end-to-end job, after its install and build."""
@@ -804,6 +804,13 @@ def test_the_two_playwright_suites_and_the_gates_cover_what_one_ui_job_ran() -> 
     assert sum("run e2e:smoke" in c for c in everywhere) == 1
     assert sum("run e2e:server" in c for c in everywhere) == 1
     assert sum("run prove-gates" in c for c in everywhere) == 1
+
+
+def test_the_smoke_suite_runs_in_two_shards() -> None:
+    """Each shard is a job of its own, named for the budget, and none stops the other (#714)."""
+    job = _jobs("ci.yml")["ui-e2e-smoke"]
+    assert job["name"] == "ui (e2e smoke, ${{ matrix.shard }}/2)"
+    assert job["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2]}}
 
 
 @pytest.mark.parametrize("name", UI_WORK_JOBS)
@@ -2864,9 +2871,14 @@ def test_every_ci_job_has_a_time_budget() -> None:
     assert "integration (services, 2/2)" in names
     assert "docs-examples (4/4)" in names
     assert "docs-examples" in names
-    assert {"ui", "ui (gates)", "ui (gate proofs)", "ui (e2e smoke)", "ui (e2e server)"} <= set(
-        names
-    )
+    assert {
+        "ui",
+        "ui (gates)",
+        "ui (gate proofs)",
+        "ui (e2e smoke, 1/2)",
+        "ui (e2e smoke, 2/2)",
+        "ui (e2e server)",
+    } <= set(names)
     errors, _ = check_jobs([JobTime(name, 0.0) for name in names], budgets)
     assert errors == []
 

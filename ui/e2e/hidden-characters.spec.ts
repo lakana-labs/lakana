@@ -3,6 +3,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { ROUTES, stubConnect } from "./connect";
+import { CONNECTIONS_STUBBED, stubConnections } from "./connections";
 import {
   apiPaths,
   expectMarked,
@@ -73,6 +74,11 @@ const LITERAL_CODES: Record<string, string> = {
   AttentionItemOut: "kind",
   CheckResultOut: "outcome",
   ColumnOut: "description_source label_source",
+  ConnectionCreateIn: "kind",
+  ConnectionEnvironmentOut: "actions",
+  ConnectionLastTestOut: "outcome state",
+  ConnectionOut: "actions kind",
+  ConnectionTestOut: "outcome state",
   DeployOut: "actions kind status",
   DeployTriggerOut: "kind",
   DroppedTableOut: "actions",
@@ -640,6 +646,39 @@ walk("the notes and refusals of the place menu mark hidden characters", async ({
   expectOnlyStubbed(paths, PLACES_STUBBED);
 });
 
+walk(
+  "Connections, a connection's page, Add and Delete mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await stubConnections(poisoned(page));
+    // The list names a connection and where it points.
+    await visit(page, "/connections", ["exports", "s3://acme-exports"]);
+    // The page names the assets that declare it and the test's message, which a manager reads.
+    const exported = `/connections/${n("dev")}/${n("exports")}`;
+    await visit(page, exported, [
+      "bronze.exports",
+      "The source refused the secret.",
+      "acme-exports",
+    ]);
+    await visit(page, `${exported}/edit`, ["exports"]);
+    // Add names the environment it starts in.
+    await visit(page, "/connections/new", ["dev"]);
+    // Delete: one still in use names its assets, one that is free names itself.
+    await visit(page, exported, ["exports"]);
+    await page.getByRole("button", { name: "Delete…" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectMarked(page, "the Delete dialog of a connection in use", [
+      "bronze.exports",
+      "silver.exports_clean",
+    ]);
+    await page.keyboard.press("Escape");
+    await visit(page, `/connections/${n("dev")}/${n("scratch")}`, ["scratch"]);
+    await page.getByRole("button", { name: "Delete…" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectMarked(page, "the Delete dialog", ["scratch", "dev"]);
+    expectOnlyStubbed(paths, CONNECTIONS_STUBBED);
+  },
+);
 walk("the job, run and task pages mark hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await stubJobs(poisoned(page));
