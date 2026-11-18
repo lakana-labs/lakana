@@ -13,7 +13,6 @@ import { ConfirmRow, useConfirm } from "../catalog/actions/ConfirmRow";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useAfter } from "../queries/useAfter";
 import { ActionDialog } from "../shell/ActionDialog";
-import { EnvironmentName } from "../shell/EnvironmentPicker";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { useAttempt } from "../sign-in/Attempt";
@@ -117,8 +116,10 @@ export function RollbackDialog({
       <Heading slot="title">{t("jobs.deploys.dialog.title", { repository, environment })}</Heading>
       {protectedEnvironment && (
         <p className="jobs-dialog-protected">
-          <EnvironmentName environment={{ name: environment, protected: true }} />{" "}
-          <span>{t("jobs.deploys.dialog.protected", { environment })}</span>
+          <span className="env-protected" aria-hidden="true">
+            ●
+          </span>{" "}
+          {t("jobs.deploys.dialog.protected", { environment })}
         </p>
       )}
       <p>

@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, type RefObject, useCallback, useRef, useState } from "react";
+import { type JSX, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Label, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -100,6 +100,20 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
   );
   const pages = useRunPages(key, load, 0);
   const rows = pages.items ?? [];
+  // Read again takes its own button away: the focus goes to the line that says the list is read
+  // again, then to the list once it is there, never to the page.
+  const readingAgain = useRef<HTMLParagraphElement>(null);
+  const region = useRef<HTMLDivElement>(null);
+  const wasRestarting = useRef(false);
+  const { restarting } = pages;
+  useEffect(() => {
+    if (restarting) {
+      readingAgain.current?.focus();
+    } else if (wasRestarting.current && document.activeElement === document.body) {
+      region.current?.focus();
+    }
+    wasRestarting.current = restarting;
+  }, [restarting]);
   const loaded = pages.items !== undefined && !pages.busy;
   return (
     <>
@@ -148,6 +162,11 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
           }}
         />
       </div>
+      {pages.restarting && (
+        <p className="jobs-reading" role="status" tabIndex={-1} ref={readingAgain}>
+          {t("jobs.runsTab.readingAgain")}
+        </p>
+      )}
       {pages.shown && (
         <div className="jobs-again">
           <p>{t("jobs.runsTab.stopped")}</p>
@@ -166,6 +185,7 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
         region={t("jobs.runsTab.region")}
         rowsOpen
         scroll="jobs-tab-runs-scroll"
+        regionRef={region}
         head={
           <tr>
             <th scope="col">{t("jobs.runsTab.columns.state")}</th>

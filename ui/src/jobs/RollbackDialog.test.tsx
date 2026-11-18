@@ -170,7 +170,9 @@ describe("RollbackDialog", () => {
     renderDialog({ [JOBS]: CURRENT_JOBS, [DEPLOY]: TARGET }, true);
 
     expect(await screen.findByText("prod is protected.")).toBeInTheDocument();
-    expect(screen.getByRole("dialog")).toHaveTextContent("● prod · protected prod is protected.");
+    // Said once: the danger's dot beside the sentence, never the status and the sentence both.
+    expect(screen.getByRole("dialog")).toHaveTextContent("● prod is protected.");
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("· protected");
   });
 
   it("sends the rollback once with the commit and hands back the deploy's id", async () => {

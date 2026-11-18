@@ -240,6 +240,11 @@ describe("DeploysTab", () => {
       expect(button).toHaveFocus();
     });
     expect(screen.getByText("Rolling back analytics in prod to 4f9d2a7…")).toBeInTheDocument();
+    // While it runs, the row's button stays but starts no second rollback.
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    await user.click(button);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(button).toHaveFocus();
     read.release({ status: 200, body: rollbackRow });
 
     // The note's read finds it succeeded: the list and the current versions are read again, and
@@ -254,6 +259,67 @@ describe("DeploysTab", () => {
     expect(
       screen.queryByRole("button", { name: "Roll back to this… (analytics at 4f9d2a7)" }),
     ).toBeNull();
+    await waitFor(() => {
+      expect(
+        screen.getByText("Rolled back analytics in prod to 4f9d2a7.").closest("[tabindex]"),
+      ).toHaveFocus();
+    });
+  });
+
+  it("hands the focus to the note when the list answers before the current versions", async () => {
+    let rolledBack = false;
+    const versions = held();
+    const rollbackRow = aDeploy({
+      id: "d-rollback",
+      kind: "rollback",
+      requested_ref: null,
+      created_at: "2026-11-18T08:00:00Z",
+    });
+    const { server, user } = renderTab(
+      () => list(rolledBack ? [rollbackRow, NOW, aDeploy()] : [NOW, aDeploy()]),
+      "/jobs/deploys?environment=prod",
+      () => (rolledBack ? versions.route() : { status: 200, body: [CURRENT] }),
+    );
+    server.route({
+      "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
+      "GET /api/v1/environments/prod/deploys/d-rollback": () => {
+        rolledBack = true;
+        return { status: 200, body: rollbackRow };
+      },
+      [`GET /api/v1/environments/prod/deploys/${aDeploy().id}`]: {
+        status: 200,
+        body: aDeploy({ jobs: [] }),
+      },
+      "POST /api/v1/environments/prod/deploys": {
+        status: 202,
+        body: { id: "d-rollback", status: "queued" },
+      },
+    });
+
+    const button = await screen.findByRole("button", {
+      name: "Roll back to this… (analytics at 4f9d2a7)",
+    });
+    await user.click(button);
+    await user.click(await screen.findByRole("button", { name: "Roll back" }));
+    expect(
+      await screen.findByText("Rolled back analytics in prod to 4f9d2a7."),
+    ).toBeInTheDocument();
+    // The list is read again first; the button is still there, as the old versions are.
+    await waitFor(() => {
+      expect(screen.getAllByRole("row")).toHaveLength(4);
+    });
+    await waitFor(() => {
+      expect(button).toHaveFocus();
+    });
+
+    // Then the current versions answer, and the button leaves with the focus.
+    versions.release({
+      status: 200,
+      body: [aDeployment({ project_version_id: DEPLOY_VERSION })],
+    });
+    await waitFor(() => {
+      expect(button).not.toBeInTheDocument();
+    });
     await waitFor(() => {
       expect(
         screen.getByText("Rolled back analytics in prod to 4f9d2a7.").closest("[tabindex]"),

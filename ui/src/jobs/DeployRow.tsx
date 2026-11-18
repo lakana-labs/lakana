@@ -33,6 +33,11 @@ export interface DeployRowProps {
   readonly current: boolean;
   /** Opens the rollback's question; null where the rollback is not offered. */
   readonly onRollBack: (() => void) | null;
+  /**
+   * Whether a rollback of the repository is being followed, so Roll back to this… waits and
+   * opens nothing; no by default. The button stays, so the focus it may hold stays too.
+   */
+  readonly held?: boolean;
 }
 
 /**
@@ -45,9 +50,15 @@ export interface DeployRowProps {
  * @param props.deploy - The deploy.
  * @param props.current - Whether it is current.
  * @param props.onRollBack - Opens the rollback's question.
+ * @param props.held - Whether a rollback of the repository is being followed.
  * @returns The row.
  */
-export function DeployRow({ deploy, current, onRollBack }: DeployRowProps): JSX.Element {
+export function DeployRow({
+  deploy,
+  current,
+  onRollBack,
+  held = false,
+}: DeployRowProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const commit = deployCommit(deploy);
@@ -90,7 +101,15 @@ export function DeployRow({ deploy, current, onRollBack }: DeployRowProps): JSX.
       </td>
       <td>
         {onRollBack !== null && (
-          <Button className="button" onPress={onRollBack}>
+          <Button
+            className="button"
+            {...(held ? { "aria-disabled": true } : {})}
+            onPress={() => {
+              if (!held) {
+                onRollBack();
+              }
+            }}
+          >
             {t("jobs.deploys.rollBack")}{" "}
             {/* The name says which deploy, after the visible words (WCAG 2.5.3). */}
             <span className="visually-hidden">

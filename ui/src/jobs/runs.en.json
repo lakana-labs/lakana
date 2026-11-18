@@ -32,6 +32,7 @@
   "clear": "Clear filters",
   "stopped": "This list is no longer read again while more runs are shown.",
   "readAgain": "Read again",
+  "readingAgain": "Reading the runs again from the first page…",
   "selection": "selection {{patterns}}",
   "resumeOf": "resume of {{id}}",
   "ofTasks": "{{ended}} of {{total}} tasks",

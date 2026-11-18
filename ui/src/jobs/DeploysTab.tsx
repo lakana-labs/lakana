@@ -36,6 +36,18 @@ interface Rolled {
   readonly repository: string;
   /** The commit, as the list writes it. */
   readonly commit: string;
+  /** Whether it succeeded or failed. */
+  readonly ended: boolean;
+}
+
+/**
+ * A followed rollback, marked as ended.
+ *
+ * @param previous - The rollback, or null for none.
+ * @returns It, ended.
+ */
+function markEnded(previous: Rolled | null): Rolled | null {
+  return previous === null ? null : { ...previous, ended: true };
 }
 
 /** The Repository menu's choice of every repository; a repository's choice is `repo:` and its name. */
@@ -88,9 +100,12 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   const { reload: reloadPages } = pages;
   const { reload: reloadDeployments } = deployments;
   const onEnded = useCallback(() => {
+    setRolled(markEnded);
     reloadPages();
     reloadDeployments();
-  }, [reloadPages, reloadDeployments]);
+  }, [reloadPages, reloadDeployments, setRolled]);
+  // While a rollback runs, its repository offers no second one.
+  const following = rolled !== null && !rolled.ended ? rolled.repository : null;
   const area = useRef<HTMLDivElement>(null);
   const note = useRef<HTMLDivElement>(null);
   // The element of the list that last had the focus.
@@ -105,14 +120,15 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
       element?.removeEventListener("focusin", onFocusIn);
     };
   }, []);
-  // Once the rows change: a row's button that left the list with the focus hands it to the note.
+  // Once the rows or the current versions change (they answer in either order, and either can
+  // take a row's button away): a button that left the list with the focus hands it to the note.
   // A dialog that closes hands the focus back to its button itself.
   useEffect(() => {
     const lost = last.current;
     if (lost !== null && !lost.isConnected && document.activeElement === document.body) {
       note.current?.focus();
     }
-  }, [pages.items]);
+  }, [pages.items, deployments.data]);
   const rows = pages.items ?? [];
   return (
     <div ref={area}>
@@ -187,6 +203,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
                   }
                 : null
             }
+            held={deploy.repository === following}
           />
         ))}
       </ViewList>
@@ -214,6 +231,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
                 id,
                 repository: rolling.repository,
                 commit: rolling.resolved_sha.slice(0, 7),
+                ended: false,
               });
               setRolling(null);
             }}

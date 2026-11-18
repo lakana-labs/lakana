@@ -19,8 +19,13 @@ import { LIST_EVERY_MS } from "./poll";
 export interface RunPages extends CursorPages<RunOut> {
   /** Whether Show more read a page, so the first page is no longer read again. */
   readonly shown: boolean;
-  /** Drops the pages Show more read and reads the first page again at once. */
+  /**
+   * Drops the pages Show more read and reads the first page again at once; until it answers, the
+   * list shows no rows, never the first page as it was read before.
+   */
   readonly restart: () => void;
+  /** Whether a restart's first read is still open. */
+  readonly restarting: boolean;
 }
 
 /** No rows, the same array on every render. */
@@ -77,10 +82,19 @@ export function useRunPages(
     current.current = key;
   }, [key]);
   const extra = more !== null && more.key === key ? more : null;
-  const first = useCallback(
-    async () => ({ key, page: await load(null, { background: true }) }),
-    [key, load],
-  );
+  // The filter whose first read failed last: the poll keeps its error when the filter changes,
+  // and that error is not the new filter's.
+  const [failedKey, setFailedKey] = useState<string | null>(null);
+  const first = useCallback(async () => {
+    try {
+      return { key, page: await load(null, { background: true }) };
+    } catch (failure: unknown) {
+      setFailedKey(key);
+      throw failure;
+    }
+  }, [key, load]);
+  // The first page as it was when Read again was pressed, which is not shown again.
+  const [stale, setStale] = useState<unknown>(null);
   const still = extra !== null && (extra.shown || extra.busy);
   const poll = useLivePoll(first, { everyMs: LIST_EVERY_MS, active: !still });
   const { reload } = poll;
@@ -92,7 +106,8 @@ export function useRunPages(
       reload();
     }
   }, [revision, reload]);
-  const data = poll.data?.key === key ? poll.data.page : undefined;
+  const data = poll.data?.key === key && poll.data !== stale ? poll.data.page : undefined;
+  const pollError = failedKey === key ? poll.error : null;
   // What Show more goes on from: the pages it read, or the first page as it is now.
   const from =
     extra?.shown === true
@@ -128,14 +143,16 @@ export function useRunPages(
   };
   return {
     items,
-    error: data === undefined ? poll.error : (extra?.error ?? (quiet ? null : poll.error)),
-    busy: (data === undefined && poll.error === null) || extra?.busy === true,
+    error: data === undefined ? pollError : (extra?.error ?? (quiet ? null : pollError)),
+    busy: (data === undefined && pollError === null) || extra?.busy === true,
     hasMore: next !== null,
     loadMore,
     reload,
     shown: extra?.shown === true,
     restart: () => {
+      setStale(poll.data ?? null);
       setMore(null);
     },
+    restarting: stale !== null && poll.data === stale && pollError === null,
   };
 }

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunOut } from "../api/jobs";
 import { aJobRun, ENVIRONMENTS } from "../test/jobs";
+import { held } from "../test/pending";
 import { type FakeRoute, fakeServer } from "../test/server";
 import { RunsTab } from "./RunsTab";
 
@@ -242,6 +243,81 @@ describe("RunsTab", () => {
     });
     expect(screen.queryByRole("button", { name: "Read again" })).toBeNull();
     expect(screen.getByRole("button", { name: "Show more" })).toBeInTheDocument();
+  });
+
+  it("Read again shows no old rows while it reads, then the list with the focus in it", async () => {
+    let reads = 0;
+    const again = held();
+    const { user } = renderTab(async (request) => {
+      if (request.path.includes("cursor=c1")) {
+        return { status: 200, body: { items: [oldest], next_cursor: null } };
+      }
+      reads += 1;
+      return reads === 1
+        ? { status: 200, body: { items: [newer, older], next_cursor: "c1" } }
+        : await again.route();
+    });
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+    await user.click(await screen.findByRole("button", { name: "Read again" }));
+
+    const status = await screen.findByText("Reading the runs again from the first page…");
+    expect(status).toHaveFocus();
+    expect(screen.queryByRole("region", { name: "Runs listed" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "orders_hourly" })).toBeNull();
+
+    again.release({
+      status: 200,
+      body: {
+        items: [aJobRun({ id: "r-fresh", job: "weekly_report", tasks: [] })],
+        next_cursor: null,
+      },
+    });
+    const region = await screen.findByRole("region", { name: "Runs listed" });
+    expect(within(region).getByRole("link", { name: "weekly_report" })).toBeInTheDocument();
+    expect(within(region).queryByRole("link", { name: "orders_hourly" })).toBeNull();
+    await waitFor(() => {
+      expect(region).toHaveFocus();
+    });
+    expect(screen.queryByText("Reading the runs again from the first page…")).toBeNull();
+  });
+
+  it("says a failed Read again, with Try again", async () => {
+    let reads = 0;
+    const { user } = renderTab((request) => {
+      if (request.path.includes("cursor=c1")) {
+        return { status: 200, body: { items: [oldest], next_cursor: null } };
+      }
+      reads += 1;
+      return reads === 1
+        ? { status: 200, body: { items: [newer], next_cursor: "c1" } }
+        : { status: 503, body: { type: "Unavailable", detail: "The server is busy." } };
+    });
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+    await user.click(await screen.findByRole("button", { name: "Read again" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy.");
+    expect(screen.queryByText("Reading the runs again from the first page…")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Runs listed" })).toBeNull();
+  });
+
+  it("shows no error of the previous filter under a new one", async () => {
+    const next = held();
+    const { user } = renderTab(async (request) =>
+      request.path.includes("status=failed")
+        ? await next.route()
+        : { status: 503, body: { type: "Unavailable", detail: "The server is busy." } },
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy.");
+
+    await user.click(screen.getByRole("button", { name: /State/u }));
+    await user.click(screen.getByRole("option", { name: "Failed" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+
+    next.release({ status: 200, body: { items: [older], next_cursor: null } });
+    expect(await screen.findByRole("link", { name: "nightly_sales" })).toBeInTheDocument();
   });
 
   it("says no runs match and clears the filters", async () => {
