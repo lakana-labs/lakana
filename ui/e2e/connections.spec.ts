@@ -360,130 +360,125 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.getByRole("columnheader", { name: "Used by" })).toBeVisible();
         await expect(rowOf(page, EXPORTS).locator(".narrow-only")).toBeHidden();
       });
-
-      test("opening /connections loads its chunk, and the first load does not", async ({
-        page,
-      }) => {
-        await stubConnections(page);
-        const scripts: string[] = [];
-        page.on("request", (request) => {
-          if (request.resourceType() === "script") {
-            scripts.push(new URL(request.url()).pathname);
-          }
-        });
-        const chunk = (name: string) => (path: string) =>
-          new RegExp(`/${name}-[^/]+\\.js$`, "u").test(path);
-
-        await page.goto("/");
-        await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-        expect(scripts.filter(chunk("ConnectionsScreen")), "the first load").toEqual([]);
-        expect(scripts.filter(chunk("ConnectionForm")), "the first load").toEqual([]);
-        const before = scripts.length;
-
-        await page
-          .getByRole("navigation", { name: "Areas" })
-          .getByRole("link", { name: "Connections" })
-          .click();
-        await expect(page.getByRole("link", { name: EXPORTS, exact: true })).toBeVisible();
-        expect(scripts.slice(before).filter(chunk("ConnectionsScreen")), "the list").toHaveLength(
-          1,
-        );
-        // The form's chunk waits for Add and Edit.
-        expect(scripts.filter(chunk("ConnectionForm")), "the list").toEqual([]);
-
-        await page.getByRole("link", { name: "Add connection" }).click();
-        await expect(page.getByRole("radiogroup", { name: "Kind" })).toBeVisible();
-        expect(scripts.filter(chunk("ConnectionForm")), "Add").toHaveLength(1);
-      });
-
-      test("the screen asks only for stubbed routes and logs no console error and no CSP violation", async ({
-        page,
-        context,
-        browserName,
-      }) => {
-        test.skip(browserName !== "chromium", "the virtual authenticator is CDP");
-        const stub = await stubConnections(page);
-        await addAdminPasskey(context, page);
-        await recordCspViolations(page);
-        const errors = consoleErrors(page);
-        const requests: string[] = [];
-        const open = new Set<Request>();
-        page.on("request", (request) => {
-          requests.push(request.url());
-          open.add(request);
-        });
-        page.on("requestfinished", (request) => open.delete(request));
-        page.on("requestfailed", (request) => open.delete(request));
-
-        await openList(page, `${ORIGIN}/connections`);
-        // A Test on a row, then the running one turns done by its reads.
-        await rowOf(page, SCRATCH)
-          .getByRole("button", { name: `Test ${SCRATCH}` })
-          .click();
-        await expect(rowOf(page, SCRATCH)).toContainText(/OK · /u, { timeout: 15_000 });
-        await expect(rowOf(page, NIGHTLY)).toContainText(/OK · /u, { timeout: 15_000 });
-        expect(stub.reads(DEV, NIGHTLY), "nightly was read").toBeGreaterThanOrEqual(3);
-
-        // Test all in one environment.
-        await page.getByRole("button", { name: /^Environment: / }).click();
-        await page.getByRole("option", { name: DEV, exact: true }).click();
-        await page.getByRole("button", { name: `Test all in ${DEV}` }).click();
-        await expect(
-          page.getByRole("status").filter({ hasText: /^Tested 4 connections/u }),
-        ).toBeVisible({ timeout: 15_000 });
-
-        // A page, an edit with its touch, and a delete.
-        await rowOf(page, SCRATCH).getByRole("link", { name: SCRATCH, exact: true }).click();
-        await page.getByRole("link", { name: "Edit" }).click();
-        await page.getByRole("textbox", { name: "path" }).fill("scratch-two");
-        await page.getByRole("button", { name: "Save" }).click();
-        await expect(
-          page.getByRole("status").filter({ hasText: `Saved ${SCRATCH}.` }),
-        ).toBeVisible();
-        await page.getByRole("button", { name: "Delete…" }).click();
-        await page
-          .getByRole("dialog", { name: `Delete the connection ${SCRATCH} in ${DEV}?` })
-          .getByRole("button", { name: "Delete" })
-          .click();
-        await expect(page).toHaveURL(`${ORIGIN}/connections`);
-
-        // Add, and its Test now.
-        await page.getByRole("link", { name: "Add connection" }).click();
-        await chooseKind(page, "Directory");
-        await page.getByRole("textbox", { name: "Name" }).fill(CREATED);
-        await page.getByRole("textbox", { name: "root" }).fill("landing");
-        await page.getByRole("textbox", { name: "path" }).fill("events");
-        await page.getByRole("button", { name: "Save" }).click();
-        await expect(page).toHaveURL(`${ORIGIN}/connections/${DEV}/${CREATED}`);
-        await page.getByRole("button", { name: "Test now" }).click();
-        await expect(page.getByRole("button", { name: "Testing…" })).toBeVisible();
-        await expect.poll(() => open.size, { timeout: 15_000 }).toBeLessThanOrEqual(1);
-
-        const api = requests
-          .filter((url) => url.includes("/api/"))
-          .map((url) => new URL(url).pathname);
-        expect(api).toContain("/api/v1/connections/environments");
-        expect(api.filter((path) => !CONNECTIONS_STUBBED.includes(path))).toEqual([]);
-        expect(stub.sent).toEqual([
-          `POST /api/v1/environments/${DEV}/connections/${SCRATCH}/tests`,
-          `POST /api/v1/environments/${DEV}/connection-tests`,
-          `PATCH /api/v1/environments/${DEV}/connections/${SCRATCH}`,
-          "POST /api/v1/sign-in/step-up/options",
-          "POST /api/v1/sign-in/step-up",
-          `PATCH /api/v1/environments/${DEV}/connections/${SCRATCH}`,
-          `DELETE /api/v1/environments/${DEV}/connections/${SCRATCH}`,
-          `POST /api/v1/environments/${DEV}/connections`,
-          "POST /api/v1/sign-in/step-up/options",
-          "POST /api/v1/sign-in/step-up",
-          `POST /api/v1/environments/${DEV}/connections`,
-          `POST /api/v1/environments/${DEV}/connections/${CREATED}/tests`,
-        ]);
-        expect(await cspViolations(page)).toEqual([]);
-        // The browser logs each 403 of a step-up the stubs ask for (the create and the update),
-        // and nothing else.
-        expect(errors.filter((error) => !error.includes("status of 403"))).toEqual([]);
-        expect(errors.filter((error) => error.includes("status of 403"))).toHaveLength(2);
-      });
     });
   }
 }
+
+// What follows does not depend on the theme or the density, so it runs once, not four times.
+test.describe("the Connections screen, once", () => {
+  test("opening /connections loads its chunk, and the first load does not", async ({ page }) => {
+    await stubConnections(page);
+    const scripts: string[] = [];
+    page.on("request", (request) => {
+      if (request.resourceType() === "script") {
+        scripts.push(new URL(request.url()).pathname);
+      }
+    });
+    const chunk = (name: string) => (path: string) =>
+      new RegExp(`/${name}-[^/]+\\.js$`, "u").test(path);
+
+    await page.goto("/");
+    await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+    expect(scripts.filter(chunk("ConnectionsScreen")), "the first load").toEqual([]);
+    expect(scripts.filter(chunk("ConnectionForm")), "the first load").toEqual([]);
+    const before = scripts.length;
+
+    await page
+      .getByRole("navigation", { name: "Areas" })
+      .getByRole("link", { name: "Connections" })
+      .click();
+    await expect(page.getByRole("link", { name: EXPORTS, exact: true })).toBeVisible();
+    expect(scripts.slice(before).filter(chunk("ConnectionsScreen")), "the list").toHaveLength(1);
+    // The form's chunk waits for Add and Edit.
+    expect(scripts.filter(chunk("ConnectionForm")), "the list").toEqual([]);
+
+    await page.getByRole("link", { name: "Add connection" }).click();
+    await expect(page.getByRole("radiogroup", { name: "Kind" })).toBeVisible();
+    expect(scripts.filter(chunk("ConnectionForm")), "Add").toHaveLength(1);
+  });
+
+  test("the screen asks only for stubbed routes and logs no console error and no CSP violation", async ({
+    page,
+    context,
+    browserName,
+  }) => {
+    test.skip(browserName !== "chromium", "the virtual authenticator is CDP");
+    const stub = await stubConnections(page);
+    await addAdminPasskey(context, page);
+    await recordCspViolations(page);
+    const errors = consoleErrors(page);
+    const requests: string[] = [];
+    const open = new Set<Request>();
+    page.on("request", (request) => {
+      requests.push(request.url());
+      open.add(request);
+    });
+    page.on("requestfinished", (request) => open.delete(request));
+    page.on("requestfailed", (request) => open.delete(request));
+
+    await openList(page, `${ORIGIN}/connections`);
+    // A Test on a row, then the running one turns done by its reads.
+    await rowOf(page, SCRATCH)
+      .getByRole("button", { name: `Test ${SCRATCH}` })
+      .click();
+    await expect(rowOf(page, SCRATCH)).toContainText(/OK · /u, { timeout: 15_000 });
+    await expect(rowOf(page, NIGHTLY)).toContainText(/OK · /u, { timeout: 15_000 });
+    expect(stub.reads(DEV, NIGHTLY), "nightly was read").toBeGreaterThanOrEqual(3);
+
+    // Test all in one environment.
+    await page.getByRole("button", { name: /^Environment: / }).click();
+    await page.getByRole("option", { name: DEV, exact: true }).click();
+    await page.getByRole("button", { name: `Test all in ${DEV}` }).click();
+    await expect(
+      page.getByRole("status").filter({ hasText: /^Tested 4 connections/u }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    // A page, an edit with its touch, and a delete.
+    await rowOf(page, SCRATCH).getByRole("link", { name: SCRATCH, exact: true }).click();
+    await page.getByRole("link", { name: "Edit" }).click();
+    await page.getByRole("textbox", { name: "path" }).fill("scratch-two");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByRole("status").filter({ hasText: `Saved ${SCRATCH}.` })).toBeVisible();
+    await page.getByRole("button", { name: "Delete…" }).click();
+    await page
+      .getByRole("dialog", { name: `Delete the connection ${SCRATCH} in ${DEV}?` })
+      .getByRole("button", { name: "Delete" })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/connections`);
+
+    // Add, and its Test now.
+    await page.getByRole("link", { name: "Add connection" }).click();
+    await chooseKind(page, "Directory");
+    await page.getByRole("textbox", { name: "Name" }).fill(CREATED);
+    await page.getByRole("textbox", { name: "root" }).fill("landing");
+    await page.getByRole("textbox", { name: "path" }).fill("events");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page).toHaveURL(`${ORIGIN}/connections/${DEV}/${CREATED}`);
+    await page.getByRole("button", { name: "Test now" }).click();
+    await expect(page.getByRole("button", { name: "Testing…" })).toBeVisible();
+    await expect.poll(() => open.size, { timeout: 15_000 }).toBeLessThanOrEqual(1);
+
+    const api = requests.filter((url) => url.includes("/api/")).map((url) => new URL(url).pathname);
+    expect(api).toContain("/api/v1/connections/environments");
+    expect(api.filter((path) => !CONNECTIONS_STUBBED.includes(path))).toEqual([]);
+    expect(stub.sent).toEqual([
+      `POST /api/v1/environments/${DEV}/connections/${SCRATCH}/tests`,
+      `POST /api/v1/environments/${DEV}/connection-tests`,
+      `PATCH /api/v1/environments/${DEV}/connections/${SCRATCH}`,
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      `PATCH /api/v1/environments/${DEV}/connections/${SCRATCH}`,
+      `DELETE /api/v1/environments/${DEV}/connections/${SCRATCH}`,
+      `POST /api/v1/environments/${DEV}/connections`,
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      `POST /api/v1/environments/${DEV}/connections`,
+      `POST /api/v1/environments/${DEV}/connections/${CREATED}/tests`,
+    ]);
+    expect(await cspViolations(page)).toEqual([]);
+    // The browser logs each 403 of a step-up the stubs ask for (the create and the update),
+    // and nothing else.
+    expect(errors.filter((error) => !error.includes("status of 403"))).toEqual([]);
+    expect(errors.filter((error) => error.includes("status of 403"))).toHaveLength(2);
+  });
+});
