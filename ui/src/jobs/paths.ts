@@ -1,8 +1,10 @@
 /**
- * The addresses of the Jobs screen: the list, a job, a run, and a task of a run.
+ * The addresses of the Jobs screen: the list, the Runs and Deploys tabs, a job, a run, and a task
+ * of a run.
  *
  * @packageDocumentation
  */
+import type { AllRunsFilter } from "../api/jobs";
 
 /**
  * The address of the Jobs list, filtered to one environment or showing all of them.
@@ -14,6 +16,46 @@ export function jobsListPath(environment: string | null): string {
   return environment === null
     ? "/jobs"
     : `/jobs?${new URLSearchParams({ environment }).toString()}`;
+}
+
+/**
+ * The address of the Runs tab, filtered to one environment and to some states.
+ *
+ * @param filter - The environment (null or absent for all) and the states (absent or empty for
+ *   all).
+ * @returns The path, the filter encoded.
+ */
+export function runsTabPath(
+  filter: Partial<Pick<AllRunsFilter, "environment" | "status">>,
+): string {
+  const query = new URLSearchParams();
+  if (filter.environment !== undefined && filter.environment !== null) {
+    query.set("environment", filter.environment);
+  }
+  if (filter.status !== undefined && filter.status.length > 0) {
+    query.set("status", filter.status.join(","));
+  }
+  const search = query.toString();
+  return search === "" ? "/jobs/runs" : `/jobs/runs?${search}`;
+}
+
+/**
+ * The address of the Deploys tab, filtered to one environment and one repository.
+ *
+ * @param environment - The environment; null for the one the tab chooses.
+ * @param repository - The repository; null or absent for all.
+ * @returns The path, the filter encoded.
+ */
+export function deploysPath(environment: string | null, repository: string | null = null): string {
+  const query = new URLSearchParams();
+  if (environment !== null) {
+    query.set("environment", environment);
+  }
+  if (repository !== null) {
+    query.set("repository", repository);
+  }
+  const search = query.toString();
+  return search === "" ? "/jobs/deploys" : `/jobs/deploys?${search}`;
 }
 
 /**

@@ -299,6 +299,7 @@ function run(id: string, over: Partial<RunOut> = {}): RunOut {
     status: "queued",
     cancel_requested: false,
     triggered_by: "admin",
+    resumed_from_run_id: null,
     selection: {},
     error_message: null,
     created_at: "2026-11-17T09:30:00Z",

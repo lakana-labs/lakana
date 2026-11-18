@@ -273,7 +273,7 @@ describe("the Jobs list's calls", () => {
     const second = await listAllRuns(
       { ...ALL_RUNS, status: ["queued", "running"] },
       first.nextCursor,
-      10,
+      { limit: 10, background: false },
     );
 
     expect(first).toEqual({ items: [aJobRun()], nextCursor: "c1" });
@@ -282,7 +282,10 @@ describe("the Jobs list's calls", () => {
       "/api/v1/runs?status=queued%2Crunning&limit=50",
       "/api/v1/runs?status=queued%2Crunning&limit=10&cursor=c1",
     ]);
-    expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
+    expect(server.sent.map((request) => request.headers["x-lakana-background"])).toEqual([
+      "1",
+      undefined,
+    ]);
   });
 
   it("adds environment, trigger, job, repository and since only when set", async () => {

@@ -184,6 +184,8 @@ export interface RunOut {
   readonly cancel_requested: boolean;
   /** Who started it. */
   readonly triggered_by: string | null;
+  /** The run a resume continues; null for a run that is not a resume. */
+  readonly resumed_from_run_id: string | null;
   /** The patterns and flags it was started with. */
   readonly selection: Readonly<Record<string, unknown>>;
   /** The run-level failure, in the server's words; null for none. */
@@ -427,18 +429,25 @@ export function listJobs(environment: string, repository?: string): Promise<read
 
 /**
  * Lists the runs of every environment the person may read, or of one, newest first, one page at
- * a time; a poll.
+ * a time; a poll unless asked otherwise.
  *
  * @param filter - What narrows the list.
  * @param cursor - The cursor of the page, or null for the first.
- * @param limit - How many runs a page holds; 50 by default.
+ * @param options - How many runs a page holds (50 by default), and whether the read is a
+ *   background poll that never counts as the person's activity (yes by default; no for Show
+ *   more).
+ * @param options.limit - How many runs a page holds.
+ * @param options.background - Whether the read is a background poll.
  * @returns The page, with the cursor from the body; its runs have no tasks.
  * @throws {ApiError} for a refusal; with an environment, 403 or 404 as for its own list.
  */
 export async function listAllRuns(
   filter: AllRunsFilter,
   cursor: string | null,
-  limit = RUNS_PAGE,
+  {
+    limit = RUNS_PAGE,
+    background = true,
+  }: { readonly limit?: number; readonly background?: boolean } = {},
 ): Promise<CursorPage<RunOut>> {
   const query = new URLSearchParams();
   if (filter.environment !== null) {
@@ -464,7 +473,7 @@ export async function listAllRuns(
     query.set("cursor", cursor);
   }
   const page = await api.request<RunPageOut>("GET", withQuery("/api/v1/runs", query), undefined, {
-    background: true,
+    background,
   });
   return { items: page.items, nextCursor: page.next_cursor };
 }

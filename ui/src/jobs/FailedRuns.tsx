@@ -17,8 +17,9 @@ import "./jobStrings";
 import "./listStrings";
 import { ListSection, RowEnd } from "./ListSection";
 import { jobRunPath, taskPath } from "./paths";
+import { RunCells, runName } from "./RunCells";
 import { ResumeRunButton } from "./RunControls";
-import { RunCells, runName, type SectionProps } from "./RunningNow";
+import type { SectionProps } from "./RunningNow";
 import { matchesSearch } from "./useJobsFilter";
 import { useListPoll } from "./useListPoll";
 

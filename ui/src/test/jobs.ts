@@ -114,6 +114,7 @@ export function aJobRun(over: Partial<RunOut> = {}): RunOut {
     status: "succeeded",
     cancel_requested: false,
     triggered_by: "ana.nowak",
+    resumed_from_run_id: null,
     selection: {},
     error_message: null,
     created_at: "2026-11-17T01:00:00Z",

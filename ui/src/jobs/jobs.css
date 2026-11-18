@@ -191,6 +191,43 @@
   margin: 0;
 }
 
+/* The Runs tab's field "Job": its label beside the input, as the menus beside it have. */
+.jobs-find .jobs-job-field {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.jobs-job-field input {
+  width: min(200px, 100%);
+}
+
+/* The line that says the Runs tab stopped reading again, with Read again beside it. */
+.jobs-again {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.jobs-again p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+/* The run a resume continues: a link of its own above the row's link, in the accent and
+   underlined, so colour does not stand alone. */
+.jobs-run-origin {
+  position: relative;
+  color: var(--color-accent);
+}
+
+.jobs-run-origin:hover {
+  color: var(--color-accent-hover);
+}
+
 /* The two tables: no narrower than their columns need, scrolling in their own region; more
    specific than the Catalog's wider minimum, which stays in the document once it was loaded. */
 .list-scroll.jobs-runs-scroll .list {
@@ -213,10 +250,15 @@
   min-width: 960px;
 }
 
+.list-scroll.jobs-tab-runs-scroll .list {
+  min-width: 960px;
+}
+
 /* The lists' names stay whole; the table scrolls in its region instead of breaking a word. */
 .list-scroll.jobs-running-scroll .row-name,
 .list-scroll.jobs-failed-scroll .row-name,
-.list-scroll.jobs-all-scroll .row-name {
+.list-scroll.jobs-all-scroll .row-name,
+.list-scroll.jobs-tab-runs-scroll .row-name {
   overflow-wrap: normal;
 }
 
@@ -291,6 +333,7 @@
 .jobs-waiting a,
 .jobs-note a,
 .jobs-fact a,
+.jobs-list-more a,
 .jobs-section .empty a {
   color: var(--color-accent);
 }
@@ -299,6 +342,7 @@
 .jobs-waiting a:hover,
 .jobs-note a:hover,
 .jobs-fact a:hover,
+.jobs-list-more a:hover,
 .jobs-section .empty a:hover {
   color: var(--color-accent-hover);
 }
