@@ -213,6 +213,13 @@
   min-width: 960px;
 }
 
+/* The lists' names stay whole; the table scrolls in its region instead of breaking a word. */
+.list-scroll.jobs-running-scroll .row-name,
+.list-scroll.jobs-failed-scroll .row-name,
+.list-scroll.jobs-all-scroll .row-name {
+  overflow-wrap: normal;
+}
+
 /* A task's table breaks after a dot or an underscore (`VisibleText` with `breakable`), never
    inside a word. */
 .list-scroll.jobs-tasks-scroll .row-name {

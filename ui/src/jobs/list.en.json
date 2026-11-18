@@ -36,7 +36,9 @@
     "region": "Runs that failed",
     "empty": "No job failed in the last 7 days.",
     "truncated": "More failed runs than shown; choose an environment.",
-    "logsName": "Logs of the run of {{name}}"
+    "logsName": "Logs of the run of {{name}}",
+    "unknownCause": "The platform failed in a way it did not expect.",
+    "unknownNextStep": "Open the run; if the cause is not clear, ask the operator for the worker's log and report it with the run id."
   },
   "all": {
     "heading": "All jobs",

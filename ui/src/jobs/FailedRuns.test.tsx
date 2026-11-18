@@ -128,6 +128,20 @@ describe("FailedRuns", () => {
     );
   });
 
+  it("says the reference's internal cause when the run has neither a failed task nor a message", async () => {
+    renderFailed(
+      failedRoute([
+        aFailedRun({ run: { ...OF_NO_JOB.run, error_message: null }, task: null, failure: null }),
+      ]),
+    );
+
+    await screen.findByRole("region", { name: "Runs that failed" });
+    const [row] = bodyRows();
+    expect(row).toHaveTextContent(
+      "internal (opens in a new tab): The platform failed in a way it did not expect. — Open the run;",
+    );
+  });
+
   it("Logs opens the failing task, or the run without one", async () => {
     renderFailed(failedRoute([aFailedRun(), OF_NO_JOB]));
 

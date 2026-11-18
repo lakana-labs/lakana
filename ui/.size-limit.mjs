@@ -90,6 +90,9 @@ const NAMED_LIMITS = [
   // server's rows with the failing task's code, cause and next step, Resume and Logs) and All
   // jobs (each environment's jobs, four read at once, with their schedule, last and next run,
   // Run and Pause or Resume), each read every 30 s while the tab is visible, and their strings.
+  // Measured 4.91 kB (2026-11-18) after review: the sections start afresh for each filter, and a
+  // failed run with neither a failed task nor a message says the reference's internal cause; the
+  // limit holds.
   { name: "the Jobs list", prefix: "JobsList-", limit: "5.23 kB" },
   // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
   // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and

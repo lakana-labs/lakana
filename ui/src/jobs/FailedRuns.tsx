@@ -27,9 +27,9 @@ import { useListPoll } from "./useListPoll";
  * attention uses, so the two never disagree), narrowed only by the search, read every 30 s while
  * the tab is visible. Each row names its job (its repository for a run of no job) as the link to
  * the run, its environment, when it ended and why it failed: the failing task's code, cause and
- * next step, or the run's own message when no task failed. Resume is offered when the server
- * lists it; Logs opens the failing task, or the run without one. A line says when the server cut
- * the list.
+ * next step, the run's own message when no task failed, or else the reference's `internal`.
+ * Resume is offered when the server lists it; Logs opens the failing task, or the run without
+ * one. A line says when the server cut the list.
  *
  * @param props - The environment, the search, the reload key and what to tell of a change.
  * @param props.environment - The environment chosen.
@@ -86,10 +86,21 @@ export function FailedRuns({
             )}
           </td>
           <td className="jobs-why-cell">
-            {failure !== null ? (
-              <FailureLine failure={failure} inline />
+            {failure === null && run.error_message !== null ? (
+              <VisibleText text={run.error_message} />
             ) : (
-              run.error_message !== null && <VisibleText text={run.error_message} />
+              <FailureLine
+                failure={
+                  failure ?? {
+                    // Neither a failed task nor the run's own message: the reference's
+                    // `internal`, so the row never fails without saying why.
+                    code: "internal",
+                    cause: t("jobs.list.failed.unknownCause"),
+                    next_step: t("jobs.list.failed.unknownNextStep"),
+                  }
+                }
+                inline
+              />
             )}
           </td>
           <RowEnd>

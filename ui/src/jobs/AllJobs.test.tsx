@@ -350,6 +350,20 @@ describe("AllJobs", () => {
     expect(await screen.findByText("No job is deployed in dev.")).toBeInTheDocument();
   });
 
+  it("marks hidden characters of an environment's name in its sentences", async () => {
+    renderAll(["d\u200Bev"], { [jobsOf("d\u200Bev")]: { status: 200, body: [] } });
+    expect(await screen.findByText("No job is deployed in dU+200Bev.")).toBeInTheDocument();
+  });
+
+  it("marks hidden characters of an environment's name when its jobs cannot be read", async () => {
+    renderAll(["pr\u202Eod"], {
+      [jobsOf("pr\u202Eod")]: { status: 500, body: { detail: "Down." } },
+    });
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^The jobs of prU\+202Eod could not be read: /u);
+    expect(alert.textContent).not.toContain("\u202E");
+  });
+
   it("says nothing more when every environment failed", async () => {
     renderAll(["dev"], { [jobsOf("dev")]: { status: 500, body: { detail: "Down." } } });
 

@@ -71,20 +71,25 @@ export function JobsList(): JSX.Element {
           />
           <JobsSearch query={filter.query} onSearch={filter.setQuery} />
         </div>
+        {/* A new filter mounts the sections afresh: no row, count or control of the previous
+            filter stays while the new read is open, and a failed first read says so at once. */}
         <div className="jobs-panels">
           <RunningNow
+            key={`running:${filter.environment ?? ""}`}
             environment={filter.environment}
             query={filter.query}
             reloadKey={reloadKey}
             onChanged={onChanged}
           />
           <FailedRuns
+            key={`failed:${filter.environment ?? ""}`}
             environment={filter.environment}
             query={filter.query}
             reloadKey={reloadKey}
             onChanged={onChanged}
           />
           <AllJobs
+            key={`all:${filter.environment ?? ""}`}
             environments={
               filter.environment === null
                 ? listed.map((environment) => environment.name)
