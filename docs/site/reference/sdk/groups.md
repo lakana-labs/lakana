@@ -28,7 +28,7 @@ Returns: `Group`. The created group.
 
 ### `client.groups.list`
 
-Signature: `client.groups.list(*, search: str | None = None, member: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[Group]`
+Signature: `client.groups.list(*, limit: int | None = None, cursor: str | None = None, **filters: Unpack[GroupFilters]) -> list[Group]`
 
 List groups, newest first.
 
@@ -36,10 +36,9 @@ The groups of one page; `list_page` also returns the cursor of the next one, and
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `search` | `str | None` | `None` | Only groups whose name contains this text, in any letter case. |
-| `member` | `str | None` | `None` | Only the groups this principal belongs to. |
 | `limit` | `int | None` | `None` | Most groups returned (1 to 200); `None` leaves it to the server (100). |
-| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` and `member` with every page. |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
+| `**filters` | `Unpack[GroupFilters]` | any number | The filters of `list_page`: `search`, `member`. |
 
 Returns: `list of Group`. Newest first.
 
@@ -60,15 +59,14 @@ Returns: `GroupPage`. The groups, and the cursor for the next page (`None` on th
 
 ### `client.groups.iter`
 
-Signature: `client.groups.iter(*, search: str | None = None, member: str | None = None, page_size: int = 100) -> Iterator[Group]`
+Signature: `client.groups.iter(*, page_size: int = 100, **filters: Unpack[GroupFilters]) -> Iterator[Group]`
 
 Yield every matching group, newest first, fetching pages as needed.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `search` | `str | None` | `None` | Only groups whose name contains this text, in any letter case. |
-| `member` | `str | None` | `None` | Only the groups this principal belongs to. |
 | `page_size` | `int` | `100` | Groups per request (1 to 200). |
+| `**filters` | `Unpack[GroupFilters]` | any number | The filters of `list_page`: `search`, `member`. |
 
 Returns: `Iterator of Group`. Each group, once.
 
