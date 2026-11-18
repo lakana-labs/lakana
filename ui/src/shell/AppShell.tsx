@@ -4,7 +4,16 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type JSX,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { RouterProvider } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import {
@@ -100,7 +109,10 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
   // a move: the skip link stays the first stop. A redirect after a move still focuses.
   const moved = useRef(false);
   const redirect = navigationType === NavigationType.Replace && isRedirect(location.state);
-  useEffect(() => {
+  // A layout effect, so focus moves in the commit that shows the new page: a passive effect
+  // runs in a later task, and until then the page is on screen with focus left on the link
+  // that was pressed (or on nothing), where a key press would go.
+  useLayoutEffect(() => {
     if (location.pathname !== shownPath.current) {
       shownPath.current = location.pathname;
       const firstRedirect = redirect && !moved.current;
