@@ -789,3 +789,122 @@ def test_a_task_token_without_a_personal_token_works_until_its_own_expiry(
 
     with pytest.raises(AuthenticationError):
         _verify(service, child.token)
+
+
+def _service_account(session: Session, granted_by: PrincipalRef) -> PrincipalRef:
+    """Persist a service account holding `MINT_TASK_TOKEN` on the instance, and nothing else.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    granted_by
+        The administrator recorded as granting it.
+
+    Returns
+    -------
+    PrincipalRef
+        The service account.
+    """
+    ref = PrincipalRef(
+        id=uuid.uuid4(), name=f"svc-{uuid.uuid4().hex[:8]}", type=PrincipalType.SERVICE_ACCOUNT
+    )
+    session.add(Principal(id=ref.id, type=ref.type, name=ref.name, is_active=True))
+    session.flush()
+    session.add(
+        Grant(
+            id=uuid.uuid4(),
+            principal_id=ref.id,
+            action=Action.MINT_TASK_TOKEN,
+            kind=SecurableKind.INSTANCE,
+            granted_by=granted_by.id,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    return ref
+
+
+def test_a_service_accounts_task_token_ends_with_its_personal_token(session: Session) -> None:
+    """A service account's PAT is recorded at mint, and revoking it gives the task token 401."""
+    admin = _admin(session)
+    account = _service_account(session, admin)
+    signed_in, pat = _signed_in_with_pat(session, account)
+    assert signed_in.type == PrincipalType.SERVICE_ACCOUNT
+    service = _listing_service(session)
+    child = service.mint(signed_in, account.name, environment="dev", asset_scope=[], ttl_seconds=60)
+    row = session.execute(select(TaskToken).where(TaskToken.key_id == child.key_id)).scalar_one()
+    assert row.source_pat_id == pat.id
+    _verify(service, child.token)
+
+    PatService(session, AllowAllAuthorization()).revoke(admin, account.name, pat.key_id)
+
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
+
+
+def test_a_service_accounts_task_token_stops_when_it_is_deactivated(session: Session) -> None:
+    """Deactivating the service account fails the task token its own PAT minted."""
+    admin = _admin(session)
+    account = _service_account(session, admin)
+    signed_in, _ = _signed_in_with_pat(session, account)
+    service = _listing_service(session)
+    child = service.mint(signed_in, account.name, environment="dev", asset_scope=[], ttl_seconds=60)
+    _verify(service, child.token)
+
+    session.get_one(Principal, account.id).is_active = False
+    session.commit()
+
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
+
+
+def test_an_administrator_minting_for_a_service_account_ties_the_token_to_its_own_pat(
+    session: Session,
+) -> None:
+    """The token signs in as the service account but lives and dies with the administrator's PAT."""
+    admin = _admin(session)
+    account = _service_account(session, admin)
+    _, account_pat = _signed_in_with_pat(session, account)
+    signed_in, admin_pat = _signed_in_with_pat(session, admin)
+    service = _listing_service(session)
+    child = service.mint(signed_in, account.name, environment="dev", asset_scope=[], ttl_seconds=60)
+    row = session.execute(select(TaskToken).where(TaskToken.key_id == child.key_id)).scalar_one()
+    assert (row.principal_id, row.source_pat_id) == (account.id, admin_pat.id)
+
+    pats = PatService(session, AllowAllAuthorization())
+    pats.revoke(admin, account.name, account_pat.key_id)
+    _verify(service, child.token)
+    pats.revoke(admin, admin.name, admin_pat.key_id)
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
+
+
+def test_a_service_accounts_ci_or_task_token_cannot_mint(session: Session) -> None:
+    """Only a PAT mints over REST: the account's CI or task token is refused before any row."""
+    admin = _admin(session)
+    account = _service_account(session, admin)
+    task = replace(
+        account,
+        credential="task",
+        task_scope=TaskScope(environment="dev", asset_scope=[], token_id=uuid.uuid4()),
+    )
+    ci = replace(
+        account,
+        credential="ci",
+        ci_scope=CiScope(
+            token_id=uuid.uuid4(),
+            rule_id=uuid.uuid4(),
+            environment="dev",
+            environment_id=uuid.uuid4(),
+            repository="sales",
+            repository_id=uuid.uuid4(),
+            kinds=frozenset(),
+            sha=None,
+        ),
+    )
+    service = _listing_service(session)
+    for ref in (task, ci):
+        with pytest.raises(PermissionDenied):
+            service.mint(ref, account.name, environment="dev", asset_scope=[], ttl_seconds=60)
+    assert session.execute(select(TaskToken)).first() is None
