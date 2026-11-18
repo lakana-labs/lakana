@@ -7,7 +7,13 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from typing import Any, NamedTuple
 
-from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
+from lakana._http import (
+    NEXT_CURSOR_HEADER,
+    HttpTransport,
+    every_page,
+    query_params,
+    route_of_a_newer_server,
+)
 from lakana._models import (
     Deploy,
     DeployAccepted,
@@ -22,6 +28,9 @@ from lakana._routes import ROUTES
 from lakana.errors import DeployFailed, JobStartsNotRecorded
 from lakana.resources.queries import waiting_for_from_json
 from lakana.resources.tables import actions_from_json
+
+_LIST_ALL_INSTEAD = "list one environment with `lakana deploys list --env ENV`"
+"""What to do instead of `Deploys.list_all` against a server without `GET /api/v1/deploys`."""
 
 
 def _when(value: str | None) -> datetime | None:
@@ -97,6 +106,9 @@ def deploy_from_json(data: dict[str, Any]) -> Deploy:
         warnings=tuple(data.get("warnings", ())),
         waiting_for=waiting_for_from_json(data.get("waiting_for")),
         job_starts=tuple(job_start_from_json(item) for item in data.get("job_starts", ())),
+        actions=tuple(data.get("actions", [])),
+        submitted_by=data.get("submitted_by"),
+        jobs=None if data.get("jobs") is None else tuple(data["jobs"]),
     )
 
 
@@ -287,6 +299,96 @@ class Deploys:
         return DeployPage(
             items=[deploy_from_json(item) for item in response.json()],
             next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
+        )
+
+    def list_all(
+        self,
+        *,
+        environment: str | None = None,
+        repository: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> DeployPage:
+        """List one page of the deploys of every environment you may read.
+
+        The environments are those where you hold `READ_ENVIRONMENT`; one where you do not is
+        left out, so this is never refused for a missing right. The order is that of `list`,
+        over all those environments, and each deploy names its `environment`; `jobs` is `None`
+        (`get` has it). With `environment`, this is `list_page` of that environment.
+
+        Parameters
+        ----------
+        environment
+            Only this environment; then a missing right or environment is refused as by `list`.
+        repository
+            Only this repository's deploys.
+        limit
+            Most deploys returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor` of this list. Send the same `repository` with every
+            page.
+
+        Returns
+        -------
+        DeployPage
+            The deploys, newest first, and the cursor for the next page (`None` on the last).
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            With `environment`, if you may not read it.
+        lakana.errors.NotFound
+            If `environment` or `repository` does not exist; or, with a sentence saying so, if
+            the server is older than this package and has no `GET /api/v1/deploys`.
+        lakana.errors.ValidationError
+            If `limit` is outside 1 to 200 or `cursor` is not one the server issued for this
+            list.
+        """
+        with route_of_a_newer_server("GET /api/v1/deploys", _LIST_ALL_INSTEAD):
+            response = self._transport.request(
+                ROUTES["deploys.list_all"],
+                params=query_params(
+                    environment=environment, repository=repository, limit=limit, cursor=cursor
+                ),
+            )
+        body = response.json()
+        return DeployPage(
+            items=[deploy_from_json(item) for item in body["items"]],
+            next_cursor=body["next_cursor"],
+        )
+
+    def iter_all(
+        self,
+        *,
+        environment: str | None = None,
+        repository: str | None = None,
+        page_size: int = 100,
+    ) -> Iterator[Deploy]:
+        """Yield every deploy of every environment you may read, fetching pages as needed.
+
+        Parameters
+        ----------
+        environment
+            Only this environment.
+        repository
+            Only this repository's deploys.
+        page_size
+            Deploys per request (1 to 200).
+
+        Yields
+        ------
+        Deploy
+            Each deploy, once, in the order of `list_all`.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            As `list_all`.
+        """
+        yield from every_page(
+            lambda cursor: self.list_all(
+                environment=environment, repository=repository, limit=page_size, cursor=cursor
+            )
         )
 
     def wait(

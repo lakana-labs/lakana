@@ -15,11 +15,12 @@ Usage: `lakana deploys list [OPTIONS]`
 
 List deploy history, newest first.
 
-A long list prints a "More results" line with the command that shows the next page.
+--all-environments lists the deploys of every environment you may read at once. A long list prints a "More results" line with the command that shows the next page.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
+| `--all-environments` | flag | off | The deploys of every environment you may read, with an environment column. |
 | `--repo` | text | none | Only this repository. |
 | `--limit` | whole number, 1 to 200 | none | Most deploys to list (default 100). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |

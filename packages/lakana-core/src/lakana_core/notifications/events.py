@@ -40,6 +40,9 @@ HEALTH = "health"
 """The event of a fired table health signal; its delivery has no run and names the signal
 (`NotificationDelivery.health_signal_id`)."""
 
+JOB_NOTIFY_EVENTS = (FAILED, RECOVERED, COLUMNS_CHANGED, HEALTH)
+"""The events a job's `notify:` receives, in the order the API lists them."""
+
 
 def decide_event(session: Session, run: Run) -> str | None:
     """Decide which event a finished run of a job reports.

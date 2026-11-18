@@ -44,14 +44,16 @@ do.
 | Command | Shows |
 |---|---|
 | `lakana job list [--env ENV] [--repo REPO]` | one row per job with a `triggers` column that holds each trigger on its own line, for example `schedule 0 6 * * * Europe/Berlin`, `after each deploy` and `on demand`; a paused schedule reads `schedule 0 6 * * * Europe/Berlin (paused)` |
-| `lakana job show NAME [--env ENV] [--repo REPO]` | the job's state, selection and last run, and each trigger on its own line with the next run of a schedule |
+| `lakana job show NAME [--env ENV] [--repo REPO]` | the job's state, selection and last run, each trigger on its own line with the next run of a schedule, and `notify`: the format and events, with `; via secret NAME` for a caller with the deploy right (see [Get told when a job fails](../how-to/get-told-when-a-job-fails.md#see-where-a-job-reports)) |
 
 With `--output json` both print the whole body, `triggers` included.
 
 `client.jobs.list(environment)` and `client.jobs.get(environment, job, repository=None)` return
 `Job` objects whose `triggers` is a tuple of `Trigger` (`kind`, `cron`, `timezone`, `paused`,
 `next_run_at`; the fields a kind does not have are `None`). From a server that does not send
-triggers the tuple is empty.
+triggers the tuple is empty. `Job.commit_sha`, `Job.source_url` (the link to `lakana.yaml` at that
+commit on the git host, or `None`) and `Job.notify` (a `JobNotify` with `format`, `events` and
+`secret`, which is `None` unless you hold the deploy right) are `None` from an older server.
 
 ## After a deploy
 

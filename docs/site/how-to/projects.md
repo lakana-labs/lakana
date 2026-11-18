@@ -306,6 +306,7 @@ You can have five checks waiting at once; each is kept for 24 hours and only you
 lakana deploy --env dev [--ref main] [--dry-run]
 lakana rollback --env dev --to-previous      # or --to <full sha>
 lakana deploys list --env dev [--repo analytics] [--limit N]
+lakana deploys list --all-environments       # every environment you may read, with an environment column
 lakana deployments --env dev
 lakana project-version show <id> --env dev
 lakana orphans --env dev                     # produced earlier, by no current deploy; --limit, --cursor
@@ -319,6 +320,13 @@ orphan, which you can then drop (see
 
 An asset file may hold tabs and line breaks but no other control characters; a deploy and a dry
 run refuse it, naming the file and the line.
+
+`lakana deploys list` has a `submitted_by` column, the name of who queued each deploy (empty once
+that account is deleted). `lakana deploys show` adds `submitted_by` and `jobs`, the jobs the
+deploy's project version defines, sorted and comma-separated (empty for a deploy that made no project version);
+the history carries no `jobs`. `lakana deploys list --all-environments` lists the deploys of every
+environment you may read, newest first, with an `environment` column after `id`; it is not
+combined with `--env`.
 
 A deploy prints the resolved SHA and a diff, and when the project has checks, a list of them under
 `Checks:`, and one `warning:` line on stderr for each table that is kept after a failed check and

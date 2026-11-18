@@ -4067,3 +4067,30 @@ def test_0083_on_postgres() -> None:
         assert restored["ix_connection_tests_connection_id"].endswith("(connection_id)")
         assert "ix_connection_tests_connection_id_created_at" not in restored
         engine.dispose()
+
+
+def test_0084_on_postgres() -> None:
+    """0084 creates the three list indexes; the downgrade drops them."""
+    revision_0083 = "b6d2f8a4c913"
+    revision_0084 = "f6b1d4e8a273"
+    indexes = {"ix_runs_created_at_id", "ix_runs_finished_at", "ix_deploy_runs_created_at_id"}
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0083)
+        engine = sqlalchemy.create_engine(url)
+        query = sqlalchemy.text(
+            "SELECT indexname FROM pg_indexes WHERE tablename IN ('runs', 'deploy_runs')"
+        )
+        with engine.connect() as conn:
+            before = {row[0] for row in conn.execute(query)}
+        assert not indexes & before
+        migrate.upgrade(url, revision_0084)
+        assert _alembic_version(engine) == revision_0084
+        with engine.connect() as conn:
+            after = {row[0] for row in conn.execute(query)}
+        assert indexes <= after
+        migrate.downgrade(url, revision_0083)
+        assert _alembic_version(engine) == revision_0083
+        with engine.connect() as conn:
+            assert {row[0] for row in conn.execute(query)} == before
+        engine.dispose()

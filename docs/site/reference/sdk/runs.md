@@ -96,6 +96,76 @@ Yield every matching run, newest first, fetching pages as needed.
 
 Yields: `Run`. Each run, once.
 
+### `client.runs.list_all`
+
+Signature: `client.runs.list_all(*, environment: str | None = None, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, limit: int | None = None, cursor: str | None = None) -> RunPage`
+
+List one page of the runs of every environment you may read, newest first.
+
+The environments are those where you hold `READ_ENVIRONMENT`; one where you do not is left out, so this is never refused for a missing right. The order is that of `list`, over all those environments, and each run names its `environment`. With `environment`, this is `list_page` of that environment.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment; then a missing right or environment is refused as by `list`. |
+| `repository` | `str | None` | `None` | Only this repository's runs. |
+| `status` | `str | Sequence[str] | None` | `None` | Only runs in this status or one of these (``queued``, ``running``, ``succeeded``, ``failed``, ``cancelled``). |
+| `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these (``schedule``, ``api``, ``manual``, ``deploy``). |
+| `job` | `str | None` | `None` | Only runs of this job. |
+| `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
+| `limit` | `int | None` | `None` | Most runs returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same filters with every page. |
+
+Returns: `RunPage`. The runs, and the cursor for the next page (`None` on the last).
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | With `environment`, if you may not read it. |
+| `lakana.NotFound` | If `environment` or `repository` does not exist; or, with a sentence saying so, if the server is older than this package and has no `GET /api/v1/runs`. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200, a filter value is unknown, `since` has no time zone, or `cursor` is not one the server issued for this list. |
+
+### `client.runs.iter_all`
+
+Signature: `client.runs.iter_all(*, environment: str | None = None, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, page_size: int = 100) -> Iterator[Run]`
+
+Yield every matching run of every environment you may read, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment. |
+| `repository` | `str | None` | `None` | Only this repository's runs. |
+| `status` | `str | Sequence[str] | None` | `None` | Only runs in this status or one of these. |
+| `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these. |
+| `job` | `str | None` | `None` | Only runs of this job. |
+| `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
+| `page_size` | `int` | `100` | Runs per request (1 to 200). |
+
+Yields: `Run`. Each run, once, in the order of `list_all`.
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | As `list_all`. |
+
+### `client.runs.failed`
+
+Signature: `client.runs.failed(*, environment: str | None = None, limit: int | None = None) -> FailedRuns`
+
+List the jobs whose newest finished run failed, in every environment you may read.
+
+The rule is Home's "Needs your attention": per job (or per repository, for runs of no job) the newest finished run of the last seven days, kept when it failed; a later cancelled run hides an earlier failure. Each entry names the first failed task and its failure; a run that failed without a failed task has neither, and its `error_message` says why.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `environment` | `str | None` | `None` | Only this environment; then a missing right or environment is refused as by `list`. |
+| `limit` | `int | None` | `None` | Most entries returned (1 to 200); `None` leaves it to the server (50). |
+
+Returns: `FailedRuns`. The entries, newest end first, and whether more were left out.
+
+| Error | When |
+|---|---|
+| `lakana.PermissionDenied` | With `environment`, if you may not read it. |
+| `lakana.NotFound` | If `environment` does not exist; or, with a sentence saying so, if the server is older than this package and has no `GET /api/v1/runs/failed`. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200. |
+
 ### `client.runs.get`
 
 Signature: `client.runs.get(environment: str, run_id: str) -> Run`

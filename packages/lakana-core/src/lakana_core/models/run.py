@@ -122,6 +122,8 @@ class Run(Base):
             sqlite_where=_ACTIVE_WHERE,
             postgresql_where=_ACTIVE_WHERE,
         ),
+        Index("ix_runs_created_at_id", "created_at", "id"),
+        Index("ix_runs_finished_at", "finished_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)

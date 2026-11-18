@@ -1,13 +1,14 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { createMemoryRouter } from "react-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { Interface, type RouterFactory } from "./Interface";
 
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
 import { catalogRoutes } from "../test/catalog";
 import { homeRoutes } from "../test/home";
+import { preloadJobsScreen } from "../test/jobs";
 import { ADMIN_SESSION, type FakeRoute, type FakeServer, fakeServer, whoami } from "../test/server";
 import { MemoryStorage } from "../test/storage";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -103,6 +104,8 @@ afterEach(() => {
 });
 
 describe("Interface", () => {
+  beforeAll(preloadJobsScreen);
+
   it("removes the link secret from the address bar before any request", async () => {
     window.history.replaceState(null, "", "/sign-in#l=pub-1&s=sec-1");
     const events: string[] = [];

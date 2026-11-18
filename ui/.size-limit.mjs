@@ -103,6 +103,48 @@ const NAMED_LIMITS = [
   // which the screen now hands to the editor, so that the editor's chunk reaches no API module
   // (see the first load below); the limit holds.
   { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
+  // Measured 1.1 kB (2026-11-17) + 10 %: the Jobs area's screen, for now its routes (a job, a run and
+  // a task, each a page of its own below), the area's page at /jobs and the screen's strings. The
+  // lists, facts and logs come in the next changes.
+  // Raised to the measured 2.68 kB (2026-11-17) + 10 %: the strings of the job and run pages
+  // (facts, runs, a run's facts and tasks, the controls and their notes) and the skeleton that
+  // says "Loading the job…" or "Loading the run…" while their chunks load.
+  // Raised to the measured 3.16 kB (2026-11-17) + 10 %: the strings of the task page (its facts,
+  // the attempts' columns and outcomes, the log's status lines, notes and Save log) and the
+  // skeleton that says "Loading the task…" while its chunk loads.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "3.48 kB" },
+  // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
+  // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and
+  // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
+  // words, the selection, after each deploy, where it notifies, why a start waits), the runs
+  // with Status and Period in the address, paged and read again every 30 s, and the selected run.
+  // Raised to the measured 2.95 kB (2026-11-18) + 10 %: without `?run=` the run shown is kept
+  // while the list holds it, so a newer run does not replace the run being read.
+  { name: "the job page", prefix: "JobPage-", limit: "3.25 kB" },
+  // Measured 288 B (2026-11-17) + 10 %: a run's page, for now its heading and breadcrumb.
+  // Raised to the measured 403 B (2026-11-17) + 10 %: the record of the run as opened; the run
+  // itself is in the chunk it shares with the job page (RunDetail-, below).
+  { name: "the run page", prefix: "RunPage-", limit: "0.44 kB" },
+  // Measured 4.7 kB (2026-11-17) + 10 %: a run, shared by the job page and the run page: read
+  // every 2 s while active, its facts, its tasks, Cancel with its question, Resume, Logs, and the
+  // failed read with Try again.
+  // Raised to the measured 5.34 kB (2026-11-17) + 10 % with a failed task's second line: the failure
+  // with its code, cause and next step, Log, Open table and Show rows of each failed check.
+  // Lowered to the measured 2.14 kB (2026-11-17) + 10 %: the run's reads, its title and
+  // breadcrumb, a task's row with its failure line and controls moved into a chunk the run shares
+  // with the task page (useRun-, below).
+  { name: "a run", prefix: "RunDetail-", limit: "2.35 kB" },
+  // Measured 4.11 kB (2026-11-17) + 10 %: what a run and a task's page share: the run read every
+  // 2 s while active, its title and breadcrumb, a task's row, its failure line with the code,
+  // cause and next step, and the controls beside it (Log, Show source, Open table, Show rows),
+  // the failed read with Try again and the reading skeleton.
+  { name: "a run and a task", prefix: "useRun-", limit: "4.52 kB" },
+  // Measured 324 B (2026-11-17) + 10 %: a task's page, for now its heading and breadcrumb.
+  // Raised to the measured 2.7 kB (2026-11-17) + 10 %: the task's facts, its attempts (a table of
+  // ten columns with the outcomes in words) and its log, followed every 2 s from the byte offset,
+  // caught up at most 16 pieces in a row, kept to 2,000,000 characters cut at a line, drawn in
+  // memoised parts of 200 lines, with the command that prints it whole and Save log.
+  { name: "the task page", prefix: "TaskPage-", limit: "2.97 kB" },
   // Measured 21.38 kB (2026-11-17) + 10 %: the result grid (React Aria's Table, the cells as
   // text, the Value panel, the masked and cut lines and the grid's strings), which the Preview
   // tab and the Queries screen share; loaded with the first of them.
@@ -111,12 +153,23 @@ const NAMED_LIMITS = [
   // catalog's numbers and sizes (catalog/format.ts, which names the chunk), shared by the
   // Catalog's menus, the Queries screen's environment picker and result line, and the table
   // page's tabs; never in the first load.
-  { name: "the menus and number formats", prefix: "format-", limit: "18.19 kB" },
-  // Measured 7.03 kB (2026-11-17) + 10 %: React Aria's collection code (tree and list state, the
-  // load-more sentinel) that the Catalog, the table page and the result grid share, split off the
-  // menus' chunk (format-, above) once the environment picker's Select, which the Connections
-  // list imports, joined its importers; never in the first load.
-  { name: "React Aria's collections", prefix: "TreeDropTargetDelegate-", limit: "7.74 kB" },
+  // Lowered to the measured 443 B (2026-11-17) + 10 %: once the Jobs screen's menus use React
+  // Aria's Select too, the bundler gives it a chunk of its own (Select-, below) and the code the
+  // Select shares with the Catalog's tree another (TreeDropTargetDelegate-, below); this chunk
+  // keeps the catalog's numbers and sizes.
+  { name: "the number formats", prefix: "format-", limit: "0.49 kB" },
+  // Measured 9.85 kB (2026-11-17) + 10 %: React Aria's Select, ListBox and Popover, shared by the
+  // Catalog's Sort by and Order, the environment picker of the Queries and Connections screens
+  // and the Status and Period of a job's runs; never in the first load. Measured 9.82 kB
+  // (2026-11-18) with the Connections screen among its importers; the limit holds.
+  { name: "the menus", prefix: "Select-", limit: "10.84 kB" },
+  // Measured 7.03 kB (2026-11-17) + 10 %: the React Aria collection code the menus share with
+  // the Catalog's tree (the chunk is named after one of its modules); never in the first load.
+  {
+    name: "the menus' and the tree's collections",
+    prefix: "TreeDropTargetDelegate-",
+    limit: "7.73 kB",
+  },
   // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
   // shares with the screens that show a state.
   { name: "the status label", prefix: "StatusLabel-", limit: "0.27 kB" },
@@ -247,7 +300,13 @@ const NAMED_LIMITS = [
   // the table's calls moved to manage- (above); the limit holds.
   // Measured 9.76 kB (2026-11-16) with the lazy import of an artifact's Versions tab; the limit
   // holds.
-  { name: "a table's page", prefix: "TablePage-", limit: "10.97 kB" },
+  // Measured 9.41 kB (2026-11-17) + 10 %: Defined in's file dialog moved out to SourceButton- (below),
+  // which the table page and a failed task's Show source share; the limit falls with the chunk.
+  { name: "a table's page", prefix: "TablePage-", limit: "10.35 kB" },
+  // Measured 5.59 kB (2026-11-17) + 10 %: Show source, the file's dialog with its numbered lines and
+  // the visible marks, which the table page's Defined in and a failed task's controls share; it
+  // loads with whichever of the two is opened first.
+  { name: "Show source", prefix: "SourceButton-", limit: "6.15 kB" },
   // Measured 21.97 kB (2026-11-13) + 10 %: the Preview tab, almost all of it React Aria's Table
   // (the grid with one tab stop and the arrow keys inside), with the run's polling and cancelling,
   // the cells as text and the Value panel. It loads only when the Preview tab is opened.
@@ -410,12 +469,11 @@ export default [
   // chunk of its own (-0.17 kB). What is left is the Queries area's loader with the list of chunks
   // it preloads, the focus kept on Run after its move, and the download's type check in the API
   // client.
-  // Measured 209.75 kB (2026-11-18; 209.84 kB on main in the same build) with the Connections
-  // area's loader and the list of chunks it preloads (+0.17 kB). The environment picker's Select,
-  // which the Connections list imports, uses React Aria's form validation but not its text field,
-  // and split their chunk of the first load in two (+0.39 kB); vite.config.ts's `form` chunk group
-  // keeps them in one (build/chunk-groups.test.ts fails if an update moves one of its files), and
-  // with the small Text chunk it takes in, the first load ends 0.09 kB below main's.
+  // Measured 209.93 kB (2026-11-18; 209.8 kB on main in the same build) with the Connections
+  // area's loader and the list of chunks it preloads (+0.12 kB); the limit holds. The
+  // environment picker's Select, which the Connections list imports, would split React Aria's
+  // form code in two as the Jobs screen's menus would; vite.config.ts's `form` chunk group keeps
+  // it in one chunk.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -458,6 +516,12 @@ export default [
   // list's narrow columns, a status's glyph beside its words, Test all's row, a connection's
   // page with its facts and fingerprints, the form's single column, the secret's group and the
   // tcp key rows wrapping at 320 px) on top of Settings' frame (9.85 kB on main).
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.63 kB" },
+  // Raised to the measured 10.59 kB (2026-11-18) + 10 %: the Jobs screen's stylesheet (0.77 kB:
+  // the job's facts, the runs list and its filters, a run's tasks with their failure lines, the
+  // attempts and the log that wraps at 320 px), loaded with the Jobs screen only.
+  // Raised to the measured 11.4 kB (2026-11-18) + 10 %: the Connections and the Jobs screens'
+  // stylesheets together (10.67 kB on main), each loaded with its screen only; the first load's
+  // index stylesheet is the same as main's.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "12.54 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

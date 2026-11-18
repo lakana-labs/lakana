@@ -1,19 +1,22 @@
 """Needs your attention: what failed or is late, for Home, filtered by what the person may read now.
 
-An administrator (`holds_instance_admin`) sees the jobs whose newest finished run failed, the late
-tables, the checks whose newest result failed or errored, the open recovery links, the lost
-workers and their own failed ad-hoc queries. Anyone else sees the late tables and failed checks
-among the tables they read (`table_reads`) or opened (`recent_opens`), and their own failed
-ad-hoc queries. Each row is checked when the list is read, so a revoked grant or a dropped table
-makes its row disappear (for anyone but an administrator, who still sees a dropped table's
-failed check), never a refusal. Every check is `permits`, which records nothing: reading a
-list is not an attempt to do anything. The list is a person's: a task or CI token is refused,
-so a task run as an administrator cannot read an administrator's list beyond its own scope.
+Everyone sees the jobs whose newest finished run failed in the environments they may read
+(`READ_ENVIRONMENT`), by the one rule the failed runs list also uses
+(`lakana_core.runs.failed`), so Home and that list never disagree. An administrator
+(`holds_instance_admin`), who may read every environment, also sees the late tables, the checks
+whose newest result failed or errored, the open recovery links, the lost workers and their own
+failed ad-hoc queries. Anyone else also sees the late tables and failed checks among the tables
+they read (`table_reads`) or opened (`recent_opens`), and their own failed ad-hoc queries.
+Each row is checked when the list is read, so a revoked grant or a dropped table makes its row
+disappear (for anyone but an administrator, who still sees a dropped table's failed check),
+never a refusal. Every check is `permits`, which records nothing: reading a list is not an
+attempt to do anything. The list is a person's: a task or CI token is refused, so a task run as
+an administrator cannot read an administrator's list beyond its own scope.
 
-Each source reads at most `CANDIDATE_LIMIT` rows, newest first, in a few indexed statements;
-the rows are then filtered, merged and cut to `ATTENTION_LIMIT`. A row's title is a name (a
-job, a table, a check, a person, a host, or ``Query`` and the first eight characters of its
-id), never a value, an error text or SQL.
+Each source reads at most `CANDIDATE_LIMIT` rows (failed runs: `FAILED_RUN_LIMIT`), newest
+first, in a few indexed statements; the rows are then filtered, merged and cut to
+`ATTENTION_LIMIT`. A row's title is a name (a job, a table, a check, a person, a host, or
+``Query`` and the first eight characters of its id), never a value, an error text or SQL.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal, cast
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -52,14 +55,12 @@ from lakana_core.models import (
     QueryRun,
     QueryRunStatus,
     RecentOpen,
-    Repository,
-    Run,
-    RunStatus,
     Table,
     TableHealthSignal,
     TableRead,
     Worker,
 )
+from lakana_core.runs.failed import failed_runs
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.instance_status import replaced_by_restart
 from lakana_core.runs.workers import alive_ids
@@ -78,7 +79,6 @@ AttentionKind = Literal[
 ]
 """What a row reports."""
 
-_FINISHED = (RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED)
 _CHECK_FAILED = (CheckOutcome.FAILED, CheckOutcome.ERRORED)
 
 
@@ -173,7 +173,7 @@ class AttentionService:
         since = now - ATTENTION_WINDOW
         if holds_instance_admin(self._session, p.id):
             items = [
-                *self._failed_runs(since),
+                *self._failed_runs(p, since),
                 *self._late_tables(None),
                 *self._failed_checks(p, since, None),
                 *self._recovery_links(now),
@@ -183,6 +183,7 @@ class AttentionService:
         else:
             tables = self._readable_tables(p, since)
             items = [
+                *self._failed_runs(p, since),
                 *self._late_tables(tables),
                 *self._failed_checks(p, since, tables),
                 *self._failed_queries(p, since),
@@ -441,11 +442,16 @@ class AttentionService:
                 "check_failed", env, result.check_name, str(result.run_id), result.finished_at
             )
 
-    def _failed_runs(self, since: datetime) -> Iterator[AttentionItem]:
+    def _failed_runs(self, p: PrincipalRef, since: datetime) -> Iterator[AttentionItem]:
         """List the jobs whose newest finished run within the window failed.
+
+        The rule is `lakana_core.runs.failed.failed_runs`, shared with the failed runs list, in
+        the environments the caller may read.
 
         Parameters
         ----------
+        p
+            The caller.
         since
             The window's start.
 
@@ -454,32 +460,14 @@ class AttentionService:
         AttentionItem
             A ``run_failed`` row per job (or per repository, for its runs of no job).
         """
-        ranked = (
-            select(
-                Run.id,
-                func.row_number()
-                .over(
-                    partition_by=(Run.environment_id, Run.repository_id, Run.job),
-                    order_by=(Run.finished_at.desc(), Run.id.desc()),
-                )
-                .label("position"),
+        for run in failed_runs(self._session, self._authz, p, since=since):
+            yield AttentionItem(
+                "run_failed",
+                run.environment,
+                run.job or run.repository,
+                str(run.run_id),
+                run.finished_at,
             )
-            .where(Run.finished_at >= since, Run.status.in_(_FINISHED))
-            .subquery()
-        )
-        rows = self._session.execute(
-            select(Run.id, Run.job, Run.finished_at, Repository.name, Environment.name)
-            .join(ranked, ranked.c.id == Run.id)
-            .join(Repository, Repository.id == Run.repository_id)
-            .join(Environment, Environment.id == Run.environment_id)
-            .where(ranked.c.position == 1, Run.status == RunStatus.FAILED, LIVE_ENVIRONMENT)
-            .order_by(Run.finished_at.desc(), Run.id.desc())
-            .limit(CANDIDATE_LIMIT)
-        ).all()
-        for run_id, job, finished_at, repository, env in rows:
-            # The window's condition holds only for a run with an end.
-            ended = cast("datetime", finished_at)
-            yield AttentionItem("run_failed", env, job or repository, str(run_id), ended)
 
     def _failed_queries(self, p: PrincipalRef, since: datetime) -> Iterator[AttentionItem]:
         """List the caller's own failed ad-hoc queries within the window.

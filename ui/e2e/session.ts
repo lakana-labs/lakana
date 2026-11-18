@@ -35,6 +35,9 @@ const SIGN_IN_SETTINGS = {
 
 const AT = "2026-11-10T08:00:00Z";
 
+/** The failed run of `daily_sales` that Home's "Needs your attention" names (`jobs.ts` answers it). */
+export const FAILED_RUN_ID = "8a1f4c2e-6b3d-4e5f-9a7b-0c1d2e3f4a5b";
+
 /** What Home reads, for an administrator of a team's instance in its first weeks. */
 const HOME: Record<string, unknown> = {
   "/api/v1/status": {
@@ -65,7 +68,7 @@ const HOME: Record<string, unknown> = {
   },
   "/api/v1/home/attention": {
     items: [
-      { kind: "run_failed", environment: "prod", title: "daily_sales", ref: "run-1", at: AT },
+      { kind: "run_failed", environment: "prod", title: "daily_sales", ref: FAILED_RUN_ID, at: AT },
       {
         kind: "table_late",
         environment: "prod",

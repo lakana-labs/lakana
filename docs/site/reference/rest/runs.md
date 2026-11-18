@@ -65,6 +65,9 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `total_tasks` | whole number | no |  |
+| `ended_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `GET /api/v1/environments/{env}/runs`
 
@@ -183,6 +186,9 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `total_tasks` | whole number | no |  |
+| `ended_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `GET /api/v1/environments/{env}/runs/{run_id}/checks`
 
@@ -331,6 +337,9 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `total_tasks` | whole number | no |  |
+| `ended_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `POST /api/v1/environments/{env}/runs/{run_id}/resume`
 
@@ -384,6 +393,9 @@ Answer fields: `RunOut`
 | `missed` | whole number | no |  |
 | `notifications` | list of `NotificationOut` | no |  |
 | `failed_tasks` | whole number | no |  |
+| `total_tasks` | whole number | no |  |
+| `ended_tasks` | whole number | no |  |
+| `actions` | list of text | no |  |
 
 ## `GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log`
 
@@ -476,3 +488,71 @@ Answers:
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
+
+## `GET /api/v1/runs`
+
+List the runs of every environment you may read
+
+Without `environment`, lists the runs of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server did not issue for this list.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only this environment. |
+| `repository` | query | no | text or null | Narrow to this repository. |
+| `status` | query | no | list of text | Narrow to these statuses (`queued`, `running`, `succeeded`, `failed`, `cancelled`); repeat the parameter or write them comma-separated. |
+| `trigger` | query | no | list of text | Narrow to these triggers (`schedule`, `api`, `manual`, `deploy`), given as `status` is. |
+| `job` | query | no | text or null | Narrow to this job. |
+| `since` | query | no | text (date-time) or null | Narrow to runs created at or after this ISO 8601 time; a time zone is required. |
+| `limit` | query | no | whole number | Page size (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `RunPageOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `RunPageOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `RunOut` | yes |  |
+| `next_cursor` | text or null | yes |  |
+
+## `GET /api/v1/runs/failed`
+
+List the jobs whose newest finished run failed
+
+Lists, for every environment you may read (`READ_ENVIRONMENT`), each job whose newest finished run within the last seven days failed (or, for runs outside a job, each repository's), newest end first: the same rule as Home's Needs your attention, so the two never disagree. A later success or a later cancelled run hides an earlier failure. Each row names the run's first failed task and why it failed; a run that failed without a failed task has `task` and `failure` null and says why in `run.error_message`. An environment you may not read is left out, never refused. With `environment`, only its runs: 403 without `READ_ENVIRONMENT` on it and 404 when it does not exist. Answers 422 for a `limit` outside 1 to 200. `truncated` says more rows were left out.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only this environment's runs. |
+| `limit` | query | no | whole number | Most rows returned (1 to 200). |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `FailedRunsOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `FailedRunsOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `FailedRunOut` | yes |  |
+| `truncated` | true or false | yes |  |

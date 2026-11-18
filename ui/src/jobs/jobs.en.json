@@ -1,0 +1,202 @@
+{
+  "runNow": "Run now",
+  "loadingJob": "Loading the job…",
+  "loadingRun": "Loading the run…",
+  "loadingTask": "Loading the task…",
+  "toJobs": "Go to Jobs",
+  "duration": {
+    "tenths": "{{n}} s",
+    "seconds": "{{n}} s",
+    "minutes": "{{n}} min",
+    "hours": "{{h}} h {{m}} min"
+  },
+  "schedule": {
+    "everyMinute": "every minute",
+    "hourly": "hourly at :{{minute}}",
+    "daily": "daily {{time}}",
+    "weekly": "weekly on {{day}} {{time}}",
+    "monthly": "monthly on day {{day}} {{time}}",
+    "inZone": "{{what}} {{zone}}",
+    "weekdays": {
+      "0": "Sunday",
+      "1": "Monday",
+      "2": "Tuesday",
+      "3": "Wednesday",
+      "4": "Thursday",
+      "5": "Friday",
+      "6": "Saturday"
+    },
+    "pause": "Pause schedule",
+    "pauseTitle": "Pause the schedule of {{job}}?",
+    "pauseText": "No run starts on schedule until the schedule is resumed. A run that is running finishes.",
+    "paused": "Paused the schedule of {{job}}.",
+    "resume": "Resume schedule",
+    "resumed": "Resumed the schedule of {{job}}."
+  },
+  "facts": {
+    "heading": "Facts",
+    "repository": "Repository",
+    "definedAt": "lakana.yaml @ {{commit}}",
+    "openHost": "open in repository",
+    "schedule": "Schedule",
+    "paused": "paused",
+    "nextRun": "next run {{when}}",
+    "noSchedule": "No schedule here; it starts by hand, through the API or after each deploy.",
+    "runs": "Runs",
+    "select": "select {{patterns}}",
+    "upstream": "+upstream",
+    "downstream": "+downstream",
+    "afterDeploy": "After each deploy",
+    "yes": "Yes",
+    "no": "No",
+    "notifies": "Notifies",
+    "notifiesOn": "Notifies on {{events}} · {{format}}",
+    "viaSecret": "via secret {{secret}}",
+    "noNotify": "No notification. Add notify: to the job in lakana.yaml.",
+    "listTwo": "{{first}} and {{last}}",
+    "events": {
+      "failed": "failure",
+      "recovered": "recovery",
+      "columns_changed": "column changes",
+      "health": "health signals"
+    },
+    "formats": {
+      "json": "JSON",
+      "slack": "Slack",
+      "teams": "Teams"
+    }
+  },
+  "start": {
+    "started": "Started a run of {{job}}.",
+    "waits": "The start waits: {{message}}"
+  },
+  "note": {
+    "waitsFor": "Open the run it waits for"
+  },
+  "trigger": {
+    "schedule": "Schedule",
+    "api": "API",
+    "manual": "By hand",
+    "deploy": "After a deploy",
+    "none": "Ad hoc"
+  },
+  "runs": {
+    "heading": "Runs",
+    "status": "Status",
+    "period": "Period",
+    "statuses": {
+      "all": "All",
+      "failed": "Failed",
+      "succeeded": "Succeeded",
+      "running": "Running",
+      "queued": "Queued",
+      "cancelled": "Cancelled"
+    },
+    "periods": {
+      "24h": "Last 24 hours",
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "all": "All time"
+    },
+    "columns": {
+      "state": "State",
+      "created": "Created",
+      "duration": "Duration",
+      "trigger": "Trigger",
+      "tasks": "Tasks"
+    },
+    "failedOf": "{{failed}} of {{total}} tasks failed",
+    "empty": "No run of this job in this period.",
+    "region": "Runs of {{job}}"
+  },
+  "run": {
+    "title": "Run of {{when}}",
+    "titleOf": "Run of {{when}} ({{repository}})",
+    "untitled": "Run",
+    "state": "State",
+    "trigger": "Trigger",
+    "started": "Started",
+    "notStarted": "Not started yet",
+    "ended": "Ended",
+    "runningFor": "running for {{duration}}",
+    "triggeredBy": "Triggered by",
+    "commit": "Commit",
+    "tasks": "Tasks",
+    "progress": "{{ended}} of {{total}} tasks",
+    "why": "Why it failed: {{message}}",
+    "logs": "Logs",
+    "noTasks": "This run has no tasks.",
+    "tasksRegion": "Tasks of the run",
+    "attempt": "attempt {{n}} of {{max}}",
+    "columns": {
+      "state": "State",
+      "task": "Task",
+      "duration": "Duration",
+      "rows": "Rows",
+      "attempt": "Attempt",
+      "why": "Why"
+    }
+  },
+  "failure": {
+    "cause": "Cause:",
+    "nextStep": "Next step:"
+  },
+  "task": {
+    "log": "Log",
+    "showSource": "Show source",
+    "openTable": "Open table",
+    "showRows": "Show rows of {{check}}"
+  },
+  "cancel": {
+    "button": "Cancel run",
+    "title": "Cancel the run of {{name}}?",
+    "text": "Running tasks stop and waiting tasks do not start. Finished tasks stay done.",
+    "cancelling": "Cancelling…"
+  },
+  "resume": {
+    "button": "Resume",
+    "done": "Resumed the failed part in a new run."
+  },
+  "taskPage": {
+    "attempt": "Attempt",
+    "attemptOf": "{{n}} of {{max}}",
+    "waits": "Waits",
+    "attempts": "Attempts",
+    "log": "Log"
+  },
+  "attempts": {
+    "region": "Attempts of {{asset}}",
+    "none": "No attempt yet.",
+    "columns": {
+      "attempt": "Attempt",
+      "worker": "Worker",
+      "started": "Started",
+      "duration": "Duration",
+      "outcome": "Outcome",
+      "rows": "Rows",
+      "failure": "Failure",
+      "memory": "Peak memory",
+      "cpu": "Processor time",
+      "read": "Bytes read"
+    },
+    "outcomes": {
+      "running": "Running",
+      "succeeded": "Succeeded",
+      "failed": "Failed",
+      "timed_out": "Timed out",
+      "lost": "Lost",
+      "released": "Released",
+      "cancelled": "Cancelled"
+    }
+  },
+  "log": {
+    "region": "Log of {{asset}}",
+    "following": "Following the log…",
+    "complete": "The log is complete.",
+    "ended": "The run has ended. This is all of the log that could be read.",
+    "tooLong": "This log is too long to follow here.",
+    "earlier": "Earlier lines are not shown here.",
+    "empty": "The task wrote nothing to its log.",
+    "save": "Save log"
+  }
+}

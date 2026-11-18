@@ -13,7 +13,9 @@ under [Other paged lists](#other-paged-lists).
 | Runs | `lakana runs list` | `READ_ENVIRONMENT` | creation time, newest first; equal times by id |
 | Queries | `lakana query list` | `SUBMIT_QUERY`; `MANAGE_ENVIRONMENT` shows everyone's | running, then queued, then (with `--all`, or an ended status) ended ones |
 | Queries of every environment | `lakana query list --all-environments` | none: an environment where you hold neither `SUBMIT_QUERY` nor `MANAGE_ENVIRONMENT` is left out | as the queries of one environment, over all of them |
+| Runs of every environment | `lakana runs list --all-environments` | none: an environment where you lack `READ_ENVIRONMENT` is left out | as the runs of one environment, over all of them |
 | Deploys | `lakana deploys list` | `READ_ENVIRONMENT` | creation time, newest first; equal times by id |
+| Deploys of every environment | `lakana deploys list --all-environments` | none: an environment where you lack `READ_ENVIRONMENT` is left out | as the deploys of one environment, over all of them |
 
 Every filter narrows the list; filters combine with AND. A filter is never a way to see more than
 the list shows without it.
