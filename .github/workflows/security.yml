@@ -115,7 +115,7 @@ jobs:
             echo "npm audit passed a lock with lodash 4.17.20, which has known advisories." >&2
             exit 1
           fi
-          # With ui/ audited alongside, so the allowlist entries are in use and the only
+          # With ui/ audited alongside, so any allowlist entry is in use and the only
           # failures left are the probe's: the allowlist must not swallow them.
           if python3 "$GITHUB_WORKSPACE/scripts/npm_audit.py" "$GITHUB_WORKSPACE/ui" . 2> audit.err; then
             echo "scripts/npm_audit.py passed a lock with lodash 4.17.20, which has known advisories." >&2

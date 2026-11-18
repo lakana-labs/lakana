@@ -1468,9 +1468,8 @@ def test_the_slot_is_released_after_a_page_and_after_a_failure(
     assert client.app.state.json_page_limiter.try_acquire(admin) is None
 
 
-def test_the_result_route_documents_every_format(client: TestClient) -> None:
-    spec = client.app.openapi()
-    op = spec["paths"]["/api/v1/environments/{env}/queries/{query_id}/result"]["get"]
+def test_the_result_route_documents_every_format(openapi_schema: dict[str, Any]) -> None:
+    op = openapi_schema["paths"]["/api/v1/environments/{env}/queries/{query_id}/result"]["get"]
     content = op["responses"]["200"]["content"]
     assert set(content) == {
         "application/vnd.apache.arrow.file",

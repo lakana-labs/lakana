@@ -142,13 +142,15 @@ jobs:
       - name: duplication of ui/ (ratchet)
         run: uv run python scripts/duplication_ratchet.py --report jscpd-report-ui/jscpd-report.json --baseline scripts/duplication-baseline-ui.json
 
-  # The web interface (ui/) in three jobs side by side, so the Playwright suites do not add to
-  # the gates' time (#586): `ui (gates)` runs every gate of `npm --prefix ui run check`, the
-  # coverage ratchet and `prove-gates`, which shows each gate still fails on a violation;
-  # `ui (e2e smoke, N/2)` (two shards) and `ui (e2e server)` each build the interface again (about
-  # a second) and run one Playwright suite, or a shard of it, on Chromium. The required check `ui`
-  # waits for the three. They run on drafts too, and only when the interface, a tool its gates run
-  # or this workflow changed; the three scope steps are the same (scripts/tests/test_workflows.py).
+  # The web interface (ui/) in four jobs side by side, so neither the Playwright suites nor the
+  # gates' proofs add to the gates' time (#586): `ui (gates)` runs every gate of
+  # `npm --prefix ui run check` and the coverage ratchet; `ui (gate proofs)` builds the interface
+  # again (about a second) and runs `prove-gates`, which shows each gate still fails on a
+  # violation (split off because the two together ran over the "ui (*)" budget);
+  # `ui (e2e smoke, N/2)` (two shards) and `ui (e2e server)` each build the interface again and
+  # run one Playwright suite, or a shard of it, on Chromium. The required check `ui` waits for the
+  # four. They run on drafts too, and only when the interface, a tool its gates run or this
+  # workflow changed; the four scope steps are the same (scripts/tests/test_workflows.py).
   # See docs/agent/testing.md, "The ui/ gates".
   ui-gates:
     name: ui (gates)
@@ -217,6 +219,45 @@ jobs:
       - if: steps.scope.outputs.run == 'true'
         name: size-limit
         run: npm --prefix ui run size
+
+  # `prove-gates` on a build of its own: each gate of `ui (gates)` still fails on a violation. It
+  # runs ESLint, Vitest with coverage and the rest once more in a scratch copy, so it takes about
+  # as long as the gates themselves.
+  ui-gate-proofs:
+    name: ui (gate proofs)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Did the interface change?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Anything but a pull request that provably changes nothing relevant runs the job.
+          if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null \
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|packages/lakana-(server|core)/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to ui/ or its gates: skipping the interface's gates."
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - if: steps.scope.outputs.run == 'true'
+        name: install
+        run: npm ci --ignore-scripts --prefix ui
+      - if: steps.scope.outputs.run == 'true'
+        name: build
+        run: npm --prefix ui run build
       - if: steps.scope.outputs.run == 'true'
         name: every gate fails on a violation
         env:
@@ -324,7 +365,7 @@ jobs:
 
   # The required check `ui`: green only when every interface job above was.
   ui:
-    needs: [changes, ui-gates, ui-e2e-smoke, ui-e2e-server]
+    needs: [changes, ui-gates, ui-gate-proofs, ui-e2e-smoke, ui-e2e-server]
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -332,11 +373,12 @@ jobs:
       - name: Interface jobs
         env:
           GATES: ${{ needs.ui-gates.result }}
+          GATE_PROOFS: ${{ needs.ui-gate-proofs.result }}
           E2E_SMOKE: ${{ needs.ui-e2e-smoke.result }}
           E2E_SERVER: ${{ needs.ui-e2e-server.result }}
         run: |
           failed=0
-          for pair in "gates:$GATES" "e2e smoke:$E2E_SMOKE" "e2e server:$E2E_SERVER"; do
+          for pair in "gates:$GATES" "gate proofs:$GATE_PROOFS" "e2e smoke:$E2E_SMOKE" "e2e server:$E2E_SERVER"; do
             if [ "${pair#*:}" != "success" ]; then
               echo "::error::The job 'ui (${pair%%:*})' ended with '${pair#*:}' (for e2e smoke, one of its shards 'ui (e2e smoke, N/2)'): its log names the failing step."
               failed=1
@@ -635,13 +677,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Runs the example projects the site shows, each against a fresh local instance, in three
+  # Runs the example projects the site shows, each against a fresh local instance, in four
   # shards side by side. `LAKANA_DOCS_SHARD=I/N` makes the runner run the examples
   # `scripts/docs_example_shards.py` gives shard I: the longest first, each to the shard with the
   # least time so far, by the seconds in scripts/docs-example-durations.json. One shard alone is
   # not the check: `docs-examples` below collects them and compares the pages with the output.
   docs-examples-shard:
-    name: docs-examples (${{ matrix.shard }}/3)
+    name: docs-examples (${{ matrix.shard }}/4)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
@@ -649,7 +691,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -667,7 +709,7 @@ jobs:
           LAKANA_TEST_WHEELHOUSE: ${{ runner.temp }}/wheelhouse
           LAKANA_DOCS_EXAMPLE_BUDGET: "240"
           LAKANA_DOCS_CAPTURE: ${{ runner.temp }}/docs-captures
-          LAKANA_DOCS_SHARD: ${{ matrix.shard }}/3
+          LAKANA_DOCS_SHARD: ${{ matrix.shard }}/4
         run: uv run bash scripts/run_docs_examples.sh
       - name: Upload what the examples printed
         if: always()
@@ -692,7 +734,7 @@ jobs:
           RESULT: ${{ needs.docs-examples-shard.result }}
         run: |
           if [ "$RESULT" != "success" ]; then
-            echo "::error::A docs-examples shard ended with '$RESULT': the failing job of this run is named 'docs-examples (N/3)', and its log names the example."
+            echo "::error::A docs-examples shard ended with '$RESULT': the failing job of this run is named 'docs-examples (N/4)', and its log names the example."
             exit 1
           fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7

@@ -214,7 +214,10 @@ def test_a_taken_name_is_409_and_an_unknown_repository_404(client: TestClient) -
 
 
 def test_private_key_never_in_answer_audit_or_logs(
-    client: TestClient, made: list[DeployKeyPair], caplog: pytest.LogCaptureFixture
+    client: TestClient,
+    made: list[DeployKeyPair],
+    caplog: pytest.LogCaptureFixture,
+    openapi_schema: dict[str, Any],
 ) -> None:
     """No line of a private key, nor its seed, is in the answer, the audit log, a log or the API."""
     for name in ("dev", "prod", "staging"):
@@ -226,7 +229,7 @@ def test_private_key_never_in_answer_audit_or_logs(
         shown = client.get(f"{_REPOS}/analytics", headers=AUTH_HEADER)
 
     assert answer.status_code == 201 and len(made) == 3
-    openapi = json.dumps(cast(FastAPI, client.app).openapi())
+    openapi = json.dumps(openapi_schema)
     for text in (answer.text, shown.text, _audit_text(client), caplog.text, openapi):
         assert _leaks(text, made) == []
 

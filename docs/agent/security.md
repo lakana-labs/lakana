@@ -7235,8 +7235,8 @@ reads the `osv-scanner.toml` next to each lock it scans, ignores the same adviso
 `scripts/tests/test_npm_audit.py` keeps the two lists equal. The job's probe also requires the
 script to fail on lodash 4.17.20 with `ui/` audited beside it, so the allowlist swallows nothing
 else. Add an entry only on the maintainer's decision, with a tracking issue that says why it is
-acceptable; the first is GHSA-fc5q-39xc-vjpf in `picomatch` (dev tooling of `ui/`, until
-2026-12-01, #709).
+acceptable. None is listed at present: the first, GHSA-fc5q-39xc-vjpf in `picomatch` (dev tooling
+of `ui/`, #709), went when GitHub withdrew the advisory on 2026-11-18.
 
 ### Image scan
 

@@ -16,6 +16,7 @@ SKIPPED_JOBS = {
         "lint",
         "ui",
         "ui-gates",
+        "ui-gate-proofs",
         "ui-e2e-smoke",
         "ui-e2e-server",
         "unit",
