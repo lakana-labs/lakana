@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from lakana_core.audit.service import AuditService
@@ -1041,9 +1041,9 @@ class TaskTokenService:
         -------
         Page of ListedTaskToken
             The tokens neither revoked nor expired, nor minted with a personal access token that
-            is revoked or has expired, by issue time, newest first, equal times
-            by id, each with its principal's name and, for a token bound to a task, its run,
-            job and asset, and the cursor of the next page.
+            is revoked or has expired or whose owner is deactivated, by issue time, newest
+            first, equal times by id, each with its principal's name and, for a token bound to
+            a task, its run, job and asset, and the cursor of the next page.
 
         Raises
         ------
@@ -1056,19 +1056,23 @@ class TaskTokenService:
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         now = datetime.now(UTC)
+        minter = aliased(Principal)
         query = (
             select(TaskToken)
             .outerjoin(PersonalAccessToken, PersonalAccessToken.id == TaskToken.source_pat_id)
+            .outerjoin(minter, minter.id == PersonalAccessToken.principal_id)
             .where(
                 TaskToken.revoked_at.is_(None),
                 TaskToken.expires_at > now,
-                # A token whose PAT is revoked or has expired no longer signs in, so it is not
-                # live. A token without a PAT has NULL for both.
+                # A token whose PAT is revoked or has expired, or whose PAT's owner is
+                # deactivated, no longer signs in (`_minting_pat_works`), so it is not live. A
+                # token without a PAT has NULL for all three.
                 PersonalAccessToken.revoked_at.is_(None),
                 or_(
                     PersonalAccessToken.expires_at.is_(None),
                     PersonalAccessToken.expires_at > now,
                 ),
+                or_(TaskToken.source_pat_id.is_(None), minter.is_active.is_(True)),
             )
         )
         if environment is not None:

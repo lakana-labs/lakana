@@ -4097,7 +4097,10 @@ def test_0084_on_postgres() -> None:
 
 
 def test_0085_on_postgres() -> None:
-    """0085 adds the cascading `source_pat_id`; the downgrade revokes a revoked PAT's tokens."""
+    """0085 adds the cascading `source_pat_id`; the downgrade revokes a revoked PAT's live tokens.
+
+    A token past its own expiry is left alone.
+    """
     revision_0084 = "f6b1d4e8a273"
     revision_0085 = "532b5154629b"
     now = datetime.now(UTC)
@@ -4153,6 +4156,19 @@ def test_0085_on_postgres() -> None:
                         "pat": pat,
                     },
                 )
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO task_tokens (id, principal_id, environment, asset_scope,"
+                    " key_id, secret_hash, issued_at, expires_at, source_pat_id) VALUES"
+                    " (:id, :principal, 'dev', '[]', 'task-expired', 'h', :then, :then, :pat)"
+                ),
+                {
+                    "id": uuid.uuid4(),
+                    "principal": principal,
+                    "then": now - timedelta(hours=1),
+                    "pat": dead_pat,
+                },
+            )
         migrate.downgrade(url, revision_0084)
         assert _alembic_version(engine) == revision_0084
         with engine.connect() as conn:

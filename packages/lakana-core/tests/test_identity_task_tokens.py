@@ -908,3 +908,21 @@ def test_a_service_accounts_ci_or_task_token_cannot_mint(session: Session) -> No
         with pytest.raises(PermissionDenied):
             service.mint(ref, account.name, environment="dev", asset_scope=[], ttl_seconds=60)
     assert session.execute(select(TaskToken)).first() is None
+
+
+def test_list_live_hides_a_token_whose_personal_tokens_owner_is_deactivated(
+    session: Session,
+) -> None:
+    """The token of a deactivated minter gets 401, so it is not listed as live either."""
+    lister = _administrator(session)
+    minter = _admin(session)
+    _add_principal(session, "worker-1")
+    signed_in, _ = _signed_in_with_pat(session, minter)
+    service = _listing_service(session)
+    child = service.mint(signed_in, "worker-1", environment="dev", asset_scope=[], ttl_seconds=60)
+    assert child.key_id in {i.token.key_id for i in service.list_live(lister).items}
+
+    session.get_one(Principal, minter.id).is_active = False
+    session.commit()
+
+    assert child.key_id not in {i.token.key_id for i in service.list_live(lister).items}

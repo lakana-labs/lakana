@@ -32,6 +32,7 @@ _task_tokens = sa.table(
     sa.column("key_id", sa.String()),
     sa.column("environment", sa.String()),
     sa.column("asset_scope", sa.JSON()),
+    sa.column("expires_at", sa.DateTime(timezone=True)),
     sa.column("revoked_at", sa.DateTime(timezone=True)),
     sa.column("source_pat_id", sa.Uuid()),
 )
@@ -86,7 +87,8 @@ def _revoke_orphaned(connection: sa.Connection) -> None:
     Without the column the previous release judges a task token by its own row alone, so a
     token of a PAT that has expired, or whose owner is deactivated, would work again. Each gets
     `revoked_at` and a `TASK_TOKEN_REVOKED` event without an actor, ``reason: pat_ended``.
-    A token whose PAT still works stays live, as it was before this migration.
+    A token whose PAT still works stays live, as it was before this migration. A token past its
+    own `expires_at` is dead either way, so it is left alone and gets no event.
 
     Parameters
     ----------
@@ -107,7 +109,7 @@ def _revoke_orphaned(connection: sa.Connection) -> None:
         )
         .join(_pats, _pats.c.id == _task_tokens.c.source_pat_id)
         .join(_principals, _principals.c.id == _pats.c.principal_id)
-        .where(_task_tokens.c.revoked_at.is_(None))
+        .where(_task_tokens.c.revoked_at.is_(None), _task_tokens.c.expires_at > now)
     ).all()
     for row in rows:
         expires_at = row.expires_at

@@ -6669,7 +6669,8 @@ def test_0085_links_task_tokens_to_their_pat_and_revokes_orphans_on_downgrade(
 
     The downgrade revokes, with a `TASK_TOKEN_REVOKED` event, each live task token whose PAT
     is revoked, expired or owned by a deactivated principal, since the release before reads a
-    token by its own row only. A token of a working PAT, and one without a PAT, stay live.
+    token by its own row only. A token of a working PAT, and one without a PAT, stay live; a
+    token past its own expiry is left alone and gets no event.
 
     Parameters
     ----------
@@ -6748,6 +6749,20 @@ def test_0085_links_task_tokens_to_their_pat_and_revokes_orphans_on_downgrade(
                         "pat": pat_ids.get(name),
                     },
                 )
+            connection.execute(
+                sa.text(
+                    "INSERT INTO task_tokens (id, principal_id, environment, asset_scope,"
+                    " key_id, secret_hash, issued_at, expires_at, source_pat_id) VALUES"
+                    " (:id, :principal, 'dev', '[]', 'task-long-expired', 'h', :then, :then,"
+                    " :pat)"
+                ),
+                {
+                    "id": uuid.uuid4().hex,
+                    "principal": active,
+                    "then": earlier,
+                    "pat": pat_ids["revoked"],
+                },
+            )
         command.downgrade(config, _REVISION_0084)
         assert "source_pat_id" not in columns()
         with engine.connect() as connection:
