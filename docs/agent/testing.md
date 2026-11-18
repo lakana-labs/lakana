@@ -1467,19 +1467,16 @@ the test, the budget, and the next step.
   `confirm_seconds` then runs again in a fresh pytest process of its own, since one after
   another in a shared process the later ones were timed under the load the earlier ones left
   and unrelated tests of 2.5 to 2.7 s failed. That is at most `SOLO_CAP` (10) tests, the ones
-  nearest the line, each up to twice: at most 20 more processes of about 4 to 6 s each. A test
+  nearest the line, each up to twice: at most 20 more processes of about 7 to 9 s each (some
+  4 s of start-up, the test itself at 2.5 s or more, and its warm-up), about 3 minutes. A test
   past the cap is named in the log and counts by its shard time, so it fails as slow; so does a
-  test that fails or raises an error when run again. In the first pass
+  test that fails or raises an error when run again. In each process
   `scripts/remeasure_warm_up.py` (loaded with `-p`) first
   runs, untimed, the cheapest other test of the candidate's module that uses all of the
-  candidate's session- and module-scoped fixtures (never a skipped one, nor another candidate;
+  candidate's session- and module-scoped fixtures (never a skipped one, nor another candidate
+  of the same process, which runs anyway; a flagged test in a process of its own may be one;
   without such a test the candidate runs alone), so a fixture such as `catalog_template` is not set up on the
-  candidate's clock. In a process of its own the plugin runs a fresh copy of the candidate
-  first instead (its twin; a doctest, which cannot be copied, keeps the sibling), and only the
-  candidate's own second run counts: the twin also pays what no sibling warms up, the first
-  call into code that sets itself up lazily (on 2026-11-18, locally, a test of
-  `/openapi.json` took 1.47 s cold, 1.30 s after a sibling and 1.24 s after its twin). A twin
-  that fails does not fail the candidate; the candidate's own failure does. Moving that setup off the candidate is deliberate: in a shard it falls on
+  candidate's clock. Moving that setup off the candidate is deliberate: in a shard it falls on
   whichever test of the module runs first, and the rule targets tests that are slow in
   themselves; the candidate's own function-scoped setup, call and teardown are measured in
   full. The candidate is run up to three times (`CONFIRM_RUNS`; it stops after the first run below

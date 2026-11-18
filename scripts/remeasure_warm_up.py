@@ -11,15 +11,8 @@ candidate's session-, package- and module-scoped ones, runs it right before the 
 deselects everything else. A candidate without such a test runs alone. The candidate's own
 function-scoped setup, call and teardown are still measured in full; only its time is counted.
 
-In a process of its own a candidate is warmed up by a twin instead (``"twin": true`` in the
-plan): a fresh copy of the candidate runs right before it, untimed. A sibling warm-up covers
-the fixtures but not the first call into code that sets itself up lazily (FastAPI building the
-OpenAPI schema's machinery, a first query), which a shard has long paid; the twin pays all of
-it. A candidate that is not a test function (a doctest) falls back to the sibling.
-
 ``LAKANA_REMEASURE_WARM_UP`` names a JSON file ``{"candidates": [node id, ...], "seconds":
-{node id: seconds}, "twin": false}``: the candidates, the shard times of the tests that may
-warm them up, and whether a twin does (optional, default false).
+{node id: seconds}}``: the candidates, and the shard times of the tests that may warm them up.
 A test missing from ``seconds`` (skipped in its shard, or not run) is never a warm-up, nor is
 one marked ``skip``. Without the variable the plugin changes nothing.
 
@@ -39,8 +32,8 @@ WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"
 _SHARED_SCOPES = frozenset({"session", "package", "module"})
 
 
-def read_plan(path: Path) -> tuple[list[str], dict[str, float], bool]:
-    """Read the candidates, the shard times and the twin choice that `time_budgets.py` wrote.
+def read_plan(path: Path) -> tuple[list[str], dict[str, float]]:
+    """Read the candidates and the shard times that `time_budgets.py` wrote.
 
     Parameters
     ----------
@@ -50,8 +43,7 @@ def read_plan(path: Path) -> tuple[list[str], dict[str, float], bool]:
     Returns
     -------
     tuple
-        The candidates' node ids, the seconds of the possible warm-ups by node id, and
-        whether each candidate is warmed up by a twin of itself (``twin``, default false).
+        The candidates' node ids, and the seconds of the possible warm-ups by node id.
 
     Raises
     ------
@@ -69,45 +61,13 @@ def read_plan(path: Path) -> tuple[list[str], dict[str, float], bool]:
         data = None
     candidates = data.get("candidates") if isinstance(data, dict) else None
     seconds = data.get("seconds") if isinstance(data, dict) else None
-    twin = data.get("twin", False) if isinstance(data, dict) else None
-    if (
-        not isinstance(candidates, list)
-        or not isinstance(seconds, dict)
-        or not isinstance(twin, bool)
-    ):
+    if not isinstance(candidates, list) or not isinstance(seconds, dict):
         raise pytest.UsageError(
             f"{path} is not a warm-up plan: it must be a JSON object with a list "
-            '"candidates", an object "seconds" and, if any, a boolean "twin". '
-            "scripts/time_budgets.py slow-tests --confirm writes it; unset the variable to "
-            "run without it."
+            '"candidates" and an object "seconds". scripts/time_budgets.py slow-tests '
+            "--confirm writes it; unset the variable to run without it."
         )
-    candidates = [str(c) for c in candidates]
-    return candidates, {str(k): float(v) for k, v in seconds.items()}, twin
-
-
-def _twin(item: pytest.Item) -> pytest.Item | None:
-    """Make a fresh copy of a test function, as pytest makes one case of a parametrized test.
-
-    Parameters
-    ----------
-    item
-        A collected test.
-
-    Returns
-    -------
-    pytest.Item or None
-        A new item of the same test, with its own fixture request (and, for a method, its
-        own instance); None for an item that is not a test function, such as a doctest.
-    """
-    if not isinstance(item, pytest.Function):
-        return None
-    return pytest.Function.from_parent(
-        item.parent,
-        name=item.name,
-        callspec=getattr(item, "callspec", None),
-        fixtureinfo=item._fixtureinfo,
-        originalname=item.originalname,
-    )
+    return [str(c) for c in candidates], {str(k): float(v) for k, v in seconds.items()}
 
 
 def _shared(item: pytest.Item) -> frozenset[object]:
@@ -135,19 +95,9 @@ def _shared(item: pytest.Item) -> frozenset[object]:
 
 
 def choose(
-    items: Sequence[pytest.Item],
-    candidates: Sequence[str],
-    seconds: dict[str, float],
-    *,
-    twin: bool = False,
+    items: Sequence[pytest.Item], candidates: Sequence[str], seconds: dict[str, float]
 ) -> list[pytest.Item]:
-    """Order the candidates, each after the test that pays its one-off setup.
-
-    With `twin`, that test is a fresh copy of the candidate itself: it pays everything the
-    process has not done yet for this test, whatever it is (imports, session fixtures, the
-    first call into code that sets itself up lazily), so the candidate is timed warm. A
-    candidate that cannot be copied, and every candidate without `twin`, runs after the
-    cheapest other test of its module that shares its session- and module-scoped fixtures.
+    """Order the candidates, each after the cheapest test that pays its one-off setup.
 
     Parameters
     ----------
@@ -157,23 +107,17 @@ def choose(
         The candidates' node ids.
     seconds
         The shard times of the tests that may warm up; any other test never does.
-    twin
-        Whether a copy of each candidate warms it up.
 
     Returns
     -------
     list of pytest.Item
-        The tests to run, in order: each candidate, preceded by its twin, or by its warm-up
-        the first time its module and fixture set come up.
+        The tests to run, in order: each candidate, preceded by its warm-up the first time
+        its module and fixture set come up.
     """
     wanted = set(candidates)
     keep: list[pytest.Item] = []
     warmed: set[tuple[Path, frozenset[object]]] = set()
     for candidate in (item for item in items if item.nodeid in wanted):
-        copy = _twin(candidate) if twin else None
-        if copy is not None:
-            keep += [copy, candidate]
-            continue
         needs = _shared(candidate)
         key = (candidate.path, needs)
         if key not in warmed:
@@ -209,8 +153,8 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     path = os.environ.get(WARM_UP_ENV)
     if not path:
         return
-    candidates, seconds, twin = read_plan(Path(path))
-    keep = choose(items, candidates, seconds, twin=twin)
+    candidates, seconds = read_plan(Path(path))
+    keep = choose(items, candidates, seconds)
     kept = set(map(id, keep))
     config.hook.pytest_deselected(items=[item for item in items if id(item) not in kept])
     items[:] = keep

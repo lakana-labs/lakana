@@ -35,7 +35,6 @@ def _ran(
     candidates: list[str],
     seconds: dict[str, float],
     *args: str,
-    twin: bool | None = None,
 ) -> list[str]:
     """Run the fixture project with the plugin and name the tests that ran, in order.
 
@@ -51,8 +50,6 @@ def _ran(
         The shard's seconds by node id.
     *args
         More arguments for pytest.
-    twin
-        The plan's ``twin``; None leaves it out.
 
     Returns
     -------
@@ -60,10 +57,7 @@ def _ran(
         The node ids whose call ran or was skipped, in the order they ran.
     """
     plan = pytester.path / "plan.json"
-    data: dict[str, object] = {"candidates": candidates, "seconds": seconds}
-    if twin is not None:
-        data["twin"] = twin
-    plan.write_text(json.dumps(data))
+    plan.write_text(json.dumps({"candidates": candidates, "seconds": seconds}))
     monkeypatch.setenv(WARM_UP_ENV, str(plan))
     reprec = pytester.inline_run("-p", "no:cacheprovider", *args, plugins=[plugin])
     return [
@@ -265,13 +259,7 @@ def test_without_a_plan_the_plugin_changes_nothing(
 
 @pytest.mark.parametrize(
     "text",
-    [
-        "not json",
-        "[]",
-        '{"candidates": "x", "seconds": {}}',
-        '{"candidates": [], "seconds": []}',
-        '{"candidates": [], "seconds": {}, "twin": "yes"}',
-    ],
+    ["not json", "[]", '{"candidates": "x", "seconds": {}}', '{"candidates": [], "seconds": []}'],
 )
 def test_a_broken_plan_is_refused_with_its_fix(tmp_path: Path, text: str) -> None:
     """The error names the file and who writes it."""
@@ -285,77 +273,3 @@ def test_a_missing_plan_is_refused(tmp_path: Path) -> None:
     """The variable names a file that is not there."""
     with pytest.raises(pytest.UsageError, match="cannot read"):
         read_plan(tmp_path / "gone.json")
-
-
-TWIN_PROJECT = """
-import pytest
-
-@pytest.fixture(scope="session")
-def app():
-    return "app"
-
-def test_cheap(app): pass
-
-def test_candidate(app): pass
-
-@pytest.mark.parametrize("n", [1, 2])
-def test_case(app, n): pass
-
-class TestGroup:
-    def test_method(self, app): pass
-"""
-
-
-def test_a_twin_of_the_candidate_runs_first_untimed(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """With ``twin``, a fresh copy of each candidate runs right before it, and no sibling.
-
-    The copy pays everything the process has not done yet for this test (imports, session
-    fixtures, first-call set-up in the code it calls), so the candidate's own run is timed
-    warm, as a shard times it; which other test would warm all of that is not guessed.
-    """
-    pytester.makepyfile(test_t=TWIN_PROJECT)
-    candidates = ["test_t.py::test_candidate", "test_t.py::test_case[2]"]
-    candidates.append("test_t.py::TestGroup::test_method")
-    seconds = {"test_t.py::test_cheap": 0.01}
-    ran = _ran(pytester, monkeypatch, candidates, seconds, twin=True)
-    assert ran == [c for c in candidates for _ in range(2)]
-
-
-def test_without_twin_the_sibling_warm_up_stays(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The shared first pass keeps the cheapest sibling, and ``twin: false`` is the default."""
-    pytester.makepyfile(test_t=TWIN_PROJECT)
-    seconds = {"test_t.py::test_cheap": 0.01}
-    for twin in (None, False):
-        ran = _ran(pytester, monkeypatch, ["test_t.py::test_candidate"], seconds, twin=twin)
-        assert ran == ["test_t.py::test_cheap", "test_t.py::test_candidate"]
-
-
-def test_a_doctest_candidate_has_no_twin_and_keeps_the_sibling_warm_up(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Only a test function can be copied; any other item keeps the warm-up by a sibling."""
-    pytester.makepyfile(
-        mod='''
-def f():
-    """
-    >>> 1 + 1
-    2
-    """
-
-def test_quick(): pass
-'''
-    )
-    ran = _ran(
-        pytester,
-        monkeypatch,
-        ["mod.py::mod.f"],
-        {"mod.py::test_quick": 0.01},
-        "--doctest-modules",
-        "mod.py",
-        twin=True,
-    )
-    assert ran == ["mod.py::test_quick", "mod.py::mod.f"]

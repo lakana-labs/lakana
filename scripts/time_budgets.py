@@ -41,11 +41,13 @@ BASELINE = Path("scripts/slow-tests-baseline.json")
 DOCS = "docs/agent/testing.md, 'Time budgets'"
 CONFIRM_RUNS = 3  # re-runs of a flagged test; the fastest counts
 # The most flagged tests that get a pytest process of their own after the shared first pass.
-# Each such process costs about 4 to 6 s on a CI runner (start-up, imports, collection and
-# coverage for one test) and runs up to CONFIRM_RUNS - 1 times, so 10 tests add at most about
-# 2 minutes to `test (3.14)` (about 3 of its 10 minutes otherwise). The first pass leaves only
-# the tests near or over the line, usually a few (49 flagged on 2026-11-18, most of them noise
-# gone after the first pass); more than 10 left means real slow tests, which fail anyway.
+# Each such process costs about 4 s of start-up on a CI runner (imports, collection and coverage)
+# plus the test itself, at least 2.5 s since only tests still over the line get one, and its
+# warm-up if it has one: about 7 to 9 s. It runs up to CONFIRM_RUNS - 1 times, so 10 tests add
+# at most about 3 minutes to `test (3.14)` (about 3 of its 10 minutes otherwise). The first
+# pass leaves only the tests near or over the line, usually a few (49 flagged on 2026-11-18,
+# most of them noise gone after the first pass); more than 10 left means real slow tests, which
+# fail anyway.
 SOLO_CAP = 10
 UPDATE_COMMAND = "uv run python scripts/time_budgets.py slow-tests --update REPORT.xml ..."
 WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"  # read by scripts/remeasure_warm_up.py
@@ -547,9 +549,7 @@ def _package_of(test: TestTime) -> str:
     return "/".join(parts[:2]) if parts[:1] == ("packages",) and len(parts) > 2 else parts[0]
 
 
-def _warm_up_plan(
-    group: Sequence[TestTime], warm_from: Sequence[TestTime], *, twin: bool = False
-) -> dict[str, object]:
+def _warm_up_plan(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> dict[str, object]:
     """Write down what the warm-up plugin needs to pick each candidate's warm-up.
 
     Parameters
@@ -558,8 +558,6 @@ def _warm_up_plan(
         The candidates of one process.
     warm_from
         Every test the reports hold.
-    twin
-        Whether a copy of each candidate runs before it (a process of its own).
 
     Returns
     -------
@@ -568,8 +566,7 @@ def _warm_up_plan(
         their files that ran, the only tests that may warm them up. A candidate of the same
         process is no warm-up, as it runs anyway; a flagged test in another process may be
         one (the plugin takes the cheapest, so a flagged one only when nothing cheaper shares
-        the fixtures, and otherwise the candidate would be timed cold every time). ``twin``:
-        added when true, for the plugin to warm each candidate up with a copy of itself.
+        the fixtures, and otherwise the candidate would be timed cold every time).
     """
     candidates = [test.nodeid for test in group]
     files = {test.file for test in group}
@@ -578,10 +575,7 @@ def _warm_up_plan(
         for test in warm_from
         if test.file in files and not test.skipped and test.nodeid not in candidates
     }
-    plan: dict[str, object] = {"candidates": candidates, "seconds": seconds}
-    if twin:
-        plan["twin"] = True
-    return plan
+    return {"candidates": candidates, "seconds": seconds}
 
 
 def remeasure(
@@ -635,8 +629,8 @@ def remeasure(
     fastest: dict[str, float] = {}
     failed: set[str] = set()
 
-    def record(groups: Sequence[Sequence[TestTime]], tag: str, *, twin: bool) -> None:
-        seconds, broke = _remeasure_once(groups, workdir, run, warm_from, tag, twin=twin)
+    def record(groups: Sequence[Sequence[TestTime]], tag: str) -> None:
+        seconds, broke = _remeasure_once(groups, workdir, run, warm_from, tag)
         failed.update(broke)
         for nodeid, value in seconds.items():
             fastest[nodeid] = min(value, fastest.get(nodeid, value))
@@ -655,7 +649,7 @@ def remeasure(
     packages: dict[str, list[TestTime]] = {}
     for test in tests:
         packages.setdefault(_package_of(test), []).append(test)
-    record(list(packages.values()), "0-", twin=False)
+    record(list(packages.values()), "0-")
     pending = still(tests) if runs > 1 else []
     if len(pending) > solo_cap:
         pending.sort(key=lambda t: fastest.get(t.nodeid, math.inf))
@@ -672,7 +666,7 @@ def remeasure(
     for attempt in range(1, runs):
         if not pending:
             break
-        record([[test] for test in pending], f"{attempt}-", twin=True)
+        record([[test] for test in pending], f"{attempt}-")
         pending = still(pending)
     for nodeid in sorted(failed):
         fastest.pop(nodeid, None)
@@ -689,8 +683,6 @@ def _remeasure_once(
     run: Callable[..., object],
     warm_from: Sequence[TestTime],
     tag: str,
-    *,
-    twin: bool = False,
 ) -> tuple[dict[str, float], set[str]]:
     """Run tests again once, serially, a pytest process per group, under coverage as in CI.
 
@@ -699,10 +691,7 @@ def _remeasure_once(
     collects its candidates' files, and the plugin `scripts.remeasure_warm_up` keeps only the
     candidates, each after the cheapest other test of its module that uses all its session-
     and module-scoped fixtures: that test takes the one-off setup a shard charges to
-    whichever test runs first, and its time is not counted. With `twin` (a process of one
-    candidate) the plugin runs a copy of the candidate first instead: a fresh process is cold
-    in ways no sibling warms up (on 2026-11-18 a `/openapi.json` test took 1.47 s cold and
-    1.24 s after its twin), and a shard has long paid all of that.
+    whichever test runs first, and its time is not counted.
 
     Parameters
     ----------
@@ -718,9 +707,6 @@ def _remeasure_once(
         candidate alone.
     tag
         Prefix of the file names, so a later run does not overwrite an earlier one.
-    twin
-        Whether each candidate runs after a copy of itself; the report names both alike,
-        and only the last, the candidate's own run, counts.
 
     Returns
     -------
@@ -734,7 +720,7 @@ def _remeasure_once(
     for index, group in enumerate(groups):
         report = workdir / f"remeasured-{tag}{index}.xml"
         plan = workdir / f"warm-up-{tag}{index}.json"
-        plan.write_text(json.dumps(_warm_up_plan(group, warm_from, twin=twin)))
+        plan.write_text(json.dumps(_warm_up_plan(group, warm_from)))
         command = [
             sys.executable,
             "-m",
@@ -762,12 +748,12 @@ def _remeasure_once(
         except (OSError, ValueError):
             continue
         wanted = {test.nodeid for test in group}
-        last = {test.nodeid: test for test in measured if test.nodeid in wanted}
-        for nodeid, test in last.items():
-            if test.failed:
-                failed.add(nodeid)
-            elif not test.skipped:
-                seconds[nodeid] = test.seconds
+        for test in measured:
+            if test.nodeid in wanted and not test.skipped:
+                if test.failed:
+                    failed.add(test.nodeid)
+                else:
+                    seconds[test.nodeid] = test.seconds
     return seconds, failed
 
 

@@ -764,8 +764,8 @@ def test_a_flagged_test_may_warm_up_another_in_its_own_process(tmp_path: Path) -
     remeasure(tests, tmp_path, run=_rerun(calls, 2.6), warm_from=tests, runs=2, stop_below=2.5)
     plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in calls[1:]]
     assert plans == [
-        {"candidates": [f"{path}::one"], "seconds": {f"{path}::two": 2.8}, "twin": True},
-        {"candidates": [f"{path}::two"], "seconds": {f"{path}::one": 2.6}, "twin": True},
+        {"candidates": [f"{path}::one"], "seconds": {f"{path}::two": 2.8}},
+        {"candidates": [f"{path}::two"], "seconds": {f"{path}::one": 2.6}},
     ]
 
 
@@ -803,31 +803,6 @@ def test_the_solo_runs_are_capped_and_the_rest_fail_as_slow(
         tests, threshold=2.0, baseline=0, confirm_threshold=2.5, remeasure=lambda over: again
     )
     assert [e.split(" took ")[0] for e in errors] == capped
-
-
-def test_a_solo_run_times_the_candidate_after_its_twin(tmp_path: Path) -> None:
-    """In a process of its own the candidate runs twice; only its second, warm run counts.
-
-    The first run is the twin the plugin adds: it pays the process's cold start (imports,
-    session fixtures, code that sets itself up on first use), which a shard has long paid.
-    The report names both runs alike, the candidate's own one last; a twin that fails does
-    not fail the candidate, and its time never counts. The shared first pass has no twin.
-    """
-    tests = [TestTime("a.py", "t", 2.8, slow=False, skipped=False)]
-    plans: list[dict[str, object]] = []
-
-    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
-        plans.append(json.loads(Path(env[WARM_UP_ENV]).read_text()))
-        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
-        if len(plans) == 1:
-            report.write_text(_junit(_case("a.py", "t", 2.7)))
-        else:
-            report.write_text(
-                _junit(_case("a.py", "t", 0.1, outcome="failure"), _case("a.py", "t", 2.1))
-            )
-
-    assert remeasure(tests, tmp_path, run=run, runs=2, stop_below=2.5) == {"a.py::t": 2.1}
-    assert [plan.get("twin", False) for plan in plans] == [False, True]
 
 
 @pytest.mark.parametrize("outcome", ["failure", "error"])
@@ -893,14 +868,12 @@ def test_remeasure_hands_the_warm_up_plugin_its_candidates_and_the_shard_times(
         {
             "candidates": [f"{core}::slow"],
             "seconds": {f"{core}::slower": 2.8, f"{core}::quick": 0.01},
-            "twin": True,
         },
         {
             "candidates": [f"{core}::slower"],
             "seconds": {f"{core}::slow": 2.6, f"{core}::quick": 0.01},
-            "twin": True,
         },
-        {"candidates": [f"{other}::lonely"], "seconds": {}, "twin": True},
+        {"candidates": [f"{other}::lonely"], "seconds": {}},
     ]
 
 
@@ -1000,14 +973,3 @@ def test_remeasure_starts_no_process_for_no_tests_or_no_runs(tmp_path: Path) -> 
     assert remeasure([], tmp_path, run=lambda *a, **k: calls.append(a)) == {}
     assert remeasure(tests, tmp_path, run=lambda *a, **k: calls.append(a), runs=0) == {}
     assert calls == []
-
-
-def test_a_candidate_skipped_when_run_again_answers_nothing(tmp_path: Path) -> None:
-    """A skip says nothing about the test's time, so its shard time stands."""
-    tests = [TestTime("a.py", "t", 2.6, slow=False, skipped=False)]
-
-    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
-        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
-        report.write_text(_junit(_case("a.py", "t", 0.0, skipped=True)))
-
-    assert remeasure(tests, tmp_path, run=run, runs=2, stop_below=2.5) == {}
