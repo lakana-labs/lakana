@@ -414,6 +414,10 @@ export default [
   // Measured 9.32 kB (2026-11-17) with the library beside the editor, its lists and the popover
   // of a narrow screen; the list frame's rules moved from the Catalog's stylesheets into
   // screen.css, so they apply wherever the frame is used. The limit holds.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "10.12 kB" },
+  // Raised to the measured 10.16 kB (2026-11-18) + 10 %: the lazily loaded stylesheets grew, the
+  // first-load one (index-*.css) did not. Browse… of New external table adds RawBrowser's own
+  // (the trail, the hint and the scrolling listing) and the Location field's wrapping row in
+  // the Catalog's.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.18 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

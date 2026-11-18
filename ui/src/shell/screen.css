@@ -198,14 +198,6 @@ tr:hover .chevron {
   font: inherit;
 }
 
-/* An input with a button beside it (Location and Browse…), which wraps at 320 px. */
-.field-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
 /* A radio: React Aria hides the input, so the label draws the circle; the focus ring is the
    one the menus use. */
 .radio {
