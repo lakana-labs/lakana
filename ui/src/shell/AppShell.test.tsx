@@ -1,8 +1,10 @@
 import { act, cleanup, screen, within } from "@testing-library/react";
+import { type JSX, useEffect } from "react";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
+import { Page } from "./Page";
 
 describe("AppShell", () => {
   beforeAll(preloadJobsScreen);
@@ -117,5 +119,35 @@ describe("AppShell", () => {
     await act(() => router.navigate("/catalog"));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Catalog" })).toHaveFocus();
+  });
+
+  it("has moved focus to the heading before the new page's own effects run", async () => {
+    // What a page's effect sees on arrival; it can then take focus itself (a note on what just
+    // happened) without waiting a frame for the shell's move.
+    const seen: (Element | null)[] = [];
+    function Probe(): JSX.Element {
+      useEffect(() => {
+        seen.push(document.activeElement);
+      }, []);
+      return <p>Probe</p>;
+    }
+    const { router } = renderShell("/", {
+      pages: {
+        jobs: () =>
+          Promise.resolve({
+            AreaScreen: () => (
+              <Page title="Probed">
+                <Probe />
+              </Page>
+            ),
+          }),
+      },
+    });
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+
+    await act(() => router.navigate("/jobs"));
+
+    await screen.findByText("Probe");
+    expect(seen).toEqual([screen.getByRole("heading", { level: 1, name: "Probed" })]);
   });
 });

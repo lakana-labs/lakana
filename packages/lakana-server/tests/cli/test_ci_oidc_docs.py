@@ -16,15 +16,13 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 from scripts.docs_blocks import read_source
-from typer.testing import CliRunner, Result
 
 import lakana
 from lakana.cli._state import CliState
-from lakana.cli.app import build_app
 from lakana_core.ci_oidc.config import CiOidcConfig
 from lakana_server.settings import Settings
 from tests.api.platform.test_ci_oidc import AUDIENCE, SHA, _app_client, _claims, _sign
-from tests.cli.conftest import make_cli_state
+from tests.cli.conftest import make_cli_state, run_cli
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -61,38 +59,6 @@ def app(settings: Settings) -> Iterator[TestClient]:
         )
         assert added.status_code == 201, added.text
         yield client
-
-
-def _run(state: CliState, *args: str, env: dict[str, str] | None = None) -> Result:
-    """Run one CLI command in-process with a clean environment.
-
-    Parameters
-    ----------
-    state
-        The CLI state.
-    *args
-        The command line, without the program name.
-    env
-        More environment variables.
-
-    Returns
-    -------
-    Result
-        The result.
-    """
-    clean: dict[str, str | None] = {
-        name: None
-        for name in (
-            "LAKANA_OUTPUT",
-            "LAKANA_PROFILE",
-            "LAKANA_TOKEN",
-            "LAKANA_URL",
-            "LAKANA_OIDC",
-            "LAKANA_OIDC_TOKEN",
-        )
-    }
-    clean.update({"COLUMNS": "200", "NO_COLOR": "1", **(env or {})})
-    return CliRunner().invoke(build_app(), list(args), obj=state, env=clean)
 
 
 def _region_commands(region: str) -> list[list[str]]:
@@ -162,12 +128,11 @@ def _create_the_documented_rules(
     state = make_cli_state(app, tmp_path)
     for region in regions:
         for words in _region_commands(region):
-            result = _run(state, *words)
+            result = run_cli(state, *words)
             assert result.exit_code == 0, (words, result.stderr)
     return state
 
 
-@pytest.mark.slow
 def test_the_github_rules_accept_the_workflow_s_jobs_and_nothing_else(
     app: TestClient, tmp_path: Path
 ) -> None:
@@ -188,7 +153,6 @@ def test_the_github_rules_accept_the_workflow_s_jobs_and_nothing_else(
     assert _verdict(app, "prod", {**push, "repository_id": "654321"}).startswith("refused")
 
 
-@pytest.mark.slow
 def test_the_gitlab_rules_accept_the_pipeline_s_jobs_and_nothing_else(
     app: TestClient, tmp_path: Path
 ) -> None:
@@ -216,7 +180,6 @@ def test_the_gitlab_rules_accept_the_pipeline_s_jobs_and_nothing_else(
     assert _verdict(app, "prod", {**main, "ref_type": "tag"}).startswith("refused")
 
 
-@pytest.mark.slow
 def test_the_gitlab_job_that_dry_runs_then_deploys_is_accepted(
     app: TestClient, tmp_path: Path
 ) -> None:
@@ -244,14 +207,13 @@ def test_the_gitlab_job_that_dry_runs_then_deploys_is_accepted(
         if r["environment"] == "prod"
     ]
     [words] = _region_commands("both-kinds")
-    result = _run(state, *[rule["id"] if word == "RULE_ID" else word for word in words])
+    result = run_cli(state, *[rule["id"] if word == "RULE_ID" else word for word in words])
     assert result.exit_code == 0, result.stderr
     shown = app.get(f"/api/v1/ci-trust-rules/{rule['id']}", headers=AUTH_HEADER).json()
     assert sorted(shown["kinds"]) == ["deploy", "dry_run"]
     assert _verdict(app, "prod", claims).startswith("accepted")
 
 
-@pytest.mark.slow
 def test_lakana_deploy_exchanges_the_job_s_id_token_once(app: TestClient, tmp_path: Path) -> None:
     state = _create_the_documented_rules(app, tmp_path)
     state.ci_client_factory = lambda state, environment, repository: lakana.Client.from_ci_oidc(
@@ -260,33 +222,31 @@ def test_lakana_deploy_exchanges_the_job_s_id_token_once(app: TestClient, tmp_pa
     id_token = _sign(_claims(environment="prod"))
     env = {"LAKANA_URL": "http://testserver", "LAKANA_OIDC_TOKEN": id_token}
     args = ("deploy", "analytics", "--env", "prod", "--no-wait")
-    queued = _run(state, *args, env=env)
+    queued = run_cli(state, *args, env=env)
     assert queued.exit_code == 0, queued.stderr
     assert "acting as ci-prod" in queued.stderr
     assert id_token not in queued.output
     deploy_id = queued.stdout.strip()
     shown = app.get(f"/api/v1/environments/prod/deploys/{deploy_id}", headers=AUTH_HEADER)
     assert shown.json()["requested_ref"] == SHA
-    again = _run(state, *args, env=env)
+    again = run_cli(state, *args, env=env)
     assert again.exit_code == 4
     assert "exchanged before" in again.stderr
     assert id_token not in again.output
 
 
 @pytest.mark.parametrize("provider", ["github", "gitlab"])
-@pytest.mark.slow
 def test_explain_accepts_the_documented_claims_of_a_deploy(
     app: TestClient, tmp_path: Path, provider: str
 ) -> None:
     state = _create_the_documented_rules(app, tmp_path, ("accounts", provider))
     claims = _ROOT / "docs" / "examples" / f"ci-trust-claims-{provider}.json"
     [words] = _region_commands("explain")
-    result = _run(state, *[str(claims) if word == "claims.json" else word for word in words])
+    result = run_cli(state, *[str(claims) if word == "claims.json" else word for word in words])
     assert result.exit_code == 0, result.stderr
     assert result.stdout.startswith("Verdict: accepted by rule")
 
 
-@pytest.mark.slow
 def test_disabling_a_rule_ends_its_ci_tokens(app: TestClient, tmp_path: Path) -> None:
     """Also: the documented opt-in to starting the deploy's jobs turns the setting on."""
     state = _create_the_documented_rules(app, tmp_path, ("accounts", "github"))
@@ -297,7 +257,7 @@ def test_disabling_a_rule_ends_its_ci_tokens(app: TestClient, tmp_path: Path) ->
     ]
     assert prod["start_on_deploy_jobs"] is False
     [words] = _region_commands("start-jobs")
-    opted = _run(state, *[prod["id"] if word == "RULE_ID" else word for word in words])
+    opted = run_cli(state, *[prod["id"] if word == "RULE_ID" else word for word in words])
     assert opted.exit_code == 0, opted.stderr
     shown = app.get(f"/api/v1/ci-trust-rules/{prod['id']}", headers=AUTH_HEADER).json()
     assert shown["start_on_deploy_jobs"] is True
@@ -309,6 +269,6 @@ def test_disabling_a_rule_ends_its_ci_tokens(app: TestClient, tmp_path: Path) ->
     header = {"Authorization": f"Bearer {issued['token']}"}
     assert app.get("/api/v1/whoami", headers=header).status_code == 200
     [words] = _region_commands("disable")
-    result = _run(state, *[issued["rule_id"] if word == "RULE_ID" else word for word in words])
+    result = run_cli(state, *[issued["rule_id"] if word == "RULE_ID" else word for word in words])
     assert result.exit_code == 0, result.stderr
     assert app.get("/api/v1/whoami", headers=header).status_code == 401
