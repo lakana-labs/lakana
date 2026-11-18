@@ -330,7 +330,13 @@ describe("SecretDialogs", () => {
     const shell = renderSecrets({
       "GET /api/v1/environments/dev/secrets": () => ({
         status: 200,
-        body: [aSecret(rotated ? { rotated_at: "2026-11-18T10:00:00Z" } : {})],
+        body: [
+          aSecret({
+            use: null,
+            use_target: null,
+            ...(rotated ? { rotated_at: "2026-11-18T10:00:00Z" } : {}),
+          }),
+        ],
       }),
       "PATCH /api/v1/environments/dev/secrets/pypi-corp": () => {
         rotated = true;
@@ -358,8 +364,36 @@ describe("SecretDialogs", () => {
     });
   });
 
+  it("prefills the keys of the secret's use", async () => {
+    const shell = renderSecrets({
+      "PATCH /api/v1/environments/dev/secrets/pypi-corp": { status: 200, body: aSecret() },
+    });
+    await shell.user.click(await screen.findByRole("button", { name: "Rotate pypi-corp" }));
+    const dialog = await screen.findByRole("dialog", { name: "Rotate pypi-corp" });
+    const { keys, values } = valueFields(dialog);
+
+    expect(keys.map((field) => (field as HTMLInputElement).value)).toEqual([
+      "username",
+      "password",
+    ]);
+    await shell.user.type(values[0] as HTMLElement, "u");
+    await shell.user.type(values[1] as HTMLElement, "p");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Rotate" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    const patch = shell.server.sent.find((request) => request.method === "PATCH");
+    expect(patch?.body).toEqual({ values: { username: "u", password: "p" } });
+  });
+
   it("rotates nothing with a key missing", async () => {
-    const shell = renderSecrets();
+    const shell = renderSecrets({
+      "GET /api/v1/environments/dev/secrets": {
+        status: 200,
+        body: [aSecret({ use: "environment", use_target: null })],
+      },
+    });
     await shell.user.click(await screen.findByRole("button", { name: "Rotate pypi-corp" }));
     const dialog = await screen.findByRole("dialog", { name: "Rotate pypi-corp" });
 

@@ -297,7 +297,9 @@ export function AddSecretDialog({ environment, onDone, onClose }: SecretDialogPr
 }
 
 /**
- * Rotate: the secret's new values. What uses the secret picks them up.
+ * Rotate: the secret's new values, which replace all of its values; the keys its use reads (a
+ * package index's `username` and `password`, a repository's `token`) are filled in. What uses
+ * the secret picks them up.
  *
  * @param props - The environment, the secret and the handlers.
  * @param props.environment - The environment.
@@ -315,7 +317,11 @@ export function RotateSecretDialog({
   const { t } = useTranslation();
   const attempt = useAttempt();
   const { name } = secret;
-  const [rows, setRows] = useState<readonly ValueRow[]>(() => [newRow()]);
+  // The values replace every value the secret has: start from the keys its use reads.
+  const [rows, setRows] = useState<readonly ValueRow[]>(() => {
+    const keys = secret.use === null ? undefined : KEYS_OF[secret.use];
+    return keys === undefined ? [newRow()] : keys.map((key) => newRow(key));
+  });
   const inputs = useValueInputs();
   const [checked, setChecked] = useState(false);
   return (
