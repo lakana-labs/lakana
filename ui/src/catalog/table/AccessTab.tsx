@@ -20,6 +20,7 @@ import {
   type PermissionOut,
   type RowFilterOut,
 } from "../../api";
+import { grantsPath } from "../../access/paths";
 import { personPath } from "../../access/personPath";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";
@@ -362,6 +363,11 @@ function WhoHasAccess(): JSX.Element {
         }
       />
       <GrantsAt level="instance" heading={t("table.access.who.instance")} />
+      <p>
+        <Link to={grantsPath({ where: { kind: "TABLE", environment, namespace, table: name } })}>
+          {t("table.access.manage")}
+        </Link>
+      </p>
     </section>
   );
 }
@@ -495,7 +501,7 @@ export default function AccessTab(): JSX.Element {
           <ColumnMasks />
         </>
       )}
-      <p className="second">{t("table.access.later")}</p>
+      {!me.admin && <p className="second">{t("table.access.later")}</p>}
     </div>
   );
 }

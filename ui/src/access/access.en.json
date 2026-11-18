@@ -203,6 +203,5 @@
     "nothing": "{{name}} holds no grant and is in no group.",
     "manage": "Manage grants",
     "reading": "Reading the grants and groups…"
-  },
-  "manageTable": "Manage grants"
+  }
 }

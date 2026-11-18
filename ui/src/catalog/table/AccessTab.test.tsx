@@ -204,10 +204,23 @@ describe("AccessTab", () => {
     expect(screen.getByRole("heading", { level: 2, name: "What you may do" })).toHaveFocus();
   });
 
-  it("says Changing access comes with the Access area", async () => {
+  it("says where an administrator changes access, and a reader sees no Manage link", async () => {
     renderShell(TAB, { me: READER });
 
-    expect(await screen.findByText("Changing access comes with the Access area.")).toBeVisible();
+    expect(
+      await screen.findByText("An administrator changes access under Settings › Access › Grants."),
+    ).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Manage grants" })).toBeNull();
+  });
+
+  it("an administrator can manage the table's grants", async () => {
+    renderShell(TAB);
+
+    expect(await screen.findByRole("link", { name: "Manage grants" })).toHaveAttribute(
+      "href",
+      "/settings/access/grants?environment=prod&namespace=gold.sales&table=fact_sales",
+    );
+    expect(screen.queryByText(/An administrator changes access/)).toBeNull();
   });
 
   it("shows nothing for administrators to a reader and asks nothing", async () => {

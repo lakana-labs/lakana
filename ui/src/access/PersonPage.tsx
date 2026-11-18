@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -23,6 +23,11 @@ import { useSession } from "../sign-in/SessionProvider";
 import { RecoveryDialog } from "./RecoveryDialog";
 import { markedText } from "../shell/VisibleText";
 import "../settings/settingsStrings";
+
+// The grants and groups load with Access's other places, not with People.
+const PersonGrants = lazy(() =>
+  import("./PersonGrants").then((module) => ({ default: module.PersonGrants })),
+);
 
 /** Who the page is about, as far as recovering them goes. */
 type Kind = "own" | "service" | "admin" | "person";
@@ -135,6 +140,9 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
         </section>
       )}
       {own && <OwnRecoveryNote name={name} />}
+      <Suspense fallback={null}>
+        <PersonGrants name={name} />
+      </Suspense>
       <PasskeysPanel name={name} own={own} />
       <SessionsPanel name={name} own={own} />
       {removing && (

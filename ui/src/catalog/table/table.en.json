@@ -394,7 +394,8 @@
       "expression": "Shown instead",
       "reading": "Reading the column masks…"
     },
-    "later": "Changing access comes with the Access area."
+    "later": "An administrator changes access under Settings › Access › Grants.",
+    "manage": "Manage grants"
   },
   "loadingTab": "Loading the tab…"
 }
