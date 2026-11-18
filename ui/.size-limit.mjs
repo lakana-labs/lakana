@@ -85,7 +85,9 @@ const NAMED_LIMITS = [
   // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
   // words, the selection, after each deploy, where it notifies, why a start waits), the runs
   // with Status and Period in the address, paged and read again every 30 s, and the selected run.
-  { name: "the job page", prefix: "JobPage-", limit: "2.92 kB" },
+  // Raised to the measured 2.95 kB (2026-11-18) + 10 %: without `?run=` the run shown is kept
+  // while the list holds it, so a newer run does not replace the run being read.
+  { name: "the job page", prefix: "JobPage-", limit: "3.25 kB" },
   // Measured 288 B (2026-11-17) + 10 %: a run's page, for now its heading and breadcrumb.
   // Raised to the measured 403 B (2026-11-17) + 10 %: the record of the run as opened; the run
   // itself is in the chunk it shares with the job page (RunDetail-, below).

@@ -103,7 +103,16 @@ function JobView({ env, repository, job }: JobViewProps): JSX.Element {
       });
     }
   };
-  const selected = params.get("run") ?? rows?.[0]?.id ?? null;
+  // Without `?run=` the newest run is shown, and kept while the list holds it: a run that starts
+  // later (the schedule, someone's Run now) does not replace the run being read, nor take the
+  // focus from its controls. A filter that drops it shows the newest run it lists.
+  const [shownRun, setShownRun] = useState<string | null>(null);
+  const kept = shownRun !== null && rows !== null && rows.some((row) => row.id === shownRun);
+  const fallback = kept ? shownRun : (rows?.[0]?.id ?? null);
+  if (fallback !== shownRun) {
+    setShownRun(fallback);
+  }
+  const selected = params.get("run") ?? fallback;
 
   return (
     <Page
@@ -161,7 +170,8 @@ function JobView({ env, repository, job }: JobViewProps): JSX.Element {
 /**
  * Renders the job the address names. Run now is the page's one primary action; after it the new
  * run is selected (`?run=`) and the focus stays on the button. Without `?run=` the newest listed
- * run is selected. A job that is not deployed (any more) says so in the server's words.
+ * run is selected, and stays selected while the list holds it, even when a newer run appears. A
+ * job that is not deployed (any more) says so in the server's words.
  *
  * @returns The page.
  */

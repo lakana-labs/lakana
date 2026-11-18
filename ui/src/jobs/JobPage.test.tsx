@@ -1,6 +1,6 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import i18next from "i18next";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { aJob, aJobRun, aTask } from "../test/jobs";
 import type { FakeRoute } from "../test/server";
@@ -35,6 +35,10 @@ function jobRoutes(more: Record<string, FakeRoute> = {}): Record<string, FakeRou
   };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("JobPage", () => {
   it("has the breadcrumb Jobs › env › job and Run now as its one primary action", async () => {
     renderShell(PAGE, { routes: jobRoutes() });
@@ -67,6 +71,69 @@ describe("JobPage", () => {
       await screen.findByRole("heading", { level: 2, name: `Run of ${when(OLDER.created_at)}` }),
     ).toBeInTheDocument();
     expect(first.server.sent.some((request) => request.path === `${ENV}/runs/r1`)).toBe(true);
+  });
+
+  it("without ?run= keeps the run being read when a newer run is listed, with the focus on it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = { ...NEWEST, status: "running" as const, actions: ["cancel" as const] };
+    const later = aJobRun({ id: "r3", created_at: "2026-11-17T09:00:00Z" });
+    let listed = [running, OLDER];
+    const { router } = renderShell(PAGE, {
+      routes: jobRoutes({
+        [`GET ${ENV}/runs`]: () => ({
+          status: 200,
+          body: listed.map((run) => ({ ...run, tasks: [] })),
+        }),
+        [`GET ${ENV}/runs/r2`]: { status: 200, body: running },
+        [`GET ${ENV}/runs/r3`]: { status: 200, body: later },
+      }),
+    });
+    const cancel = await screen.findByRole("button", { name: "Cancel run" });
+    cancel.focus();
+
+    listed = [later, running, OLDER];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(await screen.findByRole("link", { name: when(later.created_at) })).not.toHaveAttribute(
+      "aria-current",
+    );
+    expect(screen.getByRole("link", { name: when(running.created_at) })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(
+      screen.getByRole("heading", { level: 2, name: `Run of ${when(running.created_at)}` }),
+    ).toBeInTheDocument();
+    expect(cancel).toBeInTheDocument();
+    expect(cancel).toHaveFocus();
+    expect(router.state.location.search).toBe("");
+  });
+
+  it("without ?run= shows the newest run a filter lists once it drops the run being read", async () => {
+    const failed = aJobRun({ id: "r1", status: "failed", created_at: OLDER.created_at });
+    const { router } = renderShell(PAGE, {
+      routes: jobRoutes({
+        [`GET ${ENV}/runs`]: (request) => ({
+          status: 200,
+          body: (request.path.includes("status=") ? [failed] : [NEWEST, failed]).map((run) => ({
+            ...run,
+            tasks: [],
+          })),
+        }),
+        [`GET ${ENV}/runs/r1`]: { status: 200, body: failed },
+      }),
+    });
+    expect(
+      await screen.findByRole("heading", { level: 2, name: `Run of ${when(NEWEST.created_at)}` }),
+    ).toBeInTheDocument();
+
+    await act(() => router.navigate(`${PAGE}?status=failed`));
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: `Run of ${when(failed.created_at)}` }),
+    ).toBeInTheDocument();
   });
 
   it("after Run now the new run is selected and the focus stays on Run now", async () => {
