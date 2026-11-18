@@ -1,0 +1,100 @@
+/* Access's places: the Git mark, the managed note and the tables of grants, groups and members. */
+
+.git-mark {
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  font-weight: var(--type-label-weight);
+  line-height: var(--type-label-line);
+  white-space: nowrap;
+}
+
+.managed-note {
+  margin: 0 0 var(--space-5);
+}
+
+.managed-note p {
+  margin: 0 0 var(--space-2);
+}
+
+/* A list of facts without a page of their own (a grant, a member): no hover, no chevron. */
+.access-list tr:hover {
+  background: none;
+}
+
+/* The tables keep names whole and scroll in their own region at 320 px. */
+.list-scroll.held-grants-scroll .list {
+  min-width: 640px;
+}
+
+.list-scroll.grants-scroll .list {
+  min-width: 880px;
+}
+
+.list-scroll.members-scroll .list,
+.list-scroll.group-grants-scroll .list {
+  min-width: 560px;
+}
+
+.list-scroll.held-grants-scroll .row-name,
+.list-scroll.grants-scroll .row-name,
+.list-scroll.members-scroll .row-name,
+.list-scroll.group-grants-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+/* Each part of a page is a flat panel (Still Water), 24 px from the next. */
+.access-section {
+  margin: 0 0 var(--space-5);
+}
+
+.access-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-title-size);
+  font-weight: var(--type-title-weight);
+  line-height: var(--type-title-line);
+}
+
+.access-section h2:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.access-actions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.access-actions li {
+  padding: var(--space-1) 0;
+}
+
+.access-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+  margin: 0 0 var(--space-4);
+}
+
+.access-filters .field {
+  margin: 0;
+}
+
+.access-add-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.access-add-member .field {
+  margin: 0;
+}
+
+.access-section h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+  line-height: var(--type-section-line);
+}
