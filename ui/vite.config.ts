@@ -1,7 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-import { SHELL_CHUNK } from "./build/chunk-groups.ts";
+import { FORM_CHUNK, SHELL_CHUNK } from "./build/chunk-groups.ts";
 import { cspFile } from "./build/csp-file.ts";
 import { browserTargets } from "./build/targets.ts";
 import { CONTENT_SECURITY_POLICY } from "./csp.ts";
@@ -40,8 +40,11 @@ export default defineConfig({
         // first load, with what they import. Settings' places, each loaded on its own, would
         // otherwise split them, React Aria's Link and its press and hover hooks into chunks of
         // their own, and the exports between them cost about 1.5 kB.
-        // The pattern (build/chunk-groups.ts) names a file inside react-aria-components; its test
-        // fails if an update moves it.
+        // React Aria's form code stays in one chunk of the first load too. The Select menus that
+        // the Queries and Jobs screens load on demand use its validation but not its text field,
+        // and would otherwise split it in two (about 0.39 kB more).
+        // The patterns (build/chunk-groups.ts) name files inside React Aria's packages; their test
+        // fails if an update moves one.
         codeSplitting: {
           groups: [
             {
@@ -51,6 +54,10 @@ export default defineConfig({
             {
               name: "shell",
               test: SHELL_CHUNK,
+            },
+            {
+              name: "form",
+              test: FORM_CHUNK,
             },
           ],
         },

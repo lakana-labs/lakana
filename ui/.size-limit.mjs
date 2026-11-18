@@ -471,6 +471,9 @@ export default [
   // Measured 9.32 kB (2026-11-17) with the library beside the editor, its lists and the popover
   // of a narrow screen; the list frame's rules moved from the Catalog's stylesheets into
   // screen.css, so they apply wherever the frame is used. The limit holds.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "10.12 kB" },
+  // Raised to the measured 10.59 kB (2026-11-18) + 10 %: the Jobs screen's stylesheet (0.77 kB:
+  // the job's facts, the runs list and its filters, a run's tasks with their failure lines, the
+  // attempts and the log that wraps at 320 px), loaded with the Jobs screen only.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "11.65 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];
