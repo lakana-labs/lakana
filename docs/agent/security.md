@@ -5971,6 +5971,17 @@ fuller text of each part where it already lives.
   `GrantOut`: it leaves out `granted_by` and `principal_id`, the ids of other people, so the route
   tells a person nothing about anyone else (`test_get_own_grants_has_no_other_persons_id` pins the
   exact keys). The group appears by name only.
+- **The interface's writes to access (M7 parts 7 and 8, PR 3).** Groups, a group's members and
+  grants are written from Settings › Access only by an administrator, as the server enforces
+  (`authorize_admin_only`); the places follow `whoami.admin` and hide what would answer 403. Every
+  write the server guards with step-up (grant create and revoke, group delete, member add and
+  remove) asks for the passkey touch before the request (`guarded` in
+  `ui/src/api/stepUpFirst.ts`: it reads the session's `step_up_until` and runs the ceremony when
+  the touch is missing or ends within a minute); a cancelled touch sends nothing, and the 403
+  `StepUpRequired` retry stays as the fallback. The interface never sends `override_managed` or
+  `override_reason` (`e2e/access.spec.ts` checks every request): a scope an access file manages is
+  read-only there, marked "⌂ Git", and shows the CLI command for an emergency. The refusal of a
+  change that would leave no active administrator names the next step (`LAST_ADMIN_MESSAGE`).
 
 ## Governed table creation and append (M4a)
 

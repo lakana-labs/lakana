@@ -20,8 +20,8 @@
 "POST /api/v1/environments/{env}/saved-queries": { class: ui, part: 4, done: true }
 "PUT /api/v1/environments/{env}/saved-queries/{saved_query_id}": { class: ui, part: 4, done: true }
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
-"access explain": { class: ui, part: 7 }
-"access grants": { class: read, part: 7 }
+"access explain": { class: ui, part: 7, done: true }
+"access grants": { class: read, part: 7, done: true }
 "access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
 "access plan": { class: git, reason: "pre-commit validation of an access file" }
 "access status": { class: read, part: 7 }
@@ -84,19 +84,19 @@
 "env set-storage": { class: ui, part: 8 }
 "env unprotect": { class: ui, part: 8 }
 "env usage": { class: ui, part: 8 }
-"grant create": { class: ui, part: 7 }
-"grant list": { class: ui, part: 7 }
-"grant revoke": { class: ui, part: 7 }
+"grant create": { class: ui, part: 7, done: true }
+"grant list": { class: ui, part: 7, done: true }
+"grant revoke": { class: ui, part: 7, done: true }
 "graph impact": { class: ui, part: 3 }
 "graph join-path": { class: ui, part: 3 }
 "graph lineage": { class: read, part: 3, done: true }
 "graph neighbours": { class: read, part: 3, note: "the Lineage tab does not use it" }
-"group add-member": { class: ui, part: 7 }
-"group create": { class: ui, part: 7 }
-"group delete": { class: ui, part: 7 }
-"group list": { class: ui, part: 7 }
-"group members": { class: ui, part: 7 }
-"group remove-member": { class: ui, part: 7 }
+"group add-member": { class: ui, part: 7, done: true }
+"group create": { class: ui, part: 7, done: true }
+"group delete": { class: ui, part: 7, done: true }
+"group list": { class: ui, part: 7, done: true }
+"group members": { class: ui, part: 7, done: true }
+"group remove-member": { class: ui, part: 7, done: true }
 "index add": { class: ui, part: 8 }
 "index list": { class: ui, part: 8 }
 "index remove": { class: ui, part: 8 }
@@ -256,9 +256,9 @@
 "DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{name}": { class: ui, part: 8 }
-"DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7 }
-"DELETE /api/v1/groups/{name}": { class: ui, part: 7 }
-"DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
+"DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7, done: true }
+"DELETE /api/v1/groups/{name}": { class: ui, part: 7, done: true }
+"DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1 }
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
@@ -375,9 +375,14 @@
 "GET /api/v1/environments/{name}/orphaned-locations": { class: ui, part: 8 }
 "GET /api/v1/environments/{name}/usage": { class: ui, part: 8 }
 "GET /api/v1/grants":
-  { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
-"GET /api/v1/groups": { class: ui, part: 7 }
-"GET /api/v1/groups/{name}/members": { class: ui, part: 7 }
+  {
+    class: ui,
+    part: 7,
+    done: true,
+    note: "Settings › Access › Grants; the table page's Access tab links to it",
+  }
+"GET /api/v1/groups": { class: ui, part: 7, done: true }
+"GET /api/v1/groups/{name}/members": { class: ui, part: 7, done: true }
 "GET /api/v1/home/attention": { class: read, part: 2 }
 "GET /api/v1/home/get-started": { class: ui, part: 2 }
 "GET /api/v1/home/work": { class: read, part: 2 }
@@ -394,13 +399,14 @@
 "GET /api/v1/principals/{name}":
   { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
 "GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
-"GET /api/v1/principals/{name}/grants": { class: read, part: 7 }
+"GET /api/v1/principals/{name}/grants": { class: read, part: 7, done: true }
 "GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "GET /api/v1/principals/{name}/permissions":
   {
     class: ui,
     part: 7,
-    note: "1b asks it whether a person is an administrator (recovery links); the table page's Access tab shows its answer read-only",
+    done: true,
+    note: "1b asks it whether a person is an administrator (recovery links); the table page's Access tab and Settings › Access › What I may do show its answer",
   }
 "GET /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
@@ -522,8 +528,8 @@
 "POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/purge-rows": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }
-"POST /api/v1/grants": { class: ui, part: 7 }
-"POST /api/v1/groups": { class: ui, part: 7 }
+"POST /api/v1/grants": { class: ui, part: 7, done: true }
+"POST /api/v1/groups": { class: ui, part: 7, done: true }
 "POST /api/v1/invites": { class: ui, part: 1 }
 "POST /api/v1/package-indexes": { class: ui, part: 8 }
 "POST /api/v1/principals": { class: ui, part: 7 }
@@ -563,5 +569,5 @@
 "PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
   { class: ui, part: 3, done: true }
 "PUT /api/v1/environments/{name}/retention": { class: ui, part: 8 }
-"PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7 }
+"PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7, done: true }
 "PUT /api/v1/principals/{name}/picture": { class: ui, part: 2 }
