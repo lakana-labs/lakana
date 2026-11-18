@@ -1,12 +1,37 @@
 import { describe, expect, it } from "vitest";
 
-import { jobPath, jobRunPath, jobsListPath, splitJobRef, taskPath } from "./paths";
+import {
+  deploysPath,
+  jobPath,
+  jobRunPath,
+  jobsListPath,
+  runsTabPath,
+  splitJobRef,
+  taskPath,
+} from "./paths";
 
 describe("the Jobs addresses", () => {
   it("the list, of all environments or filtered to one", () => {
     expect(jobsListPath(null)).toBe("/jobs");
     expect(jobsListPath("prod")).toBe("/jobs?environment=prod");
     expect(jobsListPath("my env/a")).toBe("/jobs?environment=my+env%2Fa");
+  });
+
+  it("the Runs tab, filtered by environment and states", () => {
+    expect(runsTabPath({})).toBe("/jobs/runs");
+    expect(runsTabPath({ environment: null, status: [] })).toBe("/jobs/runs");
+    expect(runsTabPath({ environment: "my env", status: ["queued", "running"] })).toBe(
+      "/jobs/runs?environment=my+env&status=queued%2Crunning",
+    );
+  });
+
+  it("the Deploys tab, filtered by environment and repository", () => {
+    expect(deploysPath(null)).toBe("/jobs/deploys");
+    expect(deploysPath("prod")).toBe("/jobs/deploys?environment=prod");
+    expect(deploysPath("prod", "team/analytics")).toBe(
+      "/jobs/deploys?environment=prod&repository=team%2Fanalytics",
+    );
+    expect(deploysPath(null, "analytics")).toBe("/jobs/deploys?repository=analytics");
   });
 
   it("builds each address with every part encoded", () => {

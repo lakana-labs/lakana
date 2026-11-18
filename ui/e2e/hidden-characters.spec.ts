@@ -20,13 +20,16 @@ import {
 import {
   ADHOC_MESSAGE,
   ADHOC_REPOSITORY,
+  DEPLOY_FAILURE,
   DEV_JOB,
   FAILED_CHECK,
   FAILED_ID,
   JOBS_STUBBED,
   MISSING_ID,
   MISSING_SENTENCE,
+  OLDER_ONLY_JOB,
   SECRET,
+  SELECTION_PATTERNS,
   stubJobs,
   TIMED_OUT,
   TIMEOUT_CAUSE,
@@ -76,6 +79,7 @@ const LITERAL_CODES: Record<string, string> = {
   ConnectionLastTestOut: "outcome state",
   ConnectionOut: "actions kind",
   ConnectionTestOut: "outcome state",
+  DeployOut: "actions kind status",
   DeployTriggerOut: "kind",
   DroppedTableOut: "actions",
   ExternalTableOut: "format",
@@ -761,6 +765,44 @@ walk("the Jobs list marks hidden characters", async ({ page }) => {
   await expectMarked(page, "a search", [DEV_JOB]);
   expectOnlyStubbed(paths, JOBS_STUBBED);
 });
+
+walk(
+  "the Runs and Deploys tabs and the rollback dialog mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await stubJobs(poisoned(page));
+    // Every run: the jobs' names, a run of no job by its repository; then the runs that ended,
+    // with a selection's patterns.
+    await visit(page, "/jobs/runs", ["daily_sales", DEV_JOB, "analytics"]);
+    await page.getByRole("button", { name: "Show more" }).click();
+    await expect(page.getByText(/^selection /)).toBeVisible();
+    await expectMarked(page, "the runs that ended", [ADHOC_REPOSITORY, ...SELECTION_PATTERNS]);
+
+    // One environment's deploys: the repository and who asked. A failed deploy's message is cut
+    // to its first line, which here holds no override.
+    const env = n("prod");
+    await visit(page, `/jobs/deploys?environment=${env}`, ["analytics", "admin", "ana.nowak"]);
+    await expect(page.getByText(DEPLOY_FAILURE, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /Repository/ }).click();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await expectNoRaw(page, "the open Repository menu");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toBeHidden();
+
+    await page
+      .getByRole("button", { name: /^Roll back to this… \(analytics/ })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("button", { name: "Roll back" })).toBeVisible();
+    await expectMarked(page, "the rollback dialog", ["analytics", "daily_sales", OLDER_ONLY_JOB]);
+    await dialog.getByRole("button", { name: "Roll back" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(/^Rolled back /)).toBeVisible({ timeout: 10_000 });
+    await expectMarked(page, "the note after a rollback", ["analytics"]);
+    expectOnlyStubbed(paths, JOBS_STUBBED);
+  },
+);
 
 // Last, so that the walks before it have run in this worker: an entry no stub serves is stale.
 test("every object READ_AS pins is one a stub serves", () => {

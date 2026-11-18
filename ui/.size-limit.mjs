@@ -116,7 +116,13 @@ const NAMED_LIMITS = [
   // renders itself so the shell's focus finds it, the lazy import of the list, and the words of
   // the list's skeleton and of the controls in a row; the list's own strings load with the list
   // (JobsList-, below). The limit holds.
-  { name: "Jobs", prefix: "JobsScreen-", limit: "3.48 kB" },
+  // Raised to the measured 3.81 kB (2026-11-18) + 10 %: the row of tabs Jobs, Runs and Deploys on
+  // the area's three own pages, each keeping the address's environment, the routes and lazy
+  // imports of the Runs and Deploys tabs with their headings and skeletons, and the words of the
+  // tabs and of a job's link to its repository's deploys.
+  // The row is written out here rather than through shell/SectionTabs.tsx, which the table page
+  // uses: shared, it would be a chunk of its own that the first load's preload list names.
+  { name: "Jobs", prefix: "JobsScreen-", limit: "4.19 kB" },
   // Measured 4.75 kB (2026-11-18) + 10 %: the Jobs list at /jobs, loaded on demand: the
   // environment filter (remembered, in the address) and the search, Running now (the first 50
   // queued and running runs with their progress and Cancel), Failed, needs attention (the
@@ -126,7 +132,36 @@ const NAMED_LIMITS = [
   // Measured 4.91 kB (2026-11-18) after review: the sections start afresh for each filter, and a
   // failed run with neither a failed task nor a message says the reference's internal cause; the
   // limit holds.
-  { name: "the Jobs list", prefix: "JobsList-", limit: "5.23 kB" },
+  // Lowered to the measured 3.69 kB (2026-11-18) + 10 %: the environments' states, a run's first
+  // cells, the shared filter and the reads every 30 s moved into chunks the list shares with the
+  // Runs and Deploys tabs (on the shared limit).
+  { name: "the Jobs list", prefix: "JobsList-", limit: "4.06 kB" },
+  // Measured 2.68 kB (2026-11-18) + 10 %: the Runs tab, loaded on /jobs/runs: the environment, State
+  // (Queued or running as one choice), Trigger, the exact job name applied on Enter or when left,
+  // and Period, all in the address; every run newest first, 50 a page with Show more, the first
+  // page read again every 30 s until Show more read a further page, then Read again; a row's
+  // trigger, selection with +upstream and +downstream or the run a resume continues, its time,
+  // duration and tasks; no runs matching with Clear filters; and the tab's strings.
+  // Measured 2.87 kB (2026-11-18) after review: Read again shows no rows while it reads, with
+  // its status line and the focus kept off the page, and no error of another filter shows; the
+  // limit holds.
+  { name: "the Runs tab", prefix: "RunsTab-", limit: "2.95 kB" },
+  // Measured 3.44 kB (2026-11-18) + 10 %: the Deploys tab, loaded on /jobs/deploys: one
+  // environment at a time with the line that says so, the Repository menu in the address, the
+  // current version of each repository (and the sentence with Try again when it cannot be read),
+  // the deploys 50 a page with Show more, each row's result, kind, commit, current, who and when,
+  // Roll back to this… where it is offered, the lazy import of the rollback's question, the note
+  // that follows a rollback every 2 s to its end, the focus kept off the page, and the strings of
+  // the tab, the question and the note.
+  // Measured 3.54 kB (2026-11-18) after review: the focus kept off the page whichever read
+  // answers first, and every Roll back to this… held, with the note as its description, while
+  // a rollback is followed; the limit holds.
+  { name: "the Deploys tab", prefix: "DeploysTab-", limit: "3.79 kB" },
+  // Measured 1.22 kB (2026-11-18) + 10 %: the rollback's question, loaded on the first press of
+  // Roll back to this…: the two reads at once with their wait and Try again, what the rollback makes
+  // current, the union of the jobs marked kept, removed or back, the protected environment named,
+  // and Roll back with Cancel.
+  { name: "the rollback's question", prefix: "RollbackDialog-", limit: "1.34 kB" },
   // Measured 278 B (2026-11-17) + 10 %: the job's page, for now its heading and breadcrumb.
   // Raised to the measured 2.65 kB (2026-11-17) + 10 %: the job read every 30 s, Run now and
   // Pause or Resume schedule with their notes, the facts (where it is defined, the schedule in
@@ -136,7 +171,9 @@ const NAMED_LIMITS = [
   // while the list holds it, so a newer run does not replace the run being read.
   // Lowered to the measured 2.75 kB (2026-11-18) + 10 %: Run now and Pause or Resume schedule
   // moved into a chunk the job page shares with the Jobs list (JobControls-, on the shared limit).
-  { name: "the job page", prefix: "JobPage-", limit: "3.03 kB" },
+  // Lowered to the measured 2.29 kB (2026-11-18) + 10 %: the paging of a job's runs moved into a
+  // chunk the job page shares with the Runs tab (useRunPages-, on the shared limit).
+  { name: "the job page", prefix: "JobPage-", limit: "2.52 kB" },
   // Measured 288 B (2026-11-17) + 10 %: a run's page, for now its heading and breadcrumb.
   // Raised to the measured 403 B (2026-11-17) + 10 %: the record of the run as opened; the run
   // itself is in the chunk it shares with the job page (RunDetail-, below).
