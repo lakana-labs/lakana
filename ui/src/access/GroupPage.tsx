@@ -30,6 +30,7 @@ import { managedScopeOf } from "./managed";
 import { ManagedNote } from "./ManagedNote";
 import { GROUPS_PATH, grantsPath } from "./accessPaths";
 import { personPath } from "./personPath";
+import { TypedName } from "./TypedName";
 import { useAccessStatus } from "./useAccessStatus";
 import { whatWords, whereText } from "./words";
 
@@ -64,7 +65,6 @@ function DeleteGroupDialog({ name, onDeleted, onCancel }: DeleteGroupDialogProps
   const { t } = useTranslation();
   const attempt = useAttempt();
   const [typed, setTyped] = useState("");
-  const heldId = useId();
   const matches = typed === name;
   const close = (): void => {
     if (!attempt.busy) onCancel();
@@ -83,29 +83,16 @@ function DeleteGroupDialog({ name, onDeleted, onCancel }: DeleteGroupDialogProps
       >
         <Heading slot="title">{t("access.groups.deleteTitle", { name })}</Heading>
         <p>{t("access.groups.deleteText")}</p>
-        <TextField className="field" value={typed} onChange={setTyped}>
-          <Label>{t("access.groups.deleteType", { name })}</Label>
-          <Input autoComplete="off" spellCheck={false} />
-        </TextField>
-        <div className="step-actions">
-          <PendingButton
-            type="submit"
-            className="button button-primary"
-            pending={attempt.busy}
-            isDisabled={!matches}
-            {...(matches ? {} : { "aria-describedby": heldId })}
-          >
-            {t("access.groups.deleteConfirm")}
-          </PendingButton>
-          <Button className="button" onPress={close}>
-            {t("dialog.cancel")}
-          </Button>
-        </div>
-        {!matches && (
-          <p className="step-status" id={heldId}>
-            {t("access.groups.deleteHeld")}
-          </p>
-        )}
+        <TypedName
+          label={t("access.groups.deleteType", { name })}
+          typed={typed}
+          onTyped={setTyped}
+          matches={matches}
+          submit={t("access.groups.deleteConfirm")}
+          held={t("access.groups.deleteHeld")}
+          busy={attempt.busy}
+          onCancel={close}
+        />
         <AttemptStatus attempt={attempt} waiting={t("common.working")} />
       </Form>
     </ActionDialog>

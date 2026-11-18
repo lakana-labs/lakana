@@ -8,7 +8,7 @@
  * setting the use ask for the passkey touch before the request; deleting needs none.
  * @packageDocumentation
  */
-import { type JSX, useId, useState } from "react";
+import { type JSX, useState } from "react";
 import {
   Button,
   FieldError,
@@ -47,6 +47,7 @@ import {
   withKeys,
 } from "./SecretValuesFields";
 import { secretUseText } from "./secretUse";
+import { TypedName } from "./TypedName";
 import "./secretStrings";
 
 /** Properties of each secret dialog. */
@@ -411,7 +412,6 @@ export function DeleteSecretDialog({
 }: OneSecretDialogProps): JSX.Element {
   const { t } = useTranslation();
   const attempt = useAttempt();
-  const heldId = useId();
   const { name } = secret;
   const [typed, setTyped] = useState("");
   const matches = typed === name;
@@ -435,29 +435,16 @@ export function DeleteSecretDialog({
             {t("secrets.deleteDialog.inUse", { use: secretUseText(t, secret) })}
           </p>
         )}
-        <TextField className="field" value={typed} onChange={setTyped}>
-          <Label>{t("secrets.deleteDialog.type", { name })}</Label>
-          <Input autoComplete="off" spellCheck={false} />
-        </TextField>
-        <div className="step-actions">
-          <PendingButton
-            type="submit"
-            className="button button-primary"
-            pending={attempt.busy}
-            isDisabled={!matches}
-            {...(matches ? {} : { "aria-describedby": heldId })}
-          >
-            {t("secrets.deleteDialog.submit")}
-          </PendingButton>
-          <Button className="button" onPress={onClose}>
-            {t("dialog.cancel")}
-          </Button>
-        </div>
-        {!matches && (
-          <p className="step-status" id={heldId}>
-            {t("secrets.deleteDialog.held")}
-          </p>
-        )}
+        <TypedName
+          label={t("secrets.deleteDialog.type", { name })}
+          typed={typed}
+          onTyped={setTyped}
+          matches={matches}
+          submit={t("secrets.deleteDialog.submit")}
+          held={t("secrets.deleteDialog.held")}
+          busy={attempt.busy}
+          onCancel={onClose}
+        />
         <AttemptStatus attempt={attempt} waiting={t("common.working")} />
       </Form>
     </ActionDialog>

@@ -40,11 +40,11 @@ const NAMED_LIMITS = [
   // and What with its two sections, the list with the Git mark, Remove and its question); Add
   // grant loads when it is opened (AddGrantDialog-, on the shared limit).
   { name: "Grants", prefix: "GrantsPage-", limit: "4.21 kB" },
-  // Measured 3.25 kB (2026-11-18) + 10 %: Settings › Access › Secrets (the environment picker
+  // Measured 3.26 kB (2026-11-18) + 10 %: Settings › Access › Secrets (the environment picker
   // over the environments where the person manages secrets, the remembered choice, the list with
   // each secret's use and Rotate, Set use and Delete, and the loaders of the dialogs); the
   // dialogs load when one is opened (SecretDialogs-, on the shared limit).
-  { name: "Secrets", prefix: "SecretsPage-", limit: "3.58 kB" },
+  { name: "Secrets", prefix: "SecretsPage-", limit: "3.59 kB" },
   // Measured 29.08 kB (the Catalog: the list with its columns, health word, owner, header sorting,
   // the Sort by and Order menus, paging and states, 2026-11-13, 13.44 kB; and the tree of places
   // with React Aria's NavigationTree, the search field and the match line, +15.64 kB, almost all

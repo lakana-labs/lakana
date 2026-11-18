@@ -50,6 +50,101 @@ function useFocusOnRead(heading: RefObject<HTMLHeadingElement | null>, items: un
   }, []);
 }
 
+/**
+ * A list's header row: the columns, then the unnamed column of Revoke.
+ *
+ * @param props - The columns.
+ * @param props.columns - The columns' names, in order.
+ * @returns The row.
+ */
+function HeadRow({ columns }: { readonly columns: readonly string[] }): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <tr>
+      {columns.map((column) => (
+        <th scope="col" key={column}>
+          {column}
+        </th>
+      ))}
+      <th scope="col">
+        <span className="visually-hidden">{t("list.actions")}</span>
+      </th>
+    </tr>
+  );
+}
+
+/** Properties of {@link RevokeCell}. */
+interface RevokeCellProps {
+  /** The button's accessible name, naming the token. */
+  readonly label: string;
+  /** Asks to revoke the token. */
+  readonly onPress: () => void;
+}
+
+/**
+ * A row's Revoke.
+ *
+ * @param props - The name and the handler.
+ * @param props.label - The button's accessible name.
+ * @param props.onPress - Asks to revoke the token.
+ * @returns The cell.
+ */
+function RevokeCell({ label, onPress }: RevokeCellProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <td>
+      <Button className="button" aria-label={label} onPress={onPress}>
+        {t("tokens.revoke")}
+      </Button>
+    </td>
+  );
+}
+
+/** Properties of {@link RevokeDialog}. */
+interface RevokeDialogProps {
+  /** Revokes the token. */
+  readonly onConfirm: () => Promise<void>;
+  /** Closes the dialog. */
+  readonly onClose: () => void;
+  /** Called once the token is revoked, after the dialog is closed. */
+  readonly onDone: () => void;
+  /** What is revoked, in a sentence. */
+  readonly what: string;
+  /** What else stops with it, if anything. */
+  readonly also?: string;
+}
+
+/**
+ * The question before a revoke, which needs no passkey touch.
+ *
+ * @param props - The handlers and the sentences.
+ * @param props.onConfirm - Revokes the token.
+ * @param props.onClose - Closes the dialog.
+ * @param props.onDone - Called once the token is revoked.
+ * @param props.what - What is revoked.
+ * @param props.also - What else stops with it.
+ * @returns The dialog.
+ */
+function RevokeDialog({ onConfirm, onClose, onDone, what, also }: RevokeDialogProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <ConfirmDialog
+      title={t("tokens.confirm.title")}
+      confirmLabel={t("tokens.confirm.action")}
+      onConfirm={onConfirm}
+      onCancel={onClose}
+      onDone={() => {
+        onClose();
+        onDone();
+      }}
+    >
+      <p>{what}</p>
+      <p>{t("tokens.confirm.effect")}</p>
+      {also !== undefined && <p>{also}</p>}
+    </ConfirmDialog>
+  );
+}
+
 /** Properties of {@link PersonalTokens}. */
 export interface PersonalTokensProps {
   /** Only this principal's tokens; null for everyone's. */
@@ -95,16 +190,15 @@ export function PersonalTokens({ owner, heading, onRevoked }: PersonalTokensProp
         region={t("tokens.personal.region")}
         scroll="tokens-scroll"
         head={
-          <tr>
-            <th scope="col">{t("tokens.owner")}</th>
-            <th scope="col">{t("tokens.name")}</th>
-            <th scope="col">{t("tokens.created")}</th>
-            <th scope="col">{t("tokens.lastUsed")}</th>
-            <th scope="col">{t("tokens.expires")}</th>
-            <th scope="col">
-              <span className="visually-hidden">{t("list.actions")}</span>
-            </th>
-          </tr>
+          <HeadRow
+            columns={[
+              t("tokens.owner"),
+              t("tokens.name"),
+              t("tokens.created"),
+              t("tokens.lastUsed"),
+              t("tokens.expires"),
+            ]}
+          />
         }
       >
         {rows.map((token) => (
@@ -125,47 +219,35 @@ export function PersonalTokens({ owner, heading, onRevoked }: PersonalTokensProp
             <td>{when(token.created_at)}</td>
             <td>{token.last_used_at === null ? t("tokens.never") : when(token.last_used_at)}</td>
             <td>{token.expires_at === null ? t("tokens.never") : when(token.expires_at)}</td>
-            <td>
-              <Button
-                className="button"
-                aria-label={t("tokens.revokeOf", {
-                  name: markedText(token.name),
-                  owner: markedText(token.owner),
-                })}
-                onPress={() => {
-                  setRevoking(token);
-                }}
-              >
-                {t("tokens.revoke")}
-              </Button>
-            </td>
+            <RevokeCell
+              label={t("tokens.revokeOf", {
+                name: markedText(token.name),
+                owner: markedText(token.owner),
+              })}
+              onPress={() => {
+                setRevoking(token);
+              }}
+            />
           </tr>
         ))}
       </ViewList>
       {revoking !== null && (
-        <ConfirmDialog
-          title={t("tokens.confirm.title")}
-          confirmLabel={t("tokens.confirm.action")}
+        <RevokeDialog
           onConfirm={() => revokeToken(revoking.owner, revoking.key_id)}
-          onCancel={() => {
+          onClose={() => {
             setRevoking(null);
           }}
           onDone={() => {
-            setRevoking(null);
             arm();
             pages.reload();
             onRevoked();
           }}
-        >
-          <p>
-            {t("tokens.confirm.personal", {
-              name: markedText(revoking.name),
-              owner: markedText(revoking.owner),
-            })}
-          </p>
-          <p>{t("tokens.confirm.effect")}</p>
-          <p>{t("tokens.confirm.cascade")}</p>
-        </ConfirmDialog>
+          what={t("tokens.confirm.personal", {
+            name: markedText(revoking.name),
+            owner: markedText(revoking.owner),
+          })}
+          also={t("tokens.confirm.cascade")}
+        />
       )}
     </>
   );
@@ -259,16 +341,15 @@ export function TaskTokens({ environment, heading }: TaskTokensProps): JSX.Eleme
         region={t("tokens.task.region")}
         scroll="tokens-scroll"
         head={
-          <tr>
-            <th scope="col">{t("tokens.task.environment")}</th>
-            <th scope="col">{t("tokens.task.for")}</th>
-            <th scope="col">{t("tokens.task.principal")}</th>
-            <th scope="col">{t("tokens.task.issued")}</th>
-            <th scope="col">{t("tokens.expires")}</th>
-            <th scope="col">
-              <span className="visually-hidden">{t("list.actions")}</span>
-            </th>
-          </tr>
+          <HeadRow
+            columns={[
+              t("tokens.task.environment"),
+              t("tokens.task.for"),
+              t("tokens.task.principal"),
+              t("tokens.task.issued"),
+              t("tokens.expires"),
+            ]}
+          />
         }
       >
         {rows.map((token) => (
@@ -284,37 +365,27 @@ export function TaskTokens({ environment, heading }: TaskTokensProps): JSX.Eleme
             </td>
             <td>{when(token.issued_at)}</td>
             <td>{when(token.expires_at)}</td>
-            <td>
-              <Button
-                className="button"
-                aria-label={t("tokens.revokeTask", words(token))}
-                onPress={() => {
-                  setRevoking(token);
-                }}
-              >
-                {t("tokens.revoke")}
-              </Button>
-            </td>
+            <RevokeCell
+              label={t("tokens.revokeTask", words(token))}
+              onPress={() => {
+                setRevoking(token);
+              }}
+            />
           </tr>
         ))}
       </ViewList>
       {revoking !== null && (
-        <ConfirmDialog
-          title={t("tokens.confirm.title")}
-          confirmLabel={t("tokens.confirm.action")}
+        <RevokeDialog
           onConfirm={() => revokeTaskToken(revoking.key_id)}
-          onCancel={() => {
+          onClose={() => {
             setRevoking(null);
           }}
           onDone={() => {
-            setRevoking(null);
             arm();
             pages.reload();
           }}
-        >
-          <p>{t("tokens.confirm.task", words(revoking))}</p>
-          <p>{t("tokens.confirm.effect")}</p>
-        </ConfirmDialog>
+          what={t("tokens.confirm.task", words(revoking))}
+        />
       )}
     </>
   );
