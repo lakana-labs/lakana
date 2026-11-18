@@ -964,3 +964,12 @@ def test_main_confirms_before_failing(
     assert main(["slow-tests", "--confirm", "one.xml"]) == 0
     assert "counted as noise" in capsys.readouterr().out
     assert main(["slow-tests", "one.xml"]) == 1
+
+
+def test_remeasure_starts_no_process_for_no_tests_or_no_runs(tmp_path: Path) -> None:
+    """Nothing to measure, or no run allowed, answers at once and starts no pytest process."""
+    calls: list[object] = []
+    tests = [TestTime("a.py", "t", 2.5, slow=False, skipped=False, classname="a")]
+    assert remeasure([], tmp_path, run=lambda *a, **k: calls.append(a)) == {}
+    assert remeasure(tests, tmp_path, run=lambda *a, **k: calls.append(a), runs=0) == {}
+    assert calls == []
