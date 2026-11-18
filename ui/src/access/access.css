@@ -1,3 +1,5 @@
+@import "../shell/environment.css";
+
 /* Access's places: the Git mark, the managed note and the tables of grants, groups and members. */
 
 .git-mark {
@@ -17,7 +19,8 @@
 }
 
 /* A list of facts without a page of their own (a grant, a member): no hover, no chevron. */
-.access-list tr:hover {
+.access-list tr:hover,
+.grants-scroll tr:hover {
   background: none;
 }
 
@@ -35,6 +38,11 @@
   min-width: 560px;
 }
 
+.access-name {
+  display: block;
+}
+
+.list-scroll.grants-scroll .access-name,
 .list-scroll.held-grants-scroll .row-name,
 .list-scroll.grants-scroll .row-name,
 .list-scroll.members-scroll .row-name,

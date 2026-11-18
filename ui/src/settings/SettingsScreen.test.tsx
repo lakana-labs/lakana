@@ -69,6 +69,7 @@ describe("SettingsScreen", () => {
       "Repositories",
       "People",
       "Groups",
+      "Grants",
       "What I may do",
       "Sign-in",
       "Invites",
