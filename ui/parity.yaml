@@ -68,10 +68,10 @@
 "connection test": { class: ui, part: 6 }
 "connection update": { class: ui, part: 6 }
 "deploy": { class: git, reason: "deploy of a new commit" }
-"deployments list": { class: read, part: 5 }
+"deployments list": { class: read, part: 5, done: true }
 "deployments set-run-as": { class: ui, part: 7 }
-"deploys list": { class: read, part: 5 }
-"deploys show": { class: read, part: 5 }
+"deploys list": { class: read, part: 5, done: true }
+"deploys show": { class: read, part: 5, done: true }
 "env create": { class: ui, part: 8 }
 "env delete": { class: ui, part: 8 }
 "env get": { class: ui, part: 8 }
@@ -161,14 +161,14 @@
 "repo show": { class: ui, part: 8 }
 "repo test": { class: ui, part: 2 }
 "repo update": { class: ui, part: 8 }
-"rollback": { class: ui, part: 5 }
+"rollback": { class: ui, part: 5, done: true }
 "row-filter create": { class: ui, part: 7 }
 "row-filter list": { class: ui, part: 7 }
 "row-filter revoke": { class: ui, part: 7 }
 "run": { class: ui, part: 5 }
 "runs cancel": { class: ui, part: 5, done: true }
 "runs failed": { class: ui, part: 5, done: true }
-"runs list": { class: ui, part: 5 }
+"runs list": { class: ui, part: 5, done: true }
 "runs logs": { class: ui, part: 5, done: true }
 "runs resume": { class: ui, part: 5, done: true }
 "runs show": { class: ui, part: 5, done: true }
@@ -298,9 +298,9 @@
   }
 "GET /api/v1/environments/{env}/artifacts/uploads": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/checks": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/deployments": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/deploys": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/deploys/{deploy_id}": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/deployments": { class: read, part: 5, done: true }
+"GET /api/v1/environments/{env}/deploys": { class: read, part: 5, done: true }
+"GET /api/v1/environments/{env}/deploys/{deploy_id}": { class: read, part: 5, done: true }
 "GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/graph/impact": { class: ui, part: 3 }
 "GET /api/v1/environments/{env}/graph/join-path": { class: ui, part: 3 }
@@ -473,6 +473,7 @@
     class: ui,
     part: 5,
     note: "only the rollback form is in the UI; the CLI deploy of a new commit is Git",
+    done: true,
   }
 "POST /api/v1/environments/{env}/jobs/{job}/notify-test": { class: ui, part: 5 }
 "POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5, done: true }

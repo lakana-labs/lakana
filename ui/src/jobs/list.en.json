@@ -27,6 +27,7 @@
     "region": "Runs running now",
     "empty": "Nothing is running.",
     "more": "More runs are running than shown here.",
+    "seeAll": "See every running run",
     "queued": "queued {{time}}",
     "progress": "started {{time}} · {{duration}} · {{ended}} of {{total}} tasks"
   },

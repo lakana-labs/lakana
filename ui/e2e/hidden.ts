@@ -55,7 +55,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["action","allowed","reason","via"]': "PermissionOut",
   '["action","environment","granted_at","granted_by","group","group_id","id","kind","namespace","note","principal","principal_id","role","table"]':
     "GrantOut",
-  '["actions","cancel_requested","commit_sha","created_at","ended_tasks","environment","error_message","failed_tasks","finished_at","id","job","kind","repository","selection","started_at","status","tasks","total_tasks","trigger","triggered_by"]':
+  '["actions","cancel_requested","commit_sha","created_at","ended_tasks","environment","error_message","failed_tasks","finished_at","id","job","kind","repository","resumed_from_run_id","selection","started_at","status","tasks","total_tasks","trigger","triggered_by"]':
     "RunOut",
   '["actions","commit_sha","created_at","created_by","deleted_at","deleted_by","deleted_versions","file_count","files","is_directory","manifest_sha256","project_version_id","run_id","size_bytes","task_run_id","version"]':
     "ArtifactVersionOut",
@@ -182,6 +182,11 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["table"]': "RawEntryOut.claimed_by",
   '["version"]': "InfoOut",
   "[]": "-",
+  '["actions","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
+    "DeployOut",
+  '["commit_sha","project_version_id","repository","updated_at"]': "DeploymentOut",
+  '["id","status"]': "DeployAcceptedOut",
+  '["downstream","patterns","upstream"]': "JobOut",
 };
 
 /**

@@ -13,7 +13,7 @@ import { HostLink } from "../catalog/table/SourceButton";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import "./jobStrings";
-import { jobRunPath } from "./paths";
+import { deploysPath, jobRunPath } from "./paths";
 import { describeSchedule } from "./schedule";
 
 /** Properties of {@link Fact}. */
@@ -116,7 +116,7 @@ export interface JobFactsProps {
 
 /**
  * Renders the facts in a flat panel: why a start waits (with the run it waits for), then the
- * repository with `lakana.yaml` at the deployed commit, the schedule, the selection, whether it
+ * repository with `lakana.yaml` at the deployed commit and the link to its deploys, the schedule, the selection, whether it
  * runs after each deploy, and where it notifies.
  *
  * @param props - The environment and the job.
@@ -155,6 +155,10 @@ export function JobFacts({ environment, job }: JobFactsProps): JSX.Element {
           {" · "}
           {t("jobs.facts.definedAt", { commit: job.commit_sha.slice(0, 7) })}
           <HostLink url={job.source_url} label={t("jobs.facts.openHost")} before=" · " />
+          {" · "}
+          <Link to={deploysPath(environment, job.repository)}>
+            {t("jobs.facts.deploys", { repository: job.repository })}
+          </Link>
         </Fact>
         <Fact term={t("jobs.facts.schedule")}>
           <Schedule job={job} />

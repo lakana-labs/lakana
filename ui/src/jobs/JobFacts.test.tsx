@@ -50,6 +50,7 @@ describe("JobFacts", () => {
     expect(fact("Repository")).toHaveTextContent(
       "team/U+202Eanalytics · lakana.yaml @ 4f9d2a7 · open in repository ↗",
     );
+    expect(fact("Repository")).toHaveTextContent(/ · Deploys of team\/U\+202Eanalytics$/u);
     expect(
       within(fact("Repository")).getByRole("link", { name: /open in repository/ }),
     ).toHaveAttribute("href", "https://github.com/acme/analytics/blob/4f9d2a7/lakana.yaml");
@@ -61,9 +62,17 @@ describe("JobFacts", () => {
       renderFacts(aJob({ source_url: url }));
 
       expect(fact("Repository")).toHaveTextContent("analytics · lakana.yaml @ 4f9d2a7");
-      expect(screen.queryByRole("link")).toBeNull();
+      expect(screen.queryByRole("link", { name: /open in repository/ })).toBeNull();
     },
   );
+
+  it("links to its repository's deploys", () => {
+    renderFacts(aJob({ repository: "team/analytics" }));
+
+    expect(
+      within(fact("Repository")).getByRole("link", { name: "Deploys of team/analytics" }),
+    ).toHaveAttribute("href", "/jobs/deploys?environment=prod&repository=team%2Fanalytics");
+  });
 
   it("shows the schedule in words with its zone and next run, or the sentence of no schedule", () => {
     renderFacts(aJob());
