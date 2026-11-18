@@ -2,7 +2,8 @@
 
 A manager's listing of other people's queries, the readers of a table, a read of the audit
 log (`AuditService.query`) and an administrator's read of someone else's private saved query
-(`SavedQueryService`) show what other principals did. `record_view` writes one
+(`SavedQueryService`) show what other principals did; a listing of `raw/` shows files other
+systems and people put there. `record_view` writes one
 `ACTIVITY_VIEWED` row for such a view, on a session of its own that commits before the caller
 builds its answer, and at most one per viewer, view, scope and targeting key within
 `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`: the next page, another status filter and a screen that polls
@@ -51,6 +52,8 @@ class View(enum.StrEnum):
     QUERIES = "queries"
     TABLE_READERS = "table_readers"
     AUDIT_LOG = "audit_log"
+    RAW_FILES = "raw_files"
+    """A folder of `raw/`, browsed to register an external table (`CatalogService.list_raw`)."""
     SAVED_QUERIES = "saved_queries"
 
 
@@ -208,7 +211,9 @@ def record_view(
     targeting_key
         The filter that names one other principal (``{"submitter": name}`` of the query list,
         ``{"principal_id": id}`` of the audit log), or `None` when there is none or it names
-        the viewer. The caller passes `None` for a filter on the viewer.
+        the viewer. The caller passes `None` for a filter on the viewer. A listing of `raw/`
+        passes the folder (``{"path": "raw/orders"}``): each folder read is recorded, once per
+        window, whoever's files it holds.
     detail
         The filters and counts.
     config

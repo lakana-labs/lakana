@@ -2,6 +2,7 @@
 
 import contextlib
 import errno
+import heapq
 import io
 import logging
 import os
@@ -10,7 +11,7 @@ import re
 import secrets
 import stat
 import urllib.parse
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +28,7 @@ from lakana_core.storage.base import (
     PART_SUFFIX,
     STREAM_BLOCK_BYTES,
     STREAM_CHUNK_BYTES,
+    ChildEntry,
     Storage,
     StoredObject,
     StreamWriter,
@@ -86,6 +88,16 @@ _LOCAL_READ_FLAGS = (
 )
 """How the local backend opens an object to read it: never through a link at its own name, and
 never blocking on a pipe someone put there."""
+
+
+UNBROWSABLE_MESSAGE = (
+    "This environment's storage cannot be browsed: only local and S3 storage list a folder one "
+    "page at a time. Type the location instead, such as raw/orders/*.csv."
+)
+"""Why `FsspecStorage.list_children_page` refuses a backend that is neither local nor S3."""
+
+_S3_PAGE_ROUNDS = 10
+"""How many `list_objects_v2` calls one page may take when a store answers short pages."""
 
 
 def _sync_directory(directory: str) -> None:
@@ -902,11 +914,8 @@ class FsspecStorage:
         """
         full = self._full(prefix)
         if isinstance(self._fs, LocalFileSystem):
-            walked = self._base
-            for part in [p for p in full[len(self._base) :].split("/") if p]:
-                walked = f"{walked}/{part}"
-                if os.path.islink(walked):
-                    return
+            if self._linked_on_the_way(full):
+                return
             try:
                 scan = os.scandir(full)
             except (FileNotFoundError, NotADirectoryError):
@@ -921,6 +930,166 @@ class FsspecStorage:
             return
         for info in self._fs.ls(full, detail=True):
             yield str(info["name"]).rstrip("/").rsplit("/", 1)[1], info["type"] == "directory"
+
+    def _linked_on_the_way(self, full: str) -> bool:
+        """Check whether a local path, or a directory between the root and it, is a symlink.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root.
+
+        Returns
+        -------
+        bool
+            ``True`` when a listing must report nothing, as nothing outside the root is listed.
+        """
+        walked = self._base
+        for part in [p for p in full[len(self._base) :].split("/") if p]:
+            walked = f"{walked}/{part}"
+            if os.path.islink(walked):
+                return True
+        return False
+
+    def list_children_page(
+        self, prefix: str, *, after: str | None, limit: int
+    ) -> Sequence[ChildEntry]:
+        """List one page of the entries directly beneath a prefix; see `Storage.list_children_page`.
+
+        No backend reads a whole folder into memory for a page. The local backend streams the
+        one directory's names through a heap of `limit` entries and `stat`s only the files it
+        returns; S3 is asked for one page (`list_objects_v2` with a delimiter, `StartAfter` and
+        `MaxKeys`, following `IsTruncated` while a store answers short pages). Any other backend
+        has no listing that stops after a page, so it is refused (`UNBROWSABLE_MESSAGE`).
+
+        Parameters
+        ----------
+        prefix
+            Root-relative prefix.
+        after
+            The key of the last entry of the previous page; `None` for the first.
+        limit
+            Most entries returned.
+
+        Returns
+        -------
+        list of ChildEntry
+            The page, sorted by key; never an entry with an empty name.
+
+        Raises
+        ------
+        ValidationError
+            If the prefix contains a NUL byte, or escapes the configured storage root; or the
+            backend is neither local nor S3 (`UNBROWSABLE_MESSAGE`).
+        """
+        full = self._full(prefix)
+        if isinstance(self._fs, LocalFileSystem):
+            return self._local_children_page(full, after, limit)
+        if "s3" in self._fs.protocol:
+            return self._s3_children_page(full, after, limit)
+        raise ValidationError(UNBROWSABLE_MESSAGE)
+
+    def _local_children_page(
+        self, full: str, after: str | None, limit: int
+    ) -> Sequence[ChildEntry]:
+        """Read one page of a local directory, statting only the files returned.
+
+        The directory's entries are streamed through `heapq.nsmallest`, so memory stays in
+        proportion to `limit`, whatever the directory holds.
+
+        Parameters
+        ----------
+        full
+            The backend path, already confined to the root.
+        after
+            The key to start after, or `None`.
+        limit
+            Most entries returned.
+
+        Returns
+        -------
+        list of ChildEntry
+            The page; empty below a symlink or for a path that is no directory.
+        """
+        if self._linked_on_the_way(full):
+            return []
+        try:
+            scan = os.scandir(full)
+        except (FileNotFoundError, NotADirectoryError):
+            return []
+        with scan:
+            keyed = (
+                (f"{entry.name}/" if entry.is_dir(follow_symlinks=False) else entry.name, entry)
+                for entry in scan
+                if not entry.is_symlink()
+            )
+            chosen = heapq.nsmallest(
+                limit,
+                (pair for pair in keyed if after is None or pair[0] > after),
+                key=lambda pair: pair[0],
+            )
+        page: list[ChildEntry] = []
+        for key, entry in chosen:
+            if key.endswith("/"):
+                page.append(ChildEntry(entry.name, True, None))
+                continue
+            try:
+                size = os.stat(entry.path, follow_symlinks=False).st_size
+            except FileNotFoundError:
+                continue  # removed since the directory was read: not there any more
+            page.append(ChildEntry(entry.name, False, size))
+        return page
+
+    def _s3_children_page(self, full: str, after: str | None, limit: int) -> Sequence[ChildEntry]:
+        """Ask S3 for one page of the keys and common prefixes directly beneath a path.
+
+        S3 answers a `StartAfter` that ends in a common prefix's own key (``…/orders/``) with
+        that prefix again, since its objects sort after it; one more key is asked for, and the
+        repeated prefix dropped. A folder marker (the object whose key is the prefix itself, as
+        consoles and Hadoop write it) and the empty name of a ``//`` are not entries. A store
+        that answers fewer keys than asked while `IsTruncated` is asked again with the
+        continuation token, at most `_S3_PAGE_ROUNDS` times.
+
+        Parameters
+        ----------
+        full
+            The backend path, ``bucket/key``, already confined to the root.
+        after
+            The key to start after, or `None`.
+        limit
+            Most entries returned.
+
+        Returns
+        -------
+        list of ChildEntry
+            The page, sorted by key.
+        """
+        bucket, key, _ = self._fs.split_path(full)
+        start = f"{key}/" if key else ""
+        request: dict[str, object] = {
+            "Bucket": bucket,
+            "Prefix": start,
+            "Delimiter": "/",
+            "MaxKeys": limit + 1,
+        }
+        if after is not None:
+            request["StartAfter"] = start + after
+        found: list[ChildEntry] = []
+        for _ in range(_S3_PAGE_ROUNDS):
+            answer = self._fs.call_s3("list_objects_v2", **request)
+            found += [
+                ChildEntry(str(each["Prefix"])[len(start) :].rstrip("/"), True, None)
+                for each in answer.get("CommonPrefixes", [])
+            ] + [
+                ChildEntry(str(each["Key"])[len(start) :], False, int(each.get("Size") or 0))
+                for each in answer.get("Contents", [])
+            ]
+            found = [e for e in found if e.name and (after is None or e.key > after)]
+            token = answer.get("NextContinuationToken")
+            if len(found) >= limit or not answer.get("IsTruncated") or not token:
+                break
+            request["ContinuationToken"] = token
+        return sorted(found, key=lambda entry: entry.key)[:limit]
 
     def _list_local_objects(self, full: str) -> Iterator[StoredObject]:
         """List a local directory without ever following or reporting a symlink.

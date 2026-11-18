@@ -4,8 +4,9 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useState } from "react";
+import { type JSX, lazy, type ReactNode, type Ref, Suspense, useId, useRef, useState } from "react";
 import {
+  Button,
   Heading,
   Input,
   Label,
@@ -27,6 +28,9 @@ import { useProtected } from "../actions/useProtected";
 import { tablePath } from "../paths";
 import { formatFromLocation } from "./externalFormat";
 import "./placeStrings";
+
+// Browse…, with the listing of raw/, which most registrations never open.
+const RawBrowser = lazy(() => import("./RawBrowser"));
 
 /** The formats, in the order the radios show them. */
 const FORMATS: readonly ExternalFormat[] = ["csv", "json", "parquet"];
@@ -58,6 +62,10 @@ interface LineFieldProps {
   readonly onChange: (value: string) => void;
   /** Called when Enter is pressed in the field. */
   readonly onSubmit: () => void;
+  /** What stands beside the input, such as Browse…. */
+  readonly after?: ReactNode;
+  /** The input, for a caller that moves the focus to it. */
+  readonly inputRef?: Ref<HTMLInputElement>;
 }
 
 /**
@@ -69,9 +77,19 @@ interface LineFieldProps {
  * @param props.value - What has been typed.
  * @param props.onChange - Called on every change.
  * @param props.onSubmit - Called on Enter.
+ * @param props.after - What stands beside the input.
+ * @param props.inputRef - The input's element.
  * @returns The field.
  */
-function LineField({ label, description, value, onChange, onSubmit }: LineFieldProps): JSX.Element {
+function LineField({
+  label,
+  description,
+  value,
+  onChange,
+  onSubmit,
+  after,
+  inputRef,
+}: LineFieldProps): JSX.Element {
   return (
     <TextField
       className="field"
@@ -86,14 +104,22 @@ function LineField({ label, description, value, onChange, onSubmit }: LineFieldP
       }}
     >
       <Label>{label}</Label>
-      <Input />
+      {after === undefined ? (
+        <Input ref={inputRef} />
+      ) : (
+        <div className="field-line">
+          <Input ref={inputRef} />
+          {after}
+        </div>
+      )}
       <Text slot="description">{description}</Text>
     </TextField>
   );
 }
 
 /**
- * Renders the form: the table's name, its location, which starts with `raw/`, the format, which
+ * Renders the form: the table's name, its location, which starts with `raw/` and which Browse…
+ * fills from the folders of `raw/` (the format then follows it again), the format, which
  * follows the location's ending until the person picks one, and in a protected environment the
  * reason to break the protection. Nothing else is checked here: the server judges the name and
  * the location, and its refusal stays in the dialog, word for word, with the fields as typed.
@@ -120,6 +146,9 @@ export default function ExternalTableDialog({
   const [location, setLocation] = useState("raw/");
   const [picked, setPicked] = useState<ExternalFormat | null>(null);
   const [reason, setReason] = useState("");
+  const [browsing, setBrowsing] = useState(false);
+  const locationInput = useRef<HTMLInputElement>(null);
+  const panel = useId();
   const format = picked ?? formatFromLocation(location);
   const needsReason = protectedEnvironment === true;
   const missing =
@@ -171,7 +200,35 @@ export default function ExternalTableDialog({
         value={location}
         onChange={setLocation}
         onSubmit={submit}
+        inputRef={locationInput}
+        after={
+          <Button
+            className="button"
+            aria-expanded={browsing}
+            {...(browsing ? { "aria-controls": panel } : {})}
+            onPress={() => {
+              setBrowsing(!browsing);
+            }}
+          >
+            {t("catalog.places.external.browse")}
+          </Button>
+        }
       />
+      {browsing && (
+        <div id={panel}>
+          <Suspense fallback={null}>
+            <RawBrowser
+              environment={environment}
+              onChoose={(chosen) => {
+                setLocation(chosen);
+                setPicked(null);
+                setBrowsing(false);
+                locationInput.current?.focus();
+              }}
+            />
+          </Suspense>
+        </div>
+      )}
       <RadioGroup
         className="field"
         orientation="horizontal"

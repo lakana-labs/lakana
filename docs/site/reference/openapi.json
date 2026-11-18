@@ -1214,6 +1214,162 @@
         }
       }
     },
+    "/api/v1/environments/{env}/raw": {
+      "get": {
+        "tags": [
+          "environments"
+        ],
+        "summary": "List one folder of `raw/`, to choose the location of an external table",
+        "description": "One level of one folder, one page at a time: its folders and files (with their sizes), in key order. An entry inside an external table's folder says so, and names the table when you may read it. Needs `CREATE_TABLE` on an existing namespace of the environment, the right to register an external table there; each folder read is recorded in the audit log (`ACTIVITY_VIEWED`, view `raw_files`), once per folder within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. Answers 403 without that right, 404 when the environment does not exist, 422 for a path that is not `raw` or a folder below it (no `..`, no leading `/`), a cursor of another list, or a storage that is neither local nor S3 (it cannot list one page without reading the whole folder), 502 when the storage refused the environment's credentials and 503 when it did not answer or the read could not be recorded.",
+        "operationId": "list_raw_api_v1_environments__env__raw_get",
+        "parameters": [
+          {
+            "name": "env",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Env"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 1024,
+              "description": "The folder: raw, or a folder below it.",
+              "default": "raw",
+              "title": "Path"
+            },
+            "description": "The folder: raw, or a folder below it."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most entries returned (1 to 200)."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawPageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A service behind the server, such as the environment's storage, refused it; the message says what to fix. Asking again does not help until then.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The server cannot do this right now; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/environments/{env}/namespaces": {
       "post": {
         "tags": [
@@ -34238,6 +34394,107 @@
         ],
         "title": "QuerySubmitOut",
         "description": "Response body for a freshly submitted query.\n\nParameters\n----------\nquery_id\n    The submitted query's id, to poll or fetch results with."
+      },
+      "RawClaimOut": {
+        "properties": {
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          }
+        },
+        "type": "object",
+        "required": [
+          "table"
+        ],
+        "title": "RawClaimOut",
+        "description": "The external table whose claim an entry of `raw/` lies in.\n\nParameters\n----------\ntable\n    Its dotted name, such as ``bronze.orders``, when you may read it; `null` otherwise."
+      },
+      "RawEntryOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "folder",
+              "file"
+            ],
+            "title": "Kind"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "claimed_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RawClaimOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "size",
+          "claimed_by"
+        ],
+        "title": "RawEntryOut",
+        "description": "One folder or file directly in a folder of `raw/`.\n\nParameters\n----------\nname\n    Its name in the folder.\nkind\n    ``folder`` or ``file``.\nsize\n    A file's size in bytes; `null` for a folder.\nclaimed_by\n    The external table whose folder it is or lies in, so it cannot be chosen for another;\n    `null` when it is free. A folder that only holds a claimed folder further down is free\n    to open."
+      },
+      "RawPageOut": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RawEntryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "items",
+          "next_cursor"
+        ],
+        "title": "RawPageOut",
+        "description": "One page of a folder of `raw/`.\n\nParameters\n----------\npath\n    The folder listed, such as ``raw/orders``.\nitems\n    Its folders and files, in key order (a folder's key is its name followed by ``/``).\nnext_cursor\n    Pass back as `?cursor=` to fetch the next page; `null` on the last page."
       },
       "ReaderOut": {
         "properties": {

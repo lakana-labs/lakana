@@ -1,6 +1,6 @@
 """The storage protocol every backend implements."""
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -34,6 +34,37 @@ class StoredObject:
     path: str
     size: int
     modified_at: datetime | None
+
+
+@dataclass(frozen=True)
+class ChildEntry:
+    """One entry directly beneath a prefix, as `Storage.list_children_page` reports it.
+
+    Parameters
+    ----------
+    name
+        The entry's name relative to the prefix.
+    is_directory
+        Whether it is a directory (a common key prefix on an object store).
+    size
+        A file's size in bytes; `None` for a directory.
+    """
+
+    name: str
+    is_directory: bool
+    size: int | None
+
+    @property
+    def key(self) -> str:
+        """The entry's place in a listing: its name, and a slash after a directory's.
+
+        Returns
+        -------
+        str
+            The key, ordered as an object store orders its keys, so ``a.csv`` comes before the
+            directory ``a``.
+        """
+        return f"{self.name}/" if self.is_directory else self.name
 
 
 class StreamWriter(Protocol):
@@ -222,6 +253,36 @@ class Storage(Protocol):
         tuple of (str, bool)
             The entry's name relative to `prefix` and whether it is a directory, in no
             particular order. A symbolic link is never reported.
+
+        Raises
+        ------
+        ValidationError
+            If the prefix contains a NUL byte, or escapes the configured storage root.
+        """
+        ...
+
+    def list_children_page(
+        self, prefix: str, *, after: str | None, limit: int
+    ) -> Sequence[ChildEntry]:
+        """List one page of the entries directly beneath a prefix, in key order.
+
+        Reads one level of one directory, never below it, and on an object store no more than
+        the one page asked for.
+
+        Parameters
+        ----------
+        prefix
+            Root-relative prefix.
+        after
+            The `ChildEntry.key` of the last entry of the previous page; `None` for the first.
+        limit
+            Most entries returned.
+
+        Returns
+        -------
+        list of ChildEntry
+            The entries after `after`, sorted by `ChildEntry.key`, files with their size. A
+            symbolic link is never reported; a missing prefix, or one that is a file, has none.
 
         Raises
         ------

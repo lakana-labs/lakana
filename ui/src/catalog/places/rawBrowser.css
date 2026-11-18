@@ -1,0 +1,46 @@
+/* Browse… of New external table: the folders of raw/ under the Location field, inside the dialog.
+   The listing scrolls in its own region so the dialog keeps its buttons in view. */
+.raw-browser {
+  margin: 0 0 var(--space-4);
+}
+
+.raw-trail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.raw-trail li + li::before {
+  content: "/" / "";
+  margin-inline-end: var(--space-1);
+  color: var(--color-text-faint);
+}
+
+.raw-hint {
+  margin: 0 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+}
+
+.raw-browser .list-scroll {
+  max-height: 320px;
+  overflow: auto;
+}
+
+.raw-browser .list {
+  margin-bottom: var(--space-3);
+}
+
+.raw-browser .link-button[data-disabled] {
+  color: var(--color-text);
+  text-decoration: none;
+  cursor: default;
+}
+
+.raw-in-use {
+  color: var(--color-text-muted);
+}

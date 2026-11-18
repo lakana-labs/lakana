@@ -1,7 +1,8 @@
 # Register files as an external table
 
 After this guide you can make files that already lie under `raw/` in an environment's storage
-readable as a table, on the command line or in the web interface, also in a protected environment.
+readable as a table, on the command line or in the web interface, also in a protected environment,
+and look under `raw/` to find them.
 You need an environment and a namespace for the table (see
 [Organise tables in namespaces](organise-tables-in-namespaces.md)).
 
@@ -99,7 +100,8 @@ may do there; choose **New external table…**. It is offered on a namespace you
 in, never on an environment. The dialog "New external table in bronze" asks for:
 
 - **Name**: the table's name without its namespace, such as `orders`.
-- **Location**: it starts with `raw/`; complete it, such as `raw/orders/*.csv`.
+- **Location**: it starts with `raw/`; complete it, such as `raw/orders/*.csv`, or press
+  **Browse…** beside it to pick it (see below).
 - **Format**: **CSV**, **JSON** or **Parquet**. It follows the location's ending (`.csv`, `.json`
   or `.jsonl`, `.parquet`, in upper or lower case) until you pick one yourself; with another
   ending, pick one.
@@ -110,6 +112,44 @@ matches or a name a deployed project declares, stays in the dialog word for word
 as you typed them. In a protected environment the dialog asks "Why you break the protection of
 prod", the same reason `--reason` takes, and **Register** can be pressed once it is given.
 
+### Browse… instead of typing
+
+**Browse…** beside **Location** opens the folders of `raw/` under the field, one folder at a time:
+each folder and file with its size, **Show more** for a long folder, and the trail of folders
+above it to go back up.
+
+- Choose a folder to open it.
+- Choose a file to use its folder and every file there with its ending: `2026-11-02.csv` in
+  `raw/feeds` gives `raw/feeds/*.csv`.
+- **Use this folder** takes the ending most of the folder's files shown have (on a tie, one with a
+  format, `.csv`, `.json`, `.jsonl` or `.parquet`, wins).
+
+**Format** then follows the new location again, and you can still change it or edit the location
+by hand, for any pattern. A file directly in `raw/` cannot be chosen: a table needs a folder below
+it. A folder another external table uses, and everything in it, cannot be chosen either; it says
+"in use by bronze.orders" when you may read that table, otherwise only "in use". A folder that
+only holds another table's folder further down opens, so you can reach the free folders beside
+it; registering that folder itself is refused, as the location rules say.
+
+Browsing needs the same right as registering: `CREATE_TABLE` on at least one namespace of the
+environment. In a protected environment you can browse without a reason; registering still asks
+for one. Each folder you open is recorded in the audit log (see below). Browsing works on local
+and S3 storage, which list a folder one page at a time; on other storage, such as Azure, it is
+refused with `This environment's storage cannot be browsed: ... Type the location instead`.
+
+## Look under raw/ from the command line
+
+`lakana raw ls` lists a folder the same way, one page at a time:
+
+<!-- source: docs/examples/register-files-as-an-external-table/run.sh#ls -->
+```bash
+lakana raw ls raw/orders --env dev
+```
+
+It prints each entry's name (a folder with a `/` after it), kind, size and the table that uses
+it. `--limit` and `--cursor` page through a long folder; the last line names the command for the
+next page.
+
 ## Through the APIs
 
 - **REST.** `POST /api/v1/environments/{env}/namespaces/{path}/tables/external` with
@@ -118,6 +158,14 @@ prod", the same reason `--reason` takes, and **Register** can be pressed once it
   the columns it read.
 - **SDK.** `client.tables.create_external(env, "bronze.orders", "raw/orders/*.csv", "csv")`, with
   `break_glass_reason=` for a protected environment.
+- **Listing raw/.** `GET /api/v1/environments/{env}/raw?path=raw/orders&cursor=&limit=` answers
+  `{"path", "items": [{"name", "kind", "size", "claimed_by"}], "next_cursor"}`: `kind` is `folder`
+  or `file`, `size` is `null` for a folder, and `claimed_by` is `null` for a free entry or
+  `{"table": "bronze.orders"}` (`{"table": null}` for a table you may not read). It reads one
+  level of one folder and one page of it (1 to 200 entries, 100 by default); a path outside
+  `raw/` (a leading `/`, a `..`) is refused with 422, and a caller without `CREATE_TABLE` on any
+  namespace of the environment gets 403. In the SDK: `client.raw.list(env, "raw/orders")`, or
+  `client.raw.iter(env, "raw/orders")` for every entry.
 
 ## Afterwards
 
@@ -125,4 +173,7 @@ Dropping an external table removes the catalog entry only: its files stay, and i
 restored; register it again (see [Drop and restore a table](drop-and-restore-a-table.md)).
 `TABLE_CREATED` in the audit log records the registration, by the person who did it, from the
 command line, the SDK or the web interface alike (see
-[Export and keep the audit log](export-and-keep-the-audit-log.md)).
+[Export and keep the audit log](export-and-keep-the-audit-log.md)). Each folder of `raw/` someone
+lists, with **Browse…**, `lakana raw ls` or the API, is recorded as `ACTIVITY_VIEWED` with the view
+`raw_files` and the folder, once per person and folder within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`;
+if that record cannot be written, the listing is refused with 503 and shows nothing.

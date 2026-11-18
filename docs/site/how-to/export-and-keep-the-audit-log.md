@@ -27,7 +27,7 @@ in the `AuditEventType` of `lakana_core.models`; in groups:
 | Queries | `QUERY_COMPLETED` (also for a query that failed: `detail.status` says), `QUERY_CANCELLED`, `QUERY_RESULT_EXPORTED` (a whole result downloaded as Arrow, CSV or a spreadsheet: the query, `format`, `rows` and `size_bytes`; not a JSON page, nor a pipeline task reading its inputs as Arrow) |
 | Saved queries | `SAVED_QUERY_CREATED`, `SAVED_QUERY_UPDATED`, `SAVED_QUERY_DELETED` (the environment is the securable; `detail` holds the saved query's `id`, `name`, `visibility` and `owner`, never its SQL; a refused change writes none) |
 | Artifacts | `ARTIFACT_*`, among them `ARTIFACT_UPLOAD_ABORTED` (an upload withdrawn before its commit) |
-| Reading the log and other people's activity | `ACTIVITY_VIEWED` |
+| Reading the log and other people's activity, and listing a folder of `raw/` | `ACTIVITY_VIEWED` (`detail.view` says which: `queries`, `table_readers`, `audit_log` or `raw_files`) |
 | Reading the file that defines a table, or a view's SQL | `SOURCE_VIEWED` (repository, path and commit; once per person, file and commit per hour. For a view's SQL, `view_sql_sha256` instead, once per person and text per hour, withheld from readers without `READ_QUERY_TEXT`) |
 
 What the log does **not** record:
