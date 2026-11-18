@@ -6025,7 +6025,9 @@ fuller text of each part where it already lives.
     `ValueField`), read from the field (`useValueInputs().read`) only when the form sends, since
     React copies a controlled input's value into its `value` attribute, a password field's too,
     where `outerHTML`, a DOM snapshot or a CSS attribute selector would reach it. The inputs have
-    no reveal and no `name`; the values go in one request's body (`createSecret`,
+    no reveal and no `name`, and `autoComplete="new-password"` with `data-1p-ignore` and
+    `data-lpignore` (browsers ignore `off` on a password field and would offer to save the value
+    as a login when the dialog closes; the Connections form does the same); the values go in one request's body (`createSecret`,
     `rotateSecret`, with `guarded`), never in the address, storage, a log, an error, an
     attribute, a `title` or an `aria-*` text. A refusal keeps them as typed (the fields stay
     mounted), closing the dialog drops them with the fields. Pins:

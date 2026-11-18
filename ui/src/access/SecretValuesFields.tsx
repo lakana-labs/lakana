@@ -143,7 +143,10 @@ interface ValueFieldProps {
 }
 
 /**
- * One value: an uncontrolled password field.
+ * One value: an uncontrolled password field, marked as a new password so the browser neither
+ * fills a saved one in nor offers to keep it as a login (browsers ignore `off` on a password
+ * field, as the Connections form's fields say too), and out of the password managers' reach
+ * (`data-1p-ignore`, `data-lpignore`).
  *
  * @param props - The ref.
  * @param props.inputRef - Gives the field its ref.
@@ -155,7 +158,15 @@ function ValueField({ inputRef }: ValueFieldProps): JSX.Element {
   return (
     <div className="field">
       <label htmlFor={id}>{t("secrets.values.value")}</label>
-      <input id={id} ref={inputRef} type="password" autoComplete="off" spellCheck={false} />
+      <input
+        id={id}
+        ref={inputRef}
+        type="password"
+        autoComplete="new-password"
+        spellCheck={false}
+        data-1p-ignore=""
+        data-lpignore="true"
+      />
     </div>
   );
 }

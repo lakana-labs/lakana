@@ -212,7 +212,9 @@ describe("SecretDialogs", () => {
     await shell.user.type(valueFields(dialog).values[0] as HTMLElement, SENTINEL);
     const field = valueFields(dialog).values[0] as HTMLInputElement;
     expect(field.type).toBe("password");
-    expect(field).toHaveAttribute("autocomplete", "off");
+    expect(field).toHaveAttribute("autocomplete", "new-password");
+    expect(field).toHaveAttribute("data-1p-ignore");
+    expect(field).toHaveAttribute("data-lpignore", "true");
     expect(field).not.toHaveAttribute("name");
 
     await shell.user.click(within(dialog).getByRole("button", { name: "Cancel" }));
