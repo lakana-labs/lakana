@@ -324,6 +324,7 @@ export function GrantFilters({ filter, environments, onChange }: GrantFiltersPro
           label={t("access.grants.filters.name")}
           value={name}
           onChange={setName}
+          help={t("access.grants.filters.nameHelp")}
           onApply={() => {
             applyWho(whoKind, name, "replace");
           }}

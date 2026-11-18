@@ -90,8 +90,8 @@ function Who({ grant }: WhoProps): JSX.Element {
       </Link>
       <span className="second">
         {principal.principal_type === "user"
-          ? t("access.grants.person")
-          : t("access.grants.service")}
+          ? t("access.people.person")
+          : t("access.people.service")}
       </span>
     </div>
   );

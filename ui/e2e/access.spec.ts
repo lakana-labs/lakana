@@ -147,6 +147,13 @@ for (const theme of ["light", "dark"] as const) {
         await stubAccess(page);
         await addAdminPasskey(context, page);
         await stubStepUpCeremony(page);
+        const writes: string[] = [];
+        page.on("request", (request) => {
+          const path = new URL(request.url()).pathname;
+          if (request.method() !== "GET" && /^\/api\/v1\/(groups|sign-in\/step-up)/.test(path)) {
+            writes.push(`${request.method()} ${path}`);
+          }
+        });
         await page.setViewportSize({ width: 1280, height: 800 });
         await page.goto(`${ORIGIN}/settings/access/groups/analysts`);
         const members = page.getByRole("region", { name: "Members of analysts" });
@@ -182,6 +189,16 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page).toHaveURL(/\/settings\/access\/groups$/);
         await expect(page.getByRole("heading", { level: 1, name: "Groups" })).toBeFocused();
         await expect(page.getByRole("link", { name: "analysts" })).toBeHidden();
+        // Each write asks for the passkey touch first: the stubbed session has none.
+        const touch = ["POST /api/v1/sign-in/step-up/options", "POST /api/v1/sign-in/step-up"];
+        expect(writes).toEqual([
+          ...touch,
+          "PUT /api/v1/groups/analysts/members/ben",
+          ...touch,
+          "DELETE /api/v1/groups/analysts/members/maria",
+          ...touch,
+          "DELETE /api/v1/groups/analysts",
+        ]);
         expectOnlyStubbed(paths, urls);
         expect(errors).toEqual([]);
       });

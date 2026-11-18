@@ -268,7 +268,8 @@ class GroupService:
         limit
             Most groups returned.
         cursor
-            The `next_cursor` of the previous page. Send the same `q` with every page.
+            The `next_cursor` of the previous page. Send the same `q` and `member` with every
+            page.
 
         Returns
         -------

@@ -128,15 +128,15 @@ describe("GrantsPage", () => {
       "href",
       "/settings/access/groups/analysts",
     );
-    expect(group).toHaveTextContent("analystsgroupANALYSTdev › sales");
+    expect(group).toHaveTextContent("analystsGroupANALYSTdev › sales");
     expect(within(person as HTMLElement).getByRole("link", { name: "maria" })).toHaveAttribute(
       "href",
       "/settings/access/people/maria",
     );
     expect(person).toHaveTextContent(
-      "mariapersonManage API tokensMANAGE_TOKEN has no effect without the ADMIN role.The whole instance",
+      "mariaPersonManage API tokensMANAGE_TOKEN has no effect without the ADMIN role.The whole instance",
     );
-    expect(service).toHaveTextContent("ci-botservice account");
+    expect(service).toHaveTextContent("ci-botService account");
     expect(gone).toHaveTextContent("a principal no longer named");
   });
 

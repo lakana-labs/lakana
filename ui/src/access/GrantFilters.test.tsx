@@ -69,6 +69,7 @@ describe("GrantFilters", () => {
     await choose(user, /Who$/, "A group");
     expect(onChange).not.toHaveBeenCalled();
     const name = screen.getByRole("textbox", { name: "Name" });
+    expect(name).toHaveAccessibleDescription("Applied on Enter or when you leave the field.");
     await user.type(name, "analysts{Enter}");
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith(

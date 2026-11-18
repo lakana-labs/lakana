@@ -84,6 +84,22 @@ describe("GroupPage", () => {
     );
   });
 
+  it("says when the panel shows only the first page of the group's grants", async () => {
+    renderShell(PATH, {
+      routes: groupRoutes({
+        "GET /api/v1/grants": {
+          status: 200,
+          body: [aGrant()],
+          headers: { "X-Next-Cursor": "c2" },
+        },
+      }),
+    });
+
+    expect(
+      await screen.findByText("Showing the first 1. Manage these grants lists them all."),
+    ).toBeInTheDocument();
+  });
+
   it("adds a member after the passkey touch, asked first", async () => {
     fakeWebAuthn();
     let added = false;

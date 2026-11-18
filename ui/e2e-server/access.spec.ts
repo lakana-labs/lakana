@@ -80,7 +80,7 @@ test("an administrator makes a group, fills it and grants it a role", async ({
   await add.getByRole("button", { name: "Grant" }).click();
   await expect(add).toBeHidden();
   const grants = page.getByRole("region", { name: "Grants" });
-  await expect(grants.getByRole("row").nth(1)).toContainText(`${group}groupANALYST${environment}`);
+  await expect(grants.getByRole("row").nth(1)).toContainText(`${group}GroupANALYST${environment}`);
 
   await page.goto(`/settings/access/groups/${group}`);
   await expect(page.getByRole("region", { name: `Grants of ${group}` })).toContainText(

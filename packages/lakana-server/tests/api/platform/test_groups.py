@@ -178,3 +178,15 @@ def test_list_groups_by_member(client: TestClient) -> None:
     assert [g["name"] for g in ben.json()] == ["ops"]
     assert unknown.status_code == 404, unknown.text
     assert "nobody" in unknown.json()["detail"]
+
+
+def test_list_groups_by_member_is_403_for_a_non_administrator(client: TestClient) -> None:
+    """Someone who may not manage groups is refused before the name is looked up."""
+    headers = _holder_of(client, Action.READ_ENVIRONMENT)
+
+    unknown = client.get("/api/v1/groups", headers=headers, params={"member": "nobody"})
+    known = client.get("/api/v1/groups", headers=headers, params={"member": "admin"})
+
+    assert unknown.status_code == 403, unknown.text
+    assert known.status_code == 403, known.text
+    assert unknown.json()["detail"] == known.json()["detail"]

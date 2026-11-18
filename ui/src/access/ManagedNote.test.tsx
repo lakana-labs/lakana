@@ -20,6 +20,7 @@ describe("ManagedNote", () => {
     expect(container).toHaveTextContent("⌂ Git The whole instance is managed by access.yaml");
     expect(container).toHaveTextContent(command);
     expect(screen.getByRole("button", { name: "Copy command" })).toBeInTheDocument();
+    expect(screen.getByText("lakana access apply").tagName).toBe("CODE");
   });
 
   it("names a managed environment, marked", () => {

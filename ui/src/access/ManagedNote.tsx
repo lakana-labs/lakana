@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 
 import type { ManagedScopeOut } from "../api/accessFile";
 import { CopyLine } from "../shell/CopyLine";
@@ -39,9 +39,16 @@ export function ManagedNote({ scope, command }: ManagedNoteProps): JSX.Element {
     <div className="managed-note">
       <p>
         <GitMark />{" "}
-        {scope.scope === INSTANCE_SCOPE
-          ? t("access.managed.instance", values)
-          : t("access.managed.environment", { ...values, environment: scope.scope })}
+        <Trans
+          t={t}
+          i18nKey={
+            scope.scope === INSTANCE_SCOPE
+              ? "access.managed.instance"
+              : "access.managed.environment"
+          }
+          values={{ ...values, environment: scope.scope }}
+          components={{ code: <code /> }}
+        />
       </p>
       <CopyLine text={command} copyLabel={t("access.managed.copy")} />
     </div>

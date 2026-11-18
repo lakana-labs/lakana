@@ -187,6 +187,9 @@ function GroupGrants({ name }: GroupGrantsProps): JSX.Element {
           </table>
         </div>
       )}
+      {rows !== undefined && grants.data?.nextCursor !== null && (
+        <p className="page-purpose">{t("access.groups.firstOnly", { count: rows.length })}</p>
+      )}
       <p>
         <Link to={grantsPath({ who: { kind: "group", name } })}>{t("access.groups.manage")}</Link>
       </p>
@@ -301,6 +304,12 @@ export function GroupPage({ name }: GroupPageProps): JSX.Element {
   const [note, setNote] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleted, setDeleted] = useState(false);
+  // The dialog closes first, in its own commit, so its return of the focus is over before the
+  // list of groups takes the place of this page and the shell focuses that page's heading.
+  useEffect(() => {
+    if (deleted) void navigate(GROUPS_PATH, { replace: true });
+  }, [deleted, navigate]);
   const missing = members.failure?.status === 404;
   useEffect(() => {
     if (missing) heading.current?.focus();
@@ -449,7 +458,8 @@ export function GroupPage({ name }: GroupPageProps): JSX.Element {
             setDeleting(false);
           }}
           onDeleted={() => {
-            void navigate(GROUPS_PATH, { replace: true });
+            setDeleting(false);
+            setDeleted(true);
           }}
         />
       )}
