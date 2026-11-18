@@ -7,7 +7,7 @@
 import { type JSX, useMemo } from "react";
 import { Outlet } from "react-router";
 
-import { mySecretEnvironments } from "../api/secrets";
+import { mySecretEnvironments } from "../api/secretEnvironments";
 import { useFolded } from "../shell/useFolded";
 import { useMe } from "../shell/me";
 import { useResource } from "../shell/useResource";

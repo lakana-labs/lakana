@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { setStepUp } from "./client";
-import {
-  bindSecret,
-  createSecret,
-  listSecrets,
-  mySecretEnvironments,
-  revokeSecret,
-  rotateSecret,
-} from "./secrets";
+import { bindSecret, createSecret, listSecrets, revokeSecret, rotateSecret } from "./secrets";
+
+import { mySecretEnvironments } from "./secretEnvironments";
 
 import { fakeServer } from "../test/server";
 
