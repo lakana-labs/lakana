@@ -307,6 +307,10 @@ def list_grants(
         str | None,
         typer.Option("--action", help="Only grants that give this action, e.g. READ_TABLE."),
     ] = None,
+    role: Annotated[
+        str | None,
+        typer.Option("--role", help="Only grants of exactly this role, e.g. ANALYST."),
+    ] = None,
     env: _ENV = None,
     ns: _NS = None,
     table: _TABLE = None,
@@ -327,7 +331,8 @@ def list_grants(
 
     Filters combine. `--principal` and `--group` list the grants made to them (not those a
     principal has through its groups: `lakana access explain` says that). `--action` lists the
-    grants that give an action, by itself or through a role. `--env`, with `--ns` and `--table`,
+    grants that give an action, by itself or through a role; `--role` those of exactly one role
+    (not with `--action`). `--env`, with `--ns` and `--table`,
     lists the grants on exactly that object. `--kind INSTANCE` lists the grants on the whole
     instance, which apply to every environment, namespace and table; `--kind` with `--env` must
     name that object's kind. A long list prints a "More results" line with the command that
@@ -360,6 +365,8 @@ def list_grants(
         Only grants to this group.
     action
         Only grants that give this action.
+    role
+        Only grants of exactly this role.
     env
         Only grants on this environment (or, with `ns`, inside it).
     ns
@@ -376,11 +383,13 @@ def list_grants(
     state = state_of(ctx)
     client = state.client()
     wanted = action.upper() if action else None
+    exact_role = role.upper() if role else None
     level = kind.upper() if kind else None
     page = client.grants.list_page(
         principal_name=principal,
         group_name=group,
         action=wanted,
+        role=exact_role,
         environment=env,
         namespace=ns,
         table=table,
@@ -422,6 +431,7 @@ def list_grants(
             "--principal": principal,
             "--group": group,
             "--action": wanted,
+            "--role": exact_role,
             "--env": env,
             "--ns": ns,
             "--table": table,

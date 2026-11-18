@@ -158,3 +158,23 @@ def test_manage_group_as_a_single_action_is_a_403_on_every_route(client: TestCli
         assert answer.status_code == 403, (answer.request.method, str(answer.request.url))
         assert "MANAGE_GROUP needs the ADMIN role on the instance" in answer.text
     assert client.put("/api/v1/groups/team/members/bob", headers=AUTH_HEADER).status_code == 204
+
+
+def test_list_groups_by_member(client: TestClient) -> None:
+    """`?member=` lists the groups a principal belongs to, with `q`, and 404s an unknown name."""
+    for name in ("maria", "ben"):
+        client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "USER"})
+    for group in ("analysts", "ops"):
+        client.post("/api/v1/groups", headers=AUTH_HEADER, json={"name": group})
+    client.put("/api/v1/groups/analysts/members/maria", headers=AUTH_HEADER)
+    client.put("/api/v1/groups/ops/members/maria", headers=AUTH_HEADER)
+    client.put("/api/v1/groups/ops/members/ben", headers=AUTH_HEADER)
+
+    maria = client.get("/api/v1/groups", headers=AUTH_HEADER, params={"member": "maria"})
+    ben = client.get("/api/v1/groups", headers=AUTH_HEADER, params={"member": "ben", "q": "op"})
+    unknown = client.get("/api/v1/groups", headers=AUTH_HEADER, params={"member": "nobody"})
+
+    assert {g["name"] for g in maria.json()} == {"analysts", "ops"}
+    assert [g["name"] for g in ben.json()] == ["ops"]
+    assert unknown.status_code == 404, unknown.text
+    assert "nobody" in unknown.json()["detail"]

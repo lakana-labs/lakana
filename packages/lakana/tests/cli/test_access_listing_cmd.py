@@ -235,3 +235,17 @@ def test_access_explain_json_is_the_answer(tmp_path: Path) -> None:
     result = invoke(make_state(tmp_path, api), "--output", "json", "access", "explain", "alice")
     assert result.exit_code == 0, result.stderr
     assert json.loads(result.stdout) == _explained()
+
+
+def test_group_list_by_member_and_grant_list_by_role_send_them(tmp_path: Path) -> None:
+    teams = _paged("/api/v1/groups", [{"name": "team"}], "g2")
+    result = invoke(make_state(tmp_path, teams), "group", "list", "--member", "maria")
+    assert result.exit_code == 0, result.stderr
+    assert dict(teams.requests[0].url.params) == {"member": "maria"}
+    assert "More results: lakana group list --member maria --cursor g2" in result.stdout
+
+    api = _paged("/api/v1/grants", [_GRANT], "next-1")
+    result = invoke(make_state(tmp_path, api), "grant", "list", "--role", "analyst")
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[0].url.params) == {"role": "ANALYST"}
+    assert "More results: lakana grant list --role ANALYST --cursor next-1" in result.stdout

@@ -80,7 +80,12 @@ class Groups:
         return _group_from_json(response.json())
 
     def list(
-        self, *, search: str | None = None, limit: int | None = None, cursor: str | None = None
+        self,
+        *,
+        search: str | None = None,
+        member: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
     ) -> _GroupList:
         """List groups, newest first.
 
@@ -91,20 +96,28 @@ class Groups:
         ----------
         search
             Only groups whose name contains this text, in any letter case.
+        member
+            Only the groups this principal belongs to.
         limit
             Most groups returned (1 to 200); `None` leaves it to the server (100).
         cursor
-            A previous page's `next_cursor`. Send the same `search` with every page.
+            A previous page's `next_cursor`. Send the same `search` and `member` with every
+            page.
 
         Returns
         -------
         list of Group
             Newest first.
         """
-        return self.list_page(search=search, limit=limit, cursor=cursor).items
+        return self.list_page(search=search, member=member, limit=limit, cursor=cursor).items
 
     def list_page(
-        self, *, search: str | None = None, limit: int | None = None, cursor: str | None = None
+        self,
+        *,
+        search: str | None = None,
+        member: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
     ) -> GroupPage:
         """List one page of groups, newest first, with the cursor of the next page.
 
@@ -112,10 +125,13 @@ class Groups:
         ----------
         search
             Only groups whose name contains this text, in any letter case.
+        member
+            Only the groups this principal belongs to.
         limit
             Most groups returned (1 to 200); `None` leaves it to the server (100).
         cursor
-            A previous page's `next_cursor`. Send the same `search` with every page.
+            A previous page's `next_cursor`. Send the same `search` and `member` with every
+            page.
 
         Returns
         -------
@@ -123,20 +139,25 @@ class Groups:
             The groups, and the cursor for the next page (`None` on the last).
         """
         response = self._transport.request(
-            ROUTES["groups.list"], params=query_params(q=search, limit=limit, cursor=cursor)
+            ROUTES["groups.list"],
+            params=query_params(q=search, member=member, limit=limit, cursor=cursor),
         )
         return GroupPage(
             items=[_group_from_json(item) for item in response.json()],
             next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
         )
 
-    def iter(self, *, search: str | None = None, page_size: int = 100) -> Iterator[Group]:
+    def iter(
+        self, *, search: str | None = None, member: str | None = None, page_size: int = 100
+    ) -> Iterator[Group]:
         """Yield every matching group, newest first, fetching pages as needed.
 
         Parameters
         ----------
         search
             Only groups whose name contains this text, in any letter case.
+        member
+            Only the groups this principal belongs to.
         page_size
             Groups per request (1 to 200).
 
@@ -146,7 +167,9 @@ class Groups:
             Each group, once.
         """
         return every_page(
-            lambda cursor: self.list_page(search=search, limit=page_size, cursor=cursor)
+            lambda cursor: self.list_page(
+                search=search, member=member, limit=page_size, cursor=cursor
+            )
         )
 
     def delete(self, name: str, *, override_reason: str | None = None) -> None:

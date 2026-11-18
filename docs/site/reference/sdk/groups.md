@@ -28,7 +28,7 @@ Returns: `Group`. The created group.
 
 ### `client.groups.list`
 
-Signature: `client.groups.list(*, search: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[Group]`
+Signature: `client.groups.list(*, search: str | None = None, member: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[Group]`
 
 List groups, newest first.
 
@@ -37,34 +37,37 @@ The groups of one page; `list_page` also returns the cursor of the next one, and
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `search` | `str | None` | `None` | Only groups whose name contains this text, in any letter case. |
+| `member` | `str | None` | `None` | Only the groups this principal belongs to. |
 | `limit` | `int | None` | `None` | Most groups returned (1 to 200); `None` leaves it to the server (100). |
-| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` with every page. |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` and `member` with every page. |
 
 Returns: `list of Group`. Newest first.
 
 ### `client.groups.list_page`
 
-Signature: `client.groups.list_page(*, search: str | None = None, limit: int | None = None, cursor: str | None = None) -> GroupPage`
+Signature: `client.groups.list_page(*, search: str | None = None, member: str | None = None, limit: int | None = None, cursor: str | None = None) -> GroupPage`
 
 List one page of groups, newest first, with the cursor of the next page.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `search` | `str | None` | `None` | Only groups whose name contains this text, in any letter case. |
+| `member` | `str | None` | `None` | Only the groups this principal belongs to. |
 | `limit` | `int | None` | `None` | Most groups returned (1 to 200); `None` leaves it to the server (100). |
-| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` with every page. |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` and `member` with every page. |
 
 Returns: `GroupPage`. The groups, and the cursor for the next page (`None` on the last).
 
 ### `client.groups.iter`
 
-Signature: `client.groups.iter(*, search: str | None = None, page_size: int = 100) -> Iterator[Group]`
+Signature: `client.groups.iter(*, search: str | None = None, member: str | None = None, page_size: int = 100) -> Iterator[Group]`
 
 Yield every matching group, newest first, fetching pages as needed.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `search` | `str | None` | `None` | Only groups whose name contains this text, in any letter case. |
+| `member` | `str | None` | `None` | Only the groups this principal belongs to. |
 | `page_size` | `int` | `100` | Groups per request (1 to 200). |
 
 Returns: `Iterator of Group`. Each group, once.

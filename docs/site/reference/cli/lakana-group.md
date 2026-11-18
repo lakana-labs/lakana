@@ -27,11 +27,12 @@ Usage: `lakana group list [OPTIONS]`
 
 List groups, newest first.
 
-`--search TEXT` lists those whose name contains TEXT, in any letter case. A long list prints a "More results" line with the command that shows the next page.
+`--search TEXT` lists those whose name contains TEXT, in any letter case; `--member NAME` those NAME belongs to. A long list prints a "More results" line with the command that shows the next page.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--search` | text | none | Only names that contain this text, in any letter case. |
+| `--member` | text | none | Only the groups this principal belongs to. |
 | `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
 

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import Action, PrincipalRef, Securable, SecurableKind
 from lakana_core.grants.admin import ineffective_note
 from lakana_core.grants.explain import PermissionReport
+from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService, scope_filter
 from lakana_core.identifiers import NamespacePath
 from lakana_core.models import Grant
@@ -182,6 +183,7 @@ def list_grants(
     principal_name: str | None = Query(default=None, max_length=255),
     group_name: str | None = Query(default=None, max_length=255),
     action: str | None = Query(default=None, max_length=64),
+    role: str | None = Query(default=None, max_length=32),
     environment: str | None = Query(default=None, max_length=255),
     namespace: str | None = Query(default=None, max_length=1024),
     table: str | None = Query(default=None, max_length=255),
@@ -195,12 +197,13 @@ def list_grants(
     """List grants.
 
     Lists the active grants, newest first. Every filter is optional and narrows the list,
-    except that `principal_name` and `group_name` exclude each other (422 when both are
-    given). The object filter matches exactly: `table` with `namespace` and `environment`
-    lists the grants on that table, `namespace` with `environment` those on the namespace,
-    `environment` alone those on the environment. `kind` lists the grants on every object of
-    one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to
-    everything in it; with an object filter it must be that object's kind (422 otherwise).
+    except that `principal_name` and `group_name` exclude each other, and so do `role` and
+    `action` (422 when both are given). The object filter matches exactly: `table` with
+    `namespace` and `environment` lists the grants on that table, `namespace` with
+    `environment` those on the namespace, `environment` alone those on the environment.
+    `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE`
+    those on the whole instance, which apply to everything in it; with an object filter it
+    must be that object's kind (422 otherwise).
     Needs the `ADMIN` role on the instance.
     Answers 404 when no principal or group has the name given. The cursor of the next page
     is in the `X-Next-Cursor` response header.
@@ -216,6 +219,8 @@ def list_grants(
     action
         Only grants that give this action (in any letter case): the action, or a role that
         carries it.
+    role
+        Only grants of exactly this role (in any letter case).
     environment
         The environment of the object filter.
     namespace
@@ -241,12 +246,14 @@ def list_grants(
         The matching grants.
     """
     actions = parse_choices("action", [action], Action, any_case=True) if action else ()
+    roles = parse_choices("role", [role], Role, any_case=True) if role else ()
     kinds = parse_choices("kind", [kind], SecurableKind, any_case=True) if kind else ()
     page = service.list_grants(
         principal,
         principal_name=principal_name,
         group_name=group_name,
         action=actions[0] if actions else None,
+        role=roles[0] if roles else None,
         scope=scope_filter(environment, namespace, table),
         kind=kinds[0] if kinds else None,
         limit=limit,

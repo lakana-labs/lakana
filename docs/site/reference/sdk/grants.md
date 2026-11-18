@@ -49,18 +49,18 @@ The grants of one page; `list_page` also returns the cursor of the next one, and
 |---|---|---|---|
 | `limit` | `int | None` | `None` | Most grants returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
-| `**filters` | `Unpack[GrantFilters]` | any number | The filters of `list_page`: `principal_name`, `group_name`, `action`, `environment`, `namespace`, `table`, `kind`. |
+| `**filters` | `Unpack[GrantFilters]` | any number | The filters of `list_page`: `principal_name`, `group_name`, `action`, `role`, `environment`, `namespace`, `table`, `kind`. |
 
 Returns: `list of Grant`. Newest first.
 
 | Error | When |
 |---|---|
-| `lakana.ValidationError` | If both `principal_name` and `group_name` are given, an object filter has a gap, `action` or `kind` is unknown, `kind` is not the object filter's kind, or `cursor` is not one the server issued for the grants list. |
+| `lakana.ValidationError` | If both `principal_name` and `group_name` are given, or both `role` and `action`, an object filter has a gap, `action`, `role` or `kind` is unknown, `kind` is not the object filter's kind, or `cursor` is not one the server issued for the grants list. |
 | `lakana.PermissionDenied` | Without the `ADMIN` role on the instance. |
 
 ### `client.grants.list_page`
 
-Signature: `client.grants.list_page(*, principal_name: str | None = None, group_name: str | None = None, action: str | None = None, environment: str | None = None, namespace: str | None = None, table: str | None = None, kind: str | None = None, limit: int | None = None, cursor: str | None = None) -> GrantPage`
+Signature: `client.grants.list_page(*, principal_name: str | None = None, group_name: str | None = None, action: str | None = None, role: str | None = None, environment: str | None = None, namespace: str | None = None, table: str | None = None, kind: str | None = None, limit: int | None = None, cursor: str | None = None) -> GrantPage`
 
 List one page of grants, newest first, with the cursor of the next page.
 
@@ -69,6 +69,7 @@ List one page of grants, newest first, with the cursor of the next page.
 | `principal_name` | `str | None` | `None` | Only grants made to this principal. |
 | `group_name` | `str | None` | `None` | Only grants made to this group. |
 | `action` | `str | None` | `None` | Only grants that give this action. |
+| `role` | `str | None` | `None` | Only grants of exactly this role, in any letter case. Excludes `action`. |
 | `environment` | `str | None` | `None` | The environment of an object filter. |
 | `namespace` | `str | None` | `None` | The dot-joined namespace of an object filter. |
 | `table` | `str | None` | `None` | The table of an object filter. |
@@ -87,7 +88,7 @@ Yield every matching grant, newest first, fetching pages as needed.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `page_size` | `int` | `100` | Grants per request (1 to 200). |
-| `**filters` | `Unpack[GrantFilters]` | any number | The filters of `list_page`: `principal_name`, `group_name`, `action`, `environment`, `namespace`, `table`, `kind`. |
+| `**filters` | `Unpack[GrantFilters]` | any number | The filters of `list_page`: `principal_name`, `group_name`, `action`, `role`, `environment`, `namespace`, `table`, `kind`. |
 
 Returns: `Iterator of Grant`. Each grant, once.
 

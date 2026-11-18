@@ -276,3 +276,22 @@ def test_principals_grants_reads_group_and_scope() -> None:
         note=None,
         group=None,
     )
+
+
+def test_groups_list_by_member_sends_it_on_every_page() -> None:
+    seen: list[dict[str, str]] = []
+    groups = Groups(_transport(_pages("/api/v1/groups", {"name": "team"}, seen)))
+    assert groups.list(member="maria") == [Group(name="team")]
+    assert [g.name for g in groups.iter(member="maria", page_size=1)] == ["team", "team"]
+    assert seen == [
+        {"member": "maria"},
+        {"member": "maria", "limit": "1"},
+        {"member": "maria", "limit": "1", "cursor": "next"},
+    ]
+
+
+def test_grants_list_by_role_sends_it() -> None:
+    seen: list[dict[str, str]] = []
+    grants = Grants(_transport(_pages("/api/v1/grants", _GRANT, seen)))
+    grants.list(role="ANALYST")
+    assert seen == [{"role": "ANALYST"}]

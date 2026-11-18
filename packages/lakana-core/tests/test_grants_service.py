@@ -22,7 +22,7 @@ from lakana_core.auth import (
 from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
-from lakana_core.grants.service import GrantService, assert_admin_headroom
+from lakana_core.grants.service import LAST_ADMIN_MESSAGE, GrantService, assert_admin_headroom
 from lakana_core.identifiers import NamespacePath
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.principals import PrincipalService
@@ -620,3 +620,31 @@ def test_a_task_token_may_not_ask_even_about_its_own_principal(session: Session)
     service = GrantService(session, _auditing(session))
     with pytest.raises(PermissionDenied, match="Task tokens"):
         service.held_grants(task, "bob")
+
+
+def test_the_last_administrator_refusal_names_the_next_step(session: Session) -> None:
+    """Revoking the last ADMIN grant, or leaving the last ADMIN group, says what to do first."""
+    grants = GrantService(session, AllowAllAuthorization())
+    principals = PrincipalService(session, AllowAllAuthorization())
+    groups = GroupService(session, AllowAllAuthorization())
+    admin = _admin()
+    _persist_actor(session, admin)
+    _add_principal(principals, admin, "root")
+    created = grants.grant(admin, principal="root", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+
+    with pytest.raises(ConflictError) as revoked:
+        grants.revoke(admin, created.id)
+    assert str(revoked.value) == LAST_ADMIN_MESSAGE
+
+    _add_principal(principals, admin, "ops-lead")
+    groups.create_group(admin, name="ops")
+    groups.add_member(admin, "ops", "ops-lead")
+    grants.grant(admin, group="ops", role=Role.ADMIN, kind=SecurableKind.INSTANCE)
+    grants.revoke(admin, created.id)
+    with pytest.raises(ConflictError) as removed:
+        groups.remove_member(admin, "ops", "ops-lead")
+    assert str(removed.value) == LAST_ADMIN_MESSAGE
+    assert LAST_ADMIN_MESSAGE == (
+        "This would leave the instance without an active administrator. Give another person "
+        "the ADMIN role on the instance first, then try again."
+    )
