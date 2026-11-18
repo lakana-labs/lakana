@@ -228,6 +228,29 @@
   color: var(--color-accent-hover);
 }
 
+/* The Deploys tab: why it lists one environment, beside the picker; a commit in monospace; a
+   failed deploy's first line under its result, wrapping in its cell; the words of a submitter
+   whose account is gone, quieter than a name. */
+.jobs-find-note {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.jobs-commit {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+.jobs-deploy-why {
+  max-width: 320px;
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.jobs-deleted {
+  color: var(--color-text-muted);
+}
+
 /* The two tables: no narrower than their columns need, scrolling in their own region; more
    specific than the Catalog's wider minimum, which stays in the document once it was loaded. */
 .list-scroll.jobs-runs-scroll .list {
@@ -254,11 +277,16 @@
   min-width: 960px;
 }
 
+.list-scroll.jobs-deploys-scroll .list {
+  min-width: 960px;
+}
+
 /* The lists' names stay whole; the table scrolls in its region instead of breaking a word. */
 .list-scroll.jobs-running-scroll .row-name,
 .list-scroll.jobs-failed-scroll .row-name,
 .list-scroll.jobs-all-scroll .row-name,
-.list-scroll.jobs-tab-runs-scroll .row-name {
+.list-scroll.jobs-tab-runs-scroll .row-name,
+.list-scroll.jobs-deploys-scroll .row-name {
   overflow-wrap: normal;
 }
 

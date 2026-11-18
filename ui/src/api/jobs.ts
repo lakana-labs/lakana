@@ -623,3 +623,139 @@ export async function showCheckRows(
   );
   return answer.query_id;
 }
+
+/** The state of a deploy. */
+export type DeployStatus = "queued" | "running" | "succeeded" | "failed";
+
+/** One deploy of a repository to an environment, as `GET …/deploys` lists it. */
+export interface DeployOut {
+  /** The deploy's id. */
+  readonly id: string;
+  /** The environment. */
+  readonly environment: string;
+  /** The repository. */
+  readonly repository: string;
+  /** What it does: deploy a commit, try it without changing anything, or roll back to one. */
+  readonly kind: "deploy" | "dry_run" | "rollback";
+  /** Its state. */
+  readonly status: DeployStatus;
+  /** The ref asked for; null for a rollback. */
+  readonly requested_ref: string | null;
+  /** The commit it deployed; null before the worker resolved it. */
+  readonly resolved_sha: string | null;
+  /** The project version it made; null before it made one, and for a dry run. */
+  readonly project_version_id: string | null;
+  /** Why it failed, in the server's words; null for none. */
+  readonly error_message: string | null;
+  /** When it was asked for. */
+  readonly created_at: string;
+  /** When it started; null before. */
+  readonly started_at: string | null;
+  /** When it ended; null until then. */
+  readonly finished_at: string | null;
+  /** Who asked for it; null for an account since deleted. */
+  readonly submitted_by: string | null;
+  /** The jobs its version defines; only when one deploy is read, null in a list. */
+  readonly jobs: readonly string[] | null;
+  /** What the reader's rights allow on it. */
+  readonly actions: readonly "rollback"[];
+}
+
+/** The current version of one repository in an environment. */
+export interface DeploymentOut {
+  /** The repository. */
+  readonly repository: string;
+  /** Its current project version. */
+  readonly project_version_id: string;
+  /** That version's commit. */
+  readonly commit_sha: string;
+  /** When the version became current. */
+  readonly updated_at: string;
+}
+
+/** What the server answers a deploy it accepted. */
+export interface DeployAcceptedOut {
+  /** The deploy's id. */
+  readonly id: string;
+  /** Its state, `queued`. */
+  readonly status: string;
+}
+
+/** How many deploys one page holds. */
+const DEPLOYS_PAGE = 50;
+
+/**
+ * Lists an environment's deploys, newest first, one page at a time.
+ *
+ * @param environment - The environment.
+ * @param repository - Only this repository's deploys; null for all.
+ * @param cursor - The cursor of the page, or null for the first.
+ * @returns The page, with the cursor from `X-Next-Cursor`.
+ * @throws {ApiError} for a refusal; 404 for an environment or a repository that does not exist.
+ */
+export async function listDeploys(
+  environment: string,
+  repository: string | null,
+  cursor: string | null,
+): Promise<CursorPage<DeployOut>> {
+  const query = new URLSearchParams();
+  if (repository !== null) {
+    query.set("repository", repository);
+  }
+  query.set("limit", String(DEPLOYS_PAGE));
+  if (cursor !== null) {
+    query.set("cursor", cursor);
+  }
+  const page = await api.page(withQuery(environmentPath(environment, "/deploys"), query));
+  return { items: page.body as readonly DeployOut[], nextCursor: page.nextCursor };
+}
+
+/**
+ * Reads one deploy with the jobs its version defines; a poll, so it never counts as the person's
+ * activity.
+ *
+ * @param environment - The environment.
+ * @param id - The deploy's id.
+ * @returns The deploy.
+ * @throws {ApiError} for a refusal; 404 for a deploy that does not exist.
+ */
+export function getDeploy(environment: string, id: string): Promise<DeployOut> {
+  return api.request<DeployOut>(
+    "GET",
+    environmentPath(environment, `/deploys/${encodeURIComponent(id)}`),
+    undefined,
+    { background: true },
+  );
+}
+
+/**
+ * Lists the current version of each repository in an environment.
+ *
+ * @param environment - The environment.
+ * @returns One entry per deployed repository.
+ * @throws {ApiError} for a refusal.
+ */
+export function listDeployments(environment: string): Promise<readonly DeploymentOut[]> {
+  return api.request<readonly DeploymentOut[]>("GET", environmentPath(environment, "/deployments"));
+}
+
+/**
+ * Rolls a repository back to a commit already deployed to the environment.
+ *
+ * @param environment - The environment.
+ * @param repository - The repository.
+ * @param sha - The full commit to roll back to.
+ * @returns The accepted rollback, queued.
+ * @throws {ApiError} for a refusal; 403 without `DEPLOY`, 404 for a commit never deployed here.
+ */
+export function rollBack(
+  environment: string,
+  repository: string,
+  sha: string,
+): Promise<DeployAcceptedOut> {
+  return api.request<DeployAcceptedOut>("POST", environmentPath(environment, "/deploys"), {
+    repository,
+    kind: "rollback",
+    to_sha: sha,
+  });
+}

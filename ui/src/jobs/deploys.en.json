@@ -1,0 +1,49 @@
+{
+  "oneAtATime": "Deploys are listed one environment at a time.",
+  "repository": "Repository",
+  "allRepositories": "All repositories",
+  "loading": "Loading the deploys…",
+  "region": "Deploys of {{environment}}",
+  "empty": "No deploy in {{environment}} yet.",
+  "emptyOf": "No deploy of {{repository}} in {{environment}} yet.",
+  "currentFailed": "The current versions could not be read, so no deploy is marked current and none offers a rollback: {{sentence}}",
+  "columns": {
+    "result": "Result",
+    "kind": "Kind",
+    "commit": "Commit",
+    "repository": "Repository",
+    "who": "By",
+    "when": "When",
+    "actions": "Actions"
+  },
+  "kinds": {
+    "deploy": "Deploy",
+    "dry_run": "Dry run",
+    "rollback": "Rollback"
+  },
+  "current": "current",
+  "noCommit": "not known yet",
+  "deletedAccount": "an account since deleted",
+  "failedWithout": "The deploy failed without saying why.",
+  "rollBack": "Roll back to this…",
+  "rollBackName": "Roll back {{repository}} to {{commit}}",
+  "dialog": {
+    "title": "Roll back {{repository}} in {{environment}}?",
+    "reading": "Reading the jobs this changes…",
+    "text": "This makes {{commit}}, deployed {{when}} by {{who}}, the current version of {{repository}} in {{environment}} again. Every job {{repository}} defines there changes with it:",
+    "kept": "{{job}}",
+    "removed": "{{job}}: removed by the rollback",
+    "back": "{{job}}: back with the rollback",
+    "noJobs": "{{repository}} defines no job in either version.",
+    "protected": "{{environment}} is protected.",
+    "jobs": "Jobs the rollback changes",
+    "confirm": "Roll back",
+    "cancel": "Cancel"
+  },
+  "note": {
+    "rolling": "Rolling back {{repository}} in {{environment}} to {{commit}}…",
+    "done": "Rolled back {{repository}} in {{environment}} to {{commit}}.",
+    "failed": "The rollback failed: {{message}}",
+    "failedWithout": "The rollback failed without saying why."
+  }
+}

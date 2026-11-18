@@ -3,22 +3,37 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_RUN_STATUSES,
   cancelRun,
+  getDeploy,
   getJob,
   getRun,
   getTaskLog,
   listAllRuns,
+  listDeployments,
+  listDeploys,
   listFailedRuns,
   listJobRuns,
   listJobs,
   pauseJob,
   resumeJob,
   resumeRun,
+  rollBack,
   showCheckRows,
   startJob,
 } from "./jobs";
 import type { TaskAttemptOut, TriggerOut, WaitingOut } from "./jobs";
 
-import { aFailedRun, aFailure, aJob, aJobRun, aTask, aTaskLog, JOB_RUN_ID } from "../test/jobs";
+import {
+  aDeploy,
+  aDeployment,
+  aFailedRun,
+  aFailure,
+  aJob,
+  aJobRun,
+  aTask,
+  aTaskLog,
+  DEPLOY_ID,
+  JOB_RUN_ID,
+} from "../test/jobs";
 import { fakeServer } from "../test/server";
 
 const JOBS = "/api/v1/environments/prod/jobs/nightly_sales";
@@ -325,5 +340,64 @@ describe("the Jobs list's calls", () => {
       "/api/v1/runs/failed?environment=prod",
     ]);
     expect(server.sent[1]?.headers["x-lakana-background"]).toBe("1");
+  });
+});
+
+describe("the deploy calls", () => {
+  it("lists deploys of a repository with the cursor from X-Next-Cursor", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/my env/deploys": (request) =>
+        request.path.includes("cursor=")
+          ? { status: 200, body: [] }
+          : { status: 200, body: [aDeploy()], headers: { "X-Next-Cursor": "d2" } },
+    });
+
+    expect(await listDeploys("my env", "team/analytics", null)).toEqual({
+      items: [aDeploy()],
+      nextCursor: "d2",
+    });
+    expect(await listDeploys("my env", null, "d2")).toEqual({ items: [], nextCursor: null });
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/environments/my%20env/deploys?repository=team%2Fanalytics&limit=50",
+      "/api/v1/environments/my%20env/deploys?limit=50&cursor=d2",
+    ]);
+  });
+
+  it("reads one deploy with its jobs", async () => {
+    const deploy = aDeploy({ jobs: ["daily_sales", "nightly_sales"] });
+    const server = fakeServer({
+      [`GET /api/v1/environments/prod/deploys/${DEPLOY_ID}`]: { status: 200, body: deploy },
+    });
+
+    expect(await getDeploy("prod", DEPLOY_ID)).toEqual(deploy);
+    expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
+  });
+
+  it("lists the deployments", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/prod/deployments": { status: 200, body: [aDeployment()] },
+    });
+
+    expect(await listDeployments("prod")).toEqual([aDeployment()]);
+    expect(server.sent[0]?.path).toBe("/api/v1/environments/prod/deployments");
+  });
+
+  it("sends a rollback to a commit", async () => {
+    const server = fakeServer({
+      "POST /api/v1/environments/prod/deploys": {
+        status: 202,
+        body: { id: DEPLOY_ID, status: "queued" },
+      },
+    });
+
+    expect(await rollBack("prod", "analytics", "4f9d2a7c")).toEqual({
+      id: DEPLOY_ID,
+      status: "queued",
+    });
+    expect(server.sent[0]?.body).toEqual({
+      repository: "analytics",
+      kind: "rollback",
+      to_sha: "4f9d2a7c",
+    });
   });
 });

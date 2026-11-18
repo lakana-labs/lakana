@@ -60,6 +60,7 @@ it("keeps the names in the Jobs list's tables whole", () => {
     "jobs-failed-scroll",
     "jobs-all-scroll",
     "jobs-tab-runs-scroll",
+    "jobs-deploys-scroll",
   ]) {
     expect(declarations(`.list-scroll.${scroll} .row-name`)).toMatch(/overflow-wrap:\s*normal/);
   }

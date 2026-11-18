@@ -19,10 +19,13 @@ import { Reading } from "./Reading";
 /** The command that lists an environment's jobs. */
 const CLI_JOBS = "lakana job list --env <environment>";
 
+/** The environments a person may read, when there is at least one. */
+export type SomeEnvironments = readonly [EnvironmentChoice, ...EnvironmentChoice[]];
+
 /** Properties of {@link Environments}. */
 export interface EnvironmentsProps {
   /** What the tab shows once there is at least one environment. */
-  readonly children: (environments: readonly EnvironmentChoice[]) => ReactNode;
+  readonly children: (environments: SomeEnvironments) => ReactNode;
 }
 
 /**
@@ -54,5 +57,5 @@ export function Environments({ children }: EnvironmentsProps): JSX.Element {
       </div>
     );
   }
-  return <>{children(listed)}</>;
+  return <>{children(listed as SomeEnvironments)}</>;
 }

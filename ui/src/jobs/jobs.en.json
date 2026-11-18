@@ -46,6 +46,7 @@
     "repository": "Repository",
     "definedAt": "lakana.yaml @ {{commit}}",
     "openHost": "open in repository",
+    "deploys": "Deploys of {{repository}}",
     "schedule": "Schedule",
     "paused": "paused",
     "nextRun": "next run {{when}}",
