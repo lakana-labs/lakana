@@ -814,7 +814,8 @@ walk("Groups, a group, Grants and What I may do mark hidden characters", async (
   await expect(page.getByRole("listbox")).toBeVisible();
   await expectNoRaw(page, "Add grant's environments");
   await page.keyboard.press("Escape");
-  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
 
   await visit(page, "/settings/access/what-i-may-do", ["analysts", "dev"]);
