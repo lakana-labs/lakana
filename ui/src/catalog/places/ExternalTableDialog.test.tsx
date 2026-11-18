@@ -4,6 +4,7 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import { manageRoutes } from "../../test/manage";
+import { rawRoutes } from "../../test/raw";
 import { held } from "../../test/pending";
 import { type FakeRoute, fakeServer } from "../../test/server";
 import ExternalTableDialog from "./ExternalTableDialog";
@@ -109,6 +110,31 @@ describe("ExternalTableDialog", () => {
     await user.clear(location);
     await user.type(location, "raw/orders/*.csv");
     expect(screen.getByRole("radio", { name: "Parquet" })).toBeChecked();
+  });
+
+  it("fills the location from Browse… and lets the format follow it again", async () => {
+    const { user } = renderRegister({ ...manageRoutes(), ...rawRoutes() });
+    const browse = await screen.findByRole("button", { name: "Browse…" });
+    const location = screen.getByRole("textbox", { name: "Location" });
+
+    await user.click(screen.getByRole("radio", { name: "Parquet" }));
+    expect(browse).toHaveAttribute("aria-expanded", "false");
+    await user.click(browse);
+    expect(browse).toHaveAttribute("aria-expanded", "true");
+    const panel = await screen.findByRole("region", { name: "Files under raw/" });
+    await user.click(await within(panel).findByRole("button", { name: "feeds/" }));
+    await user.click(await within(panel).findByRole("button", { name: "2026-11-02.csv" }));
+
+    expect(location).toHaveValue("raw/feeds/*.csv");
+    expect(screen.getByRole("radio", { name: "CSV" })).toBeChecked();
+    expect(screen.queryByRole("region", { name: "Files under raw/" })).not.toBeInTheDocument();
+    expect(browse).toHaveAttribute("aria-expanded", "false");
+    expect(location).toHaveFocus();
+
+    await user.click(browse);
+    expect(await screen.findByRole("button", { name: "feeds/" })).toBeInTheDocument();
+    await user.click(browse);
+    expect(screen.queryByRole("region", { name: "Files under raw/" })).not.toBeInTheDocument();
   });
 
   it("keeps Register disabled until a name, a location and a format are known", async () => {

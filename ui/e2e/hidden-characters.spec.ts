@@ -98,6 +98,7 @@ const LITERAL_CODES: Record<string, string> = {
   QueryListItemOut: "origin status",
   QueryRunOut: "origin status",
   QueryStatusOut: "status",
+  RawEntryOut: "kind",
   RecentOut: "kind",
   RepositoryCreate: "kind",
   RepositoryProbeOut: "kind outcome state",
@@ -623,6 +624,13 @@ walk("the notes and refusals of the place menu mark hidden characters", async ({
   await page.getByRole("menuitem", { name: "New external table…" }).click();
   const refused = page.getByRole("dialog");
   await refused.getByRole("textbox", { name: "Name" }).fill("orders");
+  await refused.getByRole("button", { name: "Browse…" }).click();
+  await expect(refused.getByRole("button", { name: /^feeds/ })).toBeVisible();
+  await expectMarked(page, "Browse… at raw/", ["events.csv", "feeds", "bronze.orders"]);
+  await refused.getByRole("button", { name: /^feeds/ }).click();
+  await expect(refused.getByRole("button", { name: /^2026-11-02\.csv/ })).toBeVisible();
+  await expectMarked(page, "Browse… in a folder", ["2026-11-02.csv", "archive"]);
+  await refused.getByRole("button", { name: "Browse…" }).click();
   await refused.getByRole("textbox", { name: "Location" }).fill("raw/none/*.csv");
   const register = refused.getByRole("button", { name: "Register" });
   await expect(register).not.toHaveAttribute("data-pending");

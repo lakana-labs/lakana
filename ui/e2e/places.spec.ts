@@ -117,8 +117,19 @@ for (const theme of ["light", "dark"] as const) {
 
         await choose(actions, "New external table…");
         const external = page.getByRole("dialog", { name: "New external table in bronze" });
-        await expect(external.getByRole("textbox", { name: "Location" })).toHaveValue("raw/");
+        const location = external.getByRole("textbox", { name: "Location" });
+        await expect(location).toHaveValue("raw/");
         expect(await violations(page), "the New external table form").toEqual([]);
+        await external.getByRole("button", { name: "Browse…" }).click();
+        await expect(external.getByText("in use by bronze.orders")).toBeVisible();
+        expect(await violations(page), "Browse… at raw/").toEqual([]);
+        await external.getByRole("button", { name: "feeds/" }).click();
+        await expect(external.getByRole("button", { name: "Use this folder" })).toBeEnabled();
+        expect(await violations(page), "Browse… in a folder").toEqual([]);
+        await external.getByRole("button", { name: "2026-11-02.csv" }).click();
+        await expect(location).toHaveValue("raw/feeds/*.csv");
+        await expect(location).toBeFocused();
+        await expect(external.getByRole("radio", { name: "CSV" })).toBeChecked();
         await external.getByRole("button", { name: "Cancel" }).click();
 
         await choose(actions, "Delete namespace…");

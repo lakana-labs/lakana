@@ -5545,3 +5545,57 @@ class TableDefinitionFile(TableDefinition):
 
 
 # jscpd:ignore-end
+
+
+@dataclass(frozen=True)
+class RawClaim:
+    """The external table whose folder an entry of `raw/` is or lies in.
+
+    Parameters
+    ----------
+    table
+        Its dotted name, such as ``bronze.orders``, when you may read it; `None` otherwise.
+    """
+
+    table: str | None
+
+
+@dataclass(frozen=True)
+class RawEntry:
+    """One folder or file directly in a folder of `raw/`.
+
+    Parameters
+    ----------
+    name
+        Its name in the folder.
+    kind
+        ``"folder"`` or ``"file"``.
+    size
+        A file's size in bytes; `None` for a folder.
+    claimed_by
+        The external table that holds it, so it cannot be chosen for another; `None` when free.
+    """
+
+    name: str
+    kind: str
+    size: int | None
+    claimed_by: RawClaim | None
+
+
+@dataclass(frozen=True)
+class RawPage:
+    """One page of a folder of `raw/`.
+
+    Parameters
+    ----------
+    path
+        The folder listed, such as ``raw/orders``.
+    items
+        Its folders and files, in key order (a folder's key is its name followed by ``/``).
+    next_cursor
+        Pass back as `cursor=` to fetch the next page; `None` on the last page.
+    """
+
+    path: str
+    items: list[RawEntry]
+    next_cursor: str | None
