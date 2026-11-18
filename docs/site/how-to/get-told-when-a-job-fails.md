@@ -113,6 +113,11 @@ Only a person who holds the deploy right in the environment, and no CI token, is
 name. For anyone else the line ends after the events and the `secret` key is not in the object. The
 webhook URL itself is never sent to a client.
 
+In the web interface, the job's page says the same under **Notifies**, for example "Notifies on
+failure, recovery, column changes and health signals · Slack · via secret team-alerts", with the
+secret's name by the same rule. A job without one says "No notification. Add notify: to the job in
+lakana.yaml."
+
 ## What a message looks like
 
 Every message names the job, the environment, the repository, the commit, the run, how the run

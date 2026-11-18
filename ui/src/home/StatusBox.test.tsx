@@ -176,6 +176,9 @@ describe("StatusBox", () => {
     const { server } = withStatus(HEALTHY);
     await within(await box()).findByText("Healthy");
     const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
@@ -183,9 +186,12 @@ describe("StatusBox", () => {
 
     expect(server.sent.filter((request) => request.path === "/api/v1/status")).toHaveLength(1);
     hidden.mockRestore();
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     expect(server.sent.filter((request) => request.path === "/api/v1/status")).toHaveLength(2);
   });

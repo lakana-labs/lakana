@@ -1,6 +1,7 @@
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 const AT = "2026-11-10T08:00:00Z";
@@ -43,6 +44,8 @@ async function region(): Promise<HTMLElement> {
 }
 
 describe("YourWork", () => {
+  beforeAll(preloadJobsScreen);
+
   it("lists the person's jobs as rows that open them", async () => {
     const { user, router } = renderShell("/", {
       routes: { "GET /api/v1/home/work": { status: 200, body: WORK } },
@@ -59,7 +62,7 @@ describe("YourWork", () => {
 
     await user.click(job);
     await waitFor(() => {
-      expect(router.state.location.pathname).toBe("/jobs");
+      expect(router.state.location.pathname).toBe("/jobs/dev/job/analytics/daily_sales");
     });
   });
 

@@ -194,6 +194,10 @@ Resumed daily_silver in dev; next run 2026-10-15 06:00 Europe/Berlin (04:00 UTC)
 - A pause survives a deploy of the same job. A deploy that changes the cron expression recomputes
   the next time and keeps the pause.
 
+In the web interface, the job's page has **Pause schedule**, which asks first, and **Resume
+schedule** once the schedule is paused. The **Schedule** line then says "paused", or when the next
+run is. Both buttons are there only for someone who may deploy in the environment.
+
 ## Start a job by hand or from CI
 
 <!-- source: docs/examples/run-a-job/run.sh#run -->
@@ -269,6 +273,11 @@ run. A script that needs the result follows the run it names with `lakana runs s
 A start by hand follows the rules of `lakana run` for who the run writes as: the bound run
 principal if there is one; in an unprotected environment otherwise the caller; in a protected one
 without a principal it is refused with a message that says to bind one.
+
+In the web interface, **Run now** on the job's page starts the job at once; it is there for anyone
+with `RUN` on the environment. The new run shows below the job's runs, and the page says "Started
+a run of" the job. When the project is busy, the page says that the start waits and links to the
+run it waits for.
 
 ## Start a job after each deploy
 

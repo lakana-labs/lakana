@@ -1,9 +1,12 @@
 import { act, cleanup, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { renderShell } from "../test/render";
 
 describe("AppShell", () => {
+  beforeAll(preloadJobsScreen);
+
   it("has a banner with the sidebar, and one main landmark", async () => {
     renderShell("/");
     await screen.findByRole("heading", { level: 1, name: "Home" });

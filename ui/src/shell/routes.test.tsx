@@ -1,9 +1,10 @@
 import { screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { Page } from "./Page";
 import type { AreaModule } from "./routes";
 
+import { preloadJobsScreen } from "../test/jobs";
 import { queryRoutes } from "../test/queries";
 import { renderShell } from "../test/render";
 
@@ -31,6 +32,8 @@ function currentLinks(): string[] {
 }
 
 describe("appRoutes", () => {
+  beforeAll(preloadJobsScreen);
+
   it.each(shippedAreas)("%s has its own URL, heading and title", async (name, path, heading) => {
     renderShell(path);
 
@@ -162,6 +165,12 @@ describe("appRoutes", () => {
     expect(
       within(host?.shadowRoot as unknown as HTMLElement).getByRole("textbox", { name: "SQL" }),
     ).toBeInTheDocument();
+  });
+
+  it("/jobs lazy-loads its screen", async () => {
+    renderShell("/jobs/prod/runs/r1");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Run" })).toBeInTheDocument();
   });
 
   it("never loads the page of an area outside the user's access", async () => {

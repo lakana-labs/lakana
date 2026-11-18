@@ -47,7 +47,7 @@
 "audit list": { class: ui, part: 8 }
 "bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
 "check list": { class: read, part: 5 }
-"check rows": { class: ui, part: 5 }
+"check rows": { class: ui, part: 5, done: true }
 "ci-trust create": { class: ui, part: 7 }
 "ci-trust delete": { class: ui, part: 7 }
 "ci-trust disable": { class: ui, part: 7 }
@@ -107,10 +107,10 @@
 "job list": { class: read, part: 5 }
 "job notification": { class: ui, part: 5 }
 "job notify-test": { class: ui, part: 5 }
-"job pause": { class: ui, part: 5 }
-"job resume": { class: ui, part: 5 }
-"job run": { class: ui, part: 5 }
-"job show": { class: read, part: 5 }
+"job pause": { class: ui, part: 5, done: true }
+"job resume": { class: ui, part: 5, done: true }
+"job run": { class: ui, part: 5, done: true }
+"job show": { class: read, part: 5, done: true }
 "load": { class: git, reason: "load of a local file; UI file load is #224/#29, optional in M7" }
 "login": { class: ui, part: 1 }
 "logout": { class: ui, part: 1 }
@@ -163,12 +163,12 @@
 "row-filter list": { class: ui, part: 7 }
 "row-filter revoke": { class: ui, part: 7 }
 "run": { class: ui, part: 5 }
-"runs cancel": { class: ui, part: 5 }
+"runs cancel": { class: ui, part: 5, done: true }
 "runs failed": { class: ui, part: 5 }
 "runs list": { class: ui, part: 5 }
-"runs logs": { class: ui, part: 5 }
-"runs resume": { class: ui, part: 5 }
-"runs show": { class: ui, part: 5 }
+"runs logs": { class: ui, part: 5, done: true }
+"runs resume": { class: ui, part: 5, done: true }
+"runs show": { class: ui, part: 5, done: true }
 "scheduler status": { class: ui, part: 8 }
 "search": { class: ui, part: 1 }
 "secret bind": { class: ui, part: 7 }
@@ -304,7 +304,7 @@
 "GET /api/v1/environments/{env}/graph/neighbours":
   { class: read, part: 3, note: "the Lineage tab does not use it" }
 "GET /api/v1/environments/{env}/jobs": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5, done: true }
 "GET /api/v1/environments/{env}/jobs/{job}/tasks/{task}/attempts": { class: read, part: 5 }
 "GET /api/v1/environments/{env}/namespaces": { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}": { class: read, part: 3 }
@@ -357,10 +357,11 @@
   }
 "GET /api/v1/environments/{env}/queries/{query_id}": { class: ui, part: 4, done: true }
 "GET /api/v1/environments/{env}/queries/{query_id}/result": { class: ui, part: 4, done: true }
-"GET /api/v1/environments/{env}/runs": { class: ui, part: 5 }
-"GET /api/v1/environments/{env}/runs/{run_id}": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/runs":
+  { class: ui, part: 5, done: true, note: "the job page lists its job's runs with this filter" }
+"GET /api/v1/environments/{env}/runs/{run_id}": { class: ui, part: 5, done: true }
 "GET /api/v1/environments/{env}/runs/{run_id}/checks": { class: read, part: 5 }
-"GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log": { class: ui, part: 5, done: true }
 "GET /api/v1/environments/{env}/search": { class: ui, part: 1 }
 "GET /api/v1/environments/{env}/terms": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/terms/{key}": { class: read, part: 3 }
@@ -464,9 +465,9 @@
     note: "only the rollback form is in the UI; the CLI deploy of a new commit is Git",
   }
 "POST /api/v1/environments/{env}/jobs/{job}/notify-test": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/jobs/{job}/resume": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/jobs/{job}/runs": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/jobs/{job}/resume": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/jobs/{job}/runs": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/namespaces": { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads":
   { class: git, reason: "artifact upload" }
@@ -504,9 +505,9 @@
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4, done: true }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4, done: true }
 "POST /api/v1/environments/{env}/runs": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5 }
-"POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5, done: true }
+"POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/purge-rows": { class: ui, part: 8 }
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }

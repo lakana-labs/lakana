@@ -44,6 +44,14 @@ lakana runs list --all-environments --status running
 `--all-environments` and `--env` do not go together. Home shows the same failed runs; in the SDK
 they are `client.runs.failed()` and `client.runs.list_all()`.
 
+In the web interface, a failed run under **Needs your attention** on Home opens the run's page. A
+job's page, opened from **Your work** on Home, lists the job's runs under **Runs** and shows the
+one you choose below the list. A run lists its tasks with their state, duration and rows; a task
+that failed or never ran has a second line with its code, the cause and the next step. **Logs**
+opens the task that failed first, and a task's name opens its page: its attempts with the memory,
+processor time and bytes each used, and its log, which the page follows while the task runs and
+offers as **Save log** once it is complete.
+
 ## See what a task used
 
 `lakana runs show RUN_ID --env dev` ends the task table with a block that has one line per attempt,

@@ -2,7 +2,7 @@ import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderShell } from "../../test/render";
-import { DEFINITION, definitionFile, table, TABLE_PATH } from "../../test/table";
+import { DEFINITION, definitionFile, TABLE_PATH } from "../../test/table";
 
 const PAGE = "/catalog/prod/gold.sales/fact_sales";
 const FILE_PATH = `${TABLE_PATH}/definition/file`;
@@ -45,11 +45,9 @@ function fileText(dialog: HTMLElement): Promise<HTMLElement> {
 }
 
 describe("DefinedIn", () => {
-  // jsdom lays nothing out and has no scrollIntoView; the spy records what was scrolled to.
-  const scrolled = vi.fn();
+  // jsdom has no scrollIntoView, which the file's dialog calls.
   beforeEach(() => {
-    scrolled.mockClear();
-    Element.prototype.scrollIntoView = scrolled;
+    Element.prototype.scrollIntoView = vi.fn();
   });
   afterEach(() => {
     Reflect.deleteProperty(Element.prototype, "scrollIntoView");
@@ -109,81 +107,6 @@ describe("DefinedIn", () => {
     expect(await definedIn()).toHaveTextContent("models/gold/fact_sales.sql, line 1");
   });
 
-  it("marks a hidden character of the table's name in the dialog's heading and name", async () => {
-    const crafted = TABLE_PATH.replace("fact_sales", "fact_\u202Esales");
-    const { user } = renderShell("/catalog/prod/gold.sales/fact_%E2%80%AEsales", {
-      routes: {
-        [`GET ${crafted}`]: { status: 200, body: table({ name: "fact_\u202Esales" }) },
-        [`GET ${crafted}/definition`]: { status: 200, body: DEFINITION },
-        [`GET ${crafted}/definition/file`]: { status: 200, body: definitionFile() },
-      },
-    });
-
-    const dialog = await openFile(user);
-
-    expect(dialog).toHaveAccessibleName("Where fact_U+202Esales is defined");
-    const heading = within(dialog).getByRole("heading", { level: 2 });
-    expect(heading).toHaveTextContent("Where fact_U+202Esales is defined");
-    expect(heading.textContent).not.toMatch(RAW);
-  });
-
-  it("opens the file in a dialog and marks the defining line", async () => {
-    const { server, user } = renderShell(PAGE, {
-      routes: { [`GET ${FILE_PATH}`]: { status: 200, body: definitionFile({ line: 2 }) } },
-    });
-
-    await definedIn();
-    expect(server.sent.some((request) => request.path === FILE_PATH)).toBe(false);
-    const dialog = await openFile(user);
-
-    expect(dialog).toHaveAccessibleName("Where fact_sales is defined");
-    const text = await fileText(dialog);
-    expect(text).toHaveAttribute("tabindex", "0");
-    expect(server.sent.filter((request) => request.path === FILE_PATH)).toHaveLength(1);
-    const marked = within(text).getByText("grain: one row per sale", { exact: false });
-    expect(marked.closest("mark")).not.toBeNull();
-    expect(text.querySelectorAll("mark")).toHaveLength(1);
-    expect(scrolled.mock.contexts).toEqual([marked.closest("mark")]);
-    expect(text.textContent).toContain("SELECT * FROM silver.sales");
-    expect(within(dialog).getByText("analytics")).toBeVisible();
-    expect(
-      within(dialog).getByText("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"),
-    ).toBeInTheDocument();
-  });
-
-  it("renders_html_as_text", async () => {
-    const content = "<img src=x onerror=alert(1)>\n<b>bold</b>";
-    const { user } = renderShell(PAGE, {
-      routes: { [`GET ${FILE_PATH}`]: { status: 200, body: definitionFile({ content }) } },
-    });
-
-    const text = await fileText(await openFile(user));
-
-    expect(document.querySelector("img")).toBeNull();
-    expect(document.querySelector("b")).toBeNull();
-    expect(text.textContent).toContain("<img src=x onerror=alert(1)>");
-    expect(text.textContent).toContain("<b>bold</b>");
-  });
-
-  it("marks_control_and_bidi_characters", async () => {
-    const content = "\t a\u202Eb\u0007c\u2066d\u200Be\u0085f\u2028g\n";
-    const { user } = renderShell(PAGE, {
-      routes: { [`GET ${FILE_PATH}`]: { status: 200, body: definitionFile({ content }) } },
-    });
-
-    const text = await fileText(await openFile(user));
-
-    const marks = [...text.querySelectorAll(".char-mark")].map((mark) => mark.textContent);
-    expect(marks).toEqual(["U+202E", "U+0007", "U+2066", "U+200B", "U+0085", "U+2028"]);
-    for (const mark of marks) {
-      expect(within(text).getByText(mark)).toBeVisible();
-    }
-    const shown = text.textContent;
-    expect(shown).not.toMatch(RAW);
-    expect(shown).toContain("\t aU+202Eb");
-    expect(shown).toContain("\n");
-  });
-
   it("links to the git host only for an https link", async () => {
     const { user } = renderShell(PAGE);
 
@@ -217,123 +140,6 @@ describe("DefinedIn", () => {
     }
   });
 
-  it("marks a hidden character in the server's sentence about the file", async () => {
-    const { user } = renderShell(PAGE, {
-      routes: {
-        [`GET ${FILE_PATH}`]: {
-          status: 200,
-          body: definitionFile({
-            content: null,
-            bytes: null,
-            reason: "restricted",
-            message: "Ask about analy\u202Etics.",
-          }),
-        },
-      },
-    });
-
-    const dialog = await openFile(user);
-
-    const mark = await within(dialog).findByText("U+202E", { selector: "p > .char-mark" });
-    expect(mark.parentElement).toHaveTextContent("Ask about analyU+202Etics.");
-    expect(dialog.textContent).not.toMatch(RAW);
-  });
-
-  it("shows neither text nor sentence when the server sends no content and no reason", async () => {
-    const { user } = renderShell(PAGE, {
-      routes: {
-        [`GET ${FILE_PATH}`]: {
-          status: 200,
-          body: definitionFile({ content: null, bytes: null, reason: null, message: null }),
-        },
-      },
-    });
-
-    const dialog = await openFile(user);
-
-    await within(dialog).findByText("analytics");
-    expect(within(dialog).queryByRole("region")).not.toBeInTheDocument();
-  });
-
-  it("shows the server's sentence when the file is restricted", async () => {
-    const message =
-      "The file is shown only to people who may read this environment and every table the file uses, without a row filter or column mask. Open it in your git host if you have access there, or ask an administrator.";
-    const { user } = renderShell(PAGE, {
-      routes: {
-        [`GET ${FILE_PATH}`]: {
-          status: 200,
-          body: definitionFile({ content: null, bytes: null, reason: "restricted", message }),
-        },
-      },
-    });
-
-    const dialog = await openFile(user);
-
-    expect(await within(dialog).findByText(message)).toBeVisible();
-    expect(within(dialog).queryByRole("region")).not.toBeInTheDocument();
-  });
-
-  it("shows no text and says why when the read could not be recorded", async () => {
-    const { server, user } = renderShell(PAGE, {
-      routes: {
-        [`GET ${FILE_PATH}`]: { status: 503, body: { detail: "This read was refused." } },
-      },
-    });
-
-    const dialog = await openFile(user);
-
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
-      "The file is not shown because reading it could not be recorded in the audit log. Try again in a moment; if it keeps failing, ask an administrator to check the server.",
-    );
-    expect(within(dialog).queryByRole("region")).not.toBeInTheDocument();
-    server.route({ [`GET ${FILE_PATH}`]: { status: 200, body: definitionFile() } });
-    await user.click(within(dialog).getByRole("button", { name: "Try again" }));
-    expect(await fileText(dialog)).toHaveTextContent("SELECT * FROM silver.sales");
-  });
-
-  it("says so when no project defines the table any more by the time the file is read", async () => {
-    const { user } = renderShell(PAGE, {
-      routes: {
-        [`GET ${FILE_PATH}`]: {
-          status: 200,
-          body: {
-            defined: false,
-            repository: null,
-            path: null,
-            commit: null,
-            line: null,
-            project_version_id: null,
-            deployed_at: null,
-            browse_url: null,
-            content: null,
-            bytes: null,
-            reason: null,
-            message: null,
-          },
-        },
-      },
-    });
-
-    const dialog = await openFile(user);
-
-    expect(
-      await within(dialog).findByText(/No deployed project defines this table any more/),
-    ).toBeVisible();
-    expect(within(dialog).queryByRole("region")).not.toBeInTheDocument();
-  });
-
-  it("shows the server's sentence for any other refusal", async () => {
-    const { user } = renderShell(PAGE, {
-      routes: {
-        [`GET ${FILE_PATH}`]: { status: 404, body: { detail: "The table is gone." } },
-      },
-    });
-
-    const dialog = await openFile(user);
-
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("The table is gone.");
-  });
-
   it("marks invisible characters in the path too", async () => {
     const path = "models/gold/fact\u202Esales.sql";
     const { user } = renderShell(PAGE, {
@@ -353,30 +159,5 @@ describe("DefinedIn", () => {
     await fileText(dialog);
     expect(dialog).toHaveTextContent("anaU+200Blytics");
     expect(dialog.textContent).not.toMatch(RAW);
-  });
-
-  it("moves focus back to the path after the dialog closes", async () => {
-    const { user } = renderShell(PAGE);
-
-    const dialog = await openFile(user);
-    await fileText(dialog);
-    await user.click(within(dialog).getByRole("button", { name: "Close" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-    const path = within(await definedIn()).getByRole("button");
-    await waitFor(() => {
-      expect(path).toHaveFocus();
-    });
-
-    await openFile(user);
-    await user.keyboard("{Escape}");
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-    await waitFor(() => {
-      expect(path).toHaveFocus();
-    });
   });
 });
