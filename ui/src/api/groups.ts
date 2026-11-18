@@ -3,11 +3,12 @@
  *
  * @remarks
  * Deleting a group and changing its members need a fresh passkey touch; each asks for it before
- * the request (`stepUpFirst`). Creating a group needs none.
+ * the request (`guarded`). Creating a group needs none.
  * @packageDocumentation
  */
 import type { PrincipalOut } from "./access";
 import { api } from "./client";
+import { guarded } from "./stepUpFirst";
 import type { CursorPage } from "./manage";
 
 /** A group, as `GET /api/v1/groups` lists it. */
@@ -83,7 +84,7 @@ export function createGroup(name: string): Promise<GroupOut> {
  * @throws {ApiError} for a refusal, such as 409 while grants still name it.
  */
 export async function deleteGroup(name: string): Promise<void> {
-  await api.request("DELETE", groupApiPath(name), undefined, { stepUpFirst: true });
+  await guarded("DELETE", groupApiPath(name));
 }
 
 /**
@@ -105,12 +106,7 @@ export function listMembers(name: string): Promise<readonly PrincipalOut[]> {
  * @throws {ApiError} for a refusal, such as 404 for an unknown principal.
  */
 export async function addMember(group: string, principal: string): Promise<void> {
-  await api.request(
-    "PUT",
-    groupApiPath(group, `/members/${encodeURIComponent(principal)}`),
-    undefined,
-    { stepUpFirst: true },
-  );
+  await guarded("PUT", groupApiPath(group, `/members/${encodeURIComponent(principal)}`));
 }
 
 /**
@@ -121,10 +117,5 @@ export async function addMember(group: string, principal: string): Promise<void>
  * @throws {ApiError} for a refusal, such as 409 for the last administrator.
  */
 export async function removeMember(group: string, principal: string): Promise<void> {
-  await api.request(
-    "DELETE",
-    groupApiPath(group, `/members/${encodeURIComponent(principal)}`),
-    undefined,
-    { stepUpFirst: true },
-  );
+  await guarded("DELETE", groupApiPath(group, `/members/${encodeURIComponent(principal)}`));
 }

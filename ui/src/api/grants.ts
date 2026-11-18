@@ -4,11 +4,12 @@
  *
  * @remarks
  * Creating and revoking a grant need a fresh passkey touch; each asks for it before the request
- * (`stepUpFirst`). Nothing here ever sends `override_managed`: the interface never overrides a
+ * (`guarded`). Nothing here ever sends `override_managed`: the interface never overrides a
  * scope an access file manages.
  * @packageDocumentation
  */
 import { api } from "./client";
+import { guarded } from "./stepUpFirst";
 import type { CursorPage } from "./manage";
 import type { GrantOut, ScopeOut } from "./table";
 
@@ -218,7 +219,7 @@ export interface GrantCreateIn {
  *   managed scope, 422 for an incomplete object.
  */
 export function createGrant(body: GrantCreateIn): Promise<GrantOut> {
-  return api.request<GrantOut>("POST", "/api/v1/grants", body, { stepUpFirst: true });
+  return guarded<GrantOut>("POST", "/api/v1/grants", body);
 }
 
 /**
@@ -228,9 +229,7 @@ export function createGrant(body: GrantCreateIn): Promise<GrantOut> {
  * @throws {ApiError} for a refusal, such as 409 for the last administrator's grant.
  */
 export async function revokeGrant(id: string): Promise<void> {
-  await api.request("DELETE", `/api/v1/grants/${encodeURIComponent(id)}`, undefined, {
-    stepUpFirst: true,
-  });
+  await guarded("DELETE", `/api/v1/grants/${encodeURIComponent(id)}`);
 }
 
 /** A grant a person holds, directly or through a group, as `GET …/grants` answers it. */
