@@ -8,12 +8,25 @@ import {
   listedPlaces,
   placeAt,
   placePath,
+  placeState,
 } from "./places";
 
 const i18n = initI18n();
-const ADMIN = { admin: true, noAccessYet: false };
-const KIM = { admin: false, noAccessYet: false };
-const NEW = { admin: false, noAccessYet: true };
+const ADMIN = { admin: true, noAccessYet: false, secretEnvironments: [] };
+const KIM = { admin: false, noAccessYet: false, secretEnvironments: [] };
+const NEW = { admin: false, noAccessYet: true, secretEnvironments: [] };
+
+/**
+ * A place of the registry, by id.
+ *
+ * @param id - Its id.
+ * @returns The place.
+ */
+const real = (id: string): SettingsPlace => {
+  const found = SETTINGS_PLACES.find((place) => place.id === id);
+  if (found === undefined) throw new Error(`no place ${id}`);
+  return found;
+};
 
 const page = (id: string, parent: string | null, admin: boolean): SettingsPlace =>
   ({
@@ -36,13 +49,17 @@ const TREE: readonly SettingsPlace[] = [
 
 describe("places", () => {
   it("lists every built place for an administrator, in order", () => {
-    expect(listedPlaces(ADMIN).map((place) => place.id)).toEqual([
+    expect(
+      listedPlaces({ ...ADMIN, secretEnvironments: ["dev"] }).map((place) => place.id),
+    ).toEqual([
       "status",
       "repositories",
       "access",
       "people",
       "groups",
       "grants",
+      "tokens",
+      "secrets",
       "what-i-may-do",
       "sign-in",
       "invites",
@@ -54,6 +71,37 @@ describe("places", () => {
     const shown = ["status", "access", "what-i-may-do"];
     expect(listedPlaces(KIM).map((place) => place.id)).toEqual(shown);
     expect(listedPlaces(NEW).map((place) => place.id)).toEqual(shown);
+  });
+
+  it("lists Secrets to whoever manages secrets in an environment", () => {
+    expect(listedPlaces({ ...KIM, secretEnvironments: ["dev"] }).map((place) => place.id)).toEqual([
+      "status",
+      "access",
+      "secrets",
+      "what-i-may-do",
+    ]);
+    expect(listedPlaces(KIM).map((place) => place.id)).toEqual([
+      "status",
+      "access",
+      "what-i-may-do",
+    ]);
+    expect(listedPlaces(ADMIN).map((place) => place.id)).not.toContain("secrets");
+  });
+
+  it("holds a place whose rule is not known yet as pending, and lists it nowhere", () => {
+    const pending = { ...KIM, secretEnvironments: null };
+    expect(placeState(real("secrets"), pending)).toBe("pending");
+    expect(placeState(real("secrets"), KIM)).toBe("hidden");
+    expect(placeState(real("tokens"), ADMIN)).toBe("listed");
+    expect(listedPlaces(pending).map((place) => place.id)).not.toContain("secrets");
+    const unknown = { ...page("later", null, false), visible: () => null } as SettingsPlace;
+    const tree = [unknown, page("below", "later", false), group, page("inside", "grp", false)];
+    expect(placeState(tree[1] as SettingsPlace, ADMIN, tree)).toBe("pending");
+    const waiting = { ...group, id: "wait" as SettingsPlace["id"] };
+    const nested = [waiting, { ...unknown, parent: "wait" as SettingsPlace["parent"] }];
+    expect(placeState(waiting, ADMIN, nested)).toBe("pending");
+    expect(placeState(group, ADMIN, tree)).toBe("listed");
+    expect(placeState({ ...group, id: "none" as SettingsPlace["id"] }, ADMIN, tree)).toBe("hidden");
   });
 
   it("lists a child only with its parent, and a group only with a listed child", () => {
@@ -109,6 +157,9 @@ describe("places", () => {
     if (access === null) throw new Error("no place");
     expect(entryPath(access, ADMIN)).toBe("/settings/access/people");
     expect(entryPath(access, KIM)).toBe("/settings/access/what-i-may-do");
+    expect(entryPath(access, { ...KIM, secretEnvironments: ["dev"] })).toBe(
+      "/settings/access/secrets",
+    );
   });
 
   it("leaves Access open to everyone, so only its places decide whether it is listed", () => {

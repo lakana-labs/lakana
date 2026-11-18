@@ -14,7 +14,7 @@ import { type AreaPages, appRoutes } from "../shell/routes";
 import { SessionContext, type SessionValue } from "../sign-in/SessionProvider";
 import { catalogRoutes } from "./catalog";
 import { homeRoutes } from "./home";
-import { type FakeRoute, type FakeServer, fakeServer } from "./server";
+import { type FakeRoute, type FakeServer, fakeServer, whoami } from "./server";
 import { signedIn } from "./session";
 import { tableRoutes } from "./table";
 import { MemoryStorage } from "./storage";
@@ -54,7 +54,8 @@ export interface ShellOptions {
  * @param options - The access set, the storage, the session, what the person may do and the
  *   server's routes (Home's and the interface state's answer "nothing to report" by default, and the
  *   catalog answers with a page of three tables and a tree of two environments, and the table
- *   page with `prod/gold.sales/fact_sales`).
+ *   page with `prod/gold.sales/fact_sales`; whoami names `dev` and `prod` as the environments
+ *   where an administrator manages secrets, and none for anyone else).
  * @returns The router, the storage, a user-event session and the fake server.
  */
 export function renderShell(path = "/", options: ShellOptions = {}): RenderedShell {
@@ -69,6 +70,16 @@ export function renderShell(path = "/", options: ShellOptions = {}): RenderedShe
   };
   const server = fakeServer({
     "GET /api/v1/sign-in/notices": { status: 200, body: [] },
+    "GET /api/v1/whoami": {
+      status: 200,
+      body: whoami(
+        me.name,
+        me.admin,
+        !me.noAccessYet,
+        me.mayDeploy,
+        me.admin ? ["dev", "prod"] : [],
+      ),
+    },
     ...homeRoutes(me.name),
     ...catalogRoutes(),
     ...tableRoutes(me.name),

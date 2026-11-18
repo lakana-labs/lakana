@@ -9,25 +9,16 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
 
 import { PlaceList } from "./PlaceList";
-import type { SettingsViewer } from "./places";
 import "./settingsStrings";
-
-/** Properties of {@link PlaceFold}. */
-export interface PlaceFoldProps {
-  /** What the rules know about the person, who is shown only the places they may see. */
-  readonly viewer: SettingsViewer;
-}
 
 /**
  * Renders the Section ▾ button and, while it is open, the same {@link PlaceList} the wide
  * screen shows beside the place. Choosing a place closes it; Escape closes it and returns the
  * focus to the button.
  *
- * @param props - The person.
- * @param props.viewer - What the rules know about the person.
  * @returns The button and its popover.
  */
-export function PlaceFold({ viewer }: PlaceFoldProps): JSX.Element {
+export function PlaceFold(): JSX.Element {
   const { t } = useTranslation();
   // Every navigation is a new history entry with its own key, the place already shown included.
   const { key } = useLocation();
@@ -48,7 +39,7 @@ export function PlaceFold({ viewer }: PlaceFoldProps): JSX.Element {
         </Button>
         <Popover className="float place-fold-popover" placement="bottom start">
           <Dialog className="place-fold-dialog" aria-label={t("settings.places.label")}>
-            <PlaceList viewer={viewer} />
+            <PlaceList />
           </Dialog>
         </Popover>
       </DialogTrigger>

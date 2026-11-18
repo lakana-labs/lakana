@@ -47,6 +47,18 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    */
   grants: async () => (await import("../access/GrantsPage")).GrantsPage,
   /**
+   * Tokens: everyone's live personal tokens and the task tokens, each revocable.
+   *
+   * @returns The page.
+   */
+  tokens: async () => (await import("../access/TokensPage")).TokensPage,
+  /**
+   * Secrets: an environment's secrets, their names and uses, never values.
+   *
+   * @returns The page.
+   */
+  secrets: async () => (await import("../access/SecretsPage")).SecretsPage,
+  /**
    * What I may do: one's own grants and what they add up to.
    *
    * @returns The page.

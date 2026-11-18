@@ -61,7 +61,7 @@ export interface TaskTokenOut {
 }
 
 /** How many tokens a page of either list holds. */
-export const TOKENS_PAGE = 50;
+const TOKENS_PAGE = 50;
 
 /**
  * The API path of a principal's tokens, or of one of them.

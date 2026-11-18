@@ -16,14 +16,12 @@ import {
   SETTINGS_PLACES,
   type SettingsPlace,
   type SettingsPlaceId,
-  type SettingsViewer,
 } from "./places";
 import "./settingsStrings";
+import { useSettingsViewer } from "./viewer";
 
 /** Properties of {@link PlaceList}. */
 export interface PlaceListProps {
-  /** What the rules know about the person, who is shown only the places they may see. */
-  readonly viewer: SettingsViewer;
   /** The registry; only a test passes another. */
   readonly places?: readonly SettingsPlace[];
 }
@@ -76,15 +74,16 @@ function Places({ listed, parent, current }: PlacesProps): JSX.Element | null {
 
 /**
  * Renders the navigation "Settings places": the listed places in registry order, the one the
- * address is in marked with `aria-current="page"`, an accent bar and a heavier weight.
+ * address is in marked with `aria-current="page"`, an accent bar and a heavier weight. The
+ * person, from {@link useSettingsViewer}, is shown only the places they may see.
  *
- * @param props - The person and the registry.
- * @param props.viewer - What the rules know about the person.
+ * @param props - The registry.
  * @param props.places - The registry.
  * @returns The navigation.
  */
-export function PlaceList({ viewer, places = SETTINGS_PLACES }: PlaceListProps): JSX.Element {
+export function PlaceList({ places = SETTINGS_PLACES }: PlaceListProps): JSX.Element {
   const { t } = useTranslation();
+  const viewer = useSettingsViewer();
   const { pathname } = useLocation();
   const current = placeAt(pathname, places)?.id ?? null;
   return (

@@ -18,13 +18,21 @@ export type SettingsPlaceId =
   | "people"
   | "groups"
   | "grants"
+  | "tokens"
+  | "secrets"
   | "what-i-may-do"
   | "sign-in"
   | "invites"
   | "recovery-links";
 
 /** What the rules know about the person: a part of what `GET /api/v1/whoami` answers. */
-export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet">;
+export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet"> & {
+  /** The environments where the person manages secrets; null while not read yet. */
+  readonly secretEnvironments: readonly string[] | null;
+};
+
+/** Whether a place is listed, hidden, or waits for a rule that is not known yet. */
+export type PlaceState = "listed" | "hidden" | "pending";
 
 /** One place in Settings. */
 export interface SettingsPlace {
@@ -40,8 +48,8 @@ export interface SettingsPlace {
   readonly kind: "page" | "group";
   /** Whether the page owns the paths under its own. */
   readonly below: boolean;
-  /** Whether this person may see the place. */
-  readonly visible: (viewer: SettingsViewer) => boolean;
+  /** Whether this person may see the place; null while the rule is not known yet. */
+  readonly visible: (viewer: SettingsViewer) => boolean | null;
 }
 
 /**
@@ -110,6 +118,25 @@ export const SETTINGS_PLACES = [
     visible: (viewer) => viewer.admin,
   },
   {
+    id: "tokens",
+    path: "access/tokens",
+    label: "settings.places.tokens",
+    parent: "access",
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "secrets",
+    path: "access/secrets",
+    label: "settings.places.secrets",
+    parent: "access",
+    kind: "page",
+    below: false,
+    visible: (viewer) =>
+      viewer.secretEnvironments === null ? null : viewer.secretEnvironments.length > 0,
+  },
+  {
     id: "what-i-may-do",
     path: "access/what-i-may-do",
     label: "settings.places.whatIMayDo",
@@ -151,8 +178,7 @@ export const SETTINGS_PLACES = [
  * The places this person is shown, in list order.
  *
  * @remarks
- * A page is listed when its rule holds and its parent, if a page, is listed. A group is listed
- * when one of its children is.
+ * A place is listed when {@link placeState} says so; a pending one is not.
  * @param viewer - What the rules know about the person.
  * @param places - The registry; only a test passes another.
  * @returns The listed places.
@@ -161,16 +187,39 @@ export function listedPlaces(
   viewer: SettingsViewer,
   places: readonly SettingsPlace[] = SETTINGS_PLACES,
 ): readonly SettingsPlace[] {
-  const listed = (place: SettingsPlace): boolean => {
-    if (place.kind === "group") {
-      return places.some((child) => child.parent === place.id && listed(child));
-    }
-    const parent = places.find((candidate) => candidate.id === place.parent);
-    return (
-      place.visible(viewer) && (parent === undefined || parent.kind === "group" || listed(parent))
-    );
-  };
-  return places.filter(listed);
+  return places.filter((place) => placeState(place, viewer, places) === "listed");
+}
+
+/**
+ * Whether a place is listed for this person, hidden from them, or waits for a rule that is not
+ * known yet (its own, or its parent page's).
+ *
+ * @remarks
+ * A page is listed when its rule holds and its parent, if a page, is listed. A group is listed
+ * when one of its children is, pending while none is and one is pending.
+ * @param place - The place.
+ * @param viewer - What the rules know about the person.
+ * @param places - The registry; only a test passes another.
+ * @returns The place's state.
+ */
+export function placeState(
+  place: SettingsPlace,
+  viewer: SettingsViewer,
+  places: readonly SettingsPlace[] = SETTINGS_PLACES,
+): PlaceState {
+  if (place.kind === "group") {
+    const children = places
+      .filter((child) => child.parent === place.id)
+      .map((child) => placeState(child, viewer, places));
+    if (children.includes("listed")) return "listed";
+    return children.includes("pending") ? "pending" : "hidden";
+  }
+  const parent = places.find((candidate) => candidate.id === place.parent);
+  const above =
+    parent === undefined || parent.kind === "group" ? "listed" : placeState(parent, viewer, places);
+  const own = place.visible(viewer);
+  if (above === "hidden" || own === false) return "hidden";
+  return above === "pending" || own === null ? "pending" : "listed";
 }
 
 /**

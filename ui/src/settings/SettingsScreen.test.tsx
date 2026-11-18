@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { type AreaAccess, areasFor } from "../shell/areas";
 import { renderShell } from "../test/render";
+import { type FakeAnswer, whoami } from "../test/server";
 
 /** Settings for a person who is not an administrator: the area given, the places not. */
 const MEMBER: AreaAccess = areasFor(false);
@@ -63,6 +64,7 @@ describe("SettingsScreen", () => {
     renderShell("/settings/sign-in", {
       routes: { "GET /api/v1/settings/sign-in": { status: 404, body: {} } },
     });
+    await screen.findByRole("link", { name: "Secrets" });
 
     expect(await placeNames()).toEqual([
       "Status",
@@ -70,6 +72,8 @@ describe("SettingsScreen", () => {
       "People",
       "Groups",
       "Grants",
+      "Tokens",
+      "Secrets",
       "What I may do",
       "Sign-in",
       "Invites",
@@ -124,6 +128,44 @@ describe("SettingsScreen", () => {
     ).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings/access/what-i-may-do");
     expect(await placeNames()).toEqual(["Status", "What I may do"]);
+  });
+
+  it("a pending rule shows nothing, then the place", async () => {
+    let answer: (value: FakeAnswer) => void = () => undefined;
+    const held = new Promise<FakeAnswer>((resolve) => {
+      answer = resolve;
+    });
+    renderShell("/settings/access/secrets", {
+      access: MEMBER,
+      me: { name: "kim", admin: false },
+      routes: { "GET /api/v1/whoami": () => held },
+    });
+    expect(await placeNames()).toEqual(["Status", "What I may do"]);
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(screen.queryByRole("heading", { level: 1 })).not.toBeInTheDocument();
+
+    answer({ status: 200, body: whoami("kim", false, true, false, ["dev"]) });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Secrets" })).toBeInTheDocument();
+    expect(await placeNames()).toEqual(["Status", "Secrets", "What I may do"]);
+  });
+
+  it.each([
+    ["a person who manages no secrets", { status: 200, body: whoami("kim", false) }],
+    ["a failed read", { status: 500, body: { detail: "down" } }],
+  ])("%s cannot use Secrets", async (_, answer) => {
+    const { server } = renderShell("/settings/access/secrets", {
+      access: MEMBER,
+      me: { name: "kim", admin: false },
+      routes: { "GET /api/v1/whoami": answer },
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Secrets" }),
+    ).toBeInTheDocument();
+    expect(server.sent.filter((request) => request.path.includes("/secrets"))).toEqual([]);
   });
 
   it("lists Status and What I may do for a person who is not an administrator", async () => {
