@@ -45,6 +45,12 @@ from lakana_core.models import (
 )
 from lakana_core.pagination import Page, newest_first
 
+LAST_ADMIN_MESSAGE = (
+    "This would leave the instance without an active administrator. Give another person the "
+    "ADMIN role on the instance first, then try again."
+)
+"""The refusal of a change that would leave no active administrator, with its next step."""
+
 _EXPECTED_FIELDS: dict[SecurableKind, frozenset[str]] = {
     SecurableKind.INSTANCE: frozenset(),
     SecurableKind.ENVIRONMENT: frozenset({"environment"}),
@@ -515,6 +521,7 @@ class GrantService:
         principal_name: str | None = None,
         group_name: str | None = None,
         action: Action | None = None,
+        role: Role | None = None,
         scope: Securable | None = None,
         kind: SecurableKind | None = None,
         limit: int = 100,
@@ -536,6 +543,8 @@ class GrantService:
             Only grants made to this group.
         action
             Only grants that give this action: the action itself, or a role that carries it.
+        role
+            Only grants of exactly this role. Excludes `action`.
         scope
             Only grants on exactly this object.
         kind
@@ -556,8 +565,9 @@ class GrantService:
         Raises
         ------
         ValidationError
-            If both `principal_name` and `group_name` are given, `kind` is not `scope`'s kind,
-            `limit` is below 1, or `cursor` is not one this server issued for the grants list.
+            If both `principal_name` and `group_name` are given, both `role` and `action`,
+            `kind` is not `scope`'s kind, `limit` is below 1, or `cursor` is not one this
+            server issued for the grants list.
         NotFoundError
             If no principal has `principal_name`, or no group has `group_name`.
         PermissionDenied
@@ -570,6 +580,8 @@ class GrantService:
                 "Pass at most one of `principal_name` and `group_name`: a grant is made to a "
                 "principal or to a group, never to both."
             )
+        if role is not None and action is not None:
+            raise ValidationError("Give role or action, not both.")
         if kind is not None and scope is not None and kind != scope.kind:
             raise ValidationError(
                 f"`kind` asks for the grants on the {kind.value.lower()} level, but the object "
@@ -584,6 +596,8 @@ class GrantService:
         if action is not None:
             roles = [role for role, actions in ROLE_ACTIONS.items() if action in actions]
             query = query.where(or_(Grant.action == action, Grant.role.in_(roles)))
+        if role is not None:
+            query = query.where(Grant.role == role)
         if scope is not None:
             query = query.where(
                 Grant.kind == scope.kind,
@@ -1159,4 +1173,4 @@ def assert_admin_headroom(
     )
     remaining_ids.discard(excluding_principal_id)
     if not remaining_ids:
-        raise ConflictError("Cannot leave the instance with zero active admins.")
+        raise ConflictError(LAST_ADMIN_MESSAGE)

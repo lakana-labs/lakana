@@ -41,15 +41,19 @@ describe("places", () => {
       "repositories",
       "access",
       "people",
+      "groups",
+      "grants",
+      "what-i-may-do",
       "sign-in",
       "invites",
       "recovery-links",
     ]);
   });
 
-  it("lists only Status for a person who is not an administrator", () => {
-    expect(listedPlaces(KIM).map((place) => place.id)).toEqual(["status"]);
-    expect(listedPlaces(NEW).map((place) => place.id)).toEqual(["status"]);
+  it("lists Status, Access and What I may do for a person who is not an administrator", () => {
+    const shown = ["status", "access", "what-i-may-do"];
+    expect(listedPlaces(KIM).map((place) => place.id)).toEqual(shown);
+    expect(listedPlaces(NEW).map((place) => place.id)).toEqual(shown);
   });
 
   it("lists a child only with its parent, and a group only with a listed child", () => {
@@ -100,17 +104,17 @@ describe("places", () => {
     expect(entryPath(group, KIM, TREE)).toBeNull();
   });
 
-  it("enters Access at People for an administrator, and nowhere for anyone else", () => {
+  it("enters Access at People for an administrator, and at What I may do for anyone else", () => {
     const access = placeAt("/settings/access");
     if (access === null) throw new Error("no place");
     expect(entryPath(access, ADMIN)).toBe("/settings/access/people");
-    expect(entryPath(access, KIM)).toBeNull();
+    expect(entryPath(access, KIM)).toBe("/settings/access/what-i-may-do");
   });
 
   it("leaves Access open to everyone, so only its places decide whether it is listed", () => {
     const access = placeAt("/settings/access");
     expect(access?.visible(KIM)).toBe(true);
-    expect(listedPlaces(KIM)).not.toContain(access);
+    expect(listedPlaces(KIM)).toContain(access);
   });
 
   it("names every place in the frame's strings", async () => {

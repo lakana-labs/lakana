@@ -217,6 +217,17 @@ export function setStepUp(ceremony: () => Promise<void>): void {
   stepUpUnderWay = null;
 }
 
+/**
+ * Runs the step-up ceremony now, or joins the one under way; nothing before a ceremony is set.
+ *
+ * @returns When the touch is done.
+ */
+export async function stepUpNow(): Promise<void> {
+  if (stepUpCeremony !== null) {
+    await sharedStepUp(stepUpCeremony);
+  }
+}
+
 /** The body of a refusal, as far as the interface reads it. */
 interface ErrorBody {
   /** The sentence, or a validation error's problems. */

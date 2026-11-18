@@ -14,6 +14,9 @@ from lakana.cli._state import confirm, state_of
 group_app = typer.Typer(help="Manage groups.", no_args_is_help=True)
 
 _YES = Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")]
+_MEMBER = Annotated[
+    str | None, typer.Option("--member", help="Only the groups this principal belongs to.")
+]
 
 
 @group_app.command("create")
@@ -47,11 +50,16 @@ def create(
 
 @group_app.command("list")
 def list_groups(
-    ctx: typer.Context, search: SEARCH = None, limit: LIMIT = None, cursor: CURSOR = None
+    ctx: typer.Context,
+    search: SEARCH = None,
+    member: _MEMBER = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
 ) -> None:
     """List groups, newest first.
 
-    `--search TEXT` lists those whose name contains TEXT, in any letter case. A long list
+    `--search TEXT` lists those whose name contains TEXT, in any letter case; `--member NAME`
+    those NAME belongs to. A long list
     prints a "More results" line with the command that shows the next page.
 
     Parameters
@@ -60,18 +68,20 @@ def list_groups(
         The Typer context.
     search
         Only names that contain this text.
+    member
+        Only the groups this principal belongs to.
     limit
         Most groups returned (1 to 200); the server's default when omitted.
     cursor
         The cursor of the page to show.
     """
     state = state_of(ctx)
-    page = state.client().groups.list_page(search=search, limit=limit, cursor=cursor)
+    page = state.client().groups.list_page(search=search, member=member, limit=limit, cursor=cursor)
     _output.emit(state, page.items)
     more_results(
         state,
         ["lakana", "group", "list"],
-        {"--search": search, "--limit": limit},
+        {"--search": search, "--member": member, "--limit": limit},
         page.next_cursor,
     )
 

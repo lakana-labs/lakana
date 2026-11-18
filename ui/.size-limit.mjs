@@ -29,6 +29,14 @@ const NAMED_LIMITS = [
   // registered, after review, 2026-11-11) + 10 %. It loads only on /settings/repositories/new,
   // so Settings' other places stay within the shared limit.
   { name: "Connect a repository", prefix: "ConnectRepository-", limit: "5.16 kB" },
+  // Measured 3.40 kB (2026-11-18) + 10 %: the Settings frame with the loaders of Groups, Grants
+  // and What I may do, each of which names the chunks it preloads; the places themselves load on
+  // demand, and the first load is unchanged but for their three entries in the registry.
+  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "3.74 kB" },
+  // Measured 3.83 kB (2026-11-18) + 10 %: Settings › Access › Grants (the filters Who, On exactly
+  // and What with its two sections, the list with the Git mark, Remove and its question); Add
+  // grant loads when it is opened (AddGrantDialog-, on the shared limit).
+  { name: "Grants", prefix: "GrantsPage-", limit: "4.21 kB" },
   // Measured 29.08 kB (the Catalog: the list with its columns, health word, owner, header sorting,
   // the Sort by and Order menus, paging and states, 2026-11-13, 13.44 kB; and the tree of places
   // with React Aria's NavigationTree, the search field and the match line, +15.64 kB, almost all
@@ -611,6 +619,10 @@ export default [
   // Measured 11.93 kB (2026-11-18) with Browse… of New external table beside the Connections and
   // Jobs screens' stylesheets; the first load's index stylesheet is the same as main's. The limit
   // holds.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "12.54 kB" },
+  // Raised to the measured 12.88 kB (2026-11-18) + 10 %: Access's stylesheet (the Git mark,
+  // the managed note, the grants', members' and held grants' tables in their scrolling regions,
+  // the filters' row and the environment picker's rules it imports), loaded with Groups, Grants
+  // and What I may do only; the first load's stylesheet is unchanged.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "14.17 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

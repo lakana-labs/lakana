@@ -65,10 +65,11 @@ def create_group(
     return GroupOut.model_validate(created)
 
 
-@router.get("", response_model=list[GroupOut], responses=errors(403))
+@router.get("", response_model=list[GroupOut], responses=errors(403, 404))
 def list_groups(
     response: Response,
     q: str | None = Query(default=None, max_length=255),
+    member: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
@@ -76,8 +77,10 @@ def list_groups(
 ) -> list[GroupOut]:
     """List groups.
 
-    Lists the groups, newest first. Needs the `ADMIN` role on the instance. The cursor of
-    the next page is in the `X-Next-Cursor` response header and is absent on the last page.
+    Lists the groups, newest first. `member` lists only the groups that principal belongs to
+    now, and answers 404 when no principal has that name. Needs the `ADMIN` role on the
+    instance. The cursor of the next page is in the `X-Next-Cursor` response header and is
+    absent on the last page.
 
     Parameters
     ----------
@@ -85,10 +88,12 @@ def list_groups(
         The response, for the cursor header.
     q
         Only groups whose name contains this text, in any letter case.
+    member
+        Only the groups this principal belongs to.
     limit
         Most groups returned (1 to 200).
     cursor
-        The `X-Next-Cursor` of the previous page; send the same `q`.
+        The `X-Next-Cursor` of the previous page; send the same `q` and `member`.
     principal
         The authenticated caller.
     service
@@ -99,7 +104,7 @@ def list_groups(
     list of GroupOut
         The groups of this page.
     """
-    page = service.list_groups(principal, q=q, limit=limit, cursor=cursor)
+    page = service.list_groups(principal, q=q, member=member, limit=limit, cursor=cursor)
     set_next_cursor(response, page.next_cursor)
     return [GroupOut.model_validate(row) for row in page.items]
 

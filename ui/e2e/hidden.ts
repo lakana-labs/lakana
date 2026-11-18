@@ -182,7 +182,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["memory_limit_bytes","memory_used_bytes","slots_busy","slots_total","workers"]':
     "StatusDetailOut",
   '["name","type"]': "ResultColumnOut",
-  '["name"]': "OwnerOut",
+  // A group (GroupOut) and an owner without its kind: the name is free text in both.
+  '["name"]': "GroupOut",
   '["nulls","rate","values"]': "HealthObservedOut",
   '["path","root"]': "NamespaceOut",
   '["path","properties"]': "NamespaceOut",
@@ -201,6 +202,13 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["commit_sha","project_version_id","repository","updated_at"]': "DeploymentOut",
   '["id","status"]': "DeployAcceptedOut",
   '["downstream","patterns","upstream"]': "JobOut",
+  // Access's places: a held grant, a managed scope, a group's member and the access files' status.
+  '["action","environment","granted_at","group","id","kind","namespace","note","role","table"]':
+    "HeldGrantOut",
+  '["applied_at","applied_by","file_name","file_sha256","scope","source_commit"]':
+    "ManagedScopeOut",
+  '["held_admin","is_active","name","picture","type"]': "PrincipalOut",
+  '["overrides","scopes"]': "AccessStatusOut",
 };
 
 /**

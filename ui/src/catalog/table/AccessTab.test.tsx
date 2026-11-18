@@ -204,10 +204,23 @@ describe("AccessTab", () => {
     expect(screen.getByRole("heading", { level: 2, name: "What you may do" })).toHaveFocus();
   });
 
-  it("says Changing access comes with the Access area", async () => {
+  it("says where an administrator changes access, and a reader sees no Manage link", async () => {
     renderShell(TAB, { me: READER });
 
-    expect(await screen.findByText("Changing access comes with the Access area.")).toBeVisible();
+    expect(
+      await screen.findByText("An administrator changes access under Settings › Access › Grants."),
+    ).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Manage grants" })).toBeNull();
+  });
+
+  it("an administrator can manage the table's grants", async () => {
+    renderShell(TAB);
+
+    expect(await screen.findByRole("link", { name: "Manage grants" })).toHaveAttribute(
+      "href",
+      "/settings/access/grants?environment=prod&namespace=gold.sales&table=fact_sales",
+    );
+    expect(screen.queryByText(/An administrator changes access/)).toBeNull();
   });
 
   it("shows nothing for administrators to a reader and asks nothing", async () => {
@@ -414,6 +427,28 @@ describe("AccessTab", () => {
       "lakana grant list --env 'prU+202Eod' --ns 'gold.sales' --table 'fact_sales'",
     );
     expect(who.textContent).not.toContain("\u202E");
+  });
+
+  it("shows markup in a level's CLI command as text", async () => {
+    const place = "/api/v1/environments/<b>prod</b>/namespaces/gold.sales/tables/fact_sales";
+    renderShell("/catalog/%3Cb%3Eprod%3C%2Fb%3E/gold.sales/fact_sales/access", {
+      routes: {
+        [`GET ${place}`]: { status: 200, body: TABLE },
+        [`GET ${GRANTS_PATH}`]: {
+          status: 200,
+          body: MANY,
+          headers: { "X-Next-Cursor": "eyJhZnRlciI6IjIwMCJ9" },
+        },
+      },
+    });
+
+    const who = await section("Who has access");
+    await within(who).findAllByText(/lists all\.$/);
+    const commands = [...who.querySelectorAll(".grants-cut code")].map((code) => code.textContent);
+    expect(commands[0]).toBe(
+      "lakana grant list --env '<b>prod</b>' --ns 'gold.sales' --table 'fact_sales'",
+    );
+    expect(who.querySelector(".grants-cut b")).toBeNull();
   });
 
   it("shows row filters without a column and masks with one", async () => {

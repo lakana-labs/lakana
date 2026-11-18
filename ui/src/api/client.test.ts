@@ -13,6 +13,7 @@ import {
   send,
   setCsrfToken,
   setStepUp,
+  stepUpNow,
 } from "./client";
 
 import { fakeServer } from "../test/server";
@@ -608,5 +609,26 @@ describe("api.request", () => {
       type: "PermissionDenied",
     });
     expect(ceremony).not.toHaveBeenCalled();
+  });
+});
+
+describe("stepUpNow", () => {
+  it("does nothing before a ceremony is set", async () => {
+    vi.resetModules();
+    const fresh = await import("./client");
+    const server = fakeServer({});
+
+    await fresh.stepUpNow();
+
+    expect(server.sent).toEqual([]);
+  });
+
+  it("runs the ceremony", async () => {
+    const ceremony = vi.fn(() => Promise.resolve());
+    setStepUp(ceremony);
+
+    await stepUpNow();
+
+    expect(ceremony).toHaveBeenCalledTimes(1);
   });
 });

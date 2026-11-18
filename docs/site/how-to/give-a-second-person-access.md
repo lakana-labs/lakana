@@ -72,6 +72,12 @@ and nothing is created. The message names the grant that already gives the acces
 `Principal 'alice' already holds ANALYST on environment 'dev' through grant c913f5e7-…; nothing
 was created.` To take the access away, revoke that one grant with `lakana grant revoke ID`.
 
+In the web interface, an administrator does the same under **Settings → Access → Grants**: **Add
+grant** asks who (a person or a group), a role or a single action, and where, and it asks for the
+environment unless the grant is on the whole instance. **Settings → Access → Groups** creates a
+group and adds or removes its members. Both ask for a passkey touch before a change, and a scope
+that an access file manages carries the "⌂ Git" mark and changes only through the file.
+
 !!! note "Hide rows or columns before you give access"
     A grant on an environment covers every table in it, tables that are created later included.
     If some people must not see some rows or some values, create the

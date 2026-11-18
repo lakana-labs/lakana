@@ -68,6 +68,9 @@ describe("SettingsScreen", () => {
       "Status",
       "Repositories",
       "People",
+      "Groups",
+      "Grants",
+      "What I may do",
       "Sign-in",
       "Invites",
       "Recovery links",
@@ -106,19 +109,27 @@ describe("SettingsScreen", () => {
     expect(router.state.location.pathname).toBe("/settings/access/people");
   });
 
-  it("/settings/access with no Access place says so", async () => {
-    renderShell("/settings/access", { access: MEMBER, me: { admin: false } });
+  it("/settings/access opens What I may do for a person without admin rights", async () => {
+    const { router } = renderShell("/settings/access", {
+      access: MEMBER,
+      me: { name: "kim", admin: false },
+      routes: {
+        "GET /api/v1/principals/kim/grants": { status: 200, body: [] },
+        "GET /api/v1/environments": { status: 200, body: [] },
+      },
+    });
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "You cannot use Access" }),
+      await screen.findByRole("heading", { level: 1, name: "What I may do" }),
     ).toBeInTheDocument();
-    expect(await placeNames()).toEqual(["Status"]);
+    expect(router.state.location.pathname).toBe("/settings/access/what-i-may-do");
+    expect(await placeNames()).toEqual(["Status", "What I may do"]);
   });
 
-  it("lists only Status for a person who is not an administrator", async () => {
+  it("lists Status and What I may do for a person who is not an administrator", async () => {
     renderShell("/settings/status", { access: MEMBER, me: { admin: false } });
 
-    expect(await placeNames()).toEqual(["Status"]);
+    expect(await placeNames()).toEqual(["Status", "What I may do"]);
   });
 
   it.each([
@@ -128,7 +139,7 @@ describe("SettingsScreen", () => {
     const { server } = renderShell(path, { access: MEMBER, me: { admin: false } });
 
     expect(await screen.findByRole("heading", { level: 1, name: heading })).toBeInTheDocument();
-    expect(await placeNames()).toEqual(["Status"]);
+    expect(await placeNames()).toEqual(["Status", "What I may do"]);
     expect(
       server.sent.filter(
         (request) =>

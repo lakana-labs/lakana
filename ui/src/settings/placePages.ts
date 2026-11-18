@@ -35,6 +35,24 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    */
   people: async () => (await import("../access/PeopleRoutes")).PeopleRoutes,
   /**
+   * Groups, with a group's page below it.
+   *
+   * @returns The page.
+   */
+  groups: async () => (await import("../access/GroupsRoutes")).GroupsRoutes,
+  /**
+   * Grants: every grant, filtered, with Remove and Add grant.
+   *
+   * @returns The page.
+   */
+  grants: async () => (await import("../access/GrantsPage")).GrantsPage,
+  /**
+   * What I may do: one's own grants and what they add up to.
+   *
+   * @returns The page.
+   */
+  "what-i-may-do": async () => (await import("../access/WhatIMayDo")).WhatIMayDo,
+  /**
    * Sign-in: the session lengths.
    *
    * @returns The page.

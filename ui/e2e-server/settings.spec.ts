@@ -67,7 +67,7 @@ test("an administrator's places load from the server, and the old addresses land
   await page.context().close();
 });
 
-test("a person without admin rights sees Settings with Status only", async ({
+test("a person without admin rights sees Settings with Status and What I may do", async ({
   browser,
   browserName,
   request,
@@ -81,7 +81,7 @@ test("a person without admin rights sees Settings with Status only", async ({
 
   await page.goto("/settings");
   const list = page.getByRole("navigation", { name: PLACES });
-  await expect(list.getByRole("link")).toHaveText(["Status"]);
+  await expect(list.getByRole("link")).toHaveText(["Status", "What I may do"]);
 
   await page.goto("/access/invites");
   await expect(page).toHaveURL(/\/settings\/sign-in\/invites$/);

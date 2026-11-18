@@ -26,6 +26,7 @@ from lakana_core.models import (
     Environment,
     Grant,
     Group,
+    GroupMembership,
     Namespace,
     Principal,
     PrincipalType,
@@ -444,3 +445,73 @@ def test_groups_are_searched_and_paged(session: Session, setup: _Setup) -> None:
         service.list_groups(setup.admin, cursor=encode_cursor("principals", _T0, uuid.uuid4()))
     with pytest.raises(PermissionDenied):
         service.list_groups(setup.alice)
+
+
+def _member(session: Session, group: str, principal: str) -> None:
+    """Persist a membership by names.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    group
+        The group's name.
+    principal
+        The principal's name.
+    """
+    group_id = session.execute(select(Group.id).where(Group.name == group)).scalar_one()
+    principal_id = session.execute(
+        select(Principal.id).where(Principal.name == principal)
+    ).scalar_one()
+    session.add(GroupMembership(group_id=group_id, principal_id=principal_id))
+    session.commit()
+
+
+def test_list_groups_by_member_lists_only_their_groups(session: Session, setup: _Setup) -> None:
+    for minutes, name in enumerate(("analysts", "ops"), start=1):
+        session.add(Group(id=uuid.uuid4(), name=name, created_at=_T0 + timedelta(minutes=minutes)))
+    session.commit()
+    _member(session, "analysts", "alice")
+    _member(session, "ops", "alice")
+    _member(session, "ops", "bob")
+    service = GroupService(session, _auditing(session))
+
+    assert {g.name for g in service.list_groups(setup.admin, member="alice").items} == {
+        "analysts",
+        "ops",
+    }
+    assert [g.name for g in service.list_groups(setup.admin, member="bob", q="op").items] == ["ops"]
+    assert [g.name for g in service.list_groups(setup.admin, member="ada").items] == []
+    service.remove_member(setup.admin, "ops", "alice")
+    assert [g.name for g in service.list_groups(setup.admin, member="alice").items] == ["analysts"]
+
+
+def test_list_groups_by_an_unknown_member_is_404_for_an_administrator_and_403_for_others(
+    session: Session, setup: _Setup
+) -> None:
+    service = GroupService(session, _auditing(session))
+    with pytest.raises(NotFoundError, match="nobody"):
+        service.list_groups(setup.admin, member="nobody")
+    with pytest.raises(PermissionDenied):
+        service.list_groups(setup.alice, member="nobody")
+
+
+def test_list_grants_by_role_lists_exactly_that_role(session: Session, setup: _Setup) -> None:
+    viewer = _grant(
+        session,
+        setup.admin.id,
+        4,
+        principal_id=setup.alice.id,
+        role=Role.VIEWER,
+        kind=SecurableKind.INSTANCE,
+    )
+    service = GrantService(session, _auditing(session))
+    assert _ids(service.list_grants(setup.admin, role=Role.ANALYST).items) == [
+        setup.grants["alice-dev"].id
+    ]
+    assert _ids(service.list_grants(setup.admin, role=Role.VIEWER).items) == [viewer.id]
+    assert _ids(
+        service.list_grants(setup.admin, role=Role.ANALYST, principal_name="alice").items
+    ) == [setup.grants["alice-dev"].id]
+    with pytest.raises(ValidationError, match=r"Give role or action, not both\."):
+        service.list_grants(setup.admin, role=Role.ANALYST, action=Action.READ_TABLE)

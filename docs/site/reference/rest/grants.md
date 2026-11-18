@@ -70,7 +70,7 @@ Answer fields: `GrantOut`
 
 List grants
 
-Lists the active grants, newest first. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to everything in it; with an object filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
+Lists the active grants, newest first. Every filter is optional and narrows the list, except that `principal_name` and `group_name` exclude each other, and so do `role` and `action` (422 when both are given). The object filter matches exactly: `table` with `namespace` and `environment` lists the grants on that table, `namespace` with `environment` those on the namespace, `environment` alone those on the environment. `kind` lists the grants on every object of one kind, in any letter case: `INSTANCE` those on the whole instance, which apply to everything in it; with an object filter it must be that object's kind (422 otherwise). Needs the `ADMIN` role on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
 
 Parameters:
 
@@ -79,6 +79,7 @@ Parameters:
 | `principal_name` | query | no | text or null | Only grants made to this principal. |
 | `group_name` | query | no | text or null | Only grants made to this group. |
 | `action` | query | no | text or null | Only grants that give this action (in any letter case): the action, or a role that carries it. |
+| `role` | query | no | text or null | Only grants of exactly this role (in any letter case). |
 | `environment` | query | no | text or null | The environment of the object filter. |
 | `namespace` | query | no | text or null | The dot-joined namespace of the object filter. |
 | `table` | query | no | text or null | The table of the object filter. |

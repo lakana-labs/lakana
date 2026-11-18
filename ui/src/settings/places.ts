@@ -12,7 +12,16 @@ import type { AccessOut } from "../api";
 
 /** The id of a place. */
 export type SettingsPlaceId =
-  "status" | "repositories" | "access" | "people" | "sign-in" | "invites" | "recovery-links";
+  | "status"
+  | "repositories"
+  | "access"
+  | "people"
+  | "groups"
+  | "grants"
+  | "what-i-may-do"
+  | "sign-in"
+  | "invites"
+  | "recovery-links";
 
 /** What the rules know about the person: a part of what `GET /api/v1/whoami` answers. */
 export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet">;
@@ -81,6 +90,33 @@ export const SETTINGS_PLACES = [
     kind: "page",
     below: true,
     visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "groups",
+    path: "access/groups",
+    label: "settings.places.groups",
+    parent: "access",
+    kind: "page",
+    below: true,
+    visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "grants",
+    path: "access/grants",
+    label: "settings.places.grants",
+    parent: "access",
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "what-i-may-do",
+    path: "access/what-i-may-do",
+    label: "settings.places.whatIMayDo",
+    parent: "access",
+    kind: "page",
+    below: false,
+    visible: () => true,
   },
   {
     id: "sign-in",

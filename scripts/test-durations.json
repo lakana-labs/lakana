@@ -717,6 +717,7 @@
  "scripts/tests/test_select_tests.py": 5.56,
  "scripts/tests/test_time_budgets.py": 0.31,
  "scripts/tests/test_ui_coverage_ratchet.py": 0.05,
+ "scripts/tests/test_ui_grant_vocabulary.py": 0.05,
  "scripts/tests/test_ui_parity.py": 0.46,
  "scripts/tests/test_ui_project.py": 0.03,
  "scripts/tests/test_user_text_urls.py": 0.01,

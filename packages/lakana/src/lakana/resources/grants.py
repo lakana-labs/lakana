@@ -55,6 +55,7 @@ class GrantFilters(TypedDict, total=False):
     principal_name: str | None
     group_name: str | None
     action: str | None
+    role: str | None
     environment: str | None
     namespace: str | None
     table: str | None
@@ -180,7 +181,7 @@ class Grants:
         cursor
             A previous page's `next_cursor`. Send the same filters with every page.
         **filters
-            The filters of `list_page`: `principal_name`, `group_name`, `action`,
+            The filters of `list_page`: `principal_name`, `group_name`, `action`, `role`,
             `environment`, `namespace`, `table`, `kind`.
 
         Returns
@@ -191,9 +192,10 @@ class Grants:
         Raises
         ------
         lakana.errors.ValidationError
-            If both `principal_name` and `group_name` are given, an object filter has a gap,
-            `action` or `kind` is unknown, `kind` is not the object filter's kind, or `cursor` is
-            not one the server issued for the grants list.
+            If both `principal_name` and `group_name` are given, or both `role` and `action`,
+            an object filter has a gap, `action`, `role` or `kind` is unknown, `kind` is not
+            the object filter's kind, or `cursor` is not one the server issued for the grants
+            list.
         lakana.errors.PermissionDenied
             Without the `ADMIN` role on the instance.
         """
@@ -205,6 +207,7 @@ class Grants:
         principal_name: str | None = None,
         group_name: str | None = None,
         action: str | None = None,
+        role: str | None = None,
         environment: str | None = None,
         namespace: str | None = None,
         table: str | None = None,
@@ -222,6 +225,8 @@ class Grants:
             Only grants made to this group.
         action
             Only grants that give this action.
+        role
+            Only grants of exactly this role, in any letter case. Excludes `action`.
         environment
             The environment of an object filter.
         namespace
@@ -248,6 +253,7 @@ class Grants:
                 principal_name=principal_name,
                 group_name=group_name,
                 action=action,
+                role=role,
                 environment=environment,
                 namespace=namespace,
                 table=table,
@@ -269,7 +275,7 @@ class Grants:
         page_size
             Grants per request (1 to 200).
         **filters
-            The filters of `list_page`: `principal_name`, `group_name`, `action`,
+            The filters of `list_page`: `principal_name`, `group_name`, `action`, `role`,
             `environment`, `namespace`, `table`, `kind`.
 
         Returns

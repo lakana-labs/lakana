@@ -1,5 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
+import { ACCESS_STUBBED, stubAccess } from "./access";
 import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { ROUTES, stubConnect } from "./connect";
@@ -62,6 +63,8 @@ const ACCOUNTS = [
   "/api/v1/recovery-links",
   "/api/v1/principals/admin/passkeys",
   "/api/v1/principals/admin/sessions",
+  "/api/v1/principals/admin/grants",
+  "/api/v1/groups",
 ];
 
 /** What `apiTypes()` finds today: each type with a literal-union field, and those fields. */
@@ -85,12 +88,14 @@ const LITERAL_CODES: Record<string, string> = {
   ExternalTableOut: "format",
   GetStartedOut: "audience",
   GetStartedStepOut: "id",
+  GrantCreateIn: "kind",
   GrantOut: "kind role",
   GraphEdgeOut: "kind",
   GraphNodeOut: "kind",
   HealthBandOut: "basis weekday",
   HealthObservedOut: "kind reason source",
   HealthSummaryOut: "state",
+  HeldGrantOut: "kind",
   InstanceStatusOut: "state",
   JobOut: "actions last_run_status",
   JobRunFilter: "status",
@@ -418,6 +423,9 @@ async function stubAccounts(page: Page): Promise<void> {
       ],
     }),
   );
+  // The person page's grants and groups: none, as for a new administrator's own page.
+  await page.route("**/api/v1/principals/admin/grants", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/groups?*", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/principals/admin/sessions", (route) =>
     route.fulfill({
       json: [
@@ -805,6 +813,55 @@ walk(
 );
 
 // Last, so that the walks before it have run in this worker: an entry no stub serves is stale.
+walk("Groups, a group, Grants and What I may do mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubAccess(poisoned(page), { managed: ["prod"] });
+  await visit(page, "/settings/access/groups", ["analysts", "ops"]);
+
+  await visit(page, `/settings/access/groups/${n("analysts")}`, ["ci-bot", "maria", "dev"]);
+  await page.getByRole("button", { name: /^Remove mariaU\+202E from analystsU\+202E/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Remove member dialog", ["maria", "analysts"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.getByRole("button", { name: /^Delete group analystsU\+202E/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Delete group dialog", ["analysts"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // Grants: the names, the places and the managed file's name.
+  await visit(page, "/settings/access/grants", [
+    "analysts",
+    "maria",
+    "dev",
+    "gold.sales",
+    "access.yaml",
+  ]);
+  await page.getByRole("button", { name: /^Remove the grant ANALYST on devU\+202E/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Remove grant dialog", ["analysts", "dev"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.getByRole("button", { name: "Add grant" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /Environment$/ })
+    .click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await expectNoRaw(page, "Add grant's environments");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await visit(page, "/settings/access/what-i-may-do", ["analysts", "dev"]);
+  await visit(page, `/settings/access/people/${n("maria")}`, ["analysts", "dev"]);
+  expectOnlyStubbed(paths, [...STUBBED, ...ACCESS_STUBBED]);
+});
+
 test("every object READ_AS pins is one a stub serves", () => {
   test.skip(
     WALKS.some((title) => !walked.has(title)),

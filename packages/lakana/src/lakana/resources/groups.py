@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
 from lakana._models import Group, GroupPage, Principal
 from lakana._routes import ROUTES
 from lakana.resources._override import override_params
 from lakana.resources.principals import _principal_from_json
+
+
+class GroupFilters(TypedDict, total=False):
+    """The filters of a groups listing; each is optional, as in `Groups.list_page`."""
+
+    search: str | None
+    member: str | None
 
 
 def _group_from_json(data: dict[str, Any]) -> Group:
@@ -80,7 +87,11 @@ class Groups:
         return _group_from_json(response.json())
 
     def list(
-        self, *, search: str | None = None, limit: int | None = None, cursor: str | None = None
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        **filters: Unpack[GroupFilters],
     ) -> _GroupList:
         """List groups, newest first.
 
@@ -89,22 +100,27 @@ class Groups:
 
         Parameters
         ----------
-        search
-            Only groups whose name contains this text, in any letter case.
         limit
             Most groups returned (1 to 200); `None` leaves it to the server (100).
         cursor
-            A previous page's `next_cursor`. Send the same `search` with every page.
+            A previous page's `next_cursor`. Send the same filters with every page.
+        **filters
+            The filters of `list_page`: `search`, `member`.
 
         Returns
         -------
         list of Group
             Newest first.
         """
-        return self.list_page(search=search, limit=limit, cursor=cursor).items
+        return self.list_page(limit=limit, cursor=cursor, **filters).items
 
     def list_page(
-        self, *, search: str | None = None, limit: int | None = None, cursor: str | None = None
+        self,
+        *,
+        search: str | None = None,
+        member: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
     ) -> GroupPage:
         """List one page of groups, newest first, with the cursor of the next page.
 
@@ -112,10 +128,13 @@ class Groups:
         ----------
         search
             Only groups whose name contains this text, in any letter case.
+        member
+            Only the groups this principal belongs to.
         limit
             Most groups returned (1 to 200); `None` leaves it to the server (100).
         cursor
-            A previous page's `next_cursor`. Send the same `search` with every page.
+            A previous page's `next_cursor`. Send the same `search` and `member` with every
+            page.
 
         Returns
         -------
@@ -123,31 +142,30 @@ class Groups:
             The groups, and the cursor for the next page (`None` on the last).
         """
         response = self._transport.request(
-            ROUTES["groups.list"], params=query_params(q=search, limit=limit, cursor=cursor)
+            ROUTES["groups.list"],
+            params=query_params(q=search, member=member, limit=limit, cursor=cursor),
         )
         return GroupPage(
             items=[_group_from_json(item) for item in response.json()],
             next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
         )
 
-    def iter(self, *, search: str | None = None, page_size: int = 100) -> Iterator[Group]:
+    def iter(self, *, page_size: int = 100, **filters: Unpack[GroupFilters]) -> Iterator[Group]:
         """Yield every matching group, newest first, fetching pages as needed.
 
         Parameters
         ----------
-        search
-            Only groups whose name contains this text, in any letter case.
         page_size
             Groups per request (1 to 200).
+        **filters
+            The filters of `list_page`: `search`, `member`.
 
         Returns
         -------
         Iterator of Group
             Each group, once.
         """
-        return every_page(
-            lambda cursor: self.list_page(search=search, limit=page_size, cursor=cursor)
-        )
+        return every_page(lambda cursor: self.list_page(limit=page_size, cursor=cursor, **filters))
 
     def delete(self, name: str, *, override_reason: str | None = None) -> None:
         """Delete a group.

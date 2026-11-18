@@ -12,6 +12,7 @@ from lakana_core.auth import Action, SecurableKind
 from lakana_core.catalog.location_sweep import sweep_table_locations
 from lakana_core.db import create_engine
 from lakana_core.grants.roles import Role
+from lakana_core.grants.service import LAST_ADMIN_MESSAGE
 from lakana_core.models import Grant, Group, Principal, PrincipalType
 from lakana_core.storage.resolver import StorageResolver
 from lakana_server.settings import Settings
@@ -140,6 +141,7 @@ def test_revoking_the_last_admin_grant_is_409(client: TestClient) -> None:
 
     response = client.delete(f"/api/v1/grants/{admin_grant_id}", headers=AUTH_HEADER)
     assert response.status_code == 409
+    assert response.json()["detail"] == LAST_ADMIN_MESSAGE
 
 
 def test_grant_a_role_and_list_it_for_the_group(client: TestClient) -> None:
@@ -553,3 +555,41 @@ def test_an_identical_grant_is_409_naming_the_existing_one(
     params = {"principal_name": "alice"} if "principal" in subject else {"group_name": "eng"}
     listed = client.get("/api/v1/grants", headers=AUTH_HEADER, params=params).json()
     assert [g["id"] for g in listed] == [first.json()["id"]]
+
+
+def test_list_grants_by_role(client: TestClient) -> None:
+    """`?role=` lists the grants of exactly that role, in any letter case; a bad one is 422."""
+    create_environment(client)
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "alice", "type": "USER"})
+    analyst = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "alice", "role": "ANALYST", "kind": "ENVIRONMENT", "environment": "dev"},
+    ).json()
+    client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "alice", "role": "VIEWER", "kind": "INSTANCE"},
+    )
+    client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "alice",
+            "action": "READ_TABLE",
+            "kind": "ENVIRONMENT",
+            "environment": "dev",
+        },
+    )
+
+    by_role = client.get("/api/v1/grants", headers=AUTH_HEADER, params={"role": "analyst"})
+    unknown = client.get("/api/v1/grants", headers=AUTH_HEADER, params={"role": "x"})
+    both = client.get(
+        "/api/v1/grants", headers=AUTH_HEADER, params={"role": "ANALYST", "action": "READ_TABLE"}
+    )
+
+    assert by_role.status_code == 200, by_role.text
+    assert [g["id"] for g in by_role.json()] == [analyst["id"]]
+    assert unknown.status_code == 422, unknown.text
+    assert both.status_code == 422, both.text
+    assert "Give role or action, not both." in both.text

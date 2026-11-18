@@ -1,0 +1,139 @@
+@import "../shell/environment.css";
+
+/* Access's places: the Git mark, the managed note and the tables of grants, groups and members. */
+
+.git-mark {
+  color: var(--color-text-muted);
+  font-size: var(--type-label-size);
+  font-weight: var(--type-label-weight);
+  line-height: var(--type-label-line);
+  white-space: nowrap;
+}
+
+.managed-note {
+  margin: 0 0 var(--space-5);
+}
+
+.managed-note p {
+  margin: 0 0 var(--space-2);
+}
+
+/* A list of facts without a page of their own (a grant, a member): no hover, no chevron. */
+.access-list tr:hover,
+.grants-scroll tr:hover {
+  background: none;
+}
+
+/* The tables keep names whole and scroll in their own region at 320 px. */
+.list-scroll.held-grants-scroll .list {
+  min-width: 640px;
+}
+
+.list-scroll.grants-scroll .list {
+  min-width: 720px;
+}
+
+.list-scroll.members-scroll .list,
+.list-scroll.group-grants-scroll .list {
+  min-width: 560px;
+}
+
+.access-name {
+  display: block;
+}
+
+.list-scroll.grants-scroll .access-name,
+.list-scroll.held-grants-scroll .row-name,
+.list-scroll.grants-scroll .row-name,
+.list-scroll.members-scroll .row-name,
+.list-scroll.group-grants-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+/* Each part of a page is a flat panel (Still Water), 24 px from the next. */
+.access-section {
+  margin: 0 0 var(--space-5);
+}
+
+.access-section h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-title-size);
+  font-weight: var(--type-title-weight);
+  line-height: var(--type-title-line);
+}
+
+.access-section h2:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.access-actions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.access-actions li {
+  padding: var(--space-1) 0;
+}
+
+.access-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+  margin: 0 0 var(--space-4);
+}
+
+.access-filters .field {
+  margin: 0;
+}
+
+.access-add-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.access-add-member .field {
+  margin: 0;
+}
+
+.access-section h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+  line-height: var(--type-section-line);
+}
+
+/* Links that name something with a page (a group, a person) or lead on (Manage grants): the
+   accent, as in the lists; a row's own link keeps its rules. */
+.access-section a:not(.row-name),
+.grants-scroll a.access-name,
+.managed-note a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.access-section a:not(.row-name):hover,
+.grants-scroll a.access-name:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+.access-filters-help {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* A choice in a form (Add grant's role, action and environment): its label above, as a field's. */
+.access-choice {
+  margin: 0 0 var(--space-4);
+}
+
+/* The groups list's quiet `›` ends the row, beside the name's column. */
+.list-scroll.groups-scroll td:last-child,
+.list-scroll.groups-scroll th:last-child {
+  width: 1%;
+}

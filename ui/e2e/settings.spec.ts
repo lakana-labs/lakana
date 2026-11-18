@@ -46,7 +46,16 @@ for (const theme of ["light", "dark"] as const) {
         await expect(list).toBeVisible();
 
         await tabTo(page, list.getByRole("link", { name: "Status", exact: true }));
-        for (const name of ["Repositories", "People", "Sign-in", "Invites", "Recovery links"]) {
+        for (const name of [
+          "Repositories",
+          "People",
+          "Groups",
+          "Grants",
+          "What I may do",
+          "Sign-in",
+          "Invites",
+          "Recovery links",
+        ]) {
           await page.keyboard.press("Tab");
           await expect(list.getByRole("link", { name, exact: true })).toBeFocused();
         }
@@ -125,9 +134,17 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
 
         const name = "admin";
-        const person = ["", "/permissions", "/passkeys", "/sessions"].map(
-          (rest) => `/api/v1/principals/${name}${rest}`,
+        const person = [
+          ...["", "/permissions", "/passkeys", "/sessions", "/grants"].map(
+            (rest) => `/api/v1/principals/${name}${rest}`,
+          ),
+          "/api/v1/groups",
+        ];
+        // The person's grants and groups.
+        await page.route(`**/api/v1/principals/${name}/grants`, (route) =>
+          route.fulfill({ json: [] }),
         );
+        await page.route("**/api/v1/groups?*", (route) => route.fulfill({ json: [] }));
         await page.route(`**/api/v1/principals/${name}/permissions`, (route) =>
           route.fulfill({ json: { permissions: [] } }),
         );
@@ -157,7 +174,7 @@ test("an encoded address to a hidden place says so and reads nothing", async ({ 
   const errors = consoleErrors(page);
   const paths = apiPaths(page);
   await signInAsAdmin(page);
-  // The same person without admin rights: Settings lists Status alone.
+  // The same person without admin rights: Settings lists Status and What I may do.
   await page.route("**/api/v1/whoami", (route) =>
     route.fulfill({
       json: {
@@ -187,6 +204,7 @@ test("an encoded address to a hidden place says so and reads nothing", async ({ 
     ).toBeVisible();
     await expect(page.getByRole("navigation", { name: PLACES }).getByRole("link")).toHaveText([
       "Status",
+      "What I may do",
     ]);
   }
   await page.waitForLoadState("networkidle");

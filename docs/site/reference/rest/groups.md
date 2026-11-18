@@ -47,15 +47,16 @@ Answer fields: `GroupOut`
 
 List groups
 
-Lists the groups, newest first. Needs the `ADMIN` role on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.
+Lists the groups, newest first. `member` lists only the groups that principal belongs to now, and answers 404 when no principal has that name. Needs the `ADMIN` role on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.
 
 Parameters:
 
 | Name | In | Required | Type | Description |
 |---|---|---|---|---|
 | `q` | query | no | text or null | Only groups whose name contains this text, in any letter case. |
+| `member` | query | no | text or null | Only the groups this principal belongs to. |
 | `limit` | query | no | whole number | Most groups returned (1 to 200). |
-| `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `q`. |
+| `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `q` and `member`. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -65,6 +66,7 @@ Answers:
 | `200` | Successful Response | list of `GroupOut` |
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
 ## `DELETE /api/v1/groups/{name}`

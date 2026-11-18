@@ -250,6 +250,7 @@ class GroupService:
         p: PrincipalRef,
         *,
         q: str | None = None,
+        member: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
     ) -> Page[Group]:
@@ -262,10 +263,13 @@ class GroupService:
         q
             Only groups whose name contains this text, in any letter case; ``%`` and ``_``
             are matched as themselves. Blank means every group.
+        member
+            Only the groups this principal belongs to now. Combines with `q`.
         limit
             Most groups returned.
         cursor
-            The `next_cursor` of the previous page. Send the same `q` with every page.
+            The `next_cursor` of the previous page. Send the same `q` and `member` with every
+            page.
 
         Returns
         -------
@@ -275,6 +279,9 @@ class GroupService:
 
         Raises
         ------
+        NotFoundError
+            If no principal is named `member`; asked only after the authorization, so a caller
+            who may not manage groups learns nothing about the name.
         PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
             (`MANAGE_GROUP` works only with it).
@@ -286,6 +293,11 @@ class GroupService:
         query = select(Group)
         if q is not None and q.strip():
             query = query.where(name_contains(Group.name, q.strip()))
+        if member is not None:
+            principal = self._get_member_principal(member)
+            query = query.join(GroupMembership, GroupMembership.group_id == Group.id).where(
+                GroupMembership.principal_id == principal.id
+            )
         return newest_first(
             self._session,
             query,
