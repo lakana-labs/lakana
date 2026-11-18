@@ -1,0 +1,6 @@
+{
+  "label": "Environment",
+  "trigger": "{{label}}: {{environment}}",
+  "triggerProtected": "{{label}}: {{environment}}, protected",
+  "protected": "protected"
+}

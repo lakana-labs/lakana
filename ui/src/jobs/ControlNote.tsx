@@ -65,6 +65,12 @@ export function ControlNote({ note }: ControlNoteProps): JSX.Element {
 export type ControlButtonProps = {
   /** The button's label. */
   readonly label: string;
+  /**
+   * The button's accessible name when the label alone does not say what it acts on, such as a
+   * row's "Cancel the run of nightly_sales" for "Cancel"; it holds the label. The label by
+   * default.
+   */
+  readonly accessibleName?: string;
   /** Whether it is the page's one primary action; no by default. */
   readonly primary?: boolean;
 } & (
@@ -89,6 +95,7 @@ export type ControlButtonProps = {
  *
  * @param props - The label, the action and whether it asks first.
  * @param props.label - The button's label.
+ * @param props.accessibleName - The button's accessible name, when it differs from the label.
  * @param props.primary - Whether it is the page's one primary action.
  * @param props.act - Acts at once.
  * @param props.ask - Asks first instead.
@@ -96,6 +103,7 @@ export type ControlButtonProps = {
  */
 export function ControlButton({
   label,
+  accessibleName,
   primary = false,
   act,
   ask,
@@ -106,6 +114,7 @@ export function ControlButton({
     <span className="jobs-control">
       <PendingButton
         className={primary ? "button button-primary" : "button"}
+        {...(accessibleName === undefined ? {} : { "aria-label": accessibleName })}
         pending={attempt.busy}
         onPress={() => {
           if (ask !== undefined) {

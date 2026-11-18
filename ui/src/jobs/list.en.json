@@ -1,0 +1,55 @@
+{
+  "environment": "Environment",
+  "allEnvironments": "All environments",
+  "search": "Search jobs",
+  "noEnvironment": "You may not read any environment yet. Ask an administrator for a role in one.",
+  "noEnvironmentCli": "Meanwhile, list an environment's jobs from the command line:",
+  "copy": "Copy command",
+  "noMatch": "Nothing here matches the search.",
+  "columns": {
+    "state": "State",
+    "job": "Job",
+    "name": "Name",
+    "environment": "Environment",
+    "progress": "Progress",
+    "ended": "Ended",
+    "why": "Why it failed",
+    "repository": "Repository",
+    "schedule": "Schedule",
+    "lastRun": "Last run",
+    "nextRun": "Next run",
+    "actions": "Actions"
+  },
+  "running": {
+    "heading": "Running now ({{count}})",
+    "headingMore": "Running now ({{count}}+)",
+    "loading": "Loading the runs that run now…",
+    "region": "Runs running now",
+    "empty": "Nothing is running.",
+    "more": "More runs are running than shown here.",
+    "queued": "queued {{time}}",
+    "progress": "started {{time}} · {{duration}} · {{ended}} of {{total}} tasks"
+  },
+  "failed": {
+    "heading": "Failed, needs attention ({{count}})",
+    "loading": "Loading the failed runs…",
+    "region": "Runs that failed",
+    "empty": "No job failed in the last 7 days.",
+    "truncated": "More failed runs than shown; choose an environment.",
+    "logsName": "Logs of the run of {{name}}",
+    "unknownCause": "The platform failed in a way it did not expect.",
+    "unknownNextStep": "Open the run; if the cause is not clear, ask the operator for the worker's log and report it with the run id."
+  },
+  "all": {
+    "heading": "All jobs",
+    "loading": "Loading the jobs…",
+    "region": "Every job listed",
+    "emptyOne": "No job is deployed in {{environment}}.",
+    "emptyAll": "No job is deployed in an environment you may read. Jobs are declared under jobs: in lakana.yaml.",
+    "howTo": "Run a job on a schedule",
+    "readFailed": "The jobs of {{environment}} could not be read: {{sentence}}",
+    "byHand": "by hand",
+    "paused": "paused",
+    "never": "never"
+  }
+}

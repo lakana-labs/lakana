@@ -19,6 +19,8 @@ export interface RunNowButtonProps {
   readonly job: JobOut;
   /** Whether it is the page's one primary action; no by default (a row of a list). */
   readonly primary?: boolean;
+  /** Whether it stands in a row of a list: the label "Run", and the job's name in its own. */
+  readonly inRow?: boolean;
   /** Told what the start did: the queued run, or the waiting start. */
   readonly onStarted: (result: JobStartOut) => void;
 }
@@ -31,6 +33,7 @@ export interface RunNowButtonProps {
  * @param props.environment - The job's environment.
  * @param props.job - The job.
  * @param props.primary - Whether it is the page's primary action.
+ * @param props.inRow - Whether it stands in a row of a list.
  * @param props.onStarted - Told what the start did.
  * @returns The button, or nothing.
  */
@@ -38,6 +41,7 @@ export function RunNowButton({
   environment,
   job,
   primary = false,
+  inRow = false,
   onStarted,
 }: RunNowButtonProps): JSX.Element | null {
   const { t } = useTranslation();
@@ -46,7 +50,8 @@ export function RunNowButton({
   }
   return (
     <ControlButton
-      label={t("jobs.runNow")}
+      label={t(inRow ? "jobs.list.controls.run" : "jobs.runNow")}
+      {...(inRow ? { accessibleName: t("jobs.list.controls.runName", { job: job.name }) } : {})}
       primary={primary}
       act={async () => {
         onStarted(await startJob(environment, job.repository, job.name));
@@ -61,6 +66,11 @@ export interface ScheduleButtonProps {
   readonly environment: string;
   /** The job. */
   readonly job: JobOut;
+  /**
+   * Whether it stands in a row of a list: the labels "Pause" and "Resume", and the job's name in
+   * their own.
+   */
+  readonly inRow?: boolean;
   /** Told the job once its schedule was paused or resumed. */
   readonly onChanged: (job: JobOut) => void;
 }
@@ -73,12 +83,14 @@ export interface ScheduleButtonProps {
  * @param props - The environment, the job and what to do with the changed job.
  * @param props.environment - The job's environment.
  * @param props.job - The job.
+ * @param props.inRow - Whether it stands in a row of a list.
  * @param props.onChanged - Told the changed job.
  * @returns The button, or nothing.
  */
 export function ScheduleButton({
   environment,
   job,
+  inRow = false,
   onChanged,
 }: ScheduleButtonProps): JSX.Element | null {
   const { t } = useTranslation();
@@ -91,14 +103,20 @@ export function ScheduleButton({
     <>
       {job.paused ? (
         <ControlButton
-          label={t("jobs.schedule.resume")}
+          label={t(inRow ? "jobs.list.controls.resume" : "jobs.schedule.resume")}
+          {...(inRow
+            ? { accessibleName: t("jobs.list.controls.resumeName", { job: job.name }) }
+            : {})}
           act={async () => {
             onChanged(await resumeJob(environment, job.repository, job.name));
           }}
         />
       ) : (
         <ControlButton
-          label={t("jobs.schedule.pause")}
+          label={t(inRow ? "jobs.list.controls.pause" : "jobs.schedule.pause")}
+          {...(inRow
+            ? { accessibleName: t("jobs.list.controls.pauseName", { job: job.name }) }
+            : {})}
           ask={() => {
             setAsking(true);
           }}

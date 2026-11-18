@@ -3,6 +3,7 @@ import i18next from "i18next";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { aJob, aJobRun, aTask } from "../test/jobs";
+import { jobsListRoutes } from "../test/jobsList";
 import type { FakeRoute } from "../test/server";
 import { renderShell } from "../test/render";
 
@@ -48,7 +49,10 @@ describe("JobPage", () => {
     ).toBeInTheDocument();
     const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(within(trail).getByRole("link", { name: "Jobs" })).toHaveAttribute("href", "/jobs");
-    expect(within(trail).getByRole("link", { name: "prod" })).toHaveAttribute("href", "/jobs");
+    expect(within(trail).getByRole("link", { name: "prod" })).toHaveAttribute(
+      "href",
+      "/jobs?environment=prod",
+    );
     const runNow = await screen.findByRole("button", { name: "Run now" });
     expect(document.querySelectorAll(".button-primary")).toEqual(
       expect.objectContaining({ length: 1 }),
@@ -57,6 +61,22 @@ describe("JobPage", () => {
     expect(screen.getByRole("button", { name: "Pause schedule" })).not.toHaveClass(
       "button-primary",
     );
+  });
+
+  it("the environment crumb opens the list filtered to it", async () => {
+    const { user, router } = renderShell(PAGE, {
+      routes: { ...jobRoutes(), ...jobsListRoutes() },
+    });
+
+    await screen.findByRole("heading", { level: 1, name: "nightly_sales" });
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    await user.click(within(trail).getByRole("link", { name: "prod" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toBeInTheDocument();
+    expect(router.state.location.search).toBe("?environment=prod");
+    expect(
+      await screen.findByRole("button", { name: "Environment: prod, protected" }),
+    ).toBeInTheDocument();
   });
 
   it("selects the run in the address, else the newest", async () => {

@@ -100,7 +100,7 @@ describe("TaskPage", () => {
     await waitFor(() => {
       expect(trail()).toEqual([
         "/jobs",
-        "/jobs",
+        "/jobs?environment=prod",
         "/jobs/prod/job/analytics/nightly_sales",
         `/jobs/prod/runs/${JOB_RUN_ID}`,
       ]);
@@ -148,7 +148,7 @@ describe("TaskPage", () => {
       "href",
       `/jobs/prod/runs/${JOB_RUN_ID}`,
     );
-    expect(trail()).toEqual(["/jobs", "/jobs", `/jobs/prod/runs/${JOB_RUN_ID}`]);
+    expect(trail()).toEqual(["/jobs", "/jobs?environment=prod", `/jobs/prod/runs/${JOB_RUN_ID}`]);
     expect(await screen.findByText("Queued")).toBeInTheDocument();
     expect(screen.getByText("Waits").nextElementSibling).toHaveTextContent(
       "Waits for U+202Esilver.orders.",

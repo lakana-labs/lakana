@@ -1,15 +1,26 @@
 /**
- * Stubs for the end-to-end tests of the job, run and task pages: the job `daily_sales` of the
- * repository `analytics` in `prod`, scheduled and notifying Slack through a secret; a failed run
- * of seven tasks (one timed out, one never ran because of it, one blocked by a failed check); a
- * running run that ends once cancelled; a task's log in three pieces; and what Run now, Pause,
- * Resume schedule, Cancel and Resume answer. What a control changes shows in the reads after it.
+ * Stubs for the end-to-end tests of the Jobs list and the job, run and task pages: the
+ * environments `dev` and `prod` (protected); the job `daily_sales` of the repository `analytics`
+ * in `prod`, scheduled and notifying Slack through a secret, and the job `orders_hourly` in `dev`,
+ * paused; a failed run of seven tasks (one timed out, one never ran because of it, one blocked by
+ * a failed check) and a failed run of no job with a run-level message; a running run that ends
+ * once cancelled, a running run in `dev` and a queued run of no job; a task's log in three pieces;
+ * and what Run now, Pause, Resume schedule, Cancel and Resume answer. What a control changes
+ * shows in the reads after it.
  *
  * @packageDocumentation
  */
 import type { Page, Route } from "@playwright/test";
 
-import type { JobOut, RunOut, TaskAttemptOut, TaskLogOut, TaskRunOut } from "../src/api/jobs";
+import type { EnvironmentOut } from "../src/api/environments";
+import type {
+  FailedRunOut,
+  JobOut,
+  RunOut,
+  TaskAttemptOut,
+  TaskLogOut,
+  TaskRunOut,
+} from "../src/api/jobs";
 
 import { FAILED_RUN_ID, signInAsAdmin, STUBBED } from "./session";
 
@@ -68,8 +79,41 @@ export const LOG_PIECES = [
   "stopped: the task ran longer than 30 minutes\n",
 ] as const;
 
+/** The other environment, which is not protected. */
+export const DEV = "dev";
+
+/** The job of {@link DEV}, whose schedule is paused. */
+export const DEV_JOB = "orders_hourly";
+
+/** The running run of {@link DEV_JOB}. */
+const DEV_RUNNING_ID = "6071829a-a4b5-4c6d-97e8-f9a0b1c2d3e4";
+
+/** The queued run of no job, of the repository {@link REPOSITORY} in `prod`. */
+const QUEUED_ID = "718293a4-b5c6-4d7e-88f9-a0b1c2d3e4f5";
+
+/** The failed run of no job, of the repository `finance` in {@link DEV}. */
+const ADHOC_FAILED_ID = "8293a4b5-c6d7-4e8f-99a0-b1c2d3e4f5a6";
+
+/** The repository of {@link ADHOC_FAILED_ID}. */
+export const ADHOC_REPOSITORY = "finance";
+
+/** Why {@link ADHOC_FAILED_ID} failed, as the server words it: no task of it failed. */
+export const ADHOC_MESSAGE = "The project could not be built: lakana.yaml, line 4.";
+
 /** The path of an environment's part. */
 const AT = `/api/v1/environments/${ENV}`;
+
+/** The path of the other environment's part. */
+const DEV_AT = `/api/v1/environments/${DEV}`;
+
+/** The environments the person may read. */
+const ENVIRONMENTS_PATH = "/api/v1/environments";
+
+/** The runs of every environment. */
+const ALL_RUNS = "/api/v1/runs";
+
+/** The failed runs of every environment. */
+const FAILED_RUNS = "/api/v1/runs/failed";
 
 /** The path of the job. */
 const JOB_PATH = `${AT}/jobs/${JOB}`;
@@ -94,6 +138,13 @@ const ASSETS = [
 /** The paths these stubs answer, beside those of `session.ts`. */
 export const JOBS_STUBBED = [
   ...STUBBED,
+  ENVIRONMENTS_PATH,
+  ALL_RUNS,
+  FAILED_RUNS,
+  `${AT}/jobs`,
+  `${DEV_AT}/jobs`,
+  `${DEV_AT}/runs/${ADHOC_FAILED_ID}`,
+  `${DEV_AT}/runs/${DEV_RUNNING_ID}`,
   JOB_PATH,
   `${JOB_PATH}/runs`,
   `${JOB_PATH}/pause`,
@@ -375,6 +426,91 @@ function logPiece(asset: string, offset: number): TaskLogOut {
   };
 }
 
+/**
+ * An environment as `GET /api/v1/environments` answers it.
+ *
+ * @param name - Its name.
+ * @param protectedOne - Whether it is protected.
+ * @returns The environment.
+ */
+function environment(name: string, protectedOne: boolean): EnvironmentOut {
+  return {
+    name,
+    storage_root: `s3://lakana-${name}/warehouse`,
+    storage_secret_ref: null,
+    is_protected: protectedOne,
+    properties: {},
+    retention_days: null,
+    deleted_at: null,
+    purge_after: null,
+  };
+}
+
+/** The job of {@link DEV}: hourly, paused, never run. */
+const DEV_JOB_OUT: JobOut = {
+  ...job(true),
+  name: DEV_JOB,
+  environment: DEV,
+  cron: "15 * * * *",
+  last_run_id: DEV_RUNNING_ID,
+  last_run_status: "running",
+  last_run_at: "2026-11-17T09:15:00Z",
+  triggers: [
+    {
+      kind: "schedule",
+      cron: "15 * * * *",
+      timezone: "Europe/Berlin",
+      paused: true,
+      next_run_at: null,
+    },
+  ],
+  notify: null,
+};
+
+/** The running run of {@link DEV_JOB}, which the reader may cancel. */
+const DEV_RUNNING = run(DEV_RUNNING_ID, {
+  environment: DEV,
+  job: DEV_JOB,
+  status: "running",
+  trigger: "schedule",
+  created_at: "2026-11-17T09:15:00Z",
+  started_at: "2026-11-17T09:15:02Z",
+  total_tasks: 4,
+  ended_tasks: 1,
+});
+
+/** The queued run of no job. */
+const QUEUED = run(QUEUED_ID, { job: null, trigger: null, created_at: "2026-11-17T09:25:00Z" });
+
+/** The failed run of no job, without a failed task. */
+const ADHOC_FAILED = run(ADHOC_FAILED_ID, {
+  environment: DEV,
+  repository: ADHOC_REPOSITORY,
+  job: null,
+  trigger: null,
+  status: "failed",
+  error_message: ADHOC_MESSAGE,
+  created_at: "2026-11-17T03:00:00Z",
+  started_at: "2026-11-17T03:00:01Z",
+  finished_at: "2026-11-17T03:00:04Z",
+  tasks: [],
+  total_tasks: 0,
+});
+
+/**
+ * The failed runs, newest end first: the job's failed run with its first failed task, and the
+ * run of no job.
+ *
+ * @returns The rows.
+ */
+function failedRows(): FailedRunOut[] {
+  const timedOut = FAILED_TASKS.find((one) => one.asset === TIMED_OUT);
+  return [
+    { run: { ...ADHOC_FAILED, tasks: [] }, task: null, failure: null },
+    { run: { ...FAILED, tasks: [] }, task: TIMED_OUT, failure: timedOut?.failure ?? null },
+  ];
+}
+
 /** The state the stubbed server keeps between requests. */
 interface JobsState {
   paused: boolean;
@@ -494,6 +630,52 @@ export async function stubJobs(page: Page): Promise<string[]> {
   await page.route(
     (url) => url.pathname.startsWith(`${RUNS}/`),
     (route) => runAnswer(route, state),
+  );
+  await page.route(
+    (url) => url.pathname === ENVIRONMENTS_PATH,
+    (route) => route.fulfill({ json: [environment(DEV, false), environment(ENV, true)] }),
+  );
+  await page.route(
+    (url) => url.pathname === ALL_RUNS,
+    (route) => {
+      const query = new URL(route.request().url()).searchParams;
+      const statuses = (query.get("status") ?? "").split(",").filter((word) => word !== "");
+      const only = query.get("environment");
+      const runs = [
+        ...[RESUMED_ID, STARTED_ID, RUNNING_ID].map((id) => runNow(state, id)),
+        QUEUED,
+        DEV_RUNNING,
+      ]
+        .filter((one): one is RunOut => one !== undefined)
+        .filter((one) => statuses.length === 0 || statuses.includes(one.status))
+        .filter((one) => only === null || one.environment === only)
+        .map((one) => ({ ...one, tasks: [] }));
+      return route.fulfill({ json: { items: runs, next_cursor: null } });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === FAILED_RUNS,
+    (route) => {
+      const only = new URL(route.request().url()).searchParams.get("environment");
+      const items = failedRows().filter((row) => only === null || row.run.environment === only);
+      return route.fulfill({ json: { items, truncated: false } });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === `${AT}/jobs`,
+    (route) => route.fulfill({ json: [job(state.paused)] }),
+  );
+  await page.route(
+    (url) => url.pathname === `${DEV_AT}/jobs`,
+    (route) => route.fulfill({ json: [DEV_JOB_OUT] }),
+  );
+  await page.route(
+    (url) => url.pathname === `${DEV_AT}/runs/${ADHOC_FAILED_ID}`,
+    (route) => route.fulfill({ json: ADHOC_FAILED }),
+  );
+  await page.route(
+    (url) => url.pathname === `${DEV_AT}/runs/${DEV_RUNNING_ID}`,
+    (route) => route.fulfill({ json: DEV_RUNNING }),
   );
   return sent;
 }

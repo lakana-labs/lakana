@@ -1,7 +1,11 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import {
+  ADHOC_MESSAGE,
+  ADHOC_REPOSITORY,
   BLOCKED,
+  DEV,
+  DEV_JOB,
   ENV,
   FAILED_CHECK,
   FAILED_ID,
@@ -22,6 +26,9 @@ import {
 import { consoleErrors, violations } from "./session";
 
 const KEY = "lakana.preferences";
+
+/** The Jobs list. */
+const LIST = "/jobs";
 
 /** The job's page. */
 const JOB_PAGE = `/jobs/${ENV}/job/${REPOSITORY}/${JOB}`;
@@ -113,6 +120,22 @@ async function tabOnto(target: Locator): Promise<void> {
 }
 
 /**
+ * Moves the focus with Shift+Tab until it is on an element before it.
+ *
+ * @param target - The element.
+ */
+async function tabBackOnto(target: Locator): Promise<void> {
+  const page = target.page();
+  for (let step = 0; step < 80; step += 1) {
+    if (await target.evaluate((node) => node === document.activeElement)) {
+      return;
+    }
+    await page.keyboard.press("Shift+Tab");
+  }
+  throw new Error("Shift+Tab never reached the element");
+}
+
+/**
  * Whether the focus is somewhere on the page rather than on `<body>`.
  *
  * @param page - The page.
@@ -201,8 +224,288 @@ async function showAs(page: Page, state: "hidden" | "visible"): Promise<void> {
   }, state);
 }
 
+/**
+ * Opens the Jobs list and waits for its three sections.
+ *
+ * @param page - The page.
+ * @param query - What follows the address, such as `?environment=dev`.
+ */
+async function openList(page: Page, query = ""): Promise<void> {
+  await page.goto(`${LIST}${query}`);
+  await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: /^Running now/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Every job listed" })).toBeVisible();
+}
+
+/**
+ * The gaps between the visible content of every two neighbouring cells of the page's tables:
+ * their text and pictures, without what is hidden for the eye.
+ *
+ * @param page - The page.
+ * @returns Each gap, with its table, row and cell.
+ */
+function cellGaps(page: Page): Promise<{ where: string; gap: number }[]> {
+  return page.evaluate(() => {
+    const out: { where: string; gap: number }[] = [];
+    document.querySelectorAll("table").forEach((table, index) => {
+      table.querySelectorAll("tbody tr").forEach((tr, row) => {
+        const spans = [...tr.querySelectorAll("td")].map((td) => {
+          const rects: DOMRect[] = [];
+          const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            const parent = node.parentElement;
+            if (
+              (node.textContent ?? "").trim() !== "" &&
+              parent?.closest(".visually-hidden") === null
+            ) {
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              rects.push(range.getBoundingClientRect());
+            }
+          }
+          td.querySelectorAll("svg, img").forEach((picture) => {
+            rects.push(picture.getBoundingClientRect());
+          });
+          return rects.length === 0
+            ? null
+            : {
+                left: Math.min(...rects.map((rect) => rect.left)),
+                right: Math.max(...rects.map((rect) => rect.right)),
+              };
+        });
+        for (let cell = 0; cell + 1 < spans.length; cell += 1) {
+          const here = spans[cell];
+          const next = spans[cell + 1];
+          if (here && next) {
+            out.push({
+              where: `table ${String(index)} row ${String(row)} cell ${String(cell)}`,
+              gap: next.left - here.right,
+            });
+          }
+        }
+      });
+    });
+    return out;
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   for (const density of ["roomy", "compact"] as const) {
+    test.describe(`the Jobs list, ${theme}, ${density}`, () => {
+      test.beforeEach(async ({ page }) => {
+        await stubJobs(page);
+        await page.addInitScript(
+          ([key, value]) => {
+            if (window.localStorage.getItem(key ?? "") === null) {
+              window.localStorage.setItem(key ?? "", value ?? "");
+            }
+          },
+          [KEY, JSON.stringify({ theme, density, language: "en" })],
+        );
+      });
+
+      test("axe finds nothing on the list, the open filter, a search with no hits and the Cancel and Pause dialogs", async ({
+        page,
+      }) => {
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        await expect(page.getByText(ADHOC_MESSAGE)).toBeVisible();
+        expect(await violations(page), "the list").toEqual([]);
+
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await expect(page.getByRole("listbox")).toBeVisible();
+        expect(await violations(page), "the open filter").toEqual([]);
+        await page.keyboard.press("Escape");
+
+        await page.getByRole("button", { name: `Cancel the run of ${JOB}` }).click();
+        const cancel = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(cancel).toBeVisible();
+        expect(await violations(page), "the Cancel dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(cancel).toBeHidden();
+
+        await page.getByRole("button", { name: `Pause the schedule of ${JOB}` }).click();
+        const pause = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await expect(pause).toBeVisible();
+        expect(await violations(page), "the Pause dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(pause).toBeHidden();
+
+        await page.getByRole("searchbox", { name: "Search jobs" }).fill("no-such-job");
+        await expect(page.getByText("Nothing here matches the search.")).toHaveCount(3);
+        expect(await violations(page), "a search with no hits").toEqual([]);
+      });
+
+      test("at least 24 px between the content of every two neighbouring cells", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        const gaps = await cellGaps(page);
+        expect(gaps.length).toBeGreaterThanOrEqual(10);
+        const tight = gaps.filter((entry) => entry.gap < 24);
+        expect(tight, JSON.stringify(tight)).toEqual([]);
+      });
+
+      test("the filter, the search, the links and the controls work by keyboard alone", async ({
+        page,
+      }) => {
+        await openList(page);
+        const filter = page.getByRole("button", { name: "Environment: All environments" });
+        await tabOnto(filter);
+        await page.keyboard.press("Enter");
+        await expect(page.getByRole("listbox")).toBeVisible();
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(/\?environment=prod$/);
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeFocused();
+        await expect(page.getByRole("link", { name: DEV_JOB })).toHaveCount(0);
+
+        await page.keyboard.press("Tab");
+        await expect(page.getByRole("searchbox", { name: "Search jobs" })).toBeFocused();
+        await page.keyboard.type("daily");
+        await expect(page).toHaveURL(/q=daily/);
+
+        const cancel = page.getByRole("button", { name: `Cancel the run of ${JOB}` });
+        await tabOnto(cancel);
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(cancel).toBeFocused();
+
+        const pause = page.getByRole("button", { name: `Pause the schedule of ${JOB}` });
+        await tabOnto(pause);
+        await page.keyboard.press("Enter");
+        const asked = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await asked.getByRole("button", { name: "Pause schedule" }).press("Enter");
+        await expect(page.getByText(`Paused the schedule of ${JOB}.`)).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: `Resume the schedule of ${JOB}` }),
+        ).toBeFocused();
+
+        const jobLink = page
+          .getByRole("region", { name: "Every job listed" })
+          .getByRole("link", { name: JOB });
+        await tabBackOnto(jobLink);
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+        await expect(page.getByRole("heading", { level: 1, name: JOB })).toBeVisible();
+      });
+
+      test("a control's press does not open its row", async ({ page }) => {
+        await openList(page);
+        const run = page.getByRole("button", { name: `Run ${JOB}` });
+        await run.click();
+        await expect(page.getByText(`Started a run of ${JOB}.`)).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`${LIST}$`));
+        await expect(run).toBeFocused();
+        // The run it queued shows under Running now once the list is read again.
+        await expect(
+          page
+            .getByRole("region", { name: "Runs running now" })
+            .getByText("Queued", { exact: true }),
+        ).toHaveCount(2);
+      });
+
+      test("no horizontal scroll at 320 px, each list scrolling in its own region", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+        for (const region of ["Runs running now", "Runs that failed", "Every job listed"]) {
+          await scrollsInItself(page.getByRole("region", { name: region }));
+        }
+        expect(await violations(page), "the list at 320 px").toEqual([]);
+      });
+
+      test("the filter is remembered across a reload; Back and Forward keep the filter and the search", async ({
+        page,
+      }) => {
+        await openList(page);
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: DEV }).click();
+        await expect(page).toHaveURL(/\?environment=dev$/);
+        await page.getByRole("searchbox", { name: "Search jobs" }).fill("orders");
+        await expect(page).toHaveURL(/\?environment=dev&q=orders$/);
+
+        await page.goto(LIST);
+        await expect(page.getByRole("button", { name: "Environment: dev" })).toBeVisible();
+        await expect(page.getByRole("link", { name: JOB })).toHaveCount(0);
+        await expect(page.getByRole("link", { name: DEV_JOB }).first()).toBeVisible();
+
+        await page.goto(`${LIST}?environment=prod&q=daily`);
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeVisible();
+        await page
+          .getByRole("region", { name: "Every job listed" })
+          .getByRole("link", { name: JOB })
+          .click();
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+        await page.goBack();
+        await expect(page).toHaveURL(/\?environment=prod&q=daily$/);
+        await expect(page.getByRole("searchbox", { name: "Search jobs" })).toHaveValue("daily");
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeVisible();
+        await page.goForward();
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+      });
+
+      test("the list is not read while the tab is hidden, and is read at once when shown", async ({
+        page,
+      }) => {
+        let reads = 0;
+        page.on("request", (request) => {
+          if (new URL(request.url()).pathname === "/api/v1/runs") {
+            reads += 1;
+          }
+        });
+        await page.clock.install();
+        await openList(page);
+        await expect.poll(() => reads).toBe(1);
+
+        await showAs(page, "hidden");
+        await page.clock.runFor(120_000);
+        expect(reads, "no read while hidden").toBe(1);
+
+        await showAs(page, "visible");
+        await expect.poll(() => reads, { timeout: 2_000 }).toBe(2);
+      });
+
+      test("the list asks only for stubbed routes and logs no console error", async ({ page }) => {
+        const errors = consoleErrors(page);
+        const requests: string[] = [];
+        page.on("request", (request) => {
+          requests.push(new URL(request.url()).pathname);
+        });
+
+        await openList(page);
+        await expect(page.getByText(ADHOC_MESSAGE)).toBeVisible();
+        await expect(page.getByRole("link", { name: ADHOC_REPOSITORY, exact: true })).toBeVisible();
+        await page.getByRole("button", { name: `Run ${JOB}` }).click();
+        await expect(page.getByText(`Started a run of ${JOB}.`)).toBeVisible();
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: DEV }).click();
+        await expect(page.getByRole("link", { name: JOB })).toHaveCount(0);
+        await page.getByRole("link", { name: `Logs of the run of ${ADHOC_REPOSITORY}` }).click();
+        await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
+
+        const api = requests.filter((path) => path.startsWith("/api/"));
+        expect(api).toContain("/api/v1/runs/failed");
+        expect(api.filter((path) => !JOBS_STUBBED.includes(path))).toEqual([]);
+        expect(errors.filter((line) => !line.includes("404"))).toEqual([]);
+      });
+    });
+
     test.describe(`the job, run and task pages, ${theme}, ${density}`, () => {
       let sent: string[] = [];
 

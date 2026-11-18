@@ -11,7 +11,7 @@ import { getRun, type RunOut } from "../api/jobs";
 import type { Crumb } from "../shell/Breadcrumbs";
 import { type LivePoll, useLivePoll } from "../shell/useLivePoll";
 import "./jobStrings";
-import { jobPath } from "./paths";
+import { jobPath, jobsListPath } from "./paths";
 import { LIVE_EVERY_MS } from "./poll";
 import { isGone } from "./PollProblem";
 import { isActive } from "./status";
@@ -68,7 +68,7 @@ export function runTitle(
 export function runTrail(environment: string, run: RunOut | undefined, t: TFunction): Crumb[] {
   return [
     { to: "/jobs", label: t("areas.jobs.name") },
-    { to: "/jobs", label: environment },
+    { to: jobsListPath(environment), label: environment },
     ...(run === undefined || run.job === null
       ? []
       : [{ to: jobPath(environment, run.repository, run.job), label: run.job }]),
