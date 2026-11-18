@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
-from lakana._models import Permission, Permissions, PermissionVia, Principal, PrincipalPage, Scope
+from lakana._models import (
+    HeldGrant,
+    Permission,
+    Permissions,
+    PermissionVia,
+    Principal,
+    PrincipalPage,
+    Scope,
+)
 from lakana._routes import ROUTES
 from lakana.resources._override import override_params
 
@@ -91,6 +100,36 @@ def _permissions_from_json(data: dict[str, Any]) -> Permissions:
         note=data["note"],
     )
 
+
+def _held_grant_from_json(data: dict[str, Any]) -> HeldGrant:
+    """Build a `HeldGrant` from the platform API's JSON.
+
+    Parameters
+    ----------
+    data
+        The decoded `HeldGrantOut` JSON body.
+
+    Returns
+    -------
+    HeldGrant
+        The parsed grant.
+    """
+    return HeldGrant(
+        id=data["id"],
+        role=data["role"],
+        action=data["action"],
+        kind=data["kind"],
+        environment=data["environment"],
+        namespace=data["namespace"],
+        table=data["table"],
+        granted_at=datetime.fromisoformat(data["granted_at"]),
+        note=data["note"],
+        group=data["group"],
+    )
+
+
+_HeldGrantList = list[HeldGrant]
+"""Alias for `list[HeldGrant]`, for the same reason as `_PrincipalList`."""
 
 _PrincipalList = list[Principal]
 """Alias for `list[Principal]`, resolved at module scope.
@@ -277,6 +316,34 @@ class Principals:
             params=query_params(environment=environment, namespace=namespace, table=table),
         )
         return _permissions_from_json(response.json())
+
+    def grants(self, name: str) -> _HeldGrantList:
+        """List the live grants a principal holds, directly and through its groups.
+
+        Newest first, each with the name of the group it comes through (`None` for a direct
+        grant). Anyone may ask about themselves, with a personal token or in the web interface;
+        asking about another principal needs the `ADMIN` role on the instance, and a task or CI
+        token may not ask even about its own principal.
+
+        Parameters
+        ----------
+        name
+            The principal.
+
+        Returns
+        -------
+        list of HeldGrant
+            The grants; they say nothing about who made them.
+
+        Raises
+        ------
+        lakana.errors.PermissionDenied
+            About another principal, or through a task or CI token, without the `ADMIN` role.
+        lakana.errors.NotFound
+            For an administrator: no such principal.
+        """
+        response = self._transport.request(ROUTES["principals.grants"], path_params={"name": name})
+        return [_held_grant_from_json(item) for item in response.json()]
 
     def deactivate(self, name: str, *, override_reason: str | None = None) -> None:
         """Deactivate a principal.

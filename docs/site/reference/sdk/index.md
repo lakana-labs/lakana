@@ -47,6 +47,7 @@ Every name the `lakana` package exports and every resource of its client, with t
 | `client.groups` | [Groups](groups.md) | The `groups` resource of the platform API. |
 | `client.tokens` | [Tokens](tokens.md) | The `tokens` (PAT) resource of the platform API, nested under a principal. |
 | `client.task_tokens` | [Task tokens](task-tokens.md) | The `task-tokens` resource of the platform API. |
+| `client.configuration` | [Configuration](configuration.md) | The server's configuration, read-only. |
 | `client.sign_in` | [Sign in](sign-in.md) | Sign-in links a program asks for: `Client.sign_in`. |
 | `client.invites` | [Sign in](sign-in.md) | Invites of new people: `Client.invites`. Needs the ADMIN role. |
 | `client.recovery_links` | [Sign in](sign-in.md) | Recovery links for people who lost their passkeys: `Client.recovery_links`. |

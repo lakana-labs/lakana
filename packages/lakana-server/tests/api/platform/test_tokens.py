@@ -1,7 +1,7 @@
 """Tests for the tokens resource of the platform API."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -11,9 +11,10 @@ from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Secura
 from lakana_core.db import create_engine
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
-from lakana_core.models import Grant, Principal
+from lakana_core.models import Grant, PersonalAccessToken, Principal
 from lakana_server.settings import Settings
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import session_headers, signed_in
 
 
 def _admin_ref(session: Session) -> PrincipalRef:
@@ -83,7 +84,13 @@ def test_issue_list_and_revoke_a_token(client: TestClient) -> None:
 
     listed = client.get("/api/v1/principals/ci-bot/tokens", headers=AUTH_HEADER)
     assert listed.status_code == 200
-    assert listed.json() == [{"key_id": key_id, "name": "ci", "last_used_at": None}]
+    [row] = listed.json()
+    assert {k: row[k] for k in ("key_id", "name", "owner", "last_used_at")} == {
+        "key_id": key_id,
+        "name": "ci",
+        "owner": "ci-bot",
+        "last_used_at": None,
+    }
 
     revoked = client.delete(f"/api/v1/principals/ci-bot/tokens/{key_id}", headers=AUTH_HEADER)
     assert revoked.status_code == 204
@@ -215,12 +222,177 @@ def _holder_of(client: TestClient, action: Action) -> dict[str, str]:
 
 def test_manage_token_as_a_single_action_is_a_403_on_every_route(client: TestClient) -> None:
     header = _holder_of(client, Action.MANAGE_TOKEN)
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "carol", "type": "USER"})
     answers = [
-        client.post("/api/v1/principals/bob/tokens", headers=header, json={"name": "mine"}),
-        client.get("/api/v1/principals/bob/tokens", headers=header),
-        client.delete("/api/v1/principals/bob/tokens/nokey", headers=header),
+        client.post("/api/v1/principals/carol/tokens", headers=header, json={"name": "mine"}),
+        client.get("/api/v1/principals/carol/tokens", headers=header),
+        client.delete("/api/v1/principals/carol/tokens/nokey", headers=header),
     ]
     for answer in answers:
         assert answer.status_code == 403, (answer.request.method, str(answer.request.url))
         assert "MANAGE_TOKEN needs the ADMIN role on the instance" in answer.text
-    assert client.get("/api/v1/principals/bob/tokens", headers=AUTH_HEADER).status_code == 200
+    assert client.get("/api/v1/principals/carol/tokens", headers=AUTH_HEADER).status_code == 200
+
+
+def _bob(client: TestClient) -> dict[str, str]:
+    """Create Bob, a user with no grant, and give him a personal token through an administrator.
+
+    Parameters
+    ----------
+    client
+        Test client for the API.
+
+    Returns
+    -------
+    dict of str to str
+        Bob's `Authorization` header.
+    """
+    created = client.post(
+        "/api/v1/principals", headers=AUTH_HEADER, json={"name": "bob", "type": "USER"}
+    )
+    assert created.status_code == 201, created.text
+    token = client.post(
+        "/api/v1/principals/bob/tokens", headers=AUTH_HEADER, json={"name": "first"}
+    ).json()["token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_post_own_token_with_a_pat_is_403_and_from_a_fresh_session_is_201(
+    browser_client: TestClient,
+) -> None:
+    """A person's token cannot create a token; their fresh browser session can."""
+    client = browser_client
+    bob = _bob(client)
+
+    refused = client.post("/api/v1/principals/bob/tokens", headers=bob, json={"name": "second"})
+    assert refused.status_code == 403, refused.text
+    assert "A token cannot create a token" in refused.json()["detail"]
+
+    name, value, csrf = signed_in(client, "bob", touched_at=datetime.now(UTC))
+    created = client.post(
+        "/api/v1/principals/bob/tokens",
+        headers=session_headers(name, value, csrf),
+        json={"name": "second"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["token"].startswith("lakana_pat_")
+
+    stale_name, stale_value, stale_csrf = signed_in(
+        client, "bob", touched_at=datetime.now(UTC) - timedelta(minutes=16)
+    )
+    stale = client.post(
+        "/api/v1/principals/bob/tokens",
+        headers=session_headers(stale_name, stale_value, stale_csrf),
+        json={"name": "third"},
+    )
+    assert stale.status_code == 403
+    assert stale.json()["type"] == "StepUpRequired"
+
+
+def test_get_and_delete_own_tokens_with_a_pat(client: TestClient) -> None:
+    """A person lists and revokes their own tokens with a personal token; not another's."""
+    bob = _bob(client)
+
+    for other in ("admin", "nobody"):
+        assert client.get(f"/api/v1/principals/{other}/tokens", headers=bob).status_code == 403
+    listed = client.get("/api/v1/principals/bob/tokens", headers=bob)
+    assert listed.status_code == 200, listed.text
+    [token] = listed.json()
+    revoked = client.delete(f"/api/v1/principals/bob/tokens/{token['key_id']}", headers=bob)
+    assert revoked.status_code == 204, revoked.text
+
+
+def _listed(client: TestClient, headers: dict[str, str], path: str) -> list[dict[str, object]]:
+    """Read a token list and return its rows.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    headers
+        The caller's credentials.
+    path
+        The list's path and query.
+
+    Returns
+    -------
+    list of dict
+        The rows.
+    """
+    answer = client.get(path, headers=headers)
+    assert answer.status_code == 200, answer.text
+    return answer.json()
+
+
+def test_a_listed_token_says_owner_created_expires_and_revoked(client: TestClient) -> None:
+    """A row names its owner and its dates; a revoke sets `revoked_at`."""
+    bob = _bob(client)
+    [before] = _listed(client, bob, "/api/v1/principals/bob/tokens")
+    with Session(client.app.state.engine) as session:
+        row = session.execute(
+            select(PersonalAccessToken).where(PersonalAccessToken.key_id == before["key_id"])
+        ).scalar_one()
+        created = row.created_at
+    assert before["owner"] == "bob"
+    assert datetime.fromisoformat(str(before["created_at"])).replace(tzinfo=UTC) == created.replace(
+        tzinfo=UTC
+    )
+    assert before["expires_at"] is None
+    assert before["revoked_at"] is None
+
+    client.delete(f"/api/v1/principals/bob/tokens/{before['key_id']}", headers=bob)
+    [after] = _listed(client, AUTH_HEADER, "/api/v1/principals/bob/tokens")
+    assert after["revoked_at"] is not None
+
+
+def test_get_all_tokens_pages_with_the_cursor_header(client: TestClient) -> None:
+    """Every owner's live tokens, newest first, a page at a time."""
+    _bob(client)
+    first = client.get("/api/v1/tokens?limit=1", headers=AUTH_HEADER)
+    assert first.status_code == 200, first.text
+    assert [row["owner"] for row in first.json()] == ["bob"]
+    cursor = first.headers["X-Next-Cursor"]
+    second = client.get(f"/api/v1/tokens?limit=1&cursor={cursor}", headers=AUTH_HEADER)
+    assert [row["owner"] for row in second.json()] == ["admin"]
+    assert "X-Next-Cursor" not in second.headers
+    only_bob = client.get("/api/v1/tokens?owner=bob", headers=AUTH_HEADER)
+    assert [row["owner"] for row in only_bob.json()] == ["bob"]
+    assert client.get("/api/v1/tokens?owner=nobody", headers=AUTH_HEADER).status_code == 404
+    assert client.get("/api/v1/tokens?limit=0", headers=AUTH_HEADER).status_code == 422
+
+
+def test_get_all_tokens_is_403_for_a_person_and_a_task_token(client: TestClient) -> None:
+    """Only an administrator's personal credential lists everyone's tokens."""
+    bob = _bob(client)
+    assert client.get("/api/v1/tokens", headers=bob).status_code == 403
+    minted = client.post(
+        "/api/v1/task-tokens",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "admin",
+            "environment": "dev",
+            "asset_scope": ["gold.sales"],
+            "ttl_seconds": 60,
+        },
+    )
+    assert minted.status_code == 201, minted.text
+    task = {"Authorization": f"Bearer {minted.json()['token']}"}
+    assert client.get("/api/v1/tokens", headers=task).status_code == 403
+
+
+def test_get_all_tokens_never_holds_a_secret(client: TestClient) -> None:
+    """No row of the list carries a token value."""
+    _bob(client)
+    answer = client.get("/api/v1/tokens", headers=AUTH_HEADER)
+    assert answer.status_code == 200
+    assert "lakana_pat_" not in answer.text
+    for row in answer.json():
+        assert set(row) == {
+            "key_id",
+            "name",
+            "owner",
+            "created_at",
+            "last_used_at",
+            "expires_at",
+            "revoked_at",
+        }

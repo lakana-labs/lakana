@@ -545,9 +545,9 @@ class AccessApplier:
         """
         assert isinstance(change.entry, ServiceAccountEntry)  # nosec B101 -- dispatch by type name
         name = change.entry.name
-        for pat in self._pats.list(p, name):
-            if pat.revoked_at is None:
-                self._pats.revoke(p, name, pat.key_id, commit=False)
+        for listed in self._pats.list(p, name):
+            if listed.token.revoked_at is None:
+                self._pats.revoke(p, name, listed.token.key_id, commit=False)
         self._principals.deactivate_principal(p, name, commit=False)
 
     def _remove_GrantEntry(self, p: PrincipalRef, change: PlannedChange) -> None:

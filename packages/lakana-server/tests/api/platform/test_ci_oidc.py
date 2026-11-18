@@ -594,3 +594,18 @@ def test_a_ci_token_is_refused_on_the_access_routes(ci_client: TestClient) -> No
     body = {"text": "", "plan_fingerprint": "0" * 64}
     assert ci_client.post("/api/v1/access/apply", headers=header, json=body).status_code == 403
     assert ci_client.get("/api/v1/access/status", headers=header).status_code == 403
+
+
+def test_a_ci_token_of_an_administrator_may_not_list_every_owners_tokens(
+    ci_client: TestClient,
+) -> None:
+    """Listing every owner's tokens is for the administrator's personal credential."""
+    _setup(ci_client)
+    granted = ci_client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "deployer", "role": "ADMIN", "kind": "INSTANCE"},
+    )
+    assert granted.status_code == 201, granted.text
+    header = _bearer(_exchange(ci_client).json()["token"])
+    assert ci_client.get("/api/v1/tokens", headers=header).status_code == 403

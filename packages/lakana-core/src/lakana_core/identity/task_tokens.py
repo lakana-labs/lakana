@@ -27,7 +27,7 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
-from lakana_core.grants.admin import holds_instance_admin
+from lakana_core.grants.admin import authorize_admin_only, holds_instance_admin
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.identity.tokens import generate_token, verify_secret
 from lakana_core.models import (
@@ -46,6 +46,7 @@ from lakana_core.models import (
     TaskStatus,
     TaskToken,
 )
+from lakana_core.pagination import Page, newest_first
 from lakana_core.projects.manifest import (
     entry_keep_versions,
     entry_output,
@@ -454,6 +455,31 @@ def resolve_task_token_scope(
         token_id=task_token.id,
         bound=bound,
     )
+
+
+@dataclass(frozen=True)
+class ListedTaskToken:
+    """A listed task token, with the name it signs in as and, when bound, its run.
+
+    Parameters
+    ----------
+    token
+        The token's row. It carries only `secret_hash`, never a retrievable secret.
+    principal
+        The name of the principal the token signs in as.
+    run_id
+        The run whose task the token was minted for; `None` for a token minted over REST.
+    job
+        That run's job; `None` for a REST token or an ad-hoc run.
+    asset
+        The asset of that task; `None` for a REST token.
+    """
+
+    token: TaskToken
+    principal: str
+    run_id: uuid.UUID | None
+    job: str | None
+    asset: str | None
 
 
 class TaskTokenService:
@@ -933,6 +959,75 @@ class TaskTokenService:
             ),
             environment=scope.environment,
             asset_scope=scope.asset_scope,
+        )
+
+    def list_live(
+        self,
+        p: PrincipalRef,
+        *,
+        environment: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> Page[ListedTaskToken]:
+        """List the live task tokens, newest first, one page at a time.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        environment
+            Only the tokens of this environment; `None` for every environment. A name no
+            token has gives an empty page, not an error.
+        limit
+            Most tokens returned.
+        cursor
+            The `next_cursor` of the previous page. Send the same `environment` with every
+            page.
+
+        Returns
+        -------
+        Page of ListedTaskToken
+            The tokens neither revoked nor expired, by issue time, newest first, equal times
+            by id, each with its principal's name and, for a token bound to a task, its run,
+            job and asset, and the cursor of the next page.
+
+        Raises
+        ------
+        PermissionDenied
+            If the acting principal does not hold the `ADMIN` role on the instance
+            (`MANAGE_TOKEN` works only with it); a task or CI token is refused too.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for the task-token
+            list.
+        """
+        authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        query = select(TaskToken).where(
+            TaskToken.revoked_at.is_(None), TaskToken.expires_at > datetime.now(UTC)
+        )
+        if environment is not None:
+            query = query.where(TaskToken.environment == environment)
+        page = newest_first(
+            self._session,
+            query,
+            kind="task-tokens",
+            at=TaskToken.issued_at,
+            row_id=TaskToken.id,
+            at_of=lambda row: row.issued_at,
+            limit=limit,
+            cursor=cursor,
+        )
+        details = {
+            token_id: (name, run_id, job, asset)
+            for token_id, name, run_id, job, asset in self._session.execute(
+                select(TaskToken.id, Principal.name, Run.id, Run.job, TaskRun.asset)
+                .join(Principal, Principal.id == TaskToken.principal_id)
+                .outerjoin(TaskRun, TaskRun.id == TaskToken.task_run_id)
+                .outerjoin(Run, Run.id == TaskRun.run_id)
+                .where(TaskToken.id.in_({row.id for row in page.items}))
+            )
+        }
+        return Page(
+            [ListedTaskToken(row, *details[row.id]) for row in page.items], page.next_cursor
         )
 
 

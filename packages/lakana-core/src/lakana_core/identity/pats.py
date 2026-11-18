@@ -7,18 +7,25 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef
-from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError
-from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
+from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError, PermissionDenied
+from lakana_core.grants.admin import authorize_admin_only, may_manage_tokens
 from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
+from lakana_core.pagination import Page, newest_first
+
+OWN_TOKEN_FROM_BROWSER = (
+    "A token cannot create a token. Create your own token in the web interface, under your "  # nosec B105 -- a refusal message, not a credential
+    "name, after touching your passkey; or ask an administrator: lakana token issue NAME LABEL"
+)
+"""The refusal of a token that tries to create a token for its own owner."""
 
 
 @dataclass(frozen=True)
@@ -44,6 +51,22 @@ class IssuedPat:
     created_at: datetime
 
 
+@dataclass(frozen=True)
+class ListedPat:
+    """A listed PAT, with the name of the principal it signs in as.
+
+    Parameters
+    ----------
+    token
+        The token's row. It carries only `secret_hash`, never a retrievable secret.
+    owner
+        The name of the principal the token authenticates as.
+    """
+
+    token: PersonalAccessToken
+    owner: str
+
+
 class PatService:
     """Issue, list, revoke, and verify PATs.
 
@@ -59,13 +82,43 @@ class PatService:
 
     Notes
     -----
-    Issuing, listing and revoking need the `ADMIN` role on the instance, whoever
-    the token is for: there is no self-service for tokens (#32).
+    An administrator (the `ADMIN` role on the instance) issues, lists and revokes the tokens of
+    anyone, with a token or a browser session, as always; issuing in a browser asks for a fresh
+    passkey touch. Everyone else may list and revoke their own tokens with a personal token or a
+    browser session, and create one only from a browser session after the passkey touch: no
+    token (personal, task or CI) of a non-administrator can create a personal token, so a stolen
+    one cannot mint replacements. A task or CI token has no rights over its owner's tokens.
+    Anything about another person's tokens needs the `ADMIN` role, and is refused before any
+    lookup, so the answer never says whether that person exists.
     """
 
     def __init__(self, session: Session, authz: AuthorizationService) -> None:
         self._session = session
         self._authz = authz
+
+    def _own(self, p: PrincipalRef, principal_name: str) -> bool:
+        """Say whether `p` acts on its own tokens, as a person and not as an administrator.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        principal_name
+            The principal whose tokens are asked about.
+
+        Returns
+        -------
+        bool
+            `True` if it is `p` itself, through a personal token or a browser session (not a
+            task or CI token), and `p` is not an administrator: an administrator keeps the
+            rule for administrators.
+        """
+        return (
+            principal_name == p.name
+            and p.task_scope is None
+            and p.ci_scope is None
+            and not may_manage_tokens(self._session, self._authz, p)
+        )
 
     def _get_principal(self, name: str) -> Principal:
         """Look up a principal by name.
@@ -163,15 +216,29 @@ class PatService:
             server-side generation conflict, not an authentication
             failure — see the retry-once behaviour below).
         PermissionDenied
-            If the acting principal does not hold the `ADMIN` role on the instance
-            (`MANAGE_TOKEN` works only with it).
+            If the token is for someone else and the acting principal does not hold the `ADMIN`
+            role on the instance (`MANAGE_TOKEN` works only with it); or it is for the acting
+            principal itself, which is not an administrator, and the call did not come from a
+            browser session (`OWN_TOKEN_FROM_BROWSER`, audited as `AUTHORIZATION_DENIED` with
+            ``reason: not_from_a_browser``).
         sqlalchemy.exc.IntegrityError
             If the commit fails for any reason other than a key_id collision
             — e.g. the acting principal's audit foreign key.
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
         """
-        authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        if self._own(p, principal_name):
+            if p.session is None:
+                AuditService(self._session).record(
+                    p.id,
+                    AuditEventType.AUTHORIZATION_DENIED,
+                    securable=Securable.instance_scope(),
+                    detail={"operation": "issue_token", "reason": "not_from_a_browser"},
+                    commit=True,
+                )
+                raise PermissionDenied(OWN_TOKEN_FROM_BROWSER)
+        else:
+            authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         require_step_up(p)
         refuse_hidden_characters(name, what="Token name")
         refuse_outer_whitespace(name, what="Token name")
@@ -259,7 +326,7 @@ class PatService:
             is not None
         )
 
-    def list(self, p: PrincipalRef, principal_name: str) -> builtins.list[PersonalAccessToken]:
+    def list(self, p: PrincipalRef, principal_name: str) -> builtins.list[ListedPat]:
         """List every PAT issued to a principal.
 
         Parameters
@@ -271,26 +338,96 @@ class PatService:
 
         Returns
         -------
-        list of PersonalAccessToken
-            Every PAT row for that principal. Rows carry only `secret_hash`,
-            never a retrievable secret.
+        list of ListedPat
+            Every PAT row for that principal, revoked and expired ones too, each with the
+            principal's name. Rows carry only `secret_hash`, never a retrievable secret.
 
         Raises
         ------
         NotFoundError
             If no principal has `principal_name`.
         PermissionDenied
+            If the principal is someone else and the acting principal does not hold the
+            `ADMIN` role on the instance (`MANAGE_TOKEN` works only with it); or the call
+            is made with a task or CI token.
+        """
+        if not self._own(p, principal_name):
+            authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        principal = self._get_principal(principal_name)
+        rows = self._session.execute(
+            select(PersonalAccessToken).where(PersonalAccessToken.principal_id == principal.id)
+        ).scalars()
+        return [ListedPat(token=row, owner=principal.name) for row in rows]
+
+    def list_all(
+        self,
+        p: PrincipalRef,
+        *,
+        owner: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> Page[ListedPat]:
+        """List the live PATs of every principal, newest first, one page at a time.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        owner
+            Only this principal's tokens; `None` for everyone's.
+        limit
+            Most tokens returned.
+        cursor
+            The `next_cursor` of the previous page. Send the same `owner` with every page.
+
+        Returns
+        -------
+        Page of ListedPat
+            The tokens neither revoked nor expired, by creation time, newest first, equal times
+            by id, each with its owner's name, and the cursor of the next page.
+
+        Raises
+        ------
+        PermissionDenied
             If the acting principal does not hold the `ADMIN` role on the instance
-            (`MANAGE_TOKEN` works only with it).
+            (`MANAGE_TOKEN` works only with it); a task or CI token is refused too.
+        NotFoundError
+            If `owner` is given and no principal has that name.
+        ValidationError
+            If `limit` is below 1 or `cursor` is not one this server issued for the tokens
+            list.
         """
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
-        principal = self._get_principal(principal_name)
-        return list(
-            self._session.execute(
-                select(PersonalAccessToken).where(PersonalAccessToken.principal_id == principal.id)
+        query = select(PersonalAccessToken).where(
+            PersonalAccessToken.revoked_at.is_(None),
+            or_(
+                PersonalAccessToken.expires_at.is_(None),
+                PersonalAccessToken.expires_at > datetime.now(UTC),
+            ),
+        )
+        if owner is not None:
+            query = query.where(PersonalAccessToken.principal_id == self._get_principal(owner).id)
+        page = newest_first(
+            self._session,
+            query,
+            kind="tokens",
+            at=PersonalAccessToken.created_at,
+            row_id=PersonalAccessToken.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
+        names = {
+            principal_id: principal_name
+            for principal_id, principal_name in self._session.execute(
+                select(Principal.id, Principal.name).where(
+                    Principal.id.in_({row.principal_id for row in page.items})
+                )
             )
-            .scalars()
-            .all()
+        }
+        return Page(
+            [ListedPat(token=row, owner=names[row.principal_id]) for row in page.items],
+            page.next_cursor,
         )
 
     def revoke(
@@ -319,10 +456,12 @@ class PatService:
             If no principal has `principal_name`, or it has no PAT with
             that `key_id`.
         PermissionDenied
-            If the acting principal does not hold the `ADMIN` role on the instance
-            (`MANAGE_TOKEN` works only with it).
+            If the PAT is someone else's and the acting principal lacks the `ADMIN` role on
+            the instance (`MANAGE_TOKEN` works only with it), or the call is made with a task
+            or CI token.
         """
-        authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
+        if not self._own(p, principal_name):
+            authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         principal = self._get_principal(principal_name)
         pat = self._session.execute(
             select(PersonalAccessToken).where(

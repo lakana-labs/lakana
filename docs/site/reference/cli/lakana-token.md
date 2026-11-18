@@ -22,13 +22,18 @@ Issue a personal access token named NAME for PRINCIPAL; the token is shown once.
 
 ## `lakana token list`
 
-Usage: `lakana token list [OPTIONS] {principal}`
+Usage: `lakana token list [OPTIONS] [principal]`
 
-List PRINCIPAL's tokens (never their secrets).
+List your tokens, or PRINCIPAL's (never their secrets).
+
+Without a name, your own. `--all` lists the live tokens of every owner, newest first, with an owner column; it needs the ADMIN role and prints a "More results" line with the command that shows the next page.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `PRINCIPAL` | text | required |  |
+| `PRINCIPAL` | text | none | Whose tokens to list; yours when left out. |
+| `--all` | flag | off | List every owner's live tokens, with an owner column (admin only). |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 
 ## `lakana token revoke`
 

@@ -401,9 +401,10 @@ Core: `lakana_core.identity.sessions`; server: `lakana_server.browser_session`,
   `reason: csrf` or `token_only_route`, rate-limited like any failed sign-in. Double-submit
   would not hold: on loopback, other ports are the same site and receive the cookie. Together
   with `SameSite=Strict` and the guard's Origin rule this is defence in depth.
-- **Token-only routes.** `POST /api/v1/task-tokens` and `DELETE /api/v1/task-tokens/{key_id}`
-  refuse the cookie (403 `TokenOnlyRoute`, `deps.TOKEN_ONLY_ROUTES`, matched on the route
-  template): minting a task token from a browser would put a token in the interface.
+- **Token-only routes.** `POST /api/v1/task-tokens` refuses the cookie (403 `TokenOnlyRoute`,
+  `deps.TOKEN_ONLY_ROUTES`, matched on the route template): minting a task token from a browser
+  would put a token in the interface. `DELETE /api/v1/task-tokens/{key_id}` is no longer in the
+  set (M7 part 7): revoking puts no token in a browser.
 - **Background polls do not keep a session alive.** A request with `X-Lakana-Background: 1`
   never extends the idle timeout; `last_seen_at` is written at most once a minute otherwise.
 - **Ending other people's sessions and changing the session lengths** need the ADMIN role and,
@@ -587,7 +588,7 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   the request's session was read (the app clock in the server), so a test that moves
   `app.state.clock` ages a touch for every route alike:
   - API tokens and the accounts they act for: `POST /api/v1/principals/{name}/tokens` (personal
-    and service-account tokens), `POST /api/v1/principals` (a new service account is the first
+    and service-account tokens, one's own included), `POST /api/v1/principals` (a new service account is the first
     step to a token for it), `DELETE /api/v1/principals/{name}` (deactivating a person);
   - rights: `POST /api/v1/grants`, `DELETE /api/v1/grants/{grant_id}`,
     `PUT|DELETE /api/v1/groups/{name}/members/{principal_name}`, `DELETE /api/v1/groups/{name}`
@@ -639,8 +640,9 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   without `purge` is a data operation undone with restore and asks for no touch; with `purge` it
   is a drop of every table and asks (#619). The
   passkey registration answer needs no touch of its own: it answers the challenge of the step-up
-  options route. Task tokens are absent: their routes are token-only
-  (`TOKEN_ONLY_ROUTES`) and a session never reaches them. The parity test's session has a fresh
+  options route. Minting a task token is absent: the route is token-only
+  (`TOKEN_ONLY_ROUTES`) and a session never reaches it; revoking one is in `NO_STEP_UP` (it
+  removes access). The parity test's session has a fresh
   touch, so session and token still answer alike there.
 - **Removal** needs step-up; nobody removes their own last passkey that works at this address
   (one of an earlier public address does not count; 409: add another, or
@@ -4000,11 +4002,11 @@ carries any of the three, and a grant below instance scope never satisfied these
   returns the token once in the HTTP response only, task tokens go to the child's stdin, and
   `PatService`, `TaskTokenService` and the auth paths log no token; a test pins that the
   bootstrap emits no `lakana_pat_` string at any level.
-- **A principal's own tokens** stay administrator-only: issuing, listing and revoking a personal
-  access token needs `MANAGE_TOKEN` whoever it is for. This element adds no self-service; that
-  belongs to the sign-in design (#32).
-- **Call sites.** `test_admin_only_call_sites.py` enumerates the thirteen call sites (four in
-  `grants/service.py`, six in `identity/groups.py`, three in `identity/pats.py`) and fails on
+- **Tokens of someone else** stay administrator-only: issuing, listing and revoking a personal
+  access token for another principal needs `MANAGE_TOKEN` and the `ADMIN` role. One's own tokens
+  follow "Settings and Access: tokens, configuration, own grants (M7 parts 7 and 8)".
+- **Call sites.** `test_admin_only_call_sites.py` enumerates the fifteen call sites (five in
+  `grants/service.py`, six in `identity/groups.py`, four in `identity/pats.py`) and fails on
   any other module that names one of the three actions. A new call site must go through the
   helper and into that test's `_GUARDED`.
 - **Not covered by the rule** (accepted, see "What is explicitly not defended"): a holder of
@@ -5063,7 +5065,7 @@ work.
   unconditionally (`__repr_args__`), never just ones matching a secret-looking key name;
   `scheme` and `root` stay visible. `DatabaseConfig.url` reprs with its password hidden via
   `sqlalchemy.engine.make_url(...).render_as_string(hide_password=True)`, falling back to
-  full redaction if the URL doesn't parse. `SecretsConfig.master_key` reprs as `***` when
+  full redaction if the URL doesn't parse. `SecretsConfig.master_key` is a `SecretStr` (read it with `master_key_text()`) and reprs as `***` when
   set, `None` when unset. Both `lakana_core.config.Settings` and `lakana_server.settings.Settings`
   inherit this through their nested fields with no override of their own — pydantic's default
   repr calls each nested model's own `__repr__`. `hide_input_in_errors=True` on
@@ -5894,6 +5896,80 @@ fuller text of each part where it already lives.
 | `actions` | The words (`drop`, `rebuild`, …) the reader's rights allow, from one `permits_each` batch per list, no audit event. Rights only: the server decides each request again, and git ownership, protection, step-up and state still refuse. The batch asks `READ_TABLE` too, and the file is named only to a reader. | The `actions` row of the same table. Pins: `test_row_actions.py`. |
 | Audit events | `NAMESPACE_CREATED`, `NAMESPACE_DROPPED`, `TABLE_CREATED` (external), `ARTIFACT_UPLOAD_ABORTED`, `TABLE_REBUILT` (with a `TABLE_DROPPED` of `reason: rebuild`), each in the transaction of its change. No detail names a repository or a deployed file's path, because the log is read with `READ_AUDIT_LOG` alone. A refused change writes no event. | "Audit log": the part 3b bullet. |
 | Paged lists | Dropped tables, expiring tables, namespaces, orphans and artifacts return 100 rows by default. A row the caller may not read is filtered out before the page is cut (`page_in_order` takes only readable rows), and a forged cursor reveals nothing a plain list would not. | `lakana_core.pagination.page_in_order`. Pins: the forged-cursor tests of each list, `test_an_unreadable_artifact_sorting_first_does_not_cost_the_reader_a_page`. |
+
+## Settings and Access: tokens, configuration, own grants (M7 parts 7 and 8)
+
+- **One's own tokens (`PatService`).** The administrator is asked first
+  (`may_manage_tokens`: `MANAGE_TOKEN` permitted and the `ADMIN` role): an administrator keeps
+  today's path for every principal, and `issue` asks a browser session for the step-up. Anyone
+  else acting on their own name through a personal credential (`principal_name == p.name`, no
+  task or CI scope) may list and revoke their own tokens with a personal token or a session, with
+  no step-up, since revoking removes access. They create one only with `p.session` and after the
+  step-up. Any other credential is refused with `OWN_TOKEN_FROM_BROWSER`, audited as
+  `AUTHORIZATION_DENIED` (`operation: issue_token`, `reason: not_from_a_browser`). Why: a stolen
+  token cannot mint a replacement personal token. An administrator's token still may issue (R1, for
+  review): the CLI and the bootstrap need it, and it was the rule before. Everyone else, about
+  anyone else's tokens, goes through `authorize_admin_only` before any lookup, so the refusal
+  never says whether the principal exists. A token has exactly its owner's rights, and
+  deactivating the owner stops every token (`PatService.verify`). Pins: `test_identity_pats.py`
+  (`test_a_token_cannot_create_its_owners_token`,
+  `test_a_person_creates_their_own_token_from_a_fresh_session_only`,
+  `test_someone_elses_tokens_are_403_whether_or_not_they_exist`,
+  `test_a_self_made_token_stops_when_its_owner_is_deactivated`), `test_tokens.py`.
+
+- **Scope of the rule.** It is "no token can create a personal token": a stolen token cannot
+  mint a replacement personal token. A personal token whose owner holds `MINT_TASK_TOKEN` can still
+  mint a task token (`TaskTokenService.mint`), bounded by `max_ttl_seconds`. That is an accepted
+  residual: minting task tokens stays in the CLI by the spec, and `MINT_TASK_TOKEN` is granted
+  separately.
+- **The denial row** (`not_from_a_browser`) is written unconditionally, as `TaskTokenService.mint`
+  and `revoke` do, not through `DenialAuditLimiter`.
+- **Local mode.** A stolen non-administrator personal token could mint a local sign-in link, enrol
+  a first passkey within `FIRST_PASSKEY_WINDOW` and then create a personal token. Local mode is
+  single-machine and that passkey is already a persistent credential. The last hop is new: before
+  this change a non-administrator could never create a personal token, and with local sign-in a
+  stolen non-administrator token can now go local link, session, first passkey, step-up, new
+  personal token. This is accepted, because local mode runs on loopback and the enrolled passkey
+  is already a lasting credential.
+- **The task-token list (`TaskTokenService.list_live`, `GET /api/v1/task-tokens`).** Administrator
+  only (`authorize_admin_only(MANAGE_TOKEN)`): listing them is administering tokens, and a task or
+  CI token is refused. Live tokens only (not revoked, not expired), newest first by
+  `(issued_at, id)`. It holds no secret: `TaskTokenOut` has no `secret_hash` and no token value
+  (`test_get_task_tokens_never_holds_a_secret`). An `environment` no token names gives `[]`, not
+  404: the column is free text and an administrator learns nothing new from it. Names and the run,
+  job and asset of a bound token are read for the page in one statement.
+- **Revoking a task token from a browser.** `DELETE /api/v1/task-tokens/{key_id}` left
+  `TOKEN_ONLY_ROUTES` (R4; not in the spec's list, found while building it): the spec has
+  administrators revoke task tokens in Access, Tokens, which a cookie could not do there. Revoking
+  puts no token in the browser, the reason the set exists, and takes no step-up (it removes
+  access). `TaskTokenService.revoke` keeps its rules unchanged: an administrator revokes any;
+  anyone else only a token minted for themselves over REST, with one refusal and one audit row
+  for another's, a bound token or an unknown key id
+  (`test_a_non_administrators_session_cannot_revoke_anothers_task_token`). `POST` stays
+  token-only.
+- **The configuration (`GET /api/v1/settings/configuration`, `describe_settings`).** Read-only, the
+  server process's own settings, one entry per leaf in the order of `Settings`. Administrator only
+  (`require_principal_admin`, the ADMIN role with a personal credential, the rule of the sign-in
+  settings' PATCH): a task or CI token is 403, and reading records nothing. A secret never carries a
+  value: `value` is `null` and `has_value` says set or not set. A setting is a secret when its
+  annotation contains `SecretStr`, or its name is in `PLAIN_SECRETS`; `database.url` stays `str`
+  (core's `DatabaseConfig`, read as text by every engine factory, already redacted in `repr`) and is
+  in `PLAIN_SECRETS` instead of becoming `SecretStr` (R6). `source` is `set` when every step of the
+  path is in `model_fields_set` (environment and `.env` alike, also a value equal to its default).
+  Pins: `test_no_secret_value_reaches_the_answer` (sentinels in the master key, the bootstrap
+  secret, the database password and the index URL; none in `response.text`) and the guard
+  `test_every_secret_looking_setting_is_masked_or_reviewed` (a new setting whose name looks like a
+  credential fails until it is a `SecretStr` or goes in `REVIEWED_NOT_SECRET` with its reason).
+- **One's own grants (`GrantService.held_grants`, `GET /api/v1/principals/{name}/grants`).** The
+  rule of `explain` (R8): asking about oneself (`principal_name == p.name`, no task or CI scope)
+  needs no right at all; anyone else, and a task or CI token even about its own principal, goes
+  through `authorize_admin_only(MANAGE_GRANT)` before any lookup, so the 403 has one text for a
+  principal that exists and one that does not (`test_someone_elses_grants_are_403_whether_or_not_they_exist`);
+  an administrator gets 404 for an unknown name. The rows are the principal's unrevoked grants and
+  those of every group it belongs to now, in one statement. The answer is `HeldGrantOut`, not
+  `GrantOut`: it leaves out `granted_by` and `principal_id`, the ids of other people, so the route
+  tells a person nothing about anyone else (`test_get_own_grants_has_no_other_persons_id` pins the
+  exact keys). The group appears by name only.
 
 ## Governed table creation and append (M4a)
 
