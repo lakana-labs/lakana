@@ -2,8 +2,9 @@
  * What the connection form holds, and the body it sends.
  *
  * @remarks
- * Secret values live only in a {@link FormValues} held by the form's state, and travel only in
- * the body {@link createBody} returns; nothing here logs, stores or names them.
+ * The form's state holds no secret value (its new values stay `{}`): Save reads them from their
+ * password fields into the {@link FormValues} it passes here, and they travel only in the body
+ * {@link createBody} or {@link updateBody} returns; nothing here logs, stores or names them.
  * @packageDocumentation
  */
 import type { ConnectionCreateIn, ConnectionKind, ConnectionOut, ConnectionUpdateIn } from "../api";
@@ -78,7 +79,7 @@ export function emptyForm(environment: string, kind: ConnectionKind): FormValues
  * @param secret - The secret as the form holds it.
  * @returns The values typed, by key; none for any other choice.
  */
-export function typedValues(secret: SecretChoice): Readonly<Record<string, string>> {
+function typedValues(secret: SecretChoice): Readonly<Record<string, string>> {
   return secret.way === "values" ? secret.values : {};
 }
 

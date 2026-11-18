@@ -4,10 +4,11 @@
  * and starts from the connection. Save asks for the passkey touch the server asks for.
  *
  * @remarks
- * Secret values live only in this form's state until Save sends them in the create or the
- * update, the one request that carries them. They are never logged, stored, put in the address
- * or in an error, and they go with the form when it unmounts after the save. Edit starts with
- * no value.
+ * Secret values are never this form's state: they stay in their password fields
+ * ({@link useSecretInputs}) until Save reads them into the create or the update, the one
+ * request that carries them. They are never logged, stored, put in the address, an attribute
+ * or an error, and they go with the fields when the form unmounts after the save. Edit starts
+ * with no value.
  * @packageDocumentation
  */
 import "./connections.css";
@@ -58,7 +59,7 @@ import { KIND_ORDER, takesSecret } from "./kinds";
 import { KindFields } from "./KindFields";
 import { CONNECTIONS_PATH, connectionPath } from "./paths";
 import { readFilter } from "./remember";
-import { type KeptSecret, SecretFields } from "./SecretFields";
+import { type KeptSecret, SecretFields, type SecretInputs, useSecretInputs } from "./SecretFields";
 import "./formStrings";
 
 /** A connection's name, as the server takes it (`kinds.NAME`). */
@@ -66,6 +67,19 @@ const NAME = /^[a-z][a-z0-9-]{0,62}$/;
 
 /** New secret values, none typed yet. */
 const FRESH: SecretChoice = { way: "values", values: {} };
+
+/**
+ * The form with the values its value fields hold, read now, for the request Save sends.
+ *
+ * @param form - The form.
+ * @param inputs - The value fields.
+ * @returns The form with the values, when the secret is new values.
+ */
+function withValues(form: FormValues, inputs: SecretInputs): FormValues {
+  return form.secret.way === "values"
+    ? { ...form, secret: { way: "values", values: inputs.read() } }
+    : form;
+}
 
 /** Properties of {@link ConnectionForm}: Add, or Edit of one connection. */
 export type ConnectionFormProps =
@@ -110,11 +124,12 @@ function AddForm({ environments, start }: AddFormProps): JSX.Element {
   const [form, setForm] = useState<FormValues>(() =>
     emptyForm(start, KIND_ORDER[0] as ConnectionKind),
   );
+  const inputs = useSecretInputs();
   const naming = mayName(environments, form.environment);
 
   const save = (): void => {
     const { environment } = form;
-    const body = createBody(form);
+    const body = createBody(withValues(form, inputs));
     attempt.run(async () => {
       const connection = await createConnection(environment, body);
       setForm((before) => ({ ...before, ca: { kind: "keep" }, secret: FRESH }));
@@ -182,7 +197,7 @@ function AddForm({ environments, start }: AddFormProps): JSX.Element {
         <Input autoComplete="off" />
         <FieldError />
       </TextField>
-      <ConnectionFields form={form} change={setForm} naming={naming} />
+      <ConnectionFields form={form} change={setForm} naming={naming} inputs={inputs} />
       <SaveRow busy={attempt.busy} cancel={CONNECTIONS_PATH} />
     </Form>
   );
@@ -214,6 +229,7 @@ function EditForm({ connection }: EditFormProps): JSX.Element {
   const navigate = useNavigate();
   const attempt = useAttempt();
   const [form, setForm] = useState<FormValues>(() => editForm(connection));
+  const inputs = useSecretInputs();
   const [said, setSaid] = useState<"nothing" | "moves" | null>(null);
   const { environment, name, secret } = connection;
   const naming = connection.actions.includes("name_secret");
@@ -233,7 +249,7 @@ function EditForm({ connection }: EditFormProps): JSX.Element {
   };
 
   const save = (): void => {
-    const body = updateBody(connection, form);
+    const body = updateBody(connection, withValues(form, inputs));
     if (body === null) {
       setSaid("nothing");
       return;
@@ -280,6 +296,7 @@ function EditForm({ connection }: EditFormProps): JSX.Element {
         form={form}
         change={change}
         naming={naming}
+        inputs={inputs}
         kept={{ name: secret, moves }}
         caStored={
           connection.settings.ca_certificate === undefined
@@ -336,6 +353,8 @@ interface ConnectionFieldsProps {
   readonly change: (update: (before: FormValues) => FormValues) => void;
   /** Whether the person may bind an existing secret (`name_secret`). */
   readonly naming: boolean;
+  /** The secret's value fields. */
+  readonly inputs: SecretInputs;
   /** On Edit, the stored connection's secret. */
   readonly kept?: KeptSecret;
   /** On Edit, the stored CA certificate's fingerprints, when there is one. */
@@ -350,6 +369,7 @@ interface ConnectionFieldsProps {
  * @param props.form - The form.
  * @param props.change - Applies a change.
  * @param props.naming - Whether the person may bind an existing secret.
+ * @param props.inputs - The secret's value fields.
  * @param props.kept - On Edit, the stored connection's secret.
  * @param props.caStored - On Edit, the stored CA certificate's fingerprints.
  * @returns The fields.
@@ -358,6 +378,7 @@ function ConnectionFields({
   form,
   change,
   naming,
+  inputs,
   kept,
   caStored,
 }: ConnectionFieldsProps): JSX.Element {
@@ -394,6 +415,7 @@ function ConnectionFields({
           mayName={naming}
           {...(kept === undefined ? {} : { kept })}
           value={form.secret}
+          inputs={inputs}
           onChange={(secret) => {
             change((before) => ({ ...before, secret }));
           }}
