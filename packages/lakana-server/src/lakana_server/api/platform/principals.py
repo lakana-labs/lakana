@@ -12,8 +12,9 @@ from lakana_core.grants.service import GrantService, scope_filter
 from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import Principal, PrincipalType
-from lakana_server.api.platform.grants import _joined_to_dotted, permissions_out
+from lakana_server.api.platform.grants import permissions_out
 from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.namespace_forms import dotted_namespace
 from lakana_server.api.platform.schemas import (
     HeldGrantOut,
     PermissionsOut,
@@ -250,7 +251,7 @@ def list_held_grants(
             action=held.grant.action,
             kind=held.grant.kind,
             environment=held.grant.environment,
-            namespace=_joined_to_dotted(held.grant.namespace),
+            namespace=dotted_namespace(held.grant.namespace),
             table=held.grant.table,
             granted_at=held.grant.granted_at,
             note=ineffective_note(held.grant.action),
