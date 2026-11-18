@@ -431,7 +431,8 @@ describe("ConnectionForm, add", () => {
       settings: {},
       secret_values: { api_user: "loader" },
     });
-  });
+    // About forty clicks and a dozen typed fields: under coverage on a busy runner, over 5 s.
+  }, 15_000);
 
   it("reads a CA certificate file without showing it, and refuses one over 64 KiB", async () => {
     const { user, server } = renderAdd();
