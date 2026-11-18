@@ -159,7 +159,9 @@ function objectIn(node: ts.TypeNode | undefined): ts.TypeLiteralNode | undefined
 /**
  * The type an object of an answer is: of the types that have every one of its keys, the one
  * with the fewest fields; without one, the type that shares the most keys with it, if that is
- * at least half of them.
+ * at least half of them, and of those the one that shares the most code fields (a field of a
+ * union of string literals), so that a type with fewer fields never takes an object from the
+ * type whose codes it carries.
  *
  * @param types - The types.
  * @param keys - The object's keys.
@@ -173,9 +175,13 @@ export function typeOf(
   let bestScore = -Infinity;
   for (const type of types.values()) {
     const shared = keys.filter((key) => type.fields.has(key)).length;
-    // Every key present beats any partial fit; then the fewest fields not in the object.
+    const codes = keys.filter((key) => type.literal.has(key)).length;
+    // Every key present beats any partial fit; then the fewest fields not in the object. A
+    // partial fit counts the codes it shares before the fields it lacks.
     const score =
-      shared === keys.length ? 1_000_000 - type.fields.size : shared * 1000 - type.fields.size;
+      shared === keys.length
+        ? 1_000_000 - type.fields.size
+        : shared * 1000 + codes * 10 - type.fields.size;
     if (shared * 2 >= keys.length && shared > 0 && score > bestScore) {
       best = type;
       bestScore = score;

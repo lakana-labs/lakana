@@ -755,6 +755,9 @@ const PICTURE =
 /** Where the Queries screen asks where one may query; none here (`queries.ts` lists some). */
 const QUERY_ENVIRONMENTS = "/api/v1/queries/environments";
 
+/** Where the Connections screen asks where one may read connections; none here (`connections.ts` lists some). */
+const CONNECTION_ENVIRONMENTS = "/api/v1/connections/environments";
+
 /** The environments the person may read; none here (`jobs.ts` lists two). */
 const ENVIRONMENTS = "/api/v1/environments";
 
@@ -786,6 +789,7 @@ export const STUBBED = [
   `${PREVIEW_RUN_PATH}/result`,
   `${PREVIEW_RUN_PATH}/cancel`,
   QUERY_ENVIRONMENTS,
+  CONNECTION_ENVIRONMENTS,
   ENVIRONMENTS,
 ];
 
@@ -794,7 +798,8 @@ export const STUBBED = [
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
  * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture,
  * Settings' People (under Access) and Sign-in (the session lengths), no environment to run a
- * query in (`stubQueries` adds two) and no environment to read jobs in (`stubJobs` adds two).
+ * query in (`stubQueries` adds two), none to read jobs in (`stubJobs` adds two) and none to
+ * read connections in (`stubConnections` adds two).
  *
  * @param page - The page.
  */
@@ -914,6 +919,10 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   );
   await page.route(
     (url) => url.pathname === QUERY_ENVIRONMENTS,
+    (route) => route.fulfill({ json: [] }),
+  );
+  await page.route(
+    (url) => url.pathname === CONNECTION_ENVIRONMENTS,
     (route) => route.fulfill({ json: [] }),
   );
   await page.route(

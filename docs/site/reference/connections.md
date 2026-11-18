@@ -220,6 +220,166 @@ worker`, or the `lakana local` terminal), and one a worker took names the worker
 The message after the outcome is at most 1,000 characters and holds no secret value. The command
 prints the next step on standard error; `--output json` prints the test as the REST answer below.
 
+## In the web interface
+
+**Connections** in the menu does what the `lakana connection` commands do, through the same REST
+routes ([REST](#rest)). The screen asks the server what you may do and shows only that: a button
+you may not use is not there. The address holds the place, so a link to a connection's page, to
+Add or to Edit works for anyone who may open it: `/connections`, `/connections/new`,
+`/connections/ENV/NAME` and `/connections/ENV/NAME/edit`.
+
+| You hold | The screen shows you |
+|---|---|
+| `READ_ENVIRONMENT` on an environment | Its connections in the list, a connection's page, and each last test's outcome and time. No Add, Test, Edit or Delete, and no one's name or message from a test. |
+| `MANAGE_CONNECTION` on it | **Add connection**, **Test**, **Test all**, **Edit** and **Delete…**; on a connection's page the test's message and who ran it. |
+| `MANAGE_SECRET` on it too (the `ADMIN` role) | In Add and Edit, **An existing secret of ENV** and **Another secret of ENV**; and **Keep** of a secret stays open when a change moves it. |
+
+Someone who may read no environment sees "You may not read the connections of any environment
+yet. Ask an administrator for READ_ENVIRONMENT on one." and the command that lists them.
+
+### The list
+
+**Environment** filters the list: **All environments**, or one of those you may read. The screen
+remembers the choice for you in this browser, and falls back to all environments when the one it
+remembers is gone. **Add connection**, the one primary action, is at the top right when you may
+add a connection in any environment. Each row shows:
+
+- **Name**, a link that opens the connection's page, and **Kind** by its name (PostgreSQL, MariaDB,
+  SQLite file, HTTP API, S3, Google Cloud Storage, Azure Blob Storage, Directory, TCP);
+- **Where** it points, such as `db.example.com:5432/crm` or `s3://exports (eu-central-1)`, and
+  the **Environment**;
+- **Status**, the last test (below);
+- **Used by**, how many assets declare it ("2 assets", "1 asset", "No assets"), and, where you
+  may test it, **Test**.
+
+On a narrow window **Where** and **Used by** move under the name. The list holds 100 connections
+at a time; **Show more** reads the next ones.
+
+Every status says when the test finished, and a glyph goes with each word, so the colour never
+stands alone:
+
+| Status | Means |
+|---|---|
+| never tested | No test was ever asked for. |
+| queued | A test waits for a worker. After 2 minutes it reads "queued · no worker yet". |
+| testing… | A worker is running the test. |
+| OK · 2 hours ago | The source could be reached at that time. |
+| a word · 1 day ago | The test found something. The word is the outcome: host name, refused, timeout, TLS, not allowed, root missing, not found, credentials or failed ([the outcomes](#test-a-connection)). An outcome a newer server adds reads "failed". |
+| tested before the last change · 3 days ago | The connection was changed after its last test, so the result says nothing about it now. It has no glyph and is shown in a muted colour. |
+
+With no connection yet, the list says "No connections yet." (or "No connections in ENV yet.") and
+shows the command that creates one, and **Add connection** where you may.
+
+### Test and Test all
+
+**Test** on a row asks a worker for the check [described above](#test-a-connection), as
+`lakana connection test` does. While a test of the connection is queued or running, the button is
+disabled and reads "Testing…"; a reload finds the open test and keeps it that way, so a second
+test cannot be asked for by accident.
+
+The screen follows every open test it shows, whoever started it: it reads the connection every
+second for the first 10 seconds and every 3 seconds after, and the row changes to its outcome.
+When three reads in a row fail it stops with "Could not read the test's progress." and **Try
+again**. A test no worker took in 2 minutes reads "queued · no worker yet", and the connection's
+page adds "No worker has taken this test yet. Check that a worker is running: docker compose ps
+worker, or the lakana local terminal." A test open for 10 minutes stops being followed and the
+screen says "No worker finished this test within 10 minutes; Test again closes it as failed and
+starts a new one."
+
+**Test all in ENV** appears below the list when the filter is one environment where you hold
+`MANAGE_CONNECTION`; with **All environments** the screen says "Choose an environment to test all
+of its connections." It asks for a test of every connection of that environment (one that already
+has a test open is not tested again), then says "Testing 4 connections in dev…" and, when all are
+done, "Tested 4 connections in dev: 3 OK, 1 not OK." The rows change as their tests finish.
+
+### A connection's page
+
+Open a connection by its name. The page shows:
+
+- **Connection**: the kind with its one-line description, the address and the settings, each key
+  with its value; `tls` and `auth` in words ("encrypted, certificate checked", "bearer token");
+  the CA certificate as its SHA-256 fingerprints, never its text; the **Secret**'s name with "its
+  value is never shown", or "none"; who created it and when, and when it was last changed.
+- **Used by**: each asset that declares it as "repository: asset", or "No deployed asset declares
+  it."
+- **Last test**: the status with its full date; for a failure the cause and the next step from
+  [the outcome table](#test-a-connection), in the screen's words ("Give the secret again: Edit the
+  connection and enter new values."); for those who hold `MANAGE_CONNECTION` also the worker's
+  message and "by NAME"; "Tested before the last change; test it again." when the test is older
+  than the connection; and the `lakana connection test` command to copy.
+
+**Test**, **Edit** and **Delete…** are at the top, each only where you may use it, and **Test**
+is the primary action. An address that names no connection shows "This page does not exist"
+and a link back to the list.
+
+### Add a connection
+
+**Add connection** opens a form in this order:
+
+1. **Environment**, among those where you may add a connection; it starts at the list's filter
+   when that is one of them. Without a right in any environment the page says "You may not add
+   connections in any environment. Ask an administrator for MANAGE_CONNECTION." and shows no form.
+2. **Kind**: the nine kinds, each with a line, which is the list of what Lakana can read from
+   ([Kinds](#kinds)). Choosing another kind starts its fields afresh.
+3. **Name**: lower-case letters, digits and `-`, starting with a letter, at most 63 characters
+   (the screen checks it when you leave the field; the server's answer is the last word).
+4. **The kind's fields**, the address first and then the settings, named as the command line names
+   them (`host`, `port`, `database`, `user`, `tls`, …). A **port** left empty is the kind's
+   default, shown in grey; an `s3` **endpoint** left empty is the region's. `ca_certificate` is a
+   PEM file (`.pem`, `.crt` or `.cer`, at most 64 KiB) read in your browser; the form shows only
+   that it was read. An `http` connection shows the fields of its `auth`.
+5. **Secret**, for the kinds that take one: **New values**, one field for each key of the secret
+   (a password, a token, an access key, a service account key that can be read from a file, an
+   Azure account key or SAS token, or 0 to 16 keys of your own names for `tcp`); or, with
+   `MANAGE_SECRET`, **An existing secret of ENV** and its name ([Who may do what](#who-may-do-what)).
+
+**Save** asks for a passkey touch when the server needs a fresh one (within the last 15 minutes),
+then creates the connection and opens its page, which says "Created NAME. Test it now to see that
+a worker can reach it." with **Test now** as its primary action. A refusal, such as a name taken,
+shows above the form in the server's words and keeps what you typed.
+
+A secret's values live only in the form. Each is a password field that your browser neither shows
+nor remembers, it is sent only in the create request (again, unchanged, if a passkey touch is asked for first), it is never put in the
+address, in storage or in an error, and the form forgets it when you save. No page shows it again.
+
+### Edit a connection
+
+**Edit** shows the environment, kind and name as text, because they never change, and starts from
+the connection's fields with no secret value in them. The CA certificate shows its fingerprints,
+with a file to replace it and **Remove the CA certificate**. **Secret** offers:
+
+- **Keep NAME**, the default for a connection that has a secret;
+- **New values**;
+- **Another secret of ENV**, with `MANAGE_SECRET`;
+- **Stop using a secret**.
+
+A change that could send the secret somewhere new moves it: a new address, a weaker `tls`,
+another CA certificate, another `auth` or `api_key_in`, another `token_url`
+([Who may do what](#who-may-do-what)). When you make such a change, **Keep** gives way to **New
+values** and the form asks for them. Without `MANAGE_SECRET` the page says so before you change
+anything: "You may not manage secrets in ENV. A change of the address, TLS, CA certificate, or how
+the secret is sent, needs the secret's values again." and **Keep** is disabled once the change
+moves the secret, with the reason beside it: "This change could send NAME somewhere new; give its
+values again." With `MANAGE_SECRET`, **Keep** stays allowed and says "NAME will be sent to the
+new address."
+
+**Save** sends only what changed (a setting you removed is cleared), asks for a passkey touch when
+needed, and opens the connection's page with "Saved NAME." The last test is then older than the
+connection, so the page says so. With nothing changed it says "Nothing to save." and sends
+nothing. Without `MANAGE_CONNECTION` the address of Edit shows "You may not edit connections in
+ENV. Ask an administrator for MANAGE_CONNECTION there." and a link back, with no form.
+
+### Delete a connection
+
+**Delete…** asks "Delete the connection NAME in ENV?" and says that its secret stays in the
+environment, unbound (or "It has no secret."); **Delete** confirms. Delete needs no passkey
+touch. After it the list opens with "Deleted NAME."
+
+While an asset declares the connection, the dialog says "NAME is still in use", lists each
+"repository: asset", and tells you to remove it from the asset's `@asset(connections=[...])` in
+git and deploy, then delete it. It only offers **Close** and sends nothing. A connection that an
+asset declared meanwhile is refused by the server, and the dialog shows its sentence.
+
 ## Command line
 
 Create a connection; `--password-stdin` reads the password from standard input, so it never

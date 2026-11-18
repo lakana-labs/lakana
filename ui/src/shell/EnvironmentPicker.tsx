@@ -1,7 +1,7 @@
 /**
  * An environment chosen from a list, such as the one a query runs in or the one a list is
  * filtered by; a protected environment is marked in the colour of danger and in words. The
- * Queries and Jobs screens share it; each screen's stylesheet imports its rules
+ * Queries, Jobs and Connections screens share it; each screen's stylesheet imports its rules
  * (`environment.css`), so the picker brings no stylesheet of its own.
  *
  * @packageDocumentation
