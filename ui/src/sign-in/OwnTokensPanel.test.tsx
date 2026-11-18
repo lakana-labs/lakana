@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TokenOut } from "../api/tokens";
 import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
+import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { ADMIN_SESSION, type FakeRoute } from "../test/server";
 import { signedIn } from "../test/session";
@@ -215,6 +216,46 @@ describe("OwnTokensPanel", () => {
     const alert = await within(dialog).findByRole("alert");
     expect(alert).toHaveTextContent(/no passkey yet/);
     expect(within(alert).getByRole("link")).toHaveAttribute("href", "/account");
+  });
+
+  it("cannot be closed while the token is being made, so it is shown", async () => {
+    const request = held();
+    const shell = renderAccount({
+      "GET /api/v1/principals/kim/tokens": { status: 200, body: [] },
+      "POST /api/v1/principals/kim/tokens": request.route,
+    });
+    const dialog = await startCreating(shell, "laptop");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await waitFor(() => {
+      expect(shell.server.sent.some((sent) => sent.method === "POST")).toBe(true);
+    });
+
+    await shell.user.keyboard("{Escape}");
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("dialog", { name: "Create a token" })).toBeInTheDocument();
+    request.release({ status: 201, body: { key_id: "k1", name: "laptop", token: "lak_x" } });
+
+    expect(await screen.findByRole("dialog", { name: "Your new token laptop" })).toBeVisible();
+  });
+
+  it("reads the list again after a refused create", async () => {
+    const shell = renderAccount({
+      "GET /api/v1/principals/kim/tokens": { status: 200, body: [] },
+      "POST /api/v1/principals/kim/tokens": { status: 500, body: { detail: "The server failed." } },
+    });
+    const dialog = await startCreating(shell, "laptop");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Create" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("The server failed.");
+
+    await shell.user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(
+        shell.server.sent.filter(
+          (sent) => sent.method === "GET" && sent.path === "/api/v1/principals/kim/tokens",
+        ),
+      ).toHaveLength(2);
+    });
   });
 
   it("Cancel and Escape make nothing and read nothing again", async () => {

@@ -77,14 +77,15 @@ function inListOrder(tokens: readonly TokenOut[], now: number): readonly TokenOu
 interface CreateTokenDialogProps {
   /** The person's own principal name. */
   readonly owner: string;
-  /** Closes the dialog; `made` says whether a token was made. */
-  readonly onClose: (made: boolean) => void;
+  /** Closes the dialog; `sent` says whether a create was sent, so the list is read again. */
+  readonly onClose: (sent: boolean) => void;
 }
 
 /**
  * Asks for the token's name, makes it after the passkey touch and shows it once with the
  * `lakana login` command. The token lives only in this dialog's state: Done and Escape unmount
- * the dialog, and the token with it.
+ * the dialog, and the token with it. While the touch or the request runs the dialog cannot be
+ * closed, so a token that is made is always shown.
  *
  * @param props - The owner and the close handler.
  * @param props.owner - The person's own principal name.
@@ -96,9 +97,11 @@ function CreateTokenDialog({ owner, onClose }: CreateTokenDialogProps): JSX.Elem
   const attempt = useAttempt();
   const [label, setLabel] = useState("");
   const [issued, setIssued] = useState<TokenIssueOut | null>(null);
+  const [sent, setSent] = useState(false);
   const close = (): void => {
+    if (attempt.busy) return;
     setIssued(null);
-    onClose(issued !== null);
+    onClose(sent);
   };
   return (
     <ActionDialog onClose={close}>
@@ -106,6 +109,7 @@ function CreateTokenDialog({ owner, onClose }: CreateTokenDialogProps): JSX.Elem
         <Form
           onSubmit={(event) => {
             event.preventDefault();
+            setSent(true);
             attempt.run(async () => {
               setIssued(await createOwnToken(owner, label.trim()));
             });
@@ -122,7 +126,7 @@ function CreateTokenDialog({ owner, onClose }: CreateTokenDialogProps): JSX.Elem
             <PendingButton type="submit" className="button button-primary" pending={attempt.busy}>
               {t("tokens.own.submit")}
             </PendingButton>
-            <Button className="button" onPress={close}>
+            <Button className="button" onPress={close} isDisabled={attempt.busy}>
               {t("dialog.cancel")}
             </Button>
           </div>
@@ -256,9 +260,9 @@ export function OwnTokensPanel({ name }: OwnTokensPanelProps): JSX.Element {
       {creating && (
         <CreateTokenDialog
           owner={name}
-          onClose={(made) => {
+          onClose={(sent) => {
             setCreating(false);
-            if (made) {
+            if (sent) {
               armFocus();
               tokens.reload();
             }
