@@ -52,11 +52,13 @@ from lakana_core.errors import (
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.identity.pats import PatService
 from lakana_core.identity.task_tokens import MintedTaskToken, TaskTokenService
-from lakana_core.identity.tokens import parse_token
+from lakana_core.identity.tokens import hash_secret, parse_token
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
+    PersonalAccessToken,
     Principal,
     PrincipalType,
     QueryRun,
@@ -2281,6 +2283,45 @@ def test_queued_run_fails_when_token_revoked(
     query_service = QueryService(session, AllowAllAuthorization())
     run = query_service.submit_query(task_principal, "dev", "SELECT 1")
     task_tokens.revoke(principal, minted.key_id)
+
+    run_one(session, run.id, AllowAllAuthorization())
+
+    session.refresh(run)
+    assert run.status == QueryRunStatus.FAILED
+    assert run.error_message == _INVALID_TASK_TOKEN_MESSAGE
+    assert run.result_location is None
+
+
+def test_queued_run_fails_when_the_personal_token_that_minted_it_is_revoked(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The worker's re-check refuses a run whose task token's minting PAT was revoked since.
+
+    The PAT's `revoked_at` is set directly, so the task token's own row stays unrevoked: what
+    refuses the run is the re-check reading the PAT (`resolve_task_token_scope`), not the
+    cascade in `PatService.revoke`.
+    """
+    _local_catalog(session, principal, tmp_path)
+    pat = PersonalAccessToken(
+        id=uuid.uuid4(),
+        principal_id=principal.id,
+        key_id="minterpat",
+        secret_hash=hash_secret("s3cret"),
+        name="laptop",
+    )
+    session.add(pat)
+    session.commit()
+    signed_in = PatService(session, AllowAllAuthorization()).verify("minterpat", "s3cret")
+    task_tokens = TaskTokenService(session, AllowAllAuthorization())
+    minted = task_tokens.mint(
+        signed_in, principal.name, environment="dev", asset_scope=["gold.*"], ttl_seconds=300
+    )
+    task_principal = _verify_minted_token(task_tokens, minted)
+    run = QueryService(session, AllowAllAuthorization()).submit_query(
+        task_principal, "dev", "SELECT 1"
+    )
+    pat.revoked_at = datetime.now(UTC)
+    session.commit()
 
     run_one(session, run.id, AllowAllAuthorization())
 

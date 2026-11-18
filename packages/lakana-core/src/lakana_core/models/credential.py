@@ -58,6 +58,13 @@ class TaskToken(Base):
     project version manifest and its writes are limited to its own asset
     (`GrantAuthorization._check_bound_scope`), not from `asset_scope`. A
     REST-minted token has neither.
+
+    `source_pat_id` names the personal access token a REST-minted token was minted with. The
+    token works only while that one does: not revoked, not expired, its owner active
+    (`resolve_task_token_scope`, at every authentication); revoking the PAT also revokes it
+    (`revoke_task_tokens_of_pat`), and deleting the PAT deletes it. `NULL` for a bound token
+    (the worker mints it) and for a token minted before migration `0085`, which is judged by its
+    own row alone.
     """
 
     __tablename__ = "task_tokens"
@@ -78,3 +85,9 @@ class TaskToken(Base):
         ForeignKey("task_runs.id", ondelete="CASCADE"), nullable=True, index=True
     )
     claim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_pat_id: Mapped[uuid.UUID | None] = mapped_column(
+        # Deleting the token deletes the task tokens minted with it, so none outlives it.
+        ForeignKey("personal_access_tokens.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )

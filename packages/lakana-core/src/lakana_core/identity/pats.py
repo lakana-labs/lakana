@@ -17,6 +17,7 @@ from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only, may_manage_tokens
 from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
 from lakana_core.identity.sessions import require_step_up
+from lakana_core.identity.task_tokens import revoke_task_tokens_of_pat
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
 from lakana_core.pagination import Page, newest_first
@@ -439,6 +440,10 @@ class PatService:
         the existing `revoked_at` untouched and records no second
         `PAT_REVOKED` event.
 
+        Every unrevoked task token minted with this PAT is revoked with it, in the same
+        transaction, each with a `TASK_TOKEN_REVOKED` event of ``reason: pat_revoked``
+        (`lakana_core.identity.task_tokens.revoke_task_tokens_of_pat`).
+
         Parameters
         ----------
         p
@@ -479,6 +484,7 @@ class PatService:
             AuditEventType.PAT_REVOKED,
             detail={"actor": p.name, "subject": principal_name, "key_id": key_id},
         )
+        revoke_task_tokens_of_pat(self._session, p, pat)
         if commit:
             self._session.commit()
 

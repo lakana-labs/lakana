@@ -43,6 +43,7 @@ from lakana_core.grants.service import GrantService, active_instance_admin_ids
 from lakana_core.identity.links import withdraw_open_links
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.sessions import SessionService, utc_now
+from lakana_core.identity.task_tokens import revoke_task_tokens_of_pat
 from lakana_core.models import (
     AuditEventType,
     Grant,
@@ -332,7 +333,8 @@ def bootstrap_if_needed(
        unrelated user.
     2. Revokes every unrevoked PAT that principal already has, so the one
        PAT this call mints is the only working credential for it
-       afterward.
+       afterward, and every task token minted with one of them
+       (`revoke_task_tokens_of_pat`, audited as ``pat_revoked``).
     3. Grants it instance ADMIN (re-granting even if a prior grant was
        revoked). When an access file manages `instance`, this grant is the
        one change outside the file the guard lets through
@@ -435,6 +437,8 @@ def bootstrap_if_needed(
         .all()
     ):
         pat.revoked_at = now
+        # As `PatService.revoke` does: the task tokens minted with it end with it, audited.
+        revoke_task_tokens_of_pat(session, principal, pat)
 
     # The one change the access-file guard lets through: recovery must never depend on the
     # file. It is recorded as an override, so the next plan shows the grant as drift.

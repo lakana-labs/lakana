@@ -23,8 +23,8 @@ from fastapi import APIRouter, Depends, Query
 from lakana_core.audit.service import AuditCursor, AuditService, ShownAuditEvent
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
-from lakana_core.identifiers import NamespacePath
 from lakana_core.models import AuditEventFilter, AuditEventType
+from lakana_server.api.platform.namespace_forms import dotted_namespace
 from lakana_server.api.platform.schemas import AuditEventOut, AuditEventPage
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -41,29 +41,6 @@ _BAD_CURSOR = (
     "The cursor is not valid. Start the listing again without `cursor`; pass the `next_cursor` of "
     "a page only to continue that listing."
 )
-
-
-def _joined_to_dotted(namespace: str | None) -> str | None:
-    """Convert a stored unit-separator namespace path to its dotted form.
-
-    Duplicated from `grants.py`'s identical private helper rather than
-    imported — this codebase's established convention (see
-    `row_filters.py`/`column_masks.py`'s own copies) is a small private
-    helper per router, not a shared cross-router utility.
-
-    Parameters
-    ----------
-    namespace
-        The unit-separator-joined storage form, or `None`.
-
-    Returns
-    -------
-    str or None
-        The dot-joined display form, or `None`.
-    """
-    if namespace is None:
-        return None
-    return ".".join(NamespacePath.parse(namespace).parts)
 
 
 def _encode_cursor(position: AuditCursor) -> str:
@@ -145,7 +122,7 @@ def _to_out(event: ShownAuditEvent) -> AuditEventOut:
         event_type_raw=event.event_type_raw,
         securable_kind=event.securable_kind,
         securable_environment=event.securable_environment,
-        securable_namespace=_joined_to_dotted(event.securable_namespace),
+        securable_namespace=dotted_namespace(event.securable_namespace),
         securable_table=event.securable_table,
         detail=event.detail,
     )
