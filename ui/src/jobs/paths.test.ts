@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { jobPath, jobRunPath, splitJobRef, taskPath } from "./paths";
+import { jobPath, jobRunPath, jobsListPath, splitJobRef, taskPath } from "./paths";
 
 describe("the Jobs addresses", () => {
+  it("the list, of all environments or filtered to one", () => {
+    expect(jobsListPath(null)).toBe("/jobs");
+    expect(jobsListPath("prod")).toBe("/jobs?environment=prod");
+    expect(jobsListPath("my env/a")).toBe("/jobs?environment=my+env%2Fa");
+  });
+
   it("builds each address with every part encoded", () => {
     expect(jobPath("my env", "team/analytics", "nightly sales")).toBe(
       "/jobs/my%20env/job/team%2Fanalytics/nightly%20sales",

@@ -1,0 +1,17 @@
+/* The environment picker: its label beside the button, which wraps under it on a narrow screen. */
+.env-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.env-picker .button,
+.env-picker .menu-item {
+  gap: var(--space-1);
+}
+
+/* A protected environment's mark: the colour of danger beside the word, never alone. */
+.env-protected {
+  color: var(--color-bad);
+}

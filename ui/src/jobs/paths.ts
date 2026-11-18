@@ -1,8 +1,20 @@
 /**
- * The addresses of the Jobs screen: a job, a run, and a task of a run.
+ * The addresses of the Jobs screen: the list, a job, a run, and a task of a run.
  *
  * @packageDocumentation
  */
+
+/**
+ * The address of the Jobs list, filtered to one environment or showing all of them.
+ *
+ * @param environment - The environment; null for all.
+ * @returns The path, the environment encoded.
+ */
+export function jobsListPath(environment: string | null): string {
+  return environment === null
+    ? "/jobs"
+    : `/jobs?${new URLSearchParams({ environment }).toString()}`;
+}
 
 /**
  * The address of a job's page; `?run={id}` on it selects one of its runs.

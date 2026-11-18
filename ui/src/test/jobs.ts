@@ -4,7 +4,9 @@
  *
  * @packageDocumentation
  */
+import type { EnvironmentOut } from "../api/environments";
 import type {
+  FailedRunOut,
   FailureOut,
   JobOut,
   RunOut,
@@ -127,6 +129,54 @@ export function aJobRun(over: Partial<RunOut> = {}): RunOut {
     ...over,
   };
 }
+
+/**
+ * A row of the failed runs: a run of `nightly_sales` in `prod` whose task `silver.orders` failed
+ * with `timeout`, which the reader may resume.
+ *
+ * @param over - The fields that differ.
+ * @returns The row.
+ */
+export function aFailedRun(over: Partial<FailedRunOut> = {}): FailedRunOut {
+  return {
+    run: aJobRun({
+      status: "failed",
+      tasks: [],
+      failed_tasks: 1,
+      total_tasks: 3,
+      ended_tasks: 3,
+      finished_at: "2026-11-17T01:14:00Z",
+      actions: ["cancel", "resume"],
+    }),
+    task: "silver.orders",
+    failure: aFailure("timeout"),
+    ...over,
+  };
+}
+
+/** What `GET /api/v1/environments` answers: `dev`, and `prod`, which is protected. */
+export const ENVIRONMENTS: readonly EnvironmentOut[] = [
+  {
+    name: "dev",
+    storage_root: "file:///srv/lakana/dev",
+    storage_secret_ref: null,
+    is_protected: false,
+    properties: {},
+    retention_days: null,
+    deleted_at: null,
+    purge_after: null,
+  },
+  {
+    name: "prod",
+    storage_root: "s3://lakana-prod/warehouse",
+    storage_secret_ref: "prod-storage",
+    is_protected: true,
+    properties: {},
+    retention_days: 30,
+    deleted_at: null,
+    purge_after: null,
+  },
+];
 
 /**
  * One piece of a task's log, complete.

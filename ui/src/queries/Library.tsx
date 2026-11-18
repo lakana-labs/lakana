@@ -7,7 +7,7 @@ import { type JSX, useId } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { QueryEnvironmentOut } from "../api/queries";
-import { EnvironmentPicker } from "./EnvironmentPicker";
+import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { RecentList } from "./RecentList";
 import { writeFilter } from "./remember";
 import { SavedList } from "./SavedList";
