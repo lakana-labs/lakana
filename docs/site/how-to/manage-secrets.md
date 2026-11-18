@@ -7,6 +7,17 @@ again; only a running task gets the secret of a connection its asset declares
 page is for the person who runs the instance. It shows which secrets are stored in an older format
 and how to bring them up to date.
 
+## In the web interface
+
+**Settings → Access → Secrets** lists, per environment, each secret's name, its use, when it was
+created and when it was last rotated. The page is there for whoever may manage secrets in at least
+one environment (`MANAGE_SECRET`, which the `ADMIN` role holds), and it offers exactly those
+environments; the last one chosen is remembered in the browser. **Add secret**, **Rotate**, **Set
+use** and **Delete** do what `lakana secret create`, `rotate`, `bind` and `revoke` do. A value is
+typed into a password field, sent once and never shown again: the page has no way to reveal it,
+and closing the dialog forgets it. Adding, rotating and setting the use ask for a passkey touch
+first; Delete asks for the secret's name instead.
+
 ## Webhook secrets
 
 A job's `notify:` names a secret that holds its webhook. The secret is a JSON object with the key

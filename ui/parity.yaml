@@ -174,11 +174,11 @@
 "runs show": { class: ui, part: 5, done: true }
 "scheduler status": { class: ui, part: 8 }
 "search": { class: ui, part: 1 }
-"secret bind": { class: ui, part: 7 }
-"secret create": { class: ui, part: 7 }
-"secret list": { class: ui, part: 7 }
-"secret revoke": { class: ui, part: 7 }
-"secret rotate": { class: ui, part: 7 }
+"secret bind": { class: ui, part: 7, done: true }
+"secret create": { class: ui, part: 7, done: true }
+"secret list": { class: ui, part: 7, done: true }
+"secret revoke": { class: ui, part: 7, done: true }
+"secret rotate": { class: ui, part: 7, done: true }
 "server reset": { class: git, reason: "local dev tooling" }
 "server start": { class: git, reason: "local dev tooling" }
 "server status": { class: git, reason: "local dev tooling" }
@@ -227,15 +227,21 @@
 "table undrop": { class: ui, part: 3, done: true }
 "table rebuild": { class: ui, part: 3, done: true }
 "task history": { class: read, part: 5 }
-"task-token list": { class: ui, part: 7 }
+"task-token list": { class: ui, part: 7, done: true }
 "task-token mint":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
-"task-token revoke": { class: ui, part: 7 }
+"task-token revoke": { class: ui, part: 7, done: true }
 "term get": { class: read, part: 3 }
 "term list": { class: read, part: 3 }
-"token issue": { class: ui, part: 7 }
-"token list": { class: ui, part: 7 }
-"token revoke": { class: ui, part: 7 }
+"token issue":
+  {
+    class: ui,
+    part: 7,
+    done: true,
+    note: "one's own on /account; a service account's with the CLI",
+  }
+"token list": { class: ui, part: 7, done: true }
+"token revoke": { class: ui, part: 7, done: true }
 "undeploy": { class: ui, part: 5 }
 "whoami": { class: read, part: 1 }
 "worker list": { class: ui, part: 8 }
@@ -243,7 +249,8 @@
 "DELETE /api/v1/column-masks/{column_mask_id}": { class: ui, part: 7 }
 "DELETE /api/v1/environments/{environment_name}/connections/{connection_name}":
   { class: ui, part: 6, done: true }
-"DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
+"DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}":
+  { class: ui, part: 7, done: true }
 "DELETE /api/v1/environments/{env}/deployments/{repo}": { class: ui, part: 5 }
 "DELETE /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
 "DELETE /api/v1/environments/{env}/namespaces/{path}": { class: ui, part: 3, done: true }
@@ -265,13 +272,13 @@
 "DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
-"DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7 }
+"DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
 "DELETE /api/v1/repositories/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7 }
 "DELETE /api/v1/sign-in/notices/{notice_id}": { class: ui, part: 1 }
 "DELETE /api/v1/sign-in/session": { class: ui, part: 1 }
-"DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7 }
+"DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7, done: true }
 "GET /api/v1/access/export":
   { class: ui, part: 7, note: "a download of the live access as an access file" }
 "GET /api/v1/access/status": { class: read, part: 7 }
@@ -293,7 +300,7 @@
     part: 6,
     note: "the screen follows a test through the connection's last_test (PR 2, C4)",
   }
-"GET /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7 }
+"GET /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7, done: true }
 "GET /api/v1/environments/{env}/artifacts":
   {
     class: ui,
@@ -416,7 +423,13 @@
 "GET /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
 "GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
-"GET /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
+"GET /api/v1/principals/{name}/tokens":
+  {
+    class: ui,
+    part: 7,
+    done: true,
+    note: "one's own on /account; everyone's in Settings › Access › Tokens",
+  }
 "GET /api/v1/queries": { class: ui, part: 4, done: true }
 "GET /api/v1/queries/environments": { class: ui, part: 4, done: true }
 "GET /api/v1/recovery-links": { class: ui, part: 1 }
@@ -438,14 +451,15 @@
 "GET /api/v1/tables/tree": { class: read, part: 3, done: true }
 "GET /api/v1/tasks/self/connections/{name}":
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
-"GET /api/v1/task-tokens": { class: ui, part: 7 }
-"GET /api/v1/tokens": { class: ui, part: 7 }
+"GET /api/v1/task-tokens": { class: ui, part: 7, done: true }
+"GET /api/v1/tokens": { class: ui, part: 7, done: true }
 "GET /api/v1/whoami": { class: read, part: 1 }
 "GET /api/v1/workers": { class: ui, part: 8 }
 "PATCH /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "PATCH /api/v1/environments/{environment_name}/connections/{connection_name}":
   { class: ui, part: 6, done: true }
-"PATCH /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
+"PATCH /api/v1/environments/{environment_name}/secrets/{secret_name}":
+  { class: ui, part: 7, done: true }
 "PATCH /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: ui, part: 3, done: true }
 "PATCH /api/v1/environments/{name}": { class: ui, part: 8 }
@@ -478,7 +492,7 @@
 "POST /api/v1/environments/{environment_name}/connections": { class: ui, part: 6, done: true }
 "POST /api/v1/environments/{environment_name}/connections/{connection_name}/tests":
   { class: ui, part: 6, done: true }
-"POST /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7 }
+"POST /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7, done: true }
 "POST /api/v1/environments/{env}/deploys":
   {
     class: ui,
@@ -543,7 +557,13 @@
 "POST /api/v1/principals/{name}/recent":
   { class: ui, part: 2, note: "called by the detail pages from part 3", done: true }
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
-"POST /api/v1/principals/{name}/tokens": { class: ui, part: 7 }
+"POST /api/v1/principals/{name}/tokens":
+  {
+    class: ui,
+    part: 7,
+    done: true,
+    note: "one's own on /account; everyone's in Settings › Access › Tokens",
+  }
 "POST /api/v1/repositories": { class: ui, part: 8 }
 "POST /api/v1/repositories/{name}/deploy-key": { class: ui, part: 2 }
 "POST /api/v1/repository-probes": { class: ui, part: 2 }
@@ -560,7 +580,8 @@
 "POST /api/v1/sign-in/step-up/options": { class: ui, part: 1 }
 "POST /api/v1/task-tokens":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
-"PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use": { class: ui, part: 7 }
+"PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use":
+  { class: ui, part: 7, done: true }
 "PUT /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
 "PUT /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/uploads/{upload_id}/blobs/{sha256}":
   { class: git, reason: "artifact upload" }
