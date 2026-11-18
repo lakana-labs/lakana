@@ -638,3 +638,35 @@ def test_a_non_administrators_session_cannot_revoke_anothers_task_token(
         assert response.status_code == 403, response.text
     assert browser_client.get("/api/v1/task-tokens", headers=headers).status_code == 403
     assert len(browser_client.get("/api/v1/task-tokens", headers=AUTH_HEADER).json()) == 1
+
+
+def test_revoking_the_personal_token_that_minted_a_task_token_ends_it(
+    client: TestClient,
+) -> None:
+    """Revoking `minter`'s PAT gives its task token 401; the bootstrap PAT's task token still works.
+
+    The cascade is listed in the audit log as a `TASK_TOKEN_REVOKED` with ``reason:
+    pat_revoked`` naming the PAT's key id.
+    """
+    headers = _minter_headers(client)
+    pat_key_id = headers["Authorization"].removeprefix("Bearer lakana_pat_").split("_", 1)[0]
+    body = {"principal": "minter", "environment": "dev", "asset_scope": [], "ttl_seconds": 300}
+    child = client.post("/api/v1/task-tokens", headers=headers, json=body)
+    assert child.status_code == 201, child.text
+    other = _mint(client)
+    child_headers = {"Authorization": f"Bearer {child.json()['token']}"}
+    assert client.get("/api/v1/whoami", headers=child_headers).status_code == 200
+
+    revoked = client.delete(f"/api/v1/principals/minter/tokens/{pat_key_id}", headers=AUTH_HEADER)
+    assert revoked.status_code == 204, revoked.text
+
+    assert client.get("/api/v1/whoami", headers=child_headers).status_code == 401
+    still = client.get("/api/v1/whoami", headers={"Authorization": f"Bearer {other['token']}"})
+    assert still.status_code == 200, still.text
+    events = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={"event_type": "TASK_TOKEN_REVOKED"}
+    )
+    assert [
+        (e["detail"]["key_id"], e["detail"]["reason"], e["detail"]["pat_key_id"])
+        for e in events.json()["items"]
+    ] == [(child.json()["key_id"], "pat_revoked", pat_key_id)]

@@ -100,7 +100,12 @@ makes no claim of certification or compliance with any standard.
   signing in through it gets whatever multi-factor rule the provider enforces.
 - **API tokens are a single factor, by design.** Scripts, CI jobs and the command line use them.
   The server stores only a hash of each token; any token can be revoked at once; CI and task tokens
-  expire on their own (a CI token after an hour). A task token, a CI token and a service
+  expire on their own (a CI token after an hour). A task token minted with a personal token stops
+  working as soon as that personal token is revoked, expires or is deleted, or its owner is
+  deactivated, so revoking a stolen personal token also ends every task token minted with it. A
+  task token minted before this rule was added lasts until its own expiry (at most a day by
+  default). An administrator can list those tokens (`lakana task-token list`) and revoke them. A
+  task token, a CI token and a service
   account's token never lead to a browser session. A person's own token signs its holder into a
   browser only through `lakana server start --local`, on the machine that runs local mode. Two
   kinds of token reach further, and need the same care as the passkeys themselves:

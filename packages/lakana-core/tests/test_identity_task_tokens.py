@@ -32,12 +32,14 @@ from lakana_core.errors import (
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.identifiers import NamespacePath
+from lakana_core.identity.pats import PatService
 from lakana_core.identity.task_tokens import ListedTaskToken, TaskTokenService
 from lakana_core.identity.tokens import GeneratedToken, hash_secret, parse_token
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
     Grant,
+    PersonalAccessToken,
     Principal,
     PrincipalType,
     Run,
@@ -608,3 +610,182 @@ def test_list_live_is_for_an_administrator_only(session: Session) -> None:
     for ref in (holder, task, ci):
         with pytest.raises(PermissionDenied):
             service.list_live(ref)
+
+
+def _signed_in_with_pat(
+    session: Session, principal: PrincipalRef, *, expires_at: datetime | None = None
+) -> tuple[PrincipalRef, PersonalAccessToken]:
+    """Issue a personal token for a principal and authenticate with it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The token's owner.
+    expires_at
+        When the token stops working; `None` for never.
+
+    Returns
+    -------
+    tuple of PrincipalRef and PersonalAccessToken
+        The principal as `PatService.verify` returns it (``credential="pat"`` and the token's
+        id), and the token's row.
+    """
+    secret = uuid.uuid4().hex
+    pat = PersonalAccessToken(
+        id=uuid.uuid4(),
+        principal_id=principal.id,
+        key_id=uuid.uuid4().hex[:16],
+        secret_hash=hash_secret(secret),
+        name="laptop",
+        expires_at=expires_at,
+    )
+    session.add(pat)
+    session.commit()
+    return PatService(session, AllowAllAuthorization()).verify(pat.key_id, secret), pat
+
+
+def _verify(service: TaskTokenService, token: str) -> None:
+    """Verify a full task token's value.
+
+    Parameters
+    ----------
+    service
+        The task-token service.
+    token
+        The full ``lakana_task_...`` value.
+
+    Raises
+    ------
+    AuthenticationError
+        If the token no longer authenticates.
+    """
+    parsed = parse_token(token, "lakana_task")
+    assert parsed is not None
+    service.verify(*parsed)
+
+
+def test_mint_records_the_personal_token_that_minted_it(session: Session) -> None:
+    """A token minted with a PAT names that PAT; one minted without a PAT names none."""
+    admin = _admin(session)
+    signed_in, pat = _signed_in_with_pat(session, admin)
+    service = TaskTokenService(session, AllowAllAuthorization())
+
+    with_pat = service.mint(
+        signed_in, admin.name, environment="dev", asset_scope=[], ttl_seconds=60
+    )
+    without = service.mint(admin, admin.name, environment="dev", asset_scope=[], ttl_seconds=60)
+
+    rows = {row.key_id: row.source_pat_id for row in session.execute(select(TaskToken)).scalars()}
+    assert rows == {with_pat.key_id: pat.id, without.key_id: None}
+
+
+def test_revoking_the_personal_token_ends_its_task_tokens_only(session: Session) -> None:
+    """Revoking a PAT revokes its task tokens, audited; another PAT's task token still works."""
+    admin = _admin(session)
+    first, first_pat = _signed_in_with_pat(session, admin)
+    second, _ = _signed_in_with_pat(session, admin)
+    service = TaskTokenService(session, AllowAllAuthorization())
+    child = service.mint(first, admin.name, environment="dev", asset_scope=[], ttl_seconds=60)
+    other = service.mint(second, admin.name, environment="dev", asset_scope=[], ttl_seconds=60)
+
+    PatService(session, AllowAllAuthorization()).revoke(admin, admin.name, first_pat.key_id)
+
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
+    _verify(service, other.token)
+    revoked = session.execute(
+        select(TaskToken).where(TaskToken.key_id == child.key_id)
+    ).scalar_one()
+    assert revoked.revoked_at is not None
+    events = [
+        e.detail
+        for e in session.execute(
+            select(AuditEvent).where(AuditEvent.event_type == AuditEventType.TASK_TOKEN_REVOKED)
+        ).scalars()
+    ]
+    assert events == [
+        {
+            "actor": admin.name,
+            "subject": admin.name,
+            "key_id": child.key_id,
+            "environment": "dev",
+            "asset_scope": [],
+            "reason": "pat_revoked",
+            "pat_key_id": first_pat.key_id,
+        }
+    ]
+
+
+def test_a_task_token_stops_when_its_personal_token_expires(session: Session) -> None:
+    """An expired PAT's task token fails at once, and is no longer listed as live."""
+    admin = _administrator(session)
+    signed_in, pat = _signed_in_with_pat(
+        session, admin, expires_at=datetime.now(UTC) + timedelta(hours=1)
+    )
+    service = _listing_service(session)
+    child = service.mint(signed_in, admin.name, environment="dev", asset_scope=[], ttl_seconds=60)
+    _verify(service, child.token)
+
+    pat.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    session.commit()
+
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
+    assert child.key_id not in {i.token.key_id for i in service.list_live(admin).items}
+
+
+def test_a_task_token_stops_when_its_personal_tokens_owner_is_deactivated(
+    session: Session,
+) -> None:
+    """An administrator's PAT mints for someone else; deactivating the administrator ends it."""
+    admin = _admin(session)
+    _add_principal(session, "worker-1")
+    signed_in, _ = _signed_in_with_pat(session, admin)
+    service = TaskTokenService(session, AllowAllAuthorization())
+    child = service.mint(signed_in, "worker-1", environment="dev", asset_scope=[], ttl_seconds=60)
+    _verify(service, child.token)
+
+    session.get_one(Principal, admin.id).is_active = False
+    session.commit()
+
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
+
+
+def test_deleting_the_personal_token_deletes_its_task_tokens(session: Session) -> None:
+    """The foreign key cascades: a task token never outlives the row of its PAT."""
+    admin = _admin(session)
+    signed_in, pat = _signed_in_with_pat(session, admin)
+    service = TaskTokenService(session, AllowAllAuthorization())
+    child = service.mint(signed_in, admin.name, environment="dev", asset_scope=[], ttl_seconds=60)
+
+    session.delete(pat)
+    session.commit()
+
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
+    assert (
+        session.execute(select(TaskToken).where(TaskToken.key_id == child.key_id)).first() is None
+    )
+
+
+def test_a_task_token_without_a_personal_token_works_until_its_own_expiry(
+    session: Session,
+) -> None:
+    """A row minted before the link existed (`source_pat_id` NULL) is judged by itself alone."""
+    admin = _admin(session)
+    service = TaskTokenService(session, AllowAllAuthorization())
+    child = service.mint(admin, admin.name, environment="dev", asset_scope=[], ttl_seconds=60)
+    _verify(service, child.token)
+
+    _stamped(
+        session,
+        child.key_id,
+        minutes_ago=5,
+        expires_at=datetime.now(UTC) - timedelta(seconds=1),
+    )
+
+    with pytest.raises(AuthenticationError):
+        _verify(service, child.token)
