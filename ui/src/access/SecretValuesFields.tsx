@@ -144,10 +144,11 @@ interface ValueFieldProps {
 }
 
 /**
- * One value: an uncontrolled password field, marked as a new password so the browser neither
- * fills a saved one in nor offers to keep it as a login (browsers ignore `off` on a password
- * field, as the Connections form's fields say too), and out of the password managers' reach
- * (`data-1p-ignore`, `data-lpignore`).
+ * One value: an uncontrolled password field, marked as a new password so the browser fills no
+ * saved password in (browsers ignore `off` on a password field, as the Connections form's
+ * fields say too), and with `data-1p-ignore` and `data-lpignore`, which ask password managers
+ * to ignore it. A browser may still offer to save a typed value once the form is sent; the
+ * person can decline.
  *
  * @param props - The ref.
  * @param props.inputRef - Gives the field its ref.

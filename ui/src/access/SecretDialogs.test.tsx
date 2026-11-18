@@ -346,7 +346,7 @@ describe("SecretDialogs", () => {
     const rotate = await screen.findByRole("button", { name: "Rotate pypi-corp" });
     await shell.user.click(rotate);
     const dialog = await screen.findByRole("dialog", { name: "Rotate pypi-corp" });
-    expect(dialog).toHaveTextContent("What uses it picks the new value up.");
+    expect(dialog).toHaveTextContent("What uses it picks the new values up.");
     const { keys, values } = valueFields(dialog);
     await shell.user.type(keys[0] as HTMLElement, "token");
     await shell.user.type(values[0] as HTMLElement, "t");
