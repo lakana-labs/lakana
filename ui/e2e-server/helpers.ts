@@ -182,6 +182,23 @@ export async function makeAdministrator(request: APIRequestContext, name: string
 }
 
 /**
+ * Gives a person a role on an environment, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param principal - The person.
+ * @param role - The role, such as `VIEWER`.
+ * @param environment - The environment.
+ */
+export async function grantRole(
+  request: APIRequestContext,
+  principal: string,
+  role: string,
+  environment: string,
+): Promise<void> {
+  await create(request, "/api/v1/grants", { principal, role, kind: "ENVIRONMENT", environment });
+}
+
+/**
  * Signs the bootstrap administrator in with the local link, as `lakana server start --local`
  * does, and waits for Home. The passkey offer comes only while they have none; it is declined,
  * as adding one would end the setup link a test of another file needs.
