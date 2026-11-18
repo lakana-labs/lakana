@@ -178,6 +178,11 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["table"]': "MaskedColumnOut",
   '["version"]': "InfoOut",
   "[]": "-",
+  '["actions","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
+    "DeployOut",
+  '["commit_sha","project_version_id","repository","updated_at"]': "DeploymentOut",
+  '["id","status"]': "DeployAcceptedOut",
+  '["downstream","patterns","upstream"]': "JobOut",
 };
 
 /**

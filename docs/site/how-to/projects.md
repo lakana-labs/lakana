@@ -369,6 +369,14 @@ digest; the worker's log says whether it was restored or why not. `--ref` takes 
 never `refs/pull/*`, `refs/changes/*` or any other namespace; a SHA deploys only if a branch or tag of the
 repository contains it. A rollback never contacts the git host.
 
+In the web interface, open **Jobs**, then the **Deploys** tab, and choose the environment. Beside
+every earlier deploy or rollback that succeeded stands **Roll back to this…**, if you may deploy
+there (a CI token never may). It asks first and names every job the repository defines in either
+version: a job both versions define, one the rollback removes and one it brings back, so no job
+changes that the question did not name; when it cannot read both lists it says why and offers no
+rollback. **Roll back** queues the rollback to that commit, and a line under the list follows it
+until it succeeded or failed; the list then shows the new current version.
+
 A deploy, dry run or rollback that has to wait for a worker says why. After 3 seconds in the queue,
 `lakana deploy` and `lakana rollback` print a line on standard error, `Waiting: <the sentence>`, and
 print another only when the reason changes (nothing is printed with `--output json`). The reasons
