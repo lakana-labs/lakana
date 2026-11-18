@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import functools
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
+import typer
+import typer.main
+import typer.testing
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
@@ -68,6 +74,81 @@ def cli_state(client: TestClient, tmp_path: Path) -> CliState:
     return make_cli_state(client, tmp_path)
 
 
+@functools.cache
+def _app() -> typer.Typer:
+    """Build the CLI app once per process.
+
+    Typer resolves the type hints of every command each time it turns an app into a click
+    command, which took about 0.13 s per invocation under coverage, most of a CLI test's time
+    (the CLI unit tests share their app for the same reason, #101). Nothing reads state from
+    the app or its command between invocations: the state comes in through `obj`, the
+    environment through `env`.
+
+    Returns
+    -------
+    typer.Typer
+        The shared app.
+    """
+    return build_app()
+
+
+@functools.cache
+def _command() -> Any:  # ruff: ignore[any-type]
+    """Turn the shared app into its command, once per process.
+
+    Returns
+    -------
+    Any
+        The root group (Typer's own vendored click type, which it does not export).
+    """
+    return typer.main.get_command(_app())
+
+
+# Pay the conversion once while the conftest is imported, a one-off cost of the process like
+# the imports, rather than in whichever CLI test happens to run first.
+_command()
+
+
+def run_cli(
+    state: CliState, *args: str, input: str | None = None, env: dict[str, str] | None = None
+) -> Result:
+    """Run one CLI command in-process with a clean environment, on the shared command.
+
+    Parameters
+    ----------
+    state
+        The state object the root callback fills in.
+    *args
+        The command line, without the program name.
+    input
+        Text fed to stdin, if any.
+    env
+        Environment variables to set on top of the clean environment.
+
+    Returns
+    -------
+    typer.testing.Result
+        Exit code, stdout, stderr and any exception.
+    """
+    clean: dict[str, str | None] = {
+        name: None
+        for name in (
+            "LAKANA_OUTPUT",
+            "LAKANA_PROFILE",
+            "LAKANA_TOKEN",
+            "LAKANA_URL",
+            "LAKANA_OIDC",
+            "LAKANA_OIDC_TOKEN",
+        )
+    }
+    clean["COLUMNS"] = "200"
+    clean.update({"FORCE_COLOR": None, "PY_COLORS": None, "NO_COLOR": "1"})
+    clean.update(env or {})
+    # `CliRunner.invoke` turns the app into a command on every call: hand it the cached one.
+    with mock.patch.object(typer.testing, "_get_command", lambda _app_: _command()):
+        return CliRunner().invoke(_app(), list(args), obj=state, input=input, env=clean)
+
+
 @pytest.fixture
 def invoke_cli() -> Callable[..., Result]:
     """Provide a function that runs one CLI command in-process.
@@ -75,26 +156,9 @@ def invoke_cli() -> Callable[..., Result]:
     Returns
     -------
     callable
-        `invoke_cli(state, *args, input=None) -> Result`.
+        `invoke_cli(state, *args, input=None) -> Result` (`run_cli`).
     """
-
-    def run(state: CliState, *args: str, input: str | None = None) -> Result:
-        env = {
-            name: None
-            for name in (
-                "LAKANA_OUTPUT",
-                "LAKANA_PROFILE",
-                "LAKANA_TOKEN",
-                "LAKANA_URL",
-                "LAKANA_OIDC",
-                "LAKANA_OIDC_TOKEN",
-            )
-        }
-        env["COLUMNS"] = "200"
-        env.update({"FORCE_COLOR": None, "PY_COLORS": None, "NO_COLOR": "1"})
-        return CliRunner().invoke(build_app(), list(args), obj=state, input=input, env=env)
-
-    return run
+    return run_cli
 
 
 @pytest.fixture
