@@ -39,7 +39,16 @@ from pathlib import Path
 BUDGETS = Path("scripts/time-budgets.toml")
 BASELINE = Path("scripts/slow-tests-baseline.json")
 DOCS = "docs/agent/testing.md, 'Time budgets'"
-CONFIRM_RUNS = 3  # solo re-runs of a flagged test; the fastest counts
+CONFIRM_RUNS = 3  # re-runs of a flagged test; the fastest counts
+# The most flagged tests that get a pytest process of their own after the shared first pass.
+# Each such process costs about 4 s of start-up on a CI runner (imports, collection and coverage)
+# plus the test itself, at least 2.5 s since only tests still over the line get one, and its
+# warm-up if it has one: about 7 to 9 s. It runs up to CONFIRM_RUNS - 1 times, so 10 tests add
+# at most about 3 minutes to `test (3.14)` (about 3 of its 10 minutes otherwise). The first
+# pass leaves only the tests near or over the line, usually a few (49 flagged on 2026-11-18,
+# most of them noise gone after the first pass); more than 10 left means real slow tests, which
+# fail anyway.
+SOLO_CAP = 10
 UPDATE_COMMAND = "uv run python scripts/time_budgets.py slow-tests --update REPORT.xml ..."
 WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"  # read by scripts/remeasure_warm_up.py
 
@@ -98,6 +107,8 @@ class TestTime:
         Whether it was skipped.
     classname
         The report's ``classname``: the module, dotted, and the class of a method.
+    failed
+        Whether it failed or raised an error.
     """
 
     __test__ = False  # a data class, not a test class for pytest to collect
@@ -108,6 +119,7 @@ class TestTime:
     slow: bool
     skipped: bool
     classname: str = ""
+    failed: bool = False
 
     @property
     def nodeid(self) -> str:
@@ -372,7 +384,10 @@ def parse_junit(text: str) -> list[TestTime]:
             p.get("name") == "slow" and p.get("value") == "true" for p in case.iter("property")
         )
         skipped = case.find("skipped") is not None
-        tests.append(TestTime(file, name, seconds, slow, skipped, case.get("classname", "")))
+        failed = case.find("failure") is not None or case.find("error") is not None
+        tests.append(
+            TestTime(file, name, seconds, slow, skipped, case.get("classname", ""), failed)
+        )
     return tests
 
 
@@ -540,7 +555,7 @@ def _warm_up_plan(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> d
     Parameters
     ----------
     group
-        The candidates of one package.
+        The candidates of one process.
     warm_from
         Every test the reports hold.
 
@@ -548,7 +563,10 @@ def _warm_up_plan(group: Sequence[TestTime], warm_from: Sequence[TestTime]) -> d
     -------
     dict
         ``candidates``: their node ids; ``seconds``: the shard time of every other test of
-        their files that ran, the only tests that may warm them up.
+        their files that ran, the only tests that may warm them up. A candidate of the same
+        process is no warm-up, as it runs anyway; a flagged test in another process may be
+        one (the plugin takes the cheapest, so a flagged one only when nothing cheaper shares
+        the fixtures, and otherwise the candidate would be timed cold every time).
     """
     candidates = [test.nodeid for test in group]
     files = {test.file for test in group}
@@ -568,13 +586,22 @@ def remeasure(
     *,
     runs: int = 1,
     stop_below: float | None = None,
+    solo_cap: int = SOLO_CAP,
 ) -> dict[str, float]:
     """Run tests again, up to `runs` times, and answer each one's fastest time.
 
-    A solo run on a slow runner can land above the line (2.5 s twice on one day for tests
-    that are fast elsewhere), and runner variance only ever adds time, so the fastest of a few
-    runs is the best estimate of what the test itself costs. A test that took less than
-    `stop_below` once is not run again.
+    The first run is cheap: one pytest process per package, its candidates one after
+    another. Most flagged tests are noise and fall below `stop_below` there. Each test still
+    over it then runs in a fresh process of its own, up to `runs - 1` more times, since in a
+    shared process a candidate is timed under the load the earlier ones left (unrelated tests
+    of 2.5 to 2.7 s failed that way). At most `solo_cap` tests get such a process, the ones
+    nearest the line; the rest are named on stderr and answer nothing, so they keep their
+    shard time and fail as slow. A test that fails or errors when run again answers nothing
+    either: its shard time stands.
+
+    A run on a slow runner can land above the line (2.5 s twice on one day for tests that are
+    fast elsewhere), and runner variance only ever adds time, so the fastest of a few runs is
+    the best estimate of what the test itself costs.
 
     Parameters
     ----------
@@ -591,46 +618,85 @@ def remeasure(
     stop_below
         A test whose fastest time is below this many seconds is not run again; None runs
         every test `runs` times.
+    solo_cap
+        The most tests that get a process of their own.
 
     Returns
     -------
     dict
-        The fastest seconds by node id, for the tests some run measured.
+        The fastest seconds by node id, for the tests some run measured and none saw fail.
     """
     fastest: dict[str, float] = {}
-    pending = list(tests)
-    for attempt in range(runs):
+    failed: set[str] = set()
+
+    def record(groups: Sequence[Sequence[TestTime]], tag: str) -> None:
+        seconds, broke = _remeasure_once(groups, workdir, run, warm_from, tag)
+        failed.update(broke)
+        for nodeid, value in seconds.items():
+            fastest[nodeid] = min(value, fastest.get(nodeid, value))
+
+    def still(group: Sequence[TestTime]) -> list[TestTime]:
+        if stop_below is None:
+            return [t for t in group if t.nodeid not in failed]
+        return [
+            t
+            for t in group
+            if t.nodeid not in failed and fastest.get(t.nodeid, stop_below) >= stop_below
+        ]
+
+    if runs < 1 or not tests:
+        return {}
+    packages: dict[str, list[TestTime]] = {}
+    for test in tests:
+        packages.setdefault(_package_of(test), []).append(test)
+    record(list(packages.values()), "0-")
+    pending = still(tests) if runs > 1 else []
+    if len(pending) > solo_cap:
+        pending.sort(key=lambda t: fastest.get(t.nodeid, math.inf))
+        capped = pending[solo_cap:]
+        pending = pending[:solo_cap]
+        for test in capped:
+            fastest.pop(test.nodeid, None)
+        print(
+            f"{len(capped)} flagged tests were not run again in a process of their own (at "
+            f"most {solo_cap} are; scripts/time_budgets.py SOLO_CAP), so they count by their "
+            f"shard time: {', '.join(t.nodeid for t in capped)}",
+            file=sys.stderr,
+        )
+    for attempt in range(1, runs):
         if not pending:
             break
-        for nodeid, seconds in _remeasure_once(
-            pending, workdir, run, warm_from, f"{attempt}-"
-        ).items():
-            fastest[nodeid] = min(seconds, fastest.get(nodeid, seconds))
-        if stop_below is not None:
-            pending = [t for t in pending if fastest.get(t.nodeid, stop_below) >= stop_below]
+        record([[test] for test in pending], f"{attempt}-")
+        pending = still(pending)
+    for nodeid in sorted(failed):
+        fastest.pop(nodeid, None)
+        print(
+            f"{nodeid} failed or raised an error when run again, so its shard time stands.",
+            file=sys.stderr,
+        )
     return fastest
 
 
 def _remeasure_once(
-    tests: Sequence[TestTime],
+    groups: Sequence[Sequence[TestTime]],
     workdir: Path,
     run: Callable[..., object],
     warm_from: Sequence[TestTime],
     tag: str,
-) -> dict[str, float]:
-    """Run tests again once, on their own and serially, under coverage as in the shards.
+) -> tuple[dict[str, float], set[str]]:
+    """Run tests again once, serially, a pytest process per group, under coverage as in CI.
 
-    Each package's tests run in a pytest process of their own: every package has a module
-    named `conftest`, and in one process the first one imported would shadow the others. Each
-    process collects the candidates' files, and the plugin `scripts.remeasure_warm_up` keeps
-    only the candidates, each after the cheapest other test of its module that uses all its
-    session- and module-scoped fixtures: that test takes the one-off setup a shard charges
-    to whichever test runs first, and its time is not counted.
+    Two packages never share a process: every package has a module named `conftest`, and in
+    one process the first one imported would shadow the others (PR #521's run). Each process
+    collects its candidates' files, and the plugin `scripts.remeasure_warm_up` keeps only the
+    candidates, each after the cheapest other test of its module that uses all its session-
+    and module-scoped fixtures: that test takes the one-off setup a shard charges to
+    whichever test runs first, and its time is not counted.
 
     Parameters
     ----------
-    tests
-        The tests to measure again.
+    groups
+        The tests to measure again, one process for each group.
     workdir
         A directory for the junit reports and the coverage data, so neither touches the
         combined report of the run.
@@ -644,16 +710,14 @@ def _remeasure_once(
 
     Returns
     -------
-    dict
-        Seconds by node id, for the candidates the new reports hold; a package whose report
-        cannot be read adds nothing.
+    tuple
+        Seconds by node id, each from the process its test was a candidate of (a process
+        whose report cannot be read adds nothing), and the candidates that failed or raised
+        an error there.
     """
-    groups: dict[str, list[TestTime]] = {}
-    for test in tests:
-        groups.setdefault(_package_of(test), []).append(test)
-    wanted = {test.nodeid for test in tests}
     seconds: dict[str, float] = {}
-    for index, group in enumerate(groups.values()):
+    failed: set[str] = set()
+    for index, group in enumerate(groups):
         report = workdir / f"remeasured-{tag}{index}.xml"
         plan = workdir / f"warm-up-{tag}{index}.json"
         plan.write_text(json.dumps(_warm_up_plan(group, warm_from)))
@@ -680,16 +744,17 @@ def _remeasure_once(
         }
         run(command, env=env, check=False)
         try:
-            seconds.update(
-                {
-                    t.nodeid: t.seconds
-                    for t in parse_junit(report.read_text())
-                    if not t.skipped and t.nodeid in wanted
-                }
-            )
+            measured = parse_junit(report.read_text())
         except (OSError, ValueError):
             continue
-    return seconds
+        wanted = {test.nodeid for test in group}
+        for test in measured:
+            if test.nodeid in wanted and not test.skipped:
+                if test.failed:
+                    failed.add(test.nodeid)
+                else:
+                    seconds[test.nodeid] = test.seconds
+    return seconds, failed
 
 
 def _read_reports(paths: Sequence[Path]) -> list[TestTime]:

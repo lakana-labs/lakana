@@ -6,16 +6,9 @@ and request bodies of every operation, with the schemas they refer to. A respons
 task run (an artifact version says which task run committed it); that sets nothing.
 """
 
-import shutil
 from pathlib import Path
 
-import pytest
-
 import lakana_server
-from lakana_core.config import DatabaseConfig, SecretsConfig
-from lakana_server.app import create_app
-from lakana_server.settings import Settings
-from tests.conftest import _TEST_MASTER_KEY
 
 _FORBIDDEN = {"runcontext", "taskrunid", "claim", "writefence", "workerid"}
 """Names a request must not carry, compared in `_squash` form: `task-run-id`, `task_run_id` and
@@ -28,39 +21,6 @@ _ALLOWED = {"claims"}
 """Names that contain a forbidden one and are not it, compared exactly in `_squash` form. `claims`
 is the body field of `POST /api/v1/ci-trust-rules/explain`: the decoded claims of a CI job's OIDC
 ID token, which an administrator pastes to test the trust rules, not a task run's claim counter."""
-
-
-@pytest.fixture(scope="module")
-def openapi_schema(
-    tmp_path_factory: pytest.TempPathFactory, catalog_template: Path
-) -> dict[str, object]:
-    """Generate the OpenAPI document once for the module.
-
-    Building it walks every route and costs over a second; no test here changes the app, so
-    one app serves them all. The document is read from the app, which is what `/openapi.json`
-    serves, without the lifespan or an HTTP round trip.
-
-    Parameters
-    ----------
-    tmp_path_factory
-        Pytest's session-wide temporary directory factory.
-    catalog_template
-        The session's read-only database with the schema already created.
-
-    Returns
-    -------
-    dict
-        The OpenAPI document of a fully constructed app.
-    """
-    database = tmp_path_factory.mktemp("openapi") / "lakana.db"
-    shutil.copyfile(catalog_template, database)
-    settings = Settings(
-        database=DatabaseConfig(url=f"sqlite:///{database}"),
-        bootstrap_pat_key_id="testkey",
-        bootstrap_pat_secret="testsecret",
-        secrets=SecretsConfig(master_key=_TEST_MASTER_KEY),
-    )
-    return create_app(settings).openapi()
 
 
 def _squash(name: str) -> str:

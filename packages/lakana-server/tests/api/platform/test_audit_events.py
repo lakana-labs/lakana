@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -495,9 +496,11 @@ def test_the_type_filter_accepts_only_the_known_types(client: TestClient, value:
     assert response.status_code == 422, response.text
 
 
-def test_the_type_filter_offers_every_known_type_and_never_unknown(client: TestClient) -> None:
+def test_the_type_filter_offers_every_known_type_and_never_unknown(
+    openapi_schema: dict[str, Any],
+) -> None:
     """OpenAPI lists the filter's values: every type this release writes, not UNKNOWN (#613)."""
-    schema = client.app.openapi()
+    schema = openapi_schema
     [parameter] = [
         p
         for p in schema["paths"]["/api/v1/audit-events"]["get"]["parameters"]

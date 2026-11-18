@@ -947,17 +947,46 @@ def test_list_children_page_refuses_a_backend_that_cannot_stop_after_a_page() ->
 def test_list_children_page_of_a_huge_local_folder_keeps_only_a_page_in_memory(
     config: StorageConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """200,000 entries pass through a heap of the page's size, never a list of them all."""
+    """Entries pass through a heap of the page's size, never a list of them all.
+
+    Every entry, and every name and path it carries, counts itself while it is alive, so the
+    test sees how much of the folder the listing holds at once: a page of 3 holds a few, a
+    listing that kept every entry, name, path or key (a file's key is its name) would hold
+    thousands. That proves the bound with 5,000 files; measuring memory needed a folder big
+    enough to stand out (200,000, which took over a second).
+    """
     (tmp_path / "raw").mkdir()
-    total = 200_000
+    total = 5_000
+    alive = {"now": 0, "most": 0}
+
+    def born() -> None:
+        alive["now"] += 1
+        alive["most"] = max(alive["most"], alive["now"])
+
+    def died() -> None:
+        alive["now"] -= 1
+
+    class _Counted(str):
+        __slots__ = ()
+
+        def __new__(cls, text: str) -> "_Counted":
+            born()
+            return super().__new__(cls, text)
+
+        def __del__(self) -> None:
+            died()
 
     class _Entry:
         def __init__(self, number: int) -> None:
-            self.name = f"d{number:06d}"
-            self.path = f"/nowhere/{self.name}"
+            born()
+            self.name = _Counted(f"f{number:06d}.csv")
+            self.path = _Counted(f"/nowhere/{self.name}")
+
+        def __del__(self) -> None:
+            died()
 
         def is_dir(self, *, follow_symlinks: bool = True) -> bool:
-            return True
+            return False
 
         def is_symlink(self) -> bool:
             return False
@@ -972,20 +1001,30 @@ def test_list_children_page_of_a_huge_local_folder_keeps_only_a_page_in_memory(
         def __exit__(self, *exc: object) -> None:
             return None
 
-    real = os.scandir
+    real_scandir, real_stat = os.scandir, os.stat
+
+    def fake_stat(path: str, *, follow_symlinks: bool = True) -> os.stat_result:
+        if str(path).startswith("/nowhere/"):
+            return os.stat_result((stat.S_IFREG, 0, 0, 1, 0, 0, 7, 0, 0, 0))
+        return real_stat(path, follow_symlinks=follow_symlinks)
+
     monkeypatch.setattr(
-        os, "scandir", lambda path: _Scan() if str(path).endswith("/raw") else real(path)
+        os, "scandir", lambda path: _Scan() if str(path).endswith("/raw") else real_scandir(path)
     )
+    monkeypatch.setattr(os, "stat", fake_stat)
     storage = build_storage(config)
-    tracemalloc.start()
-    try:
-        page = storage.list_children_page("raw", after="d000009/", limit=3)
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
-    assert [entry.name for entry in page] == ["d000010", "d000011", "d000012"]
-    # A list of 200,000 entries alone would take well over 10 MB.
-    assert peak < 2_000_000, peak
+    page = storage.list_children_page("raw", after="f000009.csv", limit=3)
+    assert [(entry.name, entry.size) for entry in page] == [
+        ("f000010.csv", 7),
+        ("f000011.csv", 7),
+        ("f000012.csv", 7),
+    ]
+    assert alive["most"] <= 30, alive["most"]
+    # The count is real: holding every name alone would show all of them.
+    before = alive["now"]
+    held = [entry.name for entry in _Scan()]
+    assert alive["now"] - before == total
+    del held
 
 
 def test_list_children_page_on_s3_asks_for_one_page_and_drops_the_repeated_prefix(

@@ -1,9 +1,4 @@
 # osv-scanner reads this file for ui/package-lock.json (the config next to a scanned lock).
-# One advisory, ignored until a fixed date and tracked by an issue; every other finding fails.
-# Keep it in step with scripts/npm-audit-allowlist.toml, which ignores the same advisory for
-# `npm audit`. Remove both as soon as picomatch releases a fix (Dependabot will bring it).
-
-[[IgnoredVulns]]
-id = "GHSA-fc5q-39xc-vjpf"
-ignoreUntil = 2026-12-01
-reason = "picomatch ReDoS (no fix released): dev tooling only (vite, vitest, knip, dependency-cruiser), globs from this repository, not in the built bundle. Tracked in #709."
+# Each entry is one advisory, ignored until a fixed date and tracked by an issue; every other
+# finding fails. Keep it in step with scripts/npm-audit-allowlist.toml, which ignores the same
+# advisories for `npm audit`. No advisory is ignored at present.

@@ -1,13 +1,14 @@
 """Shared fixtures for lakana-server tests."""
 
 import base64
+import json
 import shutil
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from fastapi import Request
@@ -244,6 +245,57 @@ def settings(tmp_path: Path, catalog_template: Path) -> Settings:
         bootstrap_pat_secret="testsecret",
         secrets=SecretsConfig(master_key=_TEST_MASTER_KEY),
     )
+
+
+@pytest.fixture(scope="session")
+def _openapi_text(tmp_path_factory: pytest.TempPathFactory, catalog_template: Path) -> str:
+    """Build the OpenAPI document of a fully constructed app once per test session.
+
+    Building it walks every route and takes over a second; the document depends only on the
+    code, not on a test's database or state, so one build serves every test that reads it.
+    It is kept as JSON text, so no test can change what the next one reads.
+
+    Parameters
+    ----------
+    tmp_path_factory
+        Pytest's session-wide temporary directory factory.
+    catalog_template
+        The session's read-only database with the schema already created.
+
+    Returns
+    -------
+    str
+        The document, as `/openapi.json` serves it.
+    """
+    database = tmp_path_factory.mktemp("openapi") / "lakana.db"
+    shutil.copyfile(catalog_template, database)
+    settings = Settings(
+        database=DatabaseConfig(url=f"sqlite:///{database}"),
+        bootstrap_pat_key_id="testkey",
+        bootstrap_pat_secret="testsecret",
+        secrets=SecretsConfig(master_key=_TEST_MASTER_KEY),
+    )
+    return json.dumps(create_app(settings).openapi())
+
+
+@pytest.fixture
+def openapi_schema(_openapi_text: str) -> dict[str, Any]:
+    """Provide the app's OpenAPI document, a fresh copy per test.
+
+    Read this instead of `client.app.openapi()` or `GET /openapi.json` when a test only
+    inspects the document: those build it again for each test's own app.
+
+    Parameters
+    ----------
+    _openapi_text
+        The document built once for the session.
+
+    Returns
+    -------
+    dict
+        The OpenAPI document, the test's own to change.
+    """
+    return cast(dict[str, Any], json.loads(_openapi_text))
 
 
 @pytest.fixture

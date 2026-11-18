@@ -704,10 +704,9 @@ UI_GATES = (
     "run build",
     "pytest packages/lakana-server/tests/test_ui_real_build.py",
     "run size",
-    "run prove-gates",
 )
-UI_WORK_JOBS = ("ui-gates", "ui-e2e-smoke", "ui-e2e-server")
-"""The jobs that run the interface's gates side by side; ``ui`` waits for the three (#586)."""
+UI_WORK_JOBS = ("ui-gates", "ui-gate-proofs", "ui-e2e-smoke", "ui-e2e-server")
+"""The jobs that run the interface's gates side by side; ``ui`` waits for the four (#586)."""
 UI_E2E = {
     "ui-e2e-smoke": ("run e2e:smoke -- --shard=${{ matrix.shard }}/2",),
     "ui-e2e-server": ("uv sync --all-packages --locked", "run e2e:server -- --project=chromium"),
@@ -752,18 +751,36 @@ def _first(commands: list[str], text: str) -> int:
 def test_the_ui_gates_job_runs_every_gate() -> None:
     """Every gate of the interface, in the order ``npm --prefix ui run check`` runs them.
 
-    The coverage ratchet reads the report the coverage run has just written, the size check
-    measures the build, and ``prove-gates`` shows that each gate still fails on a violation.
+    The coverage ratchet reads the report the coverage run has just written, and the size
+    check measures the build.
     """
     job = _jobs("ci.yml")["ui-gates"]
     assert job["name"] == "ui (gates)"
     commands = _job_commands("ui-gates")
     found = [_first(commands, gate) for gate in UI_GATES]
     assert found == sorted(found)
+    assert not any("playwright" in c or "run e2e" in c or "prove-gates" in c for c in commands)
+
+
+def test_the_gate_proofs_run_in_their_own_job_on_a_fresh_build() -> None:
+    """``prove-gates`` shows each gate still fails on a violation, beside the gates themselves.
+
+    It runs most gates once more in a scratch copy, so in the gates' job the two together ran
+    over the "ui (*)" budget. Its size probe measures the build, and its copy probe runs jscpd.
+    """
+    job = _jobs("ci.yml")["ui-gate-proofs"]
+    assert job["name"] == "ui (gate proofs)"
+    commands = _job_commands("ui-gate-proofs")
+    install = _first(commands, "npm ci --ignore-scripts --prefix ui")
+    build = _first(commands, "npm --prefix ui run build")
     jscpd = _first(commands, "--prefix tools/jscpd")
-    assert jscpd < found[-1]
-    probe = next(s for s in job["steps"] if "run prove-gates" in str(s.get("run")))
-    assert probe["env"]["GATE_PROBE_DIR"] == "${{ runner.temp }}/gate-probe"
+    probe = _first(commands, "run prove-gates")
+    assert install < build < probe
+    assert jscpd <= probe
+    step = next(s for s in job["steps"] if "run prove-gates" in str(s.get("run")))
+    assert step["env"]["GATE_PROBE_DIR"] == "${{ runner.temp }}/gate-probe"
+    others = UI_GATES[1:8] + UI_GATES[9:]
+    assert not any(gate in c for c in commands for gate in others)
     assert not any("playwright" in c or "run e2e" in c for c in commands)
 
 
@@ -778,10 +795,11 @@ def test_each_playwright_suite_runs_in_its_own_job_on_a_fresh_build(name: str) -
     assert install < build < browser < min(suite)
     assert suite == sorted(suite)
     assert not any(gate in c for c in commands for gate in UI_GATES[1:8] + UI_GATES[9:])
+    assert not any("prove-gates" in c for c in commands)
 
 
 def test_the_two_playwright_suites_and_the_gates_cover_what_one_ui_job_ran() -> None:
-    """Every Playwright suite runs in exactly one job, and none in the gates job."""
+    """Every Playwright suite and the gate proofs run in exactly one job each."""
     everywhere = [c for name in UI_WORK_JOBS for c in _job_commands(name)]
     assert sum("run e2e:smoke" in c for c in everywhere) == 1
     assert sum("run e2e:server" in c for c in everywhere) == 1
@@ -797,7 +815,7 @@ def test_the_smoke_suite_runs_in_two_shards() -> None:
 
 @pytest.mark.parametrize("name", UI_WORK_JOBS)
 def test_each_ui_job_waits_only_for_changes_and_has_a_timeout(name: str) -> None:
-    """The three start together, right after ``changes``, under the same condition as ``ui``."""
+    """The four start together, right after ``changes``, under the same condition as ``ui``."""
     job = _jobs("ci.yml")[name]
     assert job["needs"] == "changes"
     assert job["timeout-minutes"] == 15
@@ -805,8 +823,8 @@ def test_each_ui_job_waits_only_for_changes_and_has_a_timeout(name: str) -> None
     assert job["name"].startswith("ui (")
 
 
-def test_the_required_check_ui_is_green_only_when_all_three_ui_jobs_were() -> None:
-    """``ui`` stays the required check: it waits for the three and names a failed one."""
+def test_the_required_check_ui_is_green_only_when_all_four_ui_jobs_were() -> None:
+    """``ui`` stays the required check: it waits for the four and names a failed one."""
     job = _jobs("ci.yml")["ui"]
     assert set(job["needs"]) == {"changes", *UI_WORK_JOBS}
     assert job["timeout-minutes"] == 5
@@ -822,17 +840,18 @@ def test_the_required_check_ui_is_green_only_when_all_three_ui_jobs_were() -> No
 @pytest.mark.parametrize(
     ("results", "status"),
     [
-        (("success", "success", "success"), 0),
-        (("success", "failure", "success"), 1),
-        (("success", "success", "cancelled"), 1),
-        (("skipped", "success", "success"), 1),
-        (("", "success", "success"), 1),
+        (("success", "success", "success", "success"), 0),
+        (("success", "failure", "success", "success"), 1),
+        (("success", "success", "failure", "success"), 1),
+        (("success", "success", "success", "cancelled"), 1),
+        (("skipped", "success", "success", "success"), 1),
+        (("", "success", "success", "success"), 1),
     ],
 )
 def test_the_ui_check_fails_unless_every_ui_job_succeeded(
-    results: tuple[str, str, str], status: int
+    results: tuple[str, str, str, str], status: int
 ) -> None:
-    """Run the step of ``ui`` with the results its three jobs could have."""
+    """Run the step of ``ui`` with the results its four jobs could have."""
     (step,) = _jobs("ci.yml")["ui"]["steps"]
     env = {**os.environ}
     for name, result in zip(UI_WORK_JOBS, results, strict=True):
@@ -855,8 +874,8 @@ def test_the_ui_jobs_take_node_from_the_nvmrc(name: str) -> None:
     assert "node-version" not in node["with"]
 
 
-def test_the_three_ui_jobs_share_one_scope_step() -> None:
-    """The question "did the interface change?" has one answer, asked the same way three times."""
+def test_the_ui_jobs_share_one_scope_step() -> None:
+    """The question "did the interface change?" has one answer, asked the same way each time."""
     scopes = [
         next(s for s in _jobs("ci.yml")[name]["steps"] if s.get("id") == "scope")
         for name in UI_WORK_JOBS
@@ -1345,6 +1364,7 @@ DRAFT_RUNS = (
     "lint",
     "ui",
     "ui-gates",
+    "ui-gate-proofs",
     "ui-e2e-smoke",
     "ui-e2e-server",
     "unit",
@@ -1401,6 +1421,7 @@ SKIPPED_WHEN_TESTED = (
     "unit",
     "ui",
     "ui-gates",
+    "ui-gate-proofs",
     "ui-e2e-smoke",
     "ui-e2e-server",
     "test",
@@ -1548,6 +1569,7 @@ _FULL_RUN = {
     "lint",
     "ui",
     "ui-gates",
+    "ui-gate-proofs",
     "ui-e2e-smoke",
     "ui-e2e-server",
     "unit",
@@ -1571,6 +1593,7 @@ WHAT_RUNS = {
         "lint",
         "ui",
         "ui-gates",
+        "ui-gate-proofs",
         "ui-e2e-smoke",
         "ui-e2e-server",
         "unit",
@@ -2846,11 +2869,12 @@ def test_every_ci_job_has_a_time_budget() -> None:
     assert "unit (3.14, 4/4)" in names
     assert "test (3.11)" in names
     assert "integration (services, 2/2)" in names
-    assert "docs-examples (3/3)" in names
+    assert "docs-examples (4/4)" in names
     assert "docs-examples" in names
     assert {
         "ui",
         "ui (gates)",
+        "ui (gate proofs)",
         "ui (e2e smoke, 1/2)",
         "ui (e2e smoke, 2/2)",
         "ui (e2e server)",
@@ -2897,15 +2921,18 @@ def test_the_quarantine_job_runs_only_quarantined_tests_and_never_fails_the_run(
             assert "LAKANA_TEST_QUARANTINED" not in str(other), name
 
 
-def test_the_documentation_examples_run_in_three_shards_balanced_by_their_seconds() -> None:
-    """Each shard runs the examples ``scripts/docs_example_shards.py`` gives it (#363)."""
+def test_the_documentation_examples_run_in_four_shards_balanced_by_their_seconds() -> None:
+    """Each shard runs the examples ``scripts/docs_example_shards.py`` gives it (#363).
+
+    Three shards ran up to 9.6 of their 10 minutes, so there are four.
+    """
     job = _jobs("ci.yml")["docs-examples-shard"]
-    assert job["name"] == "docs-examples (${{ matrix.shard }}/3)"
-    assert job["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3]}}
+    assert job["name"] == "docs-examples (${{ matrix.shard }}/4)"
+    assert job["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2, 3, 4]}}
     assert job["needs"] == "changes"
     assert job["timeout-minutes"] <= 25
     step = next(s for s in job["steps"] if "scripts/run_docs_examples.sh" in s.get("run", ""))
-    assert step["env"]["LAKANA_DOCS_SHARD"] == "${{ matrix.shard }}/3"
+    assert step["env"]["LAKANA_DOCS_SHARD"] == "${{ matrix.shard }}/4"
     assert step["run"] == "uv run bash scripts/run_docs_examples.sh"  # no names: the shard picks
     upload = next(s for s in job["steps"] if "upload-artifact@" in str(s.get("uses", "")))
     assert upload["if"] == "always()"
