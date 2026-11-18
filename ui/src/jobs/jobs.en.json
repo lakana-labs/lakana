@@ -4,6 +4,14 @@
   "loadingRun": "Loading the run…",
   "loadingTask": "Loading the task…",
   "toJobs": "Go to Jobs",
+  "tabs": {
+    "label": "Jobs views",
+    "jobs": "Jobs",
+    "runs": "Runs",
+    "deploys": "Deploys",
+    "loadingRuns": "Loading the runs…",
+    "loadingDeploys": "Loading the deploys…"
+  },
   "duration": {
     "tenths": "{{n}} s",
     "seconds": "{{n}} s",
@@ -38,6 +46,7 @@
     "repository": "Repository",
     "definedAt": "lakana.yaml @ {{commit}}",
     "openHost": "open in repository",
+    "deploys": "Deploys of {{repository}}",
     "schedule": "Schedule",
     "paused": "paused",
     "nextRun": "next run {{when}}",

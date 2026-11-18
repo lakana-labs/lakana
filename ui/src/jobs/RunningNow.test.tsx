@@ -43,14 +43,24 @@ function running(over: Partial<RunOut> = {}): RunOut {
  *
  * @param routes - What the server answers.
  * @param query - The search.
+ * @param environment - The environment chosen; all by default.
  * @returns The server, the change handler and a user-event session.
  */
-function renderRunning(routes: Record<string, FakeRoute>, query = "") {
+function renderRunning(
+  routes: Record<string, FakeRoute>,
+  query = "",
+  environment: string | null = null,
+) {
   const server = fakeServer(routes);
   const onChanged = vi.fn();
   const page = (reloadKey: number) => (
     <MemoryRouter>
-      <RunningNow environment={null} query={query} reloadKey={reloadKey} onChanged={onChanged} />
+      <RunningNow
+        environment={environment}
+        query={query}
+        reloadKey={reloadKey}
+        onChanged={onChanged}
+      />
     </MemoryRouter>
   );
   const view = render(page(0));
@@ -200,7 +210,16 @@ describe("RunningNow", () => {
     expect(
       await screen.findByRole("heading", { level: 2, name: "Running now (1+)" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("More runs are running than shown here.")).toBeInTheDocument();
+    expect(screen.getByText(/^More runs are running than shown here\./u)).toBeInTheDocument();
+  });
+
+  it("the more line opens the Runs tab filtered to running", async () => {
+    renderRunning({ [RUNS]: page([running()], "c1") }, "", "prod");
+
+    expect(await screen.findByRole("link", { name: "See every running run" })).toHaveAttribute(
+      "href",
+      "/jobs/runs?environment=prod&status=queued%2Crunning",
+    );
   });
 
   it("says nothing is running", async () => {

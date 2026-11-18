@@ -4,9 +4,13 @@
  * in `prod`, scheduled and notifying Slack through a secret, and the job `orders_hourly` in `dev`,
  * paused; a failed run of seven tasks (one timed out, one never ran because of it, one blocked by
  * a failed check) and a failed run of no job with a run-level message; a running run that ends
- * once cancelled, a running run in `dev` and a queued run of no job; a task's log in three pieces;
- * and what Run now, Pause, Resume schedule, Cancel and Resume answer. What a control changes
- * shows in the reads after it.
+ * once cancelled, a running run in `dev` and a queued run of no job; a run of a selection and a
+ * resume of the failed run on a second page of every run; a task's log in three pieces; the
+ * deploys of `analytics` in `prod` (the current one, an older successful deploy by an account
+ * since deleted, a dry run, a failed deploy and an older rollback) with the current version and
+ * the jobs of each version; and what Run now, Pause, Resume schedule, Cancel, Resume and a
+ * rollback answer, the rollback running at its first read and succeeded at the second. What a
+ * control changes shows in the reads after it.
  *
  * @packageDocumentation
  */
@@ -14,6 +18,8 @@ import type { Page, Route } from "@playwright/test";
 
 import type { EnvironmentOut } from "../src/api/environments";
 import type {
+  DeploymentOut,
+  DeployOut,
   FailedRunOut,
   JobOut,
   RunOut,
@@ -100,6 +106,52 @@ export const ADHOC_REPOSITORY = "finance";
 /** Why {@link ADHOC_FAILED_ID} failed, as the server words it: no task of it failed. */
 export const ADHOC_MESSAGE = "The project could not be built: lakana.yaml, line 4.";
 
+/** A run of a selection of assets, of no job, on the second page of every run. */
+const SELECTION_ID = "93a4b5c6-d7e8-4f9a-8ab1-c2d3e4f5a6b7";
+
+/** A resume of the failed run, on the second page of every run. */
+const RESUME_OF_ID = "a4b5c6d7-e8f9-4a0b-9bc2-d3e4f5a6b7c8";
+
+/** The selection's patterns. */
+export const SELECTION_PATTERNS = ["silver.*", "gold.sales.*"];
+
+/** The deploy whose version is current in {@link ENV}. */
+const CURRENT_DEPLOY_ID = "b5c6d7e8-f9a0-4b1c-8d3e-4f5a6b7c8d9e";
+
+/** An older successful deploy, by an account since deleted: the rollback's target. */
+const OLDER_DEPLOY_ID = "c6d7e8f9-a0b1-4c2d-9e4f-5a6b7c8d9eaf";
+
+/** A newer dry run. */
+const DRY_RUN_ID = "d7e8f9a0-b1c2-4d3e-8f5a-6b7c8d9eafb0";
+
+/** A failed deploy. */
+const FAILED_DEPLOY_ID = "e8f9a0b1-c2d3-4e4f-9a6b-7c8d9eafb0c1";
+
+/** An older successful rollback. */
+const OLD_ROLLBACK_ID = "f9a0b1c2-d3e4-4f5a-8b7c-8d9eafb0c1d2";
+
+/** The rollback a test asks for. */
+const NEW_ROLLBACK_ID = "0a1b2c3d-4e5f-4a6b-9c8d-9eafb0c1d2e3";
+
+/** The commit of the current version, and of the older deploy. */
+const CURRENT_COMMIT = "9c1e5b3a2d4f6e8a0b1c2d3e4f5a6b7c8d9e0f12";
+
+/** The commit of the older deploy, the rollback's target. */
+const OLDER_COMMIT = "4f9d2a7c81b3e5f60718293a4b5c6d7e8f901234";
+
+/** Why the failed deploy failed, as its first line. */
+export const DEPLOY_FAILURE = "lakana.yaml: the job weekly_report selects nothing.";
+
+/** The job only the older version defines. */
+export const OLDER_ONLY_JOB = "weekly_report";
+
+/** The project versions: the current one, the older deploy's and the older rollback's. */
+const VERSIONS = {
+  current: "1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9",
+  older: "2b3c4d5e-6f70-4182-93a4-b5c6d7e8f9a0",
+  rollback: "3c4d5e6f-7081-4293-a4b5-c6d7e8f9a0b1",
+};
+
 /** The path of an environment's part. */
 const AT = `/api/v1/environments/${ENV}`;
 
@@ -135,12 +187,27 @@ const ASSETS = [
   "gold.dim_store",
 ];
 
+/** Every deploy the stubs answer one by one. */
+const DEPLOY_IDS = [
+  CURRENT_DEPLOY_ID,
+  OLDER_DEPLOY_ID,
+  DRY_RUN_ID,
+  FAILED_DEPLOY_ID,
+  OLD_ROLLBACK_ID,
+  NEW_ROLLBACK_ID,
+];
+
 /** The paths these stubs answer, beside those of `session.ts`. */
 export const JOBS_STUBBED = [
   ...STUBBED,
   ENVIRONMENTS_PATH,
   ALL_RUNS,
   FAILED_RUNS,
+  `${AT}/deploys`,
+  `${AT}/deployments`,
+  ...DEPLOY_IDS.map((id) => `${AT}/deploys/${id}`),
+  `${DEV_AT}/deploys`,
+  `${DEV_AT}/deployments`,
   `${AT}/jobs`,
   `${DEV_AT}/jobs`,
   `${DEV_AT}/runs/${ADHOC_FAILED_ID}`,
@@ -299,6 +366,7 @@ function run(id: string, over: Partial<RunOut> = {}): RunOut {
     status: "queued",
     cancel_requested: false,
     triggered_by: "admin",
+    resumed_from_run_id: null,
     selection: {},
     error_message: null,
     created_at: "2026-11-17T09:30:00Z",
@@ -497,6 +565,182 @@ const ADHOC_FAILED = run(ADHOC_FAILED_ID, {
   total_tasks: 0,
 });
 
+/** A run of a selection of assets, of no job, started by hand: it succeeded. */
+const SELECTION = run(SELECTION_ID, {
+  job: null,
+  trigger: null,
+  kind: "selection",
+  status: "succeeded",
+  selection: { patterns: SELECTION_PATTERNS, upstream: true, downstream: true },
+  created_at: "2026-11-16T20:00:00Z",
+  started_at: "2026-11-16T20:00:03Z",
+  finished_at: "2026-11-16T20:07:40Z",
+  tasks: [],
+  total_tasks: 5,
+  ended_tasks: 5,
+});
+
+/** A resume of the failed run: it succeeded. */
+const RESUME_OF = run(RESUME_OF_ID, {
+  kind: "resume",
+  resumed_from_run_id: FAILED_ID,
+  status: "succeeded",
+  created_at: "2026-11-16T19:00:00Z",
+  started_at: "2026-11-16T19:00:02Z",
+  finished_at: "2026-11-16T19:03:10Z",
+  tasks: [],
+  total_tasks: 3,
+  ended_tasks: 3,
+});
+
+/**
+ * A deploy of the repository to {@link ENV}.
+ *
+ * @param id - Its id.
+ * @param over - The fields that differ from a deploy of the current version that succeeded.
+ * @returns The deploy.
+ */
+function deploy(id: string, over: Partial<DeployOut> = {}): DeployOut {
+  return {
+    id,
+    environment: ENV,
+    repository: REPOSITORY,
+    kind: "deploy",
+    status: "succeeded",
+    requested_ref: "main",
+    resolved_sha: CURRENT_COMMIT,
+    project_version_id: VERSIONS.current,
+    error_message: null,
+    created_at: "2026-11-17T08:00:00Z",
+    started_at: "2026-11-17T08:00:02Z",
+    finished_at: "2026-11-17T08:00:40Z",
+    submitted_by: "admin",
+    jobs: null,
+    actions: ["rollback"],
+    ...over,
+  };
+}
+
+/** The deploys of the repository, newest first, before a rollback. */
+const DEPLOYS: readonly DeployOut[] = [
+  deploy(DRY_RUN_ID, {
+    kind: "dry_run",
+    requested_ref: "feature/weekly",
+    resolved_sha: "aa11bb22cc33dd44ee55ff6677889900aabbccdd",
+    project_version_id: null,
+    created_at: "2026-11-17T10:00:00Z",
+    submitted_by: "ana.nowak",
+  }),
+  deploy(CURRENT_DEPLOY_ID),
+  deploy(FAILED_DEPLOY_ID, {
+    status: "failed",
+    resolved_sha: "77ab88cd99ef00aa11bb22cc33dd44ee55ff6677",
+    project_version_id: null,
+    error_message: `${DEPLOY_FAILURE}\nTraceback (most recent call last):`,
+    created_at: "2026-11-16T15:00:00Z",
+    submitted_by: "ana.nowak",
+  }),
+  deploy(OLDER_DEPLOY_ID, {
+    resolved_sha: OLDER_COMMIT,
+    project_version_id: VERSIONS.older,
+    created_at: "2026-11-16T09:00:00Z",
+    submitted_by: null,
+  }),
+  deploy(OLD_ROLLBACK_ID, {
+    kind: "rollback",
+    requested_ref: null,
+    resolved_sha: "0be1f6a9d2c3b4a5968778695a4b3c2d1e0f9a8b",
+    project_version_id: VERSIONS.rollback,
+    created_at: "2026-11-15T09:00:00Z",
+  }),
+];
+
+/** The jobs each version defines, by the deploy that made it. */
+const DEPLOY_JOBS: Readonly<Record<string, readonly string[]>> = {
+  [CURRENT_DEPLOY_ID]: [JOB],
+  [OLDER_DEPLOY_ID]: [JOB, OLDER_ONLY_JOB],
+  [OLD_ROLLBACK_ID]: [JOB],
+  [DRY_RUN_ID]: [JOB],
+  [FAILED_DEPLOY_ID]: [],
+  [NEW_ROLLBACK_ID]: [JOB, OLDER_ONLY_JOB],
+};
+
+/**
+ * The rollback a test asked for: running at its first read, succeeded from the second on.
+ *
+ * @param reads - How often it was read before.
+ * @returns The rollback.
+ */
+function newRollback(reads: number): DeployOut {
+  return deploy(NEW_ROLLBACK_ID, {
+    kind: "rollback",
+    status: reads === 0 ? "running" : "succeeded",
+    requested_ref: null,
+    resolved_sha: OLDER_COMMIT,
+    project_version_id: VERSIONS.older,
+    created_at: "2026-11-17T11:00:00Z",
+    finished_at: reads === 0 ? null : "2026-11-17T11:00:30Z",
+  });
+}
+
+/**
+ * Answers the deploys of {@link ENV}: the list (a rollback first once one was asked for), one
+ * deploy with its jobs, the current versions (the older one once the rollback succeeded) and a
+ * rollback, which the server accepts.
+ *
+ * @param page - The page.
+ */
+async function stubDeploys(page: Page): Promise<void> {
+  let rolledBack = false;
+  let reads = 0;
+  const succeeded = (): boolean => rolledBack && reads > 1;
+  await page.route(
+    (url) => url.pathname === `${AT}/deploys`,
+    (route) => {
+      if (route.request().method() === "POST") {
+        rolledBack = true;
+        return route.fulfill({ status: 202, json: { id: NEW_ROLLBACK_ID, status: "queued" } });
+      }
+      const only = new URL(route.request().url()).searchParams.get("repository");
+      const deploys = [...(rolledBack ? [newRollback(Math.max(reads - 1, 0))] : []), ...DEPLOYS];
+      return route.fulfill({
+        json: deploys.filter((one) => only === null || one.repository === only),
+      });
+    },
+  );
+  await page.route(
+    (url) => url.pathname.startsWith(`${AT}/deploys/`),
+    (route) => {
+      const id = new URL(route.request().url()).pathname.slice(`${AT}/deploys/`.length);
+      if (id === NEW_ROLLBACK_ID) {
+        const answer = newRollback(reads);
+        reads += 1;
+        return route.fulfill({ json: { ...answer, jobs: DEPLOY_JOBS[id] } });
+      }
+      const found = DEPLOYS.find((one) => one.id === id);
+      return found === undefined
+        ? route.fulfill({ status: 404, json: { type: "NotFoundError", detail: "No such deploy." } })
+        : route.fulfill({ json: { ...found, jobs: DEPLOY_JOBS[id] ?? [] } });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === `${AT}/deployments`,
+    (route) => {
+      const current: DeploymentOut = {
+        repository: REPOSITORY,
+        project_version_id: succeeded() ? VERSIONS.older : VERSIONS.current,
+        commit_sha: succeeded() ? OLDER_COMMIT : CURRENT_COMMIT,
+        updated_at: succeeded() ? "2026-11-17T11:00:30Z" : "2026-11-17T08:00:40Z",
+      };
+      return route.fulfill({ json: [current] });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === `${DEV_AT}/deploys` || url.pathname === `${DEV_AT}/deployments`,
+    (route) => route.fulfill({ json: [] }),
+  );
+}
+
 /**
  * The failed runs, newest end first: the job's failed run with its first failed task, and the
  * run of no job.
@@ -532,7 +776,11 @@ function runNow(state: JobsState, id: string): RunOut | undefined {
     [RUNNING_ID]: running(state.cancelled),
     [STARTED_ID]: state.started ? run(STARTED_ID) : undefined,
     [RESUMED_ID]: state.resumed
-      ? run(RESUMED_ID, { kind: "resume", created_at: "2026-11-17T09:40:00Z" })
+      ? run(RESUMED_ID, {
+          kind: "resume",
+          resumed_from_run_id: FAILED_ID,
+          created_at: "2026-11-17T09:40:00Z",
+        })
       : undefined,
   };
   return runs[id];
@@ -581,7 +829,8 @@ function runAnswer(route: Route, state: JobsState): Promise<void> {
  * job with its schedule, pause and resume; its runs newest first (the running run, a run Run now
  * or Resume queued, the failed run); each run, its cancel and its resume (the running run reads
  * cancelled once its cancel was asked for); a task's log, the timed-out task's in three pieces;
- * the query of a failed check's rows; and a 404 with its sentence for {@link MISSING_ID}.
+ * the query of a failed check's rows; a 404 with its sentence for {@link MISSING_ID}; every run,
+ * the ended ones on a second page; and the deploys of {@link ENV} with a rollback.
  *
  * @param page - The page.
  * @returns The mutating requests that reached the stubs, in order, as `METHOD path`.
@@ -640,17 +889,29 @@ export async function stubJobs(page: Page): Promise<string[]> {
     (route) => {
       const query = new URL(route.request().url()).searchParams;
       const statuses = (query.get("status") ?? "").split(",").filter((word) => word !== "");
+      const triggers = (query.get("trigger") ?? "").split(",").filter((word) => word !== "");
       const only = query.get("environment");
-      const runs = [
-        ...[RESUMED_ID, STARTED_ID, RUNNING_ID].map((id) => runNow(state, id)),
-        QUEUED,
-        DEV_RUNNING,
-      ]
+      const job = query.get("job");
+      // The runs that ended come on a second page, behind the cursor `p2`.
+      const second = query.get("cursor") === "p2";
+      const runs = (
+        second
+          ? [SELECTION, RESUME_OF, FAILED, ADHOC_FAILED]
+          : [
+              ...[RESUMED_ID, STARTED_ID, RUNNING_ID].map((id) => runNow(state, id)),
+              QUEUED,
+              DEV_RUNNING,
+            ]
+      )
         .filter((one): one is RunOut => one !== undefined)
         .filter((one) => statuses.length === 0 || statuses.includes(one.status))
+        .filter((one) => triggers.length === 0 || triggers.includes(one.trigger ?? ""))
         .filter((one) => only === null || one.environment === only)
+        .filter((one) => job === null || one.job === job)
         .map((one) => ({ ...one, tasks: [] }));
-      return route.fulfill({ json: { items: runs, next_cursor: null } });
+      // Only the unfiltered list has a second page.
+      const more = !second && statuses.length === 0 && triggers.length === 0 && job === null;
+      return route.fulfill({ json: { items: runs, next_cursor: more ? "p2" : null } });
     },
   );
   await page.route(
@@ -677,5 +938,6 @@ export async function stubJobs(page: Page): Promise<string[]> {
     (url) => url.pathname === `${DEV_AT}/runs/${DEV_RUNNING_ID}`,
     (route) => route.fulfill({ json: DEV_RUNNING }),
   );
+  await stubDeploys(page);
   return sent;
 }

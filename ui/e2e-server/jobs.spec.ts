@@ -9,6 +9,7 @@ import {
   grantOn,
   invitedPerson,
   recordDeployedJob,
+  recordDeployHistory,
   signInLocally,
   skipTheTour,
   skipTheWelcome,
@@ -323,3 +324,161 @@ for (const scheme of ["light", "dark"] as const) {
     });
   }
 }
+
+/** The job only the older version declares. */
+const OLDER_JOB: DeployedJob = {
+  name: "weekly_report",
+  table: "gold.weekly_report",
+  cron: "0 6 * * 1",
+  secret: "alerts-webhook",
+};
+
+/** The older version's commit, and the current one's. */
+const OLDER_COMMIT = "4f9d2a7c81b3e5f60718293a4b5c6d7e8f901234";
+const CURRENT_COMMIT = "9c1e5b3a2d4f6e8a0b1c2d3e4f5a6b7c8d9e0f12";
+
+/**
+ * A new environment with a repository deployed twice: an older version that declares
+ * {@link JOB} and {@link OLDER_JOB}, then the current one, which declares {@link JOB} alone.
+ *
+ * @param request - The request context.
+ * @returns The environment's and the repository's names.
+ */
+async function deployedTwiceOver(
+  request: Request,
+): Promise<{ environment: string; repository: string }> {
+  const environment = uniqueName("deploys");
+  const repository = uniqueName("analytics");
+  await createEnvironment(request, environment);
+  await recordDeployHistory(request, environment, repository, [
+    { commit: OLDER_COMMIT, jobs: [JOB, OLDER_JOB] },
+    { commit: CURRENT_COMMIT, jobs: [JOB] },
+  ]);
+  return { environment, repository };
+}
+
+/**
+ * The older deploy's Roll back to this…, by its accessible name.
+ *
+ * @param page - The page.
+ * @param repository - The repository.
+ * @returns The button.
+ */
+function rollBackButton(page: Page, repository: string): ReturnType<Page["getByRole"]> {
+  return page.getByRole("button", { name: `Roll back to this… (${repository} at 4f9d2a7)` });
+}
+
+test("a reader of the environment sees its deploys with no rollback", async ({
+  browser,
+  request,
+}) => {
+  const { environment, repository } = await deployedTwiceOver(request);
+  const { page } = await invitedPerson(browser, request, (name) =>
+    grantOn(request, name, "READ_ENVIRONMENT", environment),
+  );
+  await skipTheWelcome(page);
+
+  await page.goto(`/jobs/deploys?environment=${environment}`);
+  const region = page.getByRole("region", { name: `Deploys of ${environment}` });
+  await expect(region.getByRole("row")).toHaveCount(3);
+  await expect(region.getByRole("row").nth(1)).toContainText("9c1e5b3 · current");
+  await expect(region.getByRole("button")).toHaveCount(0);
+  await expect(rollBackButton(page, repository)).toHaveCount(0);
+  await page.context().close();
+});
+
+test("the Runs tab lists a run queued through Run now", async ({ browser, request }) => {
+  const { environment, address } = await deployed(request);
+  const page = await administrator(browser, request);
+  try {
+    await openJob(page, address);
+    await page.getByRole("button", { name: "Run now" }).click();
+    await expect(runFacts(page)).toContainText("Queued");
+
+    await page.goto(`/jobs/runs?environment=${environment}`);
+    const region = page.getByRole("region", { name: "Runs listed" });
+    await expect(region.getByRole("row")).toHaveCount(2);
+    await expect(region.getByRole("row").nth(1)).toContainText("Queued");
+    await expect(region.getByRole("link", { name: JOB.name })).toBeVisible();
+    await expect(region.getByRole("row").nth(1)).toContainText("By hand");
+  } finally {
+    await cancelRuns(request, environment);
+  }
+  await page.context().close();
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [1280, 320]) {
+    test(`axe finds nothing on the real Runs and Deploys tabs (${scheme}, ${String(width)} px)`, async ({
+      browser,
+      browserName,
+      request,
+    }) => {
+      test.skip(browserName !== "chromium", "axe runs in Chromium only");
+      const { environment, repository } = await deployedTwiceOver(request);
+      await skipTheTour(request);
+      const page = await freshPage(browser);
+      await page.setViewportSize({ width, height: width === 320 ? 640 : 800 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await signInLocally(page, request);
+      const overflow = (): Promise<number> =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+
+      await page.goto(`/jobs/runs?environment=${environment}`);
+      await expect(page.getByText("No runs match these filters.")).toBeVisible();
+      expect(await violations(page), "the Runs tab").toEqual([]);
+      expect(await overflow()).toBeLessThanOrEqual(0);
+
+      await page.goto(`/jobs/deploys?environment=${environment}`);
+      await expect(rollBackButton(page, repository)).toBeVisible();
+      expect(await violations(page), "the Deploys tab").toEqual([]);
+      expect(await overflow()).toBeLessThanOrEqual(0);
+
+      await rollBackButton(page, repository).click();
+      const dialog = page.getByRole("dialog", {
+        name: `Roll back ${repository} in ${environment}?`,
+      });
+      await expect(dialog.getByRole("button", { name: "Roll back" })).toBeVisible();
+      expect(await violations(page), "the rollback dialog").toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await page.context().close();
+    });
+  }
+}
+
+// Last in the file: the rollback it queues stays queued while no worker runs here.
+test("an administrator rolls back to the older version, naming the jobs it changes", async ({
+  browser,
+  request,
+}) => {
+  const { environment, repository } = await deployedTwiceOver(request);
+  const page = await administrator(browser, request);
+
+  await page.goto(`/jobs/deploys?environment=${environment}`);
+  const region = page.getByRole("region", { name: `Deploys of ${environment}` });
+  await expect(region.getByRole("row")).toHaveCount(3);
+  await expect(region.getByRole("row").nth(1)).toContainText("9c1e5b3 · current");
+  await expect(region.getByRole("button")).toHaveCount(1);
+  const button = rollBackButton(page, repository);
+  await expect(region.getByRole("row").nth(2)).toContainText("4f9d2a7");
+  await expect(region.getByRole("row").nth(2)).toContainText("an account since deleted");
+
+  await button.click();
+  const dialog = page.getByRole("dialog", { name: `Roll back ${repository} in ${environment}?` });
+  await expect(dialog.getByRole("list", { name: "Jobs the rollback changes" })).toBeVisible();
+  await expect(dialog.getByRole("listitem")).toHaveText([
+    JOB.name,
+    `${OLDER_JOB.name}: back with the rollback`,
+  ]);
+  await dialog.getByRole("button", { name: "Roll back" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(button).toBeFocused();
+  // The server runs no worker: the rollback stays queued, and the note says it is rolling back.
+  await expect(
+    page.getByText(`Rolling back ${repository} in ${environment} to 4f9d2a7…`),
+  ).toBeVisible();
+  await page.context().close();
+});

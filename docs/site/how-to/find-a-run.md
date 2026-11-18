@@ -59,6 +59,17 @@ opens the task that failed first, and a task's name opens its page: its attempts
 processor time and bytes each used, and its log, which the page follows while the task runs and
 offers as **Save log** once it is complete.
 
+The **Runs** tab of the Jobs page lists every run of the environments you may read, newest first,
+50 at a time with **Show more**. Narrow it by **Environment**, **State** (**Queued or running** is
+one choice), **Trigger**, **Job** (an exact name, applied when you press Enter or leave the
+field) and **Period** (the last 30 days unless you choose another); the address keeps each
+filter, so Back and a bookmark bring them back. A run you started from the command line for a
+selection of assets says `selection` and its patterns, with `+upstream` and `+downstream`; a
+resume says which run it continues and links to it. The tab starts no run: start a selection with
+`lakana runs start`. The list is read again every 30 seconds until you show more; then **Read
+again** starts over from the first page. **See every running run**, under **Running now** when
+more run than it shows, opens the tab filtered to queued and running runs.
+
 ## See what a task used
 
 `lakana runs show RUN_ID --env dev` ends the task table with a block that has one line per attempt,
@@ -107,3 +118,11 @@ you may query at once.
 ```bash
 lakana deploys list --env dev --repo analytics --limit 20
 ```
+
+In the web interface, the **Deploys** tab of the Jobs page lists one environment's deploys at a
+time, newest first, 50 at a time with **Show more**: the result, the kind, the commit, the
+repository, who asked for it and when, and the first line of a failed deploy's message. The
+repository's current version says `current`. Choose the repository under **Repository**; a job's
+page links to its repository's deploys from its facts. **Roll back to this…** beside an earlier
+successful deploy rolls the repository back to it (see
+[Deploy, dry-run, roll back](projects.md#deploy-dry-run-roll-back)).

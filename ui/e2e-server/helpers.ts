@@ -789,16 +789,20 @@ function sqliteTime(at: Date): string {
   return `${at.toISOString().slice(0, 23).replace("T", " ")}000`;
 }
 
+/** One project version of a repository, as {@link recordDeployHistory} records it. */
+export interface DeployedVersion {
+  /** The full commit the version was deployed from. */
+  readonly commit: string;
+  /** The jobs the version declares, each with the table it builds and runs. */
+  readonly jobs: readonly DeployedJob[];
+}
+
 /**
  * Registers a repository through the API and records it as deployed in an environment with one
  * job: a project version whose manifest builds one table and declares the job (selecting that
- * table, on a schedule, notifying Slack through a secret), the environment's pointer to that
- * version, and the job's schedule row, as a deploy would leave them. A deploy needs a git host
- * and a worker, which this suite has neither of; like {@link recordOrphanedVersion}, the rows
- * are written straight into the server's SQLite file (`ui/.e2e-server/lakana.db`), the columns
- * those of `JobVersion`, `EnvironmentDeployment` (`models/deploy.py`) and `JobSchedule`
- * (`models/job.py`), and the API reads them back as it would a real deploy's. No run principal
- * is bound, so a start by hand in an unprotected environment runs as the person who starts it.
+ * table, on a schedule, notifying Slack through a secret), its succeeded deploy, the
+ * environment's pointer to that version, and the job's schedule row, as a deploy would leave
+ * them. It is {@link recordDeployHistory} of one version.
  *
  * @param request - The request context.
  * @param environment - The environment; unprotected.
@@ -812,6 +816,36 @@ export async function recordDeployedJob(
   repository: string,
   job: DeployedJob,
 ): Promise<void> {
+  await recordDeployHistory(request, environment, repository, [
+    { commit: "b".repeat(40), jobs: [job] },
+  ]);
+}
+
+/**
+ * Registers a repository through the API and records its deploys to an environment, oldest
+ * first: for each version a project version whose manifest builds its jobs' tables and declares
+ * its jobs (each selecting its table, on a schedule, notifying Slack through a secret) and a
+ * succeeded deploy of its commit that made it, an hour apart; the last version is current, with
+ * the environment's pointer to it and its jobs' schedule rows. A deploy needs a git host and a
+ * worker, which this suite has neither of; like {@link recordOrphanedVersion}, the rows are
+ * written straight into the server's SQLite file (`ui/.e2e-server/lakana.db`), the columns those
+ * of `JobVersion`, `DeployRun`, `EnvironmentDeployment` (`models/deploy.py`) and `JobSchedule`
+ * (`models/job.py`), and the API reads them back as it would real deploys'. The deploys name no
+ * person (as one whose account was deleted), and no run principal is bound, so a start by hand in
+ * an unprotected environment runs as the person who starts it.
+ *
+ * @param request - The request context.
+ * @param environment - The environment; unprotected.
+ * @param repository - The repository's name; unique in the run.
+ * @param versions - The versions, oldest first; at least one.
+ * @returns Resolves once the deploys are recorded.
+ */
+export async function recordDeployHistory(
+  request: APIRequestContext,
+  environment: string,
+  repository: string,
+  versions: readonly DeployedVersion[],
+): Promise<void> {
   await create(request, "/api/v1/repositories", {
     name: repository,
     kind: "https",
@@ -823,56 +857,83 @@ export async function recordDeployedJob(
       (database.prepare(sql).get(name) as { id: string }).id;
     const repositoryId = ids("SELECT id FROM repositories WHERE name = ?", repository);
     const environmentId = ids("SELECT id FROM environments WHERE name = ?", environment);
-    const versionId = randomUUID().replaceAll("-", "");
-    const now = new Date();
-    const manifest = {
-      version: 1,
-      assets: [{ table: job.table, references: [] }],
-      edges: [],
-      external_inputs: [],
-      jobs: {
-        [job.name]: {
-          select: [job.table],
-          schedule: { cron: job.cron, timezone: "Europe/Berlin" },
-          notify: { webhook: job.secret, format: "slack" },
-        },
-      },
-    };
-    database
-      .prepare(
-        `INSERT INTO job_versions (id, repository_id, environment_id, commit_sha, manifest_json,
-           code_uri, code_sha256, created_at)
-         VALUES (?, ?, ?, ?, ?, 's3://bucket/code.tar.gz', ?, ?)`,
-      )
-      .run(
-        versionId,
-        repositoryId,
-        environmentId,
-        "b".repeat(40),
-        JSON.stringify(manifest),
-        "0".repeat(64),
-        sqliteTime(now),
-      );
+    const now = Date.now();
+    let versionId = "";
+    versions.forEach((version, index) => {
+      versionId = randomUUID().replaceAll("-", "");
+      const at = sqliteTime(new Date(now - (versions.length - index) * 3_600_000));
+      const manifest = {
+        version: 1,
+        assets: version.jobs.map((job) => ({ table: job.table, references: [] })),
+        edges: [],
+        external_inputs: [],
+        jobs: Object.fromEntries(
+          version.jobs.map((job) => [
+            job.name,
+            {
+              select: [job.table],
+              schedule: { cron: job.cron, timezone: "Europe/Berlin" },
+              notify: { webhook: job.secret, format: "slack" },
+            },
+          ]),
+        ),
+      };
+      database
+        .prepare(
+          `INSERT INTO job_versions (id, repository_id, environment_id, commit_sha, manifest_json,
+             code_uri, code_sha256, created_at)
+           VALUES (?, ?, ?, ?, ?, 's3://bucket/code.tar.gz', ?, ?)`,
+        )
+        .run(
+          versionId,
+          repositoryId,
+          environmentId,
+          version.commit,
+          JSON.stringify(manifest),
+          "0".repeat(64),
+          at,
+        );
+      // The enums are stored by their names (`DeployKind`, `DeployStatus`).
+      database
+        .prepare(
+          `INSERT INTO deploy_runs (id, environment_id, repository_id, principal_id, kind,
+             requested_ref, resolved_sha, status, job_version_id, created_at, started_at,
+             finished_at)
+           VALUES (?, ?, ?, NULL, 'DEPLOY', 'main', ?, 'SUCCEEDED', ?, ?, ?, ?)`,
+        )
+        .run(
+          randomUUID().replaceAll("-", ""),
+          environmentId,
+          repositoryId,
+          version.commit,
+          versionId,
+          at,
+          at,
+          at,
+        );
+    });
     database
       .prepare(
         `INSERT INTO environment_deployments (environment_id, repository_id,
            current_job_version_id, run_as_principal_id, updated_at)
          VALUES (?, ?, ?, NULL, ?)`,
       )
-      .run(environmentId, repositoryId, versionId, sqliteTime(now));
+      .run(environmentId, repositoryId, versionId, sqliteTime(new Date(now)));
     // The scheduler would work the next time out; any time ahead does for a server with no worker.
-    database
-      .prepare(
-        `INSERT INTO job_schedules (id, environment_id, repository_id, job, next_fire_at, paused)
-         VALUES (?, ?, ?, ?, ?, 0)`,
-      )
-      .run(
-        randomUUID().replaceAll("-", ""),
-        environmentId,
-        repositoryId,
-        job.name,
-        sqliteTime(new Date(now.getTime() + 86_400_000)),
-      );
+    for (const job of versions.at(-1)?.jobs ?? []) {
+      database
+        .prepare(
+          `INSERT INTO job_schedules (id, environment_id, repository_id, job, next_fire_at, paused)
+           VALUES (?, ?, ?, ?, ?, 0)`,
+        )
+        .run(
+          randomUUID().replaceAll("-", ""),
+          environmentId,
+          repositoryId,
+          job.name,
+          sqliteTime(new Date(now + 86_400_000)),
+        );
+    }
   } finally {
     database.close();
   }
