@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { aDeploy, aJob, DEPLOY_ID } from "../test/jobs";
 import { expectPending, held } from "../test/pending";
 import { type FakeRoute, fakeServer } from "../test/server";
+import type { RollbackTarget } from "./rollbackable";
 import { RollbackDialog } from "./RollbackDialog";
 
 const ENV = "/api/v1/environments/prod";
@@ -44,7 +45,7 @@ function renderDialog(routes: Record<string, FakeRoute>, protectedEnvironment = 
   render(
     <RollbackDialog
       environment="prod"
-      deploy={aDeploy()}
+      deploy={aDeploy() as RollbackTarget}
       protectedEnvironment={protectedEnvironment}
       onAccepted={onAccepted}
       onCancel={onCancel}
@@ -74,7 +75,7 @@ describe("RollbackDialog", () => {
     render(
       <RollbackDialog
         environment="prod"
-        deploy={aDeploy({ submitted_by: null })}
+        deploy={aDeploy({ submitted_by: null }) as RollbackTarget}
         protectedEnvironment={false}
         onAccepted={vi.fn()}
         onCancel={vi.fn()}

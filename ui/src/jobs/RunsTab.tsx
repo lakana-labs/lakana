@@ -187,7 +187,7 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
           <RunRow key={run.id} run={run} />
         ))}
       </ViewList>
-      {loaded && rows.length === 0 && filter.narrowed && (
+      {loaded && rows.length === 0 && !pages.hasMore && filter.narrowed && (
         <Button
           className="button"
           onPress={() => {

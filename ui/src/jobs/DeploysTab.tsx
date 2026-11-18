@@ -8,7 +8,7 @@ import { type JSX, lazy, Suspense, useCallback, useEffect, useRef, useState } fr
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
-import { type DeployOut, listDeployments, listDeploys } from "../api/jobs";
+import { listDeployments, listDeploys } from "../api/jobs";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
@@ -16,10 +16,10 @@ import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
-import { deployCommit, DeployRow } from "./DeployRow";
+import { DeployRow } from "./DeployRow";
 import "./deployStrings";
 import { Environments, type SomeEnvironments } from "./Environments";
-import { mayRollBackTo } from "./rollbackable";
+import { mayRollBackTo, type RollbackTarget } from "./rollbackable";
 import { RollbackNote } from "./RollbackNote";
 import { useJobsFilter } from "./useJobsFilter";
 
@@ -83,7 +83,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   if (repository !== null && !current.has(repository)) {
     repositories.push(repository);
   }
-  const [rolling, setRolling] = useState<DeployOut | null>(null);
+  const [rolling, setRolling] = useState<RollbackTarget | null>(null);
   const [rolled, setRolled] = useState<Rolled | null>(null);
   const { reload: reloadPages } = pages;
   const { reload: reloadDeployments } = deployments;
@@ -93,25 +93,23 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   }, [reloadPages, reloadDeployments]);
   const area = useRef<HTMLDivElement>(null);
   const note = useRef<HTMLDivElement>(null);
-  const inside = useRef(false);
+  // The element of the list that last had the focus.
+  const last = useRef<Element | null>(null);
   useEffect(() => {
     const element = area.current;
-    const onFocusIn = (): void => {
-      inside.current = true;
-    };
-    const onFocusOut = (event: FocusEvent): void => {
-      inside.current = element?.contains(event.relatedTarget as Node | null) === true;
+    const onFocusIn = (event: FocusEvent): void => {
+      last.current = event.target as Element | null;
     };
     element?.addEventListener("focusin", onFocusIn);
-    element?.addEventListener("focusout", onFocusOut);
     return () => {
       element?.removeEventListener("focusin", onFocusIn);
-      element?.removeEventListener("focusout", onFocusOut);
     };
   }, []);
-  // Only once the rows change: a dialog that closes hands the focus back to its button itself.
+  // Once the rows change: a row's button that left the list with the focus hands it to the note.
+  // A dialog that closes hands the focus back to its button itself.
   useEffect(() => {
-    if (inside.current && document.activeElement === document.body) {
+    const lost = last.current;
+    if (lost !== null && !lost.isConnected && document.activeElement === document.body) {
       note.current?.focus();
     }
   }, [pages.items]);
@@ -215,7 +213,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
               setRolled({
                 id,
                 repository: rolling.repository,
-                commit: deployCommit(rolling) ?? "",
+                commit: rolling.resolved_sha.slice(0, 7),
               });
               setRolling(null);
             }}

@@ -105,12 +105,22 @@ describe("DeployRow", () => {
     expect(within(row).queryByRole("button")).toBeNull();
   });
 
+  it("names a deploy whose commit is not known by its repository alone", () => {
+    const row = renderRow(aDeploy({ resolved_sha: null, requested_ref: null }), false, vi.fn());
+
+    expect(within(row).getByRole("button")).toHaveAccessibleName(
+      "Roll back to this… (analytics at )",
+    );
+  });
+
   it("offers Roll back to this… named by the repository and the commit", async () => {
     const onRollBack = vi.fn();
     const row = renderRow(aDeploy(), false, onRollBack);
 
-    const button = within(row).getByRole("button", { name: "Roll back analytics to 4f9d2a7" });
-    expect(button).toHaveTextContent("Roll back to this…");
+    const button = within(row).getByRole("button", {
+      name: "Roll back to this… (analytics at 4f9d2a7)",
+    });
+    expect(button).toHaveTextContent(/^Roll back to this…/u);
     await userEvent.click(button);
     expect(onRollBack).toHaveBeenCalledTimes(1);
   });

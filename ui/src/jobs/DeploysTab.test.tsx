@@ -154,14 +154,9 @@ describe("DeploysTab", () => {
       expect(within(region).getAllByRole("button")).toHaveLength(2);
     });
 
-    expect(
-      within(region)
-        .getAllByRole("button")
-        .map((button) => button.getAttribute("aria-label")),
-    ).toEqual(["Roll back analytics to 4f9d2a7", "Roll back analytics to 0be1f6a"]);
-    for (const button of within(region).getAllByRole("button")) {
-      expect(button).toHaveTextContent("Roll back to this…");
-    }
+    const buttons = within(region).getAllByRole("button");
+    expect(buttons[0]).toHaveAccessibleName("Roll back to this… (analytics at 4f9d2a7)");
+    expect(buttons[1]).toHaveAccessibleName("Roll back to this… (analytics at 0be1f6a)");
   });
 
   it("marks nothing current and offers no rollback while the current versions cannot be read", async () => {
@@ -182,7 +177,9 @@ describe("DeploysTab", () => {
     });
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(
-      await within(region).findByRole("button", { name: "Roll back analytics to 4f9d2a7" }),
+      await within(region).findByRole("button", {
+        name: "Roll back to this… (analytics at 4f9d2a7)",
+      }),
     ).toBeInTheDocument();
   });
 
@@ -223,7 +220,9 @@ describe("DeploysTab", () => {
       },
     });
 
-    const button = await screen.findByRole("button", { name: "Roll back analytics to 4f9d2a7" });
+    const button = await screen.findByRole("button", {
+      name: "Roll back to this… (analytics at 4f9d2a7)",
+    });
     await user.click(button);
     const dialog = await screen.findByRole("dialog", { name: "Roll back analytics in prod?" });
     expect(dialog).toHaveTextContent("prod is protected.");
@@ -252,7 +251,9 @@ describe("DeploysTab", () => {
     await waitFor(() => {
       expect(screen.getAllByRole("row")).toHaveLength(4);
     });
-    expect(screen.queryByRole("button", { name: "Roll back analytics to 4f9d2a7" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Roll back to this… (analytics at 4f9d2a7)" }),
+    ).toBeNull();
     await waitFor(() => {
       expect(
         screen.getByText("Rolled back analytics in prod to 4f9d2a7.").closest("[tabindex]"),

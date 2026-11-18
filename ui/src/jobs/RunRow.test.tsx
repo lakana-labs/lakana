@@ -87,7 +87,9 @@ describe("RunRow", () => {
     expect(selection).toHaveTextContent("selection silver.* gold.sales +upstream +downstream");
     selection.remove();
 
-    const bare = renderRow(aJobRun({ kind: "selection", selection: { patterns: "silver.*" } }));
+    const bare = renderRow(
+      aJobRun({ job: null, kind: "selection", selection: { patterns: "silver.*" } }),
+    );
     expect(bare).toHaveTextContent("selection");
     expect(bare).not.toHaveTextContent("+upstream");
     bare.remove();
@@ -95,12 +97,15 @@ describe("RunRow", () => {
     const resume = renderRow(
       aJobRun({ kind: "resume", resumed_from_run_id: "0a1b2c3d-4e5f-4061-8293-a4b5c6d7e8f9" }),
     );
-    const origin = within(resume).getByRole("link", {
-      name: "Open run 0a1b2c3d, which this run resumes",
-    });
-    expect(origin).toHaveTextContent("resume of 0a1b2c3d");
+    const origin = within(resume).getByRole("link", { name: "resume of 0a1b2c3d" });
     expect(origin).toHaveAttribute("href", "/jobs/prod/runs/0a1b2c3d-4e5f-4061-8293-a4b5c6d7e8f9");
     resume.remove();
+
+    // A job's run is a selection too, and says what started it.
+    const ofJob = renderRow(aJobRun({ kind: "selection", trigger: "manual" }));
+    expect(ofJob).toHaveTextContent("By hand");
+    expect(ofJob).not.toHaveTextContent("selection");
+    ofJob.remove();
 
     // A resume whose origin the server does not name says its trigger.
     const orphan = renderRow(aJobRun({ kind: "resume", resumed_from_run_id: null }));

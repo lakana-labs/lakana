@@ -21,7 +21,7 @@ import "./deployStrings";
  * @param deploy - The deploy.
  * @returns The commit, or null.
  */
-export function deployCommit(deploy: DeployOut): string | null {
+function deployCommit(deploy: DeployOut): string | null {
   return deploy.resolved_sha?.slice(0, 7) ?? deploy.requested_ref;
 }
 
@@ -63,7 +63,7 @@ export function DeployRow({ deploy, current, onRollBack }: DeployRowProps): JSX.
         )}
       </td>
       <td>{t(`jobs.deploys.kinds.${deploy.kind}`)}</td>
-      <td>
+      <td className="jobs-commit-cell">
         {commit === null ? (
           t("jobs.deploys.noCommit")
         ) : (
@@ -90,15 +90,15 @@ export function DeployRow({ deploy, current, onRollBack }: DeployRowProps): JSX.
       </td>
       <td>
         {onRollBack !== null && (
-          <Button
-            className="button"
-            aria-label={t("jobs.deploys.rollBackName", {
-              repository: deploy.repository,
-              commit: commit ?? "",
-            })}
-            onPress={onRollBack}
-          >
-            {t("jobs.deploys.rollBack")}
+          <Button className="button" onPress={onRollBack}>
+            {t("jobs.deploys.rollBack")}{" "}
+            {/* The name says which deploy, after the visible words (WCAG 2.5.3). */}
+            <span className="visually-hidden">
+              {t("jobs.deploys.rollBackWhat", {
+                repository: deploy.repository,
+                commit: commit ?? "",
+              })}
+            </span>
           </Button>
         )}
       </td>

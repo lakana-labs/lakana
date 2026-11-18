@@ -8,7 +8,7 @@ import { type JSX, useCallback } from "react";
 import { Button, Heading } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { type DeployOut, getDeploy, listJobs, rollBack } from "../api/jobs";
+import { getDeploy, listJobs, rollBack } from "../api/jobs";
 import { ConfirmRow, useConfirm } from "../catalog/actions/ConfirmRow";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useAfter } from "../queries/useAfter";
@@ -17,8 +17,8 @@ import { EnvironmentName } from "../shell/EnvironmentPicker";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { useAttempt } from "../sign-in/Attempt";
-import { deployCommit } from "./DeployRow";
 import "./deployStrings";
+import type { RollbackTarget } from "./rollbackable";
 import { rollbackJobs } from "./rollbackJobs";
 
 /** Properties of {@link RollbackDialog}. */
@@ -26,7 +26,7 @@ export interface RollbackDialogProps {
   /** The environment. */
   readonly environment: string;
   /** The deploy to roll back to: an earlier successful one, with a commit. */
-  readonly deploy: DeployOut;
+  readonly deploy: RollbackTarget;
   /** Whether the environment is protected. */
   readonly protectedEnvironment: boolean;
   /** Told the id of the rollback the server accepted; the dialog then closes. */
@@ -88,14 +88,13 @@ export function RollbackDialog({
     ),
   );
   const attempt = useAttempt();
-  const commit = deployCommit(deploy) ?? "";
+  const commit = deploy.resolved_sha.slice(0, 7);
   const confirm = useConfirm({
     busy: attempt.busy,
     disabled: false,
     onConfirm: () => {
       attempt.run(async () => {
-        // The deploy offers the rollback only with its commit.
-        const accepted = await rollBack(environment, repository, deploy.resolved_sha ?? "");
+        const accepted = await rollBack(environment, repository, deploy.resolved_sha);
         onAccepted(accepted.id);
       });
     },

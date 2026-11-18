@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
+import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { RunOut } from "../api/jobs";
@@ -53,6 +54,23 @@ export function RunCells({ run }: RunCellsProps): JSX.Element {
       <td>
         <EnvironmentLabel environment={run.environment} />
       </td>
+    </>
+  );
+}
+
+/**
+ * The header cells over {@link RunCells}: State, Job and Environment, in the Jobs list's words
+ * (its sections register them).
+ *
+ * @returns The three header cells.
+ */
+export function RunHeadCells(): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <>
+      <th scope="col">{t("jobs.list.columns.state")}</th>
+      <th scope="col">{t("jobs.list.columns.job")}</th>
+      <th scope="col">{t("jobs.list.columns.environment")}</th>
     </>
   );
 }

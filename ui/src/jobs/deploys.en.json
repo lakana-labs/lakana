@@ -26,7 +26,7 @@
   "deletedAccount": "an account since deleted",
   "failedWithout": "The deploy failed without saying why.",
   "rollBack": "Roll back to this…",
-  "rollBackName": "Roll back {{repository}} to {{commit}}",
+  "rollBackWhat": "({{repository}} at {{commit}})",
   "dialog": {
     "title": "Roll back {{repository}} in {{environment}}?",
     "reading": "Reading the jobs this changes…",

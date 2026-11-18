@@ -5,6 +5,9 @@
  */
 import type { DeployOut } from "../api/jobs";
 
+/** A deploy a repository can be rolled back to: one with the commit it deployed. */
+export type RollbackTarget = DeployOut & { readonly resolved_sha: string };
+
 /**
  * Whether Roll back to this… stands beside a deploy: the server lists `rollback` for the reader
  * (`DEPLOY` in the environment, never a CI token), it deployed or rolled back to a commit, it
@@ -15,7 +18,10 @@ import type { DeployOut } from "../api/jobs";
  * @param current - Each deployed repository's current project version.
  * @returns True when the rollback is offered.
  */
-export function mayRollBackTo(deploy: DeployOut, current: ReadonlyMap<string, string>): boolean {
+export function mayRollBackTo(
+  deploy: DeployOut,
+  current: ReadonlyMap<string, string>,
+): deploy is RollbackTarget {
   const now = current.get(deploy.repository);
   return (
     deploy.actions.includes("rollback") &&

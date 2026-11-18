@@ -34,7 +34,6 @@
   "readAgain": "Read again",
   "selection": "selection {{patterns}}",
   "resumeOf": "resume of {{id}}",
-  "resumeOfName": "Open run {{id}}, which this run resumes",
   "ofTasks": "{{ended}} of {{total}} tasks",
   "failedOf": "{{failed}} of {{total}} tasks failed",
   "tasks_one": "{{count}} task",

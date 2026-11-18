@@ -25,10 +25,13 @@ export function rollbackJobs(
 ): readonly RollbackJob[] {
   const now = new Set(current);
   const then = new Set(target);
-  return [...new Set([...current, ...target])]
-    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-    .map((job) => ({
-      job,
-      change: now.has(job) ? (then.has(job) ? "kept" : "removed") : "back",
-    }));
+  return (
+    [...new Set([...current, ...target])]
+      // The names are distinct, so none compares equal.
+      .sort((a, b) => (a < b ? -1 : 1))
+      .map((job) => ({
+        job,
+        change: now.has(job) ? (then.has(job) ? "kept" : "removed") : "back",
+      }))
+  );
 }

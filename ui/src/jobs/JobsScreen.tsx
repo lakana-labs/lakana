@@ -6,11 +6,10 @@
  */
 import { type JSX, lazy, type ReactNode, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { Route, Routes, useSearchParams } from "react-router";
+import { NavLink, Route, Routes, useSearchParams } from "react-router";
 
 import { NotFound } from "../shell/NotFound";
 import { Page } from "../shell/Page";
-import { SectionTabs } from "../shell/SectionTabs";
 import "./jobs.css";
 import "./jobStrings";
 import { deploysPath, jobsListPath, runsTabPath } from "./paths";
@@ -38,7 +37,8 @@ interface TabPageProps {
  * A tab of the area, at `/jobs`, `/jobs/runs` or `/jobs/deploys`: its heading at once, so the
  * focus the shell puts on it after a move survives the tab's own chunk, the row of tabs Jobs,
  * Runs and Deploys (each keeping the address's environment), and the tab under it. Only these
- * three pages show the row; a detail page has its breadcrumb instead.
+ * three pages show the row; a detail page has its breadcrumb instead. The three are wider than a
+ * detail page, so that their tables fit beside the sidebar from a 1280 px window on.
  *
  * @param props - The title, the skeleton's words and the content.
  * @param props.title - The page's heading.
@@ -51,17 +51,24 @@ function TabPage({ title, loading, children }: TabPageProps): JSX.Element {
   const [params] = useSearchParams();
   const environment = params.get("environment");
   return (
-    <Page title={title}>
-      <SectionTabs
-        label={t("jobs.tabs.label")}
-        tabs={[
-          { to: jobsListPath(environment), label: t("jobs.tabs.jobs") },
-          { to: runsTabPath({ environment }), label: t("jobs.tabs.runs") },
-          { to: deploysPath(environment), label: t("jobs.tabs.deploys") },
-        ]}
-      />
-      <Suspense fallback={<Reading label={loading} />}>{children}</Suspense>
-    </Page>
+    <div className="jobs-tab-page">
+      <Page title={title}>
+        {/* The row of `SectionTabs`, written out here: shared with a table's page, that component
+          would be a chunk of its own, which the first load would have to name. */}
+        <nav className="tabs" aria-label={t("jobs.tabs.label")}>
+          <NavLink className="tab" to={jobsListPath(environment)} end>
+            {t("jobs.tabs.jobs")}
+          </NavLink>
+          <NavLink className="tab" to={runsTabPath({ environment })} end>
+            {t("jobs.tabs.runs")}
+          </NavLink>
+          <NavLink className="tab" to={deploysPath(environment)} end>
+            {t("jobs.tabs.deploys")}
+          </NavLink>
+        </nav>
+        <Suspense fallback={<Reading label={loading} />}>{children}</Suspense>
+      </Page>
+    </div>
   );
 }
 

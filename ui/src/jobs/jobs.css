@@ -1,6 +1,12 @@
 /* The environment picker's rules, which the Queries and Jobs screens share. */
 @import "../shell/environment.css";
 
+/* The area's three tab pages: wider than a detail page, as the Catalog's list is, so that their
+   tables fit beside the sidebar from a 1280 px window on instead of scrolling. */
+.jobs-tab-page .page {
+  max-width: 1280px;
+}
+
 /* The Jobs screen's own rules: a cron expression shown as it is. */
 .jobs-verbatim {
   font-family: var(--font-mono);
@@ -194,13 +200,25 @@
 /* The Runs tab's field "Job": its label beside the input, as the menus beside it have. */
 .jobs-find .jobs-job-field {
   flex-direction: row;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--space-2);
 }
 
 .jobs-job-field input {
   width: min(200px, 100%);
+}
+
+.jobs-find .jobs-job-field label {
+  color: var(--color-text);
+}
+
+/* The tabs' times, durations and commits stay on one line; the region scrolls instead. */
+.jobs-tab-runs-scroll time,
+.jobs-tab-runs-scroll td.number,
+.jobs-deploys-scroll time,
+.jobs-deploys-scroll .jobs-commit-cell {
+  white-space: nowrap;
 }
 
 /* The line that says the Runs tab stopped reading again, with Read again beside it. */

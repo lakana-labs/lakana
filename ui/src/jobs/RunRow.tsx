@@ -45,8 +45,8 @@ export interface RunRowProps {
 
 /**
  * What started a run: for a resume, "resume of" and the link to the run it continues; for a run
- * of a selection, its patterns with +upstream and +downstream; else the trigger's word, and "By
- * hand" for a run of no job.
+ * of no job started for a selection, its patterns with +upstream and +downstream; else the
+ * trigger's word, and "By hand" for a run of no job.
  *
  * @param props - The run.
  * @param props.run - The run.
@@ -57,16 +57,13 @@ function StartedBy({ run }: RunRowProps): JSX.Element {
   if (run.kind === "resume" && run.resumed_from_run_id !== null) {
     const id = run.resumed_from_run_id.slice(0, 8);
     return (
-      <Link
-        className="jobs-run-origin"
-        to={jobRunPath(run.environment, run.resumed_from_run_id)}
-        aria-label={t("jobs.runsTab.resumeOfName", { id })}
-      >
+      <Link className="jobs-run-origin" to={jobRunPath(run.environment, run.resumed_from_run_id)}>
         {t("jobs.runsTab.resumeOf", { id })}
       </Link>
     );
   }
-  if (run.kind === "selection") {
+  // A job's own runs are selections too; only a run of no job was started for a selection by hand.
+  if (run.kind === "selection" && run.job === null) {
     const selection = selectionOf(run.selection);
     const flags = [
       selection.upstream ? ` ${t("jobs.facts.upstream")}` : "",

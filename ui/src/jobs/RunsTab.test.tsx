@@ -108,6 +108,10 @@ describe("RunsTab", () => {
     await waitFor(() => {
       expect(within(region).getAllByRole("row")).toHaveLength(4);
     });
+    // The focus goes to the first new row, never to the page.
+    await waitFor(() => {
+      expect(within(region).getAllByRole("link").at(-1)).toHaveFocus();
+    });
     const reads = runReads(server.sent);
     expect(reads[0]?.has("environment")).toBe(false);
     expect(reads[0]?.get("limit")).toBe("50");
@@ -250,6 +254,14 @@ describe("RunsTab", () => {
     expect(screen.getByRole("textbox", { name: "Job" })).toHaveFocus();
     expect(screen.getByRole("textbox", { name: "Job" })).toHaveValue("");
     // With nothing left to clear, the sentence stands alone.
+    expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
+  });
+
+  it("offers Show more, not Clear filters, for an empty page with more behind it", async () => {
+    renderTab(page([], "c1"), "/jobs/runs?status=failed");
+
+    expect(await screen.findByRole("button", { name: "Show more" })).toBeInTheDocument();
+    expect(screen.queryByText("No runs match these filters.")).toBeNull();
     expect(screen.queryByRole("button", { name: "Clear filters" })).toBeNull();
   });
 

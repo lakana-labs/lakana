@@ -17,7 +17,7 @@ import "./jobStrings";
 import "./listStrings";
 import { ListSection, RowEnd } from "./ListSection";
 import { jobRunPath, taskPath } from "./paths";
-import { RunCells, runName } from "./RunCells";
+import { RunCells, RunHeadCells, runName } from "./RunCells";
 import { ResumeRunButton } from "./RunControls";
 import type { SectionProps } from "./RunningNow";
 import { matchesSearch } from "./useJobsFilter";
@@ -70,9 +70,7 @@ export function FailedRuns({
       }
       head={
         <>
-          <th scope="col">{t("jobs.list.columns.state")}</th>
-          <th scope="col">{t("jobs.list.columns.job")}</th>
-          <th scope="col">{t("jobs.list.columns.environment")}</th>
+          <RunHeadCells />
           <th scope="col">{t("jobs.list.columns.ended")}</th>
           <th scope="col">{t("jobs.list.columns.why")}</th>
         </>

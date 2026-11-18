@@ -17,7 +17,7 @@ import "./jobStrings";
 import "./listStrings";
 import { ListSection, RowEnd } from "./ListSection";
 import { runsTabPath } from "./paths";
-import { RunCells, runName } from "./RunCells";
+import { RunCells, RunHeadCells, runName } from "./RunCells";
 import { CancelRunButton } from "./RunControls";
 import { matchesSearch } from "./useJobsFilter";
 import { useListPoll } from "./useListPoll";
@@ -140,9 +140,7 @@ export function RunningNow({
       }
       head={
         <>
-          <th scope="col">{t("jobs.list.columns.state")}</th>
-          <th scope="col">{t("jobs.list.columns.job")}</th>
-          <th scope="col">{t("jobs.list.columns.environment")}</th>
+          <RunHeadCells />
           <th scope="col">{t("jobs.list.columns.progress")}</th>
         </>
       }
