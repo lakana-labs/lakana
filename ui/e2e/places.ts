@@ -25,6 +25,23 @@ const EXTERNAL = [
   `${DEV}/namespaces/gold/tables/external`,
 ];
 
+/** The listing of `raw/` in `prod`, which Browse… reads. */
+const RAW = `${PROD}/raw`;
+
+/** The folders of `prod`'s `raw/` and what each holds, as the server lists them. */
+const LAKE: Readonly<Record<string, readonly unknown[]>> = {
+  raw: [
+    { name: "events.csv", kind: "file", size: 2048, claimed_by: null },
+    { name: "feeds", kind: "folder", size: null, claimed_by: null },
+    { name: "orders", kind: "folder", size: null, claimed_by: { table: "bronze.orders" } },
+  ],
+  "raw/feeds": [
+    { name: "2026-11-01.csv", kind: "file", size: 1200, claimed_by: null },
+    { name: "2026-11-02.csv", kind: "file", size: 1300, claimed_by: null },
+    { name: "archive", kind: "folder", size: null, claimed_by: null },
+  ],
+};
+
 /** The path of the list, which `session.ts` answers by its query. */
 const TABLES = "/api/v1/tables";
 
@@ -37,6 +54,7 @@ export const PLACES_STUBBED = [
   BRONZE_PATH,
   `${PROD}/namespaces/bronze.landing`,
   ...EXTERNAL,
+  RAW,
   "/api/v1/sign-in/step-up/options",
   "/api/v1/sign-in/step-up",
 ];
@@ -73,7 +91,7 @@ function startingTree(): Record<string, TreeNamespace[]> {
  * namespace created or deleted shows in, or leaves, the tree read next; `dev` is protected, so
  * its forms ask for a reason. New external table answers the server's refusal for a location
  * with no matching file: registering one, and the table page after it, is the real-server
- * suite's.
+ * suite's. Browse… lists a small `raw/` in `prod`.
  *
  * @param page - The page.
  */
@@ -134,6 +152,13 @@ export async function stubPlaces(page: Page): Promise<void> {
         status: 404,
         json: { type: "NotFound", detail: `No file matches '${pattern}'.` },
       });
+    },
+  );
+  await page.route(
+    (url) => url.pathname === RAW,
+    (route) => {
+      const path = new URL(route.request().url()).searchParams.get("path") ?? "raw";
+      return route.fulfill({ json: { path, items: LAKE[path] ?? [], next_cursor: null } });
     },
   );
   await page.route(

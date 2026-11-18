@@ -449,3 +449,39 @@ Answer fields: `OrphanedLocationsOut`
 | `older_than_days` | whole number | yes |  |
 | `locations` | list of `OrphanedLocationOut` | yes |  |
 | `complete` | true or false | yes |  |
+
+## `GET /api/v1/environments/{env}/raw`
+
+List one folder of `raw/`, to choose the location of an external table
+
+One level of one folder, one page at a time: its folders and files (with their sizes), in key order. An entry inside an external table's folder says so, and names the table when you may read it. Needs `CREATE_TABLE` on an existing namespace of the environment, the right to register an external table there; each folder read is recorded in the audit log (`ACTIVITY_VIEWED`, view `raw_files`), once per folder within `LAKANA_VIEW_AUDIT__WINDOW_MINUTES`. Answers 403 without that right, 404 when the environment does not exist, 422 for a path that is not `raw` or a folder below it (no `..`, no leading `/`), a cursor of another list, or a storage that is neither local nor S3 (it cannot list one page without reading the whole folder), 502 when the storage refused the environment's credentials and 503 when it did not answer or the read could not be recorded.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `env` | path | yes | text | Environment name. |
+| `path` | query | no | text | The folder: raw, or a folder below it. |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `limit` | query | no | whole number | Most entries returned (1 to 200). |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `RawPageOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `502` | A service behind the server, such as the environment's storage, refused it; the message says what to fix. Asking again does not help until then. | `ErrorOut` |
+| `503` | The server cannot do this right now; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `RawPageOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | text | yes |  |
+| `items` | list of `RawEntryOut` | yes |  |
+| `next_cursor` | text or null | yes |  |

@@ -193,6 +193,37 @@ test("an administrator registers an external table over a CSV under raw/ and lan
   await page.context().close();
 });
 
+test("Browse… lists raw/ from the server, fills the location from a file, and the table registers", async ({
+  browser,
+  request,
+}) => {
+  const environment = uniqueName("plc");
+  await createEnvironment(request, environment);
+  writeRawFile(environment, "raw/returns/2026-11-01.csv", "id,amount\n1,2.5\n");
+  writeRawFile(environment, "raw/returns/2026-11-02.csv", "id,amount\n2,3.5\n");
+  const page = await administrator(browser, request);
+
+  await choose(await openPlace(page, environment, "bronze"), "New external table…");
+  const dialog = page.getByRole("dialog", { name: "New external table in bronze" });
+  await dialog.getByRole("textbox", { name: "Name" }).fill("returns");
+  await dialog.getByRole("button", { name: "Browse…" }).click();
+  await dialog.getByRole("button", { name: "returns/" }).click();
+  await expect(dialog.getByRole("cell", { name: "2026-11-02.csv" })).toBeVisible();
+  expect(await violations(page), "Browse… in a folder").toEqual([]);
+  await dialog.getByRole("button", { name: "Use this folder" }).click();
+  await expect(dialog.getByRole("textbox", { name: "Location" })).toHaveValue("raw/returns/*.csv");
+  await expect(dialog.getByRole("radio", { name: "CSV" })).toBeChecked();
+  await confirm(dialog.getByRole("button", { name: "Register" }));
+
+  await expect(page).toHaveURL(new RegExp(`/catalog/${environment}/bronze/returns$`));
+  await choose(await openPlace(page, environment, "bronze"), "New external table…");
+  const again = page.getByRole("dialog", { name: "New external table in bronze" });
+  await again.getByRole("button", { name: "Browse…" }).click();
+  await expect(again.getByText("in use by bronze.returns")).toBeVisible();
+  await expect(again.getByRole("button", { name: "returns/" })).toBeDisabled();
+  await page.context().close();
+});
+
 test("deleting a namespace that holds a table shows the server's sentence and the namespace stays", async ({
   browser,
   browserName,

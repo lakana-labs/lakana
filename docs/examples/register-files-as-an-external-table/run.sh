@@ -45,6 +45,19 @@ import json, sys
 assert [row["order_id"] for row in json.loads(sys.argv[1])] == [1, 2, 3], sys.argv[1]
 ' "$out"
 
+# Looking under raw/: the folder's files and archive/, the folder in use by bronze.orders.
+# docs:start ls
+lakana raw ls raw/orders --env dev
+# docs:end ls
+out=$(lakana --output json raw ls raw/orders --env dev)
+python3 -c '
+import json, sys
+entries = {e["name"]: e for e in json.loads(sys.argv[1])}
+assert sorted(entries) == ["2026-11-01.csv", "2026-11-02.csv", "archive"], sys.argv[1]
+assert entries["archive"]["kind"] == "folder", sys.argv[1]
+assert entries["2026-11-01.csv"]["claimed_by"] == {"table": "bronze.orders"}, sys.argv[1]
+' "$out"
+
 # The location rules, with the sentences the page quotes.
 refused "Location pattern 'data/orders/*.csv' must start with 'raw/'." \
   lakana table create-external bronze.returns --location 'data/orders/*.csv' --format csv --env dev
