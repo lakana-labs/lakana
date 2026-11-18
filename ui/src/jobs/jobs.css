@@ -221,6 +221,12 @@
   white-space: nowrap;
 }
 
+/* The sentence of an empty list, which takes the focus when Read again finds no run. */
+.jobs-tab-page .empty:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 /* The line that says the Runs tab stopped reading again, with Read again beside it. */
 .jobs-again {
   display: flex;
@@ -267,6 +273,17 @@
 
 .jobs-deleted {
   color: var(--color-text-muted);
+}
+
+/* Roll back to this… while a rollback runs: dimmed, as a disabled menu item is, and unchanged on
+   hover; its description is the note that says what runs. */
+.jobs-deploys-scroll .button[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.jobs-deploys-scroll .button[aria-disabled="true"][data-hovered] {
+  background: var(--color-surface);
 }
 
 /* The note that follows a rollback, under the Deploys list: it takes the focus when the row whose

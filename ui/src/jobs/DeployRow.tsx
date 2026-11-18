@@ -34,10 +34,11 @@ export interface DeployRowProps {
   /** Opens the rollback's question; null where the rollback is not offered. */
   readonly onRollBack: (() => void) | null;
   /**
-   * Whether a rollback of the repository is being followed, so Roll back to this… waits and
-   * opens nothing; no by default. The button stays, so the focus it may hold stays too.
+   * The id of the note that follows a rollback still running, so Roll back to this… waits,
+   * opens nothing and points at the note for why; null (the default) while none runs. The
+   * button stays, so the focus it may hold stays too.
    */
-  readonly held?: boolean;
+  readonly heldBy?: string | null;
 }
 
 /**
@@ -50,14 +51,14 @@ export interface DeployRowProps {
  * @param props.deploy - The deploy.
  * @param props.current - Whether it is current.
  * @param props.onRollBack - Opens the rollback's question.
- * @param props.held - Whether a rollback of the repository is being followed.
+ * @param props.heldBy - The id of the note of a rollback still running, or null.
  * @returns The row.
  */
 export function DeployRow({
   deploy,
   current,
   onRollBack,
-  held = false,
+  heldBy = null,
 }: DeployRowProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
@@ -103,9 +104,9 @@ export function DeployRow({
         {onRollBack !== null && (
           <Button
             className="button"
-            {...(held ? { "aria-disabled": true } : {})}
+            {...(heldBy === null ? {} : { "aria-disabled": true, "aria-describedby": heldBy })}
             onPress={() => {
-              if (!held) {
+              if (heldBy === null) {
                 onRollBack();
               }
             }}

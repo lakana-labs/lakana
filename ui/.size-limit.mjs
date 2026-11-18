@@ -109,6 +109,9 @@ const NAMED_LIMITS = [
   // page read again every 30 s until Show more read a further page, then Read again; a row's
   // trigger, selection with +upstream and +downstream or the run a resume continues, its time,
   // duration and tasks; no runs matching with Clear filters; and the tab's strings.
+  // Measured 2.87 kB (2026-11-18) after review: Read again shows no rows while it reads, with
+  // its status line and the focus kept off the page, and no error of another filter shows; the
+  // limit holds.
   { name: "the Runs tab", prefix: "RunsTab-", limit: "2.95 kB" },
   // Measured 3.44 kB (2026-11-18) + 10 %: the Deploys tab, loaded on /jobs/deploys: one
   // environment at a time with the line that says so, the Repository menu in the address, the
@@ -117,6 +120,9 @@ const NAMED_LIMITS = [
   // Roll back to this… where it is offered, the lazy import of the rollback's question, the note
   // that follows a rollback every 2 s to its end, the focus kept off the page, and the strings of
   // the tab, the question and the note.
+  // Measured 3.54 kB (2026-11-18) after review: the focus kept off the page whichever read
+  // answers first, and every Roll back to this… held, with the note as its description, while
+  // a rollback is followed; the limit holds.
   { name: "the Deploys tab", prefix: "DeploysTab-", limit: "3.79 kB" },
   // Measured 1.22 kB (2026-11-18) + 10 %: the rollback's question, loaded on the first press of
   // Roll back to this…: the two reads at once with their wait and Try again, what the rollback makes

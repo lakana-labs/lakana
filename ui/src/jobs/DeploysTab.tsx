@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
@@ -91,9 +91,11 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     reloadPages();
     reloadDeployments();
   }, [reloadPages, reloadDeployments]);
-  // The rollback that ended; while the one followed runs, its repository offers no second one.
+  // The rollback that ended. While the one followed runs, no row starts another: a second one
+  // would replace the note that follows the first.
   const [endedId, setEndedId] = useState<string | null>(null);
-  const following = rolled !== null && endedId !== rolled.id ? rolled.repository : null;
+  const noteId = useId();
+  const following = rolled !== null && endedId !== rolled.id;
   const area = useRef<HTMLDivElement>(null);
   const note = useRef<HTMLDivElement>(null);
   // The element of the list that last had the focus.
@@ -191,12 +193,12 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
                   }
                 : null
             }
-            held={deploy.repository === following}
+            heldBy={following ? noteId : null}
           />
         ))}
       </ViewList>
       {/* The status region stays in place, so the note is announced when it arrives. */}
-      <div className="jobs-rollback-note" role="status" tabIndex={-1} ref={note}>
+      <div className="jobs-rollback-note" id={noteId} role="status" tabIndex={-1} ref={note}>
         {rolled !== null && (
           <RollbackNote
             key={rolled.id}

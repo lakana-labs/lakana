@@ -101,16 +101,21 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
   const pages = useRunPages(key, load, 0);
   const rows = pages.items ?? [];
   // Read again takes its own button away: the focus goes to the line that says the list is read
-  // again, then to the list once it is there, never to the page.
+  // again, then to the list, or to what stands in its place, never to the page.
   const readingAgain = useRef<HTMLParagraphElement>(null);
   const region = useRef<HTMLDivElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
   const wasRestarting = useRef(false);
   const { restarting } = pages;
   useEffect(() => {
     if (restarting) {
       readingAgain.current?.focus();
     } else if (wasRestarting.current && document.activeElement === document.body) {
-      region.current?.focus();
+      // The list, or what stands in its place: Try again after a failed read, or the sentence
+      // that no runs match.
+      const place =
+        region.current ?? frame.current?.querySelector<HTMLElement>(".read-failed button, .empty");
+      place?.focus();
     }
     wasRestarting.current = restarting;
   }, [restarting]);
@@ -177,36 +182,38 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
       )}
       {/* Each filter's list starts afresh: no row of the previous filter stays while its own first
           page is read, and a failed first read says so at once. */}
-      <ViewList
-        key={key}
-        pages={pages}
-        rowCount={rows.length}
-        empty={t("jobs.runsTab.empty")}
-        region={t("jobs.runsTab.region")}
-        rowsOpen
-        scroll="jobs-tab-runs-scroll"
-        regionRef={region}
-        head={
-          <tr>
-            <th scope="col">{t("jobs.runsTab.columns.state")}</th>
-            <th scope="col">{t("jobs.runsTab.columns.run")}</th>
-            <th scope="col">{t("jobs.runsTab.columns.environment")}</th>
-            <th scope="col">{t("jobs.runsTab.columns.startedBy")}</th>
-            <th scope="col">{t("jobs.runsTab.columns.created")}</th>
-            <th scope="col" className="number">
-              {t("jobs.runsTab.columns.duration")}
-            </th>
-            <th scope="col">{t("jobs.runsTab.columns.tasks")}</th>
-            <th scope="col">
-              <span className="visually-hidden">{t("list.open")}</span>
-            </th>
-          </tr>
-        }
-      >
-        {rows.map((run) => (
-          <RunRow key={run.id} run={run} />
-        ))}
-      </ViewList>
+      <div ref={frame}>
+        <ViewList
+          key={key}
+          pages={pages}
+          rowCount={rows.length}
+          empty={t("jobs.runsTab.empty")}
+          region={t("jobs.runsTab.region")}
+          rowsOpen
+          scroll="jobs-tab-runs-scroll"
+          regionRef={region}
+          head={
+            <tr>
+              <th scope="col">{t("jobs.runsTab.columns.state")}</th>
+              <th scope="col">{t("jobs.runsTab.columns.run")}</th>
+              <th scope="col">{t("jobs.runsTab.columns.environment")}</th>
+              <th scope="col">{t("jobs.runsTab.columns.startedBy")}</th>
+              <th scope="col">{t("jobs.runsTab.columns.created")}</th>
+              <th scope="col" className="number">
+                {t("jobs.runsTab.columns.duration")}
+              </th>
+              <th scope="col">{t("jobs.runsTab.columns.tasks")}</th>
+              <th scope="col">
+                <span className="visually-hidden">{t("list.open")}</span>
+              </th>
+            </tr>
+          }
+        >
+          {rows.map((run) => (
+            <RunRow key={run.id} run={run} />
+          ))}
+        </ViewList>
+      </div>
       {loaded && rows.length === 0 && !pages.hasMore && filter.narrowed && (
         <Button
           className="button"

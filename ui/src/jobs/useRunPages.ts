@@ -82,9 +82,15 @@ export function useRunPages(
     current.current = key;
   }, [key]);
   const extra = more !== null && more.key === key ? more : null;
-  // The filter whose first read failed last: the poll keeps its error when the filter changes,
-  // and that error is not the new filter's.
+  // The poll keeps its error when the filter changes. The error counts only once a read of the
+  // filter now shown failed since it was chosen, so neither another filter's error nor an older
+  // one of the same filter (A fails, B, back to A) shows.
   const [failedKey, setFailedKey] = useState<string | null>(null);
+  const [chosen, setChosen] = useState(key);
+  if (chosen !== key) {
+    setChosen(key);
+    setFailedKey(null);
+  }
   const first = useCallback(async () => {
     try {
       return { key, page: await load(null, { background: true }) };

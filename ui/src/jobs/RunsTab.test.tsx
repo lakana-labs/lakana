@@ -298,6 +298,64 @@ describe("RunsTab", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy.");
     expect(screen.queryByText("Reading the runs again from the first page…")).toBeNull();
     expect(screen.queryByRole("region", { name: "Runs listed" })).toBeNull();
+    // The focus goes to Try again, never to the page.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Try again" })).toHaveFocus();
+    });
+  });
+
+  it("hands the focus to the empty sentence when Read again finds no run", async () => {
+    let reads = 0;
+    const { user } = renderTab((request) => {
+      if (request.path.includes("cursor=c1")) {
+        return { status: 200, body: { items: [oldest], next_cursor: null } };
+      }
+      reads += 1;
+      return {
+        status: 200,
+        body:
+          reads === 1 ? { items: [newer], next_cursor: "c1" } : { items: [], next_cursor: null },
+      };
+    });
+    await user.click(await screen.findByRole("button", { name: "Show more" }));
+    await user.click(await screen.findByRole("button", { name: "Read again" }));
+
+    const empty = await screen.findByText("No runs match these filters.");
+    await waitFor(() => {
+      expect(empty.closest(".empty")).toHaveFocus();
+    });
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("shows no old error of a filter chosen again before another filter answered", async () => {
+    let allReads = 0;
+    const failedRead = held();
+    const allAgain = held();
+    const { user } = renderTab(async (request) => {
+      if (request.path.includes("status=failed")) {
+        return await failedRead.route();
+      }
+      allReads += 1;
+      return allReads === 1
+        ? { status: 503, body: { type: "Unavailable", detail: "The server is busy." } }
+        : await allAgain.route();
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy.");
+
+    // A failed, then B, then back to A before B answers.
+    await user.click(screen.getByRole("button", { name: /State/u }));
+    await user.click(screen.getByRole("option", { name: "Failed" }));
+    await user.click(screen.getByRole("button", { name: /State/u }));
+    await user.click(screen.getByRole("option", { name: "All" }));
+    await waitFor(() => {
+      expect(allReads).toBe(2);
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+
+    allAgain.release({ status: 200, body: { items: [older], next_cursor: null } });
+    expect(await screen.findByRole("link", { name: "nightly_sales" })).toBeInTheDocument();
+    failedRead.release({ status: 200, body: { items: [], next_cursor: null } });
   });
 
   it("shows no error of the previous filter under a new one", async () => {
