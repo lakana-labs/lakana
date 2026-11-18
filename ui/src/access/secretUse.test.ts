@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { initI18n } from "../i18n/i18n";
-import { secretUseText } from "./secretUse";
+import { chooseEnvironment, secretUseText } from "./secretUse";
 
 const i18n = initI18n();
 
@@ -28,5 +28,24 @@ describe("secretUseText", () => {
     expect(secretUseText(t, { use: "repository", use_target: "a‮b", environment: "dev" })).toBe(
       "Repository aU+202Eb",
     );
+  });
+
+  it("chooses the linked, else the remembered, else the first environment", () => {
+    expect(chooseEnvironment(["dev", "prod"], "prod", "dev")).toEqual({
+      allowed: ["dev", "prod"],
+      chosen: "prod",
+      refused: false,
+    });
+    expect(chooseEnvironment(["dev", "prod"], null, "prod").chosen).toBe("prod");
+    expect(chooseEnvironment(["dev"], "prod", "prod")).toEqual({
+      allowed: ["dev"],
+      chosen: "dev",
+      refused: true,
+    });
+    expect(chooseEnvironment(null, null, null)).toEqual({
+      allowed: [],
+      chosen: "",
+      refused: false,
+    });
   });
 });
