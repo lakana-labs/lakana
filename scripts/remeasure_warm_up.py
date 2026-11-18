@@ -1,7 +1,8 @@
 """Warm the slow-test re-run up, so each candidate pays only what it costs in a shard.
 
 ``scripts/time_budgets.py slow-tests --confirm`` runs every unmarked test that took 2 s or more
-in its shard again, each in a fresh pytest process of its own, and loads this plugin there with
+in its shard again (first in a pytest process per package, then each test still over the line
+in a fresh process of its own), and loads this plugin there with
 ``-p scripts.remeasure_warm_up``. In a fresh process the first test that needs a session- or
 module-scoped fixture pays its setup (``catalog_template`` builds a schema in about 0.7 s); in
 a shard that cost falls on whichever test of the module runs first. So, per candidate, this

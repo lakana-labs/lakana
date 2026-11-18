@@ -10,6 +10,7 @@ import pytest
 
 from scripts.remeasure_warm_up import WARM_UP_ENV
 from scripts.time_budgets import (
+    SOLO_CAP,
     Budgets,
     JobTime,
     TestTime,
@@ -74,6 +75,7 @@ def _case(
     *,
     slow: bool = False,
     skipped: bool = False,
+    outcome: str = "",
 ) -> str:
     """Build one ``testcase`` element of a junit report (``junit_family=xunit1``).
 
@@ -89,13 +91,15 @@ def _case(
         Whether it carries the ``slow`` property.
     skipped
         Whether it was skipped.
+    outcome
+        ``failure`` or ``error`` for a test that did not pass; empty for one that did.
 
     Returns
     -------
     str
         The element.
     """
-    inner = ""
+    inner = f'<{outcome} message="no"/>' if outcome else ""
     if slow:
         inner += '<properties><property name="slow" value="true"/></properties>'
     if skipped:
@@ -649,59 +653,190 @@ def test_remeasure_runs_the_tests_under_coverage_apart_from_the_run(tmp_path: Pa
     assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage.remeasured.0-0")
 
 
-def test_remeasure_runs_each_test_in_a_fresh_process_of_its_own(tmp_path: Path) -> None:
-    """One pytest process per flagged test, never two candidates in one.
+def test_the_first_re_run_runs_each_package_in_one_process_of_its_own(tmp_path: Path) -> None:
+    """The cheap first pass: one process per package, never two packages in one.
 
-    In one process the candidates ran after each other under the load the earlier ones left
-    (imports, caches, memory, a busy runner), and unrelated tests of 2.5 to 2.7 s failed the
-    ratchet. Each process also gets its own report, plan and coverage file, so no run reads
-    another's numbers; two packages never share a process either, as each has a `conftest`.
+    In one process the first package's `conftest` module shadows the next one's, and a test
+    importing from its own `conftest` fails to collect (PR #521's run).
+    """
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    tests = [
+        TestTime("packages/lakana-core/tests/test_x.py", "a", 2.5, slow=False, skipped=False),
+        TestTime("packages/lakana/tests/cli/test_app.py", "b", 2.5, slow=False, skipped=False),
+        TestTime("packages/lakana-core/tests/test_y.py", "c", 2.5, slow=False, skipped=False),
+        TestTime("scripts/tests/test_z.py", "d", 2.5, slow=False, skipped=False),
+    ]
+    seconds = remeasure(tests, tmp_path, run=_rerun(calls))
+    assert seconds == {t.nodeid: 0.3 for t in tests}
+    groups = [sorted(c for c in command if c.endswith(".py")) for command, _ in calls]
+    assert sorted(groups) == sorted(
+        [
+            ["packages/lakana-core/tests/test_x.py", "packages/lakana-core/tests/test_y.py"],
+            ["packages/lakana/tests/cli/test_app.py"],
+            ["scripts/tests/test_z.py"],
+        ]
+    )
+    reports = {next(c for c in command if c.startswith("--junitxml=")) for command, _ in calls}
+    plans = {env[WARM_UP_ENV] for _, env in calls}
+    assert len(reports) == len(plans) == len(calls)
+
+
+def test_a_test_still_over_the_line_runs_again_in_a_fresh_process_of_its_own(
+    tmp_path: Path,
+) -> None:
+    """After the first pass, each test still over the line gets one pytest process per run.
+
+    Run one after another in a shared process, the later candidates were timed under the load
+    the earlier ones left, and unrelated tests of 2.5 to 2.7 s failed the ratchet. One test
+    per process also keeps two packages' `conftest` modules apart (PR #521), so that follows
+    from the number of processes alone.
     """
     calls: list[tuple[list[str], dict[str, str]]] = []
     tests = [
         TestTime("packages/lakana-core/tests/test_x.py", "a", 2.5, slow=False, skipped=False),
         TestTime("packages/lakana/tests/cli/test_app.py", "b", 2.5, slow=False, skipped=False),
         TestTime("packages/lakana-core/tests/test_x.py", "c", 2.6, slow=False, skipped=False),
-        TestTime("scripts/tests/test_z.py", "d", 2.5, slow=False, skipped=False),
     ]
-    seconds = remeasure(tests, tmp_path, run=_rerun(calls))
+    seconds = remeasure(tests, tmp_path, run=_rerun(calls), runs=2, stop_below=0.1)
     assert seconds == {t.nodeid: 0.3 for t in tests}
-    assert len(calls) == len(tests)
-    plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in calls]
-    assert [plan["candidates"] for plan in plans] == [[t.nodeid] for t in tests]
-    files = [[c for c in command if c.endswith(".py")] for command, _ in calls]
-    assert files == [[t.file] for t in tests]
-    reports = {next(c for c in command if c.startswith("--junitxml=")) for command, _ in calls}
-    coverage = {env["COVERAGE_FILE"] for _, env in calls}
-    assert len(reports) == len({env[WARM_UP_ENV] for _, env in calls}) == len(coverage) == 4
+    first, solo = calls[:2], calls[2:]
+    assert len(first) == 2  # two packages
+    assert len(solo) == len(tests)
+    plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in solo]
+    assert sorted(c for plan in plans for c in plan["candidates"]) == sorted(
+        t.nodeid for t in tests
+    )
+    assert all(len(plan["candidates"]) == 1 for plan in plans)
+    for (command, _), plan in zip(solo, plans, strict=True):
+        (candidate,) = plan["candidates"]
+        assert [c for c in command if c.endswith(".py")] == [candidate.split("::")[0]]
+    paths = [
+        {next(c for c in command if c.startswith("--junitxml=")), env[WARM_UP_ENV]}
+        | {env["COVERAGE_FILE"]}
+        for command, env in calls
+    ]
+    assert len(set().union(*paths)) == 3 * len(calls)
 
 
-def test_remeasure_counts_only_the_test_a_process_was_started_for(tmp_path: Path) -> None:
+def test_a_test_fast_in_the_first_pass_gets_no_process_of_its_own(tmp_path: Path) -> None:
+    """Most flagged tests are noise and drop out in the cheap pass; only the rest cost more."""
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    tests = [TestTime("a.py", "t", 2.5, slow=False, skipped=False)]
+    assert remeasure(tests, tmp_path, run=_rerun(calls), runs=3, stop_below=2.5) == {"a.py::t": 0.3}
+    assert len(calls) == 1
+
+
+def test_a_solo_run_counts_only_the_test_it_was_started_for(tmp_path: Path) -> None:
     """A report that also times another candidate does not stand in for that one's own run."""
     tests = [
         TestTime("a.py", "first", 2.6, slow=False, skipped=False),
         TestTime("a.py", "second", 2.6, slow=False, skipped=False),
     ]
+    solo = {"a.py::first": 2.2, "a.py::second": 2.4}
 
     def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
-        (candidate,) = json.loads(Path(env[WARM_UP_ENV]).read_text())["candidates"]
-        own = 0.4 if candidate == "a.py::first" else 0.7
-        other = "second" if candidate == "a.py::first" else "first"
+        candidates = json.loads(Path(env[WARM_UP_ENV]).read_text())["candidates"]
         report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        if len(candidates) > 1:  # the first pass: both slow again
+            report.write_text(_junit(_case("a.py", "first", 3.0), _case("a.py", "second", 3.0)))
+            return
+        (candidate,) = candidates
+        other = "second" if candidate == "a.py::first" else "first"
+        own = _case("a.py", candidate.split("::")[1], solo[candidate])
+        report.write_text(_junit(own, _case("a.py", other, 0.1)))
+
+    assert remeasure(tests, tmp_path, run=run, runs=2, stop_below=2.5) == solo
+
+
+def test_a_flagged_test_may_warm_up_another_in_its_own_process(tmp_path: Path) -> None:
+    """Only the candidate itself is left out of its warm-ups.
+
+    When every other test of a module that uses the candidate's module fixture is flagged
+    too, leaving them all out would time the candidate cold in every run, with a setup no
+    shard charges it (``catalog_template``, about 0.7 s): a bias toward failing near the line.
+    """
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    path = "packages/lakana-core/tests/test_tables.py"
+    tests = [
+        TestTime(path, "one", 2.6, slow=False, skipped=False),
+        TestTime(path, "two", 2.8, slow=False, skipped=False),
+    ]
+    remeasure(tests, tmp_path, run=_rerun(calls, 2.6), warm_from=tests, runs=2, stop_below=2.5)
+    plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in calls[1:]]
+    assert plans == [
+        {"candidates": [f"{path}::one"], "seconds": {f"{path}::two": 2.8}},
+        {"candidates": [f"{path}::two"], "seconds": {f"{path}::one": 2.6}},
+    ]
+
+
+def test_the_solo_runs_are_capped_and_the_rest_fail_as_slow(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Past `SOLO_CAP` tests no process of its own is started; the rest keep their shard time.
+
+    Each process costs seconds of start-up, so the number is bounded. The tests left out are
+    the ones furthest over the line, named in the log, and fail closed.
+    """
+    calls: list[tuple[list[str], dict[str, str]]] = []
+    tests = [
+        TestTime("a.py", f"t{i:02}", 2.6, slow=False, skipped=False) for i in range(SOLO_CAP + 2)
+    ]
+    first = {t.nodeid: 2.6 + i / 100 for i, t in enumerate(tests)}
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        calls.append((command, env))
+        candidates = json.loads(Path(env[WARM_UP_ENV]).read_text())["candidates"]
+        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        seconds = first if len(candidates) > 1 else dict.fromkeys(candidates, 0.5)
         report.write_text(
-            _junit(_case("a.py", candidate.split("::")[1], own), _case("a.py", other, 9.0))
+            _junit(*[_case("a.py", c.split("::")[1], seconds[c]) for c in candidates])
         )
 
-    assert remeasure(tests, tmp_path, run=run) == {"a.py::first": 0.4, "a.py::second": 0.7}
+    again = remeasure(tests, tmp_path, run=run, runs=3, stop_below=2.5)
+    assert len(calls) == 1 + SOLO_CAP
+    capped = [t.nodeid for t in tests[SOLO_CAP:]]
+    assert again == {t.nodeid: 0.5 for t in tests[:SOLO_CAP]}
+    err = capsys.readouterr().err
+    assert all(nodeid in err for nodeid in capped)
+    assert str(SOLO_CAP) in err
+    errors, _ = check_slow_tests(
+        tests, threshold=2.0, baseline=0, confirm_threshold=2.5, remeasure=lambda over: again
+    )
+    assert [e.split(" took ")[0] for e in errors] == capped
 
 
-def test_remeasure_hands_the_warm_up_plugin_its_candidate_and_the_shard_times(
+@pytest.mark.parametrize("outcome", ["failure", "error"])
+def test_a_test_that_fails_when_run_again_keeps_its_shard_time(
+    tmp_path: Path, outcome: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A test that fails or errors on its own (say it depends on order) does not pass by time."""
+    tests = [TestTime("a.py", "t", 2.6, slow=False, skipped=False)]
+
+    def run(command: list[str], *, env: dict[str, str], check: bool) -> None:
+        report = Path(next(c for c in command if c.startswith("--junitxml=")).split("=", 1)[1])
+        report.write_text(_junit(_case("a.py", "t", 0.1, outcome=outcome)))
+
+    assert remeasure(tests, tmp_path, run=run, runs=3, stop_below=2.5) == {}
+    assert "a.py::t" in capsys.readouterr().err
+    errors, _ = check_slow_tests(
+        tests,
+        threshold=2.0,
+        baseline=0,
+        confirm_threshold=2.5,
+        remeasure=lambda over: remeasure(over, tmp_path, run=run, runs=3, stop_below=2.5),
+    )
+    assert len(errors) == 1 and errors[0].startswith("a.py::t took 2.6 s")
+
+
+def test_remeasure_hands_the_warm_up_plugin_its_candidates_and_the_shard_times(
     tmp_path: Path,
 ) -> None:
-    """The plugin picks the candidate's warm-up from its file; only the candidate is counted.
+    """The plugin picks each candidate's warm-up from its files; only candidates are counted.
 
     Run on its own, a candidate otherwise pays for the session's fixtures and first imports,
-    which no shard charges to it (the run of PR 522 failed on that).
+    which no shard charges to it (the run of PR 522 failed on that). In the shared first pass
+    the candidates are not warm-ups, as each runs anyway; in a solo run only the candidate is
+    left out.
     """
     calls: list[tuple[list[str], dict[str, str]]] = []
     core = "packages/lakana-core/tests/test_x.py"
@@ -717,18 +852,27 @@ def test_remeasure_hands_the_warm_up_plugin_its_candidate_and_the_shard_times(
         TestTime(core, "skipped", 0.0, slow=False, skipped=True),
         TestTime("packages/lakana-core/tests/test_z.py", "elsewhere", 0.1, False, False),
     ]
-    seconds = remeasure(candidates, tmp_path, run=_rerun(calls), warm_from=everything)
-    assert seconds == {t.nodeid: 0.3 for t in candidates}
+    seconds = remeasure(
+        candidates, tmp_path, run=_rerun(calls, 2.6), warm_from=everything, runs=2, stop_below=2.5
+    )
+    assert seconds == {t.nodeid: 2.6 for t in candidates}
     assert all("-p" in c and "scripts.remeasure_warm_up" in c for c, _ in calls)
-    assert [[c for c in command if c.endswith(".py")] for command, _ in calls] == [
-        [core],
-        [core],
-        [other],
-    ]
-    plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in calls]
+    (command, env), *solo = calls
+    assert [c for c in command if c.endswith(".py")] == [core, other]
+    assert json.loads(Path(env[WARM_UP_ENV]).read_text()) == {
+        "candidates": [t.nodeid for t in candidates],
+        "seconds": {f"{core}::quick": 0.01},
+    }
+    plans = [json.loads(Path(env[WARM_UP_ENV]).read_text()) for _, env in solo]
     assert plans == [
-        {"candidates": [f"{core}::slow"], "seconds": {f"{core}::quick": 0.01}},
-        {"candidates": [f"{core}::slower"], "seconds": {f"{core}::quick": 0.01}},
+        {
+            "candidates": [f"{core}::slow"],
+            "seconds": {f"{core}::slower": 2.8, f"{core}::quick": 0.01},
+        },
+        {
+            "candidates": [f"{core}::slower"],
+            "seconds": {f"{core}::slow": 2.6, f"{core}::quick": 0.01},
+        },
         {"candidates": [f"{other}::lonely"], "seconds": {}},
     ]
 

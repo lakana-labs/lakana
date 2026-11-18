@@ -1449,12 +1449,20 @@ the test, the budget, and the next step.
   which `scripts/pytest_selection.py` adds the property `slow=true` to every marked test;
   `test (3.14)` runs `time_budgets.py slow-tests --confirm junit/*.xml` over them. One
   measurement in a busy shard is noisy (between two runs a test of 0.6 s once took 2.4 s), so an
-  unmarked test over the threshold is run again under coverage, each in a fresh pytest process
-  of its own (one after another in a shared process, the later ones were timed under the load
-  the earlier ones left, and unrelated tests of 2.5 to 2.7 s failed). In that process `scripts/remeasure_warm_up.py` (loaded with `-p`) first
+  unmarked test over the threshold is run again, serially and under coverage. The first run is
+  cheap: one pytest process per package (one per package in that run's flagged tests, usually
+  four to six), where most flagged tests fall below the line as noise. Each test still at or over
+  `confirm_seconds` then runs again in a fresh pytest process of its own, since one after
+  another in a shared process the later ones were timed under the load the earlier ones left
+  and unrelated tests of 2.5 to 2.7 s failed. That is at most `SOLO_CAP` (10) tests, the ones
+  nearest the line, each up to twice: at most 20 more processes of about 4 to 6 s each. A test
+  past the cap is named in the log and counts by its shard time, so it fails as slow; so does a
+  test that fails or raises an error when run again. In each process
+  `scripts/remeasure_warm_up.py` (loaded with `-p`) first
   runs, untimed, the cheapest other test of the candidate's module that uses all of the
-  candidate's session- and module-scoped fixtures (never a skipped one; without such a test the
-  candidate runs alone), so a fixture such as `catalog_template` is not set up on the
+  candidate's session- and module-scoped fixtures (never a skipped one, nor another candidate
+  of the same process, which runs anyway; a flagged test in a process of its own may be one;
+  without such a test the candidate runs alone), so a fixture such as `catalog_template` is not set up on the
   candidate's clock. Moving that setup off the candidate is deliberate: in a shard it falls on
   whichever test of the module runs first, and the rule targets tests that are slow in
   themselves; the candidate's own function-scoped setup, call and teardown are measured in
