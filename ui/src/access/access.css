@@ -30,7 +30,7 @@
 }
 
 .list-scroll.grants-scroll .list {
-  min-width: 880px;
+  min-width: 720px;
 }
 
 .list-scroll.members-scroll .list,
@@ -105,4 +105,35 @@
   font-size: var(--type-section-size);
   font-weight: var(--type-section-weight);
   line-height: var(--type-section-line);
+}
+
+/* Links that name something with a page (a group, a person) or lead on (Manage grants): the
+   accent, as in the lists; a row's own link keeps its rules. */
+.access-section a:not(.row-name),
+.grants-scroll a.access-name,
+.managed-note a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.access-section a:not(.row-name):hover,
+.grants-scroll a.access-name:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+.access-filters-help {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* A choice in a form (Add grant's role, action and environment): its label above, as a field's. */
+.access-choice {
+  margin: 0 0 var(--space-4);
+}
+
+/* The groups list's quiet `›` ends the row, beside the name's column. */
+.list-scroll.groups-scroll td:last-child,
+.list-scroll.groups-scroll th:last-child {
+  width: 1%;
 }

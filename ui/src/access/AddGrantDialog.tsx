@@ -104,7 +104,7 @@ function Choice<T extends string>({
   const { t } = useTranslation();
   return (
     <Select
-      className="field env-picker"
+      className="env-picker access-choice"
       value={value}
       placeholder={t("access.addGrant.choose")}
       onChange={(key) => {
