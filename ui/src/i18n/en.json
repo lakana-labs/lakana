@@ -69,7 +69,7 @@
       "en": "English"
     },
     "menu": "Menu",
-    "signedInAs": "<hidden>Signed in as</hidden> {{name}}",
+    "signedInAs": "<hidden>Signed in as</hidden> <name/>",
     "account": "Account",
     "signOut": "Sign out",
     "signOutEverywhere": "Sign out everywhere",

@@ -23,6 +23,20 @@ describe("ManagedNote", () => {
     expect(screen.getByText("lakana access apply").tagName).toBe("CODE");
   });
 
+  it("shows markup in the file's and the environment's names as text", () => {
+    const file = "<strong>access</strong>.<code>yaml</code>";
+    const { container } = render(
+      <ManagedNote scope={{ ...SCOPE, scope: "<code>prod</code>", file_name: file }} command="x" />,
+    );
+
+    expect(container).toHaveTextContent(`The environment <code>prod</code> is managed by ${file}`);
+    expect(container.querySelector("strong")).toBeNull();
+    expect([...container.querySelectorAll("code")].map((code) => code.textContent)).toEqual([
+      "lakana access apply",
+      "x",
+    ]);
+  });
+
   it("names a managed environment, marked", () => {
     const { container } = render(
       <ManagedNote scope={{ ...SCOPE, scope: "pr‮od" }} command="lakana" />,

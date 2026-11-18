@@ -374,7 +374,7 @@
       "since": "Since",
       "none": "No grants at this level.",
       "reading": "Reading the grants…",
-      "cut": "The first 200 at this level; <code>{{command}}</code> lists all.",
+      "cut": "The first 200 at this level; <command/> lists all.",
       "role": "{{role}} role",
       "instance": "On the whole instance"
     },

@@ -71,6 +71,17 @@ describe("UserMenu", () => {
     expect(button.textContent).not.toMatch(/\u202E/u);
   });
 
+  it("shows markup in the person's display name as text", async () => {
+    const markup = "<strong>Ada</strong> <code>Lee</code>";
+    renderShell("/", {
+      session: signedIn({ session: { ...ADMIN_SESSION, display_name: markup } }),
+    });
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+
+    const button = screen.getByRole("button", { name: `Signed in as ${markup}` });
+    expect(button.querySelector("strong, code")).toBeNull();
+  });
+
   it("opens one's passkeys and sessions", async () => {
     const { user, router } = await openMenu();
 

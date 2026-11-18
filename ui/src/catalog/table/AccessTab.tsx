@@ -25,7 +25,7 @@ import { personPath } from "../../access/personPath";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { type Resource, useResource } from "../../shell/useResource";
-import { markedText, VisibleText } from "../../shell/VisibleText";
+import { VisibleText } from "../../shell/VisibleText";
 import { StatusGlyph } from "../../status/StatusGlyph";
 import { When } from "../cells";
 import { ReadFailed } from "../ReadFailed";
@@ -306,12 +306,19 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
                 <Trans
                   t={t}
                   i18nKey="table.access.who.cut"
-                  values={{
-                    command: instance
-                      ? INSTANCE_GRANTS_COMMAND
-                      : markedText(grantListCommand(environment, namespace, table)),
+                  components={{
+                    command: (
+                      <code>
+                        <VisibleText
+                          text={
+                            instance
+                              ? INSTANCE_GRANTS_COMMAND
+                              : grantListCommand(environment, namespace, table)
+                          }
+                        />
+                      </code>
+                    ),
                   }}
-                  components={{ code: <code /> }}
                 />
               </p>
             )}

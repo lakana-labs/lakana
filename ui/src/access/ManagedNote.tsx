@@ -10,6 +10,7 @@ import { Trans, useTranslation } from "react-i18next";
 import type { ManagedScopeOut } from "../api/accessFile";
 import { CopyLine } from "../shell/CopyLine";
 import { useWhen } from "../shell/useWhen";
+import { VisibleText } from "../shell/VisibleText";
 import "./accessStrings";
 import { GitMark } from "./GitMark";
 import { INSTANCE_SCOPE } from "./managed";
@@ -34,7 +35,6 @@ export interface ManagedNoteProps {
 export function ManagedNote({ scope, command }: ManagedNoteProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
-  const values = { file: scope.file_name, when: when(scope.applied_at) };
   return (
     <div className="managed-note">
       <p>
@@ -46,8 +46,12 @@ export function ManagedNote({ scope, command }: ManagedNoteProps): JSX.Element {
               ? "access.managed.instance"
               : "access.managed.environment"
           }
-          values={{ ...values, environment: scope.scope }}
-          components={{ code: <code /> }}
+          values={{ when: when(scope.applied_at) }}
+          components={{
+            code: <code />,
+            file: <VisibleText text={scope.file_name} />,
+            environment: <VisibleText text={scope.scope} />,
+          }}
         />
       </p>
       <CopyLine text={command} copyLabel={t("access.managed.copy")} />

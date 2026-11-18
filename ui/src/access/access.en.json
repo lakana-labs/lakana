@@ -64,8 +64,8 @@
     "directly": "directly"
   },
   "managed": {
-    "instance": "The whole instance is managed by {{file}} (applied {{when}}). Change the file and run <code>lakana access apply</code>. In an emergency, an administrator can change it from the command line; the next apply reverts it.",
-    "environment": "The environment {{environment}} is managed by {{file}} (applied {{when}}). Change the file and run <code>lakana access apply</code>. In an emergency, an administrator can change it from the command line; the next apply reverts it.",
+    "instance": "The whole instance is managed by <file/> (applied {{when}}). Change the file and run <code>lakana access apply</code>. In an emergency, an administrator can change it from the command line; the next apply reverts it.",
+    "environment": "The environment <environment/> is managed by <file/> (applied {{when}}). Change the file and run <code>lakana access apply</code>. In an emergency, an administrator can change it from the command line; the next apply reverts it.",
     "copy": "Copy command",
     "readFailed": "Lakana could not read which scopes an access file manages, so nothing can be changed here for now: {{sentence}}",
     "groupCommand": "lakana group add-member {{- group}} PRINCIPAL --override-managed --reason \"WHY\"",

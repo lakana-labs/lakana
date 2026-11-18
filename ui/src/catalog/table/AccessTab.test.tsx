@@ -429,6 +429,28 @@ describe("AccessTab", () => {
     expect(who.textContent).not.toContain("\u202E");
   });
 
+  it("shows markup in a level's CLI command as text", async () => {
+    const place = "/api/v1/environments/<b>prod</b>/namespaces/gold.sales/tables/fact_sales";
+    renderShell("/catalog/%3Cb%3Eprod%3C%2Fb%3E/gold.sales/fact_sales/access", {
+      routes: {
+        [`GET ${place}`]: { status: 200, body: TABLE },
+        [`GET ${GRANTS_PATH}`]: {
+          status: 200,
+          body: MANY,
+          headers: { "X-Next-Cursor": "eyJhZnRlciI6IjIwMCJ9" },
+        },
+      },
+    });
+
+    const who = await section("Who has access");
+    await within(who).findAllByText(/lists all\.$/);
+    const commands = [...who.querySelectorAll(".grants-cut code")].map((code) => code.textContent);
+    expect(commands[0]).toBe(
+      "lakana grant list --env '<b>prod</b>' --ns 'gold.sales' --table 'fact_sales'",
+    );
+    expect(who.querySelector(".grants-cut b")).toBeNull();
+  });
+
   it("shows row filters without a column and masks with one", async () => {
     renderShell(TAB);
 
