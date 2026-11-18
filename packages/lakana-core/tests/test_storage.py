@@ -949,27 +949,44 @@ def test_list_children_page_of_a_huge_local_folder_keeps_only_a_page_in_memory(
 ) -> None:
     """Entries pass through a heap of the page's size, never a list of them all.
 
-    Each entry counts itself while it is alive, so the test sees how many the listing holds
-    at once: a page of 3 holds a few, a listing that kept them all would hold every one. That
-    proves the bound with 5,000 entries; measuring memory needed a folder big enough to
-    stand out (200,000, which took over a second).
+    Every entry, and every name and path it carries, counts itself while it is alive, so the
+    test sees how much of the folder the listing holds at once: a page of 3 holds a few, a
+    listing that kept every entry, name, path or key (a file's key is its name) would hold
+    thousands. That proves the bound with 5,000 files; measuring memory needed a folder big
+    enough to stand out (200,000, which took over a second).
     """
     (tmp_path / "raw").mkdir()
     total = 5_000
     alive = {"now": 0, "most": 0}
 
-    class _Entry:
-        def __init__(self, number: int) -> None:
-            self.name = f"d{number:06d}"
-            self.path = f"/nowhere/{self.name}"
-            alive["now"] += 1
-            alive["most"] = max(alive["most"], alive["now"])
+    def born() -> None:
+        alive["now"] += 1
+        alive["most"] = max(alive["most"], alive["now"])
+
+    def died() -> None:
+        alive["now"] -= 1
+
+    class _Counted(str):
+        __slots__ = ()
+
+        def __new__(cls, text: str) -> "_Counted":
+            born()
+            return super().__new__(cls, text)
 
         def __del__(self) -> None:
-            alive["now"] -= 1
+            died()
+
+    class _Entry:
+        def __init__(self, number: int) -> None:
+            born()
+            self.name = _Counted(f"f{number:06d}.csv")
+            self.path = _Counted(f"/nowhere/{self.name}")
+
+        def __del__(self) -> None:
+            died()
 
         def is_dir(self, *, follow_symlinks: bool = True) -> bool:
-            return True
+            return False
 
         def is_symlink(self) -> bool:
             return False
@@ -984,17 +1001,29 @@ def test_list_children_page_of_a_huge_local_folder_keeps_only_a_page_in_memory(
         def __exit__(self, *exc: object) -> None:
             return None
 
-    real = os.scandir
+    real_scandir, real_stat = os.scandir, os.stat
+
+    def fake_stat(path: str, *, follow_symlinks: bool = True) -> os.stat_result:
+        if str(path).startswith("/nowhere/"):
+            return os.stat_result((stat.S_IFREG, 0, 0, 1, 0, 0, 7, 0, 0, 0))
+        return real_stat(path, follow_symlinks=follow_symlinks)
+
     monkeypatch.setattr(
-        os, "scandir", lambda path: _Scan() if str(path).endswith("/raw") else real(path)
+        os, "scandir", lambda path: _Scan() if str(path).endswith("/raw") else real_scandir(path)
     )
+    monkeypatch.setattr(os, "stat", fake_stat)
     storage = build_storage(config)
-    page = storage.list_children_page("raw", after="d000009/", limit=3)
-    assert [entry.name for entry in page] == ["d000010", "d000011", "d000012"]
-    assert alive["most"] <= 10, alive["most"]
-    # The count is real: holding every entry at once would show all of them.
-    held = list(_Scan())
-    assert alive["most"] == total
+    page = storage.list_children_page("raw", after="f000009.csv", limit=3)
+    assert [(entry.name, entry.size) for entry in page] == [
+        ("f000010.csv", 7),
+        ("f000011.csv", 7),
+        ("f000012.csv", 7),
+    ]
+    assert alive["most"] <= 30, alive["most"]
+    # The count is real: holding every name alone would show all of them.
+    before = alive["now"]
+    held = [entry.name for entry in _Scan()]
+    assert alive["now"] - before == total
     del held
 
 
