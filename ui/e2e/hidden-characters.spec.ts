@@ -369,7 +369,7 @@ test("the codes of each answer type are the ones src/api declares", () => {
 const AT = "2026-11-09T10:00:00Z";
 
 /**
- * Answers what the Access area and one's account read beyond `session.ts`: an open invite, an
+ * Answers what Settings' Access and Sign-in places and one's account read beyond `session.ts`: an open invite, an
  * open recovery link, a passkey, a session, and a sign-in notice about another person.
  *
  * @param page - The page to stub, poisoned.
@@ -422,7 +422,7 @@ async function stubAccounts(page: Page): Promise<void> {
   );
 }
 
-walk("Home, the Catalog and Access mark hidden characters", async ({ page }) => {
+walk("Home, the Catalog and People mark hidden characters", async ({ page }) => {
   const paths = apiPaths(page);
   await signInAsAdmin(poisoned(page));
   await visit(page, "/", ["daily_sales"]);
@@ -434,7 +434,7 @@ walk("Home, the Catalog and Access mark hidden characters", async ({ page }) => 
   await visit(page, "/catalog?q=store", ["store_id", "ranked by the trips it served"]);
   await expect(page.locator(".match-line > span", { hasText: /^deU\+202E$/ })).toHaveCount(1);
   await visit(page, `/catalog?env=${n("staging")}`, ["staging"]);
-  await visit(page, "/access", ["admin"]);
+  await visit(page, "/settings/access/people", ["admin"]);
   expectOnlyStubbed(paths, STUBBED);
 });
 
@@ -521,15 +521,15 @@ walk("an artifact's page marks hidden characters", async ({ page }) => {
 });
 
 walk(
-  "the Access area, one's account and a sign-in notice mark hidden characters",
+  "Settings' Access and Sign-in places, one's account and a sign-in notice mark hidden characters",
   async ({ page }) => {
     const paths = apiPaths(page);
     await signInAsAdmin(poisoned(page));
     await stubAccounts(poisoned(page));
     await visit(page, "/", ["kim.schulz"]);
-    await visit(page, "/access/invites", ["sam"]);
-    await visit(page, "/access/recovery-links", ["kim.schulz"]);
-    await visit(page, `/access/people/${n("admin")}`, ["Work laptop"]);
+    await visit(page, "/settings/sign-in/invites", ["sam"]);
+    await visit(page, "/settings/sign-in/recovery-links", ["kim.schulz"]);
+    await visit(page, `/settings/access/people/${n("admin")}`, ["Work laptop"]);
     await visit(page, "/account", ["Work laptop"]);
     expectOnlyStubbed(paths, [...STUBBED, ...ACCOUNTS]);
   },

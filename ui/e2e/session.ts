@@ -763,6 +763,8 @@ export const STUBBED = [
   "/api/v1/principals",
   "/api/v1/principals/admin/picture",
   "/api/v1/settings/sign-in",
+  "/api/v1/invites",
+  "/api/v1/recovery-links",
   ...Object.keys(HOME),
   ...Object.keys(CATALOG),
   TABLES,
@@ -786,8 +788,9 @@ export const STUBBED = [
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
- * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture, the first screens of Access (the people) and
- * Settings (the session lengths), and no environment to run a query in (`stubQueries` adds two).
+ * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture,
+ * Settings' People (under Access) and Sign-in (the session lengths), and no environment to run a
+ * query in (`stubQueries` adds two).
  *
  * @param page - The page.
  */
@@ -805,6 +808,8 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route("**/api/v1/settings/sign-in", (route) =>
     route.fulfill({ json: SIGN_IN_SETTINGS }),
   );
+  await page.route("**/api/v1/invites", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/recovery-links", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/whoami", (route) =>
     route.fulfill({
       json: {

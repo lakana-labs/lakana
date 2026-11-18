@@ -10,8 +10,9 @@ import { fileURLToPath } from "node:url";
 
 const ASSETS = "../packages/lakana-server/src/lakana_server/ui_dist/assets";
 const HERE = dirname(fileURLToPath(import.meta.url));
-// Measured 2.96 kB (the Access screen, 2026-11-13: its chunk was 1 B over the earlier 2.96 kB
-// limit once the Catalog's shared chunks changed the minifier's names) + 10 %.
+// Measured 2.96 kB (the former Access screen, now Settings' People, 2026-11-13: its chunk was
+// 1 B over the earlier 2.96 kB limit once the Catalog's shared chunks changed the minifier's
+// names) + 10 %.
 const ON_DEMAND_LIMIT = "3.26 kB";
 // Screens larger than ON_DEMAND_LIMIT, and the tour (held to its own, tighter one), each with a
 // limit of its own; a chunk's file name is the module's name, a dash and a hash, so the start of
@@ -329,7 +330,7 @@ const NAMED_LIMITS = [
   // The Queries screen's addresses (queries/paths.ts, 102 B on 2026-11-17, shared by Home's links
   // and the Queries screen) make a chunk of the same prefix, held to the same limit.
   { name: "the catalog's addresses", prefix: "paths-", limit: "1.09 kB" },
-  // Measured 95 B (a person's address, which the Access area and the Health and Access tabs
+  // Measured 95 B (a person's address, which Settings' People and the Health and Access tabs
   // share, 2026-11-13) + 10 %.
   { name: "a person's address", prefix: "personPath-", limit: "0.11 kB" },
   // Measured 88 B (quoting a command line to copy, which Connect a repository and the Health and
@@ -343,16 +344,11 @@ const NAMED_LIMITS = [
   // Measured 180 B (a date and time in the person's language; the Catalog's list and the table
   // page share it, 2026-11-13) + 10 %.
   { name: "dates and times", prefix: "useWhen-", limit: "0.2 kB" },
-  // Measured 239 B (focus after a control removes itself; the Access screens and the table page
-  // share it, 2026-11-13) + 10 %.
+  // Measured 239 B (focus after a control removes itself; Settings' Access pages (People, Invites,
+  // Recovery links) and the table page share it, 2026-11-13) + 10 %.
   { name: "focus after a change", prefix: "useFocusAfter-", limit: "0.27 kB" },
   // Measured 357 B (reading and reading again, now with the typed failure, 2026-11-13) + 10 %.
   { name: "reading for a screen", prefix: "useResource-", limit: "0.39 kB" },
-  // Measured 219 B (the row of tabs; the router's link code it shared moved into the first load,
-  // 2026-11-13) + 10 %.
-  // Raised to the measured 1.11 kB (2026-11-13) + 10 %: React Aria's text area and the form
-  // parts the table page's editor shares with the text field moved into this chunk.
-  { name: "the tabs", prefix: "SectionTabs-", limit: "1.22 kB" },
 ];
 
 /**
@@ -415,6 +411,9 @@ export default [
   // imports react-router's useNavigate, which split the router's chunk of the first load into
   // two (hooks- and lib-), and the exports between them cost 1.55 kB. vite.config.ts keeps
   // react-router in one chunk (codeSplitting.groups); it measures 208.57 kB, and the limit holds.
+  // The first load depends on vite.config.ts's `shell` chunk group, which names a file inside
+  // react-aria-components (dist/private/Button.mjs); build/chunk-groups.test.ts fails if an update
+  // moves it, since the group would stop matching and this limit might not trip.
   // Measured 210.29 kB (2026-11-17) with the Queries area's loader in the routes (210.05 kB
   // before); CodeMirror stays in its own chunk, and the limit holds.
   // Measured 210.93 kB (2026-11-17) with the Queries screen: React Aria's form validation left

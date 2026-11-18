@@ -37,8 +37,8 @@ working one) and signs you out everywhere.
 
 ## You are the administrator who issues the link
 
-In the interface, open **Access**, then **Recovery links**, and choose **Issue a recovery link**,
-or open the person under **People** and choose it there. Type the person's name; after a touch of
+In the interface, open **Settings → Sign-in → Recovery links** and choose **Issue a recovery link**,
+or open the person under **Settings → Access → People** and choose it there. Type the person's name; after a touch of
 your own passkey the interface shows the link once. Send it to that person on a channel you
 trust (the link is as good as a sign-in). The open links are listed on the same tab, where
 **Withdraw** stops one. From the command line, `recovery create` followed by the person's name
@@ -52,7 +52,7 @@ working if you are deactivated or lose the `ADMIN` role before it is used.
 ## The administrator lost their passkey
 
 An administrator cannot recover another administrator, nor themselves: for an administrator, the
-interface shows the command below instead of issuing a link, on that person's page in **Access**
+interface shows the command below instead of issuing a link, on that person's page in **Settings → Access → People**
 and on the administrator's own **Passkeys and sessions** page, so that it is at hand before it is
 needed. Add a second passkey while you still can. That includes anyone who has ever held the
 `ADMIN` role, directly or through a group, even after it was taken away; the server then refuses

@@ -43,7 +43,7 @@ const PLACES: Record<ObjectKind, (environment: string | null, ref: string) => st
   run: (environment, ref) => (environment === null ? "/jobs" : jobRunPath(environment, ref)),
   check: (environment, ref) => (environment === null ? "/jobs" : jobRunPath(environment, ref)),
   worker: () => "/settings/status",
-  recovery_link: () => "/access/recovery-links",
+  recovery_link: () => "/settings/sign-in/recovery-links",
 };
 
 /** The object each kind of Needs your attention row opens. */

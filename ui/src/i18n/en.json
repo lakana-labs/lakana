@@ -32,13 +32,9 @@
     "experiments": {
       "name": "Experiments"
     },
-    "access": {
-      "name": "Access",
-      "purpose": "People, groups, grants, tokens and secrets."
-    },
     "settings": {
       "name": "Settings",
-      "purpose": "Instance status, environments and how this server is set up."
+      "purpose": "Status, environments, repositories, access and sign-in for the whole instance."
     }
   },
   "comingSoon": {
@@ -482,12 +478,10 @@
     "done": "Done"
   },
   "access": {
-    "tabs": "Access sections",
     "withdraw": "Withdraw",
     "copyLink": "Copy link",
     "shownTitle": "Send this link to {{name}}",
     "people": {
-      "tab": "People",
       "find": "Find people",
       "none": "Nobody matches.",
       "person": "Person",
@@ -497,7 +491,6 @@
       "serviceNote": "{{name}} is a service account: it signs in with its API token, not a passkey, so it needs no recovery link. Issue it a new token instead."
     },
     "invites": {
-      "tab": "Invites",
       "action": "Invite someone",
       "intro": "An invite is a link that creates a person's account, with no rights, the first time it is used. It works once, for 7 days.",
       "none": "No invite is open. Invite someone with the button above, or from the command line:",
@@ -512,7 +505,6 @@
       "confirm": "The link creates the account with no rights. Before you grant any role, confirm outside Lakana that the person who signed up is {{name}}: ask them in person, by phone or in your team chat."
     },
     "recovery": {
-      "tab": "Recovery links",
       "action": "Issue a recovery link",
       "intro": "A recovery link lets a person who lost their passkeys back in. It works once, for 1 hour; using it replaces their passkeys, ends their sessions and tells every administrator.",
       "none": "No recovery link is open. Issue one with the button above when someone has lost their passkeys.",
@@ -564,13 +556,10 @@
     "effect": "{{name}} is signed out in every browser and signs in again with a passkey."
   },
   "settings": {
-    "tabs": "Settings sections",
     "status": {
-      "tab": "Status",
       "intro": "The instance in detail: each worker with its work and memory, and why the instance is degraded or down."
     },
     "signIn": {
-      "tab": "Sign-in",
       "intro": "How long a browser session lasts. API tokens are not affected. Saving asks for a passkey touch when yours is older than 15 minutes.",
       "idle": "Idle timeout in minutes",
       "idleHelp": "A session ends after this long without anything the person did. Between {{min}} and {{max}} minutes ({{minText}} to {{maxText}}).",
@@ -584,7 +573,6 @@
       "shorterThanIdle": "The longest session cannot be shorter than the idle timeout ({{idle}} minutes). Make it longer, or the idle timeout shorter."
     },
     "repositories": {
-      "tab": "Repositories",
       "intro": "Lakana deploys jobs from Git repositories and only ever reads from them.",
       "connect": "Connect a repository"
     },
@@ -746,11 +734,8 @@
       "connections": {
         "text": "The databases and services your project loads its data from."
       },
-      "access": {
-        "text": "Who may sign in, and what each person, group and token may do."
-      },
       "settings": {
-        "text": "The instance’s status, its environments and how this server is set up."
+        "text": "The instance’s status, and for those who manage them, its environments, repositories, access and sign-in."
       },
       "search": {
         "text": "Press {{keys}} anywhere to go to a place or run a command by typing a few letters."

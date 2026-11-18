@@ -71,6 +71,7 @@ What each setting means, and its default:
 |---|---|---|
 | Create, change, delete and test a connection | `MANAGE_CONNECTION` on the environment | `ADMIN`, `DATA_ENGINEER` |
 | List and show connections | `READ_ENVIRONMENT` on the environment | every role on it |
+| See a connection's last test: its outcome and when, for `READ_ENVIRONMENT`; its message and who ran it, for `MANAGE_CONNECTION` | `READ_ENVIRONMENT`; `MANAGE_CONNECTION` for the message and who ran it | every role on it; `ADMIN` and `DATA_ENGINEER` for the message and who ran it |
 
 Testing a connection is a probe from the worker: with the local runner it dials from the worker's host
 to any address the connection names and lists paths under the ingestion roots, so
@@ -182,9 +183,20 @@ log to read (`docker compose logs launcher`). A connection with a secret needs t
 key (`LAKANA_SECRETS__MASTER_KEY_FILE`, as on the server). The command waits
 up to 120 seconds, prints the outcome and exits 1 unless it is `ok`. Only one test of a connection
 runs at a time; asking again meanwhile is refused (409), naming the open test and the command
-that shows it (`lakana connection test NAME --env ENV --id ID`). A test still queued or running
-after 10 minutes is stuck: the next request finishes it as `failed` ("no worker finished this
-test within 10 minutes; …", naming the worker's log to read) and queues a new one.
+that shows it (`lakana connection test NAME --env ENV --id ID`). Test all (below) never answers
+409 for an open test. A test still queued or running after 10 minutes is stuck: the next request finishes it as
+`failed` ("no worker finished this test within 10 minutes; …", naming the worker's log to read)
+and queues a new one.
+
+`lakana connection test --all --env prod` tests every connection of the environment at once
+(`MANAGE_CONNECTION`, as for one). It queues a test of each, waits up to 120 seconds for all of
+them, prints one line per connection, sorted by name (`crm-db: refused: <message>`), with each
+outcome's next step on standard error, and exits 1 unless every outcome is `ok`. A connection
+whose test is already queued or running, and under 10 minutes old, is not queued again: its open
+test is the one waited for. A wait that runs out names every connection still open and the
+`lakana connection test NAME --env ENV --id ID` that looks at its test. With `--no-wait` it
+prints `<name>: queued <id>` or `<name>: already open <id>` and exits 0. It asks the server 200
+connections at a time; NAME, and `--id`, are refused with `--all`.
 
 `--no-wait` queues the test and prints its id; `--id ID` shows that test later (or the one a
 timed-out wait named). A test nobody takes within the wait ends with an error that says whether a
@@ -254,12 +266,31 @@ lakana connection list --env dev
 
 <!-- output: connections#list -->
 ```text
-┏━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
-┃ name    ┃ kind       ┃ address                                    ┃ secret            ┃ declared_by ┃
-┡━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
-│ exports │ directory  │ root=shared path=exports                   │                   │ (none)      │
-│ crm-db  │ postgresql │ host=db.example.com port=5432 database=crm │ crm-db-connection │ (none)      │
-└─────────┴────────────┴────────────────────────────────────────────┴───────────────────┴─────────────┘
+┏━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ name    ┃ kind       ┃ address                                    ┃ secret            ┃ declared_by ┃ last_test    ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ exports │ directory  │ root=shared path=exports                   │                   │ (none)      │ never tested │
+│ crm-db  │ postgresql │ host=db.example.com port=5432 database=crm │ crm-db-connection │ (none)      │ never tested │
+└─────────┴────────────┴────────────────────────────────────────────┴───────────────────┴─────────────┴──────────────┘
+```
+
+`--all-environments` lists the connections of every environment you may read, newest first over
+all of them, with an `environment` column after the name; give it without `--env`:
+
+<!-- source: docs/examples/connections/run.sh#list-all -->
+```bash
+lakana connection list --all-environments
+```
+
+<!-- output: connections#list-all -->
+```text
+┏━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓
+┃ name    ┃ environment ┃ kind       ┃ address                                    ┃ secret            ┃ last_test    ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩
+│ exports │ dev         │ directory  │ root=shared path=exports                   │                   │ never tested │
+│ crm-db  │ dev         │ postgresql │ host=db.example.com port=5432 database=crm │ crm-db-connection │ never tested │
+└─────────┴─────────────┴────────────┴────────────────────────────────────────────┴───────────────────┴──────────────┘
+Not shown: declared_by. Use --output json to see it.
 ```
 
 <!-- source: docs/examples/connections/run.sh#show -->
@@ -274,6 +305,7 @@ Address:     host=db.example.com port=5432 database=crm
 Settings:    user=reader tls=verify-full
 Secret:      crm-db-connection
 Declared by: (none)
+Last test:   never tested
 Created:     2026-10-23T22:54:56.950729+00:00 by admin
 Updated:     2026-10-23T22:54:56.954955+00:00
 ```
@@ -311,6 +343,15 @@ The audit events of connections:
 lakana audit list --kind connection --env dev
 ```
 
+`list` has a `last_test` column and `show` a `Last test:` line: `never tested`, `queued`,
+`running`, or the outcome and when it finished, followed by `(before the last change)` when the
+connection changed after it; `(server does not say)` from a server older than this CLI, which sends
+no last test. With `MANAGE_CONNECTION`, an open test also says when it was
+requested (`queued at 2026-11-17T08:00:00+00:00`), and `show` adds who ran a test and its message
+(`by dana: password authentication failed ...`), and for an open test its id
+(`queued at ... (--id ID)`), which `lakana connection test NAME --id ID` shows. For an outcome other than `ok`, `show` prints
+what to do next on standard error.
+
 `--output json` prints the record of the REST answer (below) for `show`, `create` and `update`.
 
 ## REST
@@ -319,10 +360,13 @@ lakana audit list --kind connection --env dev
 |---|---|---|
 | `POST /api/v1/environments/{env}/connections` | `MANAGE_CONNECTION` | 201 and the connection, whose `secret` is the name its new secret got; 409 when the name is taken; 422 naming the field that is not valid |
 | `GET /api/v1/environments/{env}/connections?limit=&cursor=` | `READ_ENVIRONMENT` | `{"items": [...], "next_cursor": ...}`, newest first, `limit` from 1 to 200 (default 100) |
+| `GET /api/v1/connections?environment=&limit=&cursor=` | `READ_ENVIRONMENT` in each environment listed | the same body over every environment where you hold it, newest first over all of them; an environment without it is left out, never a 403 or 404. With `environment`, exactly the list of that environment, with its 403 and 404. Its `next_cursor` pages this list only: a cursor of the list of one environment is a 422 |
+| `GET /api/v1/connections/environments` | `READ_ENVIRONMENT` in each environment listed | `[{"name", "actions"}]`, sorted by name: every environment where you hold it. `actions` holds `create` and `test` with `MANAGE_CONNECTION` there, and `name_secret` (naming an existing secret for a connection) with `MANAGE_SECRET` too; `[]` for a reader |
 | `GET /api/v1/environments/{env}/connections/{name}` | `READ_ENVIRONMENT` | the connection; 404 names no other connection |
 | `PATCH /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION`, and `MANAGE_SECRET` as above | the connection |
 | `DELETE /api/v1/environments/{env}/connections/{name}` | `MANAGE_CONNECTION` | 204; 409 while a deployed project version declares it |
 | `POST /api/v1/environments/{env}/connections/{name}/tests` | `MANAGE_CONNECTION` | 202 and the test `{"id", "state", "outcome", "message", "created_at", "finished_at"}` (`state` is `queued`, `running` or `done`; `outcome` and `message` are `null` until done); 409 (naming the open test's id) while a test of the connection is queued or running and less than 10 minutes old; an older one is finished as `failed` first |
+| `POST /api/v1/environments/{env}/connection-tests?limit=&cursor=` | `MANAGE_CONNECTION` | 202 and `{"items": [{"connection", "test_id", "queued"}], "next_cursor"}`: Test all of one page of the environment's connections, newest first (`limit` 1 to 200, default 200; the list's cursor). A connection with an open test under 10 minutes old gets that test with `queued: false`, never a 409; an older one is finished as `failed` first; every other connection gets a new test with `queued: true`. 404 for an unknown environment; 409 when a connection changed at the same time: the connections before it stay queued, and sending the request again returns their tests with `queued: false`; 422 for a cursor of another list |
 | `GET /api/v1/environments/{env}/connections/{name}/tests/{test_id}` | `MANAGE_CONNECTION` | the test; 404 for a test of another connection |
 | `GET /api/v1/audit-events?kind=connection` | `READ_AUDIT_LOG` | every `CONNECTION_*` event; combines with the other filters |
 | `GET /api/v1/tasks/self/connections/{name}` | the token of a running task whose asset declares `name` | `{"name", "kind", "address", "settings", "endpoints": [{"host", "port", "role"}], "secret"}`, with `Cache-Control: no-store`; 403 otherwise (below), 401 for a token whose attempt has ended or was claimed again. For the helpers of `lakana.ingest`; the SDK's `client.task_connections.get(name)` returns the body as it is |
@@ -348,9 +392,27 @@ removed), `secret`, `secret_values`, and `clear`, a list of `secret` and setting
 
 The record, in every answer: `name`, `kind`, `address` and `settings` (with defaults filled in,
 `ca_certificate` as its fingerprint), `secret` (the secret's name, or `null`), `declared_by` (a
-list of `{"repository": ..., "asset": ...}`), `created_by` (a principal's name), `created_at` and
-`updated_at`. No answer of these routes holds a secret's value; only the task route above does,
-for the running task itself.
+list of `{"repository": ..., "asset": ...}`), `created_by` (a principal's name), `created_at`,
+`updated_at`, `environment` (its environment's name), `last_test` and `actions`. No answer of
+these routes holds a secret's value; only the task route above does, for the running task itself.
+
+`last_test` is the connection's newest test of any state, or `null` if it was never tested:
+
+- every reader gets `state` (`queued`, `running` or `done`), `outcome` (`null` until done) and
+  `finished_at` (`null` until done);
+- a holder of `MANAGE_CONNECTION` also gets `id`, `created_at`, `message` and `requested_by` (the
+  name of who asked, `null` when that principal is gone). For anyone else these four keys are
+  absent, not `null`: the message can name paths, hosts and ports the worker reached, while each
+  outcome's cause and next step are public ([Test a connection](#test-a-connection)).
+
+A change keeps `last_test`: when its `finished_at` is before `updated_at`, it tested the connection
+as it was before the change.
+
+`actions` says what your rights allow on the connection, in this order: `test`, `update` and
+`delete` with `MANAGE_CONNECTION` on the environment, and `name_secret` with `MANAGE_SECRET` there
+too (naming a secret not bound to the connection, or a change that could send its secret somewhere
+new without new values). A reader gets `[]`. The server still decides every request: an offered
+action can be refused, for example a delete while a deployed version declares the connection.
 
 ## SDK
 
@@ -371,18 +433,34 @@ client.connections.update("prod", "crm-db", settings={"user": "loader"})
 page = client.connections.list("prod")  # one page: page.items, page.next_cursor
 for each in client.connections.iter("prod"):  # every page
     print(each.name, each.declared_by)
+for each in client.connections.iter_all():  # every environment you may read
+    print(each.environment, each.name)
 client.connections.delete("prod", "crm-db")
 client.secrets.bind("prod", "crm-reader", "connection", "crm-db")
 events = client.audit_events.list(kind="connection")
 ```
 
 `update` takes `address`, `settings`, `secret`, `secret_values` and `clear` (a list of names).
+`list_all` (one page, `environment=`, `limit=`, `cursor=`) and `iter_all` list the connections of
+every environment you may read, as `GET /api/v1/connections` does; `client.connections.environments()`
+returns those environments as `ConnectionEnvironment`s with `name` and `actions`.
+A `Connection` also has `environment`, `last_test` (a `LastConnectionTest` with `state`,
+`outcome` and `finished_at`, and `id`, `created_at`, `message` and `requested_by`, which are
+`None` without `MANAGE_CONNECTION`) and `actions`, a tuple of the words of `actions` above.
 
 `client.connections.test("prod", "crm-db")` queues a test and polls it (0.5 s, growing to 2 s) until
 it is done or `timeout` (120 s) passes, and returns a `ConnectionTest` with `id`, `state`,
 `outcome`, `message`, `created_at` and `finished_at`. `wait=False` returns it as queued;
 `test_id=` looks at an earlier test. A test nobody finished in time raises `TimeoutError`, naming
 the state, the worker log to read and the command that looks again.
+
+`client.connections.test_all("prod")` tests every connection of the environment: it queues a test
+of each, page by page, then polls them as `test` does until every one is done, and returns a
+`dict` of each connection's name to its `ConnectionTest`. A connection with an open test gets that
+test. `wait=False` reads each test once; a wait that runs out raises `TimeoutError` naming every
+connection still open. `queue_tests("prod", limit=, cursor=)` is one page of it, as
+`POST .../connection-tests` answers: a `QueuedConnectionTestPage` of `QueuedConnectionTest`s
+(`connection`, `test_id`, `queued`) and `next_cursor`.
 
 ## How a task gets its credential
 

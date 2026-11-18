@@ -28,6 +28,7 @@ describe("SignInSettings", () => {
     expect(absolute).toHaveValue("10080");
     expect(absolute).toHaveAccessibleDescription(/Between 60 and 43200 minutes/);
     expect(screen.getByText(/applies to sessions that begin afterwards/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Sign-in" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Sign-in" })).toHaveAttribute("aria-current", "page");
     expect(screen.queryByRole("row")).not.toBeInTheDocument();
   });

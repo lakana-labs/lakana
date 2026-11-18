@@ -183,7 +183,7 @@ describe("PasskeysPanel", () => {
 
   it("warns an administrator what removing another person's passkey does", async () => {
     let theirs: unknown[] = [LAPTOP];
-    const { user, server } = renderShell("/access/people/kim", {
+    const { user, server } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": {
           status: 200,

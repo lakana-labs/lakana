@@ -958,8 +958,11 @@ _LODASH_4_17_20_INTEGRITY = (
 def test_the_npm_audit_job_audits_both_locks_and_proves_it_fails() -> None:
     """Both npm locks are audited at the lowest level, and the audit is proved to fail.
 
-    ``npm audit`` and osv-scanner read the locks of ``ui/`` and ``tools/jscpd``; the last step
-    writes a lock with a known advisory at run time (never committed) and requires both to fail.
+    ``scripts/npm_audit.py`` (``npm audit`` with the time-limited allowlist) and osv-scanner read
+    the locks of ``ui/`` and ``tools/jscpd``; the last step writes a lock with a known advisory at
+    run time (never committed) and requires ``npm audit``, the script and osv-scanner to fail, the
+    script for the probe's advisories alone, with ``ui/`` audited alongside so its allowlist
+    entries are in use.
     The probe's lock is written out with its integrity hash, never resolved by ``npm install``, so
     no npm command of the job is left unpinned (Scorecard's Pinned-Dependencies).
     """
@@ -969,8 +972,7 @@ def test_the_npm_audit_job_audits_both_locks_and_proves_it_fails() -> None:
     assert job["if"] == _jobs("security.yml")["static"]["if"]
     commands = [c for step in job["steps"] for c in _commands(step)]
     text = "\n".join(commands)
-    for prefix in ("ui", "tools/jscpd"):
-        assert f"npm audit --audit-level=low --prefix {prefix}" in text
+    assert "python3 scripts/npm_audit.py ui tools/jscpd" in commands
     scan = next(c for c in commands if 'osv-scanner" scan source' in c)
     assert "--lockfile ui/package-lock.json" in scan
     assert "--lockfile tools/jscpd/package-lock.json" in scan
@@ -979,6 +981,9 @@ def test_the_npm_audit_job_audits_both_locks_and_proves_it_fails() -> None:
     assert '"node_modules/lodash": {"version": "4.17.20"' in probe["run"]
     assert f'"integrity": "{_LODASH_4_17_20_INTEGRITY}"' in probe["run"]
     assert "$RUNNER_TEMP/audit-probe" in probe["run"]
+    assert "npm audit --audit-level=low" in probe["run"]
+    assert 'scripts/npm_audit.py" "$GITHUB_WORKSPACE/ui" .' in probe["run"]
+    assert "in lodash: not allowlisted" in probe["run"]
     assert probe is job["steps"][-1]
     node = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/setup-node"))
     assert node["with"]["node-version-file"] == "ui/.nvmrc"

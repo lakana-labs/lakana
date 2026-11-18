@@ -9,6 +9,7 @@ describe("StatusPlaceholder", () => {
 
     expect(await screen.findByText("lakana status")).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/settings/status");
+    expect(screen.getByRole("heading", { level: 1, name: "Status" })).toBeInTheDocument();
     expect(screen.getByText(/part 8 of the interface/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Status" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("link", { name: "Sign-in" })).toHaveAttribute(

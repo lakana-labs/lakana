@@ -10,6 +10,7 @@ import { Link, Navigate } from "react-router";
 
 import { getArtifact, getTable, recordOpened, type TableRef } from "../../api";
 import { useMe } from "../../shell/me";
+import { REDIRECT } from "../../shell/redirect";
 import { markedText } from "../../shell/VisibleText";
 import { type Resource, useResource } from "../../shell/useResource";
 import type { ArtifactOut, TableOut } from "../../api";
@@ -189,7 +190,7 @@ export function TablePage({
   }
   if (!tabsFor(read.table.kind).includes(tab)) {
     // Preview on an artifact, or Versions on a table: the entry's Overview, in place of the address.
-    return <Navigate replace to={tablePath(environment, namespace, name)} />;
+    return <Navigate replace to={tablePath(environment, namespace, name)} state={REDIRECT} />;
   }
   return (
     <TableProvider place={place} loaded={read.table} artifact={read.artifact}>

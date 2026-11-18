@@ -55,12 +55,15 @@ Answer fields: `ConnectionOut`
 | `created_by` | text | yes |  |
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
+| `environment` | text | yes |  |
+| `last_test` | `ConnectionLastTestOut` or null | yes |  |
+| `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
 
 ## `GET /api/v1/environments/{environment_name}/connections`
 
 List the connections of an environment
 
-Lists one page of connections, newest first, with the assets that declare each. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.
+Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.
 
 Parameters:
 
@@ -92,7 +95,7 @@ Answer fields: `ConnectionPage`
 
 Show a connection
 
-Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret and the assets that declare it. Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Answers 404 when the environment or the connection does not exist; the answer names no other connection.
+Shows its address, settings (a CA certificate as its SHA-256 fingerprint), the name of its secret, the assets that declare it, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403, naming no connection. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment or the connection does not exist; the answer names no other connection.
 
 Parameters:
 
@@ -125,6 +128,9 @@ Answer fields: `ConnectionOut`
 | `created_by` | text | yes |  |
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
+| `environment` | text | yes |  |
+| `last_test` | `ConnectionLastTestOut` or null | yes |  |
+| `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
 
 ## `PATCH /api/v1/environments/{environment_name}/connections/{connection_name}`
 
@@ -176,6 +182,9 @@ Answer fields: `ConnectionOut`
 | `created_by` | text | yes |  |
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
+| `environment` | text | yes |  |
+| `last_test` | `ConnectionLastTestOut` or null | yes |  |
+| `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
 
 ## `DELETE /api/v1/environments/{environment_name}/connections/{connection_name}`
 
@@ -273,6 +282,92 @@ Answer fields: `ConnectionTestOut`
 | `message` | text or null | yes |  |
 | `created_at` | text (date-time) | yes |  |
 | `finished_at` | text (date-time) or null | yes |  |
+
+## `GET /api/v1/connections`
+
+List the connections of every environment you may read
+
+Without `environment`, lists one page of the connections of every environment where you hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An environment where you do not hold it is left out, so this is never a 404, and never a 403 but for a task token, which is refused as every connection read is. With `environment`, it answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers, with its 403 and 404. Each connection carries its last test and what you may do with it (`actions`), as in that list: the last test's `id`, `created_at`, `message` and `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only this environment. |
+| `limit` | query | no | whole number | Most connections returned (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `ConnectionPage` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `ConnectionPage`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `ConnectionOut` | yes |  |
+| `next_cursor` | text or null | yes |  |
+
+## `GET /api/v1/connections/environments`
+
+List the environments whose connections you may read, and what you may do there
+
+Every environment where you hold `READ_ENVIRONMENT`, sorted by name, with its `actions`: `create` and `test` where you hold `MANAGE_CONNECTION`, and `name_secret` (naming an existing secret for a connection) where you hold `MANAGE_SECRET` too. Empty when there is none. A task token is refused with 403, as every connection read is.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `ConnectionEnvironmentOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+## `POST /api/v1/environments/{environment_name}/connection-tests`
+
+Queue a test of every connection of an environment (Test all), a page at a time
+
+Takes one page of the environment's connection list, newest first (`limit` 1 to 200, default 200), and handles each connection in turn: a connection whose test is queued or running and under 10 minutes old is not queued again, and that test is returned with `queued: false`; an older open test is finished as failed first; every other connection gets a new test with `queued: true`. An open test is never a 409. Poll each test with `GET .../connections/{connection}/tests/{test_id}`, and send `next_cursor` back as `cursor` for the next page; it takes the cursors of `GET /api/v1/environments/{environment_name}/connections` and refuses others with 422. Needs `MANAGE_CONNECTION` in the environment, as a single test does. Answers 404 when the environment does not exist, and 409 when a connection changed at the same time: the connections before it stay queued, and sending the request again returns their tests with `queued: false`.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment_name` | path | yes | text | The environment. |
+| `limit` | query | no | whole number | Most connections tested (1 to 200). |
+| `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `202` | Successful Response | `ConnectionQueuedTestPage` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `ConnectionQueuedTestPage`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `items` | list of `ConnectionQueuedTestOut` | yes |  |
+| `next_cursor` | text or null | yes |  |
 
 ## `GET /api/v1/tasks/self/connections/{name}`
 
