@@ -80,6 +80,8 @@ export function renderShell(path = "/", options: ShellOptions = {}): RenderedShe
         me.admin ? ["dev", "prod"] : [],
       ),
     },
+    // The account page's API tokens: none.
+    [`GET /api/v1/principals/${me.name}/tokens`]: { status: 200, body: [] },
     ...homeRoutes(me.name),
     ...catalogRoutes(),
     ...tableRoutes(me.name),

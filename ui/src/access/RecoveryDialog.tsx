@@ -110,7 +110,7 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
       {stage.kind === "issued" && (
         <ShownOnce
           title={t("access.shownTitle", { name: markedText(stage.link.name) })}
-          url={stage.link.url}
+          value={stage.link.url}
           onDone={onClose}
         >
           <p>
