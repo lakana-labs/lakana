@@ -669,6 +669,48 @@ describe("ConnectionForm, add", () => {
     expect(password).not.toHaveAttribute("aria-describedby");
   });
 
+  it("names a missing value in its own words when the browser gives none, with no tooltip", async () => {
+    const { user } = renderAdd();
+    await user.type(await screen.findByRole("textbox", { name: "Name" }), "crm");
+    await user.type(screen.getByRole("textbox", { name: "host" }), "db.example.org");
+    await user.type(screen.getByRole("textbox", { name: "database" }), "crm");
+    await user.type(screen.getByRole("textbox", { name: "user" }), "loader");
+    const password = screen.getByLabelText("password");
+    // No browser tooltip on hover beside the sentence under the field (Firefox).
+    expect(password).toHaveAttribute("title", "");
+    Object.defineProperty(password, "validationMessage", { value: "" });
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(password).toHaveAttribute("aria-invalid", "true");
+    expect(password).toHaveAccessibleDescription("Give this value.");
+  });
+
+  it("drops a key file read after its field is gone", async () => {
+    const { user, server } = renderAdd();
+    const kinds = await screen.findByRole("radiogroup", { name: "Kind" });
+    await user.click(within(kinds).getByRole("radio", { name: "Google Cloud Storage" }));
+    let finish: (text: string) => void = () => undefined;
+    const file = new File(["{}"], "key.json");
+    Object.defineProperty(file, "text", {
+      value: () =>
+        new Promise<string>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await user.upload(screen.getByLabelText("Read the key from a file…"), file);
+    await user.click(within(kinds).getByRole("radio", { name: "S3" }));
+
+    // Without its field the key has nowhere to go; nothing throws and nothing is sent.
+    finish(SENTINEL);
+    await Promise.resolve();
+    await Promise.resolve();
+    for (const input of document.querySelectorAll("input")) {
+      expect(input.value).not.toContain(SENTINEL);
+    }
+    expect(writes(server)).toEqual([]);
+  });
+
   it("after the create goes to the page with the note and Test now", async () => {
     const { user } = renderAdd(MANAGER, {
       "POST /api/v1/environments/dev/connections": created(),
@@ -1183,6 +1225,41 @@ describe("ConnectionForm, a secret value never leaves its field", () => {
       secret_values: { api_user: `${SENTINEL}-user`, api_key: SENTINEL },
     });
   }, 15_000);
+
+  it("for a key read from a file", async () => {
+    const spies = consoleSpies();
+    const write = refusedFirst(created());
+    const { user, server } = renderAdd(MANAGER, {
+      "POST /api/v1/environments/dev/connections": write.route,
+    });
+    const kinds = await screen.findByRole("radiogroup", { name: "Kind" });
+    await user.click(within(kinds).getByRole("radio", { name: "Google Cloud Storage" }));
+    await user.type(screen.getByRole("textbox", { name: "Name" }), "events");
+    await user.type(screen.getByRole("textbox", { name: "bucket" }), "lakana-events");
+    const key = `{"type": "service_account", "private_key": "${SENTINEL}"}`;
+    await user.upload(
+      screen.getByLabelText("Read the key from a file…"),
+      new File([key], "key.json"),
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("service_account_json")).toHaveValue(key);
+    });
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("address.host is not valid.");
+    expect(screen.getByLabelText("service_account_json")).toHaveValue(key);
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+
+    write.accept();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("button", { name: "Test now" })).toBeInTheDocument();
+    expect(whereIsTheSentinel(spies)).toEqual([]);
+    expect(carryingSentinel(server)).toHaveLength(2);
+    expect(server.sent.findLast((request) => request.method !== "GET")?.body).toMatchObject({
+      secret_values: { service_account_json: key },
+    });
+  });
 
   it("on Edit, after a refused save and after a successful one", async () => {
     const spies = consoleSpies();

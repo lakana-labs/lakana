@@ -38,7 +38,7 @@ const KEY_NAME = /^[a-z][a-z0-9_]{0,31}$/;
 export interface SecretInputs {
   /** Gives a value input its ref: `id` names the input, `key` the secret key it holds. */
   readonly field: (id: string, key: string) => (input: HTMLInputElement | null) => void;
-  /** Puts text into the input of a key, as if typed (a key read from a file). */
+  /** Puts text into the input of a key, as if typed (a key read from a file); none if gone. */
   readonly fill: (key: string, text: string) => void;
   /** The values of the mounted inputs, by key; inputs whose key is not named yet left out. */
   readonly read: () => Readonly<Record<string, string>>;
@@ -64,7 +64,11 @@ export function useSecretInputs(): SecretInputs {
     [],
   );
   const fill = useCallback((key: string, text: string) => {
-    const input = inputs.current.get(key)?.input as HTMLInputElement;
+    const input = inputs.current.get(key)?.input;
+    if (input === undefined) {
+      // The field went (another kind or way) while the file was read; so does the text.
+      return;
+    }
     input.value = text;
     // The field's check runs on input, as for a typed value.
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -124,7 +128,7 @@ interface PasswordFieldProps {
  * controlled), marked as a new password so the browser fills no saved one in (browsers ignore
  * `off` on a password field), and out of the password managers' reach (`data-1p-ignore`,
  * `data-lpignore`). Like the form's other fields, a missing value shows once Save is tried: the
- * field is marked invalid with the browser's sentence, and the first invalid field of the form
+ * field is marked invalid with the browser's sentence (or ours when it gives none), and the first invalid field of the form
  * takes the focus; typing clears it until the next Save.
  *
  * @param props - The label, whether it is needed, and the ref.
@@ -134,6 +138,7 @@ interface PasswordFieldProps {
  * @returns The field.
  */
 function PasswordField({ label, required, inputRef }: PasswordFieldProps): JSX.Element {
+  const { t } = useTranslation();
   const id = useId();
   const error = useId();
   const [problem, setProblem] = useState<string | null>(null);
@@ -149,13 +154,15 @@ function PasswordField({ label, required, inputRef }: PasswordFieldProps): JSX.E
         data-1p-ignore=""
         data-lpignore="true"
         required={required}
+        // No tooltip of the browser's own beside the sentence (Firefox), as React Aria does.
+        title=""
         aria-invalid={problem === null ? undefined : true}
-        aria-describedby={problem ? error : undefined}
+        aria-describedby={problem === null ? undefined : error}
         onInvalid={(event) => {
           const input = event.currentTarget;
           // No browser bubble; the sentence shows under the field, as React Aria's fields do.
           event.preventDefault();
-          setProblem(input.validationMessage);
+          setProblem(input.validationMessage || t("connections.form.valueNeeded"));
           const form = input.form as HTMLFormElement;
           const first = [...form.elements].find(
             (element) => !(element as HTMLInputElement).validity.valid,
@@ -169,7 +176,7 @@ function PasswordField({ label, required, inputRef }: PasswordFieldProps): JSX.E
           setProblem(null);
         }}
       />
-      {problem ? (
+      {problem !== null ? (
         <span id={error} slot="errorMessage">
           {problem}
         </span>
