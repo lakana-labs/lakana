@@ -158,6 +158,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "owner",
         # a passkey's id (`lakana_core.identity.passkeys`), never its key or credential id
         "passkey_id",
+        # the personal token a task token was minted with: its public key id, never a secret
+        "pat_key_id",
         "path",
         # the client's address and browser of a sign-in, as the server saw them
         "peer",

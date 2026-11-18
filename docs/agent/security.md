@@ -3874,8 +3874,9 @@ is never checked once and then forgotten. `_task_scope_for_run` and
 apart; `_task_scope_for_run` additionally passes `expected_principal_id=run.principal_id`,
 since `QueryRun.task_token_id` has no foreign key and nothing else stops a token row's
 `principal_id` from later pointing at a different principal than the one the run was
-actually submitted under. A run whose token is missing, revoked, or expired, or whose
-principal has since been deactivated, fails with `"Task token no longer valid."` before
+actually submitted under. A run whose token is missing, revoked, or expired, whose
+principal has since been deactivated, or whose minting personal token no longer works
+(`source_pat_id`, see "Scope of the rule"), fails with `"Task token no longer valid."` before
 any parsing. `QueryService.get_query_run` additionally scopes a task-token caller's reads
 to runs submitted with that same token, so one token cannot read a run its principal
 submitted through a PAT or a different token. Every audit event this failure path
@@ -5920,9 +5921,34 @@ fuller text of each part where it already lives.
 
 - **Scope of the rule.** It is "no token can create a personal token": a stolen token cannot
   mint a replacement personal token. A personal token whose owner holds `MINT_TASK_TOKEN` can still
-  mint a task token (`TaskTokenService.mint`), bounded by `max_ttl_seconds`. That is an accepted
-  residual: minting task tokens stays in the CLI by the spec, and `MINT_TASK_TOKEN` is granted
-  separately.
+  mint a task token (`TaskTokenService.mint`): minting task tokens stays in the CLI by the spec,
+  and `MINT_TASK_TOKEN` is granted separately. Such a task token cannot outlive the personal token
+  that minted it. `TaskToken.source_pat_id` (migration `0085`, foreign key `ON DELETE CASCADE`)
+  names that token, and `resolve_task_token_scope` refuses the task token as soon as the personal
+  token is revoked or expired or its owner is deactivated (`_minting_pat_works`, the same
+  conditions as `PatService.verify`). It reads the personal token's row at every authentication
+  and before the worker runs a queued query, so there is no window and no sweep, and expiry is
+  covered as well. Deleting the personal token row deletes its task tokens (defensive: no code
+  path deletes a PAT or a principal today). `PatService.revoke`, and the bootstrap recovery
+  that revokes the bootstrap principal's earlier PATs, also revoke them in the same transaction
+  (`revoke_task_tokens_of_pat`), each with a
+  `TASK_TOKEN_REVOKED` event of `reason: pat_revoked` and the personal token's `pat_key_id`
+  (`TASK_TOKEN_MINTED` carries `pat_key_id` too), so the rows, `GET /api/v1/task-tokens` and the
+  audit log agree. `list_live` also leaves out a task token whose personal token is revoked or
+  expired, or whose personal token's owner is deactivated.
+  **Residual:** a task token minted before `0085` has `source_pat_id` `NULL` and lives until its
+  own `expires_at`, at most `max_ttl_seconds` after it was minted. An administrator can list such
+  tokens (`GET /task-tokens`) and revoke them, or deactivate their principal. The downgrade of
+  `0085` first revokes every live task token whose personal token no longer works (`reason:
+  pat_ended`; a token past its own expiry is left alone), so going back does not bring them back
+  to life; every other task token loses its link and again lasts until its own expiry. Pins:
+  `test_identity_task_tokens.py` (`test_revoking_the_personal_token_ends_its_task_tokens_only`,
+  `test_a_task_token_stops_when_its_personal_token_expires`,
+  `test_a_task_token_stops_when_its_personal_tokens_owner_is_deactivated`,
+  `test_deleting_the_personal_token_deletes_its_task_tokens`,
+  `test_a_task_token_without_a_personal_token_works_until_its_own_expiry`), `test_task_tokens.py`
+  (`test_revoking_the_personal_token_that_minted_a_task_token_ends_it`), and
+  `test_0085_links_task_tokens_to_their_pat_and_revokes_orphans_on_downgrade`.
 - **The denial row** (`not_from_a_browser`) is written unconditionally, as `TaskTokenService.mint`
   and `revoke` do, not through `DenialAuditLimiter`.
 - **Local mode.** A stolen non-administrator personal token could mint a local sign-in link, enrol

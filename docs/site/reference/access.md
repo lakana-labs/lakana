@@ -182,6 +182,12 @@ may revoke only a task token minted for themselves over REST, as before. Minting
 `lakana task-token mint`: a browser is refused (`403`, `TokenOnlyRoute`), so no task token is ever
 shown in the interface.
 
+A task token minted with a personal token works only while that personal token does. Revoking
+the personal token revokes its task tokens too (each gets a `TASK_TOKEN_REVOKED` event with
+`reason` `pat_revoked`). Once the personal token expires, or its owner is deactivated, its task
+tokens get `401` and are no longer listed. A task token minted before this rule was added lasts
+until its own `expires_at`.
+
 ## Refusals
 
 | Cause | Answer |
