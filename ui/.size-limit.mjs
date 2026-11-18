@@ -503,6 +503,10 @@ export default [
   // the Connections screen together (+0.13 kB, the Connections area's loader and its list of
   // preloaded chunks): the environment picker the three screens share is now a chunk of its own
   // (EnvironmentPicker-), apart from the storage helpers (remembered-). The limit holds.
+  // Measured 209.91 kB (2026-11-18; 209.82 kB on main in the same build) with the Connections
+  // filter kept through shell/remembered.ts as the Jobs filter is: the picker and the storage
+  // helpers are one chunk again (remembered-, as on main), and the first load holds +0.09 kB, the
+  // Connections area's loader and its list of preloaded chunks. The limit holds.
   // Measured 192.8 kB (Help in the sidebar, its two commands in the palette, and the strings of
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
@@ -557,6 +561,9 @@ export default [
   // index stylesheet is the same as main's.
   // Measured 11.58 kB (2026-11-18) with the Jobs list's rules beside the Connections screen's;
   // the first load's index stylesheet is the same as main's. The limit holds.
+  // Measured 11.61 kB (2026-11-18) with the environment picker's rules imported by the
+  // Connections stylesheet too, so the picker is laid out even when Connections is the first
+  // screen opened; the first load's index stylesheet is the same as main's. The limit holds.
   { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "12.54 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { browserStorage } from "../preferences/preferences";
+import { readRemembered, writeRemembered } from "../shell/remembered";
 
 /**
  * The storage key of a person's filter.
@@ -27,11 +28,7 @@ export function readFilter(
   person: string,
   storage: Storage | null = browserStorage(),
 ): string | null {
-  try {
-    return storage?.getItem(key(person)) ?? null;
-  } catch {
-    return null;
-  }
+  return readRemembered(key(person), storage);
 }
 
 /**
@@ -46,13 +43,5 @@ export function writeFilter(
   environment: string | null,
   storage: Storage | null = browserStorage(),
 ): void {
-  try {
-    if (environment === null) {
-      storage?.removeItem(key(person));
-    } else {
-      storage?.setItem(key(person), environment);
-    }
-  } catch {
-    // A browser that refuses storage just forgets the choice.
-  }
+  writeRemembered(key(person), environment, storage);
 }

@@ -1,4 +1,4 @@
-/* The environment picker's rules, which the Queries and Jobs screens share. */
+/* The environment picker's rules, which the Queries, Jobs and Connections screens share. */
 @import "../shell/environment.css";
 
 /* The Jobs screen's own rules: a cron expression shown as it is. */

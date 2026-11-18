@@ -1,3 +1,6 @@
+/* The environment picker's rules, which the Queries, Jobs and Connections screens share. */
+@import "../shell/environment.css";
+
 /* The Connections list: its table scrolls inside its own region; below 640 px the where and
    used-by columns fold under the name, as a second line. */
 .list-scroll.connections-scroll .list {
