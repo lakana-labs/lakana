@@ -3158,6 +3158,10 @@ class WhoamiOut(BaseModel):
     may_deploy
         Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role
         or a group); the web interface shows the deploy steps and Your work from it.
+    secret_environments
+        The environments, by name and sorted, where you may manage secrets with this credential
+        (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.
+        The web interface offers its Secrets page for exactly these.
     picture
         The etag of your profile picture, or `null` without one.
     """
@@ -3170,6 +3174,7 @@ class WhoamiOut(BaseModel):
     admin: bool = False
     has_access: bool = False
     may_deploy: bool = False
+    secret_environments: list[str] = []
     picture: str | None = None
 
 

@@ -75,7 +75,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "DroppedTableOut",
   '["actions","exists","kind","repository","table"]': "OrphanOut",
   '["active","note","permissions","principal","scope"]': "PermissionsOut",
-  '["admin","ci_token","has_access","language","may_deploy","name","picture","task_token","type"]':
+  '["admin","ci_token","has_access","language","may_deploy","name","picture","secret_environments","task_token","type"]':
     "WhoamiOut",
   '["alert","band","column","effect","id","last_fired_at","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
     "HealthSignalOut",

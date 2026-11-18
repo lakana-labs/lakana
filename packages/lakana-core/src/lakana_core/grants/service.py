@@ -690,6 +690,33 @@ class GrantService:
         questions = [(Action.DEPLOY, Securable.environment_scope(name)) for name in names]
         return any(permits_each(self._authz, p, questions))
 
+    def secret_environments(self, p: PrincipalRef) -> list[str]:
+        """Name the environments where the caller may manage secrets with this credential.
+
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. It follows the credential's scope, as `may_deploy_somewhere` does: a task or CI
+        token names none. The web interface offers its Secrets page from it.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        list of str
+            The names of the environments that are not deleted where `permits(MANAGE_SECRET)`
+            holds, sorted, asked in one batch; empty without one.
+        """
+        names = list(
+            self._session.execute(
+                select(Environment.name).where(LIVE_ENVIRONMENT).order_by(Environment.name)
+            ).scalars()
+        )
+        questions = [(Action.MANAGE_SECRET, Securable.environment_scope(name)) for name in names]
+        allowed = permits_each(self._authz, p, questions)
+        return [name for name, yes in zip(names, allowed, strict=True) if yes]
+
     def explain(self, p: PrincipalRef, principal_name: str, scope: Securable) -> PermissionReport:
         """Say what a principal may do on an object, and through which grant or group.
 

@@ -830,6 +830,7 @@ export async function signInAsAdmin(page: Page): Promise<void> {
         admin: true,
         has_access: true,
         may_deploy: true,
+        secret_environments: ["dev", "prod"],
         picture: "e1",
       },
     }),

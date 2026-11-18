@@ -66,6 +66,7 @@ export const ADMIN_SESSION = {
  * @param admin - Whether the person holds the ADMIN role on the instance.
  * @param hasAccess - Whether the person has any grant at all.
  * @param mayDeploy - Whether the person may deploy in at least one environment.
+ * @param secretEnvironments - The environments where the person manages secrets.
  * @returns The body.
  */
 export function whoami(
@@ -73,6 +74,7 @@ export function whoami(
   admin: boolean,
   hasAccess = admin,
   mayDeploy = admin,
+  secretEnvironments: readonly string[] = [],
 ): unknown {
   return {
     name,
@@ -83,6 +85,7 @@ export function whoami(
     admin,
     has_access: hasAccess,
     may_deploy: mayDeploy,
+    secret_environments: secretEnvironments,
     picture: null,
   };
 }
