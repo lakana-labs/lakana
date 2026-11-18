@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { describe, expect, it } from "vitest";
 
 import { setStepUp } from "./client";
@@ -68,15 +65,12 @@ describe("grants", () => {
     ]);
   });
 
-  it("knows every role and action the server does", () => {
-    const openapi = JSON.parse(
-      readFileSync(
-        resolve(import.meta.dirname, "../../../docs/site/reference/openapi.json"),
-        "utf8",
-      ),
-    ) as { components: { schemas: Record<string, { enum: string[] }> } };
-    expect([...ROLES]).toEqual(openapi.components.schemas["Role"]?.enum);
-    expect([...ACTIONS]).toEqual(openapi.components.schemas["Action"]?.enum);
+  it("lists each role and action once", () => {
+    // The server's order and set are compared in scripts/tests/test_ui_grant_vocabulary.py.
+    expect(new Set(ROLES).size).toBe(ROLES.length);
+    expect(new Set(ACTIONS).size).toBe(ACTIONS.length);
+    expect(ROLES).toContain("ADMIN");
+    expect(ACTIONS).toContain("READ_TABLE");
   });
 
   it("creates and revokes with the passkey asked first", async () => {
