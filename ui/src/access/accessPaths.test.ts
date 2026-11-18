@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { type GrantFilter, NO_FILTER } from "../api/grants";
-import { filterKey, grantsPath, groupPath, readGrantFilter } from "./accessPaths";
+import { filterKey, grantsPath, groupPath, readGrantFilter, tokensPath } from "./accessPaths";
 
 /**
  * Reads back the filter of an address.
@@ -14,6 +14,16 @@ function readBack(path: string): GrantFilter {
 }
 
 describe("paths", () => {
+  it("puts the Tokens filters in the address", () => {
+    expect(tokensPath({})).toBe("/settings/access/tokens");
+    expect(tokensPath({ owner: "", environment: "" })).toBe("/settings/access/tokens");
+    expect(tokensPath({ owner: "kim lee" })).toBe("/settings/access/tokens?owner=kim+lee");
+    expect(tokensPath({ owner: "maria", environment: "dev" })).toBe(
+      "/settings/access/tokens?owner=maria&environment=dev",
+    );
+    expect(tokensPath({ environment: "a&b" })).toBe("/settings/access/tokens?environment=a%26b");
+  });
+
   it.each<GrantFilter>([
     NO_FILTER,
     {

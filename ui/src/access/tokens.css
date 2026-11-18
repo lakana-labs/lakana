@@ -12,3 +12,14 @@
 .list-scroll.tokens-scroll .row-name {
   overflow-wrap: normal;
 }
+
+/* The owner's name and a task token's run: links in a list whose rows open nothing. */
+.tokens-scroll a.token-owner {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.tokens-scroll a.token-owner:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}

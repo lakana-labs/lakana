@@ -132,3 +132,27 @@ export function readGrantFilter(search: URLSearchParams): GrantFilter {
 export function filterKey(filter: GrantFilter): string {
   return grantQuery(filter).toString();
 }
+
+/** The address of Tokens. */
+const TOKENS_PATH = "/settings/access/tokens";
+
+/**
+ * The Tokens page's address with its filters.
+ *
+ * @param filter - The filters; a part left out is any.
+ * @param filter.owner - The owner of the personal tokens.
+ * @param filter.environment - The environment of the task tokens.
+ * @returns The path, with its query when a filter is set.
+ */
+export function tokensPath(filter: {
+  readonly owner?: string;
+  readonly environment?: string;
+}): string {
+  const query = new URLSearchParams();
+  if (filter.owner !== undefined && filter.owner !== "") query.set("owner", filter.owner);
+  if (filter.environment !== undefined && filter.environment !== "") {
+    query.set("environment", filter.environment);
+  }
+  const text = query.toString();
+  return text === "" ? TOKENS_PATH : `${TOKENS_PATH}?${text}`;
+}

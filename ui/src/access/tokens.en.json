@@ -12,11 +12,11 @@
   "revoke": "Revoke",
   "revokeOwn": "Revoke {{name}}",
   "revokeOf": "Revoke {{name}} of {{owner}}",
-  "revokeTask": "Revoke the task token {{key}} of {{environment}}",
+  "revokeTask": "Revoke the task token of {{principal}} in {{environment}}, {{purpose}}",
   "confirm": {
     "title": "Revoke this token?",
     "personal": "The token {{name}} of {{owner}}.",
-    "task": "The task token of {{environment}} for {{purpose}}.",
+    "task": "The task token of {{principal}} in {{environment}}, {{purpose}}.",
     "effect": "Scripts that use it stop at once.",
     "cascade": "Task tokens minted with it stop working too.",
     "action": "Revoke the token"
@@ -44,7 +44,8 @@
     "noneOf": "{{owner}} has no live token.",
     "serviceAccount": "A service account's token is issued with the command line:",
     "issueCommand": "lakana token issue NAME LABEL",
-    "reading": "Reading the personal tokens…"
+    "reading": "Reading the personal tokens…",
+    "region": "Live personal tokens"
   },
   "task": {
     "title": "Task tokens",
@@ -59,7 +60,8 @@
     "none": "No live task token.",
     "mint": "Task tokens are minted with the command line:",
     "mintCommand": "lakana task-token mint PRINCIPAL --env ENVIRONMENT --scope 'PATTERN' --ttl SECONDS",
-    "reading": "Reading the task tokens…"
+    "reading": "Reading the task tokens…",
+    "region": "Live task tokens"
   },
   "more": "Show more",
   "copyCommand": "Copy command"

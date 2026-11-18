@@ -16,7 +16,7 @@ import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
 import "./accessStrings";
 import { HeldGrants } from "./HeldGrants";
-import { grantsPath, groupPath } from "./accessPaths";
+import { grantsPath, groupPath, tokensPath } from "./accessPaths";
 
 /** Properties of {@link PersonGrants}. */
 export interface PersonGrantsProps {
@@ -92,6 +92,9 @@ export function PersonGrants({ name }: PersonGrantsProps): JSX.Element {
         <Link to={grantsPath({ who: { kind: "principal", name } })}>
           {t("access.person.manage")}
         </Link>
+      </p>
+      <p>
+        <Link to={tokensPath({ owner: name })}>{t("access.person.tokens", { name })}</Link>
       </p>
     </section>
   );
