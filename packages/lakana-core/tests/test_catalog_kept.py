@@ -866,6 +866,10 @@ _NOTHING_OF_A_KEPT_TABLE = {
         "deletes only directories that no table and no location record names, and returns "
         "their counts; nothing of a table"
     ),
+    "list_raw": (
+        "lists one level of a folder under raw/ with names and sizes, never a file's contents; a "
+        "kept table's data lies under managed/, which the path refuses"
+    ),
     "environment_usage": (
         "returns counts and byte totals per kind from the catalog database; no table's metadata "
         "and no file locations"

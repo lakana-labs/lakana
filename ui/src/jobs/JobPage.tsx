@@ -17,7 +17,7 @@ import { RunNowButton, ScheduleButton } from "./JobControls";
 import { JobFacts } from "./JobFacts";
 import { JobRuns } from "./JobRuns";
 import "./jobStrings";
-import { jobRunPath } from "./paths";
+import { jobRunPath, jobsListPath } from "./paths";
 import { LIST_EVERY_MS } from "./poll";
 import { isGone, PollProblem } from "./PollProblem";
 import { Reading } from "./Reading";
@@ -119,7 +119,7 @@ function JobView({ env, repository, job }: JobViewProps): JSX.Element {
       title={job}
       trail={[
         { to: "/jobs", label: t("areas.jobs.name") },
-        { to: "/jobs", label: env },
+        { to: jobsListPath(env), label: env },
       ]}
       action={
         shown !== undefined && (

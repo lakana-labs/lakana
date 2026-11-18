@@ -98,7 +98,8 @@ export function ViewList({
         <ReadFailed message={pages.error} onRetry={pages.reload} />
       )}
       {pages.items !== undefined && rowCount === 0 && !pages.busy && !pages.hasMore && (
-        <div className="empty">
+        // A caller may hand it the focus, as the list's place once it is empty.
+        <div className="empty" tabIndex={-1}>
           <p>{empty}</p>
         </div>
       )}

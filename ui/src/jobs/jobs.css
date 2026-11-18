@@ -1,3 +1,12 @@
+/* The environment picker's rules, which the Queries and Jobs screens share. */
+@import "../shell/environment.css";
+
+/* The area's three tab pages: wider than a detail page, as the Catalog's list is, so that their
+   tables fit beside the sidebar from a 1280 px window on instead of scrolling. */
+.jobs-tab-page .page {
+  max-width: 1280px;
+}
+
 /* The Jobs screen's own rules: a cron expression shown as it is. */
 .jobs-verbatim {
   font-family: var(--font-mono);
@@ -17,6 +26,51 @@
   flex-direction: column;
   gap: var(--space-5);
   min-width: 0;
+}
+
+/* The list's environment filter and its search, side by side; under one another when narrow. */
+.jobs-find {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-5);
+}
+
+.jobs-find .field {
+  margin: 0;
+}
+
+/* The list's controls in a row: beside each other, above the row's link so that pressing one
+   never opens the row; the failure's code link too. */
+.jobs-row-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.jobs-list .jobs-code,
+.jobs-list .jobs-control {
+  position: relative;
+}
+
+/* A failed run's why: the code, the cause and the next step, wrapping in its cell. */
+.jobs-list .jobs-why-cell {
+  overflow-wrap: anywhere;
+}
+
+.jobs-last-run {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+/* The line under a list that says the server showed less than there is. */
+.jobs-list-more {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
 }
 
 /* Run now and the schedule's button beside the heading; under it on a narrow screen. */
@@ -143,6 +197,113 @@
   margin: 0;
 }
 
+/* The Runs tab's field "Job": its label beside the input, as the menus beside it have. */
+.jobs-find .jobs-job-field {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.jobs-job-field input {
+  width: min(200px, 100%);
+}
+
+.jobs-find .jobs-job-field label {
+  color: var(--color-text);
+}
+
+/* The tabs' times, durations and commits stay on one line; the region scrolls instead. */
+.jobs-tab-runs-scroll time,
+.jobs-tab-runs-scroll td.number,
+.jobs-deploys-scroll time,
+.jobs-deploys-scroll .jobs-commit-cell {
+  white-space: nowrap;
+}
+
+/* The sentence of an empty list, which takes the focus when Read again finds no run. */
+.jobs-tab-page .empty:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* The line that says the Runs tab stopped reading again, with Read again beside it. */
+.jobs-again {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.jobs-again p {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+/* The run a resume continues: a link of its own above the row's link, in the accent and
+   underlined, so colour does not stand alone. */
+.jobs-run-origin {
+  position: relative;
+  color: var(--color-accent);
+}
+
+.jobs-run-origin:hover {
+  color: var(--color-accent-hover);
+}
+
+/* The Deploys tab: why it lists one environment, beside the picker; a commit in monospace; a
+   failed deploy's first line under its result, wrapping in its cell; the words of a submitter
+   whose account is gone, quieter than a name. */
+.jobs-find-note {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.jobs-commit {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+.jobs-deploy-why {
+  max-width: 320px;
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.jobs-deleted {
+  color: var(--color-text-muted);
+}
+
+/* Roll back to this… while a rollback runs: dimmed, as a disabled menu item is, and unchanged on
+   hover; its description is the note that says what runs. */
+.jobs-deploys-scroll .button[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.jobs-deploys-scroll .button[aria-disabled="true"][data-hovered] {
+  background: var(--color-surface);
+}
+
+/* The note that follows a rollback, under the Deploys list: it takes the focus when the row whose
+   button had it leaves the list. */
+.jobs-rollback-note {
+  margin-top: var(--space-3);
+}
+
+.jobs-rollback-note:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* The rollback's question: every job it changes, one per line. */
+.jobs-dialog-jobs {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+  overflow-wrap: anywhere;
+}
+
 /* The two tables: no narrower than their columns need, scrolling in their own region; more
    specific than the Catalog's wider minimum, which stays in the document once it was loaded. */
 .list-scroll.jobs-runs-scroll .list {
@@ -151,6 +312,35 @@
 
 .list-scroll.jobs-tasks-scroll .list {
   min-width: 640px;
+}
+
+.list-scroll.jobs-running-scroll .list {
+  min-width: 720px;
+}
+
+.list-scroll.jobs-failed-scroll .list {
+  min-width: 880px;
+}
+
+.list-scroll.jobs-all-scroll .list {
+  min-width: 960px;
+}
+
+.list-scroll.jobs-tab-runs-scroll .list {
+  min-width: 960px;
+}
+
+.list-scroll.jobs-deploys-scroll .list {
+  min-width: 960px;
+}
+
+/* The lists' names stay whole; the table scrolls in its region instead of breaking a word. */
+.list-scroll.jobs-running-scroll .row-name,
+.list-scroll.jobs-failed-scroll .row-name,
+.list-scroll.jobs-all-scroll .row-name,
+.list-scroll.jobs-tab-runs-scroll .row-name,
+.list-scroll.jobs-deploys-scroll .row-name {
+  overflow-wrap: normal;
 }
 
 /* A task's table breaks after a dot or an underscore (`VisibleText` with `breakable`), never
@@ -223,14 +413,18 @@
 .jobs-failure a,
 .jobs-waiting a,
 .jobs-note a,
-.jobs-fact a {
+.jobs-fact a,
+.jobs-list-more a,
+.jobs-section .empty a {
   color: var(--color-accent);
 }
 
 .jobs-failure a:hover,
 .jobs-waiting a:hover,
 .jobs-note a:hover,
-.jobs-fact a:hover {
+.jobs-fact a:hover,
+.jobs-list-more a:hover,
+.jobs-section .empty a:hover {
   color: var(--color-accent-hover);
 }
 

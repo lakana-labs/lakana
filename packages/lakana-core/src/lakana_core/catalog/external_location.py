@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import ValidationError
+from lakana_core.identifiers import NamespacePath
 from lakana_core.models import Namespace, Table, TableType
 from lakana_core.storage.resolver import RAW_PREFIX
 
@@ -125,6 +126,42 @@ def parse_external_location(pattern: str) -> ExternalLocation:
     return ExternalLocation(claim=claim, glob=components[-1])
 
 
+def parse_raw_folder(path: str) -> str:
+    """Check a folder to browse: `RAW_PREFIX` itself or a folder below it.
+
+    Parameters
+    ----------
+    path
+        The caller's folder, such as ``"raw/orders"``; one trailing ``/`` is dropped.
+
+    Returns
+    -------
+    str
+        The folder, root-relative, with no trailing slash.
+
+    Raises
+    ------
+    ValidationError
+        If `path` is longer than 1024 characters, holds a NUL byte, starts with ``/``, does
+        not start with the `RAW_PREFIX` component, or has an empty, ``.`` or ``..`` part.
+    """
+    if len(path) > _MAX_CLAIM_LENGTH:
+        raise ValidationError(f"Path is longer than {_MAX_CLAIM_LENGTH} characters.")
+    if "\x00" in path:
+        raise ValidationError(f"Path {path!r} contains a NUL byte.")
+    if path.startswith("/"):
+        raise ValidationError(f"Path {path!r} must not start with '/'.")
+    components = path.removesuffix("/").split("/")
+    if components[0] != RAW_PREFIX:
+        raise ValidationError(
+            f"Path {path!r} must be '{RAW_PREFIX}' or a folder under '{RAW_PREFIX}/'."
+        )
+    for component in components:
+        if component in ("", ".", ".."):
+            raise ValidationError(f"Path {path!r} has an invalid part {component!r}.")
+    return "/".join(components)
+
+
 def _normalize_component(component: str) -> str:
     """Fold a path component for case- and normalization-insensitive comparison.
 
@@ -184,6 +221,97 @@ def claims_overlap(a: str, b: str) -> bool:
     return longer[: len(shorter)] == shorter
 
 
+def claim_covers(claim: str, path: str) -> bool:
+    """Check whether a path is a claim's own directory or lies below it.
+
+    Compared as `claims_overlap` compares, part by part, case- and
+    Unicode-normalization-insensitive; a claim below `path` does not cover it.
+
+    Parameters
+    ----------
+    claim
+        The claim.
+    path
+        A directory, such as ``"raw/orders/2026"``.
+
+    Returns
+    -------
+    bool
+        `True` if every part of `claim` begins `path`.
+    """
+    claim_parts = [_normalize_component(part) for part in claim.split("/")]
+    path_parts = [_normalize_component(part) for part in path.split("/")]
+    return path_parts[: len(claim_parts)] == claim_parts
+
+
+@dataclass(frozen=True)
+class ExternalClaim:
+    """An external table's claim, and the table that holds it.
+
+    Parameters
+    ----------
+    claim
+        The directory, such as ``"raw/orders"``.
+    namespace
+        The table's namespace.
+    name
+        The table's name.
+    """
+
+    claim: str
+    namespace: NamespacePath
+    name: str
+
+
+def external_claims(
+    session: Session, environment_id: uuid.UUID, exclude_table_id: uuid.UUID | None = None
+) -> list[ExternalClaim]:
+    """List the claims of an environment's external tables, in `created_at` order.
+
+    A row whose `external_claim` is `NULL` (created before the column was backfilled, or one
+    the backfill could not parse) is re-parsed from its stored `location_pattern` (fail
+    closed); a row whose pattern does not parse either can never be queried
+    (`lakana_worker.pipeline` refuses it) and is left out.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    exclude_table_id
+        A table to leave out, for re-checking a table's own claim.
+
+    Returns
+    -------
+    list of ExternalClaim
+        Each claim with its table.
+    """
+    rows = session.execute(
+        select(Table.id, Table.name, Namespace.path, Table.external_claim, Table.external_config)
+        .join(Namespace, Table.namespace_id == Namespace.id)
+        .where(
+            Namespace.environment_id == environment_id,
+            Table.table_type == TableType.EXTERNAL,
+        )
+        .order_by(Table.created_at)
+    ).all()
+    claims: list[ExternalClaim] = []
+    for table_id, name, namespace, existing_claim, external_config in rows:
+        if exclude_table_id is not None and table_id == exclude_table_id:
+            continue
+        if existing_claim is None:
+            pattern = (external_config or {}).get("location_pattern")
+            if not isinstance(pattern, str):
+                continue
+            try:
+                existing_claim = parse_external_location(pattern).claim
+            except ValidationError:
+                continue
+        claims.append(ExternalClaim(existing_claim, NamespacePath.parse(namespace), name))
+    return claims
+
+
 def check_claim_free(
     session: Session,
     environment_id: uuid.UUID,
@@ -235,25 +363,6 @@ def check_claim_free(
     `break` is reliably killed rather than depending on incidental
     (backend- and insertion-order-dependent) row order.
     """
-    rows = session.execute(
-        select(Table.id, Table.external_claim, Table.external_config)
-        .join(Namespace, Table.namespace_id == Namespace.id)
-        .where(
-            Namespace.environment_id == environment_id,
-            Table.table_type == TableType.EXTERNAL,
-        )
-        .order_by(Table.created_at)
-    ).all()
-    for table_id, existing_claim, external_config in rows:
-        if exclude_table_id is not None and table_id == exclude_table_id:
-            continue
-        if existing_claim is None:
-            pattern = (external_config or {}).get("location_pattern")
-            if not isinstance(pattern, str):
-                continue
-            try:
-                existing_claim = parse_external_location(pattern).claim
-            except ValidationError:
-                continue
-        if claims_overlap(claim, existing_claim):
+    for existing in external_claims(session, environment_id, exclude_table_id):
+        if claims_overlap(claim, existing.claim):
             raise ValidationError("That directory is already claimed by another table.")

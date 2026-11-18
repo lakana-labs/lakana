@@ -3,23 +3,49 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_RUN_STATUSES,
   cancelRun,
+  getDeploy,
   getJob,
   getRun,
   getTaskLog,
+  listAllRuns,
+  listDeployments,
+  listDeploys,
+  listFailedRuns,
   listJobRuns,
+  listJobs,
   pauseJob,
   resumeJob,
   resumeRun,
+  rollBack,
   showCheckRows,
   startJob,
 } from "./jobs";
 import type { TaskAttemptOut, TriggerOut, WaitingOut } from "./jobs";
 
-import { aFailure, aJob, aJobRun, aTask, aTaskLog, JOB_RUN_ID } from "../test/jobs";
+import {
+  aDeploy,
+  aDeployment,
+  aFailedRun,
+  aFailure,
+  aJob,
+  aJobRun,
+  aTask,
+  aTaskLog,
+  DEPLOY_ID,
+  JOB_RUN_ID,
+} from "../test/jobs";
 import { fakeServer } from "../test/server";
 
 const JOBS = "/api/v1/environments/prod/jobs/nightly_sales";
 const NO_FILTER = { status: null, since: null };
+const ALL_RUNS = {
+  environment: null,
+  status: [],
+  trigger: [],
+  job: null,
+  repository: null,
+  since: null,
+} as const;
 
 describe("the job calls", () => {
   it("reads a job of a repository with the repository as a parameter", async () => {
@@ -231,5 +257,147 @@ describe("the job calls", () => {
     expect(await getRun("prod", JOB_RUN_ID)).toEqual(run);
     expect((await getJob("prod", "analytics", "nightly_sales")).triggers).toEqual([trigger]);
     expect((await getTaskLog("prod", JOB_RUN_ID, "silver.orders", 0)).attempts).toEqual([attempt]);
+  });
+});
+
+describe("the Jobs list's calls", () => {
+  it("lists an environments jobs of one repository", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/prod/jobs": { status: 200, body: [aJob()] },
+      "GET /api/v1/environments/dev/a/jobs": { status: 200, body: [] },
+    });
+
+    expect(await listJobs("prod", "analytics")).toEqual([aJob()]);
+    expect(await listJobs("dev/a")).toEqual([]);
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/environments/prod/jobs?repository=analytics",
+      "/api/v1/environments/dev%2Fa/jobs",
+    ]);
+    expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
+  });
+
+  it("lists running runs across environments with the status and the cursor from the body", async () => {
+    const server = fakeServer({
+      "GET /api/v1/runs": (request) =>
+        request.path.includes("cursor=c1")
+          ? { status: 200, body: { items: [], next_cursor: null } }
+          : { status: 200, body: { items: [aJobRun()], next_cursor: "c1" } },
+    });
+
+    const first = await listAllRuns({ ...ALL_RUNS, status: ["queued", "running"] }, null);
+    const second = await listAllRuns(
+      { ...ALL_RUNS, status: ["queued", "running"] },
+      first.nextCursor,
+      { limit: 10, background: false },
+    );
+
+    expect(first).toEqual({ items: [aJobRun()], nextCursor: "c1" });
+    expect(second).toEqual({ items: [], nextCursor: null });
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/runs?status=queued%2Crunning&limit=50",
+      "/api/v1/runs?status=queued%2Crunning&limit=10&cursor=c1",
+    ]);
+    expect(server.sent.map((request) => request.headers["x-lakana-background"])).toEqual([
+      "1",
+      undefined,
+    ]);
+  });
+
+  it("adds environment, trigger, job, repository and since only when set", async () => {
+    const server = fakeServer({
+      "GET /api/v1/runs": { status: 200, body: { items: [], next_cursor: null } },
+    });
+
+    await listAllRuns(
+      {
+        environment: "prod",
+        status: ["failed"],
+        trigger: ["schedule", "manual"],
+        job: "nightly_sales",
+        repository: "analytics",
+        since: "2026-11-10T00:00:00Z",
+      },
+      null,
+    );
+
+    expect(server.sent[0]?.path).toBe(
+      "/api/v1/runs?environment=prod&status=failed&trigger=schedule%2Cmanual&job=nightly_sales&repository=analytics&since=2026-11-10T00%3A00%3A00Z&limit=50",
+    );
+    await listAllRuns(ALL_RUNS, null);
+    expect(server.sent[1]?.path).toBe("/api/v1/runs?limit=50");
+  });
+
+  it("lists failed runs with and without an environment", async () => {
+    const body = { items: [aFailedRun()], truncated: true };
+    const server = fakeServer({
+      "GET /api/v1/runs/failed": { status: 200, body },
+    });
+
+    expect(await listFailedRuns(null)).toEqual(body);
+    expect(await listFailedRuns("prod")).toEqual(body);
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/runs/failed",
+      "/api/v1/runs/failed?environment=prod",
+    ]);
+    expect(server.sent[1]?.headers["x-lakana-background"]).toBe("1");
+  });
+});
+
+describe("the deploy calls", () => {
+  it("lists deploys of a repository with the cursor from X-Next-Cursor", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/my env/deploys": (request) =>
+        request.path.includes("cursor=")
+          ? { status: 200, body: [] }
+          : { status: 200, body: [aDeploy()], headers: { "X-Next-Cursor": "d2" } },
+    });
+
+    expect(await listDeploys("my env", "team/analytics", null)).toEqual({
+      items: [aDeploy()],
+      nextCursor: "d2",
+    });
+    expect(await listDeploys("my env", null, "d2")).toEqual({ items: [], nextCursor: null });
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/environments/my%20env/deploys?repository=team%2Fanalytics&limit=50",
+      "/api/v1/environments/my%20env/deploys?limit=50&cursor=d2",
+    ]);
+  });
+
+  it("reads one deploy with its jobs", async () => {
+    const deploy = aDeploy({ jobs: ["daily_sales", "nightly_sales"] });
+    const server = fakeServer({
+      [`GET /api/v1/environments/prod/deploys/${DEPLOY_ID}`]: { status: 200, body: deploy },
+    });
+
+    expect(await getDeploy("prod", DEPLOY_ID)).toEqual(deploy);
+    expect(server.sent[0]?.headers["x-lakana-background"]).toBe("1");
+  });
+
+  it("lists the deployments", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/prod/deployments": { status: 200, body: [aDeployment()] },
+    });
+
+    expect(await listDeployments("prod")).toEqual([aDeployment()]);
+    expect(server.sent[0]?.path).toBe("/api/v1/environments/prod/deployments");
+  });
+
+  it("sends a rollback to a commit", async () => {
+    const server = fakeServer({
+      "POST /api/v1/environments/prod/deploys": {
+        status: 202,
+        body: { id: DEPLOY_ID, status: "queued" },
+      },
+    });
+
+    expect(await rollBack("prod", "analytics", "4f9d2a7c")).toEqual({
+      id: DEPLOY_ID,
+      status: "queued",
+    });
+    expect(server.sent[0]?.body).toEqual({
+      repository: "analytics",
+      kind: "rollback",
+      to_sha: "4f9d2a7c",
+    });
   });
 });

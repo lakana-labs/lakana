@@ -1,7 +1,8 @@
 /**
- * The calls of the job, run and task pages: a job and its runs, a run with its tasks, a task's
- * log, starting, pausing and resuming a job, cancelling and resuming a run, and the rows a failed
- * check found. The same routes `lakana jobs`, `lakana runs` and `lakana check` use.
+ * The calls of the Jobs screen: an environment's jobs, the runs of every environment and the
+ * failed ones, a job and its runs, a run with its tasks, a task's log, starting, pausing and
+ * resuming a job, cancelling and resuming a run, and the rows a failed check found. The same
+ * routes `lakana jobs`, `lakana runs` and `lakana check` use.
  *
  * @packageDocumentation
  */
@@ -183,6 +184,8 @@ export interface RunOut {
   readonly cancel_requested: boolean;
   /** Who started it. */
   readonly triggered_by: string | null;
+  /** The run a resume continues; null for a run that is not a resume. */
+  readonly resumed_from_run_id: string | null;
   /** The patterns and flags it was started with. */
   readonly selection: Readonly<Record<string, unknown>>;
   /** The run-level failure, in the server's words; null for none. */
@@ -272,6 +275,51 @@ export interface JobRunFilter {
   readonly since: string | null;
 }
 
+/** What started a run, as the list of all runs filters by it. */
+type RunTrigger = "schedule" | "api" | "manual" | "deploy";
+
+/** What narrows the runs of every environment; an empty list or null means no limit. */
+export interface AllRunsFilter {
+  /** Only this environment's runs. */
+  readonly environment: string | null;
+  /** Only runs in these states. */
+  readonly status: readonly RunStatus[];
+  /** Only runs started this way. */
+  readonly trigger: readonly RunTrigger[];
+  /** Only this job's runs. */
+  readonly job: string | null;
+  /** Only this repository's runs. */
+  readonly repository: string | null;
+  /** Only runs created at or after this time (ISO 8601 with a zone). */
+  readonly since: string | null;
+}
+
+/** One row of the failed runs: the run, its first failed task and why that task failed. */
+export interface FailedRunOut {
+  /** The run, without tasks, with its `actions`. */
+  readonly run: RunOut;
+  /** The asset of its first failed task; null when the run failed without one. */
+  readonly task: string | null;
+  /** That task's failure; null with `task`, and then `run.error_message` says why. */
+  readonly failure: FailureOut | null;
+}
+
+/** The failed runs, by the rule of Home's Needs your attention. */
+export interface FailedRunsOut {
+  /** One row per job (or per repository, for its runs of no job), newest end first. */
+  readonly items: readonly FailedRunOut[];
+  /** Whether the server left rows out; choosing an environment shows them. */
+  readonly truncated: boolean;
+}
+
+/** One page of the runs of every environment, as `GET /api/v1/runs` answers it. */
+interface RunPageOut {
+  /** The runs of the page, without tasks. */
+  readonly items: readonly RunOut[];
+  /** The cursor of the next page; null on the last. */
+  readonly next_cursor: string | null;
+}
+
 /**
  * The query that names a job in a repository.
  *
@@ -358,6 +406,94 @@ export async function listJobRuns(
   }
   const page = await api.page(withQuery(environmentPath(environment, "/runs"), query), options);
   return { items: page.body as readonly RunOut[], nextCursor: page.nextCursor };
+}
+
+/**
+ * Lists an environment's jobs; a poll, so it never counts as the person's activity. Jobs are not
+ * paged.
+ *
+ * @param environment - The environment.
+ * @param repository - Only this repository's jobs; all of them by default.
+ * @returns The jobs.
+ * @throws {ApiError} for a refusal; 404 for an environment or a repository that does not exist.
+ */
+export function listJobs(environment: string, repository?: string): Promise<readonly JobOut[]> {
+  const path = environmentPath(environment, "/jobs");
+  return api.request<readonly JobOut[]>(
+    "GET",
+    repository === undefined ? path : withQuery(path, repositoryQuery(repository)),
+    undefined,
+    { background: true },
+  );
+}
+
+/**
+ * Lists the runs of every environment the person may read, or of one, newest first, one page at
+ * a time; a poll unless asked otherwise.
+ *
+ * @param filter - What narrows the list.
+ * @param cursor - The cursor of the page, or null for the first.
+ * @param options - How many runs a page holds (50 by default), and whether the read is a
+ *   background poll that never counts as the person's activity (yes by default; no for Show
+ *   more).
+ * @param options.limit - How many runs a page holds.
+ * @param options.background - Whether the read is a background poll.
+ * @returns The page, with the cursor from the body; its runs have no tasks.
+ * @throws {ApiError} for a refusal; with an environment, 403 or 404 as for its own list.
+ */
+export async function listAllRuns(
+  filter: AllRunsFilter,
+  cursor: string | null,
+  {
+    limit = RUNS_PAGE,
+    background = true,
+  }: { readonly limit?: number; readonly background?: boolean } = {},
+): Promise<CursorPage<RunOut>> {
+  const query = new URLSearchParams();
+  if (filter.environment !== null) {
+    query.set("environment", filter.environment);
+  }
+  if (filter.status.length > 0) {
+    query.set("status", filter.status.join(","));
+  }
+  if (filter.trigger.length > 0) {
+    query.set("trigger", filter.trigger.join(","));
+  }
+  if (filter.job !== null) {
+    query.set("job", filter.job);
+  }
+  if (filter.repository !== null) {
+    query.set("repository", filter.repository);
+  }
+  if (filter.since !== null) {
+    query.set("since", filter.since);
+  }
+  query.set("limit", String(limit));
+  if (cursor !== null) {
+    query.set("cursor", cursor);
+  }
+  const page = await api.request<RunPageOut>("GET", withQuery("/api/v1/runs", query), undefined, {
+    background,
+  });
+  return { items: page.items, nextCursor: page.next_cursor };
+}
+
+/**
+ * Lists the failed runs that need attention, by the rule of Home's Needs your attention; a poll.
+ *
+ * @param environment - Only this environment's; every environment the person may read by
+ *   default.
+ * @returns The rows in the server's order, and whether it left some out.
+ * @throws {ApiError} for a refusal; with an environment, 403 or 404.
+ */
+export function listFailedRuns(environment: string | null): Promise<FailedRunsOut> {
+  const path = "/api/v1/runs/failed";
+  return api.request<FailedRunsOut>(
+    "GET",
+    environment === null ? path : withQuery(path, new URLSearchParams({ environment })),
+    undefined,
+    { background: true },
+  );
 }
 
 /**
@@ -486,4 +622,140 @@ export async function showCheckRows(
     { check },
   );
   return answer.query_id;
+}
+
+/** The state of a deploy. */
+type DeployStatus = "queued" | "running" | "succeeded" | "failed";
+
+/** One deploy of a repository to an environment, as `GET …/deploys` lists it. */
+export interface DeployOut {
+  /** The deploy's id. */
+  readonly id: string;
+  /** The environment. */
+  readonly environment: string;
+  /** The repository. */
+  readonly repository: string;
+  /** What it does: deploy a commit, try it without changing anything, or roll back to one. */
+  readonly kind: "deploy" | "dry_run" | "rollback";
+  /** Its state. */
+  readonly status: DeployStatus;
+  /** The ref asked for; null for a rollback. */
+  readonly requested_ref: string | null;
+  /** The commit it deployed; null before the worker resolved it. */
+  readonly resolved_sha: string | null;
+  /** The project version it made; null before it made one, and for a dry run. */
+  readonly project_version_id: string | null;
+  /** Why it failed, in the server's words; null for none. */
+  readonly error_message: string | null;
+  /** When it was asked for. */
+  readonly created_at: string;
+  /** When it started; null before. */
+  readonly started_at: string | null;
+  /** When it ended; null until then. */
+  readonly finished_at: string | null;
+  /** Who asked for it; null for an account since deleted. */
+  readonly submitted_by: string | null;
+  /** The jobs its version defines; only when one deploy is read, null in a list. */
+  readonly jobs: readonly string[] | null;
+  /** What the reader's rights allow on it. */
+  readonly actions: readonly "rollback"[];
+}
+
+/** The current version of one repository in an environment. */
+export interface DeploymentOut {
+  /** The repository. */
+  readonly repository: string;
+  /** Its current project version. */
+  readonly project_version_id: string;
+  /** That version's commit. */
+  readonly commit_sha: string;
+  /** When the version became current. */
+  readonly updated_at: string;
+}
+
+/** What the server answers a deploy it accepted. */
+export interface DeployAcceptedOut {
+  /** The deploy's id. */
+  readonly id: string;
+  /** Its state, `queued`. */
+  readonly status: string;
+}
+
+/** How many deploys one page holds. */
+const DEPLOYS_PAGE = 50;
+
+/**
+ * Lists an environment's deploys, newest first, one page at a time.
+ *
+ * @param environment - The environment.
+ * @param repository - Only this repository's deploys; null for all.
+ * @param cursor - The cursor of the page, or null for the first.
+ * @returns The page, with the cursor from `X-Next-Cursor`.
+ * @throws {ApiError} for a refusal; 404 for an environment or a repository that does not exist.
+ */
+export async function listDeploys(
+  environment: string,
+  repository: string | null,
+  cursor: string | null,
+): Promise<CursorPage<DeployOut>> {
+  const query = new URLSearchParams();
+  if (repository !== null) {
+    query.set("repository", repository);
+  }
+  query.set("limit", String(DEPLOYS_PAGE));
+  if (cursor !== null) {
+    query.set("cursor", cursor);
+  }
+  const page = await api.page(withQuery(environmentPath(environment, "/deploys"), query));
+  return { items: page.body as readonly DeployOut[], nextCursor: page.nextCursor };
+}
+
+/**
+ * Reads one deploy with the jobs its version defines; a poll, so it never counts as the person's
+ * activity.
+ *
+ * @param environment - The environment.
+ * @param id - The deploy's id.
+ * @returns The deploy.
+ * @throws {ApiError} for a refusal; 404 for a deploy that does not exist.
+ */
+export function getDeploy(environment: string, id: string): Promise<DeployOut> {
+  return api.request<DeployOut>(
+    "GET",
+    environmentPath(environment, `/deploys/${encodeURIComponent(id)}`),
+    undefined,
+    { background: true },
+  );
+}
+
+/**
+ * Lists the current version of each repository in an environment.
+ *
+ * @param environment - The environment.
+ * @returns One entry per deployed repository.
+ * @throws {ApiError} for a refusal.
+ */
+export function listDeployments(environment: string): Promise<readonly DeploymentOut[]> {
+  return api.request<readonly DeploymentOut[]>("GET", environmentPath(environment, "/deployments"));
+}
+
+/**
+ * Rolls a repository back to a commit already deployed to the environment.
+ *
+ * @param environment - The environment.
+ * @param repository - The repository.
+ * @param sha - The full commit to roll back to.
+ * @returns The accepted rollback, queued.
+ * @throws {ApiError} for a refusal; 403 without `DEPLOY`, 404 for a commit never deployed here.
+ */
+export function rollBack(
+  environment: string,
+  repository: string,
+  sha: string,
+): Promise<DeployAcceptedOut> {
+  return api.request<DeployAcceptedOut>("POST", environmentPath(environment, "/deploys"), {
+    repository,
+    kind: "rollback",
+    to_sha: sha,
+  });
 }

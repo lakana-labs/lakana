@@ -55,7 +55,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["action","allowed","reason","via"]': "PermissionOut",
   '["action","environment","granted_at","granted_by","group","group_id","id","kind","namespace","note","principal","principal_id","role","table"]':
     "GrantOut",
-  '["actions","cancel_requested","commit_sha","created_at","ended_tasks","environment","error_message","failed_tasks","finished_at","id","job","kind","repository","selection","started_at","status","tasks","total_tasks","trigger","triggered_by"]':
+  '["actions","cancel_requested","commit_sha","created_at","ended_tasks","environment","error_message","failed_tasks","finished_at","id","job","kind","repository","resumed_from_run_id","selection","started_at","status","tasks","total_tasks","trigger","triggered_by"]':
     "RunOut",
   '["actions","commit_sha","created_at","created_by","deleted_at","deleted_by","deleted_versions","file_count","files","is_directory","manifest_sha256","project_version_id","run_id","size_bytes","task_run_id","version"]':
     "ArtifactVersionOut",
@@ -105,6 +105,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["checks","days","hidden_checks","last_maintenance","readers","signals"]': "TableHealthOut",
   '["checks","grain","hidden_references","key","key_none","kind","measures","references"]':
     "TableModelOut",
+  '["claimed_by","kind","name","size"]': "RawEntryOut",
   '["code","message"]': "WaitingOut",
   '["column","column_type","kind","language","matched","snippet","translated"]': "TableMatchOut",
   '["column","table"]': "MaskedColumnOut",
@@ -122,6 +123,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["cron","kind","next_run_at","paused","timezone"]': "ScheduleTriggerOut",
   '["days","expires_at","kept","last_activity_at","name","namespace","never","on","set_at","set_by","source","uuid"]':
     "TableRetentionOut",
+  '["deleted_at","is_protected","name","properties","purge_after","retention_days","storage_root","storage_secret_ref"]':
+    "EnvironmentOut",
   '["description","description_language","description_source","label","label_language","label_source","name","nullable","terms","type"]':
     "ColumnOut",
   '["detail","type"]': "ErrorBody",
@@ -140,6 +143,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["environments","name"]': "WorkRepositoryOut",
   '["events","format","secret"]': "NotifyOut",
   '["failing_rows","name","outcome","table"]': "CheckResultOut",
+  '["failure","run","task"]': "FailedRunOut",
   '["fingerprint","line","type"]': "HostKeyOut",
   '["get_started_hidden","tour_seen","update_note_seen"]': "InterfaceStateOut",
   '["grant_id","group","kind","role","scope"]': "ViaOut",
@@ -150,9 +154,10 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["high"]': "HealthBandOut",
   '["id","name","principal_type"]': "SubjectPrincipalOut",
   '["is_active","name","picture","type"]': "PrincipalOut",
-  '["is_protected","name"]': "OwnerOut",
+  '["is_protected","name"]': "EnvironmentOut",
   '["item","others","state","text"]': "HealthSummaryOut",
-  '["items","next_cursor"]': "TableListPageOut",
+  '["items","next_cursor","path"]': "RawPageOut",
+  '["items","next_cursor"]': "RunPageOut",
   '["items","truncated"]': "AttentionOut",
   '["job","last_commit_at","seconds","source"]': "HealthObservedOut",
   '["jobs","repositories"]': "WorkOut",
@@ -172,9 +177,16 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["path","sha256","size"]': "ArtifactFileOut",
   '["query_id","status"]': "QueryStatusOut",
   '["query_id"]': "QueryStatusOut",
-  '["table"]': "MaskedColumnOut",
+  // A preview's `{table}`: the one type whose fields it fills exactly is the claim of an entry of
+  // raw/ (#672); `table` is free text in both, so it carries the override either way.
+  '["table"]': "RawEntryOut.claimed_by",
   '["version"]': "InfoOut",
   "[]": "-",
+  '["actions","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
+    "DeployOut",
+  '["commit_sha","project_version_id","repository","updated_at"]': "DeploymentOut",
+  '["id","status"]': "DeployAcceptedOut",
+  '["downstream","patterns","upstream"]': "JobOut",
 };
 
 /**

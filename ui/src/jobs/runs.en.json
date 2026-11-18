@@ -1,0 +1,42 @@
+{
+  "state": "State",
+  "trigger": "Trigger",
+  "job": "Job",
+  "period": "Period",
+  "states": {
+    "all": "All",
+    "queued,running": "Queued or running",
+    "succeeded": "Succeeded",
+    "failed": "Failed",
+    "cancelled": "Cancelled"
+  },
+  "triggers": {
+    "all": "All",
+    "schedule": "Schedule",
+    "manual": "By hand",
+    "api": "API",
+    "deploy": "After a deploy"
+  },
+  "columns": {
+    "state": "State",
+    "run": "Run",
+    "environment": "Environment",
+    "startedBy": "Started by",
+    "created": "Created",
+    "duration": "Duration",
+    "tasks": "Tasks"
+  },
+  "region": "Runs listed",
+  "loading": "Loading the runs…",
+  "empty": "No runs match these filters.",
+  "clear": "Clear filters",
+  "stopped": "This list is no longer read again while more runs are shown.",
+  "readAgain": "Read again",
+  "readingAgain": "Reading the runs again from the first page…",
+  "selection": "selection {{patterns}}",
+  "resumeOf": "resume of {{id}}",
+  "ofTasks": "{{ended}} of {{total}} tasks",
+  "failedOf": "{{failed}} of {{total}} tasks failed",
+  "tasks_one": "{{count}} task",
+  "tasks_other": "{{count}} tasks"
+}

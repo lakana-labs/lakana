@@ -17,12 +17,18 @@ import {
   takeReads,
 } from "./hidden";
 import {
+  ADHOC_MESSAGE,
+  ADHOC_REPOSITORY,
+  DEPLOY_FAILURE,
+  DEV_JOB,
   FAILED_CHECK,
   FAILED_ID,
   JOBS_STUBBED,
   MISSING_ID,
   MISSING_SENTENCE,
+  OLDER_ONLY_JOB,
   SECRET,
+  SELECTION_PATTERNS,
   stubJobs,
   TIMED_OUT,
   TIMEOUT_CAUSE,
@@ -59,6 +65,7 @@ const ACCOUNTS = [
 
 /** What `apiTypes()` finds today: each type with a literal-union field, and those fields. */
 const LITERAL_CODES: Record<string, string> = {
+  AllRunsFilter: "status trigger",
   ArtifactKeptOut: "reason",
   ArtifactOut: "actions kind",
   ArtifactVersionDeletedOut: "actions",
@@ -66,6 +73,7 @@ const LITERAL_CODES: Record<string, string> = {
   AttentionItemOut: "kind",
   CheckResultOut: "outcome",
   ColumnOut: "description_source label_source",
+  DeployOut: "actions kind status",
   DeployTriggerOut: "kind",
   DroppedTableOut: "actions",
   ExternalTableOut: "format",
@@ -90,6 +98,7 @@ const LITERAL_CODES: Record<string, string> = {
   QueryListItemOut: "origin status",
   QueryRunOut: "origin status",
   QueryStatusOut: "status",
+  RawEntryOut: "kind",
   RecentOut: "kind",
   RepositoryCreate: "kind",
   RepositoryProbeOut: "kind outcome state",
@@ -615,6 +624,13 @@ walk("the notes and refusals of the place menu mark hidden characters", async ({
   await page.getByRole("menuitem", { name: "New external table…" }).click();
   const refused = page.getByRole("dialog");
   await refused.getByRole("textbox", { name: "Name" }).fill("orders");
+  await refused.getByRole("button", { name: "Browse…" }).click();
+  await expect(refused.getByRole("button", { name: /^feeds/ })).toBeVisible();
+  await expectMarked(page, "Browse… at raw/", ["events.csv", "feeds", "bronze.orders"]);
+  await refused.getByRole("button", { name: /^feeds/ }).click();
+  await expect(refused.getByRole("button", { name: /^2026-11-02\.csv/ })).toBeVisible();
+  await expectMarked(page, "Browse… in a folder", ["2026-11-02.csv", "archive"]);
+  await refused.getByRole("button", { name: "Browse…" }).click();
   await refused.getByRole("textbox", { name: "Location" }).fill("raw/none/*.csv");
   const register = refused.getByRole("button", { name: "Register" });
   await expect(register).not.toHaveAttribute("data-pending");
@@ -671,6 +687,83 @@ walk("the job, run and task pages mark hidden characters", async ({ page }) => {
   await visit(page, `/jobs/${env}/runs/${MISSING_ID}`, [MISSING_SENTENCE]);
   expectOnlyStubbed(paths, JOBS_STUBBED);
 });
+
+walk("the Jobs list marks hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await stubJobs(poisoned(page));
+  // Running now, Failed (a task's cause and a run's own message) and All jobs.
+  await visit(page, "/jobs", [
+    "daily_sales",
+    "analytics",
+    DEV_JOB,
+    TIMEOUT_CAUSE,
+    ADHOC_MESSAGE,
+    ADHOC_REPOSITORY,
+  ]);
+  await expect(page.getByRole("button", { name: /^Cancel the run of daily_sales/ })).toBeVisible();
+
+  await page.getByRole("button", { name: /^Environment: / }).click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await expectNoRaw(page, "the open filter");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+
+  await page.getByRole("button", { name: /^Cancel the run of daily_sales/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Cancel dialog of a row", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await page.getByRole("button", { name: /^Pause the schedule of daily_sales/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Pause dialog of a row", ["daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // The search narrows what was read; the rows it keeps still show their marks.
+  await page.getByRole("searchbox", { name: "Search jobs" }).fill(DEV_JOB);
+  await expect(page.getByRole("link", { name: /^daily_sales/ })).toHaveCount(0);
+  await expectMarked(page, "a search", [DEV_JOB]);
+  expectOnlyStubbed(paths, JOBS_STUBBED);
+});
+
+walk(
+  "the Runs and Deploys tabs and the rollback dialog mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await stubJobs(poisoned(page));
+    // Every run: the jobs' names, a run of no job by its repository; then the runs that ended,
+    // with a selection's patterns.
+    await visit(page, "/jobs/runs", ["daily_sales", DEV_JOB, "analytics"]);
+    await page.getByRole("button", { name: "Show more" }).click();
+    await expect(page.getByText(/^selection /)).toBeVisible();
+    await expectMarked(page, "the runs that ended", [ADHOC_REPOSITORY, ...SELECTION_PATTERNS]);
+
+    // One environment's deploys: the repository and who asked. A failed deploy's message is cut
+    // to its first line, which here holds no override.
+    const env = n("prod");
+    await visit(page, `/jobs/deploys?environment=${env}`, ["analytics", "admin", "ana.nowak"]);
+    await expect(page.getByText(DEPLOY_FAILURE, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: /Repository/ }).click();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await expectNoRaw(page, "the open Repository menu");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toBeHidden();
+
+    await page
+      .getByRole("button", { name: /^Roll back to this… \(analytics/ })
+      .first()
+      .click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("button", { name: "Roll back" })).toBeVisible();
+    await expectMarked(page, "the rollback dialog", ["analytics", "daily_sales", OLDER_ONLY_JOB]);
+    await dialog.getByRole("button", { name: "Roll back" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByText(/^Rolled back /)).toBeVisible({ timeout: 10_000 });
+    await expectMarked(page, "the note after a rollback", ["analytics"]);
+    expectOnlyStubbed(paths, JOBS_STUBBED);
+  },
+);
 
 // Last, so that the walks before it have run in this worker: an entry no stub serves is stale.
 test("every object READ_AS pins is one a stub serves", () => {

@@ -1,7 +1,12 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
 import {
+  ADHOC_MESSAGE,
+  ADHOC_REPOSITORY,
   BLOCKED,
+  DEPLOY_FAILURE,
+  DEV,
+  DEV_JOB,
   ENV,
   FAILED_CHECK,
   FAILED_ID,
@@ -9,11 +14,13 @@ import {
   JOBS_STUBBED,
   LOG_PIECES,
   MISSING_ID,
+  OLDER_ONLY_JOB,
   REPOSITORY,
   RESUMED_ID,
   ROWS_QUERY_ID,
   RUNNING_ID,
   SECRET,
+  SELECTION_PATTERNS,
   STARTED_ID,
   stubJobs,
   TIMED_OUT,
@@ -22,6 +29,18 @@ import {
 import { consoleErrors, violations } from "./session";
 
 const KEY = "lakana.preferences";
+
+/** The Jobs list. */
+const LIST = "/jobs";
+
+/** The Runs tab. */
+const RUNS_TAB = "/jobs/runs";
+
+/** The Deploys tab, on the protected environment. */
+const DEPLOYS_TAB = `/jobs/deploys?environment=${ENV}`;
+
+/** The older deploy's Roll back to this…, by its accessible name. */
+const ROLL_BACK = `Roll back to this… (${REPOSITORY} at 4f9d2a7)`;
 
 /** The job's page. */
 const JOB_PAGE = `/jobs/${ENV}/job/${REPOSITORY}/${JOB}`;
@@ -113,6 +132,22 @@ async function tabOnto(target: Locator): Promise<void> {
 }
 
 /**
+ * Moves the focus with Shift+Tab until it is on an element before it.
+ *
+ * @param target - The element.
+ */
+async function tabBackOnto(target: Locator): Promise<void> {
+  const page = target.page();
+  for (let step = 0; step < 80; step += 1) {
+    if (await target.evaluate((node) => node === document.activeElement)) {
+      return;
+    }
+    await page.keyboard.press("Shift+Tab");
+  }
+  throw new Error("Shift+Tab never reached the element");
+}
+
+/**
  * Whether the focus is somewhere on the page rather than on `<body>`.
  *
  * @param page - The page.
@@ -201,8 +236,573 @@ async function showAs(page: Page, state: "hidden" | "visible"): Promise<void> {
   }, state);
 }
 
+/**
+ * Opens the Jobs list and waits for its three sections.
+ *
+ * @param page - The page.
+ * @param query - What follows the address, such as `?environment=dev`.
+ */
+async function openList(page: Page, query = ""): Promise<void> {
+  await page.goto(`${LIST}${query}`);
+  await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: /^Running now/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Every job listed" })).toBeVisible();
+}
+
+/**
+ * The gaps between the visible content of every two neighbouring cells of the page's tables:
+ * their text and pictures, without what is hidden for the eye.
+ *
+ * @param page - The page.
+ * @returns Each gap, with its table, row and cell.
+ */
+function cellGaps(page: Page): Promise<{ where: string; gap: number }[]> {
+  return page.evaluate(() => {
+    const out: { where: string; gap: number }[] = [];
+    document.querySelectorAll("table").forEach((table, index) => {
+      table.querySelectorAll("tbody tr").forEach((tr, row) => {
+        const spans = [...tr.querySelectorAll("td")].map((td) => {
+          const rects: DOMRect[] = [];
+          const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            const parent = node.parentElement;
+            if (
+              (node.textContent ?? "").trim() !== "" &&
+              parent?.closest(".visually-hidden") === null
+            ) {
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              rects.push(range.getBoundingClientRect());
+            }
+          }
+          td.querySelectorAll("svg, img").forEach((picture) => {
+            rects.push(picture.getBoundingClientRect());
+          });
+          return rects.length === 0
+            ? null
+            : {
+                left: Math.min(...rects.map((rect) => rect.left)),
+                right: Math.max(...rects.map((rect) => rect.right)),
+              };
+        });
+        for (let cell = 0; cell + 1 < spans.length; cell += 1) {
+          const here = spans[cell];
+          const next = spans[cell + 1];
+          if (here && next) {
+            out.push({
+              where: `table ${String(index)} row ${String(row)} cell ${String(cell)}`,
+              gap: next.left - here.right,
+            });
+          }
+        }
+      });
+    });
+    return out;
+  });
+}
+
 for (const theme of ["light", "dark"] as const) {
   for (const density of ["roomy", "compact"] as const) {
+    test.describe(`the Jobs list, ${theme}, ${density}`, () => {
+      test.beforeEach(async ({ page }) => {
+        await stubJobs(page);
+        await page.addInitScript(
+          ([key, value]) => {
+            if (window.localStorage.getItem(key ?? "") === null) {
+              window.localStorage.setItem(key ?? "", value ?? "");
+            }
+          },
+          [KEY, JSON.stringify({ theme, density, language: "en" })],
+        );
+      });
+
+      test("axe finds nothing on the list, the open filter, a search with no hits and the Cancel and Pause dialogs", async ({
+        page,
+      }) => {
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        await expect(page.getByText(ADHOC_MESSAGE)).toBeVisible();
+        expect(await violations(page), "the list").toEqual([]);
+
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await expect(page.getByRole("listbox")).toBeVisible();
+        expect(await violations(page), "the open filter").toEqual([]);
+        await page.keyboard.press("Escape");
+
+        await page.getByRole("button", { name: `Cancel the run of ${JOB}` }).click();
+        const cancel = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(cancel).toBeVisible();
+        expect(await violations(page), "the Cancel dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(cancel).toBeHidden();
+
+        await page.getByRole("button", { name: `Pause the schedule of ${JOB}` }).click();
+        const pause = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await expect(pause).toBeVisible();
+        expect(await violations(page), "the Pause dialog").toEqual([]);
+        await page.keyboard.press("Escape");
+        await expect(pause).toBeHidden();
+
+        await page.getByRole("searchbox", { name: "Search jobs" }).fill("no-such-job");
+        await expect(page.getByText("Nothing here matches the search.")).toHaveCount(3);
+        expect(await violations(page), "a search with no hits").toEqual([]);
+      });
+
+      test("at least 24 px between the content of every two neighbouring cells", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        const gaps = await cellGaps(page);
+        expect(gaps.length).toBeGreaterThanOrEqual(10);
+        const tight = gaps.filter((entry) => entry.gap < 24);
+        expect(tight, JSON.stringify(tight)).toEqual([]);
+      });
+
+      test("the filter, the search, the links and the controls work by keyboard alone", async ({
+        page,
+      }) => {
+        await openList(page);
+        const filter = page.getByRole("button", { name: "Environment: All environments" });
+        await tabOnto(filter);
+        await page.keyboard.press("Enter");
+        await expect(page.getByRole("listbox")).toBeVisible();
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(/\?environment=prod$/);
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeFocused();
+        await expect(page.getByRole("link", { name: DEV_JOB })).toHaveCount(0);
+
+        await page.keyboard.press("Tab");
+        await expect(page.getByRole("searchbox", { name: "Search jobs" })).toBeFocused();
+        await page.keyboard.type("daily");
+        await expect(page).toHaveURL(/q=daily/);
+
+        const cancel = page.getByRole("button", { name: `Cancel the run of ${JOB}` });
+        await tabOnto(cancel);
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", { name: `Cancel the run of ${JOB}?` });
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(cancel).toBeFocused();
+
+        const pause = page.getByRole("button", { name: `Pause the schedule of ${JOB}` });
+        await tabOnto(pause);
+        await page.keyboard.press("Enter");
+        const asked = page.getByRole("dialog", { name: `Pause the schedule of ${JOB}?` });
+        await asked.getByRole("button", { name: "Pause schedule" }).press("Enter");
+        await expect(page.getByText(`Paused the schedule of ${JOB}.`)).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: `Resume the schedule of ${JOB}` }),
+        ).toBeFocused();
+
+        const jobLink = page
+          .getByRole("region", { name: "Every job listed" })
+          .getByRole("link", { name: JOB });
+        await tabBackOnto(jobLink);
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+        await expect(page.getByRole("heading", { level: 1, name: JOB })).toBeVisible();
+      });
+
+      test("a control's press does not open its row", async ({ page }) => {
+        await openList(page);
+        const run = page.getByRole("button", { name: `Run ${JOB}` });
+        await run.click();
+        await expect(page.getByText(`Started a run of ${JOB}.`)).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`${LIST}$`));
+        await expect(run).toBeFocused();
+        // The run it queued shows under Running now once the list is read again.
+        await expect(
+          page
+            .getByRole("region", { name: "Runs running now" })
+            .getByText("Queued", { exact: true }),
+        ).toHaveCount(2);
+      });
+
+      test("no horizontal scroll at 320 px, each list scrolling in its own region", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await openList(page);
+        await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+        expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+        for (const region of ["Runs running now", "Runs that failed", "Every job listed"]) {
+          await scrollsInItself(page.getByRole("region", { name: region }));
+        }
+        expect(await violations(page), "the list at 320 px").toEqual([]);
+      });
+
+      test("the filter is remembered across a reload; Back and Forward keep the filter and the search", async ({
+        page,
+      }) => {
+        await openList(page);
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: DEV }).click();
+        await expect(page).toHaveURL(/\?environment=dev$/);
+        await page.getByRole("searchbox", { name: "Search jobs" }).fill("orders");
+        await expect(page).toHaveURL(/\?environment=dev&q=orders$/);
+
+        await page.goto(LIST);
+        await expect(page.getByRole("button", { name: "Environment: dev" })).toBeVisible();
+        await expect(page.getByRole("link", { name: JOB })).toHaveCount(0);
+        await expect(page.getByRole("link", { name: DEV_JOB }).first()).toBeVisible();
+
+        await page.goto(`${LIST}?environment=prod&q=daily`);
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeVisible();
+        await page
+          .getByRole("region", { name: "Every job listed" })
+          .getByRole("link", { name: JOB })
+          .click();
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+        await page.goBack();
+        await expect(page).toHaveURL(/\?environment=prod&q=daily$/);
+        await expect(page.getByRole("searchbox", { name: "Search jobs" })).toHaveValue("daily");
+        await expect(
+          page.getByRole("button", { name: "Environment: prod, protected" }),
+        ).toBeVisible();
+        await page.goForward();
+        await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+      });
+
+      test("the list is not read while the tab is hidden, and is read at once when shown", async ({
+        page,
+      }) => {
+        let reads = 0;
+        page.on("request", (request) => {
+          if (new URL(request.url()).pathname === "/api/v1/runs") {
+            reads += 1;
+          }
+        });
+        await page.clock.install();
+        await openList(page);
+        await expect.poll(() => reads).toBe(1);
+
+        await showAs(page, "hidden");
+        await page.clock.runFor(120_000);
+        expect(reads, "no read while hidden").toBe(1);
+
+        await showAs(page, "visible");
+        await expect.poll(() => reads, { timeout: 2_000 }).toBe(2);
+      });
+
+      test("the list asks only for stubbed routes and logs no console error", async ({ page }) => {
+        const errors = consoleErrors(page);
+        const requests: string[] = [];
+        page.on("request", (request) => {
+          requests.push(new URL(request.url()).pathname);
+        });
+
+        await openList(page);
+        await expect(page.getByText(ADHOC_MESSAGE)).toBeVisible();
+        await expect(page.getByRole("link", { name: ADHOC_REPOSITORY, exact: true })).toBeVisible();
+        await page.getByRole("button", { name: `Run ${JOB}` }).click();
+        await expect(page.getByText(`Started a run of ${JOB}.`)).toBeVisible();
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: DEV }).click();
+        await expect(page.getByRole("link", { name: JOB })).toHaveCount(0);
+        await page.getByRole("link", { name: `Logs of the run of ${ADHOC_REPOSITORY}` }).click();
+        await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
+
+        const api = requests.filter((path) => path.startsWith("/api/"));
+        expect(api).toContain("/api/v1/runs/failed");
+        expect(api.filter((path) => !JOBS_STUBBED.includes(path))).toEqual([]);
+        expect(errors.filter((line) => !line.includes("404"))).toEqual([]);
+      });
+    });
+
+    test.describe(`the Runs and Deploys tabs, ${theme}, ${density}`, () => {
+      test.beforeEach(async ({ page }) => {
+        await stubJobs(page);
+        await page.addInitScript(
+          ([key, value]) => {
+            if (window.localStorage.getItem(key ?? "") === null) {
+              window.localStorage.setItem(key ?? "", value ?? "");
+            }
+          },
+          [KEY, JSON.stringify({ theme, density, language: "en" })],
+        );
+      });
+
+      /**
+       * Opens the Runs tab and waits for its first page.
+       *
+       * @param page - The page.
+       * @param query - What follows the address.
+       */
+      async function openRuns(page: Page, query = ""): Promise<void> {
+        await page.goto(`${RUNS_TAB}${query}`);
+        await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+        await expect(
+          page
+            .getByRole("region", { name: "Runs listed" })
+            .or(page.getByText("No runs match these filters.")),
+        ).toBeVisible();
+      }
+
+      /**
+       * Opens the Deploys tab of the protected environment and waits for its rows.
+       *
+       * @param page - The page.
+       */
+      async function openDeploys(page: Page): Promise<void> {
+        await page.goto(DEPLOYS_TAB);
+        await expect(page.getByRole("heading", { level: 1, name: "Deploys" })).toBeVisible();
+        await expect(page.getByRole("button", { name: ROLL_BACK })).toBeVisible();
+      }
+
+      test("axe finds nothing on the Runs tab, the Deploys tab and the rollback dialog", async ({
+        page,
+      }) => {
+        await openRuns(page);
+        await page.getByRole("button", { name: "Show more" }).click();
+        await expect(page.getByText(`selection ${SELECTION_PATTERNS.join(" ")}`)).toBeVisible();
+        expect(await violations(page), "the Runs tab").toEqual([]);
+
+        await openDeploys(page);
+        await expect(page.getByText(DEPLOY_FAILURE)).toBeVisible();
+        expect(await violations(page), "the Deploys tab").toEqual([]);
+
+        await page.getByRole("button", { name: ROLL_BACK }).click();
+        const dialog = page.getByRole("dialog", { name: `Roll back ${REPOSITORY} in ${ENV}?` });
+        await expect(dialog.getByRole("button", { name: "Roll back" })).toBeVisible();
+        await expect(dialog).toContainText(`${ENV} is protected.`);
+        expect(await violations(page), "the rollback dialog").toEqual([]);
+      });
+
+      test("the tabs, the filters, Show more, Read again and a rollback work by keyboard alone", async ({
+        page,
+      }) => {
+        await openList(page);
+        const runsTab = page
+          .getByRole("navigation", { name: "Jobs views" })
+          .getByRole("link", { name: "Runs" });
+        await tabOnto(runsTab);
+        await page.keyboard.press("Enter");
+        await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+        await expect(page.getByRole("region", { name: "Runs listed" })).toBeVisible();
+
+        const state = page.getByRole("button", { name: /State/ });
+        await tabOnto(state);
+        await page.keyboard.press("Enter");
+        await page.getByRole("option", { name: "Queued or running" }).press("Enter");
+        await expect(page).toHaveURL(/status=queued%2Crunning/);
+        await expect(state).toBeFocused();
+
+        const job = page.getByRole("textbox", { name: "Job" });
+        await tabOnto(job);
+        await page.keyboard.type(DEV_JOB);
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(new RegExp(`job=${DEV_JOB}`));
+        await expect(
+          page.getByRole("region", { name: "Runs listed" }).getByRole("row"),
+        ).toHaveCount(2);
+
+        await openRuns(page);
+        const more = page.getByRole("button", { name: "Show more" });
+        await tabOnto(more);
+        await page.keyboard.press("Enter");
+        await expect(page.getByText(`selection ${SELECTION_PATTERNS.join(" ")}`)).toBeVisible();
+        expect(await focusOnPage(page)).toBe(true);
+        const again = page.getByRole("button", { name: "Read again" });
+        await tabBackOnto(again);
+        await page.keyboard.press("Enter");
+        await expect(again).toBeHidden();
+        await expect(page.getByRole("button", { name: "Show more" })).toBeVisible();
+
+        await openDeploys(page);
+        const rollBack = page.getByRole("button", { name: ROLL_BACK });
+        await tabOnto(rollBack);
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", { name: `Roll back ${REPOSITORY} in ${ENV}?` });
+        await expect(dialog.getByRole("button", { name: "Roll back" })).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(rollBack).toBeFocused();
+
+        await page.keyboard.press("Enter");
+        await dialog.getByRole("button", { name: "Roll back" }).press("Enter");
+        await expect(dialog).toBeHidden();
+        await expect(page.getByText(`Rolled back ${REPOSITORY} in ${ENV} to 4f9d2a7.`)).toBeVisible(
+          { timeout: 10_000 },
+        );
+        expect(await focusOnPage(page)).toBe(true);
+      });
+
+      test("a rollback names the jobs it changes and is followed from running to succeeded", async ({
+        page,
+      }) => {
+        await openDeploys(page);
+        const rows = page.getByRole("region", { name: `Deploys of ${ENV}` }).getByRole("row");
+        // The dry run, the current deploy, the failed one, the older deploy and the rollback.
+        await expect(rows).toHaveCount(6);
+        await expect(rows.nth(2)).toContainText("current");
+        await expect(rows.nth(4)).toContainText("an account since deleted");
+        await expect(page.getByRole("button", { name: /^Roll back to this… / })).toHaveCount(2);
+
+        await page.getByRole("button", { name: ROLL_BACK }).click();
+        const dialog = page.getByRole("dialog", { name: `Roll back ${REPOSITORY} in ${ENV}?` });
+        const jobs = dialog.getByRole("list", { name: "Jobs the rollback changes" });
+        await expect(jobs.getByRole("listitem")).toHaveText([
+          JOB,
+          `${OLDER_ONLY_JOB}: back with the rollback`,
+        ]);
+        await dialog.getByRole("button", { name: "Roll back" }).click();
+        await expect(dialog).toBeHidden();
+        await expect(page.getByRole("button", { name: ROLL_BACK })).toBeFocused();
+        await expect(
+          page.getByText(`Rolling back ${REPOSITORY} in ${ENV} to 4f9d2a7…`),
+        ).toBeVisible();
+        await expect(page.getByText(`Rolled back ${REPOSITORY} in ${ENV} to 4f9d2a7.`)).toBeVisible(
+          { timeout: 10_000 },
+        );
+        // The list was read again: the rollback heads it, and the older version is current.
+        await expect(rows).toHaveCount(7);
+        await expect(rows.nth(1)).toContainText("Rollback");
+        await expect(rows.nth(1)).toContainText("current");
+        await expect(page.getByRole("button", { name: ROLL_BACK })).toHaveCount(0);
+      });
+
+      test("Back and Forward keep each tab's filters; a job links to its deploys", async ({
+        page,
+      }) => {
+        await openRuns(page, `?environment=${ENV}&trigger=schedule&period=7d`);
+        await page
+          .getByRole("navigation", { name: "Jobs views" })
+          .getByRole("link", { name: "Deploys" })
+          .click();
+        await expect(page.getByRole("heading", { level: 1, name: "Deploys" })).toBeVisible();
+        await page.getByRole("button", { name: /Repository/ }).click();
+        await page.getByRole("option", { name: REPOSITORY }).click();
+        await expect(page).toHaveURL(new RegExp(`repository=${REPOSITORY}`));
+        await page.goBack();
+        await expect(page).toHaveURL(
+          new RegExp(`/jobs/runs\\?environment=${ENV}&trigger=schedule&period=7d$`),
+        );
+        await expect(page.getByRole("button", { name: /Trigger/ })).toContainText("Schedule");
+        await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 7 days");
+        await page.goForward();
+        await expect(page).toHaveURL(
+          new RegExp(`/jobs/deploys\\?environment=${ENV}&repository=${REPOSITORY}$`),
+        );
+
+        await openJob(page);
+        await page.getByRole("link", { name: `Deploys of ${REPOSITORY}` }).click();
+        await expect(page).toHaveURL(
+          new RegExp(`/jobs/deploys\\?environment=${ENV}&repository=${REPOSITORY}$`),
+        );
+        await expect(page.getByRole("button", { name: ROLL_BACK })).toBeVisible();
+      });
+
+      test("a resume opens the run it continues, and the tab offers no start", async ({ page }) => {
+        await openRuns(page);
+        await page.getByRole("button", { name: "Show more" }).click();
+        await expect(page.getByText(`selection ${SELECTION_PATTERNS.join(" ")}`)).toBeVisible();
+        await expect(page.getByRole("button", { name: /run|start/i })).toHaveCount(0);
+        await page.getByRole("link", { name: `resume of ${FAILED_ID.slice(0, 8)}` }).click();
+        await expect(page).toHaveURL(new RegExp(`${runPage(FAILED_ID)}$`));
+        await expect(page.getByRole("navigation", { name: "Jobs views" })).toHaveCount(0);
+      });
+
+      test("no horizontal scroll at 320 px, each list in its own region and the tabs wrapping", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 320, height: 640 });
+        await openRuns(page);
+        expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+        await scrollsInItself(page.getByRole("region", { name: "Runs listed" }));
+        const tabs = page.getByRole("navigation", { name: "Jobs views" }).getByRole("link");
+        for (const tab of await tabs.all()) {
+          const box = await tab.boundingBox();
+          expect(box && box.x + box.width).toBeLessThanOrEqual(320);
+        }
+        expect(await violations(page), "the Runs tab at 320 px").toEqual([]);
+
+        await openDeploys(page);
+        expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+        await scrollsInItself(page.getByRole("region", { name: `Deploys of ${ENV}` }));
+        expect(await violations(page), "the Deploys tab at 320 px").toEqual([]);
+        await page.getByRole("button", { name: ROLL_BACK }).click();
+        await expect(
+          page.getByRole("dialog").getByRole("button", { name: "Roll back" }),
+        ).toBeVisible();
+        expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+        expect(await violations(page), "the rollback dialog at 320 px").toEqual([]);
+      });
+
+      test("no read while the tab is hidden, on the Runs tab and of a rollback", async ({
+        page,
+      }) => {
+        let runs = 0;
+        let rollback = 0;
+        page.on("request", (request) => {
+          const path = new URL(request.url()).pathname;
+          if (path === "/api/v1/runs") {
+            runs += 1;
+          }
+          if (path.startsWith(`/api/v1/environments/${ENV}/deploys/0a1b2c3d`)) {
+            rollback += 1;
+          }
+        });
+        await page.clock.install();
+        await openRuns(page);
+        await expect.poll(() => runs).toBe(1);
+        await showAs(page, "hidden");
+        await page.clock.runFor(120_000);
+        expect(runs, "no read of the runs while hidden").toBe(1);
+        await showAs(page, "visible");
+        await expect.poll(() => runs, { timeout: 2_000 }).toBe(2);
+
+        await openDeploys(page);
+        await page.getByRole("button", { name: ROLL_BACK }).click();
+        await page.getByRole("dialog").getByRole("button", { name: "Roll back" }).click();
+        await expect(
+          page.getByText(`Rolling back ${REPOSITORY} in ${ENV} to 4f9d2a7…`),
+        ).toBeVisible();
+        await expect.poll(() => rollback).toBe(1);
+        await showAs(page, "hidden");
+        await page.clock.runFor(60_000);
+        expect(rollback, "no read of the rollback while hidden").toBe(1);
+        await showAs(page, "visible");
+        await expect.poll(() => rollback, { timeout: 2_000 }).toBe(2);
+        await expect(
+          page.getByText(`Rolled back ${REPOSITORY} in ${ENV} to 4f9d2a7.`),
+        ).toBeVisible();
+      });
+
+      test("the tabs ask only for stubbed routes and log no console error", async ({ page }) => {
+        const errors = consoleErrors(page);
+        const requests: string[] = [];
+        page.on("request", (request) => {
+          requests.push(new URL(request.url()).pathname);
+        });
+
+        await openRuns(page);
+        await page.getByRole("button", { name: "Show more" }).click();
+        await expect(page.getByText(`selection ${SELECTION_PATTERNS.join(" ")}`)).toBeVisible();
+        await page.goto("/jobs/deploys");
+        await expect(page.getByText(`No deploy in ${DEV} yet.`)).toBeVisible();
+        await openDeploys(page);
+        await page.getByRole("button", { name: ROLL_BACK }).click();
+        await page.getByRole("dialog").getByRole("button", { name: "Roll back" }).click();
+        await expect(page.getByText(`Rolled back ${REPOSITORY} in ${ENV} to 4f9d2a7.`)).toBeVisible(
+          { timeout: 10_000 },
+        );
+
+        const api = requests.filter((path) => path.startsWith("/api/"));
+        expect(api).toContain(`/api/v1/environments/${ENV}/deployments`);
+        expect(api.filter((path) => !JOBS_STUBBED.includes(path))).toEqual([]);
+        expect(errors).toEqual([]);
+      });
+    });
+
     test.describe(`the job, run and task pages, ${theme}, ${density}`, () => {
       let sent: string[] = [];
 

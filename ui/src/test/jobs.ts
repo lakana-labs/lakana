@@ -1,10 +1,15 @@
 /**
- * What the server answers the job, run and task pages with, for tests: a job `analytics/nightly_sales`
- * with a schedule, a run of it, a failed task, and a log piece.
+ * What the server answers the job, run and task pages and the Deploys tab with, for tests: a job
+ * `analytics/nightly_sales` with a schedule, a run of it, a failed task, a log piece, a deploy and
+ * a repository's current version.
  *
  * @packageDocumentation
  */
+import type { EnvironmentOut } from "../api/environments";
 import type {
+  DeploymentOut,
+  DeployOut,
+  FailedRunOut,
   FailureOut,
   JobOut,
   RunOut,
@@ -112,6 +117,7 @@ export function aJobRun(over: Partial<RunOut> = {}): RunOut {
     status: "succeeded",
     cancel_requested: false,
     triggered_by: "ana.nowak",
+    resumed_from_run_id: null,
     selection: {},
     error_message: null,
     created_at: "2026-11-17T01:00:00Z",
@@ -127,6 +133,54 @@ export function aJobRun(over: Partial<RunOut> = {}): RunOut {
     ...over,
   };
 }
+
+/**
+ * A row of the failed runs: a run of `nightly_sales` in `prod` whose task `silver.orders` failed
+ * with `timeout`, which the reader may resume.
+ *
+ * @param over - The fields that differ.
+ * @returns The row.
+ */
+export function aFailedRun(over: Partial<FailedRunOut> = {}): FailedRunOut {
+  return {
+    run: aJobRun({
+      status: "failed",
+      tasks: [],
+      failed_tasks: 1,
+      total_tasks: 3,
+      ended_tasks: 3,
+      finished_at: "2026-11-17T01:14:00Z",
+      actions: ["cancel", "resume"],
+    }),
+    task: "silver.orders",
+    failure: aFailure("timeout"),
+    ...over,
+  };
+}
+
+/** What `GET /api/v1/environments` answers: `dev`, and `prod`, which is protected. */
+export const ENVIRONMENTS: readonly EnvironmentOut[] = [
+  {
+    name: "dev",
+    storage_root: "file:///srv/lakana/dev",
+    storage_secret_ref: null,
+    is_protected: false,
+    properties: {},
+    retention_days: null,
+    deleted_at: null,
+    purge_after: null,
+  },
+  {
+    name: "prod",
+    storage_root: "s3://lakana-prod/warehouse",
+    storage_secret_ref: "prod-storage",
+    is_protected: true,
+    properties: {},
+    retention_days: 30,
+    deleted_at: null,
+    purge_after: null,
+  },
+];
 
 /**
  * One piece of a task's log, complete.
@@ -177,4 +231,54 @@ export function anAttempt(over: Partial<TaskAttemptOut> = {}): TaskAttemptOut {
  */
 export async function preloadJobsScreen(): Promise<void> {
   await import("../jobs/JobsScreen");
+}
+
+/** The id of the deploy `aDeploy` answers for. */
+export const DEPLOY_ID = "7a8b9c0d-1e2f-4a3b-8c4d-5e6f70819203";
+
+/** The project version `aDeploy` made. */
+export const DEPLOY_VERSION = "1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7081";
+
+/**
+ * A deploy of `analytics` to `prod` that succeeded at commit `4f9d2a7`, asked for by
+ * `ana.nowak`, which the reader may roll back to.
+ *
+ * @param over - The fields that differ.
+ * @returns The deploy.
+ */
+export function aDeploy(over: Partial<DeployOut> = {}): DeployOut {
+  return {
+    id: DEPLOY_ID,
+    environment: "prod",
+    repository: "analytics",
+    kind: "deploy",
+    status: "succeeded",
+    requested_ref: "main",
+    resolved_sha: "4f9d2a7c81b3e5f60718293a4b5c6d7e8f901234",
+    project_version_id: DEPLOY_VERSION,
+    error_message: null,
+    created_at: "2026-11-16T09:00:00Z",
+    started_at: "2026-11-16T09:00:02Z",
+    finished_at: "2026-11-16T09:00:40Z",
+    submitted_by: "ana.nowak",
+    jobs: null,
+    actions: ["rollback"],
+    ...over,
+  };
+}
+
+/**
+ * The current version of `analytics`: another version than `aDeploy`'s, at commit `9c1e5b3`.
+ *
+ * @param over - The fields that differ.
+ * @returns The deployment.
+ */
+export function aDeployment(over: Partial<DeploymentOut> = {}): DeploymentOut {
+  return {
+    repository: "analytics",
+    project_version_id: "9c1e5b30-7a2d-4e4f-8a6b-1c2d3e4f5061",
+    commit_sha: "9c1e5b3a2d4f6e8a0b1c2d3e4f5a6b7c8d9e0f12",
+    updated_at: "2026-11-17T08:00:00Z",
+    ...over,
+  };
 }
