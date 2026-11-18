@@ -13,7 +13,7 @@ import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
 import "./accessStrings";
-import { groupPath } from "./paths";
+import { groupPath } from "./accessPaths";
 import { roleSummary, whatWords, whereText } from "./words";
 
 /** Properties of {@link HeldGrants}. */

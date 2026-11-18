@@ -26,7 +26,7 @@ export interface GroupQuery {
 }
 
 /** How many groups a page of the list holds. */
-export const GROUPS_PAGE = 50;
+const GROUPS_PAGE = 50;
 
 /**
  * The API path of a group or one of its parts.

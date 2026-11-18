@@ -1,6 +1,5 @@
 /**
- * The addresses of Access's places: a group's page, the Grants list with its filters, What I
- * may do.
+ * The addresses of Access's places: a group's page and the Grants list with its filters.
  *
  * @packageDocumentation
  */
@@ -19,10 +18,7 @@ import {
 export const GROUPS_PATH = "/settings/access/groups";
 
 /** The address of Grants. */
-export const GRANTS_PATH = "/settings/access/grants";
-
-/** The address of What I may do. */
-export const WHAT_I_MAY_DO_PATH = "/settings/access/what-i-may-do";
+const GRANTS_PATH = "/settings/access/grants";
 
 /**
  * The address of a group's page.

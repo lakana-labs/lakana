@@ -20,7 +20,7 @@ import {
   type PermissionOut,
   type RowFilterOut,
 } from "../../api";
-import { grantsPath } from "../../access/paths";
+import { grantsPath } from "../../access/accessPaths";
 import { personPath } from "../../access/personPath";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";

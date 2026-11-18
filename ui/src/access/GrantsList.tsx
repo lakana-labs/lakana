@@ -21,7 +21,7 @@ import { VisibleText } from "../shell/VisibleText";
 import "./accessStrings";
 import { GitMark } from "./GitMark";
 import { managedScopeOf } from "./managed";
-import { filterKey, groupPath } from "./paths";
+import { filterKey, groupPath } from "./accessPaths";
 import { personPath } from "./personPath";
 import { whatWords, whereText } from "./words";
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { type GrantFilter, NO_FILTER } from "../api/grants";
-import { filterKey, grantsPath, groupPath, readGrantFilter } from "./paths";
+import { filterKey, grantsPath, groupPath, readGrantFilter } from "./accessPaths";
 
 /**
  * Reads back the filter of an address.

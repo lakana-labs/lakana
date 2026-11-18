@@ -93,7 +93,7 @@ export function aMember(name: string, type = "USER"): PrincipalOut {
  * @param scope - `instance` or an environment's name.
  * @returns The scope.
  */
-export function aManagedScope(scope: string): ManagedScopeOut {
+function aManagedScope(scope: string): ManagedScopeOut {
   return {
     scope,
     file_name: "access.yaml",

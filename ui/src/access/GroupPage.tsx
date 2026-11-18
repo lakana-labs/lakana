@@ -28,7 +28,7 @@ import "./access.css";
 import "./accessStrings";
 import { managedScopeOf } from "./managed";
 import { ManagedNote } from "./ManagedNote";
-import { GROUPS_PATH, grantsPath } from "./paths";
+import { GROUPS_PATH, grantsPath } from "./accessPaths";
 import { personPath } from "./personPath";
 import { useAccessStatus } from "./useAccessStatus";
 import { whatWords, whereText } from "./words";

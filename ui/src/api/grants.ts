@@ -132,7 +132,7 @@ export interface GrantFilter {
 export const NO_FILTER: GrantFilter = { who: null, what: null, where: null };
 
 /** How many grants a page of the list holds. */
-export const GRANTS_PAGE = 50;
+const GRANTS_PAGE = 50;
 
 /**
  * Writes a filter as the server's query.

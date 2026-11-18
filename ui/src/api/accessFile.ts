@@ -22,7 +22,7 @@ export interface ManagedScopeOut {
 }
 
 /** A change made by hand in a managed scope that no apply has taken into account yet. */
-export interface AccessOverrideOut {
+interface AccessOverrideOut {
   /** The managed scope. */
   readonly scope: string;
   /** What was changed. */

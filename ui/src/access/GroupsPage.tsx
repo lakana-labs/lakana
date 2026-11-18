@@ -21,7 +21,7 @@ import "./accessStrings";
 import { CreateGroupDialog } from "./CreateGroupDialog";
 import { managedScopeOf } from "./managed";
 import { ManagedNote } from "./ManagedNote";
-import { groupPath } from "./paths";
+import { groupPath } from "./accessPaths";
 import { useAccessStatus } from "./useAccessStatus";
 
 /** How long typing must pause before the list is read again. */

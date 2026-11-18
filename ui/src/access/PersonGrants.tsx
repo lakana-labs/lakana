@@ -16,7 +16,7 @@ import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
 import "./accessStrings";
 import { HeldGrants } from "./HeldGrants";
-import { grantsPath, groupPath } from "./paths";
+import { grantsPath, groupPath } from "./accessPaths";
 
 /** Properties of {@link PersonGrants}. */
 export interface PersonGrantsProps {

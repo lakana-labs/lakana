@@ -21,7 +21,7 @@ import { type FilterStep, GrantFilters } from "./GrantFilters";
 import { GrantsList } from "./GrantsList";
 import { managedScopeOf } from "./managed";
 import { ManagedNote } from "./ManagedNote";
-import { filterKey, grantsPath, readGrantFilter } from "./paths";
+import { filterKey, grantsPath, readGrantFilter } from "./accessPaths";
 import { useAccessStatus } from "./useAccessStatus";
 
 // Add grant's form loads when it is opened, not with the list.
