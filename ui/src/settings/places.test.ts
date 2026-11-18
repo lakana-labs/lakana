@@ -41,6 +41,7 @@ describe("places", () => {
       "repositories",
       "access",
       "people",
+      "groups",
       "what-i-may-do",
       "sign-in",
       "invites",

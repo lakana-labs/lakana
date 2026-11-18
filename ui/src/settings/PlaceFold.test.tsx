@@ -34,6 +34,7 @@ describe("PlaceFold", () => {
       "Status",
       "Repositories",
       "People",
+      "Groups",
       "What I may do",
       "Sign-in",
       "Invites",

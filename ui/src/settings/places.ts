@@ -92,6 +92,15 @@ export const SETTINGS_PLACES = [
     visible: (viewer) => viewer.admin,
   },
   {
+    id: "groups",
+    path: "access/groups",
+    label: "settings.places.groups",
+    parent: "access",
+    kind: "page",
+    below: true,
+    visible: (viewer) => viewer.admin,
+  },
+  {
     id: "what-i-may-do",
     path: "access/what-i-may-do",
     label: "settings.places.whatIMayDo",
