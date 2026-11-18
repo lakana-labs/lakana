@@ -82,6 +82,20 @@ describe("EnvironmentPicker", () => {
 
     expect(screen.getByRole("button", { name: "Environment: prU+202Eod" })).toBeInTheDocument();
   });
+
+  it("gives the native select behind it the marked name, never the hidden character", () => {
+    const { container } = render(
+      <EnvironmentPicker
+        environments={[{ name: "pr\u202Eod", protected: false }]}
+        value={"pr\u202Eod"}
+        onChange={vi.fn()}
+      />,
+    );
+
+    const options = [...container.querySelectorAll("option")].map((option) => option.textContent);
+    expect(options).toContain("prU+202Eod");
+    expect(options.join("")).not.toContain("\u202E");
+  });
 });
 
 describe("EnvironmentPicker over any environment choice", () => {

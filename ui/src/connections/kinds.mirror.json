@@ -1,0 +1,160 @@
+{
+  "order": [
+    "postgresql",
+    "mariadb",
+    "sqlite-file",
+    "http",
+    "s3",
+    "gcs",
+    "azure",
+    "directory",
+    "tcp"
+  ],
+  "kinds": {
+    "postgresql": {
+      "address": [
+        { "key": "host", "required": true },
+        { "key": "port", "required": false, "default": 5432 },
+        { "key": "database", "required": true }
+      ],
+      "settings": [
+        { "key": "user", "required": true },
+        {
+          "key": "tls",
+          "required": false,
+          "default": "verify-full",
+          "choices": ["verify-full", "require", "disable"]
+        },
+        { "key": "ca_certificate", "required": false, "pem": true }
+      ],
+      "secret": { "required": ["password"], "optional": [] }
+    },
+    "mariadb": {
+      "address": [
+        { "key": "host", "required": true },
+        { "key": "port", "required": false, "default": 3306 },
+        { "key": "database", "required": true }
+      ],
+      "settings": [
+        { "key": "user", "required": true },
+        {
+          "key": "tls",
+          "required": false,
+          "default": "verify-full",
+          "choices": ["verify-full", "require", "disable"]
+        },
+        { "key": "ca_certificate", "required": false, "pem": true }
+      ],
+      "secret": { "required": ["password"], "optional": [] }
+    },
+    "sqlite-file": {
+      "address": [
+        { "key": "root", "required": true },
+        { "key": "path", "required": true }
+      ],
+      "settings": [],
+      "secret": null
+    },
+    "http": {
+      "address": [{ "key": "base_url", "required": true }],
+      "settings": [
+        {
+          "key": "auth",
+          "required": false,
+          "default": "none",
+          "choices": ["none", "bearer", "basic", "api_key", "oauth2"]
+        },
+        { "key": "username", "required": false },
+        { "key": "api_key_name", "required": false },
+        {
+          "key": "api_key_in",
+          "required": false,
+          "default": "header",
+          "choices": ["header", "query"]
+        },
+        { "key": "client_id", "required": false },
+        { "key": "token_url", "required": false },
+        { "key": "scope", "required": false },
+        { "key": "ca_certificate", "required": false, "pem": true }
+      ],
+      "secret": { "byAuth": true }
+    },
+    "s3": {
+      "address": [
+        { "key": "bucket", "required": true },
+        { "key": "region", "required": true },
+        { "key": "endpoint", "required": false }
+      ],
+      "settings": [
+        { "key": "access_key_id", "required": true },
+        { "key": "prefix", "required": false }
+      ],
+      "secret": { "required": ["secret_access_key"], "optional": ["session_token"] }
+    },
+    "gcs": {
+      "address": [{ "key": "bucket", "required": true }],
+      "settings": [{ "key": "prefix", "required": false }],
+      "secret": { "required": ["service_account_json"], "optional": [] }
+    },
+    "azure": {
+      "address": [
+        { "key": "account", "required": true },
+        { "key": "container", "required": true }
+      ],
+      "settings": [{ "key": "prefix", "required": false }],
+      "secret": { "oneOf": ["account_key", "sas_token"] }
+    },
+    "directory": {
+      "address": [
+        { "key": "root", "required": true },
+        { "key": "path", "required": true }
+      ],
+      "settings": [],
+      "secret": null
+    },
+    "tcp": {
+      "address": [
+        { "key": "host", "required": true },
+        { "key": "port", "required": true }
+      ],
+      "settings": [],
+      "secret": { "free": true, "max": 16 }
+    }
+  },
+  "httpAuth": {
+    "none": [],
+    "bearer": [],
+    "basic": ["username"],
+    "api_key": ["api_key_name", "api_key_in"],
+    "oauth2": ["client_id", "token_url", "scope"]
+  },
+  "httpAuthRequired": {
+    "basic": ["username"],
+    "api_key": ["api_key_name"],
+    "oauth2": ["client_id", "token_url"]
+  },
+  "httpSecretKey": {
+    "bearer": "token",
+    "basic": "password",
+    "api_key": "api_key",
+    "oauth2": "client_secret"
+  },
+  "movesSecret": {
+    "address": ["host", "port", "base_url", "endpoint", "bucket", "account"],
+    "settings": ["token_url", "ca_certificate", "api_key_in", "auth"],
+    "tlsStrength": ["disable", "require", "verify-full"]
+  },
+  "outcomes": [
+    "ok",
+    "dns",
+    "refused",
+    "timeout",
+    "tls",
+    "not_allowed",
+    "root_unavailable",
+    "not_found",
+    "credentials",
+    "failed"
+  ],
+  "limits": { "caBytes": 65536, "secretValueBytes": 65536 }
+}

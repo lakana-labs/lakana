@@ -41,8 +41,8 @@ export default defineConfig({
         // otherwise split them, React Aria's Link and its press and hover hooks into chunks of
         // their own, and the exports between them cost about 1.5 kB.
         // React Aria's form code stays in one chunk of the first load too. The Select menus that
-        // the Queries and Jobs screens load on demand use its validation but not its text field,
-        // and would otherwise split it in two (about 0.39 kB more).
+        // the Connections, Queries and Jobs screens load on demand use its validation but not its
+        // text field, and would otherwise split it in two (about 0.39 kB more).
         // The patterns (build/chunk-groups.ts) name files inside React Aria's packages; their test
         // fails if an update moves one.
         codeSplitting: {

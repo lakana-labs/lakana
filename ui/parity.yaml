@@ -61,12 +61,12 @@
 "column-mask list": { class: ui, part: 7 }
 "column-mask revoke": { class: ui, part: 7 }
 "configuration": { class: read, part: 8 }
-"connection create": { class: ui, part: 6 }
-"connection delete": { class: ui, part: 6 }
-"connection list": { class: ui, part: 6 }
-"connection show": { class: ui, part: 6 }
-"connection test": { class: ui, part: 6 }
-"connection update": { class: ui, part: 6 }
+"connection create": { class: ui, part: 6, done: true }
+"connection delete": { class: ui, part: 6, done: true }
+"connection list": { class: ui, part: 6, done: true }
+"connection show": { class: ui, part: 6, done: true }
+"connection test": { class: ui, part: 6, done: true }
+"connection update": { class: ui, part: 6, done: true }
 "deploy": { class: git, reason: "deploy of a new commit" }
 "deployments list": { class: read, part: 5, done: true }
 "deployments set-run-as": { class: ui, part: 7 }
@@ -242,7 +242,7 @@
 "DELETE /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "DELETE /api/v1/column-masks/{column_mask_id}": { class: ui, part: 7 }
 "DELETE /api/v1/environments/{environment_name}/connections/{connection_name}":
-  { class: ui, part: 6 }
+  { class: ui, part: 6, done: true }
 "DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
 "DELETE /api/v1/environments/{env}/deployments/{repo}": { class: ui, part: 5 }
 "DELETE /api/v1/environments/{env}/deployments/{repo}/run-as": { class: ui, part: 7 }
@@ -280,14 +280,19 @@
 "GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "GET /api/v1/column-masks":
   { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
-"GET /api/v1/connections": { class: ui, part: 6 }
-"GET /api/v1/connections/environments": { class: ui, part: 6 }
+"GET /api/v1/connections": { class: ui, part: 6, done: true }
+"GET /api/v1/connections/environments": { class: ui, part: 6, done: true }
 "GET /api/v1/deploys": { class: read, part: 5 }
 "GET /api/v1/environments": { class: ui, part: 8 }
-"GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
-"GET /api/v1/environments/{environment_name}/connections/{connection_name}": { class: ui, part: 6 }
+"GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6, done: true }
+"GET /api/v1/environments/{environment_name}/connections/{connection_name}":
+  { class: ui, part: 6, done: true }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}/tests/{test_id}":
-  { class: ui, part: 6 }
+  {
+    class: ui,
+    part: 6,
+    note: "the screen follows a test through the connection's last_test (PR 2, C4)",
+  }
 "GET /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7 }
 "GET /api/v1/environments/{env}/artifacts":
   {
@@ -439,7 +444,7 @@
 "GET /api/v1/workers": { class: ui, part: 8 }
 "PATCH /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "PATCH /api/v1/environments/{environment_name}/connections/{connection_name}":
-  { class: ui, part: 6 }
+  { class: ui, part: 6, done: true }
 "PATCH /api/v1/environments/{environment_name}/secrets/{secret_name}": { class: ui, part: 7 }
 "PATCH /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: ui, part: 3, done: true }
@@ -469,10 +474,10 @@
 "POST /api/v1/ci-trust-rules/{rule_id}/enable": { class: ui, part: 7 }
 "POST /api/v1/column-masks": { class: ui, part: 7 }
 "POST /api/v1/environments": { class: ui, part: 8 }
-"POST /api/v1/environments/{environment_name}/connection-tests": { class: ui, part: 6 }
-"POST /api/v1/environments/{environment_name}/connections": { class: ui, part: 6 }
+"POST /api/v1/environments/{environment_name}/connection-tests": { class: ui, part: 6, done: true }
+"POST /api/v1/environments/{environment_name}/connections": { class: ui, part: 6, done: true }
 "POST /api/v1/environments/{environment_name}/connections/{connection_name}/tests":
-  { class: ui, part: 6 }
+  { class: ui, part: 6, done: true }
 "POST /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7 }
 "POST /api/v1/environments/{env}/deploys":
   {

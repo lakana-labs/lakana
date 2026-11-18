@@ -14,6 +14,7 @@ import httpx
 import typer
 import typer.main
 import typer.testing
+from scripts.test_support.cli_env import clean_cli_env
 from typer.testing import CliRunner, Result
 
 import lakana
@@ -196,34 +197,7 @@ def invoke(
     typer.testing.Result
         Exit code, stdout, stderr and any exception.
     """
-    clean: dict[str, str | None] = {
-        name: None
-        for name in (
-            "LAKANA_OUTPUT",
-            "LAKANA_PROFILE",
-            "LAKANA_TOKEN",
-            "LAKANA_URL",
-            "LAKANA_OIDC",
-            "LAKANA_OIDC_TOKEN",
-            "LAKANA_OIDC_AUDIENCE",
-            "ACTIONS_ID_TOKEN_REQUEST_URL",
-            "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-        )
-    }
-    clean["COLUMNS"] = "200"
-    # Plain output regardless of the caller's terminal settings (CI, FORCE_COLOR). `NO_COLOR`
-    # removes colours but not bold; a dumb terminal removes every style, and GITHUB_ACTIONS
-    # would otherwise make the help renderer treat a self-hosted runner's TERM as a terminal.
-    clean.update(
-        {
-            "FORCE_COLOR": None,
-            "PY_COLORS": None,
-            "GITHUB_ACTIONS": None,
-            "NO_COLOR": "1",
-            "TERM": "dumb",
-        }
-    )
-    clean.update(env or {})
+    clean = clean_cli_env(env)
     # `CliRunner.invoke` turns the app into a command on every call: hand it the cached one.
     with mock.patch.object(typer.testing, "_get_command", lambda _app_: _command()):
         return CliRunner().invoke(_app(), list(args), obj=state, input=input, env=clean)
