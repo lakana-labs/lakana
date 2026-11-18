@@ -947,14 +947,26 @@ def test_list_children_page_refuses_a_backend_that_cannot_stop_after_a_page() ->
 def test_list_children_page_of_a_huge_local_folder_keeps_only_a_page_in_memory(
     config: StorageConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """200,000 entries pass through a heap of the page's size, never a list of them all."""
+    """Entries pass through a heap of the page's size, never a list of them all.
+
+    Each entry counts itself while it is alive, so the test sees how many the listing holds
+    at once: a page of 3 holds a few, a listing that kept them all would hold every one. That
+    proves the bound with 5,000 entries; measuring memory needed a folder big enough to
+    stand out (200,000, which took over a second).
+    """
     (tmp_path / "raw").mkdir()
-    total = 200_000
+    total = 5_000
+    alive = {"now": 0, "most": 0}
 
     class _Entry:
         def __init__(self, number: int) -> None:
             self.name = f"d{number:06d}"
             self.path = f"/nowhere/{self.name}"
+            alive["now"] += 1
+            alive["most"] = max(alive["most"], alive["now"])
+
+        def __del__(self) -> None:
+            alive["now"] -= 1
 
         def is_dir(self, *, follow_symlinks: bool = True) -> bool:
             return True
@@ -977,15 +989,13 @@ def test_list_children_page_of_a_huge_local_folder_keeps_only_a_page_in_memory(
         os, "scandir", lambda path: _Scan() if str(path).endswith("/raw") else real(path)
     )
     storage = build_storage(config)
-    tracemalloc.start()
-    try:
-        page = storage.list_children_page("raw", after="d000009/", limit=3)
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
+    page = storage.list_children_page("raw", after="d000009/", limit=3)
     assert [entry.name for entry in page] == ["d000010", "d000011", "d000012"]
-    # A list of 200,000 entries alone would take well over 10 MB.
-    assert peak < 2_000_000, peak
+    assert alive["most"] <= 10, alive["most"]
+    # The count is real: holding every entry at once would show all of them.
+    held = list(_Scan())
+    assert alive["most"] == total
+    del held
 
 
 def test_list_children_page_on_s3_asks_for_one_page_and_drops_the_repeated_prefix(

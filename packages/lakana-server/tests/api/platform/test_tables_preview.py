@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pyarrow as pa
 import pytest
@@ -92,8 +93,10 @@ def test_a_viewer_is_refused_with_the_next_step(previews: TestClient) -> None:
     )
 
 
-def test_the_preview_route_accepts_no_sql_or_limit(previews: TestClient) -> None:
-    op = previews.app.openapi()["paths"][PREVIEW_PATH]["post"]
+def test_the_preview_route_accepts_no_sql_or_limit(
+    previews: TestClient, openapi_schema: dict[str, Any]
+) -> None:
+    op = openapi_schema["paths"][PREVIEW_PATH]["post"]
     assert "requestBody" not in op
     # The bearer token is the only header; there is no query parameter at all.
     assert {(p["name"], p["in"]) for p in op["parameters"]} == {
