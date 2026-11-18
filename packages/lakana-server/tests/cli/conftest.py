@@ -14,6 +14,7 @@ import typer
 import typer.main
 import typer.testing
 from fastapi.testclient import TestClient
+from scripts.test_support.cli_env import clean_cli_env
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from typer.testing import CliRunner, Result
@@ -130,20 +131,7 @@ def run_cli(
     typer.testing.Result
         Exit code, stdout, stderr and any exception.
     """
-    clean: dict[str, str | None] = {
-        name: None
-        for name in (
-            "LAKANA_OUTPUT",
-            "LAKANA_PROFILE",
-            "LAKANA_TOKEN",
-            "LAKANA_URL",
-            "LAKANA_OIDC",
-            "LAKANA_OIDC_TOKEN",
-        )
-    }
-    clean["COLUMNS"] = "200"
-    clean.update({"FORCE_COLOR": None, "PY_COLORS": None, "NO_COLOR": "1"})
-    clean.update(env or {})
+    clean = clean_cli_env(env)
     # `CliRunner.invoke` turns the app into a command on every call: hand it the cached one.
     with mock.patch.object(typer.testing, "_get_command", lambda _app_: _command()):
         return CliRunner().invoke(_app(), list(args), obj=state, input=input, env=clean)

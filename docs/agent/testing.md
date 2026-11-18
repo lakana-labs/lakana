@@ -194,6 +194,16 @@ The time falls to a fifth on both versions. The memory of this package alone was
 since `core = "ctrace"` (see "Memory, Python 3.14" above) and falls by about 5 %; the 3.14
 processes stay heavier than those of 3.13 by about 20 to 30 MB here.
 
+The CLI tests against the real app do the same: `run_cli` in
+`packages/lakana-server/tests/cli/conftest.py` (what the `invoke_cli` fixture returns) builds the
+command once, when the conftest is imported, and the CI OIDC how-to and Postgres CLI tests call it
+too (#722). Each conversion had cost about 0.13 s under coverage. Measured 2026-11-18, serial,
+under `--cov`: the grant-twice test went from 1.60 s to 0.69 s alone (2.8–3.0 s to 1.2–1.5 s with
+every core busy), and `packages/lakana-server/tests/cli` without the integration tests from
+27.3 s to 12.1 s at `-n 4`. Both runners take their environment from
+`scripts/test_support/cli_env.py`, which clears the CLI's own variables and GitHub Actions' OIDC
+request variables and asks for plain output.
+
 ### The server and worker tests copy one catalog and skip fsync (#327)
 
 Every server test still gets its own SQLite file and its own app; two costs are shared instead.
