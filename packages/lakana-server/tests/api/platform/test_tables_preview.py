@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
 
 import pyarrow as pa
 import pytest
+from fastapi.dependencies.utils import get_flat_params
+from fastapi.params import Param
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.models import Principal
+from lakana_server.api.platform import tables
 from tests.api.platform.test_queries import result_url, stored_result
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import (
@@ -21,9 +24,6 @@ from tests.server_test_helpers import (
     query_run_columns,
     upload_artifact,
 )
-
-PREVIEW_PATH = "/api/v1/environments/{env}/namespaces/{path}/tables/{name}/preview"
-"""The route as OpenAPI spells it."""
 
 
 def url(dotted: str) -> str:
@@ -93,13 +93,18 @@ def test_a_viewer_is_refused_with_the_next_step(previews: TestClient) -> None:
     )
 
 
-def test_the_preview_route_accepts_no_sql_or_limit(
-    previews: TestClient, openapi_schema: dict[str, Any]
-) -> None:
-    op = openapi_schema["paths"][PREVIEW_PATH]["post"]
-    assert "requestBody" not in op
+def test_the_preview_route_accepts_no_sql_or_limit(previews: TestClient) -> None:
+    # The route itself, not the OpenAPI document: building that takes seconds.
+    (route,) = (
+        r
+        for r in tables.router.routes
+        if isinstance(r, APIRoute) and r.endpoint is tables.preview_table
+    )
+    assert route.body_field is None
     # The bearer token is the only header; there is no query parameter at all.
-    assert {(p["name"], p["in"]) for p in op["parameters"]} == {
+    params = [p.field_info for p in get_flat_params(route.dependant)]
+    assert all(isinstance(p, Param) for p in params)
+    assert {(p.alias, p.in_.value) for p in params if isinstance(p, Param)} == {
         ("env", "path"),
         ("path", "path"),
         ("name", "path"),
