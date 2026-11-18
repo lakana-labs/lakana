@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { ACCESS_STUBBED, stubAccess } from "./access";
+import { ACCESS_STUBBED, stubAccess, stubTokensSecrets, TOKENS_STUBBED } from "./access";
 import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { ROUTES, stubConnect } from "./connect";
@@ -118,6 +118,8 @@ const LITERAL_CODES: Record<string, string> = {
   SavedQueryOut: "actions visibility",
   ScheduleTriggerOut: "kind",
   ScopeOut: "kind",
+  SecretOut: "use",
+  SecretUseIn: "kind",
   SubjectPrincipalOut: "principal_type",
   TableDefinitionFileOut: "reason",
   TableListItemOut: "kind state",
@@ -811,6 +813,40 @@ walk(
     expectOnlyStubbed(paths, JOBS_STUBBED);
   },
 );
+
+walk("Tokens, one's API tokens and Secrets mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubTokensSecrets(poisoned(page));
+  await visit(page, "/settings/access/tokens", ["maria", "laptop", "daily_sales", "ci-bot", "dev"]);
+  await page.getByRole("button", { name: /^Revoke laptopU\+202E of mariaU\+202E/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Revoke dialog of a personal token", ["laptop", "maria"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page
+    .getByRole("button", { name: /^Revoke the task token of ci-botU\+202E in devU\+202E/ })
+    .click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Revoke dialog of a task token", ["ci-bot", "dev", "daily_sales"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  await visit(page, "/account", ["laptop"]);
+
+  await visit(page, "/settings/access/secrets", ["pypi-corp", "corp", "alerts-webhook", "dev"]);
+  await page.getByRole("button", { name: /^Delete pypi-corpU\+202E/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Delete secret dialog", ["pypi-corp", "corp"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await page.getByRole("button", { name: /^Set use of pypi-corpU\+202E/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "the Set use dialog", ["pypi-corp"]);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+  expectOnlyStubbed(paths, [...STUBBED, ...TOKENS_STUBBED]);
+});
 
 // Last, so that the walks before it have run in this worker: an entry no stub serves is stale.
 walk("Groups, a group, Grants and What I may do mark hidden characters", async ({ page }) => {

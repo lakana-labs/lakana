@@ -209,6 +209,11 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "ManagedScopeOut",
   '["held_admin","is_active","name","picture","type"]': "PrincipalOut",
   '["overrides","scopes"]': "AccessStatusOut",
+  '["asset","asset_scope","environment","expires_at","issued_at","job","key_id","principal","run_id"]':
+    "TaskTokenOut",
+  '["created_at","created_by","environment","format_version","id","key_id","name","rotated_at","use","use_target","use_target_url"]':
+    "SecretOut",
+  '["created_at","expires_at","key_id","last_used_at","name","owner","revoked_at"]': "TokenOut",
 };
 
 /**

@@ -370,7 +370,7 @@ describe("SecretDialogs", () => {
     const shell = renderSecrets({
       "PUT /api/v1/environments/dev/secrets/pypi-corp/use": { status: 200, body: aSecret() },
     });
-    await shell.user.click(await screen.findByRole("button", { name: "Set the use of pypi-corp" }));
+    await shell.user.click(await screen.findByRole("button", { name: "Set use of pypi-corp" }));
     const dialog = await screen.findByRole("dialog", { name: "Set the use of pypi-corp" });
     expect(within(dialog).getByRole("textbox", { name: "Name of the package index" })).toHaveValue(
       "corp",
@@ -394,7 +394,7 @@ describe("SecretDialogs", () => {
         body: [aSecret({ use: null, use_target: null })],
       },
     });
-    await shell.user.click(await screen.findByRole("button", { name: "Set the use of pypi-corp" }));
+    await shell.user.click(await screen.findByRole("button", { name: "Set use of pypi-corp" }));
     const dialog = await screen.findByRole("dialog", { name: "Set the use of pypi-corp" });
 
     await shell.user.click(within(dialog).getByRole("button", { name: "Set use" }));
