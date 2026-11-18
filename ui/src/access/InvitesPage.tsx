@@ -1,5 +1,5 @@
 /**
- * Access → Invites: invite a new person by a link, see the open invites, withdraw one.
+ * Settings › Sign-in › Invites: invite a new person by a link, see the open invites, withdraw one.
  *
  * @packageDocumentation
  */
@@ -25,10 +25,11 @@ import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
-import { AccessFrame } from "./AccessFrame";
 import { ShownOnce } from "./ShownOnce";
 import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
+import { SettingsFrame } from "../settings/SettingsFrame";
+import "../settings/settingsStrings";
 
 /** Properties of {@link InviteDialog}. */
 interface InviteDialogProps {
@@ -121,7 +122,8 @@ export function InvitesPage(): JSX.Element {
   const { target: headingRef, arm: armFocus } = useFocusAfter<HTMLHeadingElement>(invites.data);
   const [inviting, setInviting] = useState(false);
   return (
-    <AccessFrame
+    <SettingsFrame
+      title={t("settings.places.invites")}
       headingRef={headingRef}
       action={
         <Button
@@ -197,6 +199,6 @@ export function InvitesPage(): JSX.Element {
           }}
         />
       )}
-    </AccessFrame>
+    </SettingsFrame>
   );
 }

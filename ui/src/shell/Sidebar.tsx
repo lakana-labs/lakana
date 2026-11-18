@@ -54,7 +54,7 @@ export function Sidebar({ areas, onSearch, onShortcuts }: SidebarProps): JSX.Ele
   const { pathname } = useLocation();
   const groups = [
     areas.filter((area) => area.group === "work"),
-    areas.filter((area) => area.group === "admin"),
+    areas.filter((area) => area.group === "instance"),
   ].filter((group) => group.length > 0);
 
   const panel = useId();

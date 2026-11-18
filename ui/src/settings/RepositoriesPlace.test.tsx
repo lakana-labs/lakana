@@ -1,17 +1,18 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
-import { SETTINGS_PLACES } from "./SettingsFrame";
+import { entryPath, SETTINGS_PLACES } from "./places";
+
+const ADMIN = { admin: true, noAccessYet: false };
 
 describe("RepositoriesPlace", () => {
-  it("shows the heading, the tabs, the intro and the way to connect", async () => {
+  it("shows the heading, the list of places, the intro and the way to connect", async () => {
     renderShell("/settings/repositories");
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Repositories" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Repositories" })).toHaveAttribute(
       "aria-current",
       "page",
@@ -43,23 +44,18 @@ describe("RepositoriesPlace", () => {
     );
   });
 
-  it.each(SETTINGS_PLACES)("has a tab for the place %s, and the place renders", async (place) => {
-    renderShell(`/settings/${place}`);
+  // A group (Access) has no page: its address opens its first place, which is marked current.
+  it.each(SETTINGS_PLACES.map((place) => [place.path, entryPath(place, ADMIN)]))(
+    "lists the place %s, marks %s current, and the place renders",
+    async (path, entry) => {
+      renderShell(`/settings/${path}`);
 
-    const tabs = await screen.findByRole("navigation", { name: "Settings sections" });
-    expect(within(tabs).getByRole("link", { current: "page" })).toHaveAttribute(
-      "href",
-      `/settings/${place}`,
-    );
-    expect(screen.queryByText("This page does not exist")).not.toBeInTheDocument();
-  });
-
-  it("has a tab for every first-level route of the Settings screen", () => {
-    const source = readFileSync(resolve(import.meta.dirname, "SettingsScreen.tsx"), "utf8");
-    const routes = [...source.matchAll(/<Route\s+path="([^"*]+)"/g)].map((match) => match[1]);
-    const firstLevel = new Set(routes.map((path) => (path as string).split("/")[0]));
-
-    expect(firstLevel.size).toBeGreaterThan(0);
-    expect([...firstLevel].sort()).toEqual([...SETTINGS_PLACES].sort());
-  });
+      const places = await screen.findByRole("navigation", { name: "Settings places" });
+      expect(await within(places).findByRole("link", { current: "page" })).toHaveAttribute(
+        "href",
+        entry,
+      );
+      expect(screen.queryByText("This page does not exist")).not.toBeInTheDocument();
+    },
+  );
 });

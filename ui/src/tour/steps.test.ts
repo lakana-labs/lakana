@@ -1,17 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { areasFor, visibleAreas } from "../shell/areas";
+import { ALL_SHIPPED, areasFor, visibleAreas } from "../shell/areas";
 import { tourSteps, tourTarget } from "./steps";
 
 describe("tourSteps", () => {
-  it("follows the sidebar, then Search and Help, for an administrator", () => {
-    expect(tourSteps(visibleAreas(areasFor(true, false)))).toEqual([
+  it("follows the sidebar, then Search and Help, with no step of its own for Access", () => {
+    const steps = tourSteps(visibleAreas(ALL_SHIPPED));
+    expect(steps).not.toContain("access");
+    expect(steps).toEqual([
       "home",
       "catalog",
       "queries",
       "jobs",
       "connections",
-      "access",
       "settings",
       "search",
       "help",
@@ -19,12 +20,12 @@ describe("tourSteps", () => {
   });
 
   it("leaves out the areas a person cannot use", () => {
-    expect(tourSteps(visibleAreas(areasFor(false, false)))).toEqual([
+    expect(tourSteps(visibleAreas(areasFor(true)))).toEqual([
       "home",
-      "catalog",
       "queries",
       "jobs",
       "connections",
+      "settings",
       "search",
       "help",
     ]);

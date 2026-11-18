@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import { ComingSoon } from "../shell/ComingSoon";
 import { SettingsFrame } from "./SettingsFrame";
+import "./settingsStrings";
 
 /**
  * Renders the placeholder: the purpose, then part 8 and `lakana status` to copy.
@@ -18,7 +19,7 @@ import { SettingsFrame } from "./SettingsFrame";
 export function StatusPlaceholder(): JSX.Element {
   const { t } = useTranslation();
   return (
-    <SettingsFrame>
+    <SettingsFrame title={t("settings.places.status")}>
       <p className="page-purpose">{t("settings.status.intro")}</p>
       <ComingSoon part={8} cli="lakana status" />
     </SettingsFrame>

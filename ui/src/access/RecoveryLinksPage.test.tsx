@@ -33,7 +33,7 @@ function principal(name: string, heldAdmin: boolean): { status: number; body: un
 
 describe("RecoveryLinksPage", () => {
   it("lists the open links; each row opens its person", async () => {
-    const { user, router } = renderShell("/access/recovery-links", {
+    const { user, router } = renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [OPEN] },
         "GET /api/v1/principals/kim": principal("kim", false),
@@ -46,12 +46,12 @@ describe("RecoveryLinksPage", () => {
     expect(within(row).getByText("›")).toBeInTheDocument();
     await user.click(within(row).getByRole("link", { name: "kim" }));
 
-    expect(router.state.location.pathname).toBe("/access/people/kim");
+    expect(router.state.location.pathname).toBe("/settings/access/people/kim");
     expect(await screen.findByRole("heading", { level: 1, name: "kim" })).toBeInTheDocument();
   });
 
   it("says how to issue a link when none is open", async () => {
-    renderShell("/access/recovery-links", {
+    renderShell("/settings/sign-in/recovery-links", {
       routes: { "GET /api/v1/recovery-links": { status: 200, body: [] } },
     });
 
@@ -60,7 +60,7 @@ describe("RecoveryLinksPage", () => {
 
   it("issues a link for a person who is not an administrator and shows it once", async () => {
     let open: unknown[] = [];
-    const { user } = renderShell("/access/recovery-links", {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": () => ({ status: 200, body: open }),
         "GET /api/v1/principals/sam": principal("sam", false),
@@ -84,7 +84,7 @@ describe("RecoveryLinksPage", () => {
   });
 
   it("shows the operator's command for an administrator instead of issuing a link", async () => {
-    const { user, server } = renderShell("/access/recovery-links", {
+    const { user, server } = renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [] },
         "GET /api/v1/principals/ada": principal("ada", true),
@@ -106,7 +106,7 @@ describe("RecoveryLinksPage", () => {
   });
 
   it("names the server's reason for an unknown person", async () => {
-    const { user } = renderShell("/access/recovery-links", {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [] },
         "GET /api/v1/principals/nobody": {
@@ -126,7 +126,7 @@ describe("RecoveryLinksPage", () => {
 
   it("shows the pending sign on Withdraw while the link is withdrawn", async () => {
     const request = held();
-    const { user } = renderShell("/access/recovery-links", {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [OPEN] },
         "DELETE /api/v1/recovery-links/r-1": request.route,
@@ -147,7 +147,7 @@ describe("RecoveryLinksPage", () => {
 
   it("shows the pending sign only on the Withdraw that was pressed", async () => {
     const request = held();
-    const { user } = renderShell("/access/recovery-links", {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": {
           status: 200,
@@ -170,7 +170,7 @@ describe("RecoveryLinksPage", () => {
 
   it("withdraws a link in place", async () => {
     let open: unknown[] = [OPEN];
-    const { user } = renderShell("/access/recovery-links", {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": () => ({ status: 200, body: open }),
         "DELETE /api/v1/recovery-links/r-1": () => {
@@ -186,12 +186,12 @@ describe("RecoveryLinksPage", () => {
 
     expect(await screen.findByText(/No recovery link is open/)).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 1, name: "Access" })).toHaveFocus();
+      expect(screen.getByRole("heading", { level: 1, name: "Recovery links" })).toHaveFocus();
     });
   });
 
   it("marks a hidden character of the person's name", async () => {
-    renderShell("/access/recovery-links", {
+    renderShell("/settings/sign-in/recovery-links", {
       routes: {
         "GET /api/v1/recovery-links": { status: 200, body: [{ ...OPEN, name: "k\u202Eim" }] },
       },

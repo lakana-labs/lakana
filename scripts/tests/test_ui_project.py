@@ -160,7 +160,7 @@ def test_every_cli_line_in_the_shell_exists() -> None:
     """
     areas = (UI / "src/shell/areas.ts").read_text()
     lines = [line for _, line in re.findall(r"""cli:\s*(["'])(.*?)\1""", areas) if line]
-    assert len(lines) >= 7, lines
+    assert len(lines) >= 6, lines
     reference = ROOT / "docs/site/reference"
     pages = [reference / "cli.md", *sorted((reference / "cli").glob("*.md"))]
     headings = {
@@ -197,7 +197,7 @@ def test_no_area_path_collides_with_a_server_path() -> None:
     """An area's URL never starts with a segment the server or the build owns."""
     areas = (UI / "src/shell/areas.ts").read_text()
     paths = re.findall(r"""path:\s*["']([^"']*)["']""", areas)
-    assert len(paths) >= 8, paths
+    assert len(paths) >= 7, paths
     firsts = {path.strip("/").split("/")[0] for path in paths}
     server = {
         "api",

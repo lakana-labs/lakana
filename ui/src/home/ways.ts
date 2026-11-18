@@ -12,7 +12,7 @@ type Way = { readonly to: string } | { readonly href: string; readonly command?:
 /** The way of each step. */
 export const STEP_WAYS: Record<GetStartedStepId, Way> = {
   connect_repository: { to: "/settings/repositories/new" },
-  invite_team: { to: "/access/invites" },
+  invite_team: { to: "/settings/sign-in/invites" },
   add_passkey: { to: "/account" },
   deploy_project: { href: TUTORIAL_URL, command: "lakana deploy --env dev" },
   deploy_project_local: {
