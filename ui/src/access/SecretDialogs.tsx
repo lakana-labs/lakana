@@ -41,8 +41,8 @@ import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import {
   newRow,
   SecretValuesFields,
+  useValueInputs,
   type ValueRow,
-  valuesOf,
   valuesReady,
   withKeys,
 } from "./SecretValuesFields";
@@ -244,6 +244,7 @@ export function AddSecretDialog({ environment, onDone, onClose }: SecretDialogPr
   const attempt = useAttempt();
   const [name, setName] = useState("");
   const [rows, setRows] = useState<readonly ValueRow[]>(() => [newRow()]);
+  const inputs = useValueInputs();
   const [use, setUse] = useState<UseChoice>({ kind: null, target: "" });
   const [checked, setChecked] = useState(false);
   return (
@@ -257,7 +258,7 @@ export function AddSecretDialog({ environment, onDone, onClose }: SecretDialogPr
           attempt.run(async () => {
             await createSecret(environment, {
               name: name.trim(),
-              values: valuesOf(rows),
+              values: inputs.read(rows),
               use: chosenUse(use),
             });
             onDone();
@@ -277,7 +278,7 @@ export function AddSecretDialog({ environment, onDone, onClose }: SecretDialogPr
           <Text slot="description">{t("secrets.addDialog.nameHelp")}</Text>
           <FieldError />
         </TextField>
-        <SecretValuesFields rows={rows} onChange={setRows} checked={checked} />
+        <SecretValuesFields rows={rows} onChange={setRows} checked={checked} inputs={inputs} />
         <UseFields
           value={use}
           offerNone
@@ -315,6 +316,7 @@ export function RotateSecretDialog({
   const attempt = useAttempt();
   const { name } = secret;
   const [rows, setRows] = useState<readonly ValueRow[]>(() => [newRow()]);
+  const inputs = useValueInputs();
   const [checked, setChecked] = useState(false);
   return (
     <ActionDialog onClose={onClose}>
@@ -325,14 +327,14 @@ export function RotateSecretDialog({
           setChecked(true);
           if (!valuesReady(t, rows)) return;
           attempt.run(async () => {
-            await rotateSecret(environment, name, valuesOf(rows));
+            await rotateSecret(environment, name, inputs.read(rows));
             onDone();
           });
         }}
       >
         <Heading slot="title">{t("secrets.rotateDialog.title", { name })}</Heading>
         <p>{t("secrets.rotateDialog.intro")}</p>
-        <SecretValuesFields rows={rows} onChange={setRows} checked={checked} />
+        <SecretValuesFields rows={rows} onChange={setRows} checked={checked} inputs={inputs} />
         <Actions label={t("secrets.rotateDialog.submit")} busy={attempt.busy} onClose={onClose} />
         <AttemptStatus attempt={attempt} waiting={t("common.working")} />
       </Form>

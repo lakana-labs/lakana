@@ -98,7 +98,9 @@ async function fillPypi(shell: ReturnType<typeof renderShell>, dialog: HTMLEleme
 }
 
 /**
- * Says where the sentinel is, outside the request bodies and the still-open inputs.
+ * Says where the sentinel is outside the request bodies: the page's HTML as it is (text and
+ * every attribute, an input's `value` attribute included), the address, the storages and the
+ * console. A still-open input's live value is not in the HTML.
  *
  * @param spies - The console spies.
  * @returns The places found.
@@ -107,10 +109,9 @@ function whereIsTheSentinel(
   spies: readonly { readonly mock: { readonly calls: readonly unknown[] } }[],
 ): string[] {
   const found: string[] = [];
-  const clone = document.body.cloneNode(true) as HTMLElement;
-  for (const input of clone.querySelectorAll("input")) input.removeAttribute("value");
-  if (clone.textContent.includes(SENTINEL)) found.push("text");
-  for (const element of clone.querySelectorAll("*")) {
+  if (document.documentElement.outerHTML.includes(SENTINEL)) found.push("html");
+  if (document.body.textContent.includes(SENTINEL)) found.push("text");
+  for (const element of document.querySelectorAll("*")) {
     for (const attribute of element.attributes) {
       if (attribute.value.includes(SENTINEL)) found.push(`attribute ${attribute.name}`);
     }

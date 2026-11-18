@@ -6020,13 +6020,18 @@ fuller text of each part where it already lives.
     Done). The interface issues no token for another principal; a service account's token stays
     with `lakana token issue`. Revoking a personal or task token needs no touch (it removes
     access); a personal revoke's confirmation says the task tokens it minted stop too (#719).
-  - **A secret's value lives only in its form.** Add secret and Rotate hold the values in the
-    dialog's state (`SecretValuesFields`): `type="password"` inputs with no reveal, no `name`,
-    `autoComplete="off"`, sent in one request's body (`createSecret`, `rotateSecret`, with
-    `guarded`), never in the address, storage, a log, an error, a `title` or an `aria-*` text; a
-    refusal keeps them as typed, closing the dialog drops them. Pins:
-    `SecretDialogs.test.tsx` (`a value never leaves its form`: DOM text and attributes, the
-    address, both storages and every console call, after a 422, after a 201 and after Cancel),
+  - **A secret's value lives only in its field.** Add secret and Rotate never keep a value in
+    React state: each is an uncontrolled `type="password"` input (`SecretValuesFields`'s
+    `ValueField`), read from the field (`useValueInputs().read`) only when the form sends, since
+    React copies a controlled input's value into its `value` attribute, a password field's too,
+    where `outerHTML`, a DOM snapshot or a CSS attribute selector would reach it. The inputs have
+    no reveal and no `name`; the values go in one request's body (`createSecret`,
+    `rotateSecret`, with `guarded`), never in the address, storage, a log, an error, an
+    attribute, a `title` or an `aria-*` text. A refusal keeps them as typed (the fields stay
+    mounted), closing the dialog drops them with the fields. Pins:
+    `SecretDialogs.test.tsx` (`a value never leaves its form`: the page's `outerHTML` as it is,
+    every attribute, the text, the address, both storages and every console call, after a 422,
+    after a 201 and after Cancel),
     `api/secrets.test.ts` (`sends the values only in the body`) and
     `e2e/tokens-secrets.spec.ts` (requests, console and storage).
   - **`whoami.secret_environments` names only the caller's own rights.** The live environments
