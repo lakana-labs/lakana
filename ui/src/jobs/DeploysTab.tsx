@@ -36,18 +36,6 @@ interface Rolled {
   readonly repository: string;
   /** The commit, as the list writes it. */
   readonly commit: string;
-  /** Whether it succeeded or failed. */
-  readonly ended: boolean;
-}
-
-/**
- * A followed rollback, marked as ended.
- *
- * @param previous - The rollback, or null for none.
- * @returns It, ended.
- */
-function markEnded(previous: Rolled | null): Rolled | null {
-  return previous === null ? null : { ...previous, ended: true };
 }
 
 /** The Repository menu's choice of every repository; a repository's choice is `repo:` and its name. */
@@ -100,12 +88,12 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   const { reload: reloadPages } = pages;
   const { reload: reloadDeployments } = deployments;
   const onEnded = useCallback(() => {
-    setRolled(markEnded);
     reloadPages();
     reloadDeployments();
-  }, [reloadPages, reloadDeployments, setRolled]);
-  // While a rollback runs, its repository offers no second one.
-  const following = rolled !== null && !rolled.ended ? rolled.repository : null;
+  }, [reloadPages, reloadDeployments]);
+  // The rollback that ended; while the one followed runs, its repository offers no second one.
+  const [endedId, setEndedId] = useState<string | null>(null);
+  const following = rolled !== null && endedId !== rolled.id ? rolled.repository : null;
   const area = useRef<HTMLDivElement>(null);
   const note = useRef<HTMLDivElement>(null);
   // The element of the list that last had the focus.
@@ -216,7 +204,10 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
             repository={rolled.repository}
             commit={rolled.commit}
             deployId={rolled.id}
-            onEnded={onEnded}
+            onEnded={() => {
+              setEndedId(rolled.id);
+              onEnded();
+            }}
           />
         )}
       </div>
@@ -231,7 +222,6 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
                 id,
                 repository: rolling.repository,
                 commit: rolling.resolved_sha.slice(0, 7),
-                ended: false,
               });
               setRolling(null);
             }}

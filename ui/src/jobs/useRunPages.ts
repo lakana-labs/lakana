@@ -94,7 +94,7 @@ export function useRunPages(
     }
   }, [key, load]);
   // The first page as it was when Read again was pressed, which is not shown again.
-  const [stale, setStale] = useState<unknown>(null);
+  const [stale, setStale] = useState<unknown>(undefined);
   const still = extra !== null && (extra.shown || extra.busy);
   const poll = useLivePoll(first, { everyMs: LIST_EVERY_MS, active: !still });
   const { reload } = poll;
@@ -150,9 +150,9 @@ export function useRunPages(
     reload,
     shown: extra?.shown === true,
     restart: () => {
-      setStale(poll.data ?? null);
+      setStale(poll.data);
       setMore(null);
     },
-    restarting: stale !== null && poll.data === stale && pollError === null,
+    restarting: stale !== undefined && poll.data === stale && pollError === null,
   };
 }
