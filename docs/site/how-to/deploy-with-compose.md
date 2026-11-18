@@ -1621,8 +1621,10 @@ uses `team` by default, and revoking `admin`'s token in the last step then break
 `login` takes its own `--profile` flag (`packages/lakana/src/lakana/cli/auth.py`), so it goes
 after `login`, not before it.
 
-Only a principal with the `ADMIN` role on the instance can hand out access, change groups and
-issue or revoke tokens, their own tokens included. The three permissions behind this
+Only a principal with the `ADMIN` role on the instance can hand out access and change groups. An
+administrator also issues and revokes anyone's tokens; everyone else may list and revoke their own
+and create one in the web interface after the passkey touch
+([Tokens](../reference/access.md#tokens)). The three permissions behind this
 (`MANAGE_GRANT`, `MANAGE_GROUP`, `MANAGE_TOKEN`) cannot be granted on their own: a request for one
 is refused with `MANAGE_GRANT comes only with the ADMIN role on the instance; grant that role
 instead, or nothing.` Anyone else who tries to use one gets `MANAGE_GRANT needs the ADMIN role on

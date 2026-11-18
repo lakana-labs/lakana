@@ -1609,11 +1609,41 @@ class Token:
     last_used_at
         When this PAT last successfully authenticated a request, or `None`
         if never.
+    owner
+        The name of the principal the token signs in as; `None` from a server that does not
+        say.
+    created_at
+        When the token was issued; `None` from a server that does not say.
+    expires_at
+        When the token stops working, or `None` if it never expires (or the server does not
+        say).
+    revoked_at
+        When the token was revoked, or `None` while it is not (or the server does not say).
     """
 
     key_id: str
     name: str
     last_used_at: datetime | None
+    owner: str | None = None
+    created_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class TokenPage:
+    """One page of every owner's live tokens, newest first.
+
+    Parameters
+    ----------
+    items
+        The tokens on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[Token]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True)
@@ -1854,6 +1884,86 @@ class MintedTaskToken:
 
     key_id: str
     token: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class TaskToken:
+    """One listed task token: what it is for, never its value.
+
+    Parameters
+    ----------
+    key_id
+        The public lookup key, which `task_tokens.revoke` takes.
+    principal
+        The name of the principal the token signs in as.
+    environment
+        The one environment the token acts in.
+    asset_scope
+        The asset patterns it may act on; for a token bound to a task, that task's asset
+        and its declared inputs.
+    issued_at
+        When the token was minted.
+    expires_at
+        When the token stops working.
+    run_id
+        The run whose task the token was minted for; `None` for a token minted over REST.
+    job
+        That run's job, or `None`.
+    asset
+        The asset of that task, or `None`.
+    """
+
+    key_id: str
+    principal: str
+    environment: str
+    asset_scope: list[str]
+    issued_at: datetime
+    expires_at: datetime
+    run_id: str | None = None
+    job: str | None = None
+    asset: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskTokenPage:
+    """One page of the live task tokens, newest first.
+
+    Parameters
+    ----------
+    items
+        The tokens on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[TaskToken]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class ConfiguredSetting:
+    """One setting of the running server, never carrying a secret's value.
+
+    Parameters
+    ----------
+    name
+        The environment variable that sets it, such as ``LAKANA_RUN__LEASE_SECONDS``.
+    value
+        The value as JSON; always ``None`` for a secret.
+    secret
+        Whether the setting holds a credential.
+    has_value
+        Whether the setting holds a value. For a secret, this is "set" or "not set".
+    source
+        ``"set"`` when the server's environment gave it (also when it equals the default),
+        else ``"default"``.
+    """
+
+    name: str
+    value: object
+    secret: bool
+    has_value: bool
+    source: str
 
 
 @dataclass(frozen=True)
@@ -2124,6 +2234,49 @@ class Permissions:
     scope: Scope
     permissions: list[Permission]
     note: str | None
+
+
+@dataclass(frozen=True)
+class HeldGrant:
+    """A live grant a principal holds, directly or through a group.
+
+    It names nobody else: not who granted it, not an id of the holder.
+
+    Parameters
+    ----------
+    id
+        The grant's id.
+    role
+        The role granted, or `None` for a single action.
+    action
+        The single action granted, or `None` for a role.
+    kind
+        ``INSTANCE``, ``ENVIRONMENT``, ``NAMESPACE`` or ``TABLE``.
+    environment
+        The environment, below the instance.
+    namespace
+        The dot-joined namespace, for a namespace or a table.
+    table
+        The table, for a table.
+    granted_at
+        When the grant was made.
+    note
+        ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant that works only
+        with the `ADMIN` role; `None` otherwise.
+    group
+        The name of the group the grant is held through, or `None` for a direct grant.
+    """
+
+    id: str
+    role: str | None
+    action: str | None
+    kind: str
+    environment: str | None
+    namespace: str | None
+    table: str | None
+    granted_at: datetime
+    note: str | None
+    group: str | None
 
 
 # jscpd:ignore-end

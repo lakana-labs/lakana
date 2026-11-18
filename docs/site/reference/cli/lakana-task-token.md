@@ -7,7 +7,21 @@ Part of the [Command line reference](../cli.md), which lists the options for eve
 
 Usage: `lakana task-token [OPTIONS] COMMAND [ARGS]...`
 
-Mint and revoke task tokens.
+List, mint and revoke task tokens.
+
+## `lakana task-token list`
+
+Usage: `lakana task-token list [OPTIONS]`
+
+List the live task tokens, newest first (admin only).
+
+Lists the tokens neither revoked nor expired, with the principal each signs in as, its environment, its dates and, for a token a worker minted for a task, the run, job and asset. Never a token's value. Without `--env`, every environment: a list across environments is the useful default for an administrator, so the profile's default environment is not applied. It prints a "More results" line with the command that shows the next page.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `--env` | text | none | Only this environment's tokens. Without it, every environment: the profile's default environment is not applied. |
+| `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
+| `--cursor` | text | none | Continue after the page that printed this cursor. |
 
 ## `lakana task-token mint`
 

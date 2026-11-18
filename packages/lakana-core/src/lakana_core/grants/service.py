@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import exists, or_, select, update
@@ -51,6 +52,22 @@ _EXPECTED_FIELDS: dict[SecurableKind, frozenset[str]] = {
     SecurableKind.TABLE: frozenset({"environment", "namespace", "table"}),
 }
 """Which of environment/namespace/table a securable of each kind must set."""
+
+
+@dataclass(frozen=True)
+class HeldGrant:
+    """One live grant a principal holds, directly or through a group.
+
+    Parameters
+    ----------
+    grant
+        The grant row.
+    group
+        The name of the group the grant is held through, or `None` for a direct grant.
+    """
+
+    grant: Grant
+    group: str | None
 
 
 def _validate_securable_fields(
@@ -700,6 +717,50 @@ class GrantService:
                 scope.table,
             )
         return explain_permissions(self._session, target, scope)
+
+    def held_grants(self, p: PrincipalRef, principal_name: str) -> list[HeldGrant]:
+        """List the live grants a principal holds, directly and through its groups.
+
+        Parameters
+        ----------
+        p
+            The acting principal. It may ask about itself with no right at all (not through a
+            task or CI token); about anyone else it needs the `ADMIN` role on the instance.
+        principal_name
+            The principal asked about.
+
+        Returns
+        -------
+        list of HeldGrant
+            The unrevoked grants naming the principal, or a group it belongs to now, newest
+            first.
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` asks about another principal, or through a task or CI token, without the
+            `ADMIN` role on the instance; before anything is looked up, so the refusal says
+            nothing about whether the principal exists.
+        NotFoundError
+            If an administrator asks about a principal that does not exist.
+        """
+        own = p.task_scope is None and p.ci_scope is None and principal_name == p.name
+        if not own:
+            authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
+        target = self._get_principal(principal_name)
+        member_of = select(GroupMembership.group_id).where(
+            GroupMembership.principal_id == target.id
+        )
+        rows = self._session.execute(
+            select(Grant, Group.name)
+            .outerjoin(Group, Group.id == Grant.group_id)
+            .where(
+                Grant.revoked_at.is_(None),
+                or_(Grant.principal_id == target.id, Grant.group_id.in_(member_of)),
+            )
+            .order_by(Grant.granted_at.desc(), Grant.id.desc())
+        )
+        return [HeldGrant(grant=grant, group=group) for grant, group in rows]
 
     def _holder(self, grant: Grant) -> str:
         """Name the principal or group a grant is held by.

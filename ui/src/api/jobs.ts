@@ -1,7 +1,8 @@
 /**
- * The calls of the job, run and task pages: a job and its runs, a run with its tasks, a task's
- * log, starting, pausing and resuming a job, cancelling and resuming a run, and the rows a failed
- * check found. The same routes `lakana jobs`, `lakana runs` and `lakana check` use.
+ * The calls of the Jobs screen: an environment's jobs, the runs of every environment and the
+ * failed ones, a job and its runs, a run with its tasks, a task's log, starting, pausing and
+ * resuming a job, cancelling and resuming a run, and the rows a failed check found. The same
+ * routes `lakana jobs`, `lakana runs` and `lakana check` use.
  *
  * @packageDocumentation
  */
@@ -272,6 +273,51 @@ export interface JobRunFilter {
   readonly since: string | null;
 }
 
+/** What started a run, as the list of all runs filters by it. */
+type RunTrigger = "schedule" | "api" | "manual" | "deploy";
+
+/** What narrows the runs of every environment; an empty list or null means no limit. */
+export interface AllRunsFilter {
+  /** Only this environment's runs. */
+  readonly environment: string | null;
+  /** Only runs in these states. */
+  readonly status: readonly RunStatus[];
+  /** Only runs started this way. */
+  readonly trigger: readonly RunTrigger[];
+  /** Only this job's runs. */
+  readonly job: string | null;
+  /** Only this repository's runs. */
+  readonly repository: string | null;
+  /** Only runs created at or after this time (ISO 8601 with a zone). */
+  readonly since: string | null;
+}
+
+/** One row of the failed runs: the run, its first failed task and why that task failed. */
+export interface FailedRunOut {
+  /** The run, without tasks, with its `actions`. */
+  readonly run: RunOut;
+  /** The asset of its first failed task; null when the run failed without one. */
+  readonly task: string | null;
+  /** That task's failure; null with `task`, and then `run.error_message` says why. */
+  readonly failure: FailureOut | null;
+}
+
+/** The failed runs, by the rule of Home's Needs your attention. */
+export interface FailedRunsOut {
+  /** One row per job (or per repository, for its runs of no job), newest end first. */
+  readonly items: readonly FailedRunOut[];
+  /** Whether the server left rows out; choosing an environment shows them. */
+  readonly truncated: boolean;
+}
+
+/** One page of the runs of every environment, as `GET /api/v1/runs` answers it. */
+interface RunPageOut {
+  /** The runs of the page, without tasks. */
+  readonly items: readonly RunOut[];
+  /** The cursor of the next page; null on the last. */
+  readonly next_cursor: string | null;
+}
+
 /**
  * The query that names a job in a repository.
  *
@@ -358,6 +404,87 @@ export async function listJobRuns(
   }
   const page = await api.page(withQuery(environmentPath(environment, "/runs"), query), options);
   return { items: page.body as readonly RunOut[], nextCursor: page.nextCursor };
+}
+
+/**
+ * Lists an environment's jobs; a poll, so it never counts as the person's activity. Jobs are not
+ * paged.
+ *
+ * @param environment - The environment.
+ * @param repository - Only this repository's jobs; all of them by default.
+ * @returns The jobs.
+ * @throws {ApiError} for a refusal; 404 for an environment or a repository that does not exist.
+ */
+export function listJobs(environment: string, repository?: string): Promise<readonly JobOut[]> {
+  const path = environmentPath(environment, "/jobs");
+  return api.request<readonly JobOut[]>(
+    "GET",
+    repository === undefined ? path : withQuery(path, repositoryQuery(repository)),
+    undefined,
+    { background: true },
+  );
+}
+
+/**
+ * Lists the runs of every environment the person may read, or of one, newest first, one page at
+ * a time; a poll.
+ *
+ * @param filter - What narrows the list.
+ * @param cursor - The cursor of the page, or null for the first.
+ * @param limit - How many runs a page holds; 50 by default.
+ * @returns The page, with the cursor from the body; its runs have no tasks.
+ * @throws {ApiError} for a refusal; with an environment, 403 or 404 as for its own list.
+ */
+export async function listAllRuns(
+  filter: AllRunsFilter,
+  cursor: string | null,
+  limit = RUNS_PAGE,
+): Promise<CursorPage<RunOut>> {
+  const query = new URLSearchParams();
+  if (filter.environment !== null) {
+    query.set("environment", filter.environment);
+  }
+  if (filter.status.length > 0) {
+    query.set("status", filter.status.join(","));
+  }
+  if (filter.trigger.length > 0) {
+    query.set("trigger", filter.trigger.join(","));
+  }
+  if (filter.job !== null) {
+    query.set("job", filter.job);
+  }
+  if (filter.repository !== null) {
+    query.set("repository", filter.repository);
+  }
+  if (filter.since !== null) {
+    query.set("since", filter.since);
+  }
+  query.set("limit", String(limit));
+  if (cursor !== null) {
+    query.set("cursor", cursor);
+  }
+  const page = await api.request<RunPageOut>("GET", withQuery("/api/v1/runs", query), undefined, {
+    background: true,
+  });
+  return { items: page.items, nextCursor: page.next_cursor };
+}
+
+/**
+ * Lists the failed runs that need attention, by the rule of Home's Needs your attention; a poll.
+ *
+ * @param environment - Only this environment's; every environment the person may read by
+ *   default.
+ * @returns The rows in the server's order, and whether it left some out.
+ * @throws {ApiError} for a refusal; with an environment, 403 or 404.
+ */
+export function listFailedRuns(environment: string | null): Promise<FailedRunsOut> {
+  const path = "/api/v1/runs/failed";
+  return api.request<FailedRunsOut>(
+    "GET",
+    environment === null ? path : withQuery(path, new URLSearchParams({ environment })),
+    undefined,
+    { background: true },
+  );
 }
 
 /**

@@ -950,7 +950,7 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/sign-in/setup-link"): "PAT only (the operator's token); no session",
     ("POST", "/api/v1/sign-in/local-link"): "PAT only (the local person's token); no session",
     ("POST", "/api/v1/task-tokens"): "token-only route: a session never reaches it",
-    ("DELETE", "/api/v1/task-tokens/{key_id}"): "token-only route: a session never reaches it",
+    ("DELETE", "/api/v1/task-tokens/{key_id}"): "revoking a token removes access",
     ("POST", "/api/v1/auth/oidc/token"): "a CI provider's ID token, never a session",
     (
         "DELETE",

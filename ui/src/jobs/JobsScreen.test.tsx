@@ -1,14 +1,17 @@
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { jobsListRoutes } from "../test/jobsList";
 import { renderShell } from "../test/render";
 
 describe("the Jobs screen", () => {
-  it("/jobs still shows the area's page with its command line", async () => {
-    renderShell("/jobs");
+  it("/jobs shows the list of jobs and runs", async () => {
+    renderShell("/jobs", { routes: jobsListRoutes() });
 
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toBeInTheDocument();
-    expect(screen.getByText("lakana job list")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { level: 2, name: /^Running now/u }),
+    ).toBeInTheDocument();
   });
 
   it("routes a job, a run and a task to their pages", async () => {

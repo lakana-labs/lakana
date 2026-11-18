@@ -198,5 +198,19 @@
     "earlier": "Earlier lines are not shown here.",
     "empty": "The task wrote nothing to its log.",
     "save": "Save log"
+  },
+  "list": {
+    "loading": "Loading the jobs…",
+    "controls": {
+      "run": "Run",
+      "runName": "Run {{job}}",
+      "pause": "Pause",
+      "pauseName": "Pause the schedule of {{job}}",
+      "resume": "Resume",
+      "resumeName": "Resume the schedule of {{job}}",
+      "cancel": "Cancel",
+      "cancelName": "Cancel the run of {{name}}",
+      "resumeRunName": "Resume the run of {{name}}"
+    }
   }
 }

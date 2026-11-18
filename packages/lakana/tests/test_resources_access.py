@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -11,6 +12,7 @@ from lakana._config import ResolvedConfig
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport
 from lakana._models import (
     Group,
+    HeldGrant,
     Permission,
     Permissions,
     PermissionVia,
@@ -227,3 +229,50 @@ def test_principals_permissions_parse_the_answer() -> None:
     )
     principals.permissions("alice")
     assert dict(seen[1].url.params) == {}
+
+
+def test_principals_grants_reads_group_and_scope() -> None:
+    seen: list[httpx.Request] = []
+    base = {
+        "role": "ANALYST",
+        "action": None,
+        "kind": "ENVIRONMENT",
+        "environment": "dev",
+        "namespace": None,
+        "table": None,
+        "note": None,
+    }
+    body = [
+        {
+            **base,
+            "id": "g2",
+            "kind": "NAMESPACE",
+            "namespace": "sales.eu",
+            "granted_at": "2026-03-01T00:00:00Z",
+            "group": "analysts",
+        },
+        {**base, "id": "g1", "granted_at": "2026-02-01T00:00:00Z", "group": None},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
+    held = Principals(_transport(handler)).grants("bob")
+    assert seen[0].url.path == "/api/v1/principals/bob/grants"
+    assert [(h.id, h.group, h.namespace) for h in held] == [
+        ("g2", "analysts", "sales.eu"),
+        ("g1", None, None),
+    ]
+    assert held[1] == HeldGrant(
+        id="g1",
+        role="ANALYST",
+        action=None,
+        kind="ENVIRONMENT",
+        environment="dev",
+        namespace=None,
+        table=None,
+        granted_at=datetime(2026, 2, 1, tzinfo=UTC),
+        note=None,
+        group=None,
+    )

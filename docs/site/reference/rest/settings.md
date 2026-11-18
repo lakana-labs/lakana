@@ -68,3 +68,24 @@ Answer fields: `SignInSettingsOut`
 | `idle_timeout_minutes` | whole number | yes |  |
 | `absolute_lifetime_minutes` | whole number | yes |  |
 | `bounds` | `SignInBoundsOut` | yes |  |
+
+## `GET /api/v1/settings/configuration`
+
+Show the running server's configuration (administrator only)
+
+One entry per setting, in the order of the settings reference, with its environment variable, its value and whether the environment gave it (`set`) or it is the default. A secret (a key, a password, a database URL, a proxy or index URL that may carry a password) never carries a value: `value` is `null` and `has_value` says whether it is set. Only the server's own settings are shown. Needs the ADMIN role through a personal credential; a task or CI token is refused with 403. Reading it records nothing.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `ConfigurationSettingOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |

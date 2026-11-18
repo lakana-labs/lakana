@@ -5,6 +5,30 @@ run `uv run python scripts/generate_reference.py` and commit the result. -->
 
 These routes of the platform API come from its [OpenAPI document](../openapi.json); [The REST API as a contract](../rest-api.md) says what Lakana promises about them.
 
+## `GET /api/v1/task-tokens`
+
+List the live task tokens
+
+Lists the task tokens that are neither revoked nor expired, newest first, each with the principal it signs in as, its environment and asset scope, its dates and, for a token a worker minted for a task, the run, job and asset. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. An `environment` no token names gives an empty list, not a 404.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `environment` | query | no | text or null | Only the tokens of this environment; every environment when left out. |
+| `limit` | query | no | whole number | Most tokens returned (1 to 200). |
+| `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `environment`. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `TaskTokenOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
 ## `POST /api/v1/task-tokens`
 
 Mint a task token

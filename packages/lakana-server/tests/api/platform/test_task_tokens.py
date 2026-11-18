@@ -3,6 +3,7 @@
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -11,14 +12,15 @@ from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import AllowAllAuthorization, PrincipalRef
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
 from lakana_core.identity.task_tokens import TaskTokenService
-from lakana_core.models import AuditEvent, AuditEventType, Base, Principal, TaskToken
+from lakana_core.models import AuditEvent, AuditEventType, Base, Grant, Principal, TaskToken
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, TaskTokensConfig
 from tests.conftest import AUTH_HEADER
+from tests.server_test_helpers import session_headers, signed_in
 
 
 @contextmanager
@@ -510,3 +512,129 @@ def test_an_overlong_principal_name_is_rejected_at_the_schema(client: TestClient
         "/api/v1/task-tokens", headers=minter, json={**body, "principal": "x" * 255}
     )
     assert at_limit.status_code == 403
+
+
+def test_get_task_tokens_never_holds_a_secret(client: TestClient) -> None:
+    """The list names key ids and scopes; no token value and no `secret_hash` anywhere."""
+    minted = _mint(client)
+
+    response = client.get("/api/v1/task-tokens", headers=AUTH_HEADER)
+
+    assert response.status_code == 200, response.text
+    assert "lakana_task_" not in response.text
+    assert minted["token"] not in response.text
+    [row] = response.json()
+    assert "secret_hash" not in row
+    assert row["key_id"] == minted["key_id"]
+    assert row["principal"] == "admin"
+    assert (row["run_id"], row["job"], row["asset"]) == (None, None, None)
+    assert response.headers.get("X-Next-Cursor") is None
+
+
+def test_get_task_tokens_pages_and_filters_by_environment(client: TestClient) -> None:
+    """`limit` pages with `X-Next-Cursor`; an environment no token names answers `[]`."""
+    for environment in ("dev", "dev", "prod"):
+        minted = client.post(
+            "/api/v1/task-tokens",
+            headers=AUTH_HEADER,
+            json={
+                "principal": "admin",
+                "environment": environment,
+                "asset_scope": [],
+                "ttl_seconds": 300,
+            },
+        )
+        assert minted.status_code == 201, minted.text
+
+    first = client.get("/api/v1/task-tokens", headers=AUTH_HEADER, params={"limit": 2})
+    cursor = first.headers["X-Next-Cursor"]
+    second = client.get(
+        "/api/v1/task-tokens", headers=AUTH_HEADER, params={"limit": 2, "cursor": cursor}
+    )
+    assert [len(first.json()), len(second.json())] == [2, 1]
+    assert "X-Next-Cursor" not in second.headers
+    dev = client.get("/api/v1/task-tokens", headers=AUTH_HEADER, params={"environment": "dev"})
+    assert [row["environment"] for row in dev.json()] == ["dev", "dev"]
+    nowhere = client.get(
+        "/api/v1/task-tokens", headers=AUTH_HEADER, params={"environment": "nowhere"}
+    )
+    assert (nowhere.status_code, nowhere.json()) == (200, [])
+
+
+def test_get_task_tokens_from_a_browser_session(browser_client: TestClient) -> None:
+    """An administrator's session lists the task tokens."""
+    _mint(browser_client)
+    name, value, csrf = signed_in(browser_client, "admin")
+
+    response = browser_client.get("/api/v1/task-tokens", headers=session_headers(name, value, csrf))
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == 1
+
+
+def test_an_administrator_revokes_a_task_token_from_a_browser_session(
+    browser_client: TestClient,
+) -> None:
+    """Cookie and CSRF header: 204, and the token stops authenticating."""
+    minted = _mint(browser_client)
+    name, value, csrf = signed_in(browser_client, "admin")
+
+    response = browser_client.delete(
+        f"/api/v1/task-tokens/{minted['key_id']}", headers=session_headers(name, value, csrf)
+    )
+
+    assert response.status_code == 204, response.text
+    denied = browser_client.get(
+        "/api/v1/principals", headers={"Authorization": f"Bearer {minted['token']}"}
+    )
+    assert denied.status_code == 401
+    assert browser_client.get("/api/v1/task-tokens", headers=AUTH_HEADER).json() == []
+
+
+def test_minting_from_a_browser_is_still_refused(browser_client: TestClient) -> None:
+    """`POST` stays a route for code: a session is refused with `TokenOnlyRoute`."""
+    name, value, csrf = signed_in(browser_client, "admin", touched_at=datetime.now(UTC))
+
+    response = browser_client.post(
+        "/api/v1/task-tokens",
+        headers=session_headers(name, value, csrf),
+        json={"principal": "admin", "environment": "dev", "asset_scope": [], "ttl_seconds": 300},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["type"] == "TokenOnlyRoute"
+
+
+def test_a_non_administrators_session_cannot_revoke_anothers_task_token(
+    browser_client: TestClient,
+) -> None:
+    """Letting the cookie through changes no rule: a holder of `MINT_TASK_TOKEN` is refused.
+
+    The same 403 as with a token, for an unknown key id too.
+    """
+    victim = _mint(browser_client)["key_id"]
+    created = browser_client.post(
+        "/api/v1/principals", headers=AUTH_HEADER, json={"name": "bob", "type": "USER"}
+    )
+    assert created.status_code == 201, created.text
+    with Session(browser_client.app.state.engine) as session:
+        bob = session.execute(select(Principal).where(Principal.name == "bob")).scalar_one()
+        session.add(
+            Grant(
+                id=uuid.uuid4(),
+                principal_id=bob.id,
+                action=Action.MINT_TASK_TOKEN,
+                kind=SecurableKind.INSTANCE,
+                granted_by=bob.id,
+                granted_at=datetime.now(UTC),
+            )
+        )
+        session.commit()
+    name, value, csrf = signed_in(browser_client, "bob")
+    headers = session_headers(name, value, csrf)
+
+    for key_id in (victim, "nosuchkey"):
+        response = browser_client.delete(f"/api/v1/task-tokens/{key_id}", headers=headers)
+        assert response.status_code == 403, response.text
+    assert browser_client.get("/api/v1/task-tokens", headers=headers).status_code == 403
+    assert len(browser_client.get("/api/v1/task-tokens", headers=AUTH_HEADER).json()) == 1

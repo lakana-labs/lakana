@@ -37,7 +37,7 @@ import {
 } from "../api";
 import { ListSkeleton } from "../catalog/ListSkeleton";
 import { ReadFailed } from "../catalog/ReadFailed";
-import { EnvironmentPicker } from "../queries/EnvironmentPicker";
+import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { useMe } from "../shell/me";
 import { PendingButton } from "../shell/PendingButton";
 import { useResource } from "../shell/useResource";

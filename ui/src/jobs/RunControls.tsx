@@ -8,6 +8,7 @@ import { type JSX, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { cancelRun, resumeRun, type RunOut, type TaskStatus } from "../api/jobs";
+import { problemText } from "../sign-in/messages";
 import { AskDialog, ControlButton, ControlNote } from "./ControlNote";
 import "./jobStrings";
 import { isActive } from "./status";
@@ -23,8 +24,15 @@ export interface CancelRunButtonProps {
   readonly run: RunOut;
   /** What the question calls the run: its job's name, or its repository's. */
   readonly name: string;
+  /** Whether it stands in a row of a list: the label "Cancel", and the run's name in its own. */
+  readonly inRow?: boolean;
   /** Told the run once the cancel was asked for. */
   readonly onChanged: (run: RunOut) => void;
+  /**
+   * Told the server's sentence when it refuses the cancel, such as for a run that has ended; the
+   * question then closes. Without it the sentence stays in the question.
+   */
+  readonly onRefused?: (message: string) => void;
 }
 
 /**
@@ -37,14 +45,18 @@ export interface CancelRunButtonProps {
  * @param props.environment - The run's environment.
  * @param props.run - The run.
  * @param props.name - What the question calls the run.
+ * @param props.inRow - Whether it stands in a row of a list.
  * @param props.onChanged - Told the changed run.
+ * @param props.onRefused - Told the server's sentence of a refusal.
  * @returns The button, the line, or nothing.
  */
 export function CancelRunButton({
   environment,
   run,
   name,
+  inRow = false,
   onChanged,
+  onRefused,
 }: CancelRunButtonProps): JSX.Element | null {
   const { t } = useTranslation();
   const [asking, setAsking] = useState(false);
@@ -69,7 +81,8 @@ export function CancelRunButton({
   return (
     <>
       <ControlButton
-        label={t("jobs.cancel.button")}
+        label={t(inRow ? "jobs.list.controls.cancel" : "jobs.cancel.button")}
+        {...(inRow ? { accessibleName: t("jobs.list.controls.cancelName", { name }) } : {})}
         ask={() => {
           setAsking(true);
         }}
@@ -80,7 +93,16 @@ export function CancelRunButton({
           text={t("jobs.cancel.text")}
           label={t("jobs.cancel.button")}
           act={async () => {
-            const changed = await cancelRun(environment, run.id);
+            let changed: RunOut;
+            try {
+              changed = await cancelRun(environment, run.id);
+            } catch (failure: unknown) {
+              if (onRefused === undefined) {
+                throw failure;
+              }
+              onRefused(problemText(t, failure));
+              return;
+            }
             pressed.current = true;
             onChanged(changed);
           }}
@@ -94,16 +116,21 @@ export function CancelRunButton({
 }
 
 /**
- * Whether a run can be resumed: it failed or was cancelled, a task of it is to be started again,
- * and the server lists `resume`.
+ * Whether a run can be resumed: it failed or was cancelled, a task of it is to be started again
+ * (for a listed run, which comes without tasks: a task failed), and the server lists `resume`.
  *
  * @param run - The run.
  * @returns True when Resume is offered.
  */
 function resumable(run: RunOut): boolean {
+  // A listed run comes without its tasks; its count of failed tasks says the same.
+  const again =
+    run.tasks.length > 0
+      ? run.tasks.some((task) => RESUMED.includes(task.status))
+      : run.failed_tasks > 0;
   return (
     (run.status === "failed" || run.status === "cancelled") &&
-    run.tasks.some((task) => RESUMED.includes(task.status)) &&
+    again &&
     run.actions.includes("resume")
   );
 }
@@ -114,6 +141,8 @@ export interface ResumeRunButtonProps {
   readonly environment: string;
   /** The run. */
   readonly run: RunOut;
+  /** In a row of a list, what the button's own name calls the run: its job's or its repository's. */
+  readonly name?: string;
   /** Told the new run, which starts the failed, upstream-failed and cancelled tasks again. */
   readonly onResumed: (run: RunOut) => void;
 }
@@ -125,12 +154,14 @@ export interface ResumeRunButtonProps {
  * @param props - The environment, the run and what to do with the new run.
  * @param props.environment - The run's environment.
  * @param props.run - The run.
+ * @param props.name - In a row of a list, what the button's name calls the run.
  * @param props.onResumed - Told the new run.
  * @returns The button, or nothing.
  */
 export function ResumeRunButton({
   environment,
   run,
+  name,
   onResumed,
 }: ResumeRunButtonProps): JSX.Element | null {
   const { t } = useTranslation();
@@ -140,6 +171,9 @@ export function ResumeRunButton({
   return (
     <ControlButton
       label={t("jobs.resume.button")}
+      {...(name === undefined
+        ? {}
+        : { accessibleName: t("jobs.list.controls.resumeRunName", { name }) })}
       act={async () => {
         onResumed(await resumeRun(environment, run.id));
       }}

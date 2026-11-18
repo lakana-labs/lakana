@@ -29,7 +29,11 @@ describe("RunPage", () => {
       within(trail)
         .getAllByRole("link")
         .map((link) => link.getAttribute("href")),
-    ).toEqual(["/jobs", "/jobs", "/jobs/prod/job/team%2Fanalytics/nightly_%E2%80%AEsales"]);
+    ).toEqual([
+      "/jobs",
+      "/jobs?environment=prod",
+      "/jobs/prod/job/team%2Fanalytics/nightly_%E2%80%AEsales",
+    ]);
     expect(within(trail).getByRole("link", { name: "nightly_U+202Esales" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
     expect(document.querySelectorAll(".button-primary")).toHaveLength(0);

@@ -7,13 +7,19 @@ from collections.abc import Iterable
 from fastapi import APIRouter, Depends, Query, Response
 
 from lakana_core.auth import PrincipalRef, Securable
+from lakana_core.grants.admin import ineffective_note
 from lakana_core.grants.service import GrantService, scope_filter
 from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import Principal, PrincipalType
-from lakana_server.api.platform.grants import permissions_out
+from lakana_server.api.platform.grants import _joined_to_dotted, permissions_out
 from lakana_server.api.platform.listing import set_next_cursor
-from lakana_server.api.platform.schemas import PermissionsOut, PrincipalCreate, PrincipalOut
+from lakana_server.api.platform.schemas import (
+    HeldGrantOut,
+    PermissionsOut,
+    PrincipalCreate,
+    PrincipalOut,
+)
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import (
@@ -198,6 +204,60 @@ def explain_permissions(
     """
     scope = scope_filter(environment, namespace, table) or Securable.instance_scope()
     return permissions_out(service.explain(principal, name, scope))
+
+
+@router.get("/{name}/grants", response_model=list[HeldGrantOut], responses=errors(403, 404))
+def list_held_grants(
+    name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    service: GrantService = Depends(get_grant_service),
+) -> list[HeldGrantOut]:
+    """List the grants a principal holds.
+
+    The live grants naming the principal and those of every group it belongs to now, newest
+    first, each with the group's name (`null` for a direct grant). A caller may ask about
+    itself with a session or a personal token, with no right at all; about anyone else it
+    needs the `ADMIN` role on the instance, and a task or CI token may not ask even about
+    its own principal. The refusal comes before any lookup, so it never says whether the
+    principal exists; an administrator gets 404 for one that does not. It carries nothing
+    about other people: no `granted_by`, no principal id.
+
+    Parameters
+    ----------
+    name
+        The principal asked about.
+    principal
+        The authenticated caller.
+    service
+        The grant service for this request.
+
+    Returns
+    -------
+    list of HeldGrantOut
+        The grants, not paged: one person's are few.
+
+    Raises
+    ------
+    lakana_core.errors.PermissionDenied
+        Mapped to 403: another principal, or a task or CI token, without the `ADMIN` role.
+    lakana_core.errors.NotFoundError
+        Mapped to 404, for an administrator: no such principal.
+    """
+    return [
+        HeldGrantOut(
+            id=held.grant.id,
+            role=held.grant.role,
+            action=held.grant.action,
+            kind=held.grant.kind,
+            environment=held.grant.environment,
+            namespace=_joined_to_dotted(held.grant.namespace),
+            table=held.grant.table,
+            granted_at=held.grant.granted_at,
+            note=ineffective_note(held.grant.action),
+            group=held.group,
+        )
+        for held in service.held_grants(principal, name)
+    ]
 
 
 @router.get("", response_model=list[PrincipalOut], responses=errors(403))

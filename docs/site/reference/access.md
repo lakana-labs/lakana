@@ -19,6 +19,9 @@ instance administrator overrides it ([Changes outside the file](access-file.md#c
 |---|---|---|---|
 | Grants | `lakana grant list` | `GET /api/v1/grants` | the `ADMIN` role on the instance |
 | A principal's permissions | `lakana access explain` | `GET /api/v1/principals/{name}/permissions` | nothing, about yourself; the `ADMIN` role on the instance, about anyone else |
+| The grants a principal holds, directly and through groups | `lakana access grants [NAME]` | `GET /api/v1/principals/{name}/grants` | nothing, about yourself, with a personal token or a browser session; the `ADMIN` role on the instance, about anyone else |
+| Tokens of a principal | `lakana token list [NAME]` | `GET /api/v1/principals/{name}/tokens` | nothing, about yourself, with a personal token or a browser session; the `ADMIN` role on the instance, about anyone else |
+| Every owner's live tokens | `lakana token list --all` | `GET /api/v1/tokens` | the `ADMIN` role on the instance |
 | Principals | `lakana principal list` | `GET /api/v1/principals` | `MANAGE_PRINCIPAL` on the instance |
 | Groups | `lakana group list` | `GET /api/v1/groups` | the `ADMIN` role on the instance |
 
@@ -101,6 +104,12 @@ What the answer takes into account:
   A task's token never has it.
 - **`MINT_TASK_TOKEN`** is the right to mint a task token for oneself. Minting one for another
   principal needs the `ADMIN` role on the instance too.
+- **`lakana access grants [NAME]`** lists the live grants a principal holds, newest first: those
+  made to it and those of every group it belongs to now, one row each, with the columns `group`,
+  `role`, `action`, `kind`, `environment`, `namespace`, `table` and `granted_at`. `group` is the
+  name of the group the grant comes through, and empty for a grant made to the principal itself;
+  a revoked grant, or one of a group the principal has left, is not listed. Without a name it asks
+  about you. The list says nothing about anyone else: not who made a grant, not an id.
 - **Task tokens** may not ask, not even about their own principal: a task's token can do less
   than its principal, and the answer is about the principal's grants.
 - **An object that does not exist** is `404` for an administrator. A principal asking about
@@ -127,6 +136,52 @@ these fields:
 
 The REST answer also has `picture`, the etag of the profile picture, which the web interface shows.
 
+## Tokens
+
+A personal token signs in as one principal and has exactly that principal's rights, never more.
+Deactivating the principal stops every token it has.
+
+| What | Who may |
+|---|---|
+| List a principal's tokens, revoke one | the principal itself, with a personal token or a browser session (no passkey touch is asked, since revoking removes access); an administrator for anyone |
+| Create a token for yourself | only from a browser session, after a passkey touch in the last 15 minutes |
+| Create a token for anyone else | an administrator |
+
+No token (personal, task or CI) of a non-administrator can create a personal
+token, so a stolen token cannot mint a replacement. The refusal of a personal token is `403`, reads
+"A token cannot create a token. Create your own token in the web interface, under your name,
+after touching your passkey; or ask an administrator: lakana token issue NAME LABEL" and is recorded in the audit log; a task or CI token gets the
+authorization's own refusal. An
+administrator may still create tokens with a token, as `lakana token issue` does. About someone
+else's tokens, anyone who is not an administrator gets the same `403` whether or not that person
+exists. A task or CI token has no say over its owner's tokens.
+
+A listed token says its `owner`, `name`, `key_id`, `created_at`, `last_used_at`, `expires_at` (empty
+for a token that never expires) and `revoked_at` (empty while it is not revoked), and never its
+value. A principal's own list holds its revoked and expired tokens too, so they can be told apart.
+A deactivated owner's unrevoked tokens still appear in `--all`, but no longer sign in.
+
+`lakana token list` without a name lists your own tokens. `lakana token list --all` is for an
+administrator: it lists the live tokens (neither revoked nor expired) of every owner, newest
+first, with an owner column, and prints the command for the next page when there is one;
+`--limit` and `--cursor` page it, and a name together with `--all` is refused. An unknown owner
+is `404`; a person, or a task or CI token, gets `403`.
+
+### Task tokens
+
+`lakana task-token list` is for an administrator: it lists the task tokens that are neither revoked
+nor expired, newest first, across every environment unless `--env` names one. An environment no
+token names gives an empty list, not an error. A listed task token says its `key_id`, `principal`,
+`environment`, `asset_scope`, `issued_at` and `expires_at`, and for a token a worker minted for a
+task, the `run_id`, `job` and `asset` (all empty for a token minted over REST). It never says the
+token's value. `--limit` and `--cursor` page it, as with `token list --all`. Anyone who is not an
+administrator, and a task or CI token, gets `403`.
+
+An administrator may revoke any task token from the web interface, under Access, Tokens. A person
+may revoke only a task token minted for themselves over REST, as before. Minting stays with
+`lakana task-token mint`: a browser is refused (`403`, `TokenOnlyRoute`), so no task token is ever
+shown in the interface.
+
 ## Refusals
 
 | Cause | Answer |
@@ -149,8 +204,10 @@ The REST answer also has `picture`, the etag of the profile picture, which the w
 |---|---|---|
 | Grants | `client.grants.list(...)`; `client.grants.list_page(...)` also returns the cursor; `client.grants.iter(...)` every grant | `GET /api/v1/grants?principal_name=&group_name=&action=&environment=&namespace=&table=&limit=&cursor=` |
 | Permissions | `client.principals.permissions(name, environment=, namespace=, table=)` | `GET /api/v1/principals/{name}/permissions?environment=&namespace=&table=` |
+| Grants a principal holds | `client.principals.grants(name)` | `GET /api/v1/principals/{name}/grants` |
 | Principals | `client.principals.list(search=)`, `list_page`, `iter` | `GET /api/v1/principals?q=&limit=&cursor=` |
 | Groups | `client.groups.list(search=)`, `list_page`, `iter` | `GET /api/v1/groups?q=&limit=&cursor=` |
+| Every owner's live tokens | `client.tokens.list_all(owner=)`, `list_all_page`, `iter_all` | `GET /api/v1/tokens?owner=&limit=&cursor=` |
 
 The lists answer with a JSON list and put the cursor of the next page in the `X-Next-Cursor`
 header (absent on the last page). The permissions route answers with one object, the fields above.

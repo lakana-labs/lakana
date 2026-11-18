@@ -19,6 +19,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
@@ -132,7 +133,7 @@ def test_every_audited_category_is_recorded_and_readable_via_the_api() -> None:
                 bootstrap_pat_key_id=_PAT_KEY_ID,
                 bootstrap_pat_secret=_PAT_SECRET,
             )
-            settings.secrets.master_key = _master_key()
+            settings.secrets.master_key = SecretStr(_master_key())
             with TestClient(create_app(settings)) as api:
                 admin_headers = {"Authorization": f"Bearer {_TOKEN}"}
 

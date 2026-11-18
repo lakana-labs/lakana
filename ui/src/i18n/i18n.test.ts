@@ -191,3 +191,12 @@ it("names Access as a place of Settings, not an area or a tour step, and ships t
 
   expect(i18n.t("settings.places.people")).toBe("People");
 });
+
+it("the environment picker registers its own strings", async () => {
+  const i18n = initI18n();
+
+  await import("../shell/EnvironmentPicker");
+
+  expect(i18n.t("environment.protected")).toBe("protected");
+  expect(i18n.t("environment.label")).toBe("Environment");
+});

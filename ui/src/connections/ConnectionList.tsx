@@ -22,7 +22,7 @@ import { ListSkeleton } from "../catalog/ListSkeleton";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
-import { EnvironmentPicker } from "../queries/EnvironmentPicker";
+import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useMe } from "../shell/me";

@@ -12,6 +12,7 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    JsonValue,
     SecretStr,
     StrictBool,
     field_validator,
@@ -2290,16 +2291,26 @@ class TokenOut(BaseModel):
         The public lookup key.
     name
         The label given at issuance.
+    owner
+        The name of the principal the token signs in as.
+    created_at
+        When the token was issued.
     last_used_at
         When this PAT last successfully authenticated a request, or `None`
         if never.
+    expires_at
+        When the token stops working, or `None` if it never expires.
+    revoked_at
+        When the token was revoked, or `None` while it is not.
     """
 
     key_id: str
     name: str
+    owner: str
+    created_at: datetime
     last_used_at: datetime | None = None
-
-    model_config = {"from_attributes": True}
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
 
 
 class TaskTokenMintIn(BaseModel):
@@ -2348,6 +2359,67 @@ class TaskTokenMintOut(BaseModel):
 
     key_id: str
     token: str
+
+
+class TaskTokenOut(BaseModel):
+    """One listed task token: what it is for, never its value.
+
+    Parameters
+    ----------
+    key_id
+        The public lookup key, which revokes the token.
+    principal
+        The name of the principal the token signs in as.
+    environment
+        The one environment the token acts in.
+    asset_scope
+        The asset patterns the token may act on; for a token bound to a task, that task's
+        asset and its declared inputs.
+    issued_at
+        When the token was minted.
+    expires_at
+        When the token stops working.
+    run_id
+        The run whose task the token was minted for, or `None` for a token minted over REST.
+    job
+        That run's job, or `None`.
+    asset
+        The asset of that task, or `None`.
+    """
+
+    key_id: str
+    principal: str
+    environment: str
+    asset_scope: list[str]
+    issued_at: datetime
+    expires_at: datetime
+    run_id: uuid.UUID | None = None
+    job: str | None = None
+    asset: str | None = None
+
+
+class ConfigurationSettingOut(BaseModel):
+    """One setting of the running server, never carrying a secret's value.
+
+    Parameters
+    ----------
+    name
+        The environment variable that sets it.
+    value
+        The value in its JSON form; always `null` for a secret.
+    secret
+        Whether the setting holds a credential.
+    has_value
+        Whether the setting holds a value; for a secret, "set" or "not set".
+    source
+        `set` when the environment or the `.env` file gave it, else `default`.
+    """
+
+    name: str
+    value: JsonValue = None
+    secret: bool
+    has_value: bool
+    source: Literal["set", "default"]
 
 
 class GrantCreate(BaseModel):
@@ -2462,6 +2534,48 @@ class GrantOut(BaseModel):
     granted_at: datetime
     note: str | None = None
     principal: SubjectPrincipalOut | None = None
+    group: str | None = None
+
+
+class HeldGrantOut(BaseModel):
+    """Response body for a grant the caller holds, directly or through a group.
+
+    It carries nothing about other people: no `granted_by` and no principal id.
+
+    Parameters
+    ----------
+    id
+        The grant's id.
+    role
+        The role template the principal holds, or `None` if a raw action was granted.
+    action
+        The raw action the principal holds, or `None` if a role was granted.
+    kind
+        Which tier of the securable hierarchy this grant applies to.
+    environment
+        The environment this grant applies to, if any.
+    namespace
+        The dot-joined namespace path this grant applies to, if any.
+    table
+        The table this grant applies to, if any.
+    granted_at
+        When this grant was created.
+    note
+        ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant of
+        `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`; `None` otherwise.
+    group
+        The name of the group the grant is held through, or `None` for a direct grant.
+    """
+
+    id: uuid.UUID
+    role: Role | None
+    action: Action | None
+    kind: SecurableKind
+    environment: str | None
+    namespace: str | None
+    table: str | None
+    granted_at: datetime
+    note: str | None = None
     group: str | None = None
 
 

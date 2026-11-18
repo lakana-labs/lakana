@@ -758,6 +758,9 @@ const QUERY_ENVIRONMENTS = "/api/v1/queries/environments";
 /** Where the Connections screen asks where one may read connections; none here (`connections.ts` lists some). */
 const CONNECTION_ENVIRONMENTS = "/api/v1/connections/environments";
 
+/** The environments the person may read; none here (`jobs.ts` lists two). */
+const ENVIRONMENTS = "/api/v1/environments";
+
 /** The paths the stubs answer; any other request to the API is a test failure. */
 export const STUBBED = [
   "/api/v1/sign-in/session",
@@ -787,14 +790,16 @@ export const STUBBED = [
   `${PREVIEW_RUN_PATH}/cancel`,
   QUERY_ENVIRONMENTS,
   CONNECTION_ENVIRONMENTS,
+  ENVIRONMENTS,
 ];
 
 /**
  * Answers the session routes as for a signed-in administrator without notices, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
  * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture,
- * Settings' People (under Access) and Sign-in (the session lengths), and no environment to run a
- * query in (`stubQueries` adds two) or to read connections in (`stubConnections` adds two).
+ * Settings' People (under Access) and Sign-in (the session lengths), no environment to run a
+ * query in (`stubQueries` adds two), none to read jobs in (`stubJobs` adds two) and none to
+ * read connections in (`stubConnections` adds two).
  *
  * @param page - The page.
  */
@@ -918,6 +923,10 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   );
   await page.route(
     (url) => url.pathname === CONNECTION_ENVIRONMENTS,
+    (route) => route.fulfill({ json: [] }),
+  );
+  await page.route(
+    (url) => url.pathname === ENVIRONMENTS,
     (route) => route.fulfill({ json: [] }),
   );
 }

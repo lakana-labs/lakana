@@ -1,6 +1,8 @@
 /**
- * The environment a query runs in, chosen from those where the person may run one; a protected
- * environment is marked in the colour of danger and in words.
+ * An environment chosen from a list, such as the one a query runs in or the one a list is
+ * filtered by; a protected environment is marked in the colour of danger and in words. The
+ * Queries and Jobs screens share it; each screen's stylesheet imports its rules
+ * (`environment.css`), so the picker brings no stylesheet of its own.
  *
  * @packageDocumentation
  */
@@ -16,14 +18,14 @@ import {
 } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import type { QueryEnvironmentOut } from "../api/queries";
-import { markedText, VisibleText } from "../shell/VisibleText";
-import "./queryStrings";
+import type { EnvironmentChoice } from "../api/environments";
+import "./environmentStrings";
+import { markedText, VisibleText } from "./VisibleText";
 
 /** Properties of {@link EnvironmentName}. */
-interface EnvironmentNameProps {
+export interface EnvironmentNameProps {
   /** The environment. */
-  readonly environment: QueryEnvironmentOut;
+  readonly environment: EnvironmentChoice;
 }
 
 /**
@@ -35,7 +37,7 @@ interface EnvironmentNameProps {
  * @param props.environment - The environment.
  * @returns The name.
  */
-function EnvironmentName({ environment }: EnvironmentNameProps): JSX.Element {
+export function EnvironmentName({ environment }: EnvironmentNameProps): JSX.Element {
   const { t } = useTranslation();
   if (!environment.protected) {
     return <VisibleText text={environment.name} />;
@@ -48,7 +50,7 @@ function EnvironmentName({ environment }: EnvironmentNameProps): JSX.Element {
       <VisibleText text={environment.name} />{" "}
       <span className="env-protected">
         <span aria-hidden="true">· </span>
-        {t("queries.environment.protected")}
+        {t("environment.protected")}
       </span>
     </>
   );
@@ -62,8 +64,8 @@ const ALL = 0;
 
 /** Properties of {@link EnvironmentPicker} that choose one environment. */
 interface OnePickerProps {
-  /** The environments where the person may run a query, as the server lists them. */
-  readonly environments: readonly QueryEnvironmentOut[];
+  /** The environments to choose from, as the server lists them. */
+  readonly environments: readonly EnvironmentChoice[];
   /** The chosen environment's name; null for none. */
   readonly value: string | null;
   /** Called with the name of the environment chosen. */
@@ -76,8 +78,8 @@ interface OnePickerProps {
 
 /** Properties of {@link EnvironmentPicker} that choose one environment or all of them. */
 interface FilterPickerProps {
-  /** The environments where the person may run a query, as the server lists them. */
-  readonly environments: readonly QueryEnvironmentOut[];
+  /** The environments to choose from, as the server lists them. */
+  readonly environments: readonly EnvironmentChoice[];
   /** The chosen environment's name; null for all of them. */
   readonly value: string | null;
   /** Called with the name of the environment chosen, or null for all of them. */
@@ -97,7 +99,7 @@ export type EnvironmentPickerProps = OnePickerProps | FilterPickerProps;
  * option is all environments ("Show: All environments").
  *
  * @param props - The environments, the chosen one and what to do with a choice.
- * @param props.environments - The environments where the person may run a query.
+ * @param props.environments - The environments to choose from.
  * @param props.value - The chosen environment's name.
  * @param props.onChange - Called with the name of the environment chosen.
  * @param props.label - The label.
@@ -114,7 +116,7 @@ export function EnvironmentPicker({
   const { t } = useTranslation();
   const nameId = useId();
   const chosen = environments.find((environment) => environment.name === value);
-  const named = label ?? t("queries.environment.label");
+  const named = label ?? t("environment.label");
   // A filter's onChange takes null too; the one-environment picker never offers it.
   const choose = onChange as (environment: string | null) => void;
   return (
@@ -129,12 +131,10 @@ export function EnvironmentPicker({
       <Label>{named}</Label>
       <Button className="button" aria-labelledby={nameId}>
         <span id={nameId} className="visually-hidden">
-          {t(
-            chosen?.protected === true
-              ? "queries.environment.triggerProtected"
-              : "queries.environment.trigger",
-            { label: named, environment: value ?? all },
-          )}
+          {t(chosen?.protected === true ? "environment.triggerProtected" : "environment.trigger", {
+            label: named,
+            environment: value ?? all,
+          })}
         </span>
         <SelectValue aria-hidden="true">
           {chosen !== undefined ? (
@@ -162,6 +162,8 @@ export function EnvironmentPicker({
               key={environment.name}
               id={environment.name}
               className="menu-item"
+              // The hidden native select React Aria renders shows this text: marks, not the
+              // characters themselves.
               textValue={markedText(environment.name)}
             >
               <span className="menu-check" aria-hidden="true" />

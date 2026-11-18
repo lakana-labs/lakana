@@ -11309,6 +11309,102 @@
         }
       }
     },
+    "/api/v1/principals/{name}/grants": {
+      "get": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "List the grants a principal holds",
+        "description": "The live grants naming the principal and those of every group it belongs to now, newest first, each with the group's name (`null` for a direct grant). A caller may ask about itself with a session or a personal token, with no right at all; about anyone else it needs the `ADMIN` role on the instance, and a task or CI token may not ask even about its own principal. The refusal comes before any lookup, so it never says whether the principal exists; an administrator gets 404 for one that does not. It carries nothing about other people: no `granted_by`, no principal id.",
+        "operationId": "list_held_grants_api_v1_principals__name__grants_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The principal asked about."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HeldGrantOut"
+                  },
+                  "title": "Response List Held Grants Api V1 Principals  Name  Grants Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/groups": {
       "post": {
         "tags": [
@@ -12053,7 +12149,7 @@
           "tokens"
         ],
         "summary": "Issue a personal access token",
-        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.\n\nIssues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. Needs the `ADMIN` role on the instance. Answers 404 when there is no such principal.",
+        "description": "From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token is never asked for a touch, and no token (personal, task or CI) of a non-administrator can create a personal token.\n\nIssues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. For another principal it needs the `ADMIN` role on the instance. For oneself, unless one is an administrator, it works only from the web interface: no token (personal, task or CI) of a non-administrator can create a personal token, so a stolen token cannot mint replacements (403). Answers 404 when there is no such principal.",
         "operationId": "issue_token_api_v1_principals__name__tokens_post",
         "parameters": [
           {
@@ -12153,7 +12249,7 @@
           "tokens"
         ],
         "summary": "List the tokens of a principal",
-        "description": "Lists the principal's personal access tokens. The token values are never included. Needs the `ADMIN` role on the instance. Answers 404 when there is no such principal.",
+        "description": "Lists the principal's personal access tokens, revoked and expired ones too, each with its owner and its creation, last-use, expiry and revocation times. The token values are never included. Anyone may list their own with a personal token or a web session; anyone else's needs the `ADMIN` role on the instance, and is refused alike whether or not the principal exists. Answers 404 when there is no such principal.",
         "operationId": "list_tokens_api_v1_principals__name__tokens_get",
         "parameters": [
           {
@@ -12249,7 +12345,7 @@
           "tokens"
         ],
         "summary": "Revoke a personal access token",
-        "description": "The token stops working at once. Needs the `ADMIN` role on the instance. Answers 404 when the principal or the token does not exist.",
+        "description": "The token stops working at once. Anyone may revoke their own with a personal token or a web session, without a passkey touch; anyone else's needs the `ADMIN` role on the instance. Answers 404 when the principal or the token does not exist.",
         "operationId": "revoke_token_api_v1_principals__name__tokens__key_id__delete",
         "parameters": [
           {
@@ -12338,7 +12434,265 @@
         }
       }
     },
+    "/api/v1/tokens": {
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "List every owner's live tokens",
+        "description": "Lists the personal access tokens that are neither revoked nor expired, newest first, each with its owner. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. Answers 404 when `owner` names no principal.",
+        "operationId": "list_all_tokens_api_v1_tokens_get",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Owner"
+            },
+            "description": "Only this principal's tokens."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tokens returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `owner`."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TokenOut"
+                  },
+                  "title": "Response List All Tokens Api V1 Tokens Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/task-tokens": {
+      "get": {
+        "tags": [
+          "task-tokens"
+        ],
+        "summary": "List the live task tokens",
+        "description": "Lists the task tokens that are neither revoked nor expired, newest first, each with the principal it signs in as, its environment and asset scope, its dates and, for a token a worker minted for a task, the run, job and asset. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. An `environment` no token names gives an empty list, not a 404.",
+        "operationId": "list_task_tokens_api_v1_task_tokens_get",
+        "parameters": [
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 255
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            },
+            "description": "Only the tokens of this environment; every environment when left out."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most tokens returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same `environment`."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskTokenOut"
+                  },
+                  "title": "Response List Task Tokens Api V1 Task Tokens Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "task-tokens"
@@ -25531,6 +25885,82 @@
           }
         }
       }
+    },
+    "/api/v1/settings/configuration": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Show the running server's configuration (administrator only)",
+        "description": "One entry per setting, in the order of the settings reference, with its environment variable, its value and whether the environment gave it (`set`) or it is the default. A secret (a key, a password, a database URL, a proxy or index URL that may carry a password) never carries a value: `value` is `null` and `has_value` says whether it is set. Only the server's own settings are shown. Needs the ADMIN role through a personal credential; a task or CI token is refused with 403. Reading it records nothing.",
+        "operationId": "get_configuration_api_v1_settings_configuration_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConfigurationSettingOut"
+                  },
+                  "title": "Response Get Configuration Api V1 Settings Configuration Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -28182,6 +28612,42 @@
         "title": "ColumnOut",
         "description": "One column of a table's schema, in the JSON column form.\n\nParameters\n----------\nname\n    Column name.\ntype\n    The Iceberg type in the JSON form (`\"long\"`, `\"decimal(10,2)\"`, ...),\n    or the Iceberg string for a nested type.\nnullable\n    Whether the column accepts nulls.\ndescription\n    The column's description: the edit when it has one, else the project's text; `None`\n    when there is none.\ndescription_source\n    ``edited`` or ``project``; `None` when there is no description.\nlabel\n    The column's short name for people, in the reader's language where it has one, else\n    the main language's; `None` when there is none.\nlabel_source\n    ``edited`` or ``project``; `None` when there is no label.\nlabel_language\n    The language of `label`; `None` exactly when `label` is.\ndescription_language\n    The language of `description`; `None` exactly when `description` is.\nterms\n    The glossary terms that link the column, in the reader's language; empty without\n    ``READ_ENVIRONMENT``."
       },
+      "ConfigurationSettingOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "value": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "secret": {
+            "type": "boolean",
+            "title": "Secret"
+          },
+          "has_value": {
+            "type": "boolean",
+            "title": "Has Value"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "set",
+              "default"
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "secret",
+          "has_value",
+          "source"
+        ],
+        "title": "ConfigurationSettingOut",
+        "description": "One setting of the running server, never carrying a secret's value.\n\nParameters\n----------\nname\n    The environment variable that sets it.\nvalue\n    The value in its JSON form; always `null` for a secret.\nsecret\n    Whether the setting holds a credential.\nhas_value\n    Whether the setting holds a value; for a secret, \"set\" or \"not set\".\nsource\n    `set` when the environment or the `.env` file gave it, else `default`."
+      },
       "ConnectionCreate": {
         "properties": {
           "name": {
@@ -30703,6 +31169,111 @@
         "title": "HealthSummaryOut",
         "description": "A table's health in one word.\n\nParameters\n----------\nstate\n    ``failing``, ``warning``, ``healthy`` or ``not_judged``.\nitem\n    The word's name.\ntext\n    The word as it is shown.\nothers\n    How many other findings the word leaves out."
       },
+      "HeldGrantOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Role"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Action"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SecurableKind"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table"
+          },
+          "granted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Granted At"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "role",
+          "action",
+          "kind",
+          "environment",
+          "namespace",
+          "table",
+          "granted_at"
+        ],
+        "title": "HeldGrantOut",
+        "description": "Response body for a grant the caller holds, directly or through a group.\n\nIt carries nothing about other people: no `granted_by` and no principal id.\n\nParameters\n----------\nid\n    The grant's id.\nrole\n    The role template the principal holds, or `None` if a raw action was granted.\naction\n    The raw action the principal holds, or `None` if a role was granted.\nkind\n    Which tier of the securable hierarchy this grant applies to.\nenvironment\n    The environment this grant applies to, if any.\nnamespace\n    The dot-joined namespace path this grant applies to, if any.\ntable\n    The table this grant applies to, if any.\ngranted_at\n    When this grant was created.\nnote\n    ``no effect: <ACTION> needs the ADMIN role`` for a single-action grant of\n    `MANAGE_GRANT`, `MANAGE_GROUP` or `MANAGE_TOKEN`; `None` otherwise.\ngroup\n    The name of the group the grant is held through, or `None` for a direct grant."
+      },
       "HistoryOut": {
         "properties": {
           "snapshot_id": {
@@ -31502,6 +32073,7 @@
         "title": "JoinStepOut",
         "description": "One step of a join path.\n\nParameters\n----------\nreference\n    The reference it follows (`reference:<uuid>`).\nfrom_table\n    The table it leaves (`table:<uuid>`).\nfrom_name\n    Its dotted name.\nto_table\n    The table it reaches.\nto_name\n    Its dotted name.\nfrom_columns\n    The columns of `from_table` to join on.\nto_columns\n    The columns of `to_table` they equal, in the same order.\ndirection\n    `many_to_one` along the reference (from the table that declares it), `one_to_many`\n    against it.\nfans_out\n    `true` for a `one_to_many` step: each row of `from_table` may meet many rows.\nfrom_model_kind\n    `from_table`'s declared kind, such as `fact` or `dimension`.\nfrom_grain\n    Its grain, in your language.\nto_model_kind\n    `to_table`'s declared kind.\nto_grain\n    Its grain, in your language."
       },
+      "JsonValue": {},
       "LastMaintenanceOut": {
         "properties": {
           "run_id": {
@@ -38042,6 +38614,84 @@
         "title": "TaskTokenMintOut",
         "description": "Response body for a freshly minted task token.\n\nParameters\n----------\nkey_id\n    The public lookup key.\ntoken\n    The full token value. Shown here exactly once."
       },
+      "TaskTokenOut": {
+        "properties": {
+          "key_id": {
+            "type": "string",
+            "title": "Key Id"
+          },
+          "principal": {
+            "type": "string",
+            "title": "Principal"
+          },
+          "environment": {
+            "type": "string",
+            "title": "Environment"
+          },
+          "asset_scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Asset Scope"
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Issued At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
+          },
+          "asset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key_id",
+          "principal",
+          "environment",
+          "asset_scope",
+          "issued_at",
+          "expires_at"
+        ],
+        "title": "TaskTokenOut",
+        "description": "One listed task token: what it is for, never its value.\n\nParameters\n----------\nkey_id\n    The public lookup key, which revokes the token.\nprincipal\n    The name of the principal the token signs in as.\nenvironment\n    The one environment the token acts in.\nasset_scope\n    The asset patterns the token may act on; for a token bound to a task, that task's\n    asset and its declared inputs.\nissued_at\n    When the token was minted.\nexpires_at\n    When the token stops working.\nrun_id\n    The run whose task the token was minted for, or `None` for a token minted over REST.\njob\n    That run's job, or `None`.\nasset\n    The asset of that task, or `None`."
+      },
       "TaskTokenScopeOut": {
         "properties": {
           "environment": {
@@ -38277,6 +38927,15 @@
             "type": "string",
             "title": "Name"
           },
+          "owner": {
+            "type": "string",
+            "title": "Owner"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -38288,15 +38947,41 @@
               }
             ],
             "title": "Last Used At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
           }
         },
         "type": "object",
         "required": [
           "key_id",
-          "name"
+          "name",
+          "owner",
+          "created_at"
         ],
         "title": "TokenOut",
-        "description": "Response body for a listed PAT. Never includes a secret.\n\nParameters\n----------\nkey_id\n    The public lookup key.\nname\n    The label given at issuance.\nlast_used_at\n    When this PAT last successfully authenticated a request, or `None`\n    if never."
+        "description": "Response body for a listed PAT. Never includes a secret.\n\nParameters\n----------\nkey_id\n    The public lookup key.\nname\n    The label given at issuance.\nowner\n    The name of the principal the token signs in as.\ncreated_at\n    When the token was issued.\nlast_used_at\n    When this PAT last successfully authenticated a request, or `None`\n    if never.\nexpires_at\n    When the token stops working, or `None` if it never expires.\nrevoked_at\n    When the token was revoked, or `None` while it is not."
       },
       "TranslationCoverageOut": {
         "properties": {

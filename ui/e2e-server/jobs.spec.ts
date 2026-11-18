@@ -195,3 +195,131 @@ for (const scheme of ["light", "dark"] as const) {
     });
   }
 }
+
+/**
+ * Two new environments, each with a repository deployed in it that declares {@link JOB}; the two
+ * repositories' names share a tag that no other test's do, so a search for it finds only them.
+ *
+ * @param request - The request context.
+ * @returns The tag and the two environments.
+ */
+async function deployedTwice(
+  request: Request,
+): Promise<{ tag: string; first: string; second: string }> {
+  const tag = uniqueName("ledger");
+  const first = uniqueName("jobs");
+  const second = uniqueName("jobs");
+  for (const [environment, repository] of [
+    [first, `${tag}-a`],
+    [second, `${tag}-b`],
+  ] as const) {
+    await createEnvironment(request, environment);
+    await recordDeployedJob(request, environment, repository, JOB);
+  }
+  return { tag, first, second };
+}
+
+test("an administrator lists the job in two environments, filters to one across a reload, runs it and cancels it", async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(180_000);
+  const { tag, first, second } = await deployedTwice(request);
+  const page = await administrator(browser, request);
+  const all = page.getByRole("region", { name: "Every job listed" });
+  const running = page.getByRole("region", { name: "Runs running now" });
+  try {
+    await page.goto(`/jobs?q=${tag}`);
+    await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+    await expect(all.getByRole("link", { name: JOB.name })).toHaveCount(2);
+    await expect(all).toContainText(first);
+    await expect(all).toContainText(second);
+
+    await page.getByRole("button", { name: "Environment: All environments" }).click();
+    await page.getByRole("option", { name: first, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`environment=${first}`));
+    await expect(all.getByRole("link", { name: JOB.name })).toHaveCount(1);
+
+    // The choice is remembered: the list opens on it without the address naming it.
+    await page.goto("/jobs");
+    await expect(page.getByRole("button", { name: `Environment: ${first}` })).toBeVisible();
+    await expect(all.getByRole("link", { name: JOB.name })).toHaveCount(1);
+    await expect(all).not.toContainText(second);
+
+    // The server runs no worker: the run stays queued under Running now.
+    await all.getByRole("button", { name: `Run ${JOB.name}` }).click();
+    await expect(page.getByText(`Started a run of ${JOB.name}.`)).toBeVisible();
+    await expect(running.getByText("Queued", { exact: true })).toBeVisible();
+    await running.getByRole("button", { name: `Cancel the run of ${JOB.name}` }).click();
+    const ask = page.getByRole("dialog", { name: `Cancel the run of ${JOB.name}?` });
+    await ask.getByRole("button", { name: "Cancel run" }).click();
+    await expect(ask).toBeHidden();
+    await expect(running.getByText("Cancelling…")).toBeVisible();
+    // A worker carries the cancel out; the next read of the list no longer holds the run.
+    const stopWorker = await startWorker(request);
+    try {
+      await expect(page.getByText("Nothing is running.")).toBeVisible({ timeout: 60_000 });
+    } finally {
+      await stopWorker();
+    }
+  } finally {
+    await cancelRuns(request, first);
+    await cancelRuns(request, second);
+  }
+  await page.context().close();
+});
+
+test("a reader of one environment sees only its jobs on the list, with no control", async ({
+  browser,
+  request,
+}) => {
+  const { tag, first, second } = await deployedTwice(request);
+  const { page } = await invitedPerson(browser, request, (name) =>
+    grantOn(request, name, "READ_ENVIRONMENT", first),
+  );
+  await skipTheWelcome(page);
+
+  await page.goto(`/jobs?q=${tag}`);
+  const all = page.getByRole("region", { name: "Every job listed" });
+  await expect(all.getByRole("link", { name: JOB.name })).toHaveCount(1);
+  await expect(all).toContainText(first);
+  await expect(all).not.toContainText(second);
+  await expect(all.getByRole("button")).toHaveCount(0);
+  await page.getByRole("button", { name: "Environment: All environments" }).click();
+  await expect(page.getByRole("option")).toHaveText(["All environments", first]);
+  await page.keyboard.press("Escape");
+  await page.context().close();
+});
+
+for (const scheme of ["light", "dark"] as const) {
+  for (const width of [1280, 320]) {
+    test(`axe finds nothing on the real Jobs list (${scheme}, ${String(width)} px)`, async ({
+      browser,
+      browserName,
+      request,
+    }) => {
+      test.skip(browserName !== "chromium", "axe runs in Chromium only");
+      const { environment } = await deployed(request);
+      await skipTheTour(request);
+      const page = await freshPage(browser);
+      await page.setViewportSize({ width, height: width === 320 ? 640 : 800 });
+      await page.emulateMedia({ colorScheme: scheme });
+      await signInLocally(page, request);
+
+      await page.goto(`/jobs?environment=${environment}`);
+      await expect(
+        page
+          .getByRole("region", { name: "Every job listed" })
+          .getByRole("link", { name: JOB.name }),
+      ).toBeVisible();
+      await expect(page.getByText("Nothing is running.")).toBeVisible();
+      expect(await violations(page), "the Jobs list").toEqual([]);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        ),
+      ).toBeLessThanOrEqual(0);
+      await page.context().close();
+    });
+  }
+}

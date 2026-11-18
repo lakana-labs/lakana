@@ -267,6 +267,7 @@ nav:
               - reference/sdk/checks.md
               - reference/sdk/ci-trust-rules.md
               - reference/sdk/column-masks.md
+              - reference/sdk/configuration.md
               - reference/sdk/connections.md
               - reference/sdk/deploys.md
               - reference/sdk/environments.md

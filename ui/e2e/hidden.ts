@@ -133,6 +133,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["cron","kind","next_run_at","paused","timezone"]': "ScheduleTriggerOut",
   '["days","expires_at","kept","last_activity_at","name","namespace","never","on","set_at","set_by","source","uuid"]':
     "TableRetentionOut",
+  '["deleted_at","is_protected","name","properties","purge_after","retention_days","storage_root","storage_secret_ref"]':
+    "EnvironmentOut",
   '["description","description_language","description_source","label","label_language","label_source","name","nullable","terms","type"]':
     "ColumnOut",
   '["detail","type"]': "ErrorBody",
@@ -152,6 +154,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["finished_at","outcome","state"]': "ConnectionTestOut",
   '["events","format","secret"]': "NotifyOut",
   '["failing_rows","name","outcome","table"]': "CheckResultOut",
+  '["failure","run","task"]': "FailedRunOut",
   '["fingerprint","line","type"]': "HostKeyOut",
   '["get_started_hidden","tour_seen","update_note_seen"]': "InterfaceStateOut",
   '["grant_id","group","kind","role","scope"]': "ViaOut",
@@ -162,7 +165,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["high"]': "HealthBandOut",
   '["id","name","principal_type"]': "SubjectPrincipalOut",
   '["is_active","name","picture","type"]': "PrincipalOut",
-  '["is_protected","name"]': "OwnerOut",
+  '["is_protected","name"]': "EnvironmentOut",
   '["item","others","state","text"]': "HealthSummaryOut",
   '["items","next_cursor"]': "WirePage",
   '["items","truncated"]': "AttentionOut",

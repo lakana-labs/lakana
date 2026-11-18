@@ -13,12 +13,6 @@
   "formatUnreadable": "Format could not read this SQL; run it to see the server's reason.",
   "formatUnloaded": "Format could not load; reload the page.",
   "loadingEditor": "Loading the editor…",
-  "environment": {
-    "label": "Environment",
-    "trigger": "{{label}}: {{environment}}",
-    "triggerProtected": "{{label}}: {{environment}}, protected",
-    "protected": "protected"
-  },
   "noEnvironment": "You may not run queries in any environment yet. Ask an administrator for the right to run queries (SUBMIT_QUERY).",
   "noEnvironmentCli": "Meanwhile, run a query from the command line:",
   "copy": "Copy command",

@@ -9,9 +9,9 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 Issue a personal access token
 
-From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.
+From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token is never asked for a touch, and no token (personal, task or CI) of a non-administrator can create a personal token.
 
-Issues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. Needs the `ADMIN` role on the instance. Answers 404 when there is no such principal.
+Issues a token that signs in as the principal. The answer holds the token's full value, which is shown this once and cannot be read again. For another principal it needs the `ADMIN` role on the instance. For oneself, unless one is an administrator, it works only from the web interface: no token (personal, task or CI) of a non-administrator can create a personal token, so a stolen token cannot mint replacements (403). Answers 404 when there is no such principal.
 
 Parameters:
 
@@ -48,7 +48,7 @@ Answer fields: `TokenIssueOut`
 
 List the tokens of a principal
 
-Lists the principal's personal access tokens. The token values are never included. Needs the `ADMIN` role on the instance. Answers 404 when there is no such principal.
+Lists the principal's personal access tokens, revoked and expired ones too, each with its owner and its creation, last-use, expiry and revocation times. The token values are never included. Anyone may list their own with a personal token or a web session; anyone else's needs the `ADMIN` role on the instance, and is refused alike whether or not the principal exists. Answers 404 when there is no such principal.
 
 Parameters:
 
@@ -71,7 +71,7 @@ Answers:
 
 Revoke a personal access token
 
-The token stops working at once. Needs the `ADMIN` role on the instance. Answers 404 when the principal or the token does not exist.
+The token stops working at once. Anyone may revoke their own with a personal token or a web session, without a passkey touch; anyone else's needs the `ADMIN` role on the instance. Answers 404 when the principal or the token does not exist.
 
 Parameters:
 
@@ -86,6 +86,31 @@ Answers:
 | Status | Meaning | Body |
 |---|---|---|
 | `204` | Successful Response | none |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+## `GET /api/v1/tokens`
+
+List every owner's live tokens
+
+Lists the personal access tokens that are neither revoked nor expired, newest first, each with its owner. The token values are never included. Needs the `ADMIN` role on the instance; a task or CI token is refused. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page. Answers 404 when `owner` names no principal.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `owner` | query | no | text or null | Only this principal's tokens. |
+| `limit` | query | no | whole number | Most tokens returned (1 to 200). |
+| `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `owner`. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `TokenOut` |
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |

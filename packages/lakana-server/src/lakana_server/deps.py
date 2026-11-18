@@ -82,12 +82,13 @@ Which credential kind the captured token actually is (PAT, task token or CI
 token) is `parse_token`'s job, not this pattern's.
 """
 
-TOKEN_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
-    {("POST", "/api/v1/task-tokens"), ("DELETE", "/api/v1/task-tokens/{key_id}")}
-)
+TOKEN_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset({("POST", "/api/v1/task-tokens")})
 """Operations (method, route template) that refuse the session cookie: they are for code only.
 
-Minting a task token from a browser would put a token in the interface, which never holds one."""
+Minting a task token from a browser would put a token in the interface, which never holds one.
+Revoking one was let through for Access > Tokens: it puts no token in the browser, and
+`TaskTokenService.revoke` keeps its rules, so an administrator revokes any and everyone else only
+their own."""
 
 TOKEN_ONLY_MESSAGE = (  # nosec B105 -- a refusal's text, not a credential
     "Task tokens are for code, not a browser: create one with `lakana` and your own token."
@@ -833,7 +834,7 @@ def get_key_provider(request: Request) -> KeyProvider:
         operation is actually attempted with it.
     """
     secrets = request.app.state.settings.secrets
-    return EnvKeyProvider(secrets.master_key, accept_format_1=secrets.accept_format_1)
+    return EnvKeyProvider(secrets.master_key_text(), accept_format_1=secrets.accept_format_1)
 
 
 def get_undo_days(request: Request) -> int:

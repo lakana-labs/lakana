@@ -22,6 +22,18 @@ One row per action that applies to the object: `allowed` is the answer of the sa
 | `PRINCIPAL` | text | required |  |
 | `--scope` | text | none | The object: ENV, ENV/NAMESPACE or ENV/NAMESPACE/TABLE. Leave it out for the instance. |
 
+## `lakana access grants`
+
+Usage: `lakana access grants [OPTIONS] [principal]`
+
+Show the grants PRINCIPAL holds, directly and through groups; yourself when left out.
+
+One row per live grant, newest first. `group` names the group the grant comes through and is empty for a grant made to the principal itself. You may list your own grants with a personal token; listing someone else's needs the `ADMIN` role on the instance.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `PRINCIPAL` | text | none | Whose grants to list; yours when left out. |
+
 ## `lakana access export`
 
 Usage: `lakana access export [OPTIONS]`

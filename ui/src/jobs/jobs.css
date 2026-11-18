@@ -1,3 +1,6 @@
+/* The environment picker's rules, which the Queries and Jobs screens share. */
+@import "../shell/environment.css";
+
 /* The Jobs screen's own rules: a cron expression shown as it is. */
 .jobs-verbatim {
   font-family: var(--font-mono);
@@ -17,6 +20,51 @@
   flex-direction: column;
   gap: var(--space-5);
   min-width: 0;
+}
+
+/* The list's environment filter and its search, side by side; under one another when narrow. */
+.jobs-find {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-5);
+}
+
+.jobs-find .field {
+  margin: 0;
+}
+
+/* The list's controls in a row: beside each other, above the row's link so that pressing one
+   never opens the row; the failure's code link too. */
+.jobs-row-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.jobs-list .jobs-code,
+.jobs-list .jobs-control {
+  position: relative;
+}
+
+/* A failed run's why: the code, the cause and the next step, wrapping in its cell. */
+.jobs-list .jobs-why-cell {
+  overflow-wrap: anywhere;
+}
+
+.jobs-last-run {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+/* The line under a list that says the server showed less than there is. */
+.jobs-list-more {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
 }
 
 /* Run now and the schedule's button beside the heading; under it on a narrow screen. */
@@ -153,6 +201,25 @@
   min-width: 640px;
 }
 
+.list-scroll.jobs-running-scroll .list {
+  min-width: 720px;
+}
+
+.list-scroll.jobs-failed-scroll .list {
+  min-width: 880px;
+}
+
+.list-scroll.jobs-all-scroll .list {
+  min-width: 960px;
+}
+
+/* The lists' names stay whole; the table scrolls in its region instead of breaking a word. */
+.list-scroll.jobs-running-scroll .row-name,
+.list-scroll.jobs-failed-scroll .row-name,
+.list-scroll.jobs-all-scroll .row-name {
+  overflow-wrap: normal;
+}
+
 /* A task's table breaks after a dot or an underscore (`VisibleText` with `breakable`), never
    inside a word. */
 .list-scroll.jobs-tasks-scroll .row-name {
@@ -223,14 +290,16 @@
 .jobs-failure a,
 .jobs-waiting a,
 .jobs-note a,
-.jobs-fact a {
+.jobs-fact a,
+.jobs-section .empty a {
   color: var(--color-accent);
 }
 
 .jobs-failure a:hover,
 .jobs-waiting a:hover,
 .jobs-note a:hover,
-.jobs-fact a:hover {
+.jobs-fact a:hover,
+.jobs-section .empty a:hover {
   color: var(--color-accent-hover);
 }
 
