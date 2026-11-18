@@ -55,7 +55,8 @@ export function useValueInputs(): ValueInputs {
   const read = useCallback(
     (rows: readonly ValueRow[]) =>
       Object.fromEntries(
-        rows.map((row) => [row.key.trim(), inputs.current.get(row.id)?.value ?? ""]),
+        // Every row's field is mounted while the form can send.
+        rows.map((row) => [row.key.trim(), (inputs.current.get(row.id) as HTMLInputElement).value]),
       ),
     [],
   );
