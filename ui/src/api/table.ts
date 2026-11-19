@@ -367,7 +367,7 @@ interface SubjectPrincipalOut {
 }
 
 /** Who a grant, row filter or column mask is for, as the server names them. */
-interface SubjectOut {
+export interface SubjectOut {
   /** The principal's id; null for a group's. */
   readonly principal_id: string | null;
   /** The group's id; null for a principal's. */
