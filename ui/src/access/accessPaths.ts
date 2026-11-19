@@ -161,10 +161,7 @@ export function tokensPath(filter: {
 }
 
 /** The address of Row filters & masks. */
-export const POLICIES_PATH = "/settings/access/filters-and-masks";
-
-/** The address of Access file. */
-export const ACCESS_FILE_PATH = "/settings/access/access-file";
+const POLICIES_PATH = "/settings/access/filters-and-masks";
 
 /**
  * Row filters & masks' address with a filter. The table is written `namespace.table`, as the

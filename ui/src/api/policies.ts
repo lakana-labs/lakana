@@ -33,7 +33,7 @@ export const NO_POLICY_FILTER: PolicyFilter = {
 };
 
 /** How many policies a page of a list holds. */
-export const POLICIES_PAGE = 50;
+const POLICIES_PAGE = 50;
 
 /**
  * Writes a filter as the server's query.

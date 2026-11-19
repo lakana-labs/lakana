@@ -1,0 +1,9 @@
+/* Access file: the managed scopes and the changes by hand, each table in its own scrolling
+   region, the names typed by people kept whole. */
+.list-scroll.access-file-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.access-file-scroll .row-name {
+  overflow-wrap: normal;
+}
