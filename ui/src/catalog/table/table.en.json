@@ -392,7 +392,9 @@
       "reading": "Reading the column masks…"
     },
     "later": "An administrator changes access under Settings › Access › Grants.",
-    "manage": "Manage grants"
+    "manage": "Manage grants",
+    "policiesCut": "Only the first 200 are shown.",
+    "managePolicies": "Manage row filters and masks"
   },
   "loadingTab": "Loading the tab…"
 }

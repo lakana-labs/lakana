@@ -5,12 +5,10 @@ import {
   DEFINITION,
   definitionFile,
   DOWN,
-  FILTERS,
   GRANTS,
   GRANTS_PATH,
   HEALTH,
   LINEAGE_PATH,
-  MASKS,
   QUERIES_PATH,
   QUERY_ID,
   queryStatus,
@@ -31,9 +29,7 @@ import {
   getResultPage,
   getTable,
   getTableHealth,
-  listColumnMasks,
   listGrantsAt,
-  listRowFilters,
   myPermissions,
   submitPreview,
   tableApiPath,
@@ -225,21 +221,6 @@ describe("table", () => {
       `${GRANTS_PATH}?environment=prod&namespace=gold.sales&table=fact_sales&limit=200`,
       `${GRANTS_PATH}?environment=prod&namespace=gold&limit=200`,
       `${GRANTS_PATH}?environment=prod&limit=200`,
-    ]);
-  });
-
-  it("lists a table's row filters and column masks by its environment, namespace and name", async () => {
-    const server = fakeServer({
-      "GET /api/v1/row-filters": { status: 200, body: FILTERS },
-      "GET /api/v1/column-masks": { status: 200, body: MASKS },
-    });
-
-    expect(await listRowFilters(REF)).toEqual(FILTERS);
-    expect(await listColumnMasks(REF)).toEqual(MASKS);
-
-    expect(server.sent.map((request) => request.path)).toEqual([
-      "/api/v1/row-filters?environment=prod&namespace=gold.sales&table=fact_sales",
-      "/api/v1/column-masks?environment=prod&namespace=gold.sales&table=fact_sales",
     ]);
   });
 });

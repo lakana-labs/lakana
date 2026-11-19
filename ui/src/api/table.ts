@@ -496,42 +496,6 @@ async function firstGrants(query: URLSearchParams): Promise<GrantPage> {
 }
 
 /**
- * The query that names one table to the policy listings.
- *
- * @param ref - The table.
- * @returns The query, without its `?`.
- */
-function tableQuery(ref: TableRef): string {
-  return new URLSearchParams({
-    environment: ref.environment,
-    namespace: ref.namespace,
-    table: ref.name,
-  }).toString();
-}
-
-/**
- * Lists a table's row filters. Needs the right to manage policies on the instance.
- *
- * @param ref - The table.
- * @returns The row filters.
- * @throws {ApiError} for a refusal.
- */
-export function listRowFilters(ref: TableRef): Promise<readonly RowFilterOut[]> {
-  return api.request<readonly RowFilterOut[]>("GET", `/api/v1/row-filters?${tableQuery(ref)}`);
-}
-
-/**
- * Lists a table's column masks. Needs the right to manage policies on the instance.
- *
- * @param ref - The table.
- * @returns The column masks.
- * @throws {ApiError} for a refusal.
- */
-export function listColumnMasks(ref: TableRef): Promise<readonly ColumnMaskOut[]> {
-  return api.request<readonly ColumnMaskOut[]>("GET", `/api/v1/column-masks?${tableQuery(ref)}`);
-}
-
-/**
  * What a health signal observed: the fields of each signal's shape (freshness, volume, empty
  * values, range, schema), or the reason it recorded none. The server may add fields and values:
  * read each with a fallback.
