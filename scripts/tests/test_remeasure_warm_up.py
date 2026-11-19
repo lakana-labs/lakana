@@ -562,3 +562,19 @@ def test_a_missing_plan_is_refused(tmp_path: Path) -> None:
     """The variable names a file that is not there."""
     with pytest.raises(pytest.UsageError, match="cannot read"):
         read_plan(tmp_path / "gone.json")
+
+
+def test_a_doctest_candidate_alone_in_its_module_runs_alone(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An item that is not a test function gets no no-op warm-up."""
+    pytester.makepyfile(
+        test_m='''
+        """
+        >>> 1
+        1
+        """
+        '''
+    )
+    ran = _ran(pytester, monkeypatch, ["test_m.py::test_m"], {}, "--doctest-modules")
+    assert ran == ["test_m.py::test_m"]
