@@ -143,11 +143,11 @@ def create_column_mask(
 @router.get("", response_model=list[ColumnMaskOut], responses=errors(403, 404))
 def list_column_masks(
     response: Response,
-    principal_name: str | None = Query(default=None, max_length=255),
-    group_name: str | None = Query(default=None, max_length=255),
-    environment: str | None = Query(default=None, max_length=255),
-    namespace: str | None = Query(default=None, max_length=1024),
-    table: str | None = Query(default=None, max_length=255),
+    principal_name: str | None = None,
+    group_name: str | None = None,
+    environment: str | None = None,
+    namespace: str | None = None,
+    table: str | None = None,
     limit: int = Query(default=100, ge=1, le=200),
     cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
