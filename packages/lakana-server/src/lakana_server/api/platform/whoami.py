@@ -56,11 +56,12 @@ def whoami(
     deploy in at least one environment with this credential, `secret_environments` the
     environments where it may manage secrets with it, `manage_policy` whether it may manage
     row filters and column masks with it, `reads_environments` whether it may read environments
-    with it, on the instance or in at least one (and so the repositories), and
-    `instance_actions` the actions it may take on the instance with it: the web interface shows
-    the administration areas, tells a new person to ask for access, shows the deploy steps of
-    Home and offers its Secrets, Row filters & masks and Repositories pages, and the
-    instance-wide actions of Settings, from these seven.
+    with it, on the instance or in at least one (and so the repositories), `instance_actions`
+    the actions it may take on the instance with it, and `managed_environments` the
+    environments it may manage with it (deleted ones too, until their files are deleted): the
+    web interface shows the administration areas, tells a new person to ask for access, shows
+    the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages,
+    the instance-wide actions of Settings and each environment's own, from these eight.
     `picture` is the etag of your profile picture, or `null` without one.
 
     Parameters
@@ -125,6 +126,7 @@ def _describe(principal: PrincipalRef, grants: GrantService, pictures: PictureSe
         manage_policy=grants.may_manage_policies(principal),
         reads_environments=grants.reads_some_environment(principal),
         instance_actions=grants.instance_actions(principal),
+        managed_environments=grants.managed_environments(principal),
         picture=pictures.etag_of(principal.id),
     )
 

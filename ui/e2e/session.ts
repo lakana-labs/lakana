@@ -846,6 +846,7 @@ export async function signInAsAdmin(page: Page): Promise<void> {
         manage_policy: true,
         reads_environments: true,
         instance_actions: ["MANAGE_ENVIRONMENT", "MANAGE_REPOSITORY"],
+        managed_environments: ["dev", "prod"],
         picture: "e1",
       },
     }),

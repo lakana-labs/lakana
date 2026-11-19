@@ -410,6 +410,9 @@ _EXEMPT = {
     ("GrantService", "reads_some_environment"): "answers about the caller only (`whoami`) with "
     "`permits`, about `READ_ENVIRONMENT` on live environments, reading nothing about anyone else "
     "and writing nothing",
+    ("GrantService", "managed_environments"): "answers about the caller only (`whoami`) with "
+    "`permits`, about `MANAGE_ENVIRONMENT` on each environment whose row is kept, reading nothing "
+    "about anyone else and writing nothing",
     ("GrantService", "instance_actions"): "answers about the caller only (`whoami`) with "
     "`permits`, naming only the actions the caller may take on the instance, reading nothing "
     "about anyone else and writing nothing",

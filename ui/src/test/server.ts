@@ -73,6 +73,8 @@ export const ADMIN_SESSION = {
  *   default.
  * @param more.instanceActions - What the person may do on the instance; an administrator's default
  *   names `MANAGE_ENVIRONMENT` and `MANAGE_REPOSITORY`, anyone else's nothing.
+ * @param more.managedEnvironments - The environments the person manages; an administrator's
+ *   default names `dev` and `prod`, anyone else's none.
  * @returns The body.
  */
 export function whoami(
@@ -82,7 +84,11 @@ export function whoami(
   mayDeploy = admin,
   secretEnvironments: readonly string[] = [],
   managePolicy = admin,
-  more: { readonly readsEnvironments?: boolean; readonly instanceActions?: readonly string[] } = {},
+  more: {
+    readonly readsEnvironments?: boolean;
+    readonly instanceActions?: readonly string[];
+    readonly managedEnvironments?: readonly string[];
+  } = {},
 ): unknown {
   return {
     name,
@@ -98,6 +104,7 @@ export function whoami(
     reads_environments: more.readsEnvironments ?? admin,
     instance_actions:
       more.instanceActions ?? (admin ? ["MANAGE_ENVIRONMENT", "MANAGE_REPOSITORY"] : []),
+    managed_environments: more.managedEnvironments ?? (admin ? ["dev", "prod"] : []),
     picture: null,
   };
 }

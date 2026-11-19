@@ -3179,6 +3179,12 @@ class WhoamiOut(BaseModel):
         The actions you may take on the instance with this credential (such as
         `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the
         order of the action list; empty for a task or CI token. It describes you only.
+    managed_environments
+        The environments, by name and sorted, that you may manage with this credential
+        (`MANAGE_ENVIRONMENT` on the environment, directly, through a role or a group),
+        including deleted ones whose files are not deleted yet; empty for a task or CI token.
+        The web interface offers an environment's usage, retention, deletion and restore for
+        exactly these. It describes you only.
     picture
         The etag of your profile picture, or `null` without one.
     """
@@ -3195,6 +3201,7 @@ class WhoamiOut(BaseModel):
     manage_policy: bool = False
     reads_environments: bool = False
     instance_actions: list[str] = []
+    managed_environments: list[str] = []
     picture: str | None = None
 
 
