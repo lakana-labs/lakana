@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi.testclient import TestClient
 
+from lakana_server.api.platform.schemas import ManagedScopeBriefOut
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
 
@@ -246,9 +245,7 @@ def test_status_has_the_shape_the_sdk_reads(client: TestClient) -> None:
     }
 
 
-def test_managed_scopes_tells_nothing_else(
-    client: TestClient, openapi_schema: dict[str, Any]
-) -> None:
+def test_managed_scopes_tells_nothing_else(client: TestClient) -> None:
     """A policy manager reads the scope, the file name and the time; nothing more."""
     header = _user_header(client, "pat")
     granted = client.post(
@@ -271,8 +268,9 @@ def test_managed_scopes_tells_nothing_else(
     assert response.status_code == 200, response.text
     [scope] = response.json()
     assert (scope["scope"], scope["file_name"]) == ("instance", "access.yaml")
-    properties = openapi_schema["components"]["schemas"]["ManagedScopeBriefOut"]["properties"]
-    assert set(scope) == set(properties) == {"scope", "file_name", "applied_at"}
+    assert (
+        set(scope) == set(ManagedScopeBriefOut.model_fields) == {"scope", "file_name", "applied_at"}
+    )
     assert client.get("/api/v1/access/status", headers=header).status_code == 403
 
 

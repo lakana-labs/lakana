@@ -2,8 +2,10 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { setStepUp } from "../api/client";
 import type { OrphanedLocationOut, OrphanedLocationsOut } from "../api/environments";
 import { initI18n } from "../i18n/i18n";
+import { freshSession, STALE_SESSION } from "../test/access";
 import { fakeServer, type FakeRoute } from "../test/server";
 import { LeftoverDirectories } from "./LeftoverDirectories";
 
@@ -52,7 +54,8 @@ const THREE = [
 ];
 
 /**
- * Renders dev's Leftover directories.
+ * Renders dev's Leftover directories, in a session whose passkey touch is fresh unless the
+ * routes say otherwise.
  *
  * @param routes - The server's routes.
  * @returns The fake server and a user.
@@ -61,13 +64,23 @@ function renderPanel(routes: Record<string, FakeRoute>): {
   readonly server: ReturnType<typeof fakeServer>;
   readonly user: ReturnType<typeof userEvent.setup>;
 } {
-  const server = fakeServer(routes);
+  const server = fakeServer({ [SESSION]: freshSession(), ...routes });
   render(<LeftoverDirectories name="dev" />);
   return { server, user: userEvent.setup() };
 }
 
 const FIND = "GET /api/v1/environments/dev/orphaned-locations";
 const DELETE = "POST /api/v1/environments/dev/orphaned-locations/delete";
+const SESSION = "GET /api/v1/sign-in/session";
+
+/**
+ * Names each request the panel sent, in order.
+ *
+ * @param server - The fake server.
+ * @returns Each request's method and path.
+ */
+const sent = (server: ReturnType<typeof fakeServer>): string[] =>
+  server.sent.map((request) => `${request.method} ${request.path.split("?")[0] ?? ""}`);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -92,6 +105,8 @@ describe("LeftoverDirectories", () => {
       "/api/v1/environments/dev/orphaned-locations?older_than_days=30",
     );
     expect(screen.getByRole("button", { name: "Find again" })).toHaveFocus();
+    // Finding deletes nothing, so it asks for no touch.
+    expect(sent(server)).toEqual([FIND]);
   });
 
   it("says when nothing is left over", async () => {
@@ -122,9 +137,12 @@ describe("LeftoverDirectories", () => {
     ]);
   });
 
-  it("deletes the old ones after a confirmation, without a touch", async () => {
+  it("deletes the old ones after a confirmation and the touch; Continue asks again", async () => {
+    const touch = vi.fn(() => Promise.resolve());
+    setStepUp(touch);
     let calls = 0;
     const { server, user } = renderPanel({
+      [SESSION]: STALE_SESSION,
       [FIND]: { status: 200, body: report(THREE) },
       [DELETE]: () => {
         calls += 1;
@@ -164,7 +182,34 @@ describe("LeftoverDirectories", () => {
       { older_than_days: 30 },
       { older_than_days: 30 },
     ]);
-    expect(server.sent.some((request) => request.path === "/api/v1/sign-in/session")).toBe(false);
+    expect(sent(server)).toEqual([FIND, SESSION, DELETE, SESSION, DELETE]);
+    expect(touch).toHaveBeenCalledTimes(2);
+  });
+
+  it("a cancelled touch deletes nothing, and Try again asks for it again", async () => {
+    const touch = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new DOMException("Cancelled.", "NotAllowedError"))
+      .mockResolvedValue(undefined);
+    setStepUp(touch);
+    const { server, user } = renderPanel({
+      [SESSION]: STALE_SESSION,
+      [FIND]: { status: 200, body: report(THREE) },
+      [DELETE]: { status: 200, body: report([]) },
+    });
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await user.click(await screen.findByRole("button", { name: "Delete the old ones" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete them" }),
+    );
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(sent(server)).toEqual([FIND, SESSION]);
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Nothing left over.")).toBeInTheDocument();
+    expect(sent(server)).toEqual([FIND, SESSION, SESSION, DELETE]);
+    expect(touch).toHaveBeenCalledTimes(2);
   });
 
   it("deletes with the days the list was found with, not the field's new value", async () => {
@@ -248,6 +293,8 @@ describe("LeftoverDirectories", () => {
     expect(
       server.sent.filter((request) => request.method === "POST").map((request) => request.body),
     ).toEqual([{ older_than_days: 30 }, { older_than_days: 30 }]);
+    // Try again goes through the touch check as the first deletion did.
+    expect(sent(server)).toEqual([FIND, SESSION, DELETE, SESSION, DELETE]);
   });
 
   it("after a partial search the question says more may go", async () => {

@@ -2264,6 +2264,10 @@ class CatalogService:
         as the location sweep purges (`lakana_core.catalog.orphaned_locations`). One
         `ORPHANED_LOCATIONS_DELETED` event records the call, also when nothing was deleted.
 
+        The files cannot be restored, so a browser session needs a fresh passkey touch
+        (`require_step_up`), checked right after the authorization and before storage is
+        walked, as the purge of a deleted environment asks; a token is never asked.
+
         Parameters
         ----------
         p
@@ -2290,8 +2294,11 @@ class CatalogService:
         StorageRefusedError, StorageUnavailableError
             If the storage refused the credentials or did not answer during the walk, which
             comes before any deletion; nothing was deleted.
+        StepUpRequired
+            If a browser session's last passkey touch is not fresh; nothing was read or deleted.
         """
         self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        require_step_up(p)
         report = self._orphaned(name, older_than_days, delete_orphaned_locations)
         deleted = [entry for entry in report.locations if entry.deleted]
         AuditService(self._session).record(

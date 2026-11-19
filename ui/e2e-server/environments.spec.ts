@@ -1,3 +1,6 @@
+import { existsSync, utimesSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { expect, type Page, test } from "@playwright/test";
 
 import {
@@ -11,6 +14,7 @@ import {
   skipTheWelcome,
   uniqueName,
   violations,
+  writeRawFile,
 } from "./helpers";
 
 /**
@@ -162,6 +166,51 @@ test("leftover directories on a fresh environment, and axe", async ({
   await expect(page.getByText("Nothing left over.")).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Usage" })).toBeVisible();
   await axeInBothThemes(page, "an environment's page");
+  expect(errors).toEqual([]);
+  await page.context().close();
+});
+
+test("deleting old leftover directories asks for the passkey touch first", async ({
+  browser,
+  browserName,
+  request,
+}) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
+  const environment = uniqueName("o");
+  await createEnvironment(request, environment);
+  // A table directory an older release left: id-suffixed, under managed/, with no record.
+  const relative = `managed/gold/orders-${"a1".repeat(16)}/data/0.parquet`;
+  writeRawFile(environment, relative, "12345");
+  const file = resolve(lakeRoot(environment), relative);
+  const fortyDaysAgo = new Date(Date.now() - 40 * 86_400_000);
+  utimesSync(file, fortyDaysAgo, fortyDaysAgo);
+  const { page, name } = await invitedPerson(browser, request, (admin) =>
+    makeAdministrator(request, admin),
+  );
+  await skipTheWelcome(page);
+  const errors = consoleErrors(page);
+  const sent: string[] = [];
+  page.on("request", (sentRequest) => {
+    const path = new URL(sentRequest.url()).pathname;
+    if (sentRequest.method() === "POST") sent.push(path);
+  });
+
+  // An old touch: the deletion asks for the passkey again before the request is sent.
+  ageThePasskeyTouch(name);
+  await page.goto(`/settings/environments/${environment}`);
+  await page.getByRole("button", { name: "Find" }).click();
+  const region = page.getByRole("region", { name: "Leftover directories" });
+  await expect(region.getByText("older")).toBeVisible();
+  await page.getByRole("button", { name: "Delete the old ones" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Delete them" }).click();
+
+  await expect(region.getByText("deleted", { exact: true })).toBeVisible();
+  expect(existsSync(file)).toBe(false);
+  expect(sent).toEqual([
+    "/api/v1/sign-in/step-up/options",
+    "/api/v1/sign-in/step-up",
+    `/api/v1/environments/${environment}/orphaned-locations/delete`,
+  ]);
   expect(errors).toEqual([]);
   await page.context().close();
 });
