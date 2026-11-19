@@ -567,7 +567,16 @@ def test_a_missing_plan_is_refused(tmp_path: Path) -> None:
 def test_a_doctest_candidate_alone_in_its_module_runs_alone(
     pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An item that is not a test function gets no no-op warm-up."""
+    """An item that is not a test function gets no no-op warm-up, even with a shared fixture."""
+    pytester.makeconftest(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session", autouse=True)
+        def shared():
+            return 1
+        """
+    )
     pytester.makepyfile(
         test_m='''
         """
