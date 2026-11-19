@@ -402,6 +402,11 @@ x-lakana-env: &lakana-env
 Then apply them by running the `docker compose` command of the [Quickstart](#quickstart) again, from
 the bundle's directory.
 
+To check the values the server runs with, an administrator opens **Settings → Configuration** in the
+web interface: every setting the server reads, with its value and whether it was set or is the
+default, and a secret only as set or not set. Workers and the launcher read their own settings, which
+that page does not show.
+
 ### A reverse proxy in front of the server
 
 A proxy must let these requests through, or users meet errors that name no Lakana setting. It

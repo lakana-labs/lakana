@@ -6012,7 +6012,8 @@ fuller text of each part where it already lives.
   in `PLAIN_SECRETS` instead of becoming `SecretStr` (R6). `source` is `set` when every step of the
   path is in `model_fields_set` (environment and `.env` alike, also a value equal to its default).
   Pins: `test_no_secret_value_reaches_the_answer` (sentinels in the master key, the bootstrap
-  secret, the database password and the index URL; none in `response.text`) and the guard
+  secret, the database password, the index URL and the HTTPS proxy; none in `response.text` or
+  the log) and the guard
   `test_every_secret_looking_setting_is_masked_or_reviewed` (a new setting whose name looks like a
   credential fails until it is a `SecretStr` or goes in `REVIEWED_NOT_SECRET` with its reason).
 - **One's own grants (`GrantService.held_grants`, `GET /api/v1/principals/{name}/grants`).** The
@@ -6125,6 +6126,28 @@ fuller text of each part where it already lives.
     files, restore, retention and the leftover clean-up ask for none (`NO_STEP_UP`). Remove from
     the catalog is offered only for a root no release could reach (the server's 409 stays the
     authority).
+- **Sign-in and Configuration in the interface (M7 parts 7 and 8, PR 7).**
+  - **The sign-in writes ask for the passkey first.** Saving the session lengths (`PATCH
+    /api/v1/settings/sign-in`), creating an invite (`POST /api/v1/invites`) and issuing a recovery
+    link (`POST /api/v1/principals/{name}/recovery-link`) go through `guarded`
+    (`ui/src/api/signInAdmin.ts`), as `STEP_UP_ROUTES` lists them; a cancelled touch sends nothing.
+    Withdrawing an invite or a link asks for none (`NO_STEP_UP`: it removes access). A new link is
+    still shown once (`ShownOnce`) and lives only in that dialog's state. Pins:
+    `signInAdmin.test.ts`, `SignInSettings.test.tsx`, `InvitesPage.test.tsx`,
+    `RecoveryLinksPage.test.tsx`, `e2e/sign-in-configuration.spec.ts` (`Sign-in by keyboard`) and
+    `e2e-server/sign-in-configuration.spec.ts` (`an aged touch is asked for before Save`).
+  - **Configuration renders a secret from `has_value` alone.** `settingValueText`
+    (`ui/src/settings/configurationRows.ts`) never reads a secret's `value`, so even a server that
+    sent one would show nothing of it; the URL secrets (the database, the index, both proxies) stay
+    fully masked as "secret, set" or "secret, not set", with no host (maintainer decision,
+    2026-11-18). The answer lives in the page's component state only: never polled, never in a
+    storage. Paths and hosts that are not secret are shown to administrators, as `lakana
+    configuration` shows them; hiding them in the page alone would hide nothing the API does not
+    answer. Pins: `configurationRows.test.ts` (`never reads a secret's value`: a value that throws
+    when read), `ConfigurationPage.test.tsx` (a planted `mk-sentinel` in no text, attribute,
+    storage or console call), `e2e/sign-in-configuration.spec.ts` (the same in a browser) and
+    `e2e-server/sign-in-configuration.spec.ts` (the real bootstrap secret and master key in neither
+    the answer nor the page).
 
 ## Governed table creation and append (M4a)
 
