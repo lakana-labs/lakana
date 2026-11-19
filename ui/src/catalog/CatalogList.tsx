@@ -9,14 +9,7 @@ import "./catalog.css";
 import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import {
-  Link,
-  NavigationType,
-  useLocation,
-  useNavigate,
-  useNavigationType,
-  useSearchParams,
-} from "react-router";
+import { Link, NavigationType, useLocation, useNavigate, useNavigationType } from "react-router";
 
 import { getTableTree, type TableTreeOut } from "../api";
 import { CopyLine } from "../shell/CopyLine";
@@ -26,6 +19,7 @@ import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { REDIRECT } from "../shell/redirect";
+import { useAddressParams } from "../shell/useAddressParams";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { CatalogSearch } from "./CatalogSearch";
@@ -110,7 +104,7 @@ export function CatalogList(): JSX.Element {
   const location = useLocation();
   const me = useMe();
   const navigationType = useNavigationType();
-  const [params, setParams] = useSearchParams();
+  const [params, update] = useAddressParams();
   // An empty address opens the place last chosen: when the page opens and when the Catalog is
   // pressed in the menu (which sends `restore` in the navigation state), nowhere else. The place is known
   // from the first render, so the list is never read for any other.
@@ -176,13 +170,13 @@ export function CatalogList(): JSX.Element {
   };
   const search = useCallback(
     (q: string): void => {
-      setParams((current) => new URLSearchParams(viewSearch({ ...readView(current), q })), {
+      update((current) => new URLSearchParams(viewSearch({ ...readView(current), q })), {
         replace: true,
         // Typing keeps where the entry came from, so a remembered place stays one.
         state: locationState,
       });
     },
-    [setParams, locationState],
+    [update, locationState],
   );
 
   // The address takes the remembered place, by replacing the empty one so Back does not return

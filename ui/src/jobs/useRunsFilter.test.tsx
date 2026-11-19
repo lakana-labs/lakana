@@ -100,6 +100,45 @@ describe("useRunsFilter", () => {
     expect(result.current.location.search).toBe("?job=nightly_sales&period=24h");
   });
 
+  it("two changes before a render both reach the address (#744)", () => {
+    const { result } = renderFilter("/jobs/runs?trigger=schedule");
+    // Both come from the same render, as a Period chosen and a job typed at once do.
+    const { set } = result.current.filter;
+
+    act(() => {
+      set({ period: "7d" });
+      set({ job: "nightly" });
+    });
+    expect(result.current.location.search).toBe("?trigger=schedule&period=7d&job=nightly");
+    act(() => {
+      set({ environment: "prod" });
+      set({ status: "failed" });
+    });
+    expect(result.current.location.search).toBe(
+      "?trigger=schedule&period=7d&job=nightly&environment=prod&status=failed",
+    );
+    // Each was a step of its own.
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe(
+      "?trigger=schedule&period=7d&job=nightly&environment=prod",
+    );
+  });
+
+  it("an environment and another filter changed at once are one step", () => {
+    const { result } = renderFilter("/jobs/runs?status=failed");
+
+    act(() => {
+      result.current.filter.set({ environment: "prod", trigger: "manual" });
+    });
+    expect(result.current.location.search).toBe("?status=failed&environment=prod&trigger=manual");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("?status=failed");
+  });
+
   it("a choice of environment writes the shared filter", () => {
     const { result } = renderFilter("/jobs/runs?status=failed");
 

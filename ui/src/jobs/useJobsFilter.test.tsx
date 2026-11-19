@@ -68,7 +68,15 @@ describe("useJobsFilter", () => {
     });
     expect(result.current.filter.environment).toBeNull();
     expect(result.current.location.search).toBe("?q=sales");
-    expect(window.localStorage.getItem("lakana.jobs.environment")).toBeNull();
+    // All environments is remembered as a choice of its own, so it sticks across the tabs.
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
+  });
+
+  it("a remembered all is all environments on the lists", () => {
+    window.localStorage.setItem("lakana.jobs.environment", "all");
+
+    expect(renderFilter("/jobs").result.current.filter.environment).toBeNull();
+    expect(renderFilter("/jobs/deploys").result.current.filter.environment).toBeNull();
   });
 
   it("the search is in the address", () => {
@@ -117,7 +125,7 @@ describe("useJobsFilter", () => {
     expect(result.current.filter.environment).toBe(after);
   });
 
-  it("on the Runs tab the address alone holds the environment: none is all, even with one remembered", () => {
+  it("on the Runs tab, after it opened, the address alone holds the environment: none is all", () => {
     window.localStorage.setItem("lakana.jobs.environment", "dev");
     const { result } = renderHook(
       () => ({
@@ -150,11 +158,116 @@ describe("useJobsFilter", () => {
     });
     expect(result.current.location.search).toBe("");
     expect(result.current.filter.environment).toBeNull();
-    expect(window.localStorage.getItem("lakana.jobs.environment")).toBeNull();
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
     act(() => {
       void result.current.navigate(-1);
     });
     expect(result.current.filter.environment).toBe("prod");
+  });
+
+  /**
+   * Renders the Runs tab's filter at `/jobs/runs…`, opened from `/home`.
+   *
+   * @param path - The tab's address.
+   * @param listed - The listed environments; "reading" while they are read.
+   * @returns The hook's result.
+   */
+  function renderRunsTab(path: string, listed: readonly EnvironmentChoice[] | "reading" = LISTED) {
+    return renderHook(
+      ({ environments }) => ({
+        filter: useJobsFilter(environments, "push"),
+        location: useLocation(),
+        navigate: useNavigate(),
+      }),
+      {
+        initialProps: { environments: listed === "reading" ? undefined : listed },
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <MemoryRouter initialEntries={["/home", path]} initialIndex={1}>
+            {children}
+          </MemoryRouter>
+        ),
+      },
+    );
+  }
+
+  it("the Runs tab opens on the remembered environment, replacing the address", () => {
+    window.localStorage.setItem("lakana.jobs.environment", "prod");
+    const { result, rerender } = renderRunsTab("/jobs/runs?status=failed", "reading");
+
+    // While the environments are read, none is chosen and the address waits.
+    expect(result.current.filter.environment).toBeNull();
+    expect(result.current.location.search).toBe("?status=failed");
+    rerender({ environments: LISTED });
+    expect(result.current.location.search).toBe("?status=failed&environment=prod");
+    expect(result.current.filter.environment).toBe("prod");
+    // No entry was added: Back leaves the tab.
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.pathname).toBe("/home");
+  });
+
+  it.each([
+    ["nothing remembered", null],
+    ["all remembered", "all"],
+    ["a remembered environment no longer listed", "staging"],
+  ])("the Runs tab opens on all environments with %s", (_, remembered) => {
+    if (remembered !== null) {
+      window.localStorage.setItem("lakana.jobs.environment", remembered);
+    }
+    const { result } = renderRunsTab("/jobs/runs");
+
+    expect(result.current.location.search).toBe("");
+    expect(result.current.filter.environment).toBeNull();
+  });
+
+  it("the address's environment wins over the remembered one on the Runs tab", () => {
+    window.localStorage.setItem("lakana.jobs.environment", "prod");
+    const { result } = renderRunsTab("/jobs/runs?environment=dev");
+
+    expect(result.current.location.search).toBe("?environment=dev");
+    expect(result.current.filter.environment).toBe("dev");
+  });
+
+  it("Back after a choice on the Runs tab restores the environment before it", () => {
+    window.localStorage.setItem("lakana.jobs.environment", "prod");
+    const { result } = renderRunsTab("/jobs/runs");
+
+    expect(result.current.filter.environment).toBe("prod");
+    act(() => {
+      result.current.filter.setEnvironment("dev");
+    });
+    expect(result.current.location.search).toBe("?environment=dev");
+    act(() => {
+      result.current.filter.setEnvironment(null);
+    });
+    expect(result.current.location.search).toBe("");
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
+
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.filter.environment).toBe("dev");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("?environment=prod");
+    expect(result.current.filter.environment).toBe("prod");
+  });
+
+  it("Back to the tab's first address without an environment stays on all", () => {
+    const { result } = renderRunsTab("/jobs/runs");
+
+    act(() => {
+      result.current.filter.setEnvironment("prod");
+    });
+    expect(result.current.filter.environment).toBe("prod");
+    // This browser now remembers prod, but the address Back returns to named none.
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("");
+    expect(result.current.filter.environment).toBeNull();
   });
 });
 
