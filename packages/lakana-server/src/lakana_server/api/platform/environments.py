@@ -538,6 +538,9 @@ def delete_orphaned_locations(
 ) -> OrphanedLocationsOut:
     """Delete table directories without a location record.
 
+    From the web interface it needs a passkey touch within the last 15 minutes (403
+    `StepUpRequired`); a token never does.
+
     Deletes the directories that older releases left under the environment's storage and
     whose files are older than `older_than_days`. Needs `MANAGE_ENVIRONMENT` on the
     instance. Answers 404 when there is no such environment, 422 when `older_than_days` is
@@ -571,6 +574,8 @@ def delete_orphaned_locations(
         The storage refused the environment's credentials; mapped to 502.
     lakana_core.errors.StorageUnavailableError
         The storage did not answer; mapped to 503.
+    lakana_core.errors.StepUpRequired
+        From a browser whose last passkey touch is older than 15 minutes; mapped to 403.
     """
     report = catalog.delete_orphaned_locations(
         principal, name, older_than_days=body.older_than_days

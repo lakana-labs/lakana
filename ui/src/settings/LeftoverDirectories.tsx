@@ -4,8 +4,10 @@
  * instance.
  *
  * @remarks
- * It loads on its own, inside a live environment's page. Neither the search nor the deletion
- * asks for a passkey touch, as the server asks for none; a recent directory is never offered.
+ * It loads on its own, inside a live environment's page. The search asks for no passkey touch;
+ * the deletion (Delete them, Continue and its Try again) asks for one first when the last is
+ * old, as the server does, since the files cannot be restored. A recent directory is never
+ * offered.
  * @packageDocumentation
  */
 import { type JSX, useEffect, useState } from "react";
