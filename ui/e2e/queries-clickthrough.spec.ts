@@ -266,12 +266,18 @@ test.describe("the Queries screen, checked by clicking through", () => {
     await choose(page, "dev");
     await writeSql(page, editor, "SELECT * FROM ");
     await page.keyboard.type("silver.");
+    // An option is taken with a click once it is selected: the editor ignores Enter for 75 ms
+    // after the list opens or changes (CodeMirror's interactionDelay, against a key pressed for
+    // the list before it), and a key that fast is then a new line instead.
     const list = page.locator(".cm-tooltip-autocomplete");
-    await expect(list.getByRole("option", { name: TABLE.name })).toBeVisible();
-    await page.keyboard.press("Enter");
+    const table = list.getByRole("option", { name: TABLE.name });
+    await expect(table).toHaveAttribute("aria-selected", "true");
+    await table.click();
+    await expect(list).toHaveCount(0);
     await page.keyboard.type(" t WHERE t.avg");
-    await expect(list.getByRole("option", { name: new RegExp(COLUMN.name, "u") })).toBeVisible();
-    await page.keyboard.press("Enter");
+    const column = list.getByRole("option", { name: new RegExp(COLUMN.name, "u") });
+    await expect(column).toHaveAttribute("aria-selected", "true");
+    await column.click();
     await expect(page.locator(".cm-content")).toHaveText(
       `SELECT * FROM silver.${TABLE.name} t WHERE t.${COLUMN.name}`,
     );
