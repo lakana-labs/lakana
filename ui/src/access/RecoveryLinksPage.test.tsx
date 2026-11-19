@@ -1,9 +1,10 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { freshSession } from "../test/access";
+import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
+import { fakeWebAuthn } from "../test/webauthn";
 
 const OPEN = {
   id: "r-1",
@@ -32,7 +33,124 @@ function principal(name: string, heldAdmin: boolean): { status: number; body: un
   };
 }
 
+/**
+ * Opens Issue a recovery link, types the name and continues.
+ *
+ * @param user - The user-event session.
+ * @param name - The name to type.
+ */
+async function issueFor(user: ReturnType<typeof renderShell>["user"], name: string): Promise<void> {
+  await user.click(await screen.findByRole("button", { name: "Issue a recovery link" }));
+  await user.type(screen.getByRole("textbox", { name: "Name" }), name);
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+}
+
 describe("RecoveryLinksPage", () => {
+  it("keeps names whole in their own region", async () => {
+    const long = "k".repeat(300);
+    renderShell("/settings/sign-in/recovery-links", {
+      routes: { "GET /api/v1/recovery-links": { status: 200, body: [{ ...OPEN, name: long }] } },
+    });
+
+    const region = await screen.findByRole("region", { name: "Open recovery links" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toHaveClass("list-scroll", "recovery-scroll");
+    const names = region.querySelectorAll(".row-name");
+    expect(names).toHaveLength(1);
+    expect(names[0]?.tagName).toBe("A");
+    expect(within(region).getByRole("link", { name: long })).toHaveAttribute(
+      "href",
+      `/settings/access/people/${long}`,
+    );
+    expect(within(region).getByText("›")).toBeInTheDocument();
+  });
+
+  it("asks for the touch before issuing", async () => {
+    const webauthn = fakeWebAuthn();
+    const { user, server } = renderShell("/settings/sign-in/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": { status: 200, body: [] },
+        "GET /api/v1/principals/sam": principal("sam", false),
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        ...STEP_UP_ROUTES,
+        "POST /api/v1/principals/sam/recovery-link": { status: 201, body: ISSUED },
+      },
+    });
+    await screen.findByText(/No recovery link is open/);
+    const from = server.sent.length;
+
+    await issueFor(user, "sam");
+
+    expect(await screen.findByRole("dialog", { name: "Send this link to sam" })).toBeVisible();
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
+    expect(server.sent.slice(from).map((request) => `${request.method} ${request.path}`)).toEqual([
+      "GET /api/v1/principals/sam",
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      "POST /api/v1/principals/sam/recovery-link",
+    ]);
+  });
+
+  it("a cancelled touch issues nothing", async () => {
+    const webauthn = fakeWebAuthn();
+    webauthn.get.mockRejectedValue(new DOMException("Cancelled.", "NotAllowedError"));
+    const { user, server } = renderShell("/settings/sign-in/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": { status: 200, body: [] },
+        "GET /api/v1/principals/sam": principal("sam", false),
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        ...STEP_UP_ROUTES,
+        "POST /api/v1/principals/sam/recovery-link": { status: 201, body: ISSUED },
+      },
+    });
+    await screen.findByText(/No recovery link is open/);
+
+    await issueFor(user, "sam");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/cancelled or took too long/);
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("sam");
+    expect(server.sent.some((request) => request.path.endsWith("/recovery-link"))).toBe(false);
+  });
+
+  it("returns the focus to Issue a recovery link after Done", async () => {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": { status: 200, body: [] },
+        "GET /api/v1/principals/sam": principal("sam", false),
+        "GET /api/v1/sign-in/session": freshSession(),
+        "POST /api/v1/principals/sam/recovery-link": { status: 201, body: ISSUED },
+      },
+    });
+    await screen.findByText(/No recovery link is open/);
+
+    await issueFor(user, "sam");
+    const shown = await screen.findByRole("dialog", { name: "Send this link to sam" });
+    await user.click(within(shown).getByRole("button", { name: "Done" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Issue a recovery link" })).toHaveFocus();
+    });
+    expect(screen.queryByText(ISSUED.url)).not.toBeInTheDocument();
+  });
+
+  it("returns the focus to Issue a recovery link after the operator's command", async () => {
+    const { user } = renderShell("/settings/sign-in/recovery-links", {
+      routes: {
+        "GET /api/v1/recovery-links": { status: 200, body: [] },
+        "GET /api/v1/principals/ada": principal("ada", true),
+      },
+    });
+    await screen.findByText(/No recovery link is open/);
+
+    await issueFor(user, "ada");
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Issue a recovery link" })).toHaveFocus();
+    });
+  });
+
   it("lists the open links; each row opens its person", async () => {
     const { user, router } = renderShell("/settings/sign-in/recovery-links", {
       routes: {

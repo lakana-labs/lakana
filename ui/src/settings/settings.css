@@ -114,6 +114,18 @@
   outline-offset: var(--focus-offset);
 }
 
+/* Settings › Sign-in › Invites and Recovery links: each list scrolls in its own region at 320 px,
+   and a name stays whole. */
+.list-scroll.invites-scroll .list,
+.list-scroll.recovery-scroll .list {
+  min-width: 560px;
+}
+
+.list-scroll.invites-scroll .row-name,
+.list-scroll.recovery-scroll .row-name {
+  overflow-wrap: normal;
+}
+
 /* A page's facts as name and value (a repository's, an environment's). */
 .settings-facts {
   display: grid;

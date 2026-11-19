@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { freshSession } from "../test/access";
+import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -21,7 +21,163 @@ const ISSUED = {
   expires_at: "2026-11-15T10:00:00Z",
 };
 
+/**
+ * Opens Invite someone, types the name and creates the invite.
+ *
+ * @param user - The user-event session.
+ * @param name - The name to type.
+ */
+async function createInviteFor(
+  user: ReturnType<typeof renderShell>["user"],
+  name: string,
+): Promise<void> {
+  await user.click(await screen.findByRole("button", { name: "Invite someone" }));
+  const dialog = screen.getByRole("dialog", { name: "Invite someone" });
+  await user.type(within(dialog).getByRole("textbox", { name: "Name" }), name);
+  await user.click(within(dialog).getByRole("button", { name: "Create the invite" }));
+}
+
 describe("InvitesPage", () => {
+  it("keeps names whole in their own region", async () => {
+    const long = "k".repeat(300);
+    renderShell("/settings/sign-in/invites", {
+      routes: { "GET /api/v1/invites": { status: 200, body: [{ ...OPEN, name: long }] } },
+    });
+
+    const region = await screen.findByRole("region", { name: "Open invites" });
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toHaveClass("list-scroll", "invites-scroll");
+    expect(within(region).getByRole("table")).toHaveClass("list", "list-static");
+    const names = region.querySelectorAll(".row-name");
+    expect(names).toHaveLength(1);
+    expect(names[0]?.tagName).toBe("SPAN");
+    expect(names[0]).toHaveTextContent(long);
+    expect(within(region).queryByRole("link")).not.toBeInTheDocument();
+    expect(within(region).getByText("Kim Lee")).toHaveClass("second");
+  });
+
+  it("asks for the touch before creating the invite", async () => {
+    const webauthn = fakeWebAuthn();
+    const { user, server } = renderShell("/settings/sign-in/invites", {
+      routes: {
+        "GET /api/v1/invites": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        ...STEP_UP_ROUTES,
+        "POST /api/v1/invites": { status: 201, body: { ...ISSUED, name: "kim" } },
+      },
+    });
+    await screen.findByText(/No invite is open/);
+    const from = server.sent.length;
+
+    await createInviteFor(user, "kim");
+
+    const shown = await screen.findByRole("dialog", { name: "Send this link to kim" });
+    expect(within(shown).getByText(ISSUED.url)).toBeInTheDocument();
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
+    const writes = server.sent
+      .slice(from)
+      .filter((request) => request.path !== "/api/v1/invites" || request.method !== "GET");
+    expect(writes.map((request) => `${request.method} ${request.path}`)).toEqual([
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      "POST /api/v1/invites",
+    ]);
+    expect(writes.at(-1)?.body).toEqual({ name: "kim", display_name: null });
+  });
+
+  it("a cancelled touch creates nothing and keeps the name", async () => {
+    const webauthn = fakeWebAuthn();
+    webauthn.get.mockRejectedValue(new DOMException("Cancelled.", "NotAllowedError"));
+    const { user, server } = renderShell("/settings/sign-in/invites", {
+      routes: {
+        "GET /api/v1/invites": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        ...STEP_UP_ROUTES,
+        "POST /api/v1/invites": { status: 201, body: ISSUED },
+      },
+    });
+    await screen.findByText(/No invite is open/);
+
+    await createInviteFor(user, "kim");
+
+    const dialog = screen.getByRole("dialog", { name: "Invite someone" });
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+      "The passkey request was cancelled or took too long.",
+    );
+    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("kim");
+    expect(
+      server.sent.some(
+        (request) => request.method === "POST" && request.path === "/api/v1/invites",
+      ),
+    ).toBe(false);
+  });
+
+  it.each(["Done", "Escape"])("returns the focus to Invite someone after %s", async (how) => {
+    const { user } = renderShell("/settings/sign-in/invites", {
+      routes: {
+        "GET /api/v1/invites": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
+        "POST /api/v1/invites": { status: 201, body: ISSUED },
+      },
+    });
+    await screen.findByText(/No invite is open/);
+
+    await createInviteFor(user, "sam");
+    const shown = await screen.findByRole("dialog", { name: "Send this link to sam" });
+    if (how === "Done") {
+      await user.click(within(shown).getByRole("button", { name: "Done" }));
+    } else {
+      await user.keyboard("{Escape}");
+    }
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Invite someone" })).toHaveFocus();
+    });
+    expect(screen.queryByText(ISSUED.url)).not.toBeInTheDocument();
+  });
+
+  it("returns the focus to Invite someone after Cancel", async () => {
+    const { user } = renderShell("/settings/sign-in/invites", {
+      routes: { "GET /api/v1/invites": { status: 200, body: [] } },
+    });
+    await user.click(await screen.findByRole("button", { name: "Invite someone" }));
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Invite someone" })).toHaveFocus();
+    });
+  });
+
+  it("withdraws without a touch, and the focus goes to the heading when the last invite goes", async () => {
+    let open: unknown[] = [OPEN];
+    const { user, server } = renderShell("/settings/sign-in/invites", {
+      routes: {
+        "GET /api/v1/invites": () => ({ status: 200, body: open }),
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        "DELETE /api/v1/invites/i-1": () => {
+          open = [];
+          return { status: 204 };
+        },
+      },
+    });
+    const withdraw = await screen.findByRole("button", { name: "Withdraw the invite of kim" });
+    const from = server.sent.length;
+
+    await user.click(withdraw);
+
+    expect(await screen.findByText(/No invite is open/)).toBeInTheDocument();
+    expect(server.sent[from]).toMatchObject({ method: "DELETE", path: "/api/v1/invites/i-1" });
+    expect(server.sent.some((request) => request.path === "/api/v1/sign-in/session")).toBe(false);
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1, name: "Invites" })).toHaveFocus();
+    });
+  });
+
   it("lists the open invites; each row is withdrawn in place, not opened", async () => {
     renderShell("/settings/sign-in/invites", {
       routes: { "GET /api/v1/invites": { status: 200, body: [OPEN] } },
