@@ -46,6 +46,7 @@ import { EnvironmentUsage } from "./EnvironmentUsage";
 import { managesEnvironment, mayCreateEnvironments } from "./places";
 import "./settingsStrings";
 import { storageSummary } from "./storageSummary";
+import { useLeave } from "./useLeave";
 import { useSettingsViewer } from "./viewer";
 
 const P = "settings.environmentPage";
@@ -356,6 +357,7 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
   const close = (): void => {
     setOpen(null);
   };
+  const leave = useLeave(close);
   const protectedAgain = (): void => {
     armProtect();
     read.reload();
@@ -444,7 +446,11 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
             )}
             {open === "delete" && (
               <Suspense fallback={null}>
-                <DeleteEnvironmentDialog environment={environment} onClose={close} />
+                <DeleteEnvironmentDialog
+                  environment={environment}
+                  onClose={close}
+                  onLeave={leave}
+                />
               </Suspense>
             )}
             {(open === "retention" || open === "storage") && (

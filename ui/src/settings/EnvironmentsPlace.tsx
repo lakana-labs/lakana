@@ -12,7 +12,6 @@ import {
   Suspense,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -41,6 +40,7 @@ import { managesEnvironment, mayCreateEnvironments, type SettingsViewer } from "
 import { SettingsFrame } from "./SettingsFrame";
 import "./settingsStrings";
 import { storageSummary } from "./storageSummary";
+import { useLeave } from "./useLeave";
 import { useSettingsViewer } from "./viewer";
 import { useWholePages } from "./wholePages";
 
@@ -263,7 +263,7 @@ export function EnvironmentsPlace(): JSX.Element {
   const viewer = useSettingsViewer();
   const creates = mayCreateEnvironments(viewer) === true;
   // The place is shown once the facts are read, so the managed environments are known.
-  const managesAny = (viewer.managedEnvironments as readonly string[]).length > 0;
+  const managesAny = creates || (viewer.managedEnvironments as readonly string[]).length > 0;
   const heading = useRef<HTMLHeadingElement>(null);
   const read = useResource(listEnvironmentsFull);
   const loadDeleted = useCallback(
@@ -272,6 +272,10 @@ export function EnvironmentsPlace(): JSX.Element {
   );
   const deleted = useResource(loadDeleted);
   const [creating, setCreating] = useState(false);
+  const closeCreate = (): void => {
+    setCreating(false);
+  };
+  const leave = useLeave(closeCreate);
   const arrived = (useLocation().state as Partial<DeletedState> | null)?.deleted;
   const [note, setNote] = useState<string | null>(() =>
     arrived === undefined
@@ -281,10 +285,6 @@ export function EnvironmentsPlace(): JSX.Element {
         : t(`${P}.deletedKept`, { name: arrived.name, when: when(arrived.restorableUntil) }),
   );
   const focus = useRef<FocusTarget | null>(null);
-  // After a deletion the dialog's page is gone: the focus starts on the place's heading.
-  useLayoutEffect(() => {
-    if (arrived !== undefined) heading.current?.focus();
-  }, [arrived]);
   useEffect(() => {
     const target = focus.current;
     if (target === null || (target.link === null ? deleted.data : read.data) === target.before) {
@@ -325,11 +325,7 @@ export function EnvironmentsPlace(): JSX.Element {
     >
       {creating && (
         <Suspense fallback={null}>
-          <CreateEnvironmentDialog
-            onClose={() => {
-              setCreating(false);
-            }}
-          />
+          <CreateEnvironmentDialog onClose={closeCreate} onLeave={leave} />
         </Suspense>
       )}
       <p className="page-purpose">{t(`${P}.intro`)}</p>

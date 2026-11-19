@@ -27,7 +27,7 @@ import {
   TextField,
 } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
+import type { NavigateOptions } from "react-router";
 
 import {
   changeStorage,
@@ -90,6 +90,8 @@ function nameProblem(name: string): string | null {
 export interface CreateEnvironmentDialogProps {
   /** Closes the dialog without a change. */
   readonly onClose: () => void;
+  /** Closes the dialog and goes to the address (`useLeave`). */
+  readonly onLeave: (to: string, options: NavigateOptions) => void;
 }
 
 /**
@@ -97,13 +99,16 @@ export interface CreateEnvironmentDialogProps {
  * It asks for the passkey touch first when the last one is old, and goes to the new
  * environment's page; the server's refusal stays here with every field kept.
  *
- * @param props - The close handler.
+ * @param props - The handlers.
  * @param props.onClose - Closes the dialog.
+ * @param props.onLeave - Closes the dialog and goes to the new environment's page.
  * @returns The dialog.
  */
-export function CreateEnvironmentDialog({ onClose }: CreateEnvironmentDialogProps): JSX.Element {
+export function CreateEnvironmentDialog({
+  onClose,
+  onLeave,
+}: CreateEnvironmentDialogProps): JSX.Element {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const attempt = useAttempt();
   const inputs = useValueInputs();
   const [name, setName] = useState("");
@@ -132,7 +137,7 @@ export function CreateEnvironmentDialog({ onClose }: CreateEnvironmentDialogProp
               is_protected: isProtected,
             });
             const state: CreatedState = { created: true };
-            await navigate(environmentPath(created), { state });
+            onLeave(environmentPath(created), { state });
           });
         }}
       >
@@ -503,6 +508,8 @@ export interface DeleteEnvironmentDialogProps {
   readonly environment: EnvironmentOut;
   /** Closes the dialog without a change. */
   readonly onClose: () => void;
+  /** Closes the dialog and goes to the address (`useLeave`). */
+  readonly onLeave: (to: string, options: NavigateOptions) => void;
 }
 
 /**
@@ -511,17 +518,18 @@ export interface DeleteEnvironmentDialogProps {
  * it cannot be restored then). Success goes to the list, which says what became of it; the
  * server's refusal (a repository still deployed) stays here.
  *
- * @param props - The environment and the close handler.
+ * @param props - The environment and the handlers.
  * @param props.environment - The environment.
  * @param props.onClose - Closes the dialog.
+ * @param props.onLeave - Closes the dialog and goes to the list.
  * @returns The dialog.
  */
 export function DeleteEnvironmentDialog({
   environment,
   onClose,
+  onLeave,
 }: DeleteEnvironmentDialogProps): JSX.Element {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const attempt = useAttempt();
   const [typed, setTyped] = useState("");
   const [purge, setPurge] = useState(false);
@@ -539,7 +547,7 @@ export function DeleteEnvironmentDialog({
             restorableUntil: purge ? null : deleted.purge_after,
           },
         };
-        await navigate(ENVIRONMENTS_PATH, { replace: true, state });
+        onLeave(ENVIRONMENTS_PATH, { replace: true, state });
       });
     },
   });

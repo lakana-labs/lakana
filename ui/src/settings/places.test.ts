@@ -140,6 +140,7 @@ describe("places", () => {
     expect(managesEnvironment(mara, "dev")).toBe(true);
     expect(managesEnvironment(mara, "prod")).toBe(false);
     expect(managesEnvironment({ ...KIM, managedEnvironments: null }, "dev")).toBe(false);
+    expect(managesEnvironment({ ...ADMIN, managedEnvironments: [] }, "staging")).toBe(true);
   });
 
   it("says who manages repositories, and nothing before it is read", () => {

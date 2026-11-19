@@ -53,7 +53,7 @@ async function openStorage(
       ...routes,
     },
   });
-  await shell.user.click(await screen.findByRole("button", { name: "Change the storage of dev" }));
+  await shell.user.click(await screen.findByRole("button", { name: "Change storage of dev" }));
   return { ...shell, dialog: await screen.findByRole("dialog") };
 }
 
@@ -91,7 +91,7 @@ describe("Change storage", () => {
     });
     expect(patches(shell)).toEqual([[{ secret_ref: "corp-s3" }, "/api/v1/sign-in/session"]]);
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Change the storage of dev" })).toHaveFocus();
+      expect(screen.getByRole("button", { name: "Change storage of dev" })).toHaveFocus();
     });
   });
 
@@ -260,8 +260,6 @@ describe("Change storage", () => {
         "The storage of a protected environment cannot be changed. Unprotect it first.",
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Change the storage of dev" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Change storage of dev" })).not.toBeInTheDocument();
   });
 });

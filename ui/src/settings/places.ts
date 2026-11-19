@@ -55,7 +55,8 @@ export function mayCreateEnvironments(viewer: SettingsViewer): boolean | null {
 }
 
 /**
- * Whether the person manages one environment (`MANAGE_ENVIRONMENT` on it): its usage,
+ * Whether the person manages one environment (`MANAGE_ENVIRONMENT` on it, or on the instance,
+ * which covers every environment, one created since the viewer was read too): its usage,
  * retention, deletion and restore.
  *
  * @param viewer - What the rules know about the person.
@@ -63,7 +64,9 @@ export function mayCreateEnvironments(viewer: SettingsViewer): boolean | null {
  * @returns The answer; no while not read yet.
  */
 export function managesEnvironment(viewer: SettingsViewer, name: string): boolean {
-  return viewer.managedEnvironments?.includes(name) ?? false;
+  return (
+    mayCreateEnvironments(viewer) === true || (viewer.managedEnvironments?.includes(name) ?? false)
+  );
 }
 
 /**
