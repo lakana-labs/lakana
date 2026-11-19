@@ -21,6 +21,7 @@ import { useResource } from "../shell/useResource";
 import { ConnectionFacts } from "./ConnectionFacts";
 import { ConnectionNote, pageNote } from "./ConnectionNote";
 import { DeleteConnectionDialog } from "./DeleteConnectionDialog";
+import { readProtected } from "./environments";
 import { LastTest } from "./LastTest";
 import { CONNECTIONS_PATH, editPath } from "./paths";
 import { TestButton } from "./TestButton";
@@ -58,6 +59,9 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
   const now = useNow();
   const load = useCallback(() => getConnection(environment, name), [environment, name]);
   const resource = useResource(load);
+  // Whether its environment is protected, for the label's mark; plain until it is known, and
+  // plain when it cannot be read: the page is the connection's, and reads it either way.
+  const protectedNames = useResource(readProtected).data;
   // The latest read of the follower, or of a Test, over the first read.
   const [answer, setAnswer] = useState<ConnectionOut | null>(null);
   const connection = answer ?? resource.data;
@@ -119,7 +123,10 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
       trail={trail}
       action={
         <div className="connection-actions">
-          <EnvironmentLabel environment={environment} />
+          <EnvironmentLabel
+            environment={environment}
+            protected={protectedNames?.has(environment) === true}
+          />
           {connection.actions.includes("test") && (
             <TestButton
               connection={connection}

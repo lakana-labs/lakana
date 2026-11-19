@@ -8,6 +8,7 @@ import {
   createEnvironment,
   grantOn,
   invitedPerson,
+  queryStatus,
   savedQueriesAs,
   skipTheWelcome,
   startWorker,
@@ -301,4 +302,40 @@ test("an administrator sees another's private saved query without its SQL and de
     page.getByRole("region", { name: "Saved queries" }).getByRole("link", { name }),
   ).toHaveCount(0);
   expect(await savedQueriesAs(author.page, environment)).toEqual({ status: 200, names: [] });
+});
+
+test("a long query goes on while the page is left, shows as running in Recent, and Cancel there stops it", async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const environment = uniqueName("long");
+  await createEnvironment(request, environment);
+  const page = await administrator(browser, request);
+  const id = await run(page, environment, "SELECT sum(n) FROM range(100000000000) t(n)");
+  await expect(page.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+  await expect(page.locator(".queries-run-line")).toHaveText(/Running/u, { timeout: 30_000 });
+
+  // Leaving the page does not cancel: Recent lists the run as running.
+  await page.getByRole("navigation", { name: "Areas" }).getByRole("link", { name: "Home" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Areas" })
+    .getByRole("link", { name: "Queries" })
+    .click();
+  const recent = page.getByRole("region", { name: "Recent queries" });
+  const row = recent
+    .getByRole("row")
+    .filter({ has: page.locator(`a[href$="/queries/${environment}/runs/${id}"]`) });
+  await expect(row).toContainText("Running");
+  await row.getByRole("link").click();
+  await expect(page).toHaveURL(new RegExp(`/queries/${environment}/runs/${id}$`, "u"));
+  await expect(page.locator(".queries-run-line")).toHaveText(/Running/u);
+
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("The query was cancelled.", {
+    timeout: 30_000,
+  });
+  await expect(page.getByRole("button", { name: "Run" })).toBeFocused();
+  expect(await queryStatus(request, environment, id)).toBe("CANCELLED");
 });

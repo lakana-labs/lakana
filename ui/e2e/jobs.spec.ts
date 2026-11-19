@@ -701,6 +701,128 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.getByRole("button", { name: ROLL_BACK })).toBeVisible();
       });
 
+      test("Back undoes the Runs tab's filters one at a time and stays on the tab; typing a job is one step", async ({
+        page,
+      }) => {
+        await page.goto("/jobs");
+        await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+        await page
+          .getByRole("navigation", { name: "Jobs views" })
+          .getByRole("link", { name: "Runs" })
+          .click();
+        await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+        const listed = page.getByRole("region", { name: "Runs listed" });
+        const devRun = listed.locator(".env-label").filter({ hasText: DEV });
+        await expect(devRun.first()).toBeVisible();
+
+        // Back undoes an environment chosen, though this browser remembers it for the next visit.
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: /prod/u }).click();
+        await expect(page).toHaveURL(new RegExp(`/jobs/runs\\?environment=${ENV}$`, "u"));
+        await expect(
+          page.getByRole("button", { name: `Environment: ${ENV}, protected` }),
+        ).toBeVisible();
+        await expect(devRun).toHaveCount(0);
+        await page.goBack();
+        await expect(page).toHaveURL(/\/jobs\/runs$/u);
+        await expect(
+          page.getByRole("button", { name: "Environment: All environments" }),
+        ).toBeVisible();
+        await expect(devRun.first()).toBeVisible();
+
+        // Each change goes straight on to the next, without waiting for the list (#744). The
+        // Period is chosen and the job typed in one task of the page, before the address the
+        // Period led to renders: both reach the address.
+        await page.getByRole("button", { name: /Trigger/ }).click();
+        await page.getByRole("option", { name: "Schedule" }).click();
+        await page.getByRole("button", { name: /Period/ }).click();
+        await page.getByRole("option", { name: "Last 7 days" }).waitFor();
+        await page.evaluate(() => {
+          const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find(
+            (element) => element.textContent.includes("Last 7 days"),
+          );
+          option?.click();
+          const field = document.querySelector<HTMLInputElement>(".jobs-job-field input");
+          if (field !== null) {
+            // Key by key, as a person types.
+            for (let end = 1; end <= "nightly".length; end += 1) {
+              // The prototype's setter, so that React sees the value change.
+              Reflect.set(HTMLInputElement.prototype, "value", "nightly".slice(0, end), field);
+              field.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+            field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+          }
+        });
+        const job = page.getByRole("textbox", { name: "Job" });
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d&job=nightly$/u);
+
+        // The job's name typed key by key is one step back, not seven.
+        await page.goBack();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d$/u);
+        await expect(job).toHaveValue("");
+        await page.goBack();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule$/u);
+        await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+        await expect(page.getByRole("button", { name: /Trigger/ })).toContainText("Schedule");
+        await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 30 days");
+        await page.goForward();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d$/u);
+        await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 7 days");
+      });
+
+      test("the Runs tab opens on the environment chosen on the Jobs list, and Back undoes a change of it", async ({
+        page,
+      }) => {
+        await page.goto("/jobs");
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: /prod/u }).click();
+        await expect(page).toHaveURL(/\/jobs\?environment=prod$/u);
+        // The list opens on the remembered environment without naming it in the address.
+        await page.goto("/jobs");
+        await expect(
+          page.getByRole("button", { name: `Environment: ${ENV}, protected` }),
+        ).toBeVisible();
+        await expect(page).toHaveURL(/\/jobs$/u);
+
+        const tabs = page.getByRole("navigation", { name: "Jobs views" });
+        await tabs.getByRole("link", { name: "Runs" }).click();
+        await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+        await expect(page).toHaveURL(new RegExp(`/jobs/runs\\?environment=${ENV}$`, "u"));
+        await expect(
+          page.getByRole("button", { name: `Environment: ${ENV}, protected` }),
+        ).toBeVisible();
+        const listed = page.getByRole("region", { name: "Runs listed" });
+        await expect(listed.locator(".env-label").filter({ hasText: DEV })).toHaveCount(0);
+
+        // A change of environment is a step of its own: Back restores the one before it.
+        await page.getByRole("button", { name: `Environment: ${ENV}, protected` }).click();
+        await page.getByRole("option", { name: "All environments" }).click();
+        await expect(page).toHaveURL(/\/jobs\/runs$/u);
+        await page.goBack();
+        await expect(page).toHaveURL(new RegExp(`/jobs/runs\\?environment=${ENV}$`, "u"));
+        await expect(
+          page.getByRole("button", { name: `Environment: ${ENV}, protected` }),
+        ).toBeVisible();
+        // The address the tab took added no step: Back again returns to the list.
+        await page.goBack();
+        await expect(page).toHaveURL(/\/jobs$/u);
+        await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+
+        // All environments, chosen once, sticks across the tabs.
+        await page.goForward();
+        await page.goForward();
+        await expect(page).toHaveURL(/\/jobs\/runs$/u);
+        await page.goto("/jobs/runs");
+        await expect(
+          page.getByRole("button", { name: "Environment: All environments" }),
+        ).toBeVisible();
+        await expect(page).toHaveURL(/\/jobs\/runs$/u);
+        await page.goto("/jobs");
+        await expect(
+          page.getByRole("button", { name: "Environment: All environments" }),
+        ).toBeVisible();
+      });
+
       test("a resume opens the run it continues, and the tab offers no start", async ({ page }) => {
         await openRuns(page);
         await page.getByRole("button", { name: "Show more" }).click();

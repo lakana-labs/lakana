@@ -142,14 +142,17 @@ describe("TestButton", () => {
   });
 
   it("is enabled again for a test open for ten minutes, so Test again can close it", () => {
+    // One reading of the clock: two would differ by a millisecond on a slow runner, and the
+    // test would be a millisecond short of ten minutes.
+    const at = Date.now();
     render(
       <TestButton
-        at={Date.now()}
+        at={at}
         connection={aConnection({
           last_test: {
             ...QUEUED,
             state: "running",
-            created_at: new Date(Date.now() - STUCK_AFTER_MS).toISOString(),
+            created_at: new Date(at - STUCK_AFTER_MS).toISOString(),
           } as const,
         })}
         onStarted={() => undefined}

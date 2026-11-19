@@ -205,6 +205,53 @@ test("an administrator adds a postgresql connection with a password, and the val
   await page.context().close();
 });
 
+test("a protected environment is marked in the filter, its list, the rows and the page", async ({
+  browser,
+  browserName,
+  request,
+}) => {
+  test.skip(browserName !== "chromium", "the virtual authenticator is CDP");
+  test.setTimeout(120_000);
+  const prod = uniqueName("prod46");
+  const qa = uniqueName("qa46");
+  const name = uniqueName("lake");
+  await createEnvironment(request, prod, { protected: true });
+  await createEnvironment(request, qa);
+  for (const environment of [prod, qa]) {
+    await createConnection(request, environment, {
+      name,
+      kind: "directory",
+      address: { root: "landing", path: "orders" },
+      settings: {},
+    });
+  }
+  const { page } = await invitedPerson(browser, request, async (person) => {
+    await grantOn(request, person, "READ_ENVIRONMENT", prod);
+    await grantOn(request, person, "READ_ENVIRONMENT", qa);
+  });
+  await skipTheWelcome(page);
+
+  await page.goto("/connections");
+  await expect(page.getByRole("link", { name, exact: true })).toHaveCount(2);
+  await page.getByRole("button", { name: "Environment: All environments" }).click();
+  const option = page.getByRole("option", { name: new RegExp(prod, "u") });
+  await expect(option).toHaveText(`● ${prod} · protected`);
+  await expect(option.locator(".env-protected").filter({ hasText: "protected" })).toBeVisible();
+  await expect(page.getByRole("option", { name: qa, exact: true })).toHaveText(qa);
+  await option.click();
+  const filter = page.getByRole("button", { name: `Environment: ${prod}, protected` });
+  await expect(filter).toContainText(`● ${prod} · protected`);
+  await expect(rowOf(page, name)).toContainText(`● ${prod} · protected`);
+  expect(await violations(page), "the list filtered by a protected environment").toEqual([]);
+
+  await page.getByRole("link", { name, exact: true }).click();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  await expect(page.locator(".connection-actions .env-label")).toContainText(
+    `● ${prod} · protected`,
+  );
+  await page.context().close();
+});
+
 test("a reader sees the list and the page without Add, Test, Edit or Delete", async ({
   browser,
   browserName,

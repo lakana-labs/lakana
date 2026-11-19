@@ -13,6 +13,9 @@ Three commands:
 - ``slow-tests REPORT...`` reads junit reports written with ``-o junit_family=xunit1`` and
   fails when an unmarked test took ``threshold_seconds`` or more, or when more tests are
   marked slow than the baseline allows. ``--update`` lowers the baseline after a fall.
+  ``--confirm`` runs each such test again on this runner first, and fails it only from
+  ``confirm_seconds`` scaled by this runner's speed: the time of a fixed reference workload
+  against ``reference_seconds``, never below 1 and at most ``MAX_SPEED_RATIO``.
 - ``durations --output FILE REPORT...`` merges the seconds per test file into the file the
   shards of ``scripts/pytest_selection.py`` are spread by.
 
@@ -29,6 +32,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
@@ -51,6 +55,35 @@ CONFIRM_RUNS = 3  # re-runs of a flagged test; the fastest counts
 SOLO_CAP = 10
 UPDATE_COMMAND = "uv run python scripts/time_budgets.py slow-tests --update REPORT.xml ..."
 WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"  # read by scripts/remeasure_warm_up.py
+# The runner's speed, for `--confirm`: a fixed workload in a fresh interpreter, like the suite
+# (imports, pure Python, SQLite, JSON, compiling source), timed REFERENCE_RUNS times; the
+# fastest run against `reference_seconds` in scripts/time-budgets.toml is the ratio. Change the
+# workload only together with `reference_seconds` (docs/agent/testing.md, "Time budgets").
+REFERENCE_RUNS = 5
+# Seconds one run of the workload may take before it counts as hung (it takes well under 1 s).
+REFERENCE_TIMEOUT = 30
+REFERENCE_WORKLOAD = """
+import argparse, asyncio, csv, dataclasses, decimal, email.message, http.client, inspect
+import json, logging, sqlite3, tomllib, typing, unittest, urllib.request, xml.etree.ElementTree
+import zipfile
+
+rows = [(i, f"name-{i % 997}", i / 7) for i in range(50_000)]
+db = sqlite3.connect(":memory:")
+db.execute("create table t (a integer, b text, c real)")
+db.executemany("insert into t values (?, ?, ?)", rows)
+db.execute("select b, count(*), sum(c) from t group by b order by 2 desc").fetchall()
+text = json.dumps([{"key": i, "values": [i, str(i), i / 3]} for i in range(30_000)])
+assert len(json.loads(text)) == 30_000
+body = "def f{}(x):\\n    return [x * j for j in range({})]"
+source = "\\n".join(body.format(i, i % 7) for i in range(3_000))
+compile(source, "<reference>", "exec")
+total = 0
+for i in range(500_000):
+    total += i % 7
+"""
+# The most the ratio may raise the confirm line: GitHub's runners vary by about 2x (#725), and a
+# measurement gone wrong must not switch the ratchet off.
+MAX_SPEED_RATIO = 2.0
 
 
 @dataclass(frozen=True)
@@ -66,11 +99,15 @@ class Budgets:
     confirm_seconds
         From this many seconds the solo re-run of a flagged test fails it; None means
         ``threshold_seconds``.
+    reference_seconds
+        The time of ``REFERENCE_WORKLOAD`` on a fast GitHub runner, against which the re-run's
+        runner is measured; None scales nothing.
     """
 
     jobs: dict[str, float]
     threshold_seconds: float
     confirm_seconds: float | None = None
+    reference_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -196,10 +233,16 @@ def read_budgets(path: Path) -> Budgets:
     confirm = data["slow_tests"].get("confirm_seconds")
     if confirm is not None and not _is_number(confirm):
         raise ValueError(f"{path}: [slow_tests] confirm_seconds is not a number of seconds.")
+    reference = data["slow_tests"].get("reference_seconds")
+    if reference is not None and (not _is_number(reference) or reference == 0):
+        raise ValueError(
+            f"{path}: [slow_tests] reference_seconds is not a positive number of seconds."
+        )
     return Budgets(
         jobs={str(k): float(v) for k, v in jobs.items()},
         threshold_seconds=float(threshold),
         confirm_seconds=None if confirm is None else float(confirm),
+        reference_seconds=None if reference is None else float(reference),
     )
 
 
@@ -480,6 +523,85 @@ def check_slow_tests(
     return errors, notes
 
 
+def measure_reference(
+    run: Callable[..., object] = subprocess.run,
+    clock: Callable[[], float] = time.perf_counter,
+    runs: int = REFERENCE_RUNS,
+) -> float | None:
+    """Time the reference workload on this runner, each run in a fresh interpreter.
+
+    Parameters
+    ----------
+    run
+        Runs the command; `subprocess.run` unless a test replaces it.
+    clock
+        Reads the time; `time.perf_counter` unless a test replaces it.
+    runs
+        How many times to run it.
+
+    Returns
+    -------
+    float or None
+        The fastest run's seconds (runner noise only adds time); None when the workload could
+        not run or a run took longer than `REFERENCE_TIMEOUT`, which the log says.
+    """
+    command = [sys.executable, "-I", "-c", REFERENCE_WORKLOAD]
+    fastest: float | None = None
+    for _ in range(runs):
+        start = clock()
+        try:
+            run(command, check=True, capture_output=True, timeout=REFERENCE_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as error:
+            print(
+                f"cannot time the reference workload ({error}): the thresholds are not scaled "
+                "to this runner.",
+                file=sys.stderr,
+            )
+            return None
+        seconds = clock() - start
+        fastest = seconds if fastest is None else min(fastest, seconds)
+    return fastest
+
+
+def scale_for_runner(confirm: float, *, measured: float, reference: float) -> tuple[float, str]:
+    """Scale the confirm line by how much slower this runner is than the reference.
+
+    Parameters
+    ----------
+    confirm
+        ``confirm_seconds``.
+    measured
+        The reference workload's time on this runner.
+    reference
+        ``reference_seconds``: its time on a fast GitHub runner.
+
+    Returns
+    -------
+    tuple
+        The line a re-run is held to here, and a note for the log with the ratio. The line is
+        never below `confirm` (a fast runner does not tighten the rule, nor loosen it below
+        today's line) and at most `MAX_SPEED_RATIO` times it.
+    """
+    ratio = measured / reference
+    factor = min(max(ratio, 1.0), MAX_SPEED_RATIO)
+    line = confirm * factor
+    if ratio < 1.0:
+        how = f"never below {confirm:g} s, so a test run again fails from {line:.2f} s"
+    elif ratio > MAX_SPEED_RATIO:
+        how = (
+            f"capped at {MAX_SPEED_RATIO:g} times, so a test run again fails from {line:.2f} s "
+            f"({confirm:g} s x {factor:.2f})"
+        )
+    else:
+        how = f"so a test run again fails from {line:.2f} s ({confirm:g} s x {factor:.2f})"
+    note = (
+        f"Runner speed: the reference workload took {measured:.3f} s here against "
+        f"{reference:.3f} s on a fast runner (reference_seconds in {BUDGETS}): ratio "
+        f"{ratio:.2f}, {how}."
+    )
+    return line, note
+
+
 def file_durations(tests: Sequence[TestTime]) -> dict[str, float]:
     """Sum the seconds of the tests of each file.
 
@@ -690,8 +812,9 @@ def _remeasure_once(
     one process the first one imported would shadow the others (PR #521's run). Each process
     collects its candidates' files, and the plugin `scripts.remeasure_warm_up` keeps only the
     candidates, each after the cheapest other test of its module that uses all its session-
-    and module-scoped fixtures: that test takes the one-off setup a shard charges to
-    whichever test runs first, and its time is not counted.
+    and module-scoped fixtures, or else after a no-op item that sets those fixtures up: that
+    takes the one-off setup a shard charges to whichever test runs first, and its time is not
+    counted.
 
     Parameters
     ----------
@@ -837,12 +960,23 @@ def _run_slow_tests(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    confirm = budgets.confirm_seconds
+    speed: list[str] = []
+    # Only the re-runs ran on this runner; the shard times come from the unit jobs' runners.
+    if args.confirm and budgets.reference_seconds is not None:
+        measured = measure_reference()
+        if measured is not None:
+            line = budgets.threshold_seconds if confirm is None else confirm
+            confirm, note = scale_for_runner(
+                line, measured=measured, reference=budgets.reference_seconds
+            )
+            speed.append(note)
     with tempfile.TemporaryDirectory() as workdir:
         errors, notes = check_slow_tests(
             tests,
             threshold=budgets.threshold_seconds,
             baseline=baseline,
-            confirm_threshold=budgets.confirm_seconds,
+            confirm_threshold=confirm,
             remeasure=(
                 (
                     lambda over: remeasure(
@@ -850,14 +984,14 @@ def _run_slow_tests(args: argparse.Namespace) -> int:
                         Path(workdir),
                         warm_from=tests,
                         runs=CONFIRM_RUNS,
-                        stop_below=budgets.confirm_seconds,
+                        stop_below=confirm,
                     )
                 )
                 if args.confirm
                 else None
             ),
         )
-    for note in notes:
+    for note in [*speed, *notes]:
         print(note)
     for error in errors:
         print(error, file=sys.stderr)

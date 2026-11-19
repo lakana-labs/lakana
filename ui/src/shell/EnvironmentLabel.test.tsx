@@ -11,6 +11,23 @@ describe("EnvironmentLabel", () => {
     expect(screen.getByText("prod")).toHaveTextContent("Environment prod");
   });
 
+  it("marks a protected environment as the picker does, in the colour of danger and in words", () => {
+    const { container } = render(<EnvironmentLabel environment="prod" protected />);
+
+    const label = container.querySelector(".env-label");
+    expect(label).toHaveTextContent("Environment ● prod · protected");
+    expect(screen.getByText("protected")).toHaveClass("env-protected");
+    expect(screen.getByText("●")).toHaveClass("env-protected");
+    expect(screen.getByText("●")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("names an environment that is not protected plainly", () => {
+    const { container } = render(<EnvironmentLabel environment="dev" protected={false} />);
+
+    expect(container.querySelector(".env-label")).toHaveTextContent(/^Environment dev$/u);
+    expect(container.querySelector(".env-protected")).toBeNull();
+  });
+
   it("names the instance for something outside every environment", () => {
     render(<EnvironmentLabel environment={null} />);
 

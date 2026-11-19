@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router";
+import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunOut } from "../api/jobs";
@@ -19,6 +19,34 @@ const RUNS = "GET /api/v1/runs";
 function Address() {
   const location = useLocation();
   return <output data-testid="address">{location.search}</output>;
+}
+
+/**
+ * Renders the tab in a router that can go back, as the browser's Back does.
+ *
+ * @returns The router.
+ */
+function renderRouted() {
+  fakeServer({
+    "GET /api/v1/environments": { status: 200, body: ENVIRONMENTS },
+    [RUNS]: page([older]),
+  });
+  const router = createMemoryRouter(
+    [
+      {
+        path: "/jobs/runs",
+        element: (
+          <>
+            <RunsTab />
+            <Address />
+          </>
+        ),
+      },
+    ],
+    { initialEntries: ["/jobs/runs"] },
+  );
+  render(<RouterProvider router={router} />);
+  return router;
 }
 
 /**
@@ -166,6 +194,52 @@ describe("RunsTab", () => {
     await waitFor(() => {
       expect(runReads(server.sent).at(-1)?.get("job")).toBe("orders_hourly");
     });
+  });
+
+  it("each filter is a step back, a job typed key by key one of them, and Back empties the field", async () => {
+    const router = renderRouted();
+    const user = userEvent.setup();
+    await screen.findByRole("region", { name: "Runs listed" });
+
+    await user.click(screen.getByRole("button", { name: /Trigger/u }));
+    await user.click(screen.getByRole("option", { name: "Schedule" }));
+    const field = screen.getByRole("textbox", { name: "Job" });
+    await user.type(field, "daily_sales{Enter}");
+    expect(screen.getByTestId("address")).toHaveTextContent(
+      /^\?trigger=schedule&job=daily_sales$/u,
+    );
+
+    expect(field).toHaveFocus();
+    act(() => {
+      void router.navigate(-1);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("address")).toHaveTextContent(/^\?trigger=schedule$/u);
+    });
+    expect(field).toHaveValue("");
+    act(() => {
+      void router.navigate(-1);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("address")).toBeEmptyDOMElement();
+    });
+    expect(screen.getByRole("button", { name: /Trigger/u })).toHaveTextContent("All");
+  });
+
+  it("empties the field when Back comes before the name typed was shown", async () => {
+    const router = renderRouted();
+    const user = userEvent.setup();
+    await screen.findByRole("region", { name: "Runs listed" });
+    const field = screen.getByRole("textbox", { name: "Job" });
+    await user.type(field, "daily_sales");
+
+    // Enter and Back in one batch: the address goes to the name and back before a render.
+    act(() => {
+      fireEvent.keyDown(field, { key: "Enter" });
+      void router.navigate(-1);
+    });
+    expect(screen.getByTestId("address")).toBeEmptyDOMElement();
+    expect(field).toHaveValue("");
   });
 
   it("drops the previous filter's rows at once and says a failed first read at once", async () => {

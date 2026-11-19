@@ -32,8 +32,9 @@ interface JobFieldProps {
 }
 
 /**
- * The field "Job": an exact job name, applied on Enter or when the field is left. A name the
- * address brings from elsewhere (Back, Forward, Clear filters) replaces the one typed.
+ * The field "Job": an exact job name, applied on Enter or when the field is left, so a name
+ * typed is one step of the history, not one per key. A name the address brings from elsewhere
+ * (Back, Forward, Clear filters) replaces the one typed.
  *
  * @param props - The name and what to do with it.
  * @param props.job - The name in the address.
@@ -51,6 +52,9 @@ function JobField({ job, onApply, inputRef }: JobFieldProps): JSX.Element {
   }
   const apply = (): void => {
     if (typed.trim() !== job) {
+      // The name applied is the one the field follows from now on: an address that leaves it
+      // (Back before it was ever shown) puts its own name in the field.
+      setSeen(typed.trim());
       onApply(typed);
     }
   };

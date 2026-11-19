@@ -198,6 +198,10 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   (`ui/.nvmrc`, `engines.node`). Dependabot groups what ships (`ui-runtime`) and the few
   development pins that only work together (`ui-vitest`, `ui-size-limit`, `ui-react-types`,
   `ui-testing-library`); every other tool upgrades alone, like ruff and ty above.
+  `ui/src/shell/useAddressParams.ts` and `ui/src/jobs/useJobsFilter.ts` read React Router
+  internals (`UNSAFE_DataRouterContext`, `UNSAFE_NavigationContext`, the data router's state,
+  the history's `location`, a promise from `navigate`), since no supported API gives the
+  address as it is now (#744): a React Router upgrade gets its changelog read for these.
 - **ESLint 9 and TypeScript 6.0, on purpose.** ESLint 10 exists, but `eslint-plugin-jsx-a11y`
   6.10.2 supports ESLint 9 at most, so Dependabot ignores major updates of `eslint` and
   `@eslint/js` (which moves with it, never ahead). TypeScript 7 is stable, but
