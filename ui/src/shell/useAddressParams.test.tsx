@@ -4,6 +4,8 @@ import {
   createMemoryRouter,
   MemoryRouter,
   type NavigateFunction,
+  type Navigator,
+  Router,
   RouterProvider,
   useLocation,
   useNavigate,
@@ -213,5 +215,28 @@ describe("useAddressParams in a data router", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(router.state.location.search).toBe("?period=7d&job=nightly");
+  });
+});
+
+describe("useAddressParams under a router whose history has no location", () => {
+  it("fails loudly, naming what to read, rather than building on nothing", () => {
+    // What a React Router upgrade that took the location off the history would hand the hook.
+    const navigator: Navigator = {
+      createHref: () => "",
+      go: () => undefined,
+      push: () => undefined,
+      replace: () => undefined,
+    };
+    const { result } = renderHook(() => useAddressParams(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <Router location="/jobs/runs" navigator={navigator}>
+          {children}
+        </Router>
+      ),
+    });
+
+    expect(() => {
+      result.current[1](setting("period", "7d"));
+    }).toThrow(/React Router's history no longer has its location/u);
   });
 });

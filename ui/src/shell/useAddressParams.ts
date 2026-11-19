@@ -8,6 +8,12 @@ import { useCallback, useContext } from "react";
 import {
   type Location,
   type NavigateOptions,
+  type Navigator,
+  // React Router internals, on purpose: no supported API gives the router's address as it is
+  // now. `useLocation`, `useNavigationType` and `unstable_useRouterState` give the rendered one,
+  // which lags (#744); `useNavigation` stays idle for a route without loaders; and
+  // `window.location` is not the memory router's address in tests. An upgrade of React Router
+  // reads its changelog for these (docs/agent/conventions.md, "The `ui/` project").
   UNSAFE_DataRouterContext,
   UNSAFE_NavigationContext,
   useNavigate,
@@ -39,6 +45,25 @@ export function settingParam(name: string, value: string | null): ParamsChange {
 }
 
 /**
+ * The location of a declarative router's memory or browser history, which every navigation
+ * updates at once. The `Navigator` type does not name it, so it is checked rather than assumed:
+ * a React Router that took it away fails here, in the tests that run under `MemoryRouter`.
+ *
+ * @param navigator - The router's navigator.
+ * @returns The history's location.
+ * @throws {Error} When the navigator has no location.
+ */
+function historyLocation(navigator: Navigator): Location {
+  if (!("location" in navigator)) {
+    throw new Error(
+      "React Router's history no longer has its location: see the React Router note in " +
+        "docs/agent/conventions.md.",
+    );
+  }
+  return navigator.location as Location;
+}
+
+/**
  * The change written last, while the router still works on it. A data router (the interface's)
  * moves to a new address a moment after the call, so a second change in that moment builds on
  * this one; shared by every user of the hook, so two filters of one screen changed at once both
@@ -67,10 +92,7 @@ export function useAddressParams(): readonly [URLSearchParams, UpdateParams] {
       // A data router's state has the address once its navigation landed; the memory or browser
       // history under any other router (each router of the interface is one or the other) has it
       // at once.
-      const now =
-        data === null
-          ? (navigator as typeof navigator & { readonly location: Location }).location
-          : data.router.state.location;
+      const now = data === null ? historyLocation(navigator) : data.router.state.location;
       const next = change(new URLSearchParams(pending?.search ?? now.search)).toString();
       const done = navigate(`?${next}`, options);
       if (done instanceof Promise) {

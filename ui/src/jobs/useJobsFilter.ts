@@ -7,6 +7,9 @@
 import { useContext, useEffect, useState } from "react";
 import {
   NavigationType,
+  // A React Router internal, on purpose: its navigator is the one value that stays the same for
+  // the router's whole life, and no supported API names the router itself. Used only as an
+  // identity (docs/agent/conventions.md, "The `ui/` project").
   UNSAFE_NavigationContext,
   useLocation,
   useNavigationType,
@@ -40,6 +43,19 @@ export type FilterHistory = "replace" | "push";
 const shown = new WeakSet<object>();
 
 /**
+ * Whether the browser reloaded this page. A reload shows the address as it was, as Back does:
+ * React Router keeps no key in the first entry of the history, so its reload looks like a new
+ * load otherwise. A browser without navigation timing says no.
+ *
+ * @returns True after a reload.
+ */
+function reloaded(): boolean {
+  const timing: Partial<Pick<Performance, "getEntriesByType">> = performance;
+  const [entry] = timing.getEntriesByType?.("navigation") ?? [];
+  return (entry as Partial<PerformanceNavigationTiming> | undefined)?.type === "reload";
+}
+
+/**
  * The list's environment and search. The environment is the address's `?environment=`, else the
  * one this browser remembers, else all of them; only a listed environment counts, so one the
  * person may no longer read (or one that is gone) names nothing and the list shows all. While
@@ -48,7 +64,7 @@ const shown = new WeakSet<object>();
  * replaces the address with each change. The Runs tab pushes, as a job's page does, so Back
  * steps through its filters. Opened by a link, a redirect or a fresh load at an address without
  * an environment, it writes the remembered one into that address in its place (no step of the
- * history); otherwise, and from then on, it reads the environment from the address alone, so
+ * history); otherwise (Back, Forward, a reload), and from then on, it reads the environment from the address alone, so
  * Back to an address without one, from the tab or from another page, is all environments.
  *
  * @param environments - The environments the person may read; undefined while they are read.
@@ -66,13 +82,13 @@ export function useJobsFilter(
   const [remembered, setRemembered] = useState(readJobsFilter);
   // The address the Runs tab opened at, what was remembered then, and whether it is new: reached
   // by a link or a redirect, or the page's first address on a fresh load. Back or Forward to an
-  // address shown before (from a run's page, say) shows it as it was.
+  // address shown before (from a run's page, say), or a reload, shows it as it was.
   const [opening] = useState(() => ({
     key: location.key,
     environment: remembered,
     fresh:
       navigationType !== NavigationType.Pop ||
-      (location.key === "default" && !shown.has(navigator)),
+      (location.key === "default" && !shown.has(navigator) && !reloaded()),
   }));
   useEffect(() => {
     shown.add(navigator);
