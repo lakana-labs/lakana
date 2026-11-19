@@ -26,13 +26,8 @@ const AFTER_TABLE = new RegExp(
   String.raw`\b(?:from|join)\s+(?:${WORD}\.)+${WORD}\s+(?:as\s+)?$`,
   "iu",
 );
-// A table after FROM or JOIN, with its alias if it has one.
-const TABLE_IN_FROM = new RegExp(
-  String.raw`\b(?:from|join)\s+((?:${WORD}\.)+${WORD})(?:\s+(?:as\s+)?(${WORD}))?`,
-  "giu",
-);
 // Words that may follow a table in FROM and are not its alias.
-const NOT_ALIAS = new Set([
+const NOT_ALIAS = [
   "anti",
   "cross",
   "except",
@@ -56,7 +51,13 @@ const NOT_ALIAS = new Set([
   "using",
   "where",
   "window",
-]);
+];
+// A table after FROM or JOIN, with its alias if it has one. A keyword after the table is no alias,
+// and is left for the next match (the JOIN of the next table).
+const TABLE_IN_FROM = new RegExp(
+  String.raw`\b(?:from|join)\s+((?:${WORD}\.)+${WORD})(?:\s+(?:as\s+)?(?!(?:${NOT_ALIAS.join("|")})(?![\p{L}\p{N}_$]))(${WORD}))?`,
+  "giu",
+);
 
 /** A table, by its namespace and name. */
 export interface TableAt {
@@ -80,7 +81,7 @@ export function statementAt(doc: Text, pos: number): string {
 }
 
 /** A table a statement reads, and its alias there. */
-export interface TableRead {
+interface TableRead {
   /** The table. */
   readonly at: TableAt;
   /** Its alias, or null when it has none. */
@@ -96,14 +97,13 @@ export interface TableRead {
  * @param statement - The statement.
  * @returns The tables.
  */
-export function tablesRead(statement: string): TableRead[] {
+function tablesRead(statement: string): TableRead[] {
   const found = new Map<string, TableRead>();
   for (const match of statement.matchAll(TABLE_IN_FROM)) {
     const whole = match[1] as string;
     const parts = whole.split(".");
     const table = parts.pop() as string;
-    const written = match[2];
-    const alias = written !== undefined && !NOT_ALIAS.has(written.toLowerCase()) ? written : null;
+    const alias = match[2] ?? null;
     const qualifier = alias ?? whole;
     if (!found.has(qualifier.toLowerCase())) {
       found.set(qualifier.toLowerCase(), {

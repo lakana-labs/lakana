@@ -157,6 +157,15 @@ describe("catalogCompletion", () => {
       ["property", "int", undefined],
     ]);
     expect(columns).toHaveBeenCalledWith("gold", "station_ranking");
+    // Every table of a join, the first without an alias too.
+    expect(
+      labels(
+        await complete("select sa| from gold.station_ranking join gold.sales.fact_sales on true"),
+      ),
+    ).toEqual(["station_id", "rank", ...TABLE.schema.map((column) => column.name)]);
+    expect(
+      labels(await complete("select f.| from gold.station_ranking join gold.sales.fact_sales f")),
+    ).toContain("sale_id");
     // Before FROM too, and through an alias: the whole statement counts.
     expect(labels(await complete("select ra| from gold.station_ranking r"))).toEqual([
       "station_id",
@@ -177,6 +186,21 @@ describe("catalogCompletion", () => {
     expect(await complete("select ra| from raw.weather.daily")).toBeNull();
     // Another statement's tables do not count.
     expect(await complete("select * from gold.station_ranking; select ra|")).toBeNull();
+  });
+
+  it("reads a table written twice by the same name once", async () => {
+    const catalog = aCatalog();
+    const columns = vi.spyOn(catalog, "columns");
+    const result = await complete(
+      "select ra| from gold.station_ranking join gold.station_ranking using (rank)",
+      catalog,
+    );
+
+    expect(result?.options.map((option) => [option.label, option.apply])).toEqual([
+      ["station_id", undefined],
+      ["rank", undefined],
+    ]);
+    expect(columns).toHaveBeenCalledTimes(1);
   });
 
   it("offers a name that several tables have once per table, named by its table, and inserts it with the table", async () => {

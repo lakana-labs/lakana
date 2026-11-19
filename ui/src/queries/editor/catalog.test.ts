@@ -314,6 +314,52 @@ describe("catalogCache", () => {
     },
   );
 
+  it("a failure that answers after a newer read was asked forgets only itself", async () => {
+    let now = 1_000_000;
+    const failures: (() => void)[] = [];
+    const failLater = <T>(): Promise<T> =>
+      new Promise<T>((_, reject) => {
+        failures.push(() => {
+          reject(new client.ApiError(503, "Busy", "The server is busy."));
+        });
+      });
+    getTableTree.mockImplementationOnce(failLater);
+    listCompletionTables.mockImplementationOnce(failLater);
+    getTable.mockImplementationOnce(failLater).mockResolvedValue(TABLE);
+    listCompletionTables.mockResolvedValue(pageOf(["station_ranking"], null));
+    const prod = catalog.catalogCache("prod", () => now);
+
+    // The tree first: the table names wait for it.
+    const oldTree = prod.namespaces();
+    await vi.waitFor(() => {
+      expect(failures).toHaveLength(1);
+    });
+    now += catalog.STALE_MS;
+    expect(await prod.namespaces()).toEqual(["bronze", "silver", "gold", "gold.sales"]);
+    failures[0]?.();
+    expect(await oldTree).toEqual([]);
+
+    const old = [prod.tables("gold", ""), prod.columns("gold", "fact_sales")];
+    await vi.waitFor(() => {
+      expect(failures).toHaveLength(3);
+    });
+    // The first reads are stale before they answer, so the next asks read again.
+    now += catalog.STALE_MS;
+    expect(await prod.tables("gold", "")).toEqual(["station_ranking"]);
+    expect((await prod.columns("gold", "fact_sales"))?.[0]?.name).toBe("sale_id");
+    failures[1]?.();
+    failures[2]?.();
+    await Promise.all(old);
+
+    // The newer reads are still kept.
+    await prod.namespaces();
+    await prod.tables("gold", "");
+    await prod.columns("gold", "fact_sales");
+    expect(getTableTree).toHaveBeenCalledTimes(3);
+    expect(listCompletionTables).toHaveBeenCalledTimes(2);
+    expect(getTable).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps nothing of a search that failed for a while", async () => {
     vi.useFakeTimers();
     getTableTree.mockResolvedValue(treeHolding(5_000));
