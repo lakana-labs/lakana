@@ -114,6 +114,47 @@
   outline-offset: var(--focus-offset);
 }
 
+/* Settings › Sign-in › Invites and Recovery links: each list scrolls in its own region at 320 px,
+   and a name stays whole. */
+.list-scroll.invites-scroll .list,
+.list-scroll.recovery-scroll .list {
+  min-width: 560px;
+}
+
+.list-scroll.invites-scroll .row-name,
+.list-scroll.recovery-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+/* Settings › Configuration: one table in its own region; a group row above each group, its
+   prefix and each name in the monospace face and whole, a value wrapping anywhere in its cell,
+   and a setting without a value in the muted colour (it also says "not set"). */
+.list-scroll.configuration-scroll .list {
+  min-width: 640px;
+}
+
+.configuration-scroll .setting-group {
+  padding-top: var(--space-4);
+}
+
+.configuration-scroll .setting-prefix,
+.configuration-scroll .setting-name {
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+}
+
+.list-scroll.configuration-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+.configuration-scroll .setting-value {
+  overflow-wrap: anywhere;
+}
+
+.configuration-scroll .setting-unset {
+  color: var(--color-text-muted);
+}
+
 /* A page's facts as name and value (a repository's, an environment's). */
 .settings-facts {
   display: grid;

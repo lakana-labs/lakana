@@ -86,7 +86,18 @@ describe("places", () => {
       "sign-in",
       "invites",
       "recovery-links",
+      "configuration",
     ]);
+  });
+
+  it("lists Configuration to administrators only", () => {
+    expect(
+      listedPlaces(ADMIN)
+        .map((place) => place.id)
+        .slice(-4),
+    ).toEqual(["sign-in", "invites", "recovery-links", "configuration"]);
+    expect(listedPlaces(KIM).map((place) => place.id)).not.toContain("configuration");
+    expect(placeAt("/settings/configuration")?.id).toBe("configuration");
   });
 
   it("lists Row filters & masks to a policy manager, and Access file to administrators only", () => {

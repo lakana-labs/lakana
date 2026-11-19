@@ -61,7 +61,7 @@
 "column-mask create": { class: ui, part: 7, done: true }
 "column-mask list": { class: ui, part: 7, done: true }
 "column-mask revoke": { class: ui, part: 7, done: true }
-"configuration": { class: read, part: 8 }
+"configuration": { class: read, part: 8, done: true, note: "Settings › Configuration" }
 "connection create": { class: ui, part: 6, done: true }
 "connection delete": { class: ui, part: 6, done: true }
 "connection list": { class: ui, part: 6, done: true }
@@ -110,9 +110,9 @@
 "index show": { class: ui, part: 8 }
 "index update": { class: ui, part: 8 }
 "init": { class: git, reason: "project init" }
-"invite create": { class: ui, part: 1 }
-"invite list": { class: ui, part: 1 }
-"invite withdraw": { class: ui, part: 1 }
+"invite create": { class: ui, part: 1, done: true }
+"invite list": { class: ui, part: 1, done: true }
+"invite withdraw": { class: ui, part: 1, done: true }
 "job list": { class: read, part: 5, done: true }
 "job notification": { class: ui, part: 5 }
 "job notify-test": { class: ui, part: 5 }
@@ -157,9 +157,9 @@
 "query submit": { class: ui, part: 4, done: true }
 "query wait": { class: ui, part: 4, done: true }
 "raw ls": { class: ui, part: 3, done: true, note: "Browse… beside Location in New external table" }
-"recovery create": { class: ui, part: 1 }
-"recovery list": { class: ui, part: 1 }
-"recovery withdraw": { class: ui, part: 1 }
+"recovery create": { class: ui, part: 1, done: true }
+"recovery list": { class: ui, part: 1, done: true }
+"recovery withdraw": { class: ui, part: 1, done: true }
 "repo add": { class: ui, part: 8, done: true }
 "repo deploy-key": { class: ui, part: 2, done: true }
 "repo host-keys": { class: ui, part: 2, done: true }
@@ -192,7 +192,7 @@
 "server stop": { class: git, reason: "local dev tooling" }
 "session end": { class: ui, part: 1 }
 "session list": { class: ui, part: 1 }
-"sign-in settings": { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"sign-in settings": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
 "sign-in setup-link":
   { class: git, reason: "local deployment tooling: prints the first administrator's link" }
 "sql":
@@ -273,14 +273,14 @@
 "DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/groups/{name}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7, done: true }
-"DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1 }
+"DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1, done: true }
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
 "DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7, done: true }
-"DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
+"DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1, done: true }
 "DELETE /api/v1/repositories/{name}": { class: ui, part: 8, done: true }
 "DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/sign-in/notices/{notice_id}": { class: ui, part: 1 }
@@ -419,7 +419,7 @@
 "GET /api/v1/home/get-started": { class: ui, part: 2 }
 "GET /api/v1/home/work": { class: read, part: 2 }
 "GET /api/v1/info": { class: read, part: 8, done: true }
-"GET /api/v1/invites": { class: ui, part: 1 }
+"GET /api/v1/invites": { class: ui, part: 1, done: true }
 "GET /api/v1/package-indexes": { class: ui, part: 8 }
 "GET /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "GET /api/v1/principals":
@@ -452,7 +452,7 @@
   }
 "GET /api/v1/queries": { class: ui, part: 4, done: true }
 "GET /api/v1/queries/environments": { class: ui, part: 4, done: true }
-"GET /api/v1/recovery-links": { class: ui, part: 1 }
+"GET /api/v1/recovery-links": { class: ui, part: 1, done: true }
 "GET /api/v1/repositories": { class: ui, part: 8, done: true }
 "GET /api/v1/repositories/{name}": { class: ui, part: 8, done: true }
 "GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2, done: true }
@@ -466,9 +466,9 @@
 "GET /api/v1/runs": { class: ui, part: 5, done: true }
 "GET /api/v1/runs/failed": { class: ui, part: 5, done: true }
 "GET /api/v1/scheduler": { class: ui, part: 8, done: true }
-"GET /api/v1/settings/configuration": { class: read, part: 8 }
-"GET /api/v1/settings/sign-in":
-  { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"GET /api/v1/settings/configuration":
+  { class: read, part: 8, done: true, note: "Settings › Configuration" }
+"GET /api/v1/settings/sign-in": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/status": { class: read, part: 2, done: true }
@@ -498,8 +498,7 @@
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8, done: true }
-"PATCH /api/v1/settings/sign-in":
-  { class: ui, part: 8, note: "Settings → sign-in, brought forward to 1b" }
+"PATCH /api/v1/settings/sign-in": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
 "PATCH /api/v1/whoami": { class: ui, part: 1 }
 "POST /api/v1/access/apply":
   {
@@ -580,14 +579,14 @@
 "POST /api/v1/environments/{name}/restore": { class: ui, part: 8, done: true }
 "POST /api/v1/grants": { class: ui, part: 7, done: true }
 "POST /api/v1/groups": { class: ui, part: 7, done: true }
-"POST /api/v1/invites": { class: ui, part: 1 }
+"POST /api/v1/invites": { class: ui, part: 1, done: true }
 "POST /api/v1/package-indexes": { class: ui, part: 8 }
 "POST /api/v1/principals": { class: ui, part: 7 }
 "POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/recent":
   { class: ui, part: 2, note: "called by the detail pages from part 3", done: true }
-"POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1 }
+"POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1, done: true }
 "POST /api/v1/principals/{name}/tokens":
   {
     class: ui,

@@ -19,8 +19,9 @@ function challenge(): string {
 }
 
 /**
- * Answers the administration routes like the server: the first invite asks for a passkey touch,
- * and the passkeys list grows when one is added.
+ * Answers the administration routes like the server: an invite before a passkey touch is refused
+ * with `StepUpRequired` (the interface asks for the touch first, so it sends none such), and the
+ * passkeys list grows when one is added.
  *
  * @param page - The page.
  * @returns The requests sent to the API.
@@ -174,9 +175,8 @@ test.describe("administering sign-in", () => {
     });
     const server = await fakeAdministration(page);
     const errors: string[] = [];
-    // The step-up refusal (403) is the browser's own log line, not an error of the interface.
     page.on("console", (message) => {
-      if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
+      if (message.type() === "error") {
         errors.push(message.text());
       }
     });
@@ -200,8 +200,8 @@ test.describe("administering sign-in", () => {
     const posts = server.sent
       .filter((request) => request.method() === "POST")
       .map((request) => new URL(request.url()).pathname);
+    // The touch comes before the invite: the session's is stale, so no refusal is needed.
     expect(posts).toEqual([
-      "/api/v1/invites",
       "/api/v1/sign-in/step-up/options",
       "/api/v1/sign-in/step-up",
       "/api/v1/invites",

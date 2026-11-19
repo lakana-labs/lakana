@@ -43,13 +43,3 @@ export interface SignInSettingsIn {
 export async function getSignInSettings(): Promise<SignInSettingsOut> {
   return api.request<SignInSettingsOut>("GET", "/api/v1/settings/sign-in");
 }
-
-/**
- * Changes the session lengths; sessions that begin afterwards use them.
- *
- * @param lengths - The new lengths.
- * @returns The settings as saved.
- */
-export async function changeSignInSettings(lengths: SignInSettingsIn): Promise<SignInSettingsOut> {
-  return api.request<SignInSettingsOut>("PATCH", "/api/v1/settings/sign-in", lengths);
-}

@@ -1,8 +1,11 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
+import type { FakeRoute } from "../test/server";
+import { fakeWebAuthn } from "../test/webauthn";
 
 const SETTINGS = {
   idle_timeout_minutes: 720,
@@ -15,7 +18,142 @@ const SETTINGS = {
   },
 };
 
+/**
+ * Sign-in's routes, with a stale passkey touch and a PATCH that answers what it was sent.
+ *
+ * @param more - Routes that differ.
+ * @returns The routes.
+ */
+function staleRoutes(more: Record<string, FakeRoute> = {}): Record<string, FakeRoute> {
+  return {
+    "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+    "GET /api/v1/sign-in/session": STALE_SESSION,
+    ...STEP_UP_ROUTES,
+    "PATCH /api/v1/settings/sign-in": (request) => ({
+      status: 200,
+      body: { ...SETTINGS, ...(request.body as object) },
+    }),
+    ...more,
+  };
+}
+
+/**
+ * Types new lengths into both fields.
+ *
+ * @param user - The user-event session.
+ * @param idle - The idle timeout to type.
+ * @param absolute - The longest session to type.
+ */
+async function typeLengths(
+  user: ReturnType<typeof renderShell>["user"],
+  idle: string,
+  absolute: string,
+): Promise<void> {
+  const idleField = await screen.findByRole("textbox", { name: "Idle timeout in minutes" });
+  await user.clear(idleField);
+  await user.type(idleField, idle);
+  const absoluteField = screen.getByRole("textbox", { name: "Longest session in minutes" });
+  await user.clear(absoluteField);
+  await user.type(absoluteField, absolute);
+}
+
 describe("SignInSettings", () => {
+  it("shows the session lengths in their own section", async () => {
+    renderShell("/settings/sign-in", {
+      routes: { "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS } },
+    });
+
+    const section = await screen.findByRole("region", { name: "Session lengths" });
+    expect(within(section).getByRole("heading", { level: 2 })).toHaveTextContent("Session lengths");
+    expect(
+      await within(section).findByRole("textbox", { name: "Idle timeout in minutes" }),
+    ).toBeVisible();
+    expect(
+      within(section).getByRole("textbox", { name: "Longest session in minutes" }),
+    ).toBeVisible();
+    expect(within(section).getByRole("button", { name: "Save" })).toBeVisible();
+    expect(section).not.toContainElement(screen.getByText(/How long a browser session lasts/));
+  });
+
+  it("asks for the touch before saving", async () => {
+    const webauthn = fakeWebAuthn();
+    const { user, server } = renderShell("/settings/sign-in", { routes: staleRoutes() });
+    await typeLengths(user, "60", "1440");
+    const from = server.sent.length;
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved. New sessions use these lengths.")).toBeInTheDocument();
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
+    expect(server.sent.slice(from).map((request) => `${request.method} ${request.path}`)).toEqual([
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      "PATCH /api/v1/settings/sign-in",
+    ]);
+    expect(server.sent.at(-1)?.body).toEqual({
+      idle_timeout_minutes: 60,
+      absolute_lifetime_minutes: 1440,
+    });
+  });
+
+  it("a cancelled touch saves nothing", async () => {
+    const webauthn = fakeWebAuthn();
+    webauthn.get.mockRejectedValue(new DOMException("Cancelled.", "NotAllowedError"));
+    const { user, server } = renderShell("/settings/sign-in", { routes: staleRoutes() });
+    await typeLengths(user, "60", "1440");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The passkey request was cancelled or took too long. Try again when you are ready.",
+    );
+    expect(server.sent.some((request) => request.method === "PATCH")).toBe(false);
+    expect(screen.getByRole("textbox", { name: "Idle timeout in minutes" })).toHaveValue("60");
+    expect(screen.getByRole("textbox", { name: "Longest session in minutes" })).toHaveValue("1440");
+    expect(screen.queryByText("Saved. New sessions use these lengths.")).not.toBeInTheDocument();
+  });
+
+  it("an account without a passkey hears the next step", async () => {
+    const { user, server } = renderShell("/settings/sign-in", {
+      routes: staleRoutes({
+        "POST /api/v1/sign-in/step-up/options": {
+          status: 409,
+          body: { type: "NoPasskeyError", detail: "Your account has no passkey at this address." },
+        },
+      }),
+    });
+    await typeLengths(user, "60", "1440");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Your account has no passkey yet, and this action needs a passkey touch. Add one first " +
+        "under Passkeys and sessions, in the menu under your name, then try again.",
+    );
+    expect(within(alert).getByRole("link", { name: "Add a passkey" })).toHaveAttribute(
+      "href",
+      "/account",
+    );
+    expect(server.sent.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("keeps the focus on Save after saving", async () => {
+    fakeWebAuthn();
+    const { user } = renderShell("/settings/sign-in", { routes: staleRoutes() });
+    await typeLengths(user, "60", "1440");
+    const save = screen.getByRole("button", { name: "Save" });
+
+    await user.click(save);
+
+    expect(await screen.findByText("Saved. New sessions use these lengths.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save" })).toHaveFocus();
+    });
+    expect(screen.getByRole("textbox", { name: "Idle timeout in minutes" })).toHaveValue("60");
+  });
+
   it("shows the session lengths with their bounds, edited in place", async () => {
     renderShell("/settings/sign-in", {
       routes: { "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS } },
@@ -73,6 +211,7 @@ describe("SignInSettings", () => {
     const { user, server } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+        "GET /api/v1/sign-in/session": freshSession(),
         "PATCH /api/v1/settings/sign-in": (request) => ({
           status: 200,
           body: { ...SETTINGS, ...(request.body as object) },
@@ -97,6 +236,7 @@ describe("SignInSettings", () => {
     const { user } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+        "GET /api/v1/sign-in/session": freshSession(),
         "PATCH /api/v1/settings/sign-in": request.route,
       },
     });
@@ -113,6 +253,7 @@ describe("SignInSettings", () => {
     const { user } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+        "GET /api/v1/sign-in/session": freshSession(),
         "PATCH /api/v1/settings/sign-in": {
           status: 403,
           body: { type: "PermissionDenied", detail: "You need the ADMIN role." },

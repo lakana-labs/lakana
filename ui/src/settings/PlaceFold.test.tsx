@@ -45,6 +45,7 @@ describe("PlaceFold", () => {
       "Sign-in",
       "Invites",
       "Recovery links",
+      "Configuration",
     ]);
     await user.click(within(dialog).getByRole("link", { name: "Sign-in" }));
 

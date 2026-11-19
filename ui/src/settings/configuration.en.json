@@ -1,0 +1,19 @@
+{
+  "purpose": "The server's settings as it runs now. A secret shows only whether it is set.",
+  "restart": "Values change in the server's .env file (or its environment) and take effect after a restart.",
+  "workers": "Workers and the launcher read their own settings; they are not shown here.",
+  "reference": "Every setting is described in the settings reference",
+  "find": "Find a setting",
+  "region": "Server settings",
+  "setting": "Setting",
+  "value": "Value",
+  "source": "Source",
+  "general": "General",
+  "secretSet": "secret, set",
+  "secretNotSet": "secret, not set",
+  "notSet": "not set",
+  "sourceSet": "set",
+  "sourceDefault": "default",
+  "noMatch": "No setting matches “{{words}}”.",
+  "clear": "Clear search"
+}

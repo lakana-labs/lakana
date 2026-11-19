@@ -174,6 +174,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["fingerprint","line","type"]': "HostKeyOut",
   '["get_started_hidden","tour_seen","update_note_seen"]': "InterfaceStateOut",
   '["grant_id","group","kind","role","scope"]': "ViaOut",
+  '["has_value","name","secret","source","value"]': "ConfigurationSettingOut",
   '["hidden","next_cursor","orphans"]': "-",
   '["hidden_incoming","hidden_outgoing","incoming","outgoing","table"]': "TableReferencesOut",
   '["high","low","max","min"]': "HealthBandOut",
@@ -193,6 +194,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["kind","name"]': "OwnerOut",
   '["kind","source","target"]': "GraphEdgeOut",
   '["kind"]': "DeployTriggerOut",
+  '["landing","raw"]': "-",
   '["last_read_at","principal","read_count"]': "ReaderOut",
   '["memory_limit_bytes","memory_used_bytes","slots_busy","slots_total","workers"]':
     "StatusDetailOut",

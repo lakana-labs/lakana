@@ -101,4 +101,10 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    * @returns The page.
    */
   "recovery-links": async () => (await import("../access/RecoveryLinksPage")).RecoveryLinksPage,
+  /**
+   * Configuration: the running server's settings, read-only.
+   *
+   * @returns The page.
+   */
+  configuration: async () => (await import("./ConfigurationPage")).ConfigurationPage,
 };
