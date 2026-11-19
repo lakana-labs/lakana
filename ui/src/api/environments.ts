@@ -316,7 +316,8 @@ export async function findOrphans(
 }
 
 /**
- * Deletes the table directories no table owns whose files are older than the days given.
+ * Deletes the table directories no table owns whose files are older than the days given. They
+ * cannot be restored, so the passkey touch comes first when the last one is old.
  *
  * @param name - The environment's name.
  * @param olderThanDays - How old a directory's newest file must be.
@@ -326,7 +327,7 @@ export async function deleteOrphans(
   name: string,
   olderThanDays: number,
 ): Promise<OrphanedLocationsOut> {
-  return api.request<OrphanedLocationsOut>(
+  return guarded<OrphanedLocationsOut>(
     "POST",
     `${environmentApiPath(name)}/orphaned-locations/delete`,
     { older_than_days: olderThanDays },

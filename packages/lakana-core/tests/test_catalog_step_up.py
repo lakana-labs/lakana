@@ -1,15 +1,16 @@
 """A browser session needs a fresh passkey touch before it drops data; a token never does.
 
-Dropping a table, a namespace, an artifact or one artifact version, rebuilding a table, and
-deleting an environment with `purge`, cannot be undone from the browser the way an ordinary edit
-can, so each asks a browser session for a passkey touch no older than 15 minutes
-(`lakana_core.identity.sessions.require_step_up`), as the purge of a deleted environment's rows
-already does. A token caller (the CLI, an agent) has no session and is
-never asked.
+Dropping a table, a namespace, an artifact or one artifact version, rebuilding a table,
+deleting an environment with `purge`, and deleting the directories older releases left behind,
+cannot be undone from the browser the way an ordinary edit can, so each asks a browser session
+for a passkey touch no older than 15 minutes (`lakana_core.identity.sessions.require_step_up`),
+as the purge of a deleted environment's rows already does. A token caller (the CLI, an agent)
+has no session and is never asked.
 """
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -287,6 +288,36 @@ def _deleted_environment_purge(session: Session, tmp_path: Path, p: PrincipalRef
     return Drop(run=lambda who: catalog.delete_environment(who, "dev", purge=True), intact=intact)
 
 
+def _orphaned_locations_delete(session: Session, tmp_path: Path, p: PrincipalRef) -> Drop:
+    """Leave an old table directory without a record under `dev` and offer its delete.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        The environment's storage root.
+    p
+        The acting principal (unused: the directory needs no owner).
+
+    Returns
+    -------
+    Drop
+        The delete, and a check that the directory still holds its file.
+    """
+    del p
+    catalog = _prepared_catalog(session, tmp_path, AllowAllAuthorization())
+    leftover = tmp_path / "managed" / "gold" / f"orders-{uuid.uuid4().hex}" / "data" / "0.parquet"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_bytes(b"12345")
+    old = (datetime.now(UTC) - timedelta(days=40)).timestamp()
+    os.utime(leftover, (old, old))
+    return Drop(
+        run=lambda who: catalog.delete_orphaned_locations(who, "dev"),
+        intact=leftover.exists,
+    )
+
+
 DROPS: dict[str, Callable[[Session, Path, PrincipalRef], Drop]] = {
     "catalog.drop_table": _table_drop,
     "catalog.drop_namespace": _namespace_drop,
@@ -295,6 +326,7 @@ DROPS: dict[str, Callable[[Session, Path, PrincipalRef], Drop]] = {
     "rebuild.rebuild": _table_rebuild,
     "catalog.delete_environment(purge)": _environment_purge,
     "catalog.delete_environment(purge, deleted)": _deleted_environment_purge,
+    "catalog.delete_orphaned_locations": _orphaned_locations_delete,
 }
 """Every call that asks a browser session for a fresh touch, by name."""
 
