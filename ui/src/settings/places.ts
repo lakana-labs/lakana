@@ -26,7 +26,8 @@ export type SettingsPlaceId =
   | "what-i-may-do"
   | "sign-in"
   | "invites"
-  | "recovery-links";
+  | "recovery-links"
+  | "configuration";
 
 /** What the rules know about the person: a part of what `GET /api/v1/whoami` answers. */
 export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet"> & {
@@ -254,6 +255,15 @@ export const SETTINGS_PLACES = [
     path: "sign-in/recovery-links",
     label: "settings.places.recoveryLinks",
     parent: "sign-in",
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.admin,
+  },
+  {
+    id: "configuration",
+    path: "configuration",
+    label: "settings.places.configuration",
+    parent: null,
     kind: "page",
     below: false,
     visible: (viewer) => viewer.admin,
