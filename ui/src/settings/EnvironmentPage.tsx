@@ -52,16 +52,79 @@ const P = "settings.environmentPage";
  * @param name - The dialog's export.
  * @returns The lazy dialog.
  */
-function dialogOf(name: "RetentionDialog"): ComponentType<EnvironmentDialogProps> {
+function dialogOf(
+  name: "RetentionDialog" | "ChangeStorageDialog",
+): ComponentType<EnvironmentDialogProps> {
   return lazy(async () => ({ default: (await import("./EnvironmentDialogs"))[name] }));
 }
 
 const DIALOGS = {
   retention: dialogOf("RetentionDialog"),
+  storage: dialogOf("ChangeStorageDialog"),
 } as const;
 
 /** The dialog open on the page. */
-type Open = "retention" | "unprotect";
+type Open = "retention" | "storage" | "unprotect";
+
+/**
+ * The dialog that is open, loaded when it is first opened.
+ *
+ * @param props - Which dialog, and its properties.
+ * @param props.kind - Which dialog.
+ * @returns The dialog.
+ */
+function OpenDialog({
+  kind,
+  ...props
+}: EnvironmentDialogProps & {
+  /** Which dialog. */
+  readonly kind: keyof typeof DIALOGS;
+}): JSX.Element {
+  const Dialog = DIALOGS[kind];
+  return <Dialog {...props} />;
+}
+
+/** Properties of {@link StoragePanel}. */
+interface StoragePanelProps {
+  /** The environment. */
+  readonly environment: EnvironmentOut;
+  /** Opens Change storage. */
+  readonly onOpen: () => void;
+  /** Change storage, focused when its dialog is done. */
+  readonly button: RefObject<HTMLButtonElement | null>;
+}
+
+/**
+ * Change storage, for those who manage environments on the instance; for a protected
+ * environment the sentence that names Unprotect instead, as the server refuses it.
+ *
+ * @param props - The environment, the handler and the button.
+ * @param props.environment - The environment.
+ * @param props.onOpen - Opens Change storage.
+ * @param props.button - Change storage.
+ * @returns The panel.
+ */
+function StoragePanel({ environment, onOpen, button }: StoragePanelProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <section className="flat-panel settings-panel">
+      <h2>{t(`${P}.storageTitle`)}</h2>
+      <p className="page-purpose">{t(`${P}.storageIntro`)}</p>
+      {environment.is_protected ? (
+        <p>{t(`${P}.storageProtected`)}</p>
+      ) : (
+        <Button
+          ref={button}
+          className="button"
+          aria-label={t(`${P}.changeStorageOf`, { name: markedText(environment.name) })}
+          onPress={onOpen}
+        >
+          {t(`${P}.changeStorage`)}
+        </Button>
+      )}
+    </section>
+  );
+}
 
 /** Properties of {@link Overview}. */
 interface OverviewProps {
@@ -235,6 +298,7 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
   const { target: retentionButton, arm: armRetention } =
     useFocusAfter<HTMLButtonElement>(environment);
   const { target: protectButton, arm: armProtect } = useFocusAfter<HTMLButtonElement>(environment);
+  const { target: storageButton, arm: armStorage } = useFocusAfter<HTMLButtonElement>(environment);
   const [open, setOpen] = useState<Open | null>(null);
   const close = (): void => {
     setOpen(null);
@@ -243,7 +307,10 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
     armProtect();
     read.reload();
   };
-  const Retention = DIALOGS.retention;
+  const arms: Record<keyof typeof DIALOGS, () => void> = {
+    retention: armRetention,
+    storage: armStorage,
+  };
   return (
     <Page
       title={name}
@@ -298,6 +365,15 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
             protectButton={protectButton}
           />
           {manages && <EnvironmentUsage name={environment.name} />}
+          {creates && (
+            <StoragePanel
+              environment={environment}
+              button={storageButton}
+              onOpen={() => {
+                setOpen("storage");
+              }}
+            />
+          )}
           {open === "unprotect" && (
             <ConfirmDialog
               title={t(`${P}.unprotectTitle`, { name: markedText(environment.name) })}
@@ -314,13 +390,14 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
               <p>{t(`${P}.unprotectBody`)}</p>
             </ConfirmDialog>
           )}
-          {open === "retention" && (
+          {open !== null && open !== "unprotect" && (
             <Suspense fallback={null}>
-              <Retention
+              <OpenDialog
+                kind={open}
                 environment={environment}
                 onDone={() => {
                   close();
-                  armRetention();
+                  arms[open]();
                   read.reload();
                 }}
                 onClose={close}

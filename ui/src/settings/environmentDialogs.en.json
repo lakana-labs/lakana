@@ -1,7 +1,7 @@
 {
   "options": {
     "legend": "Options",
-    "help": "Each value is written to the server and never shown again, here or anywhere. Put credentials in a secret, not in an option: after creating, add one under Access › Secrets and choose it under Storage.",
+    "help": "Each value is written to the server and never shown again, here or anywhere. Put credentials in a secret under Access › Secrets, not in an option, and choose it as the storage secret.",
     "key": "Key",
     "value": "Value",
     "add": "Add an option",
@@ -43,5 +43,24 @@
     "daysHelp": "1 to 3,650 days after a table's last write or read.",
     "save": "Save",
     "held": "Give a number of days from 1 to 3,650."
+  },
+  "storage": {
+    "title": "Change the storage of {{name}}",
+    "reading": "Reading the storage…",
+    "root": "Root",
+    "secret": "Storage secret",
+    "keepSecret": "Keep the current secret",
+    "noSecretYet": "No secret yet",
+    "secretTyped": "Secret name",
+    "secretTypedHelp": "Leave it empty to keep the current secret. The secret must exist in this environment.",
+    "secretNoneHere": "This environment has no secret yet. Add one under Access › Secrets.",
+    "options": "Options",
+    "keepOptions": "Keep the options as they are",
+    "replaceOptions": "Replace the options",
+    "setNow": "Set now: {{keys}}",
+    "noneSetNow": "No option is set now.",
+    "replaceHelp": "Sending replaces every option: name each one the storage needs.",
+    "submit": "Change storage",
+    "held": "Choose another secret or replace the options."
   }
 }

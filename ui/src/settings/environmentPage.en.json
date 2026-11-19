@@ -31,5 +31,10 @@
   "part": "{{count}} · {{size}}",
   "total": "Total",
   "incomplete": "Some sizes are not measured yet; the worker measures them in its next sweeps.",
-  "usageReading": "Reading the usage…"
+  "usageReading": "Reading the usage…",
+  "storageTitle": "Storage",
+  "storageIntro": "Where the tables' files are and which secret opens them. The root cannot be changed.",
+  "changeStorage": "Change storage",
+  "changeStorageOf": "Change the storage of {{name}}",
+  "storageProtected": "The storage of a protected environment cannot be changed. Unprotect it first."
 }

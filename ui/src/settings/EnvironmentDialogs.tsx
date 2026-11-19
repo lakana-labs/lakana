@@ -1,6 +1,6 @@
 /**
- * The dialogs of Settings › Environments: Create environment, and an environment's Set retention.
- * They load on demand, when one is opened.
+ * The dialogs of Settings › Environments: Create environment, and an environment's Set retention
+ * and Change storage. They load on demand, when one is opened.
  *
  * @remarks
  * A storage option's value can be an inline credential. It is typed into an uncontrolled
@@ -9,7 +9,7 @@
  * gone with the field when the dialog closes.
  * @packageDocumentation
  */
-import { type JSX, useState } from "react";
+import { type JSX, useCallback, useState } from "react";
 import {
   CheckboxButton,
   CheckboxField,
@@ -29,11 +29,15 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
 import {
+  changeStorage,
   createEnvironment,
   type EnvironmentOut,
+  getStorage,
   setEnvironmentRetention,
   type StorageScheme,
 } from "../api/environments";
+import { listSecrets } from "../api/secrets";
+import { Choice } from "../access/Choice";
 import { FormFoot } from "../access/FormFoot";
 import "../access/secrets.css";
 import {
@@ -42,11 +46,14 @@ import {
   type ValueRow,
   valuesReady,
 } from "../access/SecretValuesFields";
+import { ReadFailed } from "../catalog/ReadFailed";
 import { ActionDialog } from "../shell/ActionDialog";
-import { markedText } from "../shell/VisibleText";
+import { useResource } from "../shell/useResource";
+import { markedText, VisibleText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import "./environmentDialogStrings";
 import { environmentPath } from "./environmentPaths";
+import { useSettingsViewer } from "./viewer";
 
 const D = "settings.environmentDialogs";
 
@@ -262,6 +269,181 @@ export function RetentionDialog({
           attempt={attempt}
           submit={t(`${r}.save`)}
           held={choice === "expire" && !valid ? t(`${r}.held`) : null}
+          blocked={false}
+          onCancel={onClose}
+        />
+      </Form>
+    </ActionDialog>
+  );
+}
+
+/** The secret picker's choice that keeps the current secret; a secret's is `secret:` and its name. */
+const KEEP = "keep";
+
+/** Properties of {@link SecretChoice}. */
+interface SecretChoiceProps {
+  /** The environment. */
+  readonly environment: string;
+  /** The choice: {@link KEEP}, or `secret:` and a name. */
+  readonly value: string;
+  /** Called with the choice. */
+  readonly onChange: (value: string) => void;
+}
+
+/**
+ * The environment's secrets to choose the storage secret from, with Keep the current secret
+ * first.
+ *
+ * @param props - The environment, the choice and the handler.
+ * @param props.environment - The environment.
+ * @param props.value - The choice.
+ * @param props.onChange - Called with the choice.
+ * @returns The picker, or why it cannot be offered.
+ */
+function SecretChoice({ environment, value, onChange }: SecretChoiceProps): JSX.Element {
+  const { t } = useTranslation();
+  const load = useCallback(() => listSecrets(environment), [environment]);
+  const read = useResource(load);
+  const s = `${D}.storage`;
+  if (read.data === undefined) {
+    return read.error === null ? (
+      <p className="step-status">{t(`${s}.reading`)}</p>
+    ) : (
+      <ReadFailed message={read.error} onRetry={read.reload} />
+    );
+  }
+  if (read.data.length === 0) return <p className="step-status">{t(`${s}.secretNoneHere`)}</p>;
+  return (
+    <Choice<string>
+      label={t(`${s}.secret`)}
+      value={value}
+      options={[
+        { id: KEEP, text: t(`${s}.keepSecret`) },
+        ...read.data.map((secret) => ({ id: `secret:${secret.name}`, text: secret.name })),
+      ]}
+      onChange={onChange}
+    />
+  );
+}
+
+/**
+ * Change storage: the storage secret, chosen from the environment's secrets where the person
+ * manages them and typed otherwise, and the options, kept as they are or replaced whole. It names
+ * the options set now by their keys (never a value), asks for the passkey touch first when the
+ * last one is old, and sends only what changes; the server's refusal stays here.
+ *
+ * @param props - The environment and what to call.
+ * @param props.environment - The environment.
+ * @param props.onDone - Called once it is changed.
+ * @param props.onClose - Closes the dialog.
+ * @returns The dialog.
+ */
+export function ChangeStorageDialog({
+  environment,
+  onDone,
+  onClose,
+}: EnvironmentDialogProps): JSX.Element {
+  const { t } = useTranslation();
+  const attempt = useAttempt();
+  const inputs = useValueInputs();
+  // Change storage is offered once the viewer is read, so where one manages secrets is known.
+  const managed = useSettingsViewer().secretEnvironments as readonly string[];
+  const picks = managed.includes(environment.name);
+  const load = useCallback(() => getStorage(environment.name), [environment.name]);
+  const storage = useResource(load);
+  const [secret, setSecret] = useState(KEEP);
+  const [typed, setTyped] = useState("");
+  const [replace, setReplace] = useState(false);
+  const [rows, setRows] = useState<readonly ValueRow[]>([]);
+  const [checked, setChecked] = useState(false);
+  const s = `${D}.storage`;
+  const chosen = picks ? (secret === KEEP ? "" : secret.slice("secret:".length)) : typed.trim();
+  const secretRef = chosen === "" || chosen === environment.storage_secret_ref ? null : chosen;
+  const keys = storage.data?.option_keys;
+  return (
+    <ActionDialog onClose={onClose}>
+      <Form
+        autoComplete="off"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setChecked(true);
+          if (replace && !valuesReady(t, rows)) return;
+          attempt.run(async () => {
+            await changeStorage(environment.name, {
+              ...(secretRef === null ? {} : { secret_ref: secretRef }),
+              ...(replace ? { options: inputs.read(rows) } : {}),
+            });
+            onDone();
+          });
+        }}
+      >
+        <Heading slot="title">{t(`${s}.title`, { name: markedText(environment.name) })}</Heading>
+        <dl className="settings-facts">
+          <dt>{t(`${s}.root`)}</dt>
+          <dd className="environment-storage">
+            <VisibleText text={environment.storage_root} />
+          </dd>
+          <dt>{t(`${s}.secret`)}</dt>
+          <dd>
+            {environment.storage_secret_ref === null ? (
+              t(`${s}.noSecretYet`)
+            ) : (
+              <VisibleText text={environment.storage_secret_ref} />
+            )}
+          </dd>
+        </dl>
+        {picks ? (
+          <SecretChoice environment={environment.name} value={secret} onChange={setSecret} />
+        ) : (
+          <TextField className="field" value={typed} onChange={setTyped}>
+            <Label>{t(`${s}.secretTyped`)}</Label>
+            <Input autoComplete="off" spellCheck={false} />
+            <Text slot="description">{t(`${s}.secretTypedHelp`)}</Text>
+          </TextField>
+        )}
+        <RadioGroup
+          className="field"
+          value={replace ? "replace" : "keep"}
+          onChange={(value) => {
+            setReplace(value === "replace");
+          }}
+        >
+          <Label>{t(`${s}.options`)}</Label>
+          <RadioField value="keep" className="radio-field">
+            <RadioButton className="radio">{t(`${s}.keepOptions`)}</RadioButton>
+          </RadioField>
+          <RadioField value="replace" className="radio-field">
+            <RadioButton className="radio">{t(`${s}.replaceOptions`)}</RadioButton>
+          </RadioField>
+        </RadioGroup>
+        {keys === undefined ? (
+          storage.error === null ? (
+            <p className="step-status">{t(`${s}.reading`)}</p>
+          ) : (
+            <ReadFailed message={storage.error} onRetry={storage.reload} />
+          )
+        ) : (
+          <p className="step-hint">
+            {keys.length === 0 ? t(`${s}.noneSetNow`) : t(`${s}.setNow`, { keys: keys.join(", ") })}
+          </p>
+        )}
+        {replace && (
+          <>
+            <p className="step-hint">{t(`${s}.replaceHelp`)}</p>
+            <SecretValuesFields
+              rows={rows}
+              onChange={setRows}
+              checked={checked}
+              inputs={inputs}
+              words={OPTION_WORDS}
+              mayBeNone
+            />
+          </>
+        )}
+        <FormFoot
+          attempt={attempt}
+          submit={t(`${s}.submit`)}
+          held={secretRef === null && !replace ? t(`${s}.held`) : null}
           blocked={false}
           onCancel={onClose}
         />
