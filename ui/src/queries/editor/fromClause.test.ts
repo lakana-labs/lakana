@@ -43,6 +43,7 @@ describe("tablesRead", () => {
     ["unpivot", "select | from gold.a unpivot (v for k in (x, y))"],
     ["offset", "select | from gold.a limit 1 offset 2"],
     ["returning", "delete from gold.a returning |"],
+    ["at (time travel)", "select | from gold.a at (version => 1)"],
   ])("takes no %s for an alias", (_, sql) => {
     expect(inScope(sql)).toEqual(["gold.a=gold.a"]);
   });
@@ -59,6 +60,71 @@ describe("tablesRead", () => {
     ]);
     expect(inScope("select * from gold.f f where x in (select y from gold.t s) and |")).toEqual([
       "f=gold.f",
+    ]);
+  });
+
+  it("reads past a parenthesis that is never closed, as one being typed", () => {
+    expect(inScope("select sum(r.| from gold.station_ranking r")).toEqual([
+      "r=gold.station_ranking",
+    ]);
+    expect(inScope("select round(r.rank, r.| from gold.a r")).toEqual(["r=gold.a"]);
+    expect(inScope("select sum(| from gold.a r")).toEqual(["r=gold.a"]);
+    // Closed and unclosed together: the closed ones are groups, the others are not.
+    expect(
+      inScope("select round(sum(r.rank), | from gold.a r join (select 1 from gold.b b) q"),
+    ).toEqual(["r=gold.a"]);
+    expect(inScope("select * from gold.a a where x in (select | from gold.b b")).toEqual([
+      "a=gold.a",
+      "b=gold.b",
+    ]);
+  });
+
+  it("keeps a CTE's body and a derived table to themselves, and lets LATERAL see the tables to its left", () => {
+    expect(inScope("with x as (select | from gold.t s) select * from gold.f f")).toEqual([
+      "s=gold.t",
+    ]);
+    expect(inScope("select * from (select | from gold.t s) q join gold.f f on true")).toEqual([
+      "s=gold.t",
+    ]);
+    expect(inScope("select * from gold.f f, lateral (select | from gold.t s)")).toEqual([
+      "f=gold.f",
+      "s=gold.t",
+    ]);
+    expect(
+      inScope("select * from gold.f f join lateral (select | from gold.t s) q on true"),
+    ).toEqual(["f=gold.f", "s=gold.t"]);
+  });
+
+  it("gives each branch of a UNION, INTERSECT or EXCEPT its own tables", () => {
+    expect(inScope("select a.x from gold.a a union all select | from gold.b b")).toEqual([
+      "b=gold.b",
+    ]);
+    expect(inScope("select | from gold.a a intersect select * from gold.b b")).toEqual([
+      "a=gold.a",
+    ]);
+    expect(
+      inScope("select * from gold.a a except select * from gold.b b except select | from gold.c c"),
+    ).toEqual(["c=gold.c"]);
+    // A star's EXCEPT is no set operator.
+    expect(inScope("select * except (x), | from gold.a a")).toEqual(["a=gold.a"]);
+  });
+
+  it("reads the tables of UPDATE … FROM, DELETE … USING and a join in parentheses", () => {
+    expect(inScope("update gold.a set x = b.y from gold.b b where |")).toEqual([
+      "gold.a=gold.a",
+      "b=gold.b",
+    ]);
+    expect(inScope("delete from gold.a using gold.b b where |")).toEqual([
+      "gold.a=gold.a",
+      "b=gold.b",
+    ]);
+    expect(inScope("select | from gold.a a join (gold.b b join gold.c c on true) on true")).toEqual(
+      ["a=gold.a", "b=gold.b", "c=gold.c"],
+    );
+    // A join's USING names columns, not tables.
+    expect(inScope("select | from gold.a a join gold.b b using (id)")).toEqual([
+      "a=gold.a",
+      "b=gold.b",
     ]);
   });
 
@@ -90,6 +156,10 @@ describe("placeAfter", () => {
     ["select * from gold.a, ", "table"],
     ["select * from gold.a join ", "table"],
     ["select * from gold.a join lateral ", "table"],
+    ["update ", "table"],
+    ["delete from gold.a using ", "table"],
+    ["select * from gold.a where x in (select y from ", "table"],
+    ["select sum(", "other"],
     ["select * from gold.a ", "alias"],
     ["select * from gold.a as ", "alias"],
     ["select * from (select 1) ", "alias"],

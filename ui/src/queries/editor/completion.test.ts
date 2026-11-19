@@ -311,6 +311,15 @@ describe("catalogCompletion", () => {
     ).toBeNull();
   });
 
+  it.each([
+    ["a dotted word", "select sum(r.| from gold.station_ranking r"],
+    ["a later argument", "select round(r.rank, r.| from gold.station_ranking r"],
+    ["a bare word", "select sum(ra| from gold.station_ranking r"],
+    ["closed and unclosed calls", "select round(sum(r.rank), r.| from gold.station_ranking r"],
+  ])("completes %s in a call whose parenthesis is not closed yet", async (_, text) => {
+    expect(labels(await complete(text))).toEqual(["station_id", "rank"]);
+  });
+
   it("reads no table after a FROM inside an expression", async () => {
     const catalog = aCatalog();
     const columns = vi.spyOn(catalog, "columns");

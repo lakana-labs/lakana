@@ -1,15 +1,20 @@
 /**
- * The tables a SQL statement reads, as the editor's help needs them: after FROM, JOIN and the
- * commas of a FROM list, each with its alias and the parentheses it sits in.
+ * The tables a SQL statement reads, as the editor's help needs them: after FROM, JOIN, the commas
+ * of a FROM list, UPDATE and DELETE … USING, each with its alias and the parentheses it sits in.
  *
  * @remarks
  * Not a parser of SQL, but enough of one for completion and hover. Comments, strings and quoted
- * identifiers are read as blanks. A FROM counts as a clause only where it can start one: in a
- * group (the statement, or the inside of a parenthesis) that has a SELECT before it, as the
+ * identifiers are read as blanks, and a parenthesis that is never closed (a call being typed) is
+ * read as no group. A FROM counts as a clause only where it can start one: in a group (the
+ * statement, or the inside of a parenthesis) that has a SELECT or an UPDATE before it, as the
  * group's first word (DuckDB's FROM-first) or after DELETE; so `extract(year FROM ts)` and
- * `IS DISTINCT FROM` read no table. A table counts where the cursor is when its FROM sits in the
- * cursor's group or one around it, so a subquery's or a CTE's tables stay inside their
- * parentheses.
+ * `IS DISTINCT FROM` read no table.
+ *
+ * Where the cursor is, a table counts when its FROM sits in the cursor's group or one around it,
+ * and in the same branch of a UNION, INTERSECT or EXCEPT as the cursor. A CTE's body and a
+ * subquery in FROM see nothing outside their parentheses, unless the subquery is LATERAL; a
+ * subquery elsewhere (WHERE, SELECT) sees the tables around it. A join in parentheses counts as
+ * part of the FROM it is in.
  * @packageDocumentation
  */
 import type { Text } from "@codemirror/state";
@@ -26,7 +31,9 @@ const BLANKS = /--[^\n]*|\/\*[\s\S]*?(?:\*\/|$)|'(?:[^']|'')*(?:'|$)|"(?:[^"]|""
 // Words that may follow a table in FROM and are not its alias.
 const NOT_ALIAS = new Set([
   "anti",
+  "as",
   "asof",
+  "at",
   "cross",
   "except",
   "full",
@@ -50,6 +57,7 @@ const NOT_ALIAS = new Set([
   "right",
   "select",
   "semi",
+  "set",
   "tablesample",
   "union",
   "unpivot",
@@ -70,11 +78,16 @@ const FROM_ENDS = new Set([
   "qualify",
   "returning",
   "select",
+  "set",
   "union",
   "unpivot",
   "where",
   "window",
 ]);
+// Set operators: each starts a branch with its own tables.
+const SET_OPERATORS = new Set(["union", "intersect", "except"]);
+// The first words of a subquery in parentheses; any other word starts a join in parentheses.
+const SUBQUERY_STARTS = new Set(["select", "from", "with", "values", "(", "table"]);
 
 /** A table, by its namespace and name. */
 export interface TableAt {
@@ -105,18 +118,42 @@ export interface Statement {
 /** What the cursor is expected to write next, from the text before it. */
 export type Place = "table" | "alias" | "other";
 
-/** A table found, with the group its FROM is in. */
+/** A table found, with the group and the branch its FROM is in. */
 interface Found {
   /** The table, its alias set once read. */
   read: { at: TableAt; alias: string | null };
   /** The group. */
   readonly group: number;
+  /** The branch of the group's set operators. */
+  readonly branch: number;
 }
 
 /** What a group has read so far. */
 interface GroupState {
-  /** Whether a SELECT came before. */
+  /** Where it starts (its parenthesis) and ends (its closing one, or the text's end). */
+  readonly span: [number, number];
+  /** The group around it; -1 for the statement. */
+  readonly parent: number;
+  /** Whether it sees nothing outside it: a CTE's body, or a subquery in FROM but LATERAL. */
+  closed: boolean;
+  /** Where its tables go: its own number, or the FROM's around it for a join in parentheses. */
+  owner: number;
+  /** Whether its first word decides between a subquery and a join in parentheses. */
+  pendingKind: boolean;
+  /** Where its set operators are. */
+  readonly operators: number[];
+  /** Whether a SELECT, an UPDATE, a DELETE or a WITH came before. */
   select: boolean;
+  /** Whether an UPDATE came before. */
+  update: boolean;
+  /** Whether a DELETE came before. */
+  delete: boolean;
+  /** Whether a WITH came before. */
+  with: boolean;
+  /** Whether a JOIN came in the FROM clause. */
+  joined: boolean;
+  /** Whether LATERAL came right before. */
+  lateral: boolean;
   /** Whether no word came yet. */
   first: boolean;
   /** The word before, in lower case. */
@@ -135,9 +172,9 @@ interface GroupState {
 interface Reading {
   /** The tables. */
   readonly tables: readonly Found[];
-  /** Where each group starts (its parenthesis) and ends (its closing one, or the text's end). */
-  readonly spans: readonly (readonly [number, number])[];
-  /** What the text's innermost open group expects next. */
+  /** The groups; the statement is group 0. */
+  readonly groups: readonly GroupState[];
+  /** What the innermost group open at the text's end expects next. */
   readonly place: Place;
 }
 
@@ -162,9 +199,7 @@ export function statementAt(doc: Text, pos: number): Statement {
  * @returns True for a clause's FROM.
  */
 function startsClause(state: GroupState): boolean {
-  return (
-    state.previous !== "distinct" && (state.select || state.first || state.previous === "delete")
-  );
+  return state.previous !== "distinct" && (state.select || state.first || state.delete);
 }
 
 /**
@@ -173,26 +208,27 @@ function startsClause(state: GroupState): boolean {
  * @param state - The group.
  * @param token - The token.
  * @param lower - The token in lower case.
- * @param group - The group's number.
- * @param tables - Where a table found goes.
+ * @param add - Records a table found, and hands it back.
  * @returns True when the token was the clause's; false when the clause ended at it.
  */
 function inFrom(
   state: GroupState,
   token: string,
   lower: string,
-  group: number,
-  tables: Found[],
+  add: (at: TableAt) => Found,
 ): boolean {
-  if (state.expect === "table" && lower !== "lateral") {
+  if (state.expect === "table" && lower === "lateral") {
+    state.lateral = true;
+    return true;
+  }
+  if (state.expect === "table") {
     const dotted = DOTTED.test(token);
     state.expect = dotted || SINGLE_WORD.test(token) ? "alias" : "none";
     state.last = null;
     if (dotted) {
       const parts = token.split(".");
       const table = parts.pop() as string;
-      state.last = { read: { at: { namespace: parts.join("."), table }, alias: null }, group };
-      tables.push(state.last);
+      state.last = add({ namespace: parts.join("."), table });
     }
     return true;
   }
@@ -207,7 +243,8 @@ function inFrom(
     state.expect = "none";
     return true;
   }
-  if (lower === "," || lower === "join") {
+  if (lower === "," || lower === "join" || (lower === "using" && state.delete && !state.joined)) {
+    state.joined ||= lower === "join";
     state.expect = "table";
     return true;
   }
@@ -216,79 +253,181 @@ function inFrom(
     state.expect = "none";
     return false;
   }
-  if (lower !== "lateral") {
-    state.expect = "none";
-  }
+  state.expect = "none";
   return true;
 }
 
 /**
- * Reads a text's FROM clauses.
+ * The parentheses of a text's tokens that are closed: each opening one's index, with the closing
+ * one's.
  *
- * @param source - The text.
- * @returns The tables, the groups, and what the end of the text expects.
+ * @param tokens - The tokens.
+ * @param unclosed - Whether an opening parenthesis that is never closed opens a group too.
+ * @returns The opening parentheses that open a group, and the closing ones that close one.
  */
-function read(source: string): Reading {
-  const text = source.replace(BLANKS, (blank) => " ".repeat(blank.length));
-  const tables: Found[] = [];
-  const spans: [number, number][] = [[0, text.length]];
-  const fresh = (): GroupState => ({
+function matched(
+  tokens: readonly string[],
+  unclosed: boolean,
+): { opens: Set<number>; closes: Set<number> } {
+  const opens = new Set<number>();
+  const closes = new Set<number>();
+  const waiting: number[] = [];
+  tokens.forEach((token, index) => {
+    if (token === "(") {
+      waiting.push(index);
+    } else if (token === ")" && waiting.length > 0) {
+      opens.add(waiting.pop() as number);
+      closes.add(index);
+    }
+  });
+  if (unclosed) {
+    for (const index of waiting) {
+      opens.add(index);
+    }
+  }
+  return { opens, closes };
+}
+
+/**
+ * A new group's state.
+ *
+ * @param span - Where it starts and ends.
+ * @param parent - The group around it.
+ * @param owner - Where its tables go.
+ * @returns The state.
+ */
+function group(span: [number, number], parent: number, owner: number): GroupState {
+  return {
+    span,
+    parent,
+    closed: false,
+    owner,
+    pendingKind: false,
+    operators: [],
     select: false,
+    update: false,
+    delete: false,
+    with: false,
+    joined: false,
+    lateral: false,
     first: true,
     previous: "",
     from: false,
     expect: "none",
     last: null,
     derived: false,
-  });
-  const states = [fresh()];
+  };
+}
+
+/**
+ * Reads a word outside an open FROM clause: what starts a clause or a branch.
+ *
+ * @param state - The group.
+ * @param lower - The word in lower case.
+ * @param index - Where it is.
+ */
+function outsideFrom(state: GroupState, lower: string, index: number): void {
+  if (lower === "select" || lower === "with") {
+    state.select = true;
+    state.with ||= lower === "with";
+  } else if (lower === "update" && state.first) {
+    state.select = true;
+    state.update = true;
+    state.from = true;
+    state.expect = "table";
+  } else if (lower === "delete" && state.first) {
+    state.delete = true;
+  } else if (lower === "from" && startsClause(state)) {
+    state.from = true;
+    state.expect = "table";
+  } else if (SET_OPERATORS.has(lower) && state.previous !== "*") {
+    state.operators.push(index);
+  }
+}
+
+/**
+ * Reads a text's FROM clauses.
+ *
+ * @param source - The text.
+ * @param unclosed - Whether a parenthesis that is never closed opens a group: so for the text
+ *   before the cursor, where it is the group being typed in; not for a whole statement, where it
+ *   is a call being typed.
+ * @returns The tables, the groups, and what the end of the text expects.
+ */
+function read(source: string, unclosed = false): Reading {
+  const text = source.replace(BLANKS, (blank) => " ".repeat(blank.length));
+  const matches = [...text.matchAll(TOKEN)];
+  const { opens, closes } = matched(
+    matches.map((match) => match[0]),
+    unclosed,
+  );
+  const tables: Found[] = [];
+  const groups = [group([0, text.length], -1, 0)];
   const open = [0];
-  for (const match of text.matchAll(TOKEN)) {
+  matches.forEach((match, index) => {
     const token = match[0];
-    const group = open[open.length - 1] as number;
-    const state = states[group] as GroupState;
-    if (token === "(") {
-      state.derived = state.from && state.expect === "table";
+    const number = open[open.length - 1] as number;
+    const state = groups[number] as GroupState;
+    if (opens.has(index)) {
+      const derived = state.from && state.expect === "table";
+      const inner = group([match.index, text.length], number, groups.length);
+      // A CTE's body, or a subquery in FROM but LATERAL, once its first word says it is one.
+      inner.closed = (state.with && state.previous === "as") || (derived && !state.lateral);
+      inner.pendingKind = derived;
+      state.derived = derived;
       state.expect = "none";
+      state.lateral = false;
       state.first = false;
-      open.push(states.length);
-      spans.push([match.index, text.length]);
-      states.push(fresh());
-      continue;
+      open.push(groups.length);
+      groups.push(inner);
+      return;
     }
-    if (token === ")") {
-      if (open.length > 1) {
-        (spans[group] as [number, number])[1] = match.index;
-        open.pop();
-        const outer = states[open[open.length - 1] as number] as GroupState;
-        if (outer.derived) {
-          outer.derived = false;
-          outer.expect = "alias";
-          outer.last = null;
-        }
+    if (closes.has(index)) {
+      state.span[1] = match.index;
+      open.pop();
+      const outer = groups[open[open.length - 1] as number] as GroupState;
+      if (outer.derived) {
+        outer.derived = false;
+        outer.expect = "alias";
+        outer.last = null;
       }
-      continue;
+      return;
     }
     const lower = token.toLowerCase();
-    if (!state.from || !inFrom(state, token, lower, group, tables)) {
-      if (lower === "select") {
-        state.select = true;
-      } else if (lower === "from" && startsClause(state)) {
+    if (state.pendingKind) {
+      state.pendingKind = false;
+      if (!SUBQUERY_STARTS.has(lower)) {
+        // A join in parentheses: its tables are the FROM's around it.
+        state.closed = false;
+        state.owner = (groups[state.parent] as GroupState).owner;
         state.from = true;
         state.expect = "table";
       }
     }
+    const owner = groups[state.owner] as GroupState;
+    const add = (at: TableAt): Found => {
+      const found = {
+        read: { at, alias: null },
+        group: state.owner,
+        branch: owner.operators.length,
+      };
+      tables.push(found);
+      return found;
+    };
+    if (!state.from || !inFrom(state, token, lower, add)) {
+      outsideFrom(state, lower, match.index);
+    }
     state.first = false;
     state.previous = lower;
-  }
-  const last = states[open[open.length - 1] as number] as GroupState;
+  });
+  const last = groups[open[open.length - 1] as number] as GroupState;
   let place: Place = "other";
   if (last.from && last.expect === "table") {
     place = "table";
   } else if (last.from && last.expect !== "none") {
     place = "alias";
   }
-  return { tables, spans, place };
+  return { tables, groups, place };
 }
 
 /**
@@ -299,7 +438,7 @@ function read(source: string): Reading {
  * @returns The place.
  */
 export function placeAfter(before: string): Place {
-  return read(before).place;
+  return read(before, true).place;
 }
 
 /**
@@ -310,23 +449,30 @@ export function placeAfter(before: string): Place {
  * @returns The tables.
  */
 export function tablesRead(statement: Statement): TableRead[] {
-  const { tables, spans } = read(statement.text);
-  const around = new Set<number>([0]);
-  spans.forEach(([start, end], group) => {
-    if (start < statement.at && statement.at <= end) {
-      around.add(group);
+  const { tables, groups } = read(statement.text);
+  const { at } = statement;
+  // The innermost group around the position, then outward until a group that sees nothing more.
+  let inner = 0;
+  groups.forEach(({ span: [start, end] }, number) => {
+    if (start < at && at <= end && start >= (groups[inner] as GroupState).span[0]) {
+      inner = number;
     }
   });
+  const branches = new Map<number, number>();
+  for (let number = inner; number >= 0;) {
+    const state = groups[number] as GroupState;
+    branches.set(number, state.operators.filter((operator) => operator < at).length);
+    number = state.closed ? -1 : state.parent;
+  }
   const found = new Map<string, TableRead>();
-  for (const { read: table, group } of tables) {
-    // The groups around the position are its own and every one outside it.
-    if (!around.has(group)) {
+  for (const { read: table, group: number, branch } of tables) {
+    if (branches.get(number) !== branch) {
       continue;
     }
-    const { at, alias } = table;
-    const qualifier = alias ?? `${at.namespace}.${at.table}`;
+    const { at: place, alias } = table;
+    const qualifier = alias ?? `${place.namespace}.${place.table}`;
     if (!found.has(qualifier.toLowerCase())) {
-      found.set(qualifier.toLowerCase(), { at, alias, qualifier });
+      found.set(qualifier.toLowerCase(), { at: place, alias, qualifier });
     }
   }
   return [...found.values()];
