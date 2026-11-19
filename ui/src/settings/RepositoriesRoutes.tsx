@@ -4,12 +4,13 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useLayoutEffect } from "react";
+import { type JSX, lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { NavigationType, Route, Routes, useNavigationType, useParams } from "react-router";
+import { Route, Routes, useParams } from "react-router";
 
 import { NotAvailable } from "../shell/NotAvailable";
 import { NotFound } from "../shell/NotFound";
+import { FocusIfLost } from "./FocusIfLost";
 import { mayManageRepositories } from "./places";
 import { RepositoriesPlace } from "./RepositoriesPlace";
 import { useSettingsViewer } from "./viewer";
@@ -38,25 +39,6 @@ function ConnectRoute(): JSX.Element {
   ) : (
     <NotAvailable place={t("settings.repositories.connect")} />
   );
-}
-
-/**
- * Gives the page's heading the focus once a page that was loading has shown after a move, when
- * the focus was left on nothing (the link that was pressed is gone with the list). On the first
- * load the skip link stays the first stop.
- *
- * @returns Nothing to show.
- */
-function FocusIfLost(): null {
-  const moved = useNavigationType() === NavigationType.Push;
-  // A layout effect, as the shell's: the focus moves in the commit that shows the page, so
-  // no key pressed in between goes to the page's body.
-  useLayoutEffect(() => {
-    if (moved && document.activeElement === document.body) {
-      document.getElementById("main")?.querySelector("h1")?.focus();
-    }
-  }, [moved]);
-  return null;
 }
 
 /**

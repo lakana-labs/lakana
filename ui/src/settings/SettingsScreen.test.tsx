@@ -68,6 +68,7 @@ describe("SettingsScreen", () => {
 
     expect(await placeNames()).toEqual([
       "Status",
+      "Environments",
       "Repositories",
       "People",
       "Groups",
@@ -196,7 +197,7 @@ describe("SettingsScreen", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Repositories" }),
     ).toBeInTheDocument();
-    expect(await placeNames()).toEqual(["Status", "Repositories", "What I may do"]);
+    expect(await placeNames()).toEqual(["Status", "Environments", "Repositories", "What I may do"]);
   });
 
   it("a failed read hides Repositories", async () => {

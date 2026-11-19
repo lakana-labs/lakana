@@ -93,7 +93,7 @@ function Overview({ repo }: BlockProps): JSX.Element {
   return (
     <section className="flat-panel settings-panel">
       <h2>{t(`${P}.overview`)}</h2>
-      <dl className="repository-facts">
+      <dl className="settings-facts">
         <dt>{t(`${P}.url`)}</dt>
         <dd className="repository-url">
           <VisibleText text={repo.url} />
@@ -281,7 +281,7 @@ function Credential({
       <h2>{t(`${P}.credentialTitle`)}</h2>
       <p>{credentialText(t, repo)}</p>
       {repo.kind === "https" && (
-        <dl className="repository-facts">
+        <dl className="settings-facts">
           <dt>{t(`${P}.secret`)}</dt>
           <dd>
             {repo.credential_secret === null ? (

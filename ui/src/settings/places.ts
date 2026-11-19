@@ -13,6 +13,7 @@ import type { AccessOut } from "../api";
 /** The id of a place. */
 export type SettingsPlaceId =
   | "status"
+  | "environments"
   | "repositories"
   | "access"
   | "people"
@@ -37,7 +38,33 @@ export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet"> & {
   readonly readsEnvironments: boolean | null;
   /** The actions the person may take on the instance; null while not read yet. */
   readonly instanceActions: ReadonlySet<string> | null;
+  /** The environments the person manages, deleted ones included; null while not read yet. */
+  readonly managedEnvironments: readonly string[] | null;
 };
+
+/**
+ * Whether the person may create environments, and protect them, change their storage, remove
+ * unreachable deleted ones and clean up their leftover directories (`MANAGE_ENVIRONMENT` on the
+ * instance).
+ *
+ * @param viewer - What the rules know about the person.
+ * @returns The answer; null while not read yet.
+ */
+export function mayCreateEnvironments(viewer: SettingsViewer): boolean | null {
+  return viewer.instanceActions === null ? null : viewer.instanceActions.has("MANAGE_ENVIRONMENT");
+}
+
+/**
+ * Whether the person manages one environment (`MANAGE_ENVIRONMENT` on it): its usage,
+ * retention, deletion and restore.
+ *
+ * @param viewer - What the rules know about the person.
+ * @param name - The environment's name.
+ * @returns The answer; no while not read yet.
+ */
+export function managesEnvironment(viewer: SettingsViewer, name: string): boolean {
+  return viewer.managedEnvironments?.includes(name) ?? false;
+}
 
 /**
  * Whether the person may connect, edit and delete repositories (`MANAGE_REPOSITORY` on the
@@ -90,6 +117,20 @@ export const SETTINGS_PLACES = [
     kind: "page",
     below: false,
     visible: () => true,
+  },
+  {
+    id: "environments",
+    path: "environments",
+    label: "settings.places.environments",
+    parent: null,
+    kind: "page",
+    below: true,
+    visible: (viewer) => {
+      const creates = mayCreateEnvironments(viewer);
+      return viewer.readsEnvironments === null || creates === null
+        ? null
+        : viewer.readsEnvironments || creates;
+    },
   },
   {
     id: "repositories",

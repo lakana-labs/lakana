@@ -33,8 +33,8 @@ const NONE: SettingsFacts = {
  *
  * @remarks
  * It reads, once per visit to Settings, where the person manages secrets, whether they manage
- * row filters and masks, whether they read an environment and what they may do on the instance
- * (`GET /api/v1/whoami`), and provides the viewer the rules read;
+ * row filters and masks, whether they read an environment, what they may do on the instance and
+ * which environments they manage (`GET /api/v1/whoami`), and provides the viewer the rules read;
  * until the answer comes, the places that need it are neither listed nor refused.
  * @returns The layout.
  */
@@ -50,6 +50,7 @@ export function SettingsLayout(): JSX.Element {
       managePolicy: facts?.managePolicy ?? null,
       readsEnvironments: facts?.readsEnvironments ?? null,
       instanceActions: facts === null ? null : new Set(facts.instanceActions),
+      managedEnvironments: facts?.managedEnvironments ?? null,
     }),
     [admin, noAccessYet, facts],
   );
