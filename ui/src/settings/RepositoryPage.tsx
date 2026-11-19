@@ -25,7 +25,6 @@ import { Link, useNavigate } from "react-router";
 
 import { getRepositoryPage, type RepositoryOut, type TrustedHostKeyOut } from "../api";
 import { listEnvironments } from "../api/environments";
-import { ReadFailed } from "../catalog/ReadFailed";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { Page } from "../shell/Page";
@@ -34,6 +33,7 @@ import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { credentialText } from "./credentialText";
+import { DetailRead } from "./DetailRead";
 import { httpsForm, recogniseHost } from "./hosts";
 import { mayManageRepositories } from "./places";
 import "./repositories.css";
@@ -93,7 +93,7 @@ function Overview({ repo }: BlockProps): JSX.Element {
   return (
     <section className="flat-panel settings-panel">
       <h2>{t(`${P}.overview`)}</h2>
-      <dl className="repository-facts">
+      <dl className="settings-facts">
         <dt>{t(`${P}.url`)}</dt>
         <dd className="repository-url">
           <VisibleText text={repo.url} />
@@ -281,7 +281,7 @@ function Credential({
       <h2>{t(`${P}.credentialTitle`)}</h2>
       <p>{credentialText(t, repo)}</p>
       {repo.kind === "https" && (
-        <dl className="repository-facts">
+        <dl className="settings-facts">
           <dt>{t(`${P}.secret`)}</dt>
           <dd>
             {repo.credential_secret === null ? (
@@ -354,10 +354,9 @@ export function RepositoryPage({ name }: RepositoryPageProps): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const load = useCallback(() => getRepositoryPage(name), [name]);
   const read = useResource(load);
-  const repo = read.data;
   // The focus moves once the page is read again, after the dialog has given it back.
-  const { target: keysHeading, arm: armKeys } = useFocusAfter<HTMLHeadingElement>(repo);
-  const { target: editButton, arm: armEdit } = useFocusAfter<HTMLButtonElement>(repo);
+  const { target: keysHeading, arm: armKeys } = useFocusAfter<HTMLHeadingElement>(read.data);
+  const { target: editButton, arm: armEdit } = useFocusAfter<HTMLButtonElement>(read.data);
   const [open, setOpen] = useState<Open | null>(null);
   const environments = useResource(listEnvironments);
   // Only where the person reads the environment does the page know whether it has a key.
@@ -385,93 +384,78 @@ export function RepositoryPage({ name }: RepositoryPageProps): JSX.Element {
         { to: REPOSITORIES_PATH, label: t("settings.places.repositories") },
       ]}
     >
-      {read.failure?.status === 404 ? (
-        <div className="empty">
-          <p role="alert">{read.error}</p>
-          <p>
-            <Link to={REPOSITORIES_PATH}>{t(`${P}.back`)}</Link>
-          </p>
-        </div>
-      ) : repo === undefined ? (
-        read.error === null ? (
-          <p className="step-status" role="status">
-            {t("session.loading")}
-          </p>
-        ) : (
-          <ReadFailed
-            message={read.error}
-            onRetry={() => {
-              heading.current?.focus();
-              read.reload();
-            }}
-          />
-        )
-      ) : (
-        <>
-          <Overview repo={repo} />
-          <Credential
-            repo={repo}
-            keysHeading={keysHeading}
-            keyEnvironments={keyEnvironments}
-            readable={readable}
-            onOpen={setOpen}
-          />
-          {manages && (
-            <>
-              {repo.kind !== "local" && (
-                <section className="flat-panel settings-panel">
-                  <h2>{t(`${P}.testTitle`)}</h2>
-                  <RepositoryTestAccess name={repo.name} environments={environments} />
-                </section>
-              )}
-              <div className="step-actions">
-                <Button
-                  ref={editButton}
-                  className="button"
-                  aria-label={t(`${P}.editOf`, { name: markedText(repo.name) })}
-                  onPress={() => {
-                    setOpen({ kind: "edit" });
-                  }}
-                >
-                  {t(`${P}.edit`)}
-                </Button>
-                <Button
-                  className="button"
-                  aria-label={t(`${P}.deleteOf`, { name: markedText(repo.name) })}
-                  onPress={() => {
-                    setOpen({ kind: "delete" });
-                  }}
-                >
-                  {t(`${P}.delete`)}
-                </Button>
-              </div>
-            </>
-          )}
-          {open !== null && (
-            <Suspense fallback={null}>
-              {open.kind === "replace" ? (
-                <ReplaceKeyDialog
-                  repository={repo}
-                  environment={open.environment}
-                  onDone={() => {
-                    done("replace");
-                  }}
-                  onClose={close}
-                />
-              ) : (
-                <OpenDialog
-                  kind={open.kind}
-                  repository={repo}
-                  onDone={() => {
-                    done(open.kind);
-                  }}
-                  onClose={close}
-                />
-              )}
-            </Suspense>
-          )}
-        </>
-      )}
+      <DetailRead
+        read={read}
+        heading={heading}
+        missing={<Link to={REPOSITORIES_PATH}>{t(`${P}.back`)}</Link>}
+      >
+        {(repo) => (
+          <>
+            <Overview repo={repo} />
+            <Credential
+              repo={repo}
+              keysHeading={keysHeading}
+              keyEnvironments={keyEnvironments}
+              readable={readable}
+              onOpen={setOpen}
+            />
+            {manages && (
+              <>
+                {repo.kind !== "local" && (
+                  <section className="flat-panel settings-panel">
+                    <h2>{t(`${P}.testTitle`)}</h2>
+                    <RepositoryTestAccess name={repo.name} environments={environments} />
+                  </section>
+                )}
+                <div className="step-actions">
+                  <Button
+                    ref={editButton}
+                    className="button"
+                    aria-label={t(`${P}.editOf`, { name: markedText(repo.name) })}
+                    onPress={() => {
+                      setOpen({ kind: "edit" });
+                    }}
+                  >
+                    {t(`${P}.edit`)}
+                  </Button>
+                  <Button
+                    className="button"
+                    aria-label={t(`${P}.deleteOf`, { name: markedText(repo.name) })}
+                    onPress={() => {
+                      setOpen({ kind: "delete" });
+                    }}
+                  >
+                    {t(`${P}.delete`)}
+                  </Button>
+                </div>
+              </>
+            )}
+            {open !== null && (
+              <Suspense fallback={null}>
+                {open.kind === "replace" ? (
+                  <ReplaceKeyDialog
+                    repository={repo}
+                    environment={open.environment}
+                    onDone={() => {
+                      done("replace");
+                    }}
+                    onClose={close}
+                  />
+                ) : (
+                  <OpenDialog
+                    kind={open.kind}
+                    repository={repo}
+                    onDone={() => {
+                      done(open.kind);
+                    }}
+                    onClose={close}
+                  />
+                )}
+              </Suspense>
+            )}
+          </>
+        )}
+      </DetailRead>
     </Page>
   );
 }

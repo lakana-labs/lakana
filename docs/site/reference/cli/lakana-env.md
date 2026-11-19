@@ -93,6 +93,18 @@ Refused for an environment that is not deleted (`lakana env delete NAME` first);
 | `--rows-only` | flag | off | Remove only the environment's rows from the catalog; its files, if any, are not touched. Required. |
 | `--yes` | flag | off | Don't ask for confirmation. |
 
+## `lakana env storage`
+
+Usage: `lakana env storage [OPTIONS] {name}`
+
+Show environment NAME's storage: its root, its secret and which options are set.
+
+Each option is named by its key, never its value, which can be a credential. Run it before `lakana env set-storage --option`, which replaces every option. Needs MANAGE_ENVIRONMENT on the instance.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+
 ## `lakana env set-storage`
 
 Usage: `lakana env set-storage [OPTIONS] {name}`

@@ -1044,3 +1044,54 @@ def test_a_directory_just_below_the_root_of_the_disk_is_accepted(
         principal, name="dev", storage=StorageConfig(scheme="file", root=root, options={})
     )
     assert catalog.get_environment(principal, "dev").storage_root == root
+
+
+def test_environment_storage_names_the_option_keys_never_a_value(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """The root, the secret's name and the sorted keys; no value is in what comes back."""
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_environment(
+        principal, name="dev", storage=StorageConfig(scheme="file", root=f"file://{tmp_path}")
+    )
+    catalog.update_environment_storage(
+        principal, "dev", options={"key": "AKIA-sentinel", "endpoint": "https://s3.corp"}
+    )
+    catalog.update_environment_storage(principal, "dev", secret_ref="corp-s3")
+
+    storage = catalog.environment_storage(principal, "dev")
+
+    assert storage.root == f"file://{tmp_path}"
+    assert storage.secret_ref == "corp-s3"
+    assert storage.option_keys == ("endpoint", "key")
+    assert "AKIA-sentinel" not in repr(storage)
+    assert "s3.corp" not in repr(storage)
+
+
+def test_environment_storage_needs_manage_environment_on_the_instance(
+    session: Session, principal: PrincipalRef
+) -> None:
+    """As changing the storage needs it: an environment's own grant is not asked."""
+    authz = _RecordThenDeny()
+    catalog = CatalogService(session, StorageResolver(session), authz)
+
+    with pytest.raises(PermissionDenied):
+        catalog.environment_storage(principal, "dev")
+
+    assert authz.seen == (Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+
+
+def test_environment_storage_of_a_deleted_or_unknown_environment_is_not_found(
+    session: Session, principal: PrincipalRef, tmp_path: Path
+) -> None:
+    """A deleted environment's storage is not read, like every other lookup by name."""
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_environment(
+        principal, name="dev", storage=StorageConfig(scheme="file", root=f"file://{tmp_path}")
+    )
+    catalog.delete_environment(principal, "dev")
+
+    with pytest.raises(NotFoundError):
+        catalog.environment_storage(principal, "dev")
+    with pytest.raises(NotFoundError):
+        catalog.environment_storage(principal, "nope")

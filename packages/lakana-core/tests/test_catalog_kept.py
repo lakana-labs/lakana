@@ -875,6 +875,9 @@ _NOTHING_OF_A_KEPT_TABLE = {
         "and no file locations"
     ),
     "update_environment_storage": _NO_TABLE,
+    "environment_storage": (
+        "returns the root, the secret's name and the option keys; no value, no table"
+    ),
     "set_environment_protection": _NO_TABLE,
     "create_namespace": _NO_TABLE,
     "load_namespace": _NO_TABLE,

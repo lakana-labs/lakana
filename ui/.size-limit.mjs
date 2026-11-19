@@ -44,6 +44,15 @@ const NAMED_LIMITS = [
   // keys and deploy keys, Test access with the environment picker, and the loaders of its
   // dialogs, which load when one is opened: RepositoryDialogs-, on the shared limit).
   { name: "a repository's page", prefix: "RepositoryPage-", limit: "3.6 kB" },
+  // Measured 3.56 kB (2026-11-19) + 10 %: an environment's page (its overview with Protect,
+  // Unprotect and Set retention, usage, Storage and Delete environment, and the loaders of its
+  // dialogs and of Leftover directories, which load on their own: EnvironmentDialogs- and
+  // LeftoverDirectories-).
+  { name: "an environment's page", prefix: "EnvironmentPage-", limit: "3.92 kB" },
+  // Measured 4.11 kB (2026-11-19) + 10 %: the dialogs of Settings › Environments (Create
+  // environment, Set retention, Change storage, Delete environment, and a deleted environment's
+  // Restore, Delete the files and Remove from the catalog), loaded when one is first opened.
+  { name: "the environments' dialogs", prefix: "EnvironmentDialogs-", limit: "4.52 kB" },
   // Measured 3.83 kB (2026-11-18) + 10 %: Settings › Access › Grants (the filters Who, On exactly
   // and What with its two sections, the list with the Git mark, Remove and its question); Add
   // grant loads when it is opened (AddGrantDialog-, on the shared limit).

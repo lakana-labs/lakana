@@ -47,6 +47,7 @@ for (const theme of ["light", "dark"] as const) {
 
         await tabTo(page, list.getByRole("link", { name: "Status", exact: true }));
         for (const name of [
+          "Environments",
           "Repositories",
           "People",
           "Groups",

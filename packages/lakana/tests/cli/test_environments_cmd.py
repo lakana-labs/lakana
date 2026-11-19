@@ -726,3 +726,26 @@ def test_env_usage_without_a_worker_says_no_cache_is_shown(tmp_path: Path) -> No
     result = invoke(make_state(tmp_path, api), "env", "usage", "dev")
     assert result.exit_code == 0, result.stderr
     assert "No worker is registered, so no cache is shown." in result.stdout
+
+
+def test_env_storage_names_the_option_keys(tmp_path: Path) -> None:
+    """`env storage` shows the root, the secret and the keys of the options that are set."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/environments/dev/storage",
+        json={"root": "s3://corp-lake/dev", "secret_ref": "corp-s3", "option_keys": ["endpoint"]},
+    )
+
+    shown = invoke(make_state(tmp_path, api), "env", "storage", "dev", env={"COLUMNS": "200"})
+    as_json = invoke(make_state(tmp_path, api), "--output", "json", "env", "storage", "dev")
+
+    assert shown.exit_code == 0, shown.stderr
+    assert "s3://corp-lake/dev" in shown.stdout
+    assert "corp-s3" in shown.stdout
+    assert "endpoint" in shown.stdout
+    assert json.loads(as_json.stdout) == {
+        "root": "s3://corp-lake/dev",
+        "secret_ref": "corp-s3",
+        "option_keys": ["endpoint"],
+    }

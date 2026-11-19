@@ -73,18 +73,24 @@
 "deployments set-run-as": { class: ui, part: 7 }
 "deploys list": { class: read, part: 5, done: true }
 "deploys show": { class: read, part: 5, done: true }
-"env create": { class: ui, part: 8 }
-"env delete": { class: ui, part: 8 }
-"env get": { class: ui, part: 8 }
-"env list": { class: ui, part: 8 }
-"env orphaned-locations": { class: ui, part: 8 }
-"env protect": { class: ui, part: 8 }
-"env purge": { class: ui, part: 8 }
-"env restore": { class: ui, part: 8 }
-"env retention": { class: ui, part: 8 }
-"env set-storage": { class: ui, part: 8 }
-"env unprotect": { class: ui, part: 8 }
-"env usage": { class: ui, part: 8 }
+"env create": { class: ui, part: 8, done: true }
+"env delete": { class: ui, part: 8, done: true }
+"env get": { class: ui, part: 8, done: true }
+"env list": { class: ui, part: 8, done: true }
+"env orphaned-locations": { class: ui, part: 8, done: true }
+"env protect": { class: ui, part: 8, done: true }
+"env purge": { class: ui, part: 8, done: true }
+"env restore": { class: ui, part: 8, done: true }
+"env retention": { class: ui, part: 8, done: true }
+"env set-storage": { class: ui, part: 8, done: true }
+"env storage": { class: ui, part: 8, done: true }
+"env unprotect": { class: ui, part: 8, done: true }
+"env usage":
+  {
+    class: ui,
+    part: 8,
+    note: "each environment's usage is on its page; the workers' caches are not shown yet",
+  }
 "grant create": { class: ui, part: 7, done: true }
 "grant list": { class: ui, part: 7, done: true }
 "grant revoke": { class: ui, part: 7, done: true }
@@ -263,7 +269,7 @@
   { class: ui, part: 3, done: true }
 "DELETE /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: ui, part: 3, done: true }
-"DELETE /api/v1/environments/{name}": { class: ui, part: 8 }
+"DELETE /api/v1/environments/{name}": { class: ui, part: 8, done: true }
 "DELETE /api/v1/grants/{grant_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/groups/{name}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7, done: true }
@@ -303,7 +309,7 @@
 "GET /api/v1/connections": { class: ui, part: 6, done: true }
 "GET /api/v1/connections/environments": { class: ui, part: 6, done: true }
 "GET /api/v1/deploys": { class: read, part: 5 }
-"GET /api/v1/environments": { class: ui, part: 8 }
+"GET /api/v1/environments": { class: ui, part: 8, done: true }
 "GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6, done: true }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}":
   { class: ui, part: 6, done: true }
@@ -396,9 +402,10 @@
 "GET /api/v1/environments/{env}/search": { class: ui, part: 1 }
 "GET /api/v1/environments/{env}/terms": { class: read, part: 3 }
 "GET /api/v1/environments/{env}/terms/{key}": { class: read, part: 3 }
-"GET /api/v1/environments/{name}": { class: ui, part: 8 }
-"GET /api/v1/environments/{name}/orphaned-locations": { class: ui, part: 8 }
-"GET /api/v1/environments/{name}/usage": { class: ui, part: 8 }
+"GET /api/v1/environments/{name}": { class: ui, part: 8, done: true }
+"GET /api/v1/environments/{name}/orphaned-locations": { class: ui, part: 8, done: true }
+"GET /api/v1/environments/{name}/storage": { class: ui, part: 8, done: true }
+"GET /api/v1/environments/{name}/usage": { class: ui, part: 8, done: true }
 "GET /api/v1/grants":
   {
     class: ui,
@@ -486,8 +493,8 @@
   { class: ui, part: 7, done: true }
 "PATCH /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: ui, part: 3, done: true }
-"PATCH /api/v1/environments/{name}": { class: ui, part: 8 }
-"PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8 }
+"PATCH /api/v1/environments/{name}": { class: ui, part: 8, done: true }
+"PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8, done: true }
 "PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "PATCH /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8, done: true }
@@ -511,7 +518,7 @@
 "POST /api/v1/ci-trust-rules/{rule_id}/disable": { class: ui, part: 7 }
 "POST /api/v1/ci-trust-rules/{rule_id}/enable": { class: ui, part: 7 }
 "POST /api/v1/column-masks": { class: ui, part: 7, done: true }
-"POST /api/v1/environments": { class: ui, part: 8 }
+"POST /api/v1/environments": { class: ui, part: 8, done: true }
 "POST /api/v1/environments/{environment_name}/connection-tests": { class: ui, part: 6, done: true }
 "POST /api/v1/environments/{environment_name}/connections": { class: ui, part: 6, done: true }
 "POST /api/v1/environments/{environment_name}/connections/{connection_name}/tests":
@@ -568,9 +575,9 @@
 "POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5, done: true }
-"POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8 }
-"POST /api/v1/environments/{name}/purge-rows": { class: ui, part: 8 }
-"POST /api/v1/environments/{name}/restore": { class: ui, part: 8 }
+"POST /api/v1/environments/{name}/orphaned-locations/delete": { class: ui, part: 8, done: true }
+"POST /api/v1/environments/{name}/purge-rows": { class: ui, part: 8, done: true }
+"POST /api/v1/environments/{name}/restore": { class: ui, part: 8, done: true }
 "POST /api/v1/grants": { class: ui, part: 7, done: true }
 "POST /api/v1/groups": { class: ui, part: 7, done: true }
 "POST /api/v1/invites": { class: ui, part: 1 }
@@ -618,6 +625,6 @@
   }
 "PUT /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
   { class: ui, part: 3, done: true }
-"PUT /api/v1/environments/{name}/retention": { class: ui, part: 8 }
+"PUT /api/v1/environments/{name}/retention": { class: ui, part: 8, done: true }
 "PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7, done: true }
 "PUT /api/v1/principals/{name}/picture": { class: ui, part: 2 }

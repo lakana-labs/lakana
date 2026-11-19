@@ -722,6 +722,40 @@ class GrantService:
         allowed = permits_each(self._authz, p, questions)
         return [name for name, yes in zip(names, allowed, strict=True) if yes]
 
+    def managed_environments(self, p: PrincipalRef) -> list[str]:
+        """Name the environments the caller may manage with this credential.
+
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. It follows the credential's scope, as `secret_environments` does: a task or CI
+        token names none. A deleted environment counts while its row is kept (until the sweep
+        has deleted its files), as `GET /api/v1/environments?deleted=true` lists it, since
+        restoring it or deleting its files needs the same right. The web interface offers the
+        usage, retention, deletion and restore of Settings, Environments from it.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        list of str
+            The names of the environments, live or deleted with a `purge_after`, where
+            `permits(MANAGE_ENVIRONMENT)` holds, sorted, asked in one batch; empty without one.
+        """
+        names = list(
+            self._session.execute(
+                select(Environment.name)
+                .where(or_(LIVE_ENVIRONMENT, Environment.purge_after.is_not(None)))
+                .order_by(Environment.name)
+            ).scalars()
+        )
+        questions = [
+            (Action.MANAGE_ENVIRONMENT, Securable.environment_scope(name)) for name in names
+        ]
+        allowed = permits_each(self._authz, p, questions)
+        return [name for name, yes in zip(names, allowed, strict=True) if yes]
+
     def may_manage_policies(self, p: PrincipalRef) -> bool:
         """Say whether the caller may manage row filters and column masks with this credential.
 

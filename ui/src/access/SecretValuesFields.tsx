@@ -1,6 +1,6 @@
 /**
- * A secret's values as a form writes them: rows of a key and a value, the value typed into a
- * password field and never shown.
+ * A secret's values as a form writes them, and an environment's storage options likewise: rows
+ * of a key and a value, the value typed into a password field and never shown.
  *
  * @remarks
  * A value is never React state: its password field is uncontrolled, so React never writes it
@@ -63,6 +63,9 @@ export function useValueInputs(): ValueInputs {
   return { register, read };
 }
 
+/** The strings of the secret's values, the default words of the fields. */
+const SECRET_WORDS = "secrets.values";
+
 /** Counts the rows made, for their ids. */
 let made = 0;
 
@@ -84,13 +87,19 @@ export function newRow(key = ""): ValueRow {
  * @param t - The translator.
  * @param rows - Every row.
  * @param row - The row.
+ * @param words - The strings' prefix.
  * @returns The sentence, which names the key, never the value.
  */
-function keyProblem(t: TFunction, rows: readonly ValueRow[], row: ValueRow): string | null {
+function keyProblem(
+  t: TFunction,
+  rows: readonly ValueRow[],
+  row: ValueRow,
+  words: string,
+): string | null {
   const key = row.key.trim();
-  if (key === "") return t("secrets.values.keyMissing");
+  if (key === "") return t(`${words}.keyMissing`);
   const twice = rows.some((other) => other.id !== row.id && other.key.trim() === key);
-  return twice ? t("secrets.values.keyTwice", { key }) : null;
+  return twice ? t(`${words}.keyTwice`, { key }) : null;
 }
 
 /**
@@ -101,7 +110,7 @@ function keyProblem(t: TFunction, rows: readonly ValueRow[], row: ValueRow): str
  * @returns True when they may.
  */
 export function valuesReady(t: TFunction, rows: readonly ValueRow[]): boolean {
-  return rows.every((row) => keyProblem(t, rows, row) === null);
+  return rows.every((row) => keyProblem(t, rows, row, SECRET_WORDS) === null);
 }
 
 /**
@@ -135,12 +144,21 @@ export interface SecretValuesFieldsProps {
   readonly checked: boolean;
   /** The rows' password fields. */
   readonly inputs: ValueInputs;
+  /**
+   * The prefix of the strings the fields say (its `legend`, `help`, `key`, `value`, `add`,
+   * `remove`, `removeOf`, `removeUnnamed`, `keyMissing` and `keyTwice`); a secret's by default.
+   */
+  readonly words?: string;
+  /** Whether the last row may be removed too, for values that may be none; no by default. */
+  readonly mayBeNone?: boolean;
 }
 
 /** Properties of {@link ValueField}. */
 interface ValueFieldProps {
   /** Gives the field its ref. */
   readonly inputRef: (input: HTMLInputElement | null) => void;
+  /** Its label. */
+  readonly label: string;
 }
 
 /**
@@ -150,16 +168,16 @@ interface ValueFieldProps {
  * to ignore it. A browser may still offer to save a typed value once the form is sent; the
  * person can decline.
  *
- * @param props - The ref.
+ * @param props - The ref and the label.
  * @param props.inputRef - Gives the field its ref.
+ * @param props.label - Its label.
  * @returns The field.
  */
-function ValueField({ inputRef }: ValueFieldProps): JSX.Element {
-  const { t } = useTranslation();
+function ValueField({ inputRef, label }: ValueFieldProps): JSX.Element {
   const id = useId();
   return (
     <div className="field">
-      <label htmlFor={id}>{t("secrets.values.value")}</label>
+      <label htmlFor={id}>{label}</label>
       <input
         id={id}
         ref={inputRef}
@@ -175,14 +193,16 @@ function ValueField({ inputRef }: ValueFieldProps): JSX.Element {
 
 /**
  * Renders the rows, each a Key field, a Value field (a password field, with no way to reveal
- * it) and Remove while there is more than one row, then Add a value. A key's problem shows once
- * its field is left, or once a send was tried.
+ * it) and Remove while there is more than one row (or any, with `mayBeNone`), then Add a value.
+ * A key's problem shows once its field is left, or once a send was tried.
  *
  * @param props - The rows, the change handler, whether a send was tried and the fields.
  * @param props.rows - The rows.
  * @param props.onChange - Called with the rows as changed.
  * @param props.checked - Whether a send was tried.
  * @param props.inputs - The rows' password fields.
+ * @param props.words - The prefix of the strings the fields say.
+ * @param props.mayBeNone - Whether the last row may be removed too.
  * @returns The fields.
  */
 export function SecretValuesFields({
@@ -190,6 +210,8 @@ export function SecretValuesFields({
   onChange,
   checked,
   inputs,
+  words = SECRET_WORDS,
+  mayBeNone = false,
 }: SecretValuesFieldsProps): JSX.Element {
   const { t } = useTranslation();
   const [left, setLeft] = useState<ReadonlySet<string>>(new Set());
@@ -198,10 +220,10 @@ export function SecretValuesFields({
   };
   return (
     <fieldset className="secret-values">
-      <legend>{t("secrets.values.legend")}</legend>
-      <p className="step-hint">{t("secrets.values.help")}</p>
+      <legend>{t(`${words}.legend`)}</legend>
+      <p className="step-hint">{t(`${words}.help`)}</p>
       {rows.map((row) => {
-        const problem = checked || left.has(row.id) ? keyProblem(t, rows, row) : null;
+        const problem = checked || left.has(row.id) ? keyProblem(t, rows, row, words) : null;
         return (
           <div className="secret-value-row" key={row.id}>
             <TextField
@@ -215,24 +237,24 @@ export function SecretValuesFields({
                 setLeft((previous) => new Set(previous).add(row.id));
               }}
             >
-              <Label>{t("secrets.values.key")}</Label>
+              <Label>{t(`${words}.key`)}</Label>
               <Input autoComplete="off" spellCheck={false} />
               <FieldError>{problem}</FieldError>
             </TextField>
-            <ValueField inputRef={inputs.register(row.id)} />
-            {rows.length > 1 && (
+            <ValueField inputRef={inputs.register(row.id)} label={t(`${words}.value`)} />
+            {(mayBeNone || rows.length > 1) && (
               <Button
                 className="button"
                 aria-label={
                   row.key.trim() === ""
-                    ? t("secrets.values.removeUnnamed")
-                    : t("secrets.values.removeOf", { key: markedText(row.key.trim()) })
+                    ? t(`${words}.removeUnnamed`)
+                    : t(`${words}.removeOf`, { key: markedText(row.key.trim()) })
                 }
                 onPress={() => {
                   onChange(rows.filter((other) => other.id !== row.id));
                 }}
               >
-                {t("secrets.values.remove")}
+                {t(`${words}.remove`)}
               </Button>
             )}
           </div>
@@ -244,7 +266,7 @@ export function SecretValuesFields({
           onChange([...rows, newRow()]);
         }}
       >
-        {t("secrets.values.add")}
+        {t(`${words}.add`)}
       </Button>
     </fieldset>
   );

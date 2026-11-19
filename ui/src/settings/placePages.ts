@@ -23,6 +23,12 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    */
   status: async () => (await import("./StatusPage")).StatusPage,
   /**
+   * Environments, with an environment's page below it.
+   *
+   * @returns The page.
+   */
+  environments: async () => (await import("./EnvironmentsRoutes")).EnvironmentsRoutes,
+  /**
    * Repositories, with Connect a repository below it.
    *
    * @returns The page.

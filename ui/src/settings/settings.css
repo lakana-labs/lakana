@@ -84,7 +84,7 @@
   }
 }
 
-/* Settings › Status and a repository's page: blocks 24 px apart, each under a title-step
+/* Settings › Status, a repository's page and an environment's: blocks 24 px apart, each under a title-step
    heading; a word beside its glyph. */
 .settings-panel {
   margin: 0 0 var(--space-5);
@@ -100,6 +100,35 @@
 .settings-panel h2:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
+}
+
+.settings-panel h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: 500;
+}
+
+.settings-panel h3:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* A page's facts as name and value (a repository's, an environment's). */
+.settings-facts {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.settings-facts dt {
+  color: var(--color-text-muted);
+}
+
+.settings-facts dd {
+  min-width: 0;
+  margin: 0;
 }
 
 .status-word {

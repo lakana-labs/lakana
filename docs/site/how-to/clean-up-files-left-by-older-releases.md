@@ -88,6 +88,17 @@ A run without `--delete` records nothing.
     `--older-than` to more days than the backup's age. See "After a restore" in
     [Deploy with Docker Compose](deploy-with-compose.md#after-a-restore).
 
+## In the web interface
+
+**Settings → Environments → an environment → Leftover directories** does the same. Set **Older
+than** (30 days by default), press **Find**, and the page lists each directory with its files, its
+size, its newest file and whether it is recent (and so kept). **Delete the old ones** asks once,
+naming how many directories and how much data go, then lists each directory as deleted or with
+the reason it was kept. When the server's time limit stopped a search, **Find again** continues
+it; a deletion it stopped offers **Continue**. The panel is shown to whoever may manage
+environments on the instance, on the page of a live environment; for a deleted environment, use
+the command.
+
 ## The same over REST and the SDK
 
 - `GET /api/v1/environments/{name}/orphaned-locations?older_than_days=30` lists;

@@ -3179,6 +3179,12 @@ class WhoamiOut(BaseModel):
         The actions you may take on the instance with this credential (such as
         `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the
         order of the action list; empty for a task or CI token. It describes you only.
+    managed_environments
+        The environments, by name and sorted, that you may manage with this credential
+        (`MANAGE_ENVIRONMENT` on the environment, directly, through a role or a group),
+        including deleted ones whose files are not deleted yet; empty for a task or CI token.
+        The web interface offers an environment's usage, retention, deletion and restore for
+        exactly these. It describes you only.
     picture
         The etag of your profile picture, or `null` without one.
     """
@@ -3195,6 +3201,7 @@ class WhoamiOut(BaseModel):
     manage_policy: bool = False
     reads_environments: bool = False
     instance_actions: list[str] = []
+    managed_environments: list[str] = []
     picture: str | None = None
 
 
@@ -3460,6 +3467,28 @@ class WorkOut(BaseModel):
 
     repositories: list[WorkRepositoryOut]
     jobs: list[WorkJobOut]
+
+
+class EnvironmentStorageOut(BaseModel):
+    """Where an environment's data lives, and which storage options are set.
+
+    Never a value: an option can hold an inline credential, so only its key is named.
+
+    Parameters
+    ----------
+    root
+        The storage root URI.
+    secret_ref
+        The name of the secret holding the storage credential, or `null`.
+    option_keys
+        The keys of the storage options that are set, sorted.
+    """
+
+    model_config = {"from_attributes": True}
+
+    root: str
+    secret_ref: str | None
+    option_keys: list[str]
 
 
 class EnvironmentStorageUpdate(BaseModel):

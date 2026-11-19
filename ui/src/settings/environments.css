@@ -1,0 +1,81 @@
+@import "../shell/environment.css";
+
+/* Settings › Environments: the lists scroll in their own region, a name stays whole, a long root
+   wraps inside its own cell, and a usage that could not be read says so quietly. */
+.list-scroll.environments-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.environments-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+.environment-storage {
+  overflow-wrap: anywhere;
+}
+
+.environment-usage-failed {
+  color: var(--color-text-muted);
+}
+
+/* The deleted environments, one section below the list. */
+.environments-deleted {
+  margin: var(--space-6) 0 0;
+}
+
+.environments-deleted h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--type-title-size);
+  font-weight: var(--type-title-weight);
+  line-height: var(--type-title-line);
+}
+
+.environments-deleted h2:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* An environment's properties: each key beside its value, a long one wrapping in its place. */
+.environment-properties {
+  margin: 0 0 var(--space-2);
+}
+
+.environment-properties div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.environment-properties dt {
+  color: var(--color-text-muted);
+}
+
+.environment-properties dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A deleted environment's actions, side by side, wrapping on a narrow screen. */
+.environment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Leftover directories: the age beside Find, wrapping on a narrow screen; the directories scroll
+   in their own region, each location kept whole. */
+.leftover-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.list-scroll.leftover-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.leftover-scroll .leftover-location {
+  overflow-wrap: normal;
+}

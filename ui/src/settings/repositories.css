@@ -16,23 +16,7 @@
   color: var(--color-warn);
 }
 
-/* A repository's page: its facts as name and value, its keys one per line, kept whole. */
-.repository-facts {
-  display: grid;
-  grid-template-columns: minmax(96px, max-content) 1fr;
-  gap: var(--space-2) var(--space-4);
-  margin: 0 0 var(--space-3);
-}
-
-.repository-facts dt {
-  color: var(--color-text-muted);
-}
-
-.repository-facts dd {
-  min-width: 0;
-  margin: 0;
-}
-
+/* A repository's page: its keys one per line, kept whole. */
 .repository-keys {
   margin: 0 0 var(--space-3);
   padding: 0;
@@ -46,18 +30,6 @@
 
 .repository-keys code {
   overflow-wrap: anywhere;
-}
-
-.settings-panel h3 {
-  margin: var(--space-4) 0 var(--space-2);
-  font-size: var(--type-body-size);
-  line-height: var(--type-body-line);
-  font-weight: 500;
-}
-
-.settings-panel h3:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
 }
 
 .repository-host-keys {

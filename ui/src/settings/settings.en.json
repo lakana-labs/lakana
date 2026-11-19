@@ -2,6 +2,7 @@
   "label": "Settings places",
   "picker": "Section",
   "status": "Status",
+  "environments": "Environments",
   "repositories": "Repositories",
   "access": "Access",
   "people": "People",
