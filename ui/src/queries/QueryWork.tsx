@@ -137,11 +137,13 @@ interface WorkProps {
   readonly address: QueriesAddress | null;
   /** The Queries ▾ button of a narrow screen, first in the toolbar; null beside the library. */
   readonly fold: ReactNode;
+  /** Called after a save or a delete, so Saved is read again; the same function on every render. */
+  readonly onSavedChange: () => void;
   /**
-   * Called after a save or a delete, a submit taken or a followed run's end, so the library reads
-   * its lists again; the same function on every render.
+   * Called after a submit taken or a followed run's end, so Recent is read again; the same
+   * function on every render.
    */
-  readonly onLibraryChange: () => void;
+  readonly onRecentChange: () => void;
 }
 
 /**
@@ -149,14 +151,21 @@ interface WorkProps {
  * no run (a new query, a saved one) shows no run: entering it stops following the old one
  * (without a cancel) and keeps the editor's text.
  *
- * @param props - The environments, the address, the fold and the library's reload.
+ * @param props - The environments, the address, the fold and the library's reloads.
  * @param props.environments - The environments where the person may run a query.
  * @param props.address - The run or saved query the address names, or null.
  * @param props.fold - The Queries ▾ button, or null.
- * @param props.onLibraryChange - Called when the library's lists changed.
+ * @param props.onSavedChange - Called when Saved changed.
+ * @param props.onRecentChange - Called when Recent changed.
  * @returns The work column.
  */
-function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.Element {
+function Work({
+  environments,
+  address,
+  fold,
+  onSavedChange,
+  onRecentChange,
+}: WorkProps): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
   const navigate = useNavigate();
@@ -213,9 +222,9 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
   const { listed } = query;
   useEffect(() => {
     if (listed > 0) {
-      onLibraryChange();
+      onRecentChange();
     }
-  }, [listed, onLibraryChange]);
+  }, [listed, onRecentChange]);
 
   const { open, reset } = query;
   const runAddress = address?.kind === "run" ? address : null;
@@ -416,7 +425,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           opened={opened}
           onSaved={(saved, created) => {
             close();
-            onLibraryChange();
+            onSavedChange();
             // A new saved query moves to its address; one saved again stays where it is (its
             // own address, or the run's), and its history entry carries it as it is now.
             void navigate(created ? savedPath(saved.environment, saved.id) : location.pathname, {
@@ -432,7 +441,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           saved={opened}
           onDone={() => {
             close();
-            onLibraryChange();
+            onSavedChange();
             // The SQL stays in the editor; the note takes the focus from the gone Delete….
             void navigate("/queries", {
               state: { keepFocus: true, note: { kind: "deleted", name: opened.name } },
@@ -470,9 +479,14 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
   const folded = useFolded();
   const environments = useResource(listQueryEnvironments);
   const [filter, setFilter] = useState(readFilter);
-  const [reloadKey, setReloadKey] = useState(0);
-  const reloadLibrary = useCallback(() => {
-    setReloadKey((key) => key + 1);
+  // Each list is read again on its own, so one's reload keeps the other's pages (Show more).
+  const [savedKey, setSavedKey] = useState(0);
+  const [recentKey, setRecentKey] = useState(0);
+  const reloadSaved = useCallback(() => {
+    setSavedKey((key) => key + 1);
+  }, []);
+  const reloadRecent = useCallback(() => {
+    setRecentKey((key) => key + 1);
   }, []);
   const address =
     mode === "new" ? null : { kind: mode, environment: String(params.env), id: String(params.id) };
@@ -496,7 +510,8 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
                 environments: listed,
                 filter,
                 onFilter: setFilter,
-                reloadKey,
+                savedKey,
+                recentKey,
               };
               return (
                 <>
@@ -509,7 +524,8 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
                     environments={listed}
                     address={address}
                     fold={folded ? <LibraryFold {...library} /> : null}
-                    onLibraryChange={reloadLibrary}
+                    onSavedChange={reloadSaved}
+                    onRecentChange={reloadRecent}
                   />
                 </>
               );

@@ -320,6 +320,58 @@ describe("the Queries screen's work", () => {
     expect(within(recent).queryByText("Running")).toBeNull();
   });
 
+  it("a run reads Recent again and leaves Saved, and the pages shown with Show more, as they are", async () => {
+    window.localStorage.setItem("lakana.queries.environment", "prod");
+    const shell = renderShell("/queries", {
+      routes: routes({
+        "GET /api/v1/saved-queries": ({ path }) => ({
+          status: 200,
+          body: path.includes("cursor=c-2")
+            ? { items: [aSavedQuery({ id: "b2", name: "Station ranking" })], next_cursor: null }
+            : { items: [aSavedQuery()], next_cursor: "c-2" },
+        }),
+      }),
+    });
+    const saved = await screen.findByRole("region", { name: "Saved" });
+    await shell.user.click(await within(saved).findByRole("button", { name: "Show more" }));
+    await within(saved).findByRole("link", { name: "Station ranking" });
+    const reads = (list: string): number =>
+      sent(shell).filter((request) => request.startsWith(`GET /api/v1/${list}?`)).length;
+    const recentBefore = reads("queries");
+    type(await editor(), "select 1 as one");
+
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("grid");
+
+    await waitFor(() => {
+      expect(reads("queries")).toBeGreaterThan(recentBefore);
+    });
+    expect(reads("saved-queries")).toBe(2);
+    expect(within(saved).getByRole("link", { name: "Station ranking" })).toBeInTheDocument();
+  });
+
+  it("a save reads Saved again and leaves Recent as it is", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`PUT ${SAVED_ONE}`]: { status: 200, body: aSavedQuery() } }),
+    });
+    await editor();
+    const reads = (list: string): number =>
+      sent(shell).filter((request) => request.startsWith(`GET /api/v1/${list}?`)).length;
+    await waitFor(() => {
+      expect(reads("saved-queries")).toBe(1);
+    });
+    const recentBefore = reads("queries");
+
+    await shell.user.click(screen.getByRole("button", { name: "Save…" }));
+    const dialog = await screen.findByRole("dialog");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(reads("saved-queries")).toBe(2);
+    });
+    expect(reads("queries")).toBe(recentBefore);
+  });
+
   it("shows a refusal through problemText above the result", async () => {
     const shell = renderShell(RUN_PATH, {
       routes: routes({
