@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { expectPending, held } from "../test/pending";
+import { freshSession } from "../test/access";
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -48,6 +49,7 @@ describe("InvitesPage", () => {
     const { user, server } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": () => ({ status: 200, body: open }),
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/invites": () => {
           open = [{ ...OPEN, id: "i-2", name: "sam", display_name: null }];
           return { status: 201, body: ISSUED };
@@ -85,6 +87,7 @@ describe("InvitesPage", () => {
     const { user, server } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/invites": () => {
           tries += 1;
           return tries === 1
@@ -126,6 +129,7 @@ describe("InvitesPage", () => {
     const { user, server } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/invites": {
           status: 403,
           body: { type: "StepUpRequired", detail: "Confirm with your passkey." },
@@ -160,6 +164,7 @@ describe("InvitesPage", () => {
     const { user } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/invites": {
           status: 409,
           body: { type: "ConflictError", detail: "'Kim' is taken. Choose another name." },
@@ -186,6 +191,7 @@ describe("InvitesPage", () => {
     const { user } = renderShell("/settings/sign-in/invites", {
       routes: {
         "GET /api/v1/invites": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/invites": request.route,
       },
     });

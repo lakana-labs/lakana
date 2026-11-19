@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { expectPending, held } from "../test/pending";
+import { freshSession } from "../test/access";
 import { renderShell } from "../test/render";
 
 const SETTINGS = {
@@ -73,6 +74,7 @@ describe("SignInSettings", () => {
     const { user, server } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+        "GET /api/v1/sign-in/session": freshSession(),
         "PATCH /api/v1/settings/sign-in": (request) => ({
           status: 200,
           body: { ...SETTINGS, ...(request.body as object) },
@@ -97,6 +99,7 @@ describe("SignInSettings", () => {
     const { user } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+        "GET /api/v1/sign-in/session": freshSession(),
         "PATCH /api/v1/settings/sign-in": request.route,
       },
     });
@@ -113,6 +116,7 @@ describe("SignInSettings", () => {
     const { user } = renderShell("/settings/sign-in", {
       routes: {
         "GET /api/v1/settings/sign-in": { status: 200, body: SETTINGS },
+        "GET /api/v1/sign-in/session": freshSession(),
         "PATCH /api/v1/settings/sign-in": {
           status: 403,
           body: { type: "PermissionDenied", detail: "You need the ADMIN role." },

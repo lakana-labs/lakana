@@ -8,7 +8,8 @@ import { type JSX, useState } from "react";
 import { Form, Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { changeSignInSettings, getSignInSettings, type SignInSettingsOut } from "../api";
+import { getSignInSettings, type SignInSettingsOut } from "../api";
+import { saveSignInSettings } from "../api/signInAdmin";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
 import { useAttempt } from "../sign-in/Attempt";
@@ -112,7 +113,7 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
           return;
         }
         attempt.run(async () => {
-          const changed = await changeSignInSettings({
+          const changed = await saveSignInSettings({
             idle_timeout_minutes: idleMinutes as number,
             absolute_lifetime_minutes: absoluteMinutes as number,
           });

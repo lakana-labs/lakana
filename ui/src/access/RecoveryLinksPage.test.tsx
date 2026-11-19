@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { expectPending, held } from "../test/pending";
+import { freshSession } from "../test/access";
 import { renderShell } from "../test/render";
 
 const OPEN = {
@@ -64,6 +65,7 @@ describe("RecoveryLinksPage", () => {
       routes: {
         "GET /api/v1/recovery-links": () => ({ status: 200, body: open }),
         "GET /api/v1/principals/sam": principal("sam", false),
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/principals/sam/recovery-link": () => {
           open = [{ ...OPEN, id: "r-2", name: "sam" }];
           return { status: 201, body: ISSUED };

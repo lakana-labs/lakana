@@ -8,7 +8,8 @@ import { type JSX, useState } from "react";
 import { Button, FieldError, Form, Heading, Input, Label, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { createRecoveryLink, getPrincipal, type RecoveryLinkOut } from "../api";
+import { getPrincipal, type RecoveryLinkOut } from "../api";
+import { issueRecoveryLink } from "../api/signInAdmin";
 import { ActionDialog } from "../shell/ActionDialog";
 import { CopyLine } from "../shell/CopyLine";
 import { useWhen } from "../shell/useWhen";
@@ -33,8 +34,8 @@ type Stage =
 
 /**
  * Asks for whose account (unless named), finds out whether the person holds or has held ADMIN, and
- * then either shows the operator's command or issues the link (a passkey touch when the server
- * asks for one) and shows it once.
+ * then either shows the operator's command or issues the link (after a passkey touch when the
+ * session's is stale) and shows it once.
  *
  * @param props - The name and the close handler.
  * @param props.name - Whose account, if already known.
@@ -66,7 +67,7 @@ export function RecoveryDialog({ name: known, onClose }: RecoveryDialogProps): J
               setStage(
                 (await getPrincipal(name)).held_admin === true
                   ? { kind: "operator" }
-                  : { kind: "issued", link: await createRecoveryLink(name) },
+                  : { kind: "issued", link: await issueRecoveryLink(name) },
               );
             });
           }}

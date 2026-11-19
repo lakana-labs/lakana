@@ -2,6 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { expectPending, held } from "../test/pending";
+import { freshSession } from "../test/access";
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
 
@@ -121,6 +122,7 @@ describe("PersonPage", () => {
         "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/principals/kim/recovery-link": () => {
           tries += 1;
           return tries === 1
@@ -159,6 +161,7 @@ describe("PersonPage", () => {
         "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
         "POST /api/v1/principals/kim/recovery-link": request.route,
       },
     });
@@ -350,6 +353,7 @@ describe("PersonPage", () => {
         [`GET ${base}`]: principal("k\u202Eim", false),
         [`GET ${base}/passkeys`]: { status: 200, body: [] },
         [`GET ${base}/sessions`]: { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
         [`POST ${base}/recovery-link`]: {
           status: 201,
           body: {

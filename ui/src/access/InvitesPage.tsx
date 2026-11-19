@@ -16,7 +16,8 @@ import {
 } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { createInvite, type InviteOut, listInvites, withdrawInvite } from "../api";
+import { type InviteOut, listInvites, withdrawInvite } from "../api";
+import { issueInvite } from "../api/signInAdmin";
 import { ActionDialog } from "../shell/ActionDialog";
 import { CopyLine } from "../shell/CopyLine";
 import { ListHead } from "../shell/ListHead";
@@ -38,8 +39,8 @@ interface InviteDialogProps {
 }
 
 /**
- * Asks for the new person's name, creates the invite (a passkey touch when the server asks for
- * one) and shows its link once.
+ * Asks for the new person's name, creates the invite (after a passkey touch when the session's
+ * is stale) and shows its link once.
  *
  * @param props - The close handler.
  * @param props.onClose - Closes the dialog.
@@ -59,7 +60,7 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
           onSubmit={(event) => {
             event.preventDefault();
             attempt.run(async () => {
-              setIssued(await createInvite(name, displayName));
+              setIssued(await issueInvite(name, displayName));
             });
           }}
         >
