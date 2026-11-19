@@ -476,44 +476,46 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
   const address =
     mode === "new" ? null : { kind: mode, environment: String(params.env), id: String(params.id) };
   return (
-    <Page title={t("areas.queries.name")}>
-      <div className="queries">
-        <Loaded resource={environments}>
-          {(listed) => {
-            if (listed.length === 0) {
+    <div className="queries-page">
+      <Page title={t("areas.queries.name")}>
+        <div className="queries">
+          <Loaded resource={environments}>
+            {(listed) => {
+              if (listed.length === 0) {
+                return (
+                  <div className="queries-work">
+                    <p>{t("queries.noEnvironment")}</p>
+                    <p>{t("queries.noEnvironmentCli")}</p>
+                    <CopyLine text={CLI_QUERY} copyLabel={t("queries.copy")} />
+                  </div>
+                );
+              }
+              const library = {
+                me: me.name,
+                environments: listed,
+                filter,
+                onFilter: setFilter,
+                reloadKey,
+              };
               return (
-                <div className="queries-work">
-                  <p>{t("queries.noEnvironment")}</p>
-                  <p>{t("queries.noEnvironmentCli")}</p>
-                  <CopyLine text={CLI_QUERY} copyLabel={t("queries.copy")} />
-                </div>
+                <>
+                  {!folded && (
+                    <aside className="queries-library" aria-label={t("queries.library.label")}>
+                      <Library {...library} />
+                    </aside>
+                  )}
+                  <Work
+                    environments={listed}
+                    address={address}
+                    fold={folded ? <LibraryFold {...library} /> : null}
+                    onLibraryChange={reloadLibrary}
+                  />
+                </>
               );
-            }
-            const library = {
-              me: me.name,
-              environments: listed,
-              filter,
-              onFilter: setFilter,
-              reloadKey,
-            };
-            return (
-              <>
-                {!folded && (
-                  <aside className="queries-library" aria-label={t("queries.library.label")}>
-                    <Library {...library} />
-                  </aside>
-                )}
-                <Work
-                  environments={listed}
-                  address={address}
-                  fold={folded ? <LibraryFold {...library} /> : null}
-                  onLibraryChange={reloadLibrary}
-                />
-              </>
-            );
-          }}
-        </Loaded>
-      </div>
-    </Page>
+            }}
+          </Loaded>
+        </div>
+      </Page>
+    </div>
   );
 }

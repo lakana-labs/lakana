@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { EnvironmentChoice } from "../api/environments";
@@ -85,6 +85,76 @@ describe("useJobsFilter", () => {
     });
     expect(result.current.location.search).toBe("?environment=dev");
     expect(result.current.filter.query).toBe("");
+  });
+
+  it.each([
+    ["the list replaces the address, so Back leaves it", undefined, "/home", "prod"],
+    ["the Runs tab pushes, so Back undoes the choice", "push" as const, "/jobs/runs", null],
+  ])("%s", (_, history, back, after) => {
+    const { result } = renderHook(
+      () => ({
+        filter: useJobsFilter(LISTED, history),
+        location: useLocation(),
+        navigate: useNavigate(),
+      }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <MemoryRouter initialEntries={["/home", "/jobs/runs"]} initialIndex={1}>
+            {children}
+          </MemoryRouter>
+        ),
+      },
+    );
+
+    act(() => {
+      result.current.filter.setEnvironment("prod");
+    });
+    expect(result.current.location.search).toBe("?environment=prod");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.pathname).toBe(back);
+    expect(result.current.filter.environment).toBe(after);
+  });
+
+  it("on the Runs tab the address alone holds the environment: none is all, even with one remembered", () => {
+    window.localStorage.setItem("lakana.jobs.environment", "dev");
+    const { result } = renderHook(
+      () => ({
+        filter: useJobsFilter(LISTED, "push"),
+        location: useLocation(),
+        navigate: useNavigate(),
+      }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <MemoryRouter
+            initialEntries={["/jobs/runs", "/jobs/runs?environment=prod"]}
+            initialIndex={1}
+          >
+            {children}
+          </MemoryRouter>
+        ),
+      },
+    );
+    expect(result.current.filter.environment).toBe("prod");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.filter.environment).toBeNull();
+    act(() => {
+      void result.current.navigate(1);
+    });
+
+    act(() => {
+      result.current.filter.setEnvironment(null);
+    });
+    expect(result.current.location.search).toBe("");
+    expect(result.current.filter.environment).toBeNull();
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBeNull();
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.filter.environment).toBe("prod");
   });
 });
 

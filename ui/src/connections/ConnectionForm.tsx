@@ -33,7 +33,6 @@ import {
   type ConnectionKind,
   type ConnectionOut,
   createConnection,
-  listConnectionEnvironments,
   updateConnection,
 } from "../api";
 import { ListSkeleton } from "../catalog/ListSkeleton";
@@ -55,6 +54,7 @@ import {
   type SecretChoice,
   updateBody,
 } from "./formBody";
+import { type ConnectionEnvironment, readConnectionEnvironments } from "./environments";
 import { KIND_ORDER, takesSecret } from "./kinds";
 import { KindFields } from "./KindFields";
 import { CONNECTIONS_PATH, connectionPath } from "./paths";
@@ -87,8 +87,8 @@ export type ConnectionFormProps =
 
 /** Properties of {@link AddForm}. */
 interface AddFormProps {
-  /** The environments where the person may add a connection. */
-  readonly environments: readonly ConnectionEnvironmentOut[];
+  /** The environments where the person may add a connection, each saying if it is protected. */
+  readonly environments: readonly ConnectionEnvironment[];
   /** The environment the form starts in. */
   readonly start: string;
 }
@@ -149,7 +149,7 @@ function AddForm({ environments, start }: AddFormProps): JSX.Element {
     >
       <AttemptStatus attempt={attempt} waiting={t("connections.form.saving")} />
       <EnvironmentPicker
-        environments={environments.map(({ name }) => ({ name, protected: false }))}
+        environments={environments}
         value={form.environment}
         label={t("connections.list.environment")}
         onChange={(environment) => {
@@ -465,7 +465,7 @@ function SaveRow({ busy, cancel }: SaveRowProps): JSX.Element {
 function AddConnection(): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
-  const load = useCallback(() => listConnectionEnvironments(), []);
+  const load = useCallback(() => readConnectionEnvironments(), []);
   const resource = useResource(load);
   const creatable = resource.data?.filter(({ actions }) => actions.includes("create"));
   let body: JSX.Element;

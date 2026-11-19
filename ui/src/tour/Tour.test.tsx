@@ -209,6 +209,19 @@ describe("the tour", () => {
     expect(currentStep()).toBe("Search");
   });
 
+  it("names Configuration among what Settings holds", async () => {
+    const { user } = firstSignIn();
+    let step = await startTour(user);
+    while (currentStep() !== "Settings") {
+      await user.click(within(step).getByRole("button", { name: "Next" }));
+      step = await screen.findByRole("dialog", { name: /./ });
+    }
+
+    expect(step).toHaveTextContent(
+      "The instance’s status, and for those who manage them, its environments, repositories, access, sign-in and configuration.",
+    );
+  });
+
   it("outlines the place each step is about", async () => {
     const { user } = firstSignIn();
     const step = await startTour(user);
