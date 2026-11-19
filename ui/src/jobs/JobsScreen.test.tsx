@@ -107,7 +107,7 @@ describe("the Jobs screen", () => {
     await waitFor(() => {
       expect(router.state.location.search).toBe("");
     });
-    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe(".");
     await router.navigate("/jobs");
     await screen.findByRole("heading", { level: 1, name: "Jobs" });
     expect(

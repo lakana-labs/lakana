@@ -69,14 +69,28 @@ describe("useJobsFilter", () => {
     expect(result.current.filter.environment).toBeNull();
     expect(result.current.location.search).toBe("?q=sales");
     // All environments is remembered as a choice of its own, so it sticks across the tabs.
-    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe(".");
   });
 
-  it("a remembered all is all environments on the lists", () => {
-    window.localStorage.setItem("lakana.jobs.environment", "all");
+  it("a remembered all environments is all of them on the lists", () => {
+    window.localStorage.setItem("lakana.jobs.environment", ".");
 
     expect(renderFilter("/jobs").result.current.filter.environment).toBeNull();
     expect(renderFilter("/jobs/deploys").result.current.filter.environment).toBeNull();
+  });
+
+  it("an environment really named all is remembered as itself, on the lists and the Runs tab", () => {
+    const withAll: readonly EnvironmentChoice[] = [...LISTED, { name: "all", protected: false }];
+    const { result } = renderFilter("/jobs", withAll);
+
+    act(() => {
+      result.current.filter.setEnvironment("all");
+    });
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
+    expect(renderFilter("/jobs", withAll).result.current.filter.environment).toBe("all");
+    const runs = renderRunsTab("/jobs/runs", withAll).result.current;
+    expect(runs.location.search).toBe("?environment=all");
+    expect(runs.filter.environment).toBe("all");
   });
 
   it("the search is in the address", () => {
@@ -158,7 +172,7 @@ describe("useJobsFilter", () => {
     });
     expect(result.current.location.search).toBe("");
     expect(result.current.filter.environment).toBeNull();
-    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe(".");
     act(() => {
       void result.current.navigate(-1);
     });
@@ -209,7 +223,7 @@ describe("useJobsFilter", () => {
 
   it.each([
     ["nothing remembered", null],
-    ["all remembered", "all"],
+    ["all environments remembered", "."],
     ["a remembered environment no longer listed", "staging"],
   ])("the Runs tab opens on all environments with %s", (_, remembered) => {
     if (remembered !== null) {
@@ -242,7 +256,7 @@ describe("useJobsFilter", () => {
       result.current.filter.setEnvironment(null);
     });
     expect(result.current.location.search).toBe("");
-    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("all");
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe(".");
 
     act(() => {
       void result.current.navigate(-1);

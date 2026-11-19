@@ -9,8 +9,12 @@ import { readRemembered, writeRemembered } from "../shell/remembered";
 /** The storage key of the list's environment. */
 const FILTER_KEY = "lakana.jobs.environment";
 
-/** What the key holds for all environments, a choice of its own that sticks across the tabs. */
-const ALL = "all";
+/**
+ * What the key holds for all environments, a choice of its own that sticks across the tabs. No
+ * environment name holds a `.` (the access file reads it as the start of a namespace, see
+ * `environment_name_problem` in lakana-core), so an environment named `all` stays itself.
+ */
+const ALL = ".";
 
 /**
  * Reads the environment the Jobs list was last filtered by.
@@ -26,7 +30,7 @@ export function readJobsFilter(storage: Storage | null = browserStorage()): stri
 /**
  * Keeps the environment the Jobs list is filtered by.
  *
- * @param environment - The environment's name, or null for all environments, kept as `all`.
+ * @param environment - The environment's name, or null for all environments, kept as `.`.
  * @param storage - Where to keep it; the browser's storage by default.
  */
 export function writeJobsFilter(
