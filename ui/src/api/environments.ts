@@ -78,7 +78,7 @@ export interface EnvironmentCreate {
 }
 
 /** The storage one kind of thing uses in an environment. */
-export interface UsagePartOut {
+interface UsagePartOut {
   /** How many there are. */
   readonly count: number;
   /** The sum of the sizes that are known. */
