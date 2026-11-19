@@ -3,6 +3,7 @@ import {
   CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete";
+import { sql } from "@codemirror/lang-sql";
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it, vi } from "vitest";
 
@@ -51,6 +52,26 @@ function aCatalog(): CompletionCatalog {
 }
 
 /**
+ * The catalog of {@link aCatalog} where `gold.sales.fact_sales` has only a `station_id`, as
+ * `gold.station_ranking` does.
+ *
+ * @returns The catalog.
+ */
+function sharedStationId(): CompletionCatalog {
+  const catalog = aCatalog();
+  catalog.columns = vi.fn((namespace: string, table: string) =>
+    Promise.resolve(
+      namespace === "gold" && table === "station_ranking"
+        ? STATION_COLUMNS
+        : namespace === "gold.sales"
+          ? [{ ...(TABLE.schema[0] as ColumnOut), name: "station_id", type: "string" }]
+          : null,
+    ),
+  );
+  return catalog;
+}
+
+/**
  * Asks the catalog's completion at the `|` in a text.
  *
  * @param text - The SQL with a `|` where the cursor is.
@@ -64,7 +85,8 @@ async function complete(
   explicit = false,
 ): Promise<CompletionResult | null> {
   const pos = text.indexOf("|");
-  const state = EditorState.create({ doc: text.replace("|", "") });
+  // With the editor's language, so comments and strings are known.
+  const state = EditorState.create({ doc: text.replace("|", ""), extensions: sql() });
   return catalogCompletion(catalog)(new CompletionContext(state, pos, explicit));
 }
 
@@ -204,16 +226,7 @@ describe("catalogCompletion", () => {
   });
 
   it("offers a name that several tables have once per table, named by its table, and inserts it with the table", async () => {
-    const catalog = aCatalog();
-    catalog.columns = vi.fn((namespace: string, table: string) =>
-      Promise.resolve(
-        namespace === "gold" && table === "station_ranking"
-          ? STATION_COLUMNS
-          : namespace === "gold.sales"
-            ? [{ ...(TABLE.schema[0] as ColumnOut), name: "station_id", type: "string" }]
-            : null,
-      ),
-    );
+    const catalog = sharedStationId();
     const result = await complete(
       "select st| from gold.station_ranking s join gold.sales.fact_sales",
       catalog,
@@ -235,6 +248,80 @@ describe("catalogCompletion", () => {
       ["b.station_id", "b · long"],
       ["b.rank", "b · int"],
     ]);
+  });
+
+  it.each([
+    ["a line comment", "select * from gold.station_ranking -- check the ra|"],
+    ["a block comment", "select * from gold.station_ranking /* ra| */"],
+    ["a string", "select * from gold.station_ranking where note = 'ra|'"],
+    ["a quoted identifier", 'select "ra|" from gold.station_ranking'],
+    ["a path in a comment", "select * -- from gold.|"],
+  ])("offers nothing inside %s", async (_, text) => {
+    const catalog = aCatalog();
+    const columns = vi.spyOn(catalog, "columns");
+    expect(await complete(text, catalog)).toBeNull();
+    expect(columns).not.toHaveBeenCalled();
+  });
+
+  it("offers the columns of every table of a comma list, and namespaces after its comma", async () => {
+    const result = await complete(
+      "select sa| from gold.station_ranking r, gold.sales.fact_sales f",
+    );
+
+    expect(labels(result)).toEqual([
+      "station_id",
+      "rank",
+      ...TABLE.schema.map((each) => each.name),
+    ]);
+    expect(labels(await complete("select * from gold.station_ranking r, go|"))).toEqual([
+      "gold",
+      "raw",
+    ]);
+  });
+
+  it("names a shared column by the table's name, never by a keyword after the table", async () => {
+    const catalog = sharedStationId();
+    const asof = await complete(
+      "select st| from gold.station_ranking asof join gold.sales.fact_sales f on true",
+      catalog,
+    );
+    expect(
+      asof?.options.filter((option) => option.apply !== undefined).map((o) => o.apply),
+    ).toEqual(["gold.station_ranking.station_id", "f.station_id"]);
+    const first = await complete(
+      "from gold.station_ranking, gold.sales.fact_sales select st|",
+      catalog,
+    );
+    expect(
+      first?.options.filter((option) => option.apply !== undefined).map((o) => o.apply),
+    ).toEqual(["gold.station_ranking.station_id", "gold.sales.fact_sales.station_id"]);
+  });
+
+  it("offers no qualifier that is out of scope where the cursor is", async () => {
+    const result = await complete(
+      "select ra| from (select * from gold.station_ranking s) q join gold.station_ranking t on true",
+    );
+
+    expect(result?.options.map((option) => [option.label, option.apply])).toEqual([
+      ["station_id", undefined],
+      ["rank", undefined],
+    ]);
+    expect(
+      await complete("with x as (select * from gold.station_ranking s) select ra| from x"),
+    ).toBeNull();
+  });
+
+  it("reads no table after a FROM inside an expression", async () => {
+    const catalog = aCatalog();
+    const columns = vi.spyOn(catalog, "columns");
+    const result = await complete(
+      "select extract(year from t.ts), ra| from gold.station_ranking where rank is distinct from b.rank and true",
+      catalog,
+    );
+
+    expect(labels(result)).toEqual(["station_id", "rank"]);
+    expect(columns).toHaveBeenCalledTimes(1);
+    expect(columns).toHaveBeenCalledWith("gold", "station_ranking");
   });
 
   it("a description shows as text, never HTML", async () => {

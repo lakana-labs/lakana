@@ -109,6 +109,12 @@ describe("columnHover", () => {
         "select ra|nk from gold.station_ranking a join gold.station_ranking b on a.rank = b.rank",
       ),
     ).toBeNull();
+    // The tables of a comma list count too.
+    expect(
+      await hoverAt("select ra|nk from gold.station_ranking a, gold.station_ranking b"),
+    ).toBeNull();
+    // A table out of scope does not count.
+    expect(await hoverAt("select ra|nk from (select * from gold.station_ranking s) q")).toBeNull();
     // A word before a dot names a table, not a column.
     expect(await hoverAt("select ra|nk.x from gold.station_ranking")).toBeNull();
   });

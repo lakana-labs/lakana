@@ -9,7 +9,8 @@ import { type HoverTooltipSource, hoverTooltip } from "@codemirror/view";
 import type { ColumnOut } from "../../api/table";
 import { markedText } from "../../shell/VisibleText";
 import type { CompletionCatalog } from "./catalog";
-import { columnsRead, statementAt, tableOf } from "./completion";
+import { columnsRead, tableOf } from "./completion";
+import { statementAt } from "./fromClause";
 
 // The dotted path that ends at a position, and the rest of the word after it.
 const PATH_BEFORE = /(?:[\p{L}\p{N}_$]+\.)*[\p{L}\p{N}_$]*$/u;
