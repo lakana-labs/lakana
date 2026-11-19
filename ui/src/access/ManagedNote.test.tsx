@@ -15,7 +15,7 @@ const SCOPE = {
 describe("ManagedNote", () => {
   it("names the file, the time and the emergency command", () => {
     const command = 'lakana grant revoke GRANT_ID --override-managed --reason "WHY"';
-    const { container } = render(<ManagedNote scope={SCOPE} command={command} />);
+    const { container } = render(<ManagedNote scope={SCOPE} commands={[command]} />);
 
     expect(container).toHaveTextContent("⌂ Git The whole instance is managed by access.yaml");
     expect(container).toHaveTextContent(command);
@@ -26,7 +26,10 @@ describe("ManagedNote", () => {
   it("shows markup in the file's and the environment's names as text", () => {
     const file = "<strong>access</strong>.<code>yaml</code>";
     const { container } = render(
-      <ManagedNote scope={{ ...SCOPE, scope: "<code>prod</code>", file_name: file }} command="x" />,
+      <ManagedNote
+        scope={{ ...SCOPE, scope: "<code>prod</code>", file_name: file }}
+        commands={["x"]}
+      />,
     );
 
     expect(container).toHaveTextContent(`The environment <code>prod</code> is managed by ${file}`);
@@ -39,9 +42,25 @@ describe("ManagedNote", () => {
 
   it("names a managed environment, marked", () => {
     const { container } = render(
-      <ManagedNote scope={{ ...SCOPE, scope: "pr‮od" }} command="lakana" />,
+      <ManagedNote scope={{ ...SCOPE, scope: "pr‮od" }} commands={["lakana"]} />,
     );
 
     expect(container).toHaveTextContent("The environment prU+202Eod is managed by access.yaml");
+  });
+
+  it("shows each command with its own Copy", () => {
+    const commands = [
+      'lakana row-filter revoke ROW_FILTER_ID --override-managed --reason "WHY"',
+      'lakana column-mask revoke COLUMN_MASK_ID --override-managed --reason "WHY"',
+    ];
+    const { container } = render(
+      <ManagedNote
+        scope={{ scope: "prod", file_name: "access.yaml", applied_at: SCOPE.applied_at }}
+        commands={commands}
+      />,
+    );
+
+    for (const command of commands) expect(container).toHaveTextContent(command);
+    expect(screen.getAllByRole("button", { name: "Copy command" })).toHaveLength(2);
   });
 });

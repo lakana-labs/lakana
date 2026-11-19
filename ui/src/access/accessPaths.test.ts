@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { type GrantFilter, NO_FILTER } from "../api/grants";
-import { filterKey, grantsPath, groupPath, readGrantFilter, tokensPath } from "./accessPaths";
+import { NO_POLICY_FILTER, type PolicyFilter } from "../api/policies";
+import {
+  filterKey,
+  grantsPath,
+  groupPath,
+  policiesPath,
+  policyFilterKey,
+  readGrantFilter,
+  readPolicyFilter,
+  tokensPath,
+} from "./accessPaths";
 
 /**
  * Reads back the filter of an address.
@@ -65,5 +75,45 @@ describe("paths", () => {
     };
     expect(filterKey(one)).toBe(filterKey(readBack(grantsPath(one))));
     expect(filterKey(NO_FILTER)).not.toBe(filterKey(one));
+  });
+
+  it.each<PolicyFilter>([
+    NO_POLICY_FILTER,
+    {
+      who: { kind: "group", name: "analysts" },
+      environment: "dev",
+      namespace: "gold",
+      table: "station_ranking",
+    },
+    { ...NO_POLICY_FILTER, who: { kind: "principal", name: "maria" }, environment: "prod" },
+    { ...NO_POLICY_FILTER, environment: "dev", namespace: "a.b", table: "c" },
+  ])("reads back every policy filter it writes: %j", (filter) => {
+    const path = policiesPath(filter);
+    expect(readPolicyFilter(new URLSearchParams(path.split("?")[1] ?? ""))).toEqual(filter);
+    expect(policyFilterKey(readPolicyFilter(new URLSearchParams(path.split("?")[1])))).toBe(
+      policyFilterKey(filter),
+    );
+  });
+
+  it("writes the policy filters' address", () => {
+    expect(policiesPath({})).toBe("/settings/access/filters-and-masks");
+    expect(
+      policiesPath({ environment: "prod", namespace: "gold.sales", table: "fact_sales" }),
+    ).toBe("/settings/access/filters-and-masks?environment=prod&table=gold.sales.fact_sales");
+    expect(policiesPath({ namespace: "gold", table: "x" })).toBe(
+      "/settings/access/filters-and-masks",
+    );
+  });
+
+  it.each([
+    ["a table without its environment", "table=gold.station_ranking"],
+    ["a table without a namespace", "environment=dev&table=nodot"],
+  ])("keeps no table for %s", (_label, query) => {
+    const filter = readPolicyFilter(new URLSearchParams(query));
+    expect([filter.namespace, filter.table]).toEqual([null, null]);
+  });
+
+  it("keeps neither subject when both are given", () => {
+    expect(readPolicyFilter(new URLSearchParams("principal=maria&group=analysts")).who).toBeNull();
   });
 });

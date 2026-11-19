@@ -3,8 +3,6 @@
  *
  * @packageDocumentation
  */
-import type { ManagedScopeOut } from "../api/accessFile";
-
 /** The name of the scope that stands for the whole instance. */
 export const INSTANCE_SCOPE = "instance";
 
@@ -14,14 +12,16 @@ export const INSTANCE_SCOPE = "instance";
  * is; a change of the whole instance (a group, a membership, a grant on the instance) only when
  * the instance is.
  *
- * @param scopes - The managed scopes, as `GET /api/v1/access/status` lists them.
+ * @template S - The scopes' shape: `/access/status`'s, or `/access/managed-scopes`'s.
+ * @param scopes - The managed scopes, as `GET /api/v1/access/status` or
+ *   `GET /api/v1/access/managed-scopes` lists them.
  * @param environment - The environment the change is in; null for the whole instance.
  * @returns The scope that manages the change, or null when none does.
  */
-export function managedScopeOf(
-  scopes: readonly ManagedScopeOut[],
+export function managedScopeOf<S extends { readonly scope: string }>(
+  scopes: readonly S[],
   environment: string | null,
-): ManagedScopeOut | null {
+): S | null {
   const own =
     environment === null ? undefined : scopes.find((scope) => scope.scope === environment);
   return own ?? scopes.find((scope) => scope.scope === INSTANCE_SCOPE) ?? null;

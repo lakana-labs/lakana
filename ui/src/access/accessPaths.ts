@@ -1,5 +1,6 @@
 /**
- * The addresses of Access's places: a group's page and the Grants list with its filters.
+ * The addresses of Access's places: a group's page, and the lists of Grants, Tokens and Row
+ * filters & masks with their filters.
  *
  * @packageDocumentation
  */
@@ -13,6 +14,8 @@ import {
   NO_FILTER,
   ROLES,
 } from "../api/grants";
+import { NO_POLICY_FILTER, type PolicyFilter, policyQuery } from "../api/policies";
+import { splitDotted } from "../catalog/paths";
 
 /** The address of Groups. */
 export const GROUPS_PATH = "/settings/access/groups";
@@ -155,4 +158,59 @@ export function tokensPath(filter: {
   }
   const text = query.toString();
   return text === "" ? TOKENS_PATH : `${TOKENS_PATH}?${text}`;
+}
+
+/** The address of Row filters & masks. */
+export const POLICIES_PATH = "/settings/access/filters-and-masks";
+
+/** The address of Access file. */
+export const ACCESS_FILE_PATH = "/settings/access/access-file";
+
+/**
+ * Row filters & masks' address with a filter. The table is written `namespace.table`, as the
+ * page's Table field takes it, and only with its environment and namespace.
+ *
+ * @param filter - The filter; a part left out is any.
+ * @returns The path, with its query when a filter is set.
+ */
+export function policiesPath(filter: Partial<PolicyFilter>): string {
+  const { who, environment, namespace, table } = { ...NO_POLICY_FILTER, ...filter };
+  const query = new URLSearchParams();
+  if (who !== null) query.set(who.kind, who.name);
+  if (environment !== null) {
+    query.set("environment", environment);
+    if (namespace !== null && table !== null) query.set("table", `${namespace}.${table}`);
+  }
+  const text = query.toString();
+  return text === "" ? POLICIES_PATH : `${POLICIES_PATH}?${text}`;
+}
+
+/**
+ * Reads Row filters & masks' filter from its address; what it cannot read is any. A table
+ * without its environment, or without a dot, is none.
+ *
+ * @param search - The address's query.
+ * @returns The filter.
+ */
+export function readPolicyFilter(search: URLSearchParams): PolicyFilter {
+  const environment = value(search, "environment");
+  const dotted = value(search, "table");
+  const split = environment === null || dotted === null ? null : splitDotted(dotted);
+  return {
+    who: readWho(search),
+    environment,
+    namespace: split?.namespace ?? null,
+    table: split?.name ?? null,
+  };
+}
+
+/**
+ * A key that is the same for the same policy filter, however it was built: each list is keyed
+ * by it.
+ *
+ * @param filter - The filter.
+ * @returns The key.
+ */
+export function policyFilterKey(filter: PolicyFilter): string {
+  return policyQuery(filter, 0).toString();
 }

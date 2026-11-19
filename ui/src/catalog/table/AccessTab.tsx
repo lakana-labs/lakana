@@ -12,7 +12,6 @@ import { Link } from "react-router";
 import {
   type ColumnMaskOut,
   type GrantLevel,
-  type GrantOut,
   listColumnMasks,
   listGrantsAt,
   listInstanceGrants,
@@ -21,7 +20,7 @@ import {
   type RowFilterOut,
 } from "../../api";
 import { grantsPath } from "../../access/accessPaths";
-import { personPath } from "../../access/personPath";
+import { SubjectName } from "../../access/SubjectName";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { type Resource, useResource } from "../../shell/useResource";
@@ -34,47 +33,6 @@ import { useTableData } from "./TableContext";
 
 /** The actions the tab answers, besides editing the texts, in the order it shows them. */
 const ACTIONS = ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE"] as const;
-
-/** Who a grant, row filter or column mask is for. */
-type Subject = Pick<GrantOut, "principal_id" | "group_id" | "principal" | "group">;
-
-/**
- * Who a grant or a policy is for: a person or service account, linked to their page; a group,
- * as plain text; or, when the subject was deleted while the list was read, words and the id.
- *
- * @param props - The subject.
- * @param props.subject - Who it is for.
- * @returns The subject.
- */
-function SubjectName({ subject }: { readonly subject: Subject }): JSX.Element {
-  const { t } = useTranslation();
-  if (subject.principal !== null) {
-    return (
-      <>
-        <Link to={personPath(subject.principal.name)}>
-          <VisibleText text={subject.principal.name} breakable />
-        </Link>
-        {subject.principal.principal_type === "service" && (
-          <span className="second">{t("table.access.serviceAccount")}</span>
-        )}
-      </>
-    );
-  }
-  if (subject.group !== null) {
-    return (
-      <Trans
-        t={t}
-        i18nKey="table.access.group"
-        components={{ name: <VisibleText text={subject.group} breakable /> }}
-      />
-    );
-  }
-  return (
-    <>
-      {t("table.access.removed")} <code>{subject.principal_id ?? subject.group_id}</code>
-    </>
-  );
-}
 
 /** One answer of the "What you may do" list. */
 interface Answer {
@@ -284,7 +242,7 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
                 {grants.map((grant) => (
                   <tr key={grant.id}>
                     <td>
-                      <SubjectName subject={grant} />
+                      <SubjectName subject={grant} link />
                     </td>
                     <td>
                       {/* A grant gives a role or a single action, never both. */}
@@ -415,7 +373,7 @@ function RowFilters(): JSX.Element {
               {filters.map((filter) => (
                 <tr key={filter.id}>
                   <td>
-                    <SubjectName subject={filter} />
+                    <SubjectName subject={filter} link />
                   </td>
                   <td>
                     <code className="expression">
@@ -469,7 +427,7 @@ function ColumnMasks(): JSX.Element {
               {masks.map((mask) => (
                 <tr key={mask.id}>
                   <td>
-                    <SubjectName subject={mask} />
+                    <SubjectName subject={mask} link />
                   </td>
                   <td>
                     <VisibleText text={mask.column} breakable />

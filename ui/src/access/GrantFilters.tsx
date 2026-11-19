@@ -7,7 +7,6 @@ import { type JSX, useState } from "react";
 import {
   Button,
   Header,
-  Input,
   Label,
   ListBox,
   ListBoxItem,
@@ -15,8 +14,6 @@ import {
   Popover,
   Select,
   SelectValue,
-  Text,
-  TextField,
 } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -25,10 +22,8 @@ import { ACTIONS, type GrantFilter, type GrantWhat, type GrantWhere, ROLES } fro
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import "./accessStrings";
+import { AppliedField, type FilterStep, WhoFilter } from "./WhoFilter";
 import { actionWords, roleName } from "./words";
-
-/** How a filter change is kept in the history: a menu choice is a step, a typed name is not. */
-export type FilterStep = "push" | "replace";
 
 /** Properties of {@link GrantFilters}. */
 export interface GrantFiltersProps {
@@ -40,18 +35,11 @@ export interface GrantFiltersProps {
   readonly onChange: (next: GrantFilter, step: FilterStep) => void;
 }
 
-/** Who the list is filtered by. */
-type WhoKind = "anyone" | "principal" | "group";
-
 /** Where the list is filtered by. */
 type WhereKind = "anywhere" | GrantWhere["kind"];
 
 /** What the filter fields show, typed or chosen but not yet applied. */
 interface Fields {
-  /** Who: anyone, a person or a group. */
-  readonly whoKind: WhoKind;
-  /** The person's or group's name. */
-  readonly name: string;
   /** Where: anywhere, or a level. */
   readonly whereKind: WhereKind;
   /** The environment chosen. */
@@ -69,10 +57,8 @@ interface Fields {
  * @returns The fields.
  */
 function fieldsOf(filter: GrantFilter): Fields {
-  const { who, where } = filter;
+  const { where } = filter;
   return {
-    whoKind: who?.kind ?? "anyone",
-    name: who?.name ?? "",
     whereKind: where?.kind ?? "anywhere",
     environment: where === null || where.kind === "INSTANCE" ? null : where.environment,
     namespace: where?.kind === "NAMESPACE" || where?.kind === "TABLE" ? where.namespace : "",
@@ -190,49 +176,6 @@ function WhatMenu({ value, onChange }: WhatMenuProps): JSX.Element {
   );
 }
 
-/** Properties of {@link AppliedField}. */
-interface AppliedFieldProps {
-  /** The label. */
-  readonly label: string;
-  /** What is typed. */
-  readonly value: string;
-  /** Called as the person types. */
-  readonly onChange: (value: string) => void;
-  /** Applies what is typed: on Enter, or when the field is left. */
-  readonly onApply: () => void;
-  /** A help line under the field. */
-  readonly help?: string;
-}
-
-/**
- * A text field whose value is applied on Enter or when the field is left, never as one types.
- *
- * @param props - The label, the value and the handlers.
- * @param props.label - The label.
- * @param props.value - What is typed.
- * @param props.onChange - Called as the person types.
- * @param props.onApply - Applies the value.
- * @param props.help - A help line.
- * @returns The field.
- */
-function AppliedField({ label, value, onChange, onApply, help }: AppliedFieldProps): JSX.Element {
-  return (
-    <TextField
-      className="field"
-      value={value}
-      onChange={onChange}
-      onBlur={onApply}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") onApply();
-      }}
-    >
-      <Label>{label}</Label>
-      <Input autoComplete="off" spellCheck={false} />
-      {help !== undefined && <Text slot="description">{help}</Text>}
-    </TextField>
-  );
-}
-
 /**
  * Renders the three filters. A menu choice applies at once; a typed name, namespace or table on
  * Enter or when its field is left. A filter that is not complete yet (a person without a name,
@@ -253,12 +196,9 @@ export function GrantFilters({ filter, environments, onChange }: GrantFiltersPro
     setShownFor(filter);
     setShown(fieldsOf(filter));
   }
-  const { whoKind, name, whereKind, environment, namespace, table } = shown;
+  const { whereKind, environment, namespace, table } = shown;
   const set = (change: Partial<Fields>): void => {
     setShown((previous) => ({ ...previous, ...change }));
-  };
-  const setName = (value: string): void => {
-    set({ name: value });
   };
   const setNamespace = (value: string): void => {
     set({ namespace: value });
@@ -272,14 +212,6 @@ export function GrantFilters({ filter, environments, onChange }: GrantFiltersPro
     // The fields already show it: the filter that comes back must not set them again.
     setShownFor(next);
     onChange(next, step);
-  };
-  const applyWho = (kind: WhoKind, typed: string, step: FilterStep): void => {
-    const trimmed = typed.trim();
-    if (kind === "anyone") {
-      apply({ ...filter, who: null }, step);
-    } else if (trimmed !== "") {
-      apply({ ...filter, who: { kind, name: trimmed } }, step);
-    }
   };
   const applyWhere = (
     kind: WhereKind,
@@ -305,31 +237,12 @@ export function GrantFilters({ filter, environments, onChange }: GrantFiltersPro
 
   return (
     <div className="access-filters" role="group" aria-label={t("access.grants.filters.label")}>
-      <ChoiceMenu<WhoKind>
-        className="env-picker"
-        label={t("access.grants.filters.who")}
-        selected={whoKind}
-        choices={[
-          { id: "anyone", text: t("access.grants.filters.anyone") },
-          { id: "principal", text: t("access.grants.filters.aPerson") },
-          { id: "group", text: t("access.grants.filters.aGroup") },
-        ]}
-        onChoose={(kind) => {
-          set({ whoKind: kind });
-          applyWho(kind, name, "push");
+      <WhoFilter
+        who={filter.who}
+        onChange={(who, step) => {
+          apply({ ...filter, who }, step);
         }}
       />
-      {whoKind !== "anyone" && (
-        <AppliedField
-          label={t("access.grants.filters.name")}
-          value={name}
-          onChange={setName}
-          help={t("access.grants.filters.nameHelp")}
-          onApply={() => {
-            applyWho(whoKind, name, "replace");
-          }}
-        />
-      )}
       <ChoiceMenu<WhereKind>
         className="env-picker"
         label={t("access.grants.filters.where")}

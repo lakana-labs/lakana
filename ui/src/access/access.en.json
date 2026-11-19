@@ -71,6 +71,8 @@
     "groupCommand": "lakana group add-member {{- group}} PRINCIPAL --override-managed --reason \"WHY\"",
     "groupsCommand": "lakana group add-member GROUP PRINCIPAL --override-managed --reason \"WHY\"",
     "grantCommand": "lakana grant revoke GRANT_ID --override-managed --reason \"WHY\"",
+    "filterCommand": "lakana row-filter revoke ROW_FILTER_ID --override-managed --reason \"WHY\"",
+    "maskCommand": "lakana column-mask revoke COLUMN_MASK_ID --override-managed --reason \"WHY\"",
     "addGrant": "An access file manages {{environment}}: give this grant in {{file}} instead.",
     "markOf": "Managed by {{file}}"
   },

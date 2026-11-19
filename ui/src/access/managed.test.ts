@@ -36,4 +36,12 @@ describe("managedScopeOf", () => {
   ])("follows the server's rule (%#)", (scopes, environment, expected) => {
     expect(managedScopeOf(scopes, environment)).toBe(expected);
   });
+
+  it("reads the briefer scopes a policy manager gets", () => {
+    const prod = { scope: "prod", file_name: "access.yaml", applied_at: "2026-11-18T09:00:00Z" };
+    const instance = { ...prod, scope: "instance" };
+    expect(managedScopeOf([prod], "prod")).toBe(prod);
+    expect(managedScopeOf([prod], "dev")).toBeNull();
+    expect(managedScopeOf([instance, prod], "dev")).toBe(instance);
+  });
 });

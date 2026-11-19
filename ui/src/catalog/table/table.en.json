@@ -378,9 +378,6 @@
       "role": "{{role}} role",
       "instance": "On the whole instance"
     },
-    "group": "group <name/>",
-    "removed": "a removed person or group",
-    "serviceAccount": "service account",
     "filters": {
       "heading": "Row filters",
       "none": "No row filters on this table.",
