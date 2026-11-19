@@ -19,7 +19,12 @@ import "./settingsStrings";
 import { SettingsViewerContext } from "./viewer";
 
 /** Nothing: what a failed read of the facts gives, so no place is offered on a guess. */
-const NONE: SettingsFacts = { secretEnvironments: [], managePolicy: false };
+const NONE: SettingsFacts = {
+  secretEnvironments: [],
+  managePolicy: false,
+  readsEnvironments: false,
+  instanceActions: [],
+};
 
 /**
  * Renders the list (wide) or Section (narrow), then the place. Whether the person may see the
