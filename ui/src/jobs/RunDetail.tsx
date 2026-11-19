@@ -14,10 +14,11 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import type { RunOut, TaskRunOut } from "../api/jobs";
 import { Page } from "../shell/Page";
+import { settingParam, useAddressParams } from "../shell/useAddressParams";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { StatusLabel } from "../status/StatusLabel";
@@ -343,7 +344,7 @@ export function RunDetail({
 }: RunDetailProps): JSX.Element {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [, setParams] = useSearchParams();
+  const [, update] = useAddressParams();
   const [note, setNote] = useState<RunNote | null>(null);
   return (
     <RunView
@@ -359,10 +360,7 @@ export function RunDetail({
         if (level === 1) {
           void navigate(jobRunPath(environment, next.id));
         } else {
-          setParams((current) => {
-            current.set("run", next.id);
-            return current;
-          });
+          update(settingParam("run", next.id));
         }
       }}
     />

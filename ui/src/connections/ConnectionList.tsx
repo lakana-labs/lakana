@@ -10,13 +10,7 @@ import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
 
-import {
-  type ConnectionEnvironmentOut,
-  type ConnectionOut,
-  type ConnectionQueuedTestOut,
-  listConnectionEnvironments,
-  listConnections,
-} from "../api";
+import { type ConnectionOut, type ConnectionQueuedTestOut, listConnections } from "../api";
 import { Unknown } from "../catalog/cells";
 import { ListSkeleton } from "../catalog/ListSkeleton";
 import { ReadFailed } from "../catalog/ReadFailed";
@@ -32,6 +26,7 @@ import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { ConnectionNote, listNote } from "./ConnectionNote";
+import { type ConnectionEnvironment, readConnectionEnvironments } from "./environments";
 import { isKnownKind, whereText } from "./kinds";
 import { connectionPath, NEW_CONNECTION_PATH } from "./paths";
 import { readFilter, writeFilter } from "./remember";
@@ -44,8 +39,8 @@ import "./connectionStrings";
 
 /** Properties of {@link ConnectionRows} and {@link ConnectionTable}. */
 interface ConnectionRowsProps {
-  /** The environments whose connections the person may read. */
-  readonly environments: readonly ConnectionEnvironmentOut[];
+  /** The environments whose connections the person may read, each saying if it is protected. */
+  readonly environments: readonly ConnectionEnvironment[];
   /** The name of the first of them, for the command that adds a connection. */
   readonly first: string;
   /** The environment the list is filtered by, or null for all of them. */
@@ -194,7 +189,12 @@ function ConnectionTable({
                 <VisibleText text={where} breakable />
               </td>
               <td>
-                <EnvironmentLabel environment={row.environment} />
+                <EnvironmentLabel
+                  environment={row.environment}
+                  protected={environments.some(
+                    (environment) => environment.name === row.environment && environment.protected,
+                  )}
+                />
               </td>
               <td>
                 <TestStatus connection={row} now={now} queuedSince={follow.queuedSince.get(key)} />
@@ -262,7 +262,7 @@ function ConnectionRows({
   return (
     <>
       <EnvironmentPicker
-        environments={environments.map(({ name }) => ({ name, protected: false }))}
+        environments={environments}
         value={filter}
         label={t("connections.list.environment")}
         all={t("connections.list.all")}
@@ -300,7 +300,7 @@ export function ConnectionList(): JSX.Element {
     // Once, for the note this visit arrived with.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const load = useCallback(() => listConnectionEnvironments(), []);
+  const load = useCallback(() => readConnectionEnvironments(), []);
   const resource = useResource(load);
   const [chosen, setChosen] = useState(() => readFilter(me.name));
   const environments = resource.data;

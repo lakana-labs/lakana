@@ -99,6 +99,23 @@ async function openAdd(page: Page): Promise<void> {
 }
 
 /**
+ * The colour of danger as the page resolves it, in the form computed styles give.
+ *
+ * @param page - The page.
+ * @returns The colour, such as `rgb(…)`.
+ */
+function dangerColour(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--color-bad)";
+    document.body.append(probe);
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  });
+}
+
+/**
  * How far the page is wider than the window.
  *
  * @param page - The page.
@@ -315,6 +332,43 @@ for (const theme of ["light", "dark"] as const) {
         // The running one has gone on to done by now, and says so in words too.
         await expect(rowOf(page, NIGHTLY)).toContainText(/testing…|OK · /u);
         await showInColour(page);
+      });
+
+      test("a protected environment reads as protected in the filter, its list, the rows and the page, in greyscale too", async ({
+        page,
+        browserName,
+      }) => {
+        await stubConnections(page);
+        await openList(page);
+        const marked = (scope: Locator): Locator =>
+          scope.locator(".env-protected").filter({ hasText: "protected" });
+        await expect(rowOf(page, WAREHOUSE)).toContainText("● prod · protected");
+        await expect(marked(rowOf(page, WAREHOUSE))).toBeVisible();
+        await expect(rowOf(page, EXPORTS)).not.toContainText("protected");
+
+        await showInGreyscale(page);
+        const shot = `test-results/connections-protected-${browserName}-${theme}-${density}`;
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        const option = page.getByRole("option", { name: /prod/u });
+        await expect(option).toContainText("● prod · protected");
+        await expect(marked(option)).toBeVisible();
+        await expect(page.getByRole("option", { name: DEV, exact: true })).not.toContainText(
+          "protected",
+        );
+        await page.getByRole("listbox").screenshot({ path: `${shot}-options-grey.png` });
+        await option.click();
+        const picker = page.getByRole("button", { name: "Environment: prod, protected" });
+        await expect(picker).toContainText("● prod · protected");
+        await expect(marked(picker)).toBeVisible();
+        await expect(marked(rowOf(page, WAREHOUSE))).toBeVisible();
+        await page.locator(".env-picker").screenshot({ path: `${shot}-grey.png` });
+        await showInColour(page);
+        await expect(marked(picker)).toHaveCSS("color", await dangerColour(page));
+
+        await openConnection(page, PROD, WAREHOUSE);
+        await expect(page.locator(".connection-actions .env-label")).toContainText(
+          "● prod · protected",
+        );
       });
 
       test("no horizontal scroll at 320 px, with where and used by under the name", async ({

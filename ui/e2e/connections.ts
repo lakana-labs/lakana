@@ -1,6 +1,6 @@
 /**
  * Stubs for the end-to-end tests of the Connections screen: the environments `dev` (where the
- * administrator may add, test, change and delete) and `prod` (read only), five connections (one
+ * administrator may add, test, change and delete) and `prod` (read only and protected), five connections (one
  * that is fine, one the source refused, one never tested, one tested before its last change and
  * one whose test is running and is done at its third read), a page, a create and an update
  * (each asking for a passkey touch first), a delete, a test and Test all. What a write changes
@@ -58,6 +58,9 @@ const LIST = "/api/v1/connections";
 /** The route of the environments. */
 const LIST_ENVIRONMENTS = "/api/v1/connections/environments";
 
+/** The route of the environments the administrator may read, which says which are protected. */
+const READABLE = "/api/v1/environments";
+
 /**
  * The path of an environment's part.
  *
@@ -74,6 +77,7 @@ export const CONNECTIONS_STUBBED = [
   ...STUBBED,
   LIST,
   LIST_ENVIRONMENTS,
+  READABLE,
   "/api/v1/sign-in/step-up/options",
   "/api/v1/sign-in/step-up",
   ...Object.entries(NAMES).flatMap(([environment, names]) => [
@@ -342,6 +346,22 @@ export async function stubConnections(page: Page): Promise<ConnectionsStub> {
   await page.route(
     (url) => url.pathname === LIST_ENVIRONMENTS,
     (route) => route.fulfill({ json: ENVIRONMENTS }),
+  );
+  await page.route(
+    (url) => url.pathname === READABLE,
+    (route) =>
+      route.fulfill({
+        json: ENVIRONMENTS.map(({ name }) => ({
+          name,
+          storage_root: `file:///srv/lakana/${name}`,
+          storage_secret_ref: null,
+          is_protected: name === PROD,
+          properties: {},
+          retention_days: null,
+          deleted_at: null,
+          purge_after: null,
+        })),
+      }),
   );
   await page.route(
     (url) => url.pathname === LIST,

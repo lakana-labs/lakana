@@ -4,11 +4,11 @@
  *
  * @packageDocumentation
  */
-import { useSearchParams } from "react-router";
-
 import type { EnvironmentChoice } from "../api/environments";
 import type { AllRunsFilter, RunStatus } from "../api/jobs";
+import { settingParam, useAddressParams } from "../shell/useAddressParams";
 import { DEFAULT_PERIOD, type Period, readPeriod, sinceOf } from "./period";
+import { writeJobsFilter } from "./remember";
 import { useJobsFilter } from "./useJobsFilter";
 
 /** The choices of the State menu, each the address's `status`; `all` is no narrowing. */
@@ -22,6 +22,14 @@ export const TRIGGER_CHOICES = ["all", "schedule", "manual", "api", "deploy"] as
 
 /** A choice of the Trigger menu. */
 type TriggerChoice = (typeof TRIGGER_CHOICES)[number];
+
+/** Each filter's default, which the address holds as no parameter. */
+const DEFAULTS: Readonly<Record<string, string>> = {
+  status: "all",
+  trigger: "all",
+  job: "",
+  period: DEFAULT_PERIOD,
+};
 
 /** What the Runs tab is filtered by, as the address holds it. */
 export interface RunsChoice {
@@ -63,16 +71,17 @@ function readChoice<T extends string>(choices: readonly T[], value: string | nul
 
 /**
  * The Runs tab's filter. The environment is the Jobs list's (`useJobsFilter`: the address, else
- * the one this browser remembers); the states (`?status=queued,running`), the trigger, the job
- * and the period (the last 30 days by default) are the address's. A change replaces the address
- * in the history, so Back leaves the tab with its filter.
+ * the one this browser remembers when the tab opens); the states (`?status=queued,running`), the
+ * trigger, the job and the period (the last 30 days by default) are the address's. A change adds
+ * one entry to the history, as a job's page does, so Back undoes one change at a time and stays
+ * on the tab; the Job field writes its name on Enter or when it is left, not on each key.
  *
  * @param environments - The environments the person may read.
  * @returns The filter and how to change it.
  */
 export function useRunsFilter(environments: readonly EnvironmentChoice[]): RunsFilter {
-  const [params, setParams] = useSearchParams();
-  const jobs = useJobsFilter(environments);
+  const [params, update] = useAddressParams();
+  const jobs = useJobsFilter(environments, "push");
   const choice: RunsChoice = {
     environment: jobs.environment,
     status: readChoice(STATE_CHOICES, params.get("status")),
@@ -80,47 +89,30 @@ export function useRunsFilter(environments: readonly EnvironmentChoice[]): RunsF
     job: params.get("job")?.trim() ?? "",
     period: readPeriod(params.get("period")),
   };
-  const write = (change: Partial<Omit<RunsChoice, "environment">>): void => {
-    setParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        const values: Record<string, string | undefined> = {
-          status: change.status,
-          trigger: change.trigger,
-          job: change.job?.trim(),
-          period: change.period,
-        };
-        const defaults: Record<string, string> = {
-          status: "all",
-          trigger: "all",
-          job: "",
-          period: DEFAULT_PERIOD,
-        };
-        for (const [name, value] of Object.entries(values)) {
-          if (value === undefined) {
-            continue;
-          }
-          if (value === defaults[name]) {
-            next.delete(name);
-          } else {
-            next.set(name, value);
-          }
+  const write = (change: Partial<RunsChoice>): void => {
+    if (change.environment !== undefined) {
+      writeJobsFilter(change.environment);
+    }
+    // One step of the history for the whole change, built on the address as it is now (#744).
+    update((current) => {
+      const values: Record<string, string | null | undefined> = {
+        environment: change.environment,
+        status: change.status,
+        trigger: change.trigger,
+        job: change.job?.trim(),
+        period: change.period,
+      };
+      for (const [name, value] of Object.entries(values)) {
+        if (value !== undefined) {
+          settingParam(name, value === DEFAULTS[name] ? null : value)(current);
         }
-        return next;
-      },
-      { replace: true },
-    );
+      }
+      return current;
+    });
   };
   return {
     choice,
-    set: ({ environment, ...rest }) => {
-      if (environment !== undefined) {
-        jobs.setEnvironment(environment);
-      }
-      if (Object.keys(rest).length > 0) {
-        write(rest);
-      }
-    },
+    set: write,
     clear: () => {
       write({ status: "all", trigger: "all", job: "", period: DEFAULT_PERIOD });
     },

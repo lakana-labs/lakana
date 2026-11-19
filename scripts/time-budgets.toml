@@ -30,3 +30,10 @@ threshold_seconds = 2.0
 # this many seconds: a test that sits at the threshold would otherwise pass and fail on the same
 # code.
 confirm_seconds = 2.5
+# The time of the reference workload (REFERENCE_WORKLOAD in scripts/time_budgets.py, the fastest of
+# five runs) on a fast GitHub runner. With --confirm the ratchet times it on its own runner first
+# and raises confirm_seconds by the ratio, never below 1 and at most MAX_SPEED_RATIO (2), so a slow
+# runner does not fail tests that are fast elsewhere (#725). Recalibrate it whenever the workload
+# changes: the step log prints the time and the ratio. Calibrated on 2026-11-19 from three
+# `test (3.14)` runs of #747 (run 44584790489, attempts 1–3: 0.232, 0.335 and 0.289 s), the fastest.
+reference_seconds = 0.232

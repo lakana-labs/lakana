@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EnvironmentChoice } from "../api/environments";
@@ -21,9 +21,10 @@ function renderFilter(path: string) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
   );
-  return renderHook(() => ({ filter: useRunsFilter(LISTED), location: useLocation() }), {
-    wrapper,
-  });
+  return renderHook(
+    () => ({ filter: useRunsFilter(LISTED), location: useLocation(), navigate: useNavigate() }),
+    { wrapper },
+  );
 }
 
 afterEach(() => {
@@ -99,6 +100,45 @@ describe("useRunsFilter", () => {
     expect(result.current.location.search).toBe("?job=nightly_sales&period=24h");
   });
 
+  it("two changes before a render both reach the address (#744)", () => {
+    const { result } = renderFilter("/jobs/runs?trigger=schedule");
+    // Both come from the same render, as a Period chosen and a job typed at once do.
+    const { set } = result.current.filter;
+
+    act(() => {
+      set({ period: "7d" });
+      set({ job: "nightly" });
+    });
+    expect(result.current.location.search).toBe("?trigger=schedule&period=7d&job=nightly");
+    act(() => {
+      set({ environment: "prod" });
+      set({ status: "failed" });
+    });
+    expect(result.current.location.search).toBe(
+      "?trigger=schedule&period=7d&job=nightly&environment=prod&status=failed",
+    );
+    // Each was a step of its own.
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe(
+      "?trigger=schedule&period=7d&job=nightly&environment=prod",
+    );
+  });
+
+  it("an environment and another filter changed at once are one step", () => {
+    const { result } = renderFilter("/jobs/runs?status=failed");
+
+    act(() => {
+      result.current.filter.set({ environment: "prod", trigger: "manual" });
+    });
+    expect(result.current.location.search).toBe("?status=failed&environment=prod&trigger=manual");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("?status=failed");
+  });
+
   it("a choice of environment writes the shared filter", () => {
     const { result } = renderFilter("/jobs/runs?status=failed");
 
@@ -120,5 +160,39 @@ describe("useRunsFilter", () => {
     });
     expect(result.current.location.search).toBe("?environment=prod");
     expect(result.current.filter.narrowed).toBe(false);
+  });
+
+  it("each change is a step of the history, so Back undoes one filter at a time", () => {
+    const { result } = renderFilter("/jobs/runs");
+
+    act(() => {
+      result.current.filter.set({ status: "failed" });
+    });
+    act(() => {
+      result.current.filter.set({ environment: "prod" });
+    });
+    act(() => {
+      result.current.filter.set({ trigger: "manual" });
+    });
+    expect(result.current.location.search).toBe("?status=failed&environment=prod&trigger=manual");
+
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.pathname).toBe("/jobs/runs");
+    expect(result.current.location.search).toBe("?status=failed&environment=prod");
+    expect(result.current.filter.choice.environment).toBe("prod");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("?status=failed");
+    expect(result.current.filter.choice.status).toBe("failed");
+    // Back undoes the environment too, though this browser now remembers it for the next visit.
+    expect(result.current.filter.choice.environment).toBeNull();
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("prod");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("");
   });
 });

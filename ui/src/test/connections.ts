@@ -11,6 +11,35 @@ import type { FakeRoute } from "./server";
 /** The route that lists the environments whose connections the reader may see. */
 export const ENVIRONMENTS_ROUTE = "GET /api/v1/connections/environments";
 
+/** The route that lists the environments the reader may read, each saying whether it is protected. */
+export const READABLE_ROUTE = "GET /api/v1/environments";
+
+/**
+ * The answer of {@link READABLE_ROUTE} for some environments.
+ *
+ * @param names - The environments' names.
+ * @param protectedNames - Those of them that are protected; none by default.
+ * @returns The route.
+ */
+export function readableRoute(
+  names: readonly string[],
+  protectedNames: readonly string[] = [],
+): FakeRoute {
+  return {
+    status: 200,
+    body: names.map((name) => ({
+      name,
+      storage_root: `file:///srv/lakana/${name}`,
+      storage_secret_ref: null,
+      is_protected: protectedNames.includes(name),
+      properties: {},
+      retention_days: null,
+      deleted_at: null,
+      purge_after: null,
+    })),
+  };
+}
+
 /**
  * A connection, as the server answers a manager: PostgreSQL in `prod`, with a finished test, and
  * every action open.
@@ -46,15 +75,17 @@ export function aConnection(over: Partial<ConnectionOut> = {}): ConnectionOut {
 
 /**
  * The routes of a list of connections: the list, with the environment filter applied, and the
- * environments.
+ * environments, with those that are protected.
  *
  * @param rows - The connections.
  * @param environments - The readable environments.
+ * @param protectedNames - The protected ones among them; none by default.
  * @returns The routes, for `fakeServer`.
  */
 export function connectionRoutes(
   rows: readonly ConnectionOut[],
   environments: readonly ConnectionEnvironmentOut[],
+  protectedNames: readonly string[] = [],
 ): Record<string, FakeRoute> {
   return {
     "GET /api/v1/connections": (request) => {
@@ -63,5 +94,9 @@ export function connectionRoutes(
       return { status: 200, body: { items, next_cursor: null } };
     },
     [ENVIRONMENTS_ROUTE]: { status: 200, body: environments },
+    [READABLE_ROUTE]: readableRoute(
+      environments.map(({ name }) => name),
+      protectedNames,
+    ),
   };
 }

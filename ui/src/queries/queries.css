@@ -4,6 +4,13 @@
 /* The Queries screen: the library of saved and recent queries, and the work column with its
    toolbar, the editor and the result. Below 640 px the library is not rendered (useFolded), and
    the work takes the whole width. */
+
+/* Writing SQL and reading its result is not text to read: the screen takes the whole window, as
+   a table's Preview and Lineage do. */
+.queries-page .page {
+  max-width: none;
+}
+
 .queries {
   display: flex;
   align-items: flex-start;
@@ -98,7 +105,7 @@
 .queries-editor {
   display: flex;
   flex-direction: column;
-  min-height: 12rem;
+  min-height: 20rem;
   overflow: auto;
   resize: vertical;
   border: 1px solid var(--color-edge);
