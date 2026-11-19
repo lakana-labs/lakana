@@ -623,6 +623,12 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
     whether the environment exists. Without `purge` no touch is asked: `restore` undoes the
     deletion. The harness key is the route; its case sends `?purge=true`, and
     `test_a_stale_session_deletes_an_environment_without_purge` pins the other half;
+  - deleting leftover directories (#735):
+    `POST /api/v1/environments/{name}/orphaned-locations/delete` deletes table directories older
+    releases left without a record, and nothing restores their files.
+    `CatalogService.delete_orphaned_locations` calls `require_step_up` right after `authorize`
+    and before the storage is walked, so a stale session deletes, reads and audits nothing.
+    Finding them (`GET …/orphaned-locations`) deletes nothing and asks for no touch;
   - sign-in: `POST /api/v1/invites`, `POST /api/v1/principals/{name}/recovery-link`, adding a
     passkey (`POST …/passkeys/options`), removing one, ending another person's sessions
     (`DELETE /api/v1/principals/{name}/sessions`), `PATCH /api/v1/settings/sign-in`.
@@ -633,9 +639,10 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   write route fails the test until it is placed. The rule: step-up when a write changes who or
   what can act or read (identities, rights, run-as, CI trust), handles credentials or secrets, or
   changes where code or data come from or go, irreversibly erases catalog records, or drops data
-  (a table, an artifact, an artifact version, a namespace, a rebuild, an environment purge); none for
-  removing access (revoking a token, withdrawing a link, deleting a secret, clearing run-as), for operating on existing work under
-  one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
+  (a table, an artifact, an artifact version, a namespace, a rebuild, an environment purge,
+  leftover directories); none for removing access (revoking a token, withdrawing a link,
+  deleting a secret, clearing run-as), for operating on existing work under one's own rights
+  (runs, queries, deploys of a registered repository, jobs, table data,
   descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
   without `purge` is a data operation undone with restore and asks for no touch; with `purge` it
   is a drop of every table and asks (#619). The
@@ -2997,7 +3004,11 @@ asks.
 **Who.** `MANAGE_ENVIRONMENT` on `Securable.instance_scope()`, checked before the environment is
 looked up: the walk sees every environment that shares the root, so an environment-scoped admin
 is refused (and audited as a denial). A deleted environment is accepted by name (its leftovers
-are the point); an unknown name is a 404 after the check.
+are the point); an unknown name is a 404 after the check. The delete then takes step-up
+(`require_step_up`, #735): from a browser it needs a passkey touch within 15 minutes, checked
+before the walk, since the files cannot be restored; a token is never asked, as for the purge.
+The listing asks for none. Pins: `test_catalog_step_up.py`
+(`catalog.delete_orphaned_locations`), `test_step_up_routes.py`.
 
 **What is listed.** Only what the sweep's own walk (`_Run.unrecorded_directories`: id-suffixed
 directories under `managed/` that hold files, never entering a known location or an id-suffixed

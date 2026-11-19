@@ -1146,7 +1146,9 @@ relative or host `file` location keeps everything on the local disk), the same c
 sweep's purge makes, and only when their newest file is older than the age asked for (30
 days by default). Each is reserved by inserting a record for its location (unique, so a create
 that claimed it first wins) and then purged by the sweep's own purge, under that record's lock, with
-the same checks before every file. One audit event records each such call.
+the same checks before every file. One audit event records each such call. From a browser the
+delete needs a passkey touch within the last 15 minutes (`require_step_up`, #735), as the purge of
+a deleted environment does; a token is never asked.
 
 ## M3 exit criteria
 

@@ -35,7 +35,7 @@ const calls = (server: ReturnType<typeof fakeServer>): string[] =>
   server.sent.map((request) => `${request.method} ${request.path}`);
 
 describe("the environments' calls", () => {
-  it("asks for the touch before create, protect, storage, purge rows and a purging delete", async () => {
+  it("asks for the touch before create, protect, storage, purge rows, a purging delete and deleting leftovers", async () => {
     const server = fakeServer({
       "GET /api/v1/sign-in/session": FRESH,
       "POST /api/v1/environments": { status: 201, body: DEV },
@@ -43,6 +43,7 @@ describe("the environments' calls", () => {
       "PATCH /api/v1/environments/dev/storage": { status: 200, body: DEV },
       "POST /api/v1/environments/dev/purge-rows": { status: 204 },
       "DELETE /api/v1/environments/dev": { status: 200, body: DEV },
+      "POST /api/v1/environments/dev/orphaned-locations/delete": { status: 200, body: ORPHANS },
     });
 
     await createEnvironment({
@@ -54,6 +55,7 @@ describe("the environments' calls", () => {
     await changeStorage("dev", { secret_ref: "corp-s3" });
     await purgeEnvironmentRows("dev");
     await deleteEnvironment("dev", true);
+    await deleteOrphans("dev", 45);
 
     expect(calls(server)).toEqual([
       "GET /api/v1/sign-in/session",
@@ -66,35 +68,34 @@ describe("the environments' calls", () => {
       "POST /api/v1/environments/dev/purge-rows",
       "GET /api/v1/sign-in/session",
       "DELETE /api/v1/environments/dev?purge=true",
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/environments/dev/orphaned-locations/delete",
     ]);
     expect(server.sent[3]?.body).toEqual({ is_protected: true });
     expect(server.sent[5]?.body).toEqual({ secret_ref: "corp-s3" });
+    expect(server.sent[11]?.body).toEqual({ older_than_days: 45 });
   });
 
-  it("deletes without purge, restores, sets retention and cleans up without a touch", async () => {
+  it("deletes without purge, restores, sets retention and finds leftovers without a touch", async () => {
     const server = fakeServer({
       "DELETE /api/v1/environments/dev": { status: 200, body: DEV },
       "POST /api/v1/environments/dev/restore": { status: 200, body: DEV },
       "PUT /api/v1/environments/dev/retention": { status: 200, body: DEV },
       "GET /api/v1/environments/dev/orphaned-locations": { status: 200, body: ORPHANS },
-      "POST /api/v1/environments/dev/orphaned-locations/delete": { status: 200, body: ORPHANS },
     });
 
     await deleteEnvironment("dev", false);
     await restoreEnvironment("dev");
     await setEnvironmentRetention("dev", null);
     expect(await findOrphans("dev", 45)).toEqual(ORPHANS);
-    await deleteOrphans("dev", 45);
 
     expect(calls(server)).toEqual([
       "DELETE /api/v1/environments/dev",
       "POST /api/v1/environments/dev/restore",
       "PUT /api/v1/environments/dev/retention",
       "GET /api/v1/environments/dev/orphaned-locations?older_than_days=45",
-      "POST /api/v1/environments/dev/orphaned-locations/delete",
     ]);
     expect(server.sent[2]?.body).toEqual({ days: null });
-    expect(server.sent[4]?.body).toEqual({ older_than_days: 45 });
   });
 
   it("sends an option's value only in the body", async () => {

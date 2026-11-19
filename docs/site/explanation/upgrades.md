@@ -204,12 +204,15 @@ language by mistake stays there; to remove only that label edit, send `{"label":
 `COLUMN_DESCRIBED` gain `label_language` when the label was edited in another language. See
 [Descriptions](../reference/descriptions.md#rest-routes).
 
-### A browser asks for a passkey touch before a drop
+### A browser asks for a passkey touch before a drop or an unrecoverable delete
 
 A signed-in browser now asks for a passkey touch before it drops a table, drops an artifact, deletes
-an artifact version, deletes a namespace, rebuilds a table, or deletes an environment with purge
-(`DELETE /api/v1/environments/{name}?purge=true`). Deleting an environment without purge still asks
-for no touch: restore undoes it. A token, the CLI and the SDK are not asked, so no script changes.
+an artifact version, deletes a namespace, rebuilds a table, deletes an environment with purge
+(`DELETE /api/v1/environments/{name}?purge=true`), or deletes the directories older releases left
+behind (`POST /api/v1/environments/{name}/orphaned-locations/delete`, **Delete the old ones** under
+Leftover directories). Deleting an environment without purge still asks for no touch: restore
+undoes it; finding leftover directories asks for none either. A token, the CLI and the SDK are not
+asked, so no script changes.
 
 ### Expiring tables, namespaces, artifacts and orphans come in pages (breaking)
 
