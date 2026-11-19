@@ -117,13 +117,22 @@ _TASK_ONLY = frozenset({"task_connections.get"})
 the refusal. `lakana.ingest` calls them inside the task; a person reads connections with
 `lakana connection show`."""
 
-_UI_ONLY = frozenset({"catalog.tree", "queries.environments", "connections.environments"})
+_UI_ONLY = frozenset(
+    {
+        "catalog.tree",
+        "queries.environments",
+        "connections.environments",
+        "access.managed_scopes",
+    }
+)
 """SDK methods that only feed a screen: the counts of the catalog tree (M7 part 3a) have no use in
 a terminal, where `lakana table list` lists the same tables with `--under`; the environments a
 person may query fill the query editor's environment picker (M7 part 4), where in a terminal
 `--env` names one and `lakana env list` lists them; the environments whose connections a person
 may read, and what they may do there, fill the Connections screen's environment filter and its
-Add connection (M7 part 6), where in a terminal a refused command says why."""
+Add connection (M7 part 6), where in a terminal a refused command says why; the managed scopes a
+policy manager may know mark the policies of Row filters & masks (M7 part 7), where in a terminal an
+administrator runs `lakana access status` and a refused write names its file."""
 
 _ASSET_ONLY = frozenset({"tables.history"})
 """SDK methods a Python asset's harness calls and no person runs by hand: a history version
