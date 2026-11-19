@@ -9,18 +9,29 @@
  * secret's value is ever part of an answer.
  * @packageDocumentation
  */
-import { type JSX, type RefObject, useCallback, useRef } from "react";
+import {
+  type ComponentType,
+  type JSX,
+  lazy,
+  type RefObject,
+  Suspense,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
+import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import { getRepositoryPage, type RepositoryOut } from "../api";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { Page } from "../shell/Page";
+import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
-import { VisibleText } from "../shell/VisibleText";
+import { markedText, VisibleText } from "../shell/VisibleText";
 import { credentialText } from "./credentialText";
 import { httpsForm, recogniseHost } from "./hosts";
 import { mayManageRepositories } from "./places";
@@ -29,9 +40,36 @@ import { REPOSITORIES_PATH } from "./repositoryPaths";
 import "./repositoryStrings";
 import { RepositoryTestAccess } from "./RepositoryTestAccess";
 import "./settingsStrings";
+import type { RepositoryDialogProps } from "./RepositoryDialogs";
 import { useSettingsViewer } from "./viewer";
 
 const P = "settings.repositoryPages";
+
+/**
+ * One of the page's dialogs, loaded when it is first opened.
+ *
+ * @param name - The dialog's export.
+ * @returns The lazy dialog.
+ */
+function dialogOf(
+  name: "EditRepositoryDialog" | "MissingKeysDialog" | "DeleteRepositoryDialog",
+): ComponentType<RepositoryDialogProps> {
+  return lazy(async () => ({ default: (await import("./RepositoryDialogs"))[name] }));
+}
+
+const DIALOGS = {
+  edit: dialogOf("EditRepositoryDialog"),
+  missing: dialogOf("MissingKeysDialog"),
+  delete: dialogOf("DeleteRepositoryDialog"),
+} as const;
+
+const ReplaceKeyDialog: ComponentType<RepositoryDialogProps & { readonly environment: string }> =
+  lazy(async () => ({ default: (await import("./RepositoryDialogs")).ReplaceKeyDialog }));
+
+/** The dialog open on the page. */
+type Open =
+  | { readonly kind: "edit" | "missing" | "delete" }
+  | { readonly kind: "replace"; readonly environment: string };
 
 /** Properties of the page's blocks. */
 interface BlockProps {
@@ -91,20 +129,27 @@ function Overview({ repo }: BlockProps): JSX.Element {
 interface SshKeysProps extends BlockProps {
   /** The Deploy keys heading, focused after a key is replaced. */
   readonly keysHeading: RefObject<HTMLHeadingElement | null>;
+  /** The environments whose keys the person may replace or make; none for a reader. */
+  readonly keyEnvironments: readonly string[];
+  /** Opens a dialog. */
+  readonly onOpen: (open: Open) => void;
 }
 
 /**
  * The host keys an SSH repository trusts, by type and fingerprint, and its public deploy keys
  * per environment.
  *
- * @param props - The repository and the heading.
+ * @param props - The repository, the heading and the person's environments.
  * @param props.repo - The repository.
  * @param props.keysHeading - The Deploy keys heading.
- * @returns The two lists.
+ * @param props.keyEnvironments - The environments whose keys the person may replace or make.
+ * @param props.onOpen - Opens a dialog.
+ * @returns The two lists, with Replace key and Make the missing keys where the person may.
  */
-function SshKeys({ repo, keysHeading }: SshKeysProps): JSX.Element {
+function SshKeys({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): JSX.Element {
   const { t } = useTranslation();
   const hostKeys = repo.host_keys ?? [];
+  const keyed = new Set(repo.deploy_keys.map((key) => key.environment));
   return (
     <>
       <h3>{t(`${P}.hostKeys`)}</h3>
@@ -136,9 +181,30 @@ function SshKeys({ repo, keysHeading }: SshKeysProps): JSX.Element {
                 <VisibleText text={key.fingerprint} />
               </code>
               <CopyLine text={key.public_key} copyLabel={t(`${P}.copyPublicKey`)} />
+              {keyEnvironments.includes(key.environment) && (
+                <Button
+                  className="button"
+                  aria-label={t(`${P}.replaceKeyOf`, { environment: markedText(key.environment) })}
+                  onPress={() => {
+                    onOpen({ kind: "replace", environment: key.environment });
+                  }}
+                >
+                  {t(`${P}.replaceKey`)}
+                </Button>
+              )}
             </li>
           ))}
         </ul>
+      )}
+      {keyEnvironments.some((environment) => !keyed.has(environment)) && (
+        <Button
+          className="button"
+          onPress={() => {
+            onOpen({ kind: "missing" });
+          }}
+        >
+          {t(`${P}.makeMissing`)}
+        </Button>
       )}
     </>
   );
@@ -148,12 +214,14 @@ function SshKeys({ repo, keysHeading }: SshKeysProps): JSX.Element {
  * How the repository authenticates: the secret and username of an HTTPS one, the host keys
  * and deploy keys of an SSH one, nothing for a local folder.
  *
- * @param props - The repository and the heading.
+ * @param props - The repository, the heading and the person's environments.
  * @param props.repo - The repository.
  * @param props.keysHeading - The Deploy keys heading.
+ * @param props.keyEnvironments - The environments whose keys the person may replace or make.
+ * @param props.onOpen - Opens a dialog.
  * @returns The block.
  */
-function Credential({ repo, keysHeading }: SshKeysProps): JSX.Element {
+function Credential({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <section className="flat-panel settings-panel">
@@ -179,10 +247,35 @@ function Credential({ repo, keysHeading }: SshKeysProps): JSX.Element {
           </dd>
         </dl>
       )}
-      {repo.kind === "ssh" && <SshKeys repo={repo} keysHeading={keysHeading} />}
+      {repo.kind === "ssh" && (
+        <SshKeys
+          repo={repo}
+          keysHeading={keysHeading}
+          keyEnvironments={keyEnvironments}
+          onOpen={onOpen}
+        />
+      )}
       {repo.kind === "local" && <p>{t(`${P}.localNote`)}</p>}
     </section>
   );
+}
+
+/** Properties of {@link OpenDialog}. */
+interface OpenDialogProps extends RepositoryDialogProps {
+  /** Which dialog. */
+  readonly kind: keyof typeof DIALOGS;
+}
+
+/**
+ * The open dialog but Replace key, which names its environment.
+ *
+ * @param props - Which dialog, the repository and what to call.
+ * @param props.kind - Which dialog.
+ * @returns The dialog.
+ */
+function OpenDialog({ kind, ...props }: OpenDialogProps): JSX.Element {
+  const Dialog = DIALOGS[kind];
+  return <Dialog {...props} />;
 }
 
 /** Properties of {@link RepositoryPage}. */
@@ -201,12 +294,31 @@ export interface RepositoryPageProps {
  */
 export function RepositoryPage({ name }: RepositoryPageProps): JSX.Element {
   const { t } = useTranslation();
-  const manages = mayManageRepositories(useSettingsViewer()) === true;
+  const navigate = useNavigate();
+  const viewer = useSettingsViewer();
+  const manages = mayManageRepositories(viewer) === true;
   const heading = useRef<HTMLHeadingElement>(null);
-  const keysHeading = useRef<HTMLHeadingElement>(null);
   const load = useCallback(() => getRepositoryPage(name), [name]);
   const read = useResource(load);
   const repo = read.data;
+  // The focus moves once the page is read again, after the dialog has given it back.
+  const { target: keysHeading, arm: armKeys } = useFocusAfter<HTMLHeadingElement>(repo);
+  const { target: editButton, arm: armEdit } = useFocusAfter<HTMLButtonElement>(repo);
+  const [open, setOpen] = useState<Open | null>(null);
+  const keyEnvironments = manages ? (viewer.secretEnvironments ?? []) : [];
+  const close = (): void => {
+    setOpen(null);
+  };
+  const done = (kind: Open["kind"]): void => {
+    setOpen(null);
+    if (kind === "delete") {
+      void navigate(REPOSITORIES_PATH, { replace: true });
+      return;
+    }
+    if (kind === "edit") armEdit();
+    else armKeys();
+    read.reload();
+  };
   return (
     <Page
       title={name}
@@ -240,12 +352,63 @@ export function RepositoryPage({ name }: RepositoryPageProps): JSX.Element {
       ) : (
         <>
           <Overview repo={repo} />
-          <Credential repo={repo} keysHeading={keysHeading} />
+          <Credential
+            repo={repo}
+            keysHeading={keysHeading}
+            keyEnvironments={keyEnvironments}
+            onOpen={setOpen}
+          />
           {manages && (
-            <section className="flat-panel settings-panel">
-              <h2>{t(`${P}.testTitle`)}</h2>
-              <RepositoryTestAccess name={repo.name} />
-            </section>
+            <>
+              <section className="flat-panel settings-panel">
+                <h2>{t(`${P}.testTitle`)}</h2>
+                <RepositoryTestAccess name={repo.name} />
+              </section>
+              <div className="step-actions">
+                <Button
+                  ref={editButton}
+                  className="button"
+                  aria-label={t(`${P}.editOf`, { name: markedText(repo.name) })}
+                  onPress={() => {
+                    setOpen({ kind: "edit" });
+                  }}
+                >
+                  {t(`${P}.edit`)}
+                </Button>
+                <Button
+                  className="button"
+                  aria-label={t(`${P}.deleteOf`, { name: markedText(repo.name) })}
+                  onPress={() => {
+                    setOpen({ kind: "delete" });
+                  }}
+                >
+                  {t(`${P}.delete`)}
+                </Button>
+              </div>
+            </>
+          )}
+          {open !== null && (
+            <Suspense fallback={null}>
+              {open.kind === "replace" ? (
+                <ReplaceKeyDialog
+                  repository={repo}
+                  environment={open.environment}
+                  onDone={() => {
+                    done("replace");
+                  }}
+                  onClose={close}
+                />
+              ) : (
+                <OpenDialog
+                  kind={open.kind}
+                  repository={repo}
+                  onDone={() => {
+                    done(open.kind);
+                  }}
+                  onClose={close}
+                />
+              )}
+            </Suspense>
           )}
         </>
       )}
