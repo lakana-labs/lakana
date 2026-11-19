@@ -34,3 +34,24 @@
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
 }
+
+/* An environment's properties: each key beside its value, a long one wrapping in its place. */
+.environment-properties {
+  margin: 0 0 var(--space-2);
+}
+
+.environment-properties div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.environment-properties dt {
+  color: var(--color-text-muted);
+}
+
+.environment-properties dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}

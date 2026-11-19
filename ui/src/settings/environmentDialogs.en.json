@@ -33,5 +33,15 @@
     "protect": "Protect it: refuse deleting it and changing its storage",
     "submit": "Create environment",
     "held": "Name it and say where its data is stored."
+  },
+  "retention": {
+    "title": "Set retention of {{name}}",
+    "rule": "Tables that set no retention of their own",
+    "keep": "Keep tables",
+    "expire": "Tables expire after",
+    "days": "Days",
+    "daysHelp": "1 to 3,650 days after a table's last write or read.",
+    "save": "Save",
+    "held": "Give a number of days from 1 to 3,650."
   }
 }

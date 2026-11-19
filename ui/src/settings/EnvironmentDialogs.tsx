@@ -1,6 +1,6 @@
 /**
- * The dialogs of Settings › Environments: Create environment. They load on demand, when one is
- * opened.
+ * The dialogs of Settings › Environments: Create environment, and an environment's Set retention.
+ * They load on demand, when one is opened.
  *
  * @remarks
  * A storage option's value can be an inline credential. It is typed into an uncontrolled
@@ -18,6 +18,7 @@ import {
   Heading,
   Input,
   Label,
+  NumberField,
   RadioButton,
   RadioField,
   RadioGroup,
@@ -27,7 +28,12 @@ import {
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 
-import { createEnvironment, type StorageScheme } from "../api/environments";
+import {
+  createEnvironment,
+  type EnvironmentOut,
+  setEnvironmentRetention,
+  type StorageScheme,
+} from "../api/environments";
 import { FormFoot } from "../access/FormFoot";
 import "../access/secrets.css";
 import {
@@ -37,6 +43,7 @@ import {
   valuesReady,
 } from "../access/SecretValuesFields";
 import { ActionDialog } from "../shell/ActionDialog";
+import { markedText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import "./environmentDialogStrings";
 import { environmentPath } from "./environmentPaths";
@@ -165,6 +172,96 @@ export function CreateEnvironmentDialog({ onClose }: CreateEnvironmentDialogProp
           attempt={attempt}
           submit={t(`${c}.submit`)}
           held={held}
+          blocked={false}
+          onCancel={onClose}
+        />
+      </Form>
+    </ActionDialog>
+  );
+}
+
+/** Properties of the dialogs of an environment's page. */
+export interface EnvironmentDialogProps {
+  /** The environment. */
+  readonly environment: EnvironmentOut;
+  /** Called once the change is made: the page reads the environment again. */
+  readonly onDone: () => void;
+  /** Closes the dialog without a change. */
+  readonly onClose: () => void;
+}
+
+/** The most days a retention may be, as the server takes it. */
+const MAX_RETENTION_DAYS = 3650;
+
+/**
+ * Set retention: keep the tables that set no retention of their own, or let them expire a number
+ * of days after their last write or read. No passkey touch; the server's refusal (a protected
+ * environment, days out of range) stays here with the days kept.
+ *
+ * @param props - The environment and what to call.
+ * @param props.environment - The environment.
+ * @param props.onDone - Called once it is saved.
+ * @param props.onClose - Closes the dialog.
+ * @returns The dialog.
+ */
+export function RetentionDialog({
+  environment,
+  onDone,
+  onClose,
+}: EnvironmentDialogProps): JSX.Element {
+  const { t } = useTranslation();
+  const attempt = useAttempt();
+  const [choice, setChoice] = useState<"keep" | "expire">(
+    environment.retention_days === null ? "keep" : "expire",
+  );
+  const [days, setDays] = useState(environment.retention_days ?? 30);
+  const r = `${D}.retention`;
+  const valid = Number.isInteger(days) && days >= 1 && days <= MAX_RETENTION_DAYS;
+  return (
+    <ActionDialog onClose={onClose}>
+      <Form
+        onSubmit={(event) => {
+          event.preventDefault();
+          attempt.run(async () => {
+            await setEnvironmentRetention(environment.name, choice === "keep" ? null : days);
+            onDone();
+          });
+        }}
+      >
+        <Heading slot="title">{t(`${r}.title`, { name: markedText(environment.name) })}</Heading>
+        <RadioGroup
+          className="field"
+          value={choice}
+          onChange={(value) => {
+            setChoice(value as "keep" | "expire");
+          }}
+        >
+          <Label>{t(`${r}.rule`)}</Label>
+          <RadioField value="keep" className="radio-field">
+            <RadioButton className="radio">{t(`${r}.keep`)}</RadioButton>
+          </RadioField>
+          <RadioField value="expire" className="radio-field">
+            <RadioButton className="radio">{t(`${r}.expire`)}</RadioButton>
+          </RadioField>
+        </RadioGroup>
+        {choice === "expire" && (
+          <NumberField
+            className="field"
+            value={days}
+            onChange={setDays}
+            minValue={1}
+            maxValue={MAX_RETENTION_DAYS}
+            formatOptions={{ useGrouping: false }}
+          >
+            <Label>{t(`${r}.days`)}</Label>
+            <Input />
+            <Text slot="description">{t(`${r}.daysHelp`)}</Text>
+          </NumberField>
+        )}
+        <FormFoot
+          attempt={attempt}
+          submit={t(`${r}.save`)}
+          held={choice === "expire" && !valid ? t(`${r}.held`) : null}
           blocked={false}
           onCancel={onClose}
         />

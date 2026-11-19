@@ -182,7 +182,7 @@ describe("Create environment", () => {
   });
 
   it("checks the name on leaving it, and holds the button until name and root are given", async () => {
-    const { dialog, user } = await openCreate();
+    const { dialog, user, server } = await openCreate();
     const name = within(dialog).getByRole("textbox", { name: "Name" });
     const submit = within(dialog).getByRole("button", { name: "Create environment" });
     expect(submit).toBeDisabled();
@@ -197,6 +197,10 @@ describe("Create environment", () => {
     await user.type(name, "staging");
     await user.type(within(dialog).getByRole("textbox", { name: "Root" }), "file:///srv/x");
     expect(submit).toBeEnabled();
+    await user.click(within(dialog).getByRole("button", { name: "Add an option" }));
+    await user.click(submit);
+    expect(within(dialog).getByText("Name the key.")).toBeVisible();
+    expect(server.sent.some((request) => request.method === "POST")).toBe(false);
   });
 
   it("keeps the fields with the server's sentence", async () => {
