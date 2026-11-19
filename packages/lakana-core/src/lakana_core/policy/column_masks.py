@@ -11,6 +11,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.identity.named import group_named, principal_named
 from lakana_core.models import AuditEventType, ColumnMask, Group, Principal
 from lakana_core.policy.columns import (
     ColumnSource,
@@ -279,8 +280,10 @@ class ColumnMaskService(PolicyShowing[ColumnMask]):
         authorize_policy_change(self._authz, p)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
-        principal_id = self._get_principal(principal).id if principal is not None else None
-        group_id = self._get_group(group).id if group is not None else None
+        principal_id = (
+            principal_named(self._session, principal).id if principal is not None else None
+        )
+        group_id = group_named(self._session, group).id if group is not None else None
         target = self.check_target(
             p,
             environment=environment,

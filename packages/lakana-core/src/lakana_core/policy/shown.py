@@ -20,8 +20,9 @@ from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
-from lakana_core.errors import NotFoundError, ValidationError
-from lakana_core.models import ColumnMask, Group, Principal, RowFilter
+from lakana_core.errors import ValidationError
+from lakana_core.identity.named import group_named, principal_named
+from lakana_core.models import ColumnMask, RowFilter
 from lakana_core.pagination import Page, newest_first
 from lakana_core.policy.columns import ColumnSource
 from lakana_core.policy.field_binding import (
@@ -137,54 +138,6 @@ class PolicyShowing(Generic[_Policy]):
     _model: type[_Policy]
     _list_kind: str
 
-    def _get_principal(self, name: str) -> Principal:
-        """Look up a principal by name.
-
-        Parameters
-        ----------
-        name
-            Principal name.
-
-        Returns
-        -------
-        Principal
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has that name.
-        """
-        principal = self._session.execute(
-            select(Principal).where(Principal.name == name)
-        ).scalar_one_or_none()
-        if principal is None:
-            raise NotFoundError(f"No principal named {name!r}.")
-        return principal
-
-    def _get_group(self, name: str) -> Group:
-        """Look up a group by name.
-
-        Parameters
-        ----------
-        name
-            Group name.
-
-        Returns
-        -------
-        Group
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no group has that name.
-        """
-        group = self._session.execute(select(Group).where(Group.name == name)).scalar_one_or_none()
-        if group is None:
-            raise NotFoundError(f"No group named {name!r}.")
-        return group
-
     def list_page(
         self,
         p: PrincipalRef,
@@ -256,9 +209,11 @@ class PolicyShowing(Generic[_Policy]):
         model = self._model
         query = select(model).where(model.revoked_at.is_(None))
         if principal_name is not None:
-            query = query.where(model.principal_id == self._get_principal(principal_name).id)
+            query = query.where(
+                model.principal_id == principal_named(self._session, principal_name).id
+            )
         if group_name is not None:
-            query = query.where(model.group_id == self._get_group(group_name).id)
+            query = query.where(model.group_id == group_named(self._session, group_name).id)
         if environment is not None:
             query = query.where(model.environment == environment)
         if namespace is not None:
