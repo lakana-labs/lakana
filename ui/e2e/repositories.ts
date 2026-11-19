@@ -79,7 +79,16 @@ const ANALYTICS = {
     },
   ],
   host_keys: [
-    { type: "ssh-ed25519", fingerprint: "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU" },
+    {
+      type: "ssh-ed25519",
+      fingerprint: "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU",
+      marker: null,
+    },
+    {
+      type: "ssh-ed25519",
+      fingerprint: "SHA256:k8vN0Jk3Zr2Yb6PqLw1aXcT9mE4uHs7fGd5Ri0Qp2Vo",
+      marker: "revoked",
+    },
   ],
 };
 

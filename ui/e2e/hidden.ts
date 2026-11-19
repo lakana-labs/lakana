@@ -54,7 +54,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["deploy_run_id","heartbeat_at","host","id","memory","query_run_id","replaced","started_at","status","takes","task_run_id","version"]':
     "StatusWorkerOut",
   '["environment","fingerprint","public_key"]': "RepositoryDeployKeyOut",
-  '["fingerprint","type"]': "TrustedHostKeyOut",
+  '["fingerprint","marker","type"]': "TrustedHostKeyOut",
   '["limit_bytes","measured_at","used_bytes"]': "WorkerMemoryOut",
   '["absolute_expires_at","browser","created_at","current","id","last_seen_at","peer","user_agent","via"]':
     "BrowserSessionOut",
