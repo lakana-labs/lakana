@@ -1,7 +1,7 @@
 /**
- * The work of the Queries screen: the library of saved and recent queries, the toolbar (the
- * query's name, Save…, Delete…, Format, the environment and Run, which becomes Cancel while the
- * run is active), the SQL editor, what went wrong, and the result.
+ * The work of the Queries screen: the library of saved and recent queries beside the editor bar
+ * ({@link QueryToolbar}), the saved query's facts, the SQL editor, and the run under it
+ * ({@link RunResult}).
  *
  * @packageDocumentation
  */
@@ -22,34 +22,29 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { listQueryEnvironments, type QueryEnvironmentOut } from "../api/queries";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
-import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { Loaded } from "../shell/Loaded";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
-import { PendingButton } from "../shell/PendingButton";
-import { shortcutLabel } from "../shell/shortcut";
 import { useFolded } from "../shell/useFolded";
 import { useResource } from "../shell/useResource";
-import { markedText, VisibleText } from "../shell/VisibleText";
-import { problemText } from "../sign-in/messages";
-import type { StatusKind } from "../status/status";
-import { StatusLabel } from "../status/StatusLabel";
+import { markedText } from "../shell/VisibleText";
 import { DeleteSavedDialog } from "./DeleteSavedDialog";
 import { catalogCache } from "./editor/catalog";
 import type { SqlEditorHandle } from "./editor/SqlEditor";
 import { Library } from "./Library";
 import { LibraryFold } from "./LibraryFold";
 import { savedPath } from "./paths";
-import { endedMessage, QueryError } from "./QueryError";
+import { endedMessage } from "./QueryError";
 import { QueryNote } from "./QueryNote";
+import { QueryToolbar } from "./QueryToolbar";
 import { readEnvironment, readFilter, writeEnvironment } from "./remember";
-import { ResultPanel } from "./ResultPanel";
+import { RunResult } from "./RunResult";
 import { savedWho } from "./SavedList";
 import { SaveQueryDialog } from "./SaveQueryDialog";
 import { useAfter } from "./useAfter";
 import { type QueriesAddress, useOpenedSaved } from "./useOpenedSaved";
 import { useQueryNote } from "./useQueryNote";
-import { type QueryRunState, useQueryRun } from "./useQueryRun";
+import { useQueryRun } from "./useQueryRun";
 import "./queries.css";
 import "./queryStrings";
 
@@ -71,61 +66,6 @@ export function EditorSkeleton(): JSX.Element {
     <div className="queries-editor-skeleton" role="status">
       {slow && t("queries.loadingEditor")}
     </div>
-  );
-}
-
-/**
- * Why a queued run waits, in the server's words, once it has waited a second.
- *
- * @param props - The sentence.
- * @param props.message - The server's sentence.
- * @returns The sentence, or nothing in the first second.
- */
-function WaitingFor({ message }: { readonly message: string }): JSX.Element | null {
-  const slow = useAfter();
-  return slow ? <VisibleText text={message} /> : null;
-}
-
-/** Properties of {@link RunLine}. */
-interface RunLineProps {
-  /** The run's state. */
-  readonly state: QueryRunState;
-}
-
-/**
- * The run's state in words: submitting, starting, queued (with the server's reason after a
- * second) or running with its glyph, reading the rows, or how it ended when it did not succeed.
- * A run that succeeded says its rows in the result's own line.
- *
- * @param props - The state.
- * @param props.state - The run's state.
- * @returns The line, a live region that is always there.
- */
-export function RunLine({ state }: RunLineProps): JSX.Element {
-  const { t } = useTranslation();
-  const { phase, run } = state;
-  let words: JSX.Element | string | null = null;
-  if (phase === "submitting") {
-    words = t("queries.state.submitting");
-  } else if (phase === "loading_page") {
-    words = t("queries.state.reading");
-  } else if (run === null) {
-    words = phase === "waiting" ? t("queries.state.starting") : null;
-  } else if (phase === "waiting" || (phase === "done" && run.status !== "SUCCEEDED")) {
-    words = (
-      <>
-        {/* The five states of a run are five of the glyphs' kinds, in lower case. */}
-        <StatusLabel kind={run.status.toLowerCase() as StatusKind} />
-        {run.status === "QUEUED" && run.waiting_for !== null && (
-          <WaitingFor message={run.waiting_for.message} />
-        )}
-      </>
-    );
-  }
-  return (
-    <p role="status" className="queries-run-line">
-      {words}
-    </p>
   );
 }
 
@@ -273,73 +213,38 @@ function Work({
   };
   return (
     <div className="queries-work">
-      <div className="queries-toolbar">
-        {fold}
-        <p className="queries-name">
-          <VisibleText text={name} />
-        </p>
-        <Button
-          className="button"
-          isDisabled={readOnly}
-          onPress={() => {
-            setDialog("save");
-          }}
-        >
-          {t("queries.save.open")}
-        </Button>
-        {opened?.actions.includes("delete") === true && (
-          <Button
-            className="button"
-            onPress={() => {
-              setDialog("delete");
-            }}
-          >
-            {t("queries.delete.open")}
-          </Button>
-        )}
-        <Button
-          className="button"
-          isDisabled={readOnly}
-          onPress={() => {
-            void editor.current?.format().then(
-              (formatted) => {
-                setFormatLine(formatted ? null : "unreadable");
-              },
-              () => {
-                setFormatLine("unloaded");
-              },
-            );
-          }}
-        >
-          {t("queries.format")}
-        </Button>
-        <EnvironmentPicker
-          environments={environments}
-          value={environment}
-          onChange={(chosen) => {
-            setPicked({ at, environment: chosen });
-            writeEnvironment(chosen);
-          }}
-        />
-        {/* One button that is Run, or Cancel while the run is active, so the focus stays on it. */}
-        <PendingButton
-          ref={runButton}
-          className={active ? "button queries-run" : "button button-primary queries-run"}
-          pending={query.phase === "submitting" || query.cancelling}
-          isDisabled={readOnly || (!active && !allowed)}
-          onPress={active ? query.cancel : run}
-        >
-          {active
-            ? t(query.cancelling ? "queries.cancelling" : "queries.cancel")
-            : t("queries.run")}
-        </PendingButton>
-        {/* Beside Run, not in it: text inside a button belongs in its name (WCAG 2.5.3). */}
-        {!active && (
-          <kbd className="queries-run-keys" aria-hidden="true">
-            {t(`queries.runKeys.${shortcutLabel(navigator)}`)}
-          </kbd>
-        )}
-      </div>
+      <QueryToolbar
+        fold={fold}
+        name={name}
+        readOnly={readOnly}
+        deletable={opened?.actions.includes("delete") === true}
+        environments={environments}
+        environment={environment}
+        allowed={allowed}
+        query={query}
+        runButton={runButton}
+        onSave={() => {
+          setDialog("save");
+        }}
+        onDelete={() => {
+          setDialog("delete");
+        }}
+        onFormat={() => {
+          void editor.current?.format().then(
+            (formatted) => {
+              setFormatLine(formatted ? null : "unreadable");
+            },
+            () => {
+              setFormatLine("unloaded");
+            },
+          );
+        }}
+        onEnvironment={(chosen) => {
+          setPicked({ at, environment: chosen });
+          writeEnvironment(chosen);
+        }}
+        onRun={run}
+      />
       {!allowed && (
         <p className="queries-saved-facts">{t("queries.notAllowed", { environment })}</p>
       )}
@@ -390,34 +295,14 @@ function Work({
           {t(formatLine === "unreadable" ? "queries.formatUnreadable" : "queries.formatUnloaded")}
         </p>
       )}
-      {query.cancelRefusal !== null && (
-        <p role="alert" className="step-error queries-alert">
-          {t("queries.cancelRefused", { problem: problemText(t, query.cancelRefusal) })}
-        </p>
-      )}
-      <RunLine state={query} />
-      <QueryError
-        state={query}
-        onGoTo={(line, column) => {
-          editor.current?.focusAt(line, column);
-        }}
-        onRetry={() => {
-          // Try again goes with the alert it is in: the focus moves to Run, which is Cancel
-          // while the run is followed again.
-          query.retry();
-          runButton.current?.focus();
-        }}
+      <RunResult
+        query={query}
+        editor={editor}
+        runButton={runButton}
+        environment={runEnvironment ?? environment}
+        name={name}
+        saved={opened?.name ?? null}
       />
-      {query.phase === "done" && query.run?.status === "SUCCEEDED" && (
-        <ResultPanel
-          environment={runEnvironment ?? environment}
-          run={query.run}
-          page={query.page}
-          name={name}
-          saved={opened?.name ?? null}
-          onMore={query.more}
-        />
-      )}
       {dialog === "save" && (
         <SaveQueryDialog
           environment={environment}

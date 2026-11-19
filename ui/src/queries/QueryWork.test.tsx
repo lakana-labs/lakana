@@ -18,7 +18,8 @@ import {
 import { renderShell } from "../test/render";
 import type { FakeAnswer, FakeRoute } from "../test/server";
 import { catalogCache } from "./editor/catalog";
-import { EditorSkeleton, RunLine } from "./QueryWork";
+import { EditorSkeleton } from "./QueryWork";
+import { RunLine } from "./RunLine";
 import type { QueryRunState } from "./useQueryRun";
 
 vi.mock("./editor/catalog", async (original) => {
