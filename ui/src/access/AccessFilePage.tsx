@@ -5,7 +5,8 @@
  * @packageDocumentation
  */
 import type { JSX, ReactNode } from "react";
-import { useRef } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
+import { Button } from "react-aria-components";
 import { Trans, useTranslation } from "react-i18next";
 
 import type { AccessOverrideOut, ManagedScopeOut } from "../api/accessFile";
@@ -23,6 +24,13 @@ import "./accessFileStrings";
 import "./accessStrings";
 import { INSTANCE_SCOPE, managedScopeOf } from "./managed";
 import { useAccessStatus } from "./useAccessStatus";
+
+// Download access file's form loads when it is opened, not with the page.
+const DownloadAccessFileDialog = lazy(() =>
+  import("./DownloadAccessFileDialog").then((module) => ({
+    default: module.DownloadAccessFileDialog,
+  })),
+);
 
 /** The file the commands name when nothing names one. */
 const DEFAULT_FILE = "access.yaml";
@@ -108,12 +116,30 @@ export function AccessFilePage(): JSX.Element {
   const when = useWhen();
   const status = useAccessStatus();
   const heading = useRef<HTMLHeadingElement>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [note, setNote] = useState("");
   const scopes = status.data?.scopes ?? [];
   const overrides = status.data?.overrides ?? [];
   const file = (managedScopeOf(scopes, null) ?? scopes[0])?.file_name ?? DEFAULT_FILE;
   return (
-    <SettingsFrame title={t("settings.places.accessFile")} headingRef={heading}>
+    <SettingsFrame
+      title={t("settings.places.accessFile")}
+      headingRef={heading}
+      action={
+        <Button
+          className="button button-primary"
+          onPress={() => {
+            setDownloading(true);
+          }}
+        >
+          {t("accessFile.download.action")}
+        </Button>
+      }
+    >
       <p className="page-purpose">{t("accessFile.intro")}</p>
+      <p className="step-status" role="status">
+        {note}
+      </p>
       {status.error !== null && (
         <ReadFailed
           message={status.error}
@@ -249,6 +275,20 @@ export function AccessFilePage(): JSX.Element {
           />
         ))}
       </section>
+      {downloading && (
+        <Suspense fallback={null}>
+          <DownloadAccessFileDialog
+            scopes={scopes}
+            onClose={() => {
+              setDownloading(false);
+            }}
+            onDone={(name) => {
+              setDownloading(false);
+              setNote(t("accessFile.download.done", { name }));
+            }}
+          />
+        </Suspense>
+      )}
     </SettingsFrame>
   );
 }

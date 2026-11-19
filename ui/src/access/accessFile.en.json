@@ -34,5 +34,18 @@
     "applyCommand": "lakana access apply {{- file}} --source-commit COMMIT",
     "exportCommand": "lakana access export --scope instance -o {{- file}}",
     "copy": "Copy command"
+  },
+  "download": {
+    "action": "Download access file",
+    "title": "Download access file",
+    "what": "What to export",
+    "instance": "The whole instance",
+    "some": "Some environments",
+    "environments": "Environments",
+    "help": "The live access of what you choose, as an access file: groups, service accounts, memberships, grants, row filters, column masks and CI trust rules. It holds no token, secret or person.",
+    "submit": "Download",
+    "chooseOne": "Choose at least one environment.",
+    "reading": "Reading the environments…",
+    "done": "Downloaded {{name}}."
   }
 }

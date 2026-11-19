@@ -7,3 +7,46 @@
 .list-scroll.access-file-scroll .row-name {
   overflow-wrap: normal;
 }
+
+/* A checkbox: React Aria hides the input, so the label draws the square; the focus ring is the
+   one the menus use, as for a radio. */
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+
+.checkbox::before {
+  content: "";
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  color: var(--color-on-accent);
+  font-size: var(--type-label-size);
+  line-height: 1;
+}
+
+.checkbox[data-selected]::before {
+  content: "✓";
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.checkbox[data-focus-visible]::before {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  .checkbox[data-selected]::before {
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
+}
