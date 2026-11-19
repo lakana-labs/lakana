@@ -74,6 +74,8 @@ describe("SettingsScreen", () => {
       "Grants",
       "Tokens",
       "Secrets",
+      "Row filters & masks",
+      "Access file",
       "What I may do",
       "Sign-in",
       "Invites",
@@ -166,6 +168,46 @@ describe("SettingsScreen", () => {
       await screen.findByRole("heading", { level: 1, name: "You cannot use Secrets" }),
     ).toBeInTheDocument();
     expect(server.sent.filter((request) => request.path.includes("/secrets"))).toEqual([]);
+  });
+
+  it("a policy manager lands on Row filters & masks", async () => {
+    let answer: (value: FakeAnswer) => void = () => undefined;
+    const held = new Promise<FakeAnswer>((resolve) => {
+      answer = resolve;
+    });
+    const { router } = renderShell("/settings/access", {
+      access: MEMBER,
+      me: { name: "pat", admin: false },
+      routes: { "GET /api/v1/whoami": () => held },
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(router.state.location.pathname).toBe("/settings/access");
+    expect(screen.queryByRole("heading", { name: /You cannot use/ })).not.toBeInTheDocument();
+
+    answer({ status: 200, body: whoami("pat", false, true, false, [], true) });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Row filters & masks" }),
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/settings/access/filters-and-masks");
+    expect(await placeNames()).toEqual(["Status", "Row filters & masks", "What I may do"]);
+  });
+
+  it("a policy manager cannot use Access file", async () => {
+    const { server } = renderShell("/settings/access/access-file", {
+      access: MEMBER,
+      me: { name: "pat", admin: false },
+      routes: {
+        "GET /api/v1/whoami": { status: 200, body: whoami("pat", false, true, false, [], true) },
+      },
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Access file" }),
+    ).toBeInTheDocument();
+    expect(server.sent.filter((request) => request.path.startsWith("/api/v1/access/"))).toEqual([]);
   });
 
   it("lists Status and What I may do for a person who is not an administrator", async () => {

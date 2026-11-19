@@ -38,6 +38,8 @@ describe("PlaceFold", () => {
       "Grants",
       "Tokens",
       "Secrets",
+      "Row filters & masks",
+      "Access file",
       "What I may do",
       "Sign-in",
       "Invites",

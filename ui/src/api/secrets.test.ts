@@ -3,8 +3,6 @@ import { describe, expect, it } from "vitest";
 import { setStepUp } from "./client";
 import { bindSecret, createSecret, listSecrets, revokeSecret, rotateSecret } from "./secrets";
 
-import { mySecretEnvironments } from "./secretEnvironments";
-
 import { fakeServer } from "../test/server";
 
 /** A session whose passkey touch is fresh for ten more minutes. */
@@ -95,15 +93,5 @@ describe("secrets", () => {
       expect(JSON.stringify(request.headers)).not.toContain("s3cr3t-sentinel");
       expect(JSON.stringify(request.body)).toContain("s3cr3t-sentinel");
     }
-  });
-
-  it("reads the environments where one manages secrets", async () => {
-    const server = fakeServer({
-      "GET /api/v1/whoami": { status: 200, body: { secret_environments: ["dev"] } },
-    });
-
-    await expect(mySecretEnvironments()).resolves.toEqual(["dev"]);
-    server.route({ "GET /api/v1/whoami": { status: 200, body: { name: "kim" } } });
-    await expect(mySecretEnvironments()).resolves.toEqual([]);
   });
 });

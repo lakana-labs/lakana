@@ -20,6 +20,8 @@ export type SettingsPlaceId =
   | "grants"
   | "tokens"
   | "secrets"
+  | "filters-and-masks"
+  | "access-file"
   | "what-i-may-do"
   | "sign-in"
   | "invites"
@@ -29,6 +31,8 @@ export type SettingsPlaceId =
 export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet"> & {
   /** The environments where the person manages secrets; null while not read yet. */
   readonly secretEnvironments: readonly string[] | null;
+  /** Whether the person manages row filters and column masks; null while not read yet. */
+  readonly managePolicy: boolean | null;
 };
 
 /** Whether a place is listed, hidden, or waits for a rule that is not known yet. */
@@ -135,6 +139,24 @@ export const SETTINGS_PLACES = [
     below: false,
     visible: (viewer) =>
       viewer.secretEnvironments === null ? null : viewer.secretEnvironments.length > 0,
+  },
+  {
+    id: "filters-and-masks",
+    path: "access/filters-and-masks",
+    label: "settings.places.filtersAndMasks",
+    parent: "access",
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.managePolicy,
+  },
+  {
+    id: "access-file",
+    path: "access/access-file",
+    label: "settings.places.accessFile",
+    parent: "access",
+    kind: "page",
+    below: false,
+    visible: (viewer) => viewer.admin,
   },
   {
     id: "what-i-may-do",
