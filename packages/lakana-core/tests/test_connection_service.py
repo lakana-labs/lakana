@@ -440,6 +440,25 @@ def test_a_data_engineer_creates_a_connection_and_its_secret(world: World) -> No
     assert "s3cr3t-value" not in world.audit_details_text()
 
 
+def test_a_protected_environment_takes_a_connection_without_a_reason(world: World) -> None:
+    """A connection is no write to a table: protection asks no break-glass reason for it."""
+    env = world.session.execute(select(Environment).where(Environment.name == "prod")).scalar_one()
+    env.is_protected = True
+    world.session.commit()
+
+    view = world.connections().create(
+        world.data_engineer,
+        "prod",
+        name="prod-tcp",
+        kind=ConnectionKind.TCP,
+        address={"host": "example.com", "port": 443},
+        settings={},
+    )
+
+    assert (view.name, view.secret) == ("prod-tcp", None)
+    assert world.connection("prod", "prod-tcp") is not None
+
+
 def test_a_taken_secret_name_gives_the_next_free_one(world: World) -> None:
     """A secret already called `<name>-connection` is left alone; the new one is `-2`.
 
