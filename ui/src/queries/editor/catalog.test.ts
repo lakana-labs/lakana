@@ -279,42 +279,69 @@ describe("catalogCache", () => {
     ],
     ["a 408", (): Error => new client.ApiError(408, "Timeout", "The request took too long.")],
     ["an error that is not the server's", (): Error => new TypeError("Failed to fetch")],
-  ])(
-    "keeps nothing after %s: the next ask reads again, and its answer is kept",
-    async (_, failed) => {
-      const failure = failed();
-      const secret = { ...TABLE, name: "station_ranking" };
-      getTableTree.mockRejectedValueOnce(failure);
-      listCompletionTables
-        .mockResolvedValueOnce(pageOf(["daily_sales"]))
-        .mockRejectedValueOnce(failure)
-        .mockResolvedValue(pageOf(["station_ranking"], null));
-      getTable.mockRejectedValueOnce(failure).mockResolvedValue(secret);
-      const prod = catalog.catalogCache("prod");
+  ])("holds %s for 15 s, then reads again and keeps the answer", async (_, failed) => {
+    let now = 1_000_000;
+    const failure = failed();
+    const secret = { ...TABLE, name: "station_ranking" };
+    getTableTree.mockRejectedValueOnce(failure);
+    listCompletionTables
+      .mockResolvedValueOnce(pageOf(["daily_sales"]))
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue(pageOf(["station_ranking"], null));
+    getTable.mockRejectedValueOnce(failure).mockResolvedValue(secret);
+    const prod = catalog.catalogCache("prod", () => now);
 
-      expect(await prod.namespaces()).toEqual([]);
-      // What was read before the failure answers this time.
-      expect(await prod.tables("gold", "")).toEqual(["daily_sales"]);
-      expect(await prod.columns("gold", "station_ranking")).toBeNull();
+    expect(await prod.namespaces()).toEqual([]);
+    // What was read before the failure answers this time.
+    expect(await prod.tables("gold", "")).toEqual(["daily_sales"]);
+    expect(await prod.columns("gold", "station_ranking")).toBeNull();
 
-      expect(await prod.namespaces()).toEqual(["bronze", "silver", "gold", "gold.sales"]);
-      expect(await prod.tables("gold", "")).toEqual(["station_ranking"]);
-      expect((await prod.columns("gold", "station_ranking"))?.[0]?.name).toBe("sale_id");
-      expect(getTableTree).toHaveBeenCalledTimes(2);
-      expect(listCompletionTables).toHaveBeenCalledTimes(3);
-      expect(getTable).toHaveBeenCalledTimes(2);
+    // Asked again within the hold: the failure answers, and nothing is sent.
+    now += catalog.FAILURE_HOLD_MS - 1;
+    expect(await prod.namespaces()).toEqual([]);
+    expect(await prod.tables("gold", "")).toEqual(["daily_sales"]);
+    expect(await prod.columns("gold", "station_ranking")).toBeNull();
+    expect(getTableTree).toHaveBeenCalledTimes(1);
+    expect(listCompletionTables).toHaveBeenCalledTimes(2);
+    expect(getTable).toHaveBeenCalledTimes(1);
 
-      // Now kept: no third read while it is fresh.
-      await prod.namespaces();
-      await prod.tables("gold", "");
-      await prod.columns("gold", "station_ranking");
-      expect(getTableTree).toHaveBeenCalledTimes(2);
-      expect(listCompletionTables).toHaveBeenCalledTimes(3);
-      expect(getTable).toHaveBeenCalledTimes(2);
-    },
-  );
+    now += 1;
+    expect(await prod.namespaces()).toEqual(["bronze", "silver", "gold", "gold.sales"]);
+    expect(await prod.tables("gold", "")).toEqual(["station_ranking"]);
+    expect((await prod.columns("gold", "station_ranking"))?.[0]?.name).toBe("sale_id");
+    expect(getTableTree).toHaveBeenCalledTimes(2);
+    expect(listCompletionTables).toHaveBeenCalledTimes(3);
+    expect(getTable).toHaveBeenCalledTimes(2);
 
-  it("a failure that answers after a newer read was asked forgets only itself", async () => {
+    // Now kept like any answer: nothing is sent while it is fresh.
+    now += catalog.FAILURE_HOLD_MS;
+    await prod.namespaces();
+    await prod.tables("gold", "");
+    await prod.columns("gold", "station_ranking");
+    expect(getTableTree).toHaveBeenCalledTimes(2);
+    expect(listCompletionTables).toHaveBeenCalledTimes(3);
+    expect(getTable).toHaveBeenCalledTimes(2);
+    expect(catalog.FAILURE_HOLD_MS).toBe(15_000);
+  });
+
+  it("sends one read per table while the server is down, however often it is asked", async () => {
+    let now = 1_000_000;
+    getTable.mockRejectedValue(new client.ApiError(0, "NetworkError", "No answer."));
+    const prod = catalog.catalogCache("prod", () => now);
+
+    // Twenty keystrokes over ten seconds, each asking for the columns of two tables.
+    for (let key = 0; key < 20; key += 1) {
+      await Promise.all([prod.columns("gold", "a"), prod.columns("gold", "b")]);
+      now += 500;
+    }
+    expect(getTable).toHaveBeenCalledTimes(2);
+
+    now += catalog.FAILURE_HOLD_MS;
+    await Promise.all([prod.columns("gold", "a"), prod.columns("gold", "b")]);
+    expect(getTable).toHaveBeenCalledTimes(4);
+  });
+
+  it("a failure that answers after a newer read was asked holds only itself", async () => {
     let now = 1_000_000;
     const failures: (() => void)[] = [];
     const failLater = <T>(): Promise<T> =>
@@ -360,7 +387,7 @@ describe("catalogCache", () => {
     expect(getTable).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps nothing of a search that failed for a while", async () => {
+  it("holds a failed search for a while, then searches again", async () => {
     vi.useFakeTimers();
     getTableTree.mockResolvedValue(treeHolding(5_000));
     listCompletionTables.mockImplementation((_environment, q) =>
@@ -377,6 +404,9 @@ describe("catalogCache", () => {
 
     expect(await ask()).toEqual([]);
     listCompletionTables.mockResolvedValue(pageOf(["station_ranking"], null));
+    // Within the hold the failure answers at once, without a search.
+    expect(await prod.tables("gold", "sta")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(catalog.FAILURE_HOLD_MS);
     expect(await ask()).toEqual(["station_ranking"]);
     expect(await prod.tables("gold", "sta")).toEqual(["station_ranking"]);
     expect(listCompletionTables.mock.calls.filter((call) => call[1] === "sta")).toHaveLength(2);
