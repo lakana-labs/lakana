@@ -329,36 +329,26 @@ describe("ConnectionPage", () => {
   });
 
   it("names its environment plainly when its protection cannot be read", async () => {
-    // The 503's body is read when the refusal is built; wait for that, so the assertions below
-    // are about the settled read and not about the moment before it.
-    const readBody = Reflect.get(Response.prototype, "json") as (
-      this: Response,
-    ) => Promise<unknown>;
-    let refused: () => void = () => undefined;
+    // The route says when it has answered; a macrotask later the refusal has been built and
+    // the page has settled, so the assertions below are about the settled read.
+    let answered: () => void = () => undefined;
     const settled = new Promise<void>((resolve) => {
-      refused = resolve;
-    });
-    const spy = vi.spyOn(Response.prototype, "json").mockImplementation(async function (
-      this: Response,
-    ) {
-      const body: unknown = await readBody.call(this);
-      if (this.status === 503) {
-        refused();
-      }
-      return body;
+      answered = resolve;
     });
     fakeServer({
       [CRM]: { status: 200, body: aConnection() },
-      [READABLE_ROUTE]: { status: 503, body: { detail: "The server is busy; try again." } },
+      [READABLE_ROUTE]: () => {
+        answered();
+        return { status: 503, body: { detail: "The server is busy; try again." } };
+      },
     });
     renderPage();
 
     await screen.findByRole("button", { name: "Test crm" });
     await settled;
     await act(async () => {
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    spy.mockRestore();
     expect(document.querySelector(".connection-actions .env-label")).toHaveTextContent(
       /^Environment prod$/u,
     );

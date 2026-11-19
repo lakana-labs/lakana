@@ -41,6 +41,7 @@ export async function readConnectionEnvironments(): Promise<readonly ConnectionE
   const [listed, protectedNames] = await Promise.all([
     listConnectionEnvironments(),
     readProtected().catch((error: unknown) => {
+      // A 408 or 429 is deliberately not "unavailable": it shows the error, with Try again.
       if (error instanceof ApiError && (error.status === 0 || error.status >= 500)) {
         return new Set<string>();
       }
