@@ -86,6 +86,33 @@ describe("columnHover", () => {
     expect(lines(await hoverAt("select gold.station_ranking.rides|"))).toEqual(["rides · long"]);
   });
 
+  it("explains a column written without its table when one table the statement reads has it", async () => {
+    const sql = "select stat|ion_id from gold.station_ranking where rank < 10";
+    const tooltip = await hoverAt(sql);
+
+    expect(tooltip?.pos).toBe("select ".length);
+    expect(tooltip?.end).toBe("select station_id".length);
+    expect(lines(tooltip)).toEqual(["station_id · long", "The station's id.<b>bold</b>"]);
+    expect(lines(await hoverAt("select * from gold.station_ranking r where ra|nk < 10"))).toEqual([
+      "rank · int",
+      "Rank by ridesU+202E",
+    ]);
+  });
+
+  it("explains no column written without its table that no table or several tables have", async () => {
+    expect(await hoverAt("select stat|ion_id from gold.weather")).toBeNull();
+    expect(await hoverAt("select stat|ion_id")).toBeNull();
+    expect(await hoverAt("select no|pe from gold.station_ranking")).toBeNull();
+    // Both tables have it: which one is meant is not said.
+    expect(
+      await hoverAt(
+        "select ra|nk from gold.station_ranking a join gold.station_ranking b on a.rank = b.rank",
+      ),
+    ).toBeNull();
+    // A word before a dot names a table, not a column.
+    expect(await hoverAt("select ra|nk.x from gold.station_ranking")).toBeNull();
+  });
+
   it("shows nothing over a name that is not a known column", async () => {
     expect(await hoverAt("sel|ect 1")).toBeNull();
     expect(await hoverAt("select |r.station_id from gold.station_ranking r")).toBeNull();

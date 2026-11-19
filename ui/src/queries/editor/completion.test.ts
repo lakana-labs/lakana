@@ -145,6 +145,74 @@ describe("catalogCompletion", () => {
     expect(await complete("select w.| from raw.weather.daily w")).toBeNull();
   });
 
+  it("offers the columns of the tables the statement reads for a word without its table", async () => {
+    const catalog = aCatalog();
+    const columns = vi.spyOn(catalog, "columns");
+    const result = await complete("select * from gold.station_ranking where ra|", catalog);
+
+    expect(labels(result)).toEqual(["station_id", "rank"]);
+    expect(result?.from).toBe("select * from gold.station_ranking where ".length);
+    expect(result?.options.map((option) => [option.type, option.detail, option.apply])).toEqual([
+      ["property", "long", undefined],
+      ["property", "int", undefined],
+    ]);
+    expect(columns).toHaveBeenCalledWith("gold", "station_ranking");
+    // Before FROM too, and through an alias: the whole statement counts.
+    expect(labels(await complete("select ra| from gold.station_ranking r"))).toEqual([
+      "station_id",
+      "rank",
+    ]);
+    // Ctrl Space asks without a word; a space alone does not.
+    expect(await complete("select * from gold.station_ranking where |")).toBeNull();
+    expect(
+      labels(await complete("select * from gold.station_ranking where |", aCatalog(), true)),
+    ).toEqual(["station_id", "rank"]);
+  });
+
+  it("offers nothing of its own for a word without its table where no table is read", async () => {
+    // The table's alias is being written, and SQL's keywords answer the rest.
+    expect(await complete("select * from gold.station_ranking s|")).toBeNull();
+    expect(await complete("select * from gold.station_ranking as s|")).toBeNull();
+    expect(await complete("select ra|")).toBeNull();
+    expect(await complete("select ra| from raw.weather.daily")).toBeNull();
+    // Another statement's tables do not count.
+    expect(await complete("select * from gold.station_ranking; select ra|")).toBeNull();
+  });
+
+  it("offers a name that several tables have once per table, named by its table, and inserts it with the table", async () => {
+    const catalog = aCatalog();
+    catalog.columns = vi.fn((namespace: string, table: string) =>
+      Promise.resolve(
+        namespace === "gold" && table === "station_ranking"
+          ? STATION_COLUMNS
+          : namespace === "gold.sales"
+            ? [{ ...(TABLE.schema[0] as ColumnOut), name: "station_id", type: "string" }]
+            : null,
+      ),
+    );
+    const result = await complete(
+      "select st| from gold.station_ranking s join gold.sales.fact_sales",
+      catalog,
+    );
+
+    expect(result?.options.map((option) => [option.label, option.detail, option.apply])).toEqual([
+      ["station_id", "s · long", "s.station_id"],
+      ["rank", "int", undefined],
+      ["station_id", "gold.sales.fact_sales · string", "gold.sales.fact_sales.station_id"],
+    ]);
+
+    // The same table twice, by two aliases: once per alias.
+    const self = await complete(
+      "select ra| from gold.station_ranking a join gold.station_ranking b on a.rank = b.rank",
+    );
+    expect(self?.options.map((option) => [option.apply, option.detail])).toEqual([
+      ["a.station_id", "a · long"],
+      ["a.rank", "a · int"],
+      ["b.station_id", "b · long"],
+      ["b.rank", "b · int"],
+    ]);
+  });
+
   it("a description shows as text, never HTML", async () => {
     const result = await complete("select r.| from gold.station_ranking r");
     const [plain, described] = result?.options ?? [];

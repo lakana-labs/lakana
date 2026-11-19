@@ -3,13 +3,15 @@
  *
  * @remarks
  * The SQL keywords come from the language (`@codemirror/lang-sql`); this source adds the names
- * the person may read, from {@link CompletionCatalog}. A name is inserted as it is and shown with
+ * the person may read, from {@link CompletionCatalog}: a word without a table is answered with the
+ * columns of the tables the statement reads. A name is inserted as it is and shown with
  * `markedText`, so a hidden character shows as `U+XXXX`; a column's description is a text node.
  * @packageDocumentation
  */
 import type { Completion, CompletionSource } from "@codemirror/autocomplete";
 import type { Text } from "@codemirror/state";
 
+import type { ColumnOut } from "../../api/table";
 import { markedText } from "../../shell/VisibleText";
 import type { CompletionCatalog } from "./catalog";
 
@@ -19,6 +21,11 @@ const WORD = String.raw`[\p{L}\p{N}_$]+`;
 const PATH_BEFORE = new RegExp(String.raw`(?:${WORD}\.)*[\p{L}\p{N}_$]*`, "u");
 // FROM or JOIN right before the word.
 const AFTER_FROM = /\b(?:from|join)\s+$/i;
+// A table after FROM or JOIN right before the word, which is then the table's alias.
+const AFTER_TABLE = new RegExp(
+  String.raw`\b(?:from|join)\s+(?:${WORD}\.)+${WORD}\s+(?:as\s+)?$`,
+  "iu",
+);
 // A table after FROM or JOIN, with its alias if it has one.
 const TABLE_IN_FROM = new RegExp(
   String.raw`\b(?:from|join)\s+((?:${WORD}\.)+${WORD})(?:\s+(?:as\s+)?(${WORD}))?`,
@@ -72,6 +79,43 @@ export function statementAt(doc: Text, pos: number): string {
   return text.slice(text.lastIndexOf(";", pos - 1) + 1, end < 0 ? text.length : end);
 }
 
+/** A table a statement reads, and its alias there. */
+export interface TableRead {
+  /** The table. */
+  readonly at: TableAt;
+  /** Its alias, or null when it has none. */
+  readonly alias: string | null;
+  /** What the statement calls it: its alias, or else its whole name. */
+  readonly qualifier: string;
+}
+
+/**
+ * The tables a statement reads after FROM and JOIN, in their order, each once by what the
+ * statement calls it.
+ *
+ * @param statement - The statement.
+ * @returns The tables.
+ */
+export function tablesRead(statement: string): TableRead[] {
+  const found = new Map<string, TableRead>();
+  for (const match of statement.matchAll(TABLE_IN_FROM)) {
+    const whole = match[1] as string;
+    const parts = whole.split(".");
+    const table = parts.pop() as string;
+    const written = match[2];
+    const alias = written !== undefined && !NOT_ALIAS.has(written.toLowerCase()) ? written : null;
+    const qualifier = alias ?? whole;
+    if (!found.has(qualifier.toLowerCase())) {
+      found.set(qualifier.toLowerCase(), {
+        at: { namespace: parts.join("."), table },
+        alias,
+        qualifier,
+      });
+    }
+  }
+  return [...found.values()];
+}
+
 /**
  * The tables a statement reads, by their aliases and their own names, in lower case.
  *
@@ -80,17 +124,40 @@ export function statementAt(doc: Text, pos: number): string {
  */
 function tablesIn(statement: string): Map<string, TableAt> {
   const found = new Map<string, TableAt>();
-  for (const match of statement.matchAll(TABLE_IN_FROM)) {
-    const parts = (match[1] as string).split(".");
-    const alias = match[2];
-    const table = parts.pop() as string;
-    const at = { namespace: parts.join("."), table };
-    found.set(table.toLowerCase(), at);
-    if (alias !== undefined && !NOT_ALIAS.has(alias.toLowerCase())) {
+  for (const { at, alias } of tablesRead(statement)) {
+    found.set(at.table.toLowerCase(), at);
+    if (alias !== null) {
       found.set(alias.toLowerCase(), at);
     }
   }
   return found;
+}
+
+/** A table a statement reads, with its columns. */
+export interface ColumnsRead {
+  /** The table. */
+  readonly read: TableRead;
+  /** Its columns. */
+  readonly columns: readonly ColumnOut[];
+}
+
+/**
+ * The columns of the tables a statement reads, of those whose columns can be read.
+ *
+ * @param catalog - The environment's catalog.
+ * @param statement - The statement.
+ * @returns Each table with its columns, in the statement's order.
+ */
+export async function columnsRead(
+  catalog: CompletionCatalog,
+  statement: string,
+): Promise<ColumnsRead[]> {
+  const reads = tablesRead(statement);
+  const columns = await Promise.all(reads.map(({ at }) => catalog.columns(at.namespace, at.table)));
+  return reads.flatMap((read, index) => {
+    const found = columns[index];
+    return found === null || found === undefined ? [] : [{ read, columns: found }];
+  });
 }
 
 /**
@@ -130,6 +197,55 @@ function named(name: string, type: string): Completion {
 }
 
 /**
+ * An option for a column: its type, and its description as text when it has one.
+ *
+ * @param column - The column.
+ * @param detail - What is shown beside the name: the column's type, after its table's name when
+ *   several tables have the name.
+ * @returns The option.
+ */
+function columnOption(column: ColumnOut, detail: string): Completion {
+  const { description } = column;
+  return {
+    ...named(column.name, "property"),
+    detail,
+    ...(description === null
+      ? {}
+      : { info: () => document.createTextNode(markedText(description)) }),
+  };
+}
+
+/**
+ * The columns of the tables a statement reads, for a word without its table. A name that several
+ * of them have is offered once for each, named and inserted with what the statement calls its
+ * table, since the name alone would be ambiguous.
+ *
+ * @param catalog - The environment's catalog.
+ * @param statement - The statement.
+ * @returns The options.
+ */
+async function bareColumns(catalog: CompletionCatalog, statement: string): Promise<Completion[]> {
+  const read = await columnsRead(catalog, statement);
+  const tablesOf = new Map<string, number>();
+  for (const { columns } of read) {
+    for (const name of new Set(columns.map((column) => column.name))) {
+      tablesOf.set(name, (tablesOf.get(name) ?? 0) + 1);
+    }
+  }
+  return read.flatMap(({ read: { qualifier }, columns }) =>
+    columns.map((column) => {
+      const type = markedText(column.type);
+      return (tablesOf.get(column.name) as number) > 1
+        ? {
+            ...columnOption(column, `${markedText(qualifier)} · ${type}`),
+            apply: `${qualifier}.${column.name}`,
+          }
+        : columnOption(column, type);
+    }),
+  );
+}
+
+/**
  * The next part of each namespace below a path, once each.
  *
  * @param namespaces - The namespaces.
@@ -149,8 +265,9 @@ function childNamespaces(namespaces: readonly string[], below: string): string[]
  *
  * @param catalog - The environment's catalog.
  * @returns The source: namespaces after FROM or JOIN, a namespace's namespaces and tables after
- *   its path and a dot, and a table's columns, with their types and descriptions, after its
- *   alias, its name or its whole name and a dot.
+ *   its path and a dot, a table's columns, with their types and descriptions, after its alias,
+ *   its name or its whole name and a dot, and the columns of the statement's tables for a word
+ *   elsewhere.
  */
 export function catalogCompletion(catalog: CompletionCatalog): CompletionSource {
   return async (context) => {
@@ -160,12 +277,18 @@ export function catalogCompletion(catalog: CompletionCatalog): CompletionSource 
     const word = qualifier.pop() as string;
     const from = context.pos - word.length;
     if (qualifier.length === 0) {
-      // A word elsewhere is SQL's, and the language's keywords answer it.
-      if (!AFTER_FROM.test(context.state.sliceDoc(0, path.from))) {
+      const before = context.state.sliceDoc(0, path.from);
+      if (AFTER_FROM.test(before)) {
+        const top = childNamespaces(await catalog.namespaces(), "");
+        return { from, options: top.map((part) => named(part, "namespace")) };
+      }
+      // A table's alias is the person's to write; a space alone asks nothing. The language's
+      // keywords answer beside the columns.
+      if (AFTER_TABLE.test(before) || (word === "" && !context.explicit)) {
         return null;
       }
-      const top = childNamespaces(await catalog.namespaces(), "");
-      return { from, options: top.map((part) => named(part, "namespace")) };
+      const options = await bareColumns(catalog, statementAt(context.state.doc, context.pos));
+      return options.length === 0 ? null : { from, options };
     }
     const namespaces = await catalog.namespaces();
     const below = qualifier.join(".");
@@ -177,14 +300,7 @@ export function catalogCompletion(catalog: CompletionCatalog): CompletionSource 
     const target = tableOf(qualifier, namespaces, statementAt(context.state.doc, context.pos));
     const columns = target === null ? null : await catalog.columns(target.namespace, target.table);
     for (const column of columns ?? []) {
-      const { description } = column;
-      options.push({
-        ...named(column.name, "property"),
-        detail: markedText(column.type),
-        ...(description === null
-          ? {}
-          : { info: () => document.createTextNode(markedText(description)) }),
-      });
+      options.push(columnOption(column, markedText(column.type)));
     }
     return options.length === 0 ? null : { from, options };
   };
