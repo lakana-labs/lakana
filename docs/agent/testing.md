@@ -1472,14 +1472,19 @@ the test, the budget, and the next step.
   past the cap is named in the log and counts by its shard time, so it fails as slow; so does a
   test that fails or raises an error when run again. In each process
   `scripts/remeasure_warm_up.py` (loaded with `-p`) first runs, untimed, the cheapest other
-  test of the candidate's module that uses all of the candidate's session-, package- and
-  module-scoped fixtures (never a skipped one, nor another candidate of the same process,
-  which runs anyway; a flagged test in a process of its own may be one). When the module has
-  no such test, it adds a no-op item beside the candidate, `test_x[warm-up]`, that requests
-  only the candidate's fixtures of those scopes and of class scope, with the candidate's
-  parameters, and so sets them up; only a candidate without such fixtures runs alone. So no
-  fixture such as `catalog_template` (a schema, about 0.7 s) or `_openapi_text` (the server's
-  whole OpenAPI document, about 2 s) is ever set up on the candidate's clock. Before that
+  test of the candidate's module that uses all of the candidate's session-, package-, module-
+  and class-scoped fixtures with the same instances: the same class for a class fixture, the
+  same parameter for a parametrized one (never a skipped test, nor another candidate of the
+  same process, which runs anyway; a flagged test in a process of its own may be one). When
+  the module has no such test, it adds a no-op item beside the candidate, `test_x[warm-up]`,
+  that requests only those fixtures (their dependencies and autouse fixtures come along), with
+  the candidate's parameters and its markers except `skip`, `skipif` and `xfail`, and so sets
+  them up; only a candidate without such fixtures runs alone. Each distinct setup gets its own
+  warm-up, so two parameter sets or two classes in one process are each warmed. So no fixture
+  such as `catalog_template` (a schema, about 0.7 s) or `_openapi_text` (the server's whole
+  OpenAPI document, about 2 s) is ever *set up* on the candidate's clock. Teardown is not
+  moved: the shared fixtures are torn down after the last item of the process, a candidate,
+  and xunit1 counts that teardown in its time (small for these fixtures). Before that
   fallback, a candidate alone in its module with `openapi_schema` paid the build on every
   re-run and failed unrelated pull requests (`test_the_result_route_documents_every_format`,
   2.6 s on its own on PR #739's run; #742 had worked around the same in
@@ -1525,9 +1530,12 @@ the test, the budget, and the next step.
   runner (...): ratio R, ... a test run again fails from L s`. Only the re-run's line is
   scaled: the shard times come from the `unit` jobs' runners, which this step did not
   measure, and they only pick the tests to run again. A workload that cannot run scales
-  nothing and says so. Change the workload only together with `reference_seconds`, calibrated
-  so the ratio is about 1.0 on a fast runner, from the ratios the step logs of a few runs
-  print.
+  nothing and says so. Change the workload only together with `reference_seconds`. To calibrate,
+  run `test (3.14)` three or four times (`gh run rerun RUN_ID --job JOB_ID`, after the first
+  run ends), read the `took X s here` number of each log's `Runner speed:` line, and set
+  `reference_seconds` to the lowest of them, the fastest runner seen, so that it reads about
+  1.0; note the runs and the date in the comment above the value. Only `test (3.14)` runs the
+  ratchet, so `test (3.11)` logs no such line.
 - **Locally**, `uv run pytest -m "not slow"` skips the slow tests for a quick loop while you
   work; before a push, run the selection of "Local gates" without it.
 

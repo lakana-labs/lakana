@@ -283,8 +283,11 @@ def test_the_fixture_warm_up_of_a_method_runs_in_its_class(
         test_m="""
         import pytest
 
+        from conftest import _note
+
         @pytest.fixture(scope="class")
         def shelf(db):
+            _note("shelf")
             return "shelf"
 
         class TestThings:
@@ -298,8 +301,165 @@ def test_the_fixture_warm_up_of_a_method_runs_in_its_class(
     ]
     assert _setups(pytester) == [
         "db test_m.py::TestThings::test_candidate[warm-up]",
+        "shelf test_m.py::TestThings::test_candidate[warm-up]",
         "row test_m.py::TestThings::test_candidate",
     ]
+
+
+FLAVOURS = """
+
+@pytest.fixture(scope="module", params=["a", "b"])
+def flavour(request):
+    _note(f"flavour-{request.param}")
+    return request.param
+"""
+
+
+def test_two_parameter_sets_of_one_test_are_each_warmed_up(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each parameter of a shared fixture is its own setup, so each candidate gets a warm-up."""
+    pytester.makeconftest(RECORDING_FIXTURES + FLAVOURS)
+    pytester.makepyfile(test_m="def test_candidate(flavour, row): pass")
+    ran = _ran(
+        pytester, monkeypatch, ["test_m.py::test_candidate[a]", "test_m.py::test_candidate[b]"], {}
+    )
+    assert ran == [
+        "test_m.py::test_candidate[warm-up][a]",
+        "test_m.py::test_candidate[a]",
+        "test_m.py::test_candidate[warm-up][b]",
+        "test_m.py::test_candidate[b]",
+    ]
+    assert [line for line in _setups(pytester) if line.startswith("flavour")] == [
+        "flavour-a test_m.py::test_candidate[warm-up][a]",
+        "flavour-b test_m.py::test_candidate[warm-up][b]",
+    ]
+
+
+def test_a_test_with_another_parameter_is_no_warm_up(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A neighbour that sets the shared fixture up with another parameter warms nothing."""
+    pytester.makeconftest(RECORDING_FIXTURES + FLAVOURS)
+    pytester.makepyfile(
+        test_m="""
+        def test_neighbour(flavour): pass
+        def test_candidate(flavour): pass
+        """
+    )
+    ran = _ran(
+        pytester,
+        monkeypatch,
+        ["test_m.py::test_candidate[b]"],
+        {"test_m.py::test_neighbour[a]": 0.01, "test_m.py::test_neighbour[b]": 0.2},
+    )
+    assert ran == ["test_m.py::test_neighbour[b]", "test_m.py::test_candidate[b]"]
+
+
+def test_two_classes_with_a_class_fixture_are_each_warmed_up(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A class fixture is set up per class: a test of another class warms none of it."""
+    pytester.makeconftest(RECORDING_FIXTURES)
+    pytester.makepyfile(
+        test_m="""
+        import pytest
+
+        from conftest import _note
+
+        @pytest.fixture(scope="class")
+        def shelf(db):
+            _note("shelf")
+            return "shelf"
+
+        class TestA:
+            def test_quick(self, shelf): pass
+            def test_c(self, shelf): pass
+
+        class TestB:
+            def test_c(self, shelf): pass
+        """
+    )
+    ran = _ran(
+        pytester,
+        monkeypatch,
+        ["test_m.py::TestA::test_c", "test_m.py::TestB::test_c"],
+        {"test_m.py::TestA::test_quick": 0.01},
+    )
+    assert ran == [
+        "test_m.py::TestA::test_quick",
+        "test_m.py::TestA::test_c",
+        "test_m.py::TestB::test_c[warm-up]",
+        "test_m.py::TestB::test_c",
+    ]
+    assert [line for line in _setups(pytester) if line.startswith("shelf")] == [
+        "shelf test_m.py::TestA::test_quick",
+        "shelf test_m.py::TestB::test_c[warm-up]",
+    ]
+
+
+def test_the_fixture_warm_up_sets_up_autouse_and_usefixtures_fixtures(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A module's autouse fixture and a session fixture named by `usefixtures` come along."""
+    pytester.makeconftest(RECORDING_FIXTURES)
+    pytester.makepyfile(
+        test_m="""
+        import pytest
+
+        from conftest import _note
+
+        @pytest.fixture(scope="module", autouse=True)
+        def ambient():
+            _note("ambient")
+
+        @pytest.mark.usefixtures("db")
+        def test_candidate(row): pass
+        """
+    )
+    ran = _ran(pytester, monkeypatch, ["test_m.py::test_candidate"], {})
+    assert ran == ["test_m.py::test_candidate[warm-up]", "test_m.py::test_candidate"]
+    assert sorted(_setups(pytester)) == [
+        "ambient test_m.py::test_candidate[warm-up]",
+        "db test_m.py::test_candidate[warm-up]",
+        "row test_m.py::test_candidate",
+    ]
+
+
+def test_the_fixture_warm_up_takes_no_skip_or_xfail_of_the_candidate(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A strict xfail on the candidate does not turn its no-op warm-up into an XPASS failure."""
+    pytester.makeconftest(RECORDING_FIXTURES)
+    pytester.makeini("[pytest]\nmarkers =\n    custom: a marker a fixture may read\n")
+    pytester.makepyfile(
+        test_m="""
+        import pytest
+
+        @pytest.mark.custom
+        @pytest.mark.xfail(strict=True)
+        def test_candidate(db): assert False
+        """
+    )
+    plan = pytester.path / "plan.json"
+    plan.write_text(json.dumps({"candidates": ["test_m.py::test_candidate"], "seconds": {}}))
+    monkeypatch.setenv(WARM_UP_ENV, str(plan))
+    reprec = pytester.inline_run("-p", "no:cacheprovider", plugins=[plugin])
+    calls = {
+        report.nodeid: report
+        for report in reprec.getreports("pytest_runtest_logreport")
+        if report.when == "call"
+    }
+    warm_up = calls["test_m.py::test_candidate[warm-up]"]
+    assert warm_up.passed
+    assert not hasattr(warm_up, "wasxfail")
+    assert hasattr(calls["test_m.py::test_candidate"], "wasxfail")
+    (setup,) = [
+        call.item
+        for call in reprec.getcalls("pytest_runtest_setup")
+        if call.item.nodeid.endswith("[warm-up]")
+    ]
+    assert setup.get_closest_marker("custom") is not None
 
 
 def test_a_candidate_without_shared_fixtures_alone_in_its_module_runs_alone(

@@ -60,6 +60,8 @@ WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"  # read by scripts/remeasure_warm_up.py
 # fastest run against `reference_seconds` in scripts/time-budgets.toml is the ratio. Change the
 # workload only together with `reference_seconds` (docs/agent/testing.md, "Time budgets").
 REFERENCE_RUNS = 5
+# Seconds one run of the workload may take before it counts as hung (it takes well under 1 s).
+REFERENCE_TIMEOUT = 30
 REFERENCE_WORKLOAD = """
 import argparse, asyncio, csv, dataclasses, decimal, email.message, http.client, inspect
 import json, logging, sqlite3, tomllib, typing, unittest, urllib.request, xml.etree.ElementTree
@@ -541,15 +543,15 @@ def measure_reference(
     -------
     float or None
         The fastest run's seconds (runner noise only adds time); None when the workload could
-        not run, which the log says.
+        not run or a run took longer than `REFERENCE_TIMEOUT`, which the log says.
     """
     command = [sys.executable, "-I", "-c", REFERENCE_WORKLOAD]
     fastest: float | None = None
     for _ in range(runs):
         start = clock()
         try:
-            run(command, check=True, capture_output=True)
-        except (OSError, subprocess.CalledProcessError) as error:
+            run(command, check=True, capture_output=True, timeout=REFERENCE_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as error:
             print(
                 f"cannot time the reference workload ({error}): the thresholds are not scaled "
                 "to this runner.",

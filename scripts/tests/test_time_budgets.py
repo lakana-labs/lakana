@@ -13,6 +13,7 @@ import pytest
 from scripts.remeasure_warm_up import WARM_UP_ENV
 from scripts.time_budgets import (
     MAX_SPEED_RATIO,
+    REFERENCE_TIMEOUT,
     REFERENCE_WORKLOAD,
     SOLO_CAP,
     Budgets,
@@ -1025,6 +1026,7 @@ def test_the_reference_workload_runs_in_fresh_interpreters_and_the_fastest_count
     def run(command: list[str], **kwargs: object) -> None:
         commands.append(command)
         assert kwargs["check"] is True
+        assert kwargs["timeout"] == REFERENCE_TIMEOUT
 
     clock = _clock([0.0, 0.7, 1.0, 1.5, 2.0, 2.6])
     assert measure_reference(run=run, clock=clock, runs=3) == pytest.approx(0.5)
@@ -1032,12 +1034,17 @@ def test_the_reference_workload_runs_in_fresh_interpreters_and_the_fastest_count
 
 
 @pytest.mark.parametrize(
-    "error", [OSError("no python"), subprocess.CalledProcessError(1, "python")]
+    "error",
+    [
+        OSError("no python"),
+        subprocess.CalledProcessError(1, "python"),
+        subprocess.TimeoutExpired("python", 30),
+    ],
 )
 def test_a_reference_workload_that_cannot_run_measures_nothing(
     error: Exception, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Then the thresholds stay as they are, and the log says why."""
+    """Then the thresholds stay as they are, and the log says why; a hung run is cut off."""
 
     def run(command: list[str], **kwargs: object) -> None:
         raise error
@@ -1097,9 +1104,52 @@ def test_main_scales_the_confirm_line_by_the_runner_and_logs_the_ratio(
     monkeypatch.setattr("scripts.time_budgets.measure_reference", lambda: 0.75)
     assert main(["slow-tests", "--confirm", "one.xml"]) == 0
     out = capsys.readouterr().out
-    assert "1.50" in out
+    assert out.startswith("Runner speed: the reference workload took 0.750 s here")
+    assert "ratio 1.50" in out
     assert "counted as noise" in out
     assert seen["stop_below"] == pytest.approx(3.75)
+
+
+def test_main_scales_the_threshold_when_there_is_no_confirm_margin(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``confirm_seconds`` the threshold is the re-run's line, and it is scaled."""
+    (in_tmp / "scripts" / "time-budgets.toml").write_text(
+        BUDGETS_TOML + "reference_seconds = 0.5\n"
+    )
+    (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 4.0)))
+    seen: dict[str, object] = {}
+
+    def fake(tests: object, workdir: object, **kwargs: object) -> dict[str, float]:
+        seen.update(kwargs)
+        return {"a.py::t": 2.9}
+
+    monkeypatch.setattr("scripts.time_budgets.remeasure", fake)
+    monkeypatch.setattr("scripts.time_budgets.measure_reference", lambda: 0.75)
+    assert main(["slow-tests", "--confirm", "one.xml"]) == 0
+    assert seen["stop_below"] == pytest.approx(3.0)
+
+
+def test_main_measures_nothing_without_a_reference(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No ``reference_seconds``: no workload, no ratio, the line as written."""
+    (in_tmp / "scripts" / "time-budgets.toml").write_text(BUDGETS_TOML + "confirm_seconds = 2.5\n")
+    (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 4.0)))
+    seen: dict[str, object] = {}
+
+    def fake(tests: object, workdir: object, **kwargs: object) -> dict[str, float]:
+        seen.update(kwargs)
+        return {"a.py::t": 0.5}
+
+    def never() -> float:
+        raise AssertionError("measured without a reference")
+
+    monkeypatch.setattr("scripts.time_budgets.remeasure", fake)
+    monkeypatch.setattr("scripts.time_budgets.measure_reference", never)
+    assert main(["slow-tests", "--confirm", "one.xml"]) == 0
+    assert "Runner speed" not in capsys.readouterr().out
+    assert seen["stop_below"] == pytest.approx(2.5)
 
 
 def test_main_measures_the_runner_only_to_confirm(
