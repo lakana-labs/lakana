@@ -196,6 +196,9 @@ _NEAR_THE_LIMIT = (
 )
 """The nightly run's input of #733: its parse ends, in a syntax error, near the recursion limit."""
 
+_NESTED_THAT_PARSES = b"SELECT " + b"(" * 30 + b"1" + b")" * 30 + b" FROM gold.t"
+"""A query that parses and passes the guard, so `_parse_checked` parses it again, deepest of all."""
+
 
 def _parses_under(sql: str, limit: int) -> bool:
     """Say whether parsing `sql` from here stays under the recursion limit `limit`.
@@ -225,15 +228,23 @@ def _parses_under(sql: str, limit: int) -> bool:
     return True
 
 
-def test_a_parse_near_the_limit_is_judged_the_same_wherever_the_stack_stands() -> None:
+@pytest.mark.parametrize("data", [_NEAR_THE_LIMIT, _NESTED_THAT_PARSES], ids=["733", "parses"])
+def test_a_parse_near_the_limit_is_judged_the_same_wherever_the_stack_stands(data: bytes) -> None:
     """The guard parses a few frames below `parse_alone_recurses`; the verdict must not differ.
 
     Under every recursion limit from the lowest at which the text parses from this frame up, the
     target accepts or refuses the text. The guard's own parse hitting the limit while the
     shallower parse alone did not was the crash of #733: it says nothing about the guard, only
-    where the stack stood when the fuzzer happened on a text this deep.
+    where the stack stood when the fuzzer happened on a text this deep. The text that parses also
+    reaches `extract_table_refs` and `rewrite_query`, whose `_parse_checked` parses two frames
+    below `parse_alone_recurses`: the case fails with a `PARSE_HEADROOM` of 2 or less.
+
+    Parameters
+    ----------
+    data
+        The fuzzer's input.
     """
-    sql = _NEAR_THE_LIMIT.decode()
+    sql = data.decode()
     low, high = 100, 5000
     assert _parses_under(sql, high)
     while low < high:
@@ -243,7 +254,7 @@ def test_a_parse_near_the_limit_is_judged_the_same_wherever_the_stack_stands() -
     try:
         for candidate in range(low, low + 40):
             sys.setrecursionlimit(candidate)
-            targets.query_guard(_NEAR_THE_LIMIT)
+            targets.query_guard(data)
     finally:
         sys.setrecursionlimit(previous)
 

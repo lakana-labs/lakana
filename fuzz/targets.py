@@ -124,9 +124,10 @@ The guard, the lineage and the rewrite call the parser a few frames deeper than
 ``_parse_sql``: one more than ``query_guard``, ``parse_alone_recurses``, ``_parse_sql``; two more
 through ``_parse_checked``). A text whose parse ends within those frames of the limit recursed
 there and not here, and the target reported the guard's syntax refusal as a crash (#733). The
-headroom covers those frames with room for a wrapper or two; it is far less than one level of
-nesting, about 25 of the parser's frames, so a walker's `RecursionError` over a tree that parses
-well within the limit is still a crash.
+headroom covers those frames with room for a wrapper or two. It is less than one level of
+nesting for most of the parser's constructs (about 23 frames a level for parentheses, 19 for
+``CASE``, 18 for ``{``) and under two for a subquery (about 10), so a walker's `RecursionError`
+over a tree that parses well within the limit is still a crash.
 """
 
 
@@ -148,8 +149,10 @@ def parse_alone_recurses(sql: str) -> bool:
         `True` when the guard's own parse (`_parse_sql`) raises `RecursionError`.
     """
     limit = sys.getrecursionlimit()
-    sys.setrecursionlimit(limit - PARSE_HEADROOM)
     try:
+        # Python 3.11 raises RecursionError here when the stack is already deeper than the
+        # lowered limit; the parse would then recurse too, and `finally` restores the limit.
+        sys.setrecursionlimit(limit - PARSE_HEADROOM)
         _parse_sql(sql, "duckdb")
     except RecursionError:
         return True
