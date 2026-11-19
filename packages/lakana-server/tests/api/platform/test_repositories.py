@@ -195,7 +195,8 @@ def test_the_repository_answers_its_host_keys(client: TestClient) -> None:
 def test_a_line_with_a_non_ascii_character_still_lists(client: TestClient) -> None:
     """A key field ssh cannot decode (here a no-break space before a comment) is skipped.
 
-    The other lines still list, in the answer of the create, the list and the repository.
+    The other lines still list, in the answer of the create, the list, the repository and an
+    update.
     """
     known_hosts = (
         f"gitlab.internal ssh-ed25519 {_ED25519_B64}\u00a0# pasted\n"
@@ -227,6 +228,15 @@ def test_a_line_with_a_non_ascii_character_still_lists(client: TestClient) -> No
     assert listed.status_code == 200, listed.text
     assert [repo["host_keys"] for repo in listed.json()] == [[key]]
     assert shown.json()["host_keys"] == [key]
+
+    patched = client.patch(
+        "/api/v1/repositories/infra",
+        headers=AUTH_HEADER,
+        json={"ssh_known_hosts": "gitlab.internal ssh-ed25519 AAAA\u00e9\n" + known_hosts},
+    )
+
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["host_keys"] == [key]
 
 
 def test_unknown_repository_is_not_revealed_to_a_caller_without_read_rights(
