@@ -701,6 +701,42 @@ for (const theme of ["light", "dark"] as const) {
         await expect(page.getByRole("button", { name: ROLL_BACK })).toBeVisible();
       });
 
+      test("Back undoes the Runs tab's filters one at a time and stays on the tab; typing a job is one step", async ({
+        page,
+      }) => {
+        await page.goto("/jobs");
+        await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+        await page
+          .getByRole("navigation", { name: "Jobs views" })
+          .getByRole("link", { name: "Runs" })
+          .click();
+        await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+
+        await page.getByRole("button", { name: /Trigger/ }).click();
+        await page.getByRole("option", { name: "Schedule" }).click();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule$/u);
+        await page.getByRole("button", { name: /Period/ }).click();
+        await page.getByRole("option", { name: "Last 7 days" }).click();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d$/u);
+        const job = page.getByRole("textbox", { name: "Job" });
+        await job.pressSequentially("nightly");
+        await job.press("Enter");
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d&job=nightly$/u);
+
+        // The job's name typed key by key is one step back, not seven.
+        await page.goBack();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d$/u);
+        await expect(job).toHaveValue("");
+        await page.goBack();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule$/u);
+        await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+        await expect(page.getByRole("button", { name: /Trigger/ })).toContainText("Schedule");
+        await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 30 days");
+        await page.goForward();
+        await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d$/u);
+        await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 7 days");
+      });
+
       test("a resume opens the run it continues, and the tab offers no start", async ({ page }) => {
         await openRuns(page);
         await page.getByRole("button", { name: "Show more" }).click();

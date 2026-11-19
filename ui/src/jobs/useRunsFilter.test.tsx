@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter, useLocation } from "react-router";
+import { MemoryRouter, useLocation, useNavigate } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EnvironmentChoice } from "../api/environments";
@@ -21,9 +21,10 @@ function renderFilter(path: string) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
   );
-  return renderHook(() => ({ filter: useRunsFilter(LISTED), location: useLocation() }), {
-    wrapper,
-  });
+  return renderHook(
+    () => ({ filter: useRunsFilter(LISTED), location: useLocation(), navigate: useNavigate() }),
+    { wrapper },
+  );
 }
 
 afterEach(() => {
@@ -120,5 +121,35 @@ describe("useRunsFilter", () => {
     });
     expect(result.current.location.search).toBe("?environment=prod");
     expect(result.current.filter.narrowed).toBe(false);
+  });
+
+  it("each change is a step of the history, so Back undoes one filter at a time", () => {
+    const { result } = renderFilter("/jobs/runs");
+
+    act(() => {
+      result.current.filter.set({ status: "failed" });
+    });
+    act(() => {
+      result.current.filter.set({ environment: "prod" });
+    });
+    act(() => {
+      result.current.filter.set({ trigger: "manual" });
+    });
+    expect(result.current.location.search).toBe("?status=failed&environment=prod&trigger=manual");
+
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.pathname).toBe("/jobs/runs");
+    expect(result.current.location.search).toBe("?status=failed&environment=prod");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("?status=failed");
+    expect(result.current.filter.choice.status).toBe("failed");
+    act(() => {
+      void result.current.navigate(-1);
+    });
+    expect(result.current.location.search).toBe("");
   });
 });
