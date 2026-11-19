@@ -9,6 +9,8 @@ const ADMIN = {
   noAccessYet: false,
   secretEnvironments: ["dev", "prod"],
   managePolicy: true,
+  readsEnvironments: true,
+  instanceActions: new Set(["MANAGE_REPOSITORY"]),
 };
 
 describe("RepositoriesPlace", () => {

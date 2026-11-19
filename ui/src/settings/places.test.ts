@@ -8,15 +8,29 @@ import {
   listedPlaces,
   placeAt,
   placePath,
+  mayManageRepositories,
   placeState,
 } from "./places";
 
 const i18n = initI18n();
-const ADMIN = { admin: true, noAccessYet: false, secretEnvironments: [], managePolicy: true };
-const KIM = { admin: false, noAccessYet: false, secretEnvironments: [], managePolicy: false };
-const NEW = { admin: false, noAccessYet: true, secretEnvironments: [], managePolicy: false };
+/** What every viewer below knows, unless it says otherwise: nothing read, nothing allowed. */
+const NOTHING = {
+  noAccessYet: false,
+  secretEnvironments: [],
+  readsEnvironments: false,
+  instanceActions: new Set<string>(),
+};
+const ADMIN = {
+  ...NOTHING,
+  admin: true,
+  managePolicy: true,
+  readsEnvironments: true,
+  instanceActions: new Set(["MANAGE_ENVIRONMENT", "MANAGE_REPOSITORY"]),
+};
+const KIM = { ...NOTHING, admin: false, managePolicy: false };
+const NEW = { ...NOTHING, admin: false, noAccessYet: true, managePolicy: false };
 /** A person who manages row filters and masks and is no administrator. */
-const PAT = { admin: false, noAccessYet: false, secretEnvironments: [], managePolicy: true };
+const PAT = { ...NOTHING, admin: false, managePolicy: true };
 
 /**
  * A place of the registry, by id.
@@ -82,6 +96,24 @@ describe("places", () => {
     expect(placeState(real("filters-and-masks"), { ...PAT, managePolicy: null })).toBe("pending");
     expect(placeState(real("access-file"), PAT)).toBe("hidden");
     expect(placeState(real("access-file"), ADMIN)).toBe("listed");
+  });
+
+  it("a reader is listed Repositories, a person who reads nothing is not", () => {
+    const ids = (viewer: Parameters<typeof listedPlaces>[0]): readonly string[] =>
+      listedPlaces(viewer).map((place) => place.id);
+    expect(ids({ ...KIM, readsEnvironments: true })).toContain("repositories");
+    expect(ids(KIM)).not.toContain("repositories");
+    expect(ids({ ...KIM, instanceActions: new Set(["MANAGE_REPOSITORY"]) })).toContain(
+      "repositories",
+    );
+    expect(placeState(real("repositories"), { ...KIM, readsEnvironments: null })).toBe("pending");
+    expect(placeState(real("repositories"), { ...KIM, instanceActions: null })).toBe("pending");
+  });
+
+  it("says who manages repositories, and nothing before it is read", () => {
+    expect(mayManageRepositories(ADMIN)).toBe(true);
+    expect(mayManageRepositories({ ...KIM, readsEnvironments: true })).toBe(false);
+    expect(mayManageRepositories({ ...KIM, instanceActions: null })).toBeNull();
   });
 
   it("lists Status, Access and What I may do for a person who is not an administrator", () => {

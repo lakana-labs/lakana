@@ -33,7 +33,22 @@ export type SettingsViewer = Pick<AccessOut, "admin" | "noAccessYet"> & {
   readonly secretEnvironments: readonly string[] | null;
   /** Whether the person manages row filters and column masks; null while not read yet. */
   readonly managePolicy: boolean | null;
+  /** Whether the person reads at least one environment; null while not read yet. */
+  readonly readsEnvironments: boolean | null;
+  /** The actions the person may take on the instance; null while not read yet. */
+  readonly instanceActions: ReadonlySet<string> | null;
 };
+
+/**
+ * Whether the person may connect, edit and delete repositories (`MANAGE_REPOSITORY` on the
+ * instance).
+ *
+ * @param viewer - What the rules know about the person.
+ * @returns The answer; null while not read yet.
+ */
+export function mayManageRepositories(viewer: SettingsViewer): boolean | null {
+  return viewer.instanceActions === null ? null : viewer.instanceActions.has("MANAGE_REPOSITORY");
+}
 
 /** Whether a place is listed, hidden, or waits for a rule that is not known yet. */
 export type PlaceState = "listed" | "hidden" | "pending";
@@ -83,7 +98,12 @@ export const SETTINGS_PLACES = [
     parent: null,
     kind: "page",
     below: true,
-    visible: (viewer) => viewer.admin,
+    visible: (viewer) => {
+      const manages = mayManageRepositories(viewer);
+      return viewer.readsEnvironments === null || manages === null
+        ? null
+        : viewer.readsEnvironments || manages;
+    },
   },
   {
     id: "access",
