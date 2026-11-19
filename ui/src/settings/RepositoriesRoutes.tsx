@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useEffect } from "react";
+import { type JSX, lazy, Suspense, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { NavigationType, Route, Routes, useNavigationType, useParams } from "react-router";
 
@@ -49,7 +49,9 @@ function ConnectRoute(): JSX.Element {
  */
 function FocusIfLost(): null {
   const moved = useNavigationType() === NavigationType.Push;
-  useEffect(() => {
+  // A layout effect, as the shell's: the focus moves in the commit that shows the page, so
+  // no key pressed in between goes to the page's body.
+  useLayoutEffect(() => {
     if (moved && document.activeElement === document.body) {
       document.getElementById("main")?.querySelector("h1")?.focus();
     }

@@ -110,6 +110,8 @@ interface TrustedHostKeyOut {
   readonly type: string;
   /** `SHA256:…`, to compare with the host's published fingerprints. */
   readonly fingerprint: string;
+  /** A key that signs the hosts' certificates, or one ssh refuses; null (or absent) for a host key. */
+  readonly marker?: "cert-authority" | "revoked" | null;
 }
 
 /** A registered repository, as `GET /api/v1/repositories/{name}` answers it. */
@@ -136,7 +138,7 @@ export interface RepositoryOut {
   readonly updated_at: string;
   /** The public deploy keys of the environments the person may read. */
   readonly deploy_keys: readonly RepositoryDeployKeyOut[];
-  /** The host keys `ssh_known_hosts` trusts, each with its fingerprint; absent from an older server. */
+  /** The keys `ssh_known_hosts` names, each with its fingerprint and marker; absent from an older server. */
   readonly host_keys?: readonly TrustedHostKeyOut[];
 }
 

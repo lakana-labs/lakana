@@ -287,6 +287,15 @@ describe("RepositoryDialogs", () => {
     expect(server.sent.some((request) => request.path.endsWith("/deploy-key"))).toBe(false);
   });
 
+  it("offers no missing keys where the person cannot see whether a key exists", async () => {
+    renderPage({
+      "GET /api/v1/environments": { status: 200, body: [anEnvironment("dev")] },
+    });
+
+    expect(await screen.findByRole("button", { name: "Replace key of dev" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Make the missing keys" })).not.toBeInTheDocument();
+  });
+
   it("makes the missing keys and names the skipped", async () => {
     const made = {
       ...NEW_KEY,

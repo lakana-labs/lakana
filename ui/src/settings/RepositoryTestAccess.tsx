@@ -7,12 +7,12 @@
 import { type JSX, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { type EnvironmentChoice, listEnvironments } from "../api/environments";
+import type { EnvironmentChoice } from "../api/environments";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { Loaded } from "../shell/Loaded";
 import { PendingButton } from "../shell/PendingButton";
 import { readRemembered, writeRemembered } from "../shell/remembered";
-import { useResource } from "../shell/useResource";
+import type { Resource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { CheckOutcome, useCheck } from "./repositoryCheck";
 import "./repositoryPageStrings";
@@ -24,6 +24,8 @@ const TEST_ENVIRONMENT_KEY = "lakana.repositories.testEnvironment";
 export interface RepositoryTestAccessProps {
   /** The repository's name. */
   readonly name: string;
+  /** The environments the person may read, as the page read them. */
+  readonly environments: Resource<readonly EnvironmentChoice[]>;
 }
 
 /** Properties of {@link TestWith}. */
@@ -88,12 +90,15 @@ function TestWith({ name, choices }: TestWithProps): JSX.Element {
 /**
  * Test access, once the environments are read. Leaving the page stops the wait.
  *
- * @param props - The repository.
+ * @param props - The repository and the environments.
  * @param props.name - The repository's name.
+ * @param props.environments - The environments the person may read.
  * @returns The block.
  */
-export function RepositoryTestAccess({ name }: RepositoryTestAccessProps): JSX.Element {
-  const environments = useResource(listEnvironments);
+export function RepositoryTestAccess({
+  name,
+  environments,
+}: RepositoryTestAccessProps): JSX.Element {
   return (
     <Loaded resource={environments}>
       {(choices) => <TestWith name={name} choices={choices} />}

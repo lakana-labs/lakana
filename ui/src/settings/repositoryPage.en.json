@@ -28,5 +28,9 @@
   "edit": "Edit",
   "editOf": "Edit repository {{name}}",
   "delete": "Delete repository",
-  "deleteOf": "Delete repository {{name}}"
+  "deleteOf": "Delete repository {{name}}",
+  "markers": {
+    "cert-authority": "certificate authority: trusts every host certificate it signed",
+    "revoked": "revoked: ssh refuses it"
+  }
 }

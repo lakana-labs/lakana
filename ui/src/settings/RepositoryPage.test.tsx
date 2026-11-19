@@ -151,6 +151,26 @@ describe("RepositoryPage", () => {
     expect(
       await screen.findByText("Read from the server's disk; no credential."),
     ).toBeInTheDocument();
+    // A worker never tests a folder on the server's disk: the server refuses the check.
+    expect(screen.queryByRole("heading", { name: "Test access" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit repository analytics" })).toBeInTheDocument();
+  });
+
+  it("names a certificate authority and a revoked key", async () => {
+    renderPage({
+      ...ANALYTICS,
+      host_keys: [
+        { type: "ssh-ed25519", fingerprint: "SHA256:authority", marker: "cert-authority" },
+        { type: "ssh-ed25519", fingerprint: "SHA256:old", marker: "revoked" },
+      ],
+    });
+
+    expect(await screen.findByText("SHA256:authority")).toBeInTheDocument();
+    const keys = screen.getByText("SHA256:authority").closest("ul");
+    expect(keys).toHaveTextContent(
+      "certificate authority: trusts every host certificate it signed",
+    );
+    expect(keys).toHaveTextContent("revoked: ssh refuses it");
   });
 
   it("says when no host key is trusted", async () => {

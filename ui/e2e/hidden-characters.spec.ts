@@ -139,6 +139,7 @@ const LITERAL_CODES: Record<string, string> = {
   "TableTreeOut.environments": "actions",
   "TableTreeOut.environments.namespaces": "actions",
   TaskRunOut: "kind status",
+  TrustedHostKeyOut: "marker",
   ViaOut: "kind role",
 };
 

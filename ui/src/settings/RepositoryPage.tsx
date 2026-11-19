@@ -24,6 +24,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
 
 import { getRepositoryPage, type RepositoryOut } from "../api";
+import { listEnvironments } from "../api/environments";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
@@ -131,6 +132,8 @@ interface SshKeysProps extends BlockProps {
   readonly keysHeading: RefObject<HTMLHeadingElement | null>;
   /** The environments whose keys the person may replace or make; none for a reader. */
   readonly keyEnvironments: ReadonlySet<string>;
+  /** The environments the person reads, whose keys the page sees. */
+  readonly readable: ReadonlySet<string>;
   /** Opens a dialog. */
   readonly onOpen: (open: Open) => void;
 }
@@ -143,10 +146,17 @@ interface SshKeysProps extends BlockProps {
  * @param props.repo - The repository.
  * @param props.keysHeading - The Deploy keys heading.
  * @param props.keyEnvironments - The environments whose keys the person may replace or make.
+ * @param props.readable - The environments the person reads, whose keys the page sees.
  * @param props.onOpen - Opens a dialog.
  * @returns The two lists, with Replace key and Make the missing keys where the person may.
  */
-function SshKeys({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): JSX.Element {
+function SshKeys({
+  repo,
+  keysHeading,
+  keyEnvironments,
+  readable,
+  onOpen,
+}: SshKeysProps): JSX.Element {
   const { t } = useTranslation();
   const hostKeys = repo.host_keys ?? [];
   const keyed = new Set(repo.deploy_keys.map((key) => key.environment));
@@ -163,6 +173,7 @@ function SshKeys({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): 
               <code>
                 <VisibleText text={key.fingerprint} />
               </code>
+              {key.marker != null && <> {t(`${P}.markers.${key.marker}`)}</>}
             </li>
           ))}
         </ul>
@@ -196,7 +207,9 @@ function SshKeys({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): 
           ))}
         </ul>
       )}
-      {[...keyEnvironments].some((environment) => !keyed.has(environment)) && (
+      {[...keyEnvironments].some(
+        (environment) => readable.has(environment) && !keyed.has(environment),
+      ) && (
         <Button
           className="button"
           onPress={() => {
@@ -218,10 +231,17 @@ function SshKeys({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): 
  * @param props.repo - The repository.
  * @param props.keysHeading - The Deploy keys heading.
  * @param props.keyEnvironments - The environments whose keys the person may replace or make.
+ * @param props.readable - The environments the person reads, whose keys the page sees.
  * @param props.onOpen - Opens a dialog.
  * @returns The block.
  */
-function Credential({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): JSX.Element {
+function Credential({
+  repo,
+  keysHeading,
+  keyEnvironments,
+  readable,
+  onOpen,
+}: SshKeysProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <section className="flat-panel settings-panel">
@@ -252,6 +272,7 @@ function Credential({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps
           repo={repo}
           keysHeading={keysHeading}
           keyEnvironments={keyEnvironments}
+          readable={readable}
           onOpen={onOpen}
         />
       )}
@@ -305,6 +326,9 @@ export function RepositoryPage({ name }: RepositoryPageProps): JSX.Element {
   const { target: keysHeading, arm: armKeys } = useFocusAfter<HTMLHeadingElement>(repo);
   const { target: editButton, arm: armEdit } = useFocusAfter<HTMLButtonElement>(repo);
   const [open, setOpen] = useState<Open | null>(null);
+  const environments = useResource(listEnvironments);
+  // Only where the person reads the environment does the page know whether it has a key.
+  const readable = new Set(environments.data?.map((environment) => environment.name));
   const keyEnvironments = new Set(manages ? viewer.secretEnvironments : null);
   const close = (): void => {
     setOpen(null);
@@ -356,14 +380,17 @@ export function RepositoryPage({ name }: RepositoryPageProps): JSX.Element {
             repo={repo}
             keysHeading={keysHeading}
             keyEnvironments={keyEnvironments}
+            readable={readable}
             onOpen={setOpen}
           />
           {manages && (
             <>
-              <section className="flat-panel settings-panel">
-                <h2>{t(`${P}.testTitle`)}</h2>
-                <RepositoryTestAccess name={repo.name} />
-              </section>
+              {repo.kind !== "local" && (
+                <section className="flat-panel settings-panel">
+                  <h2>{t(`${P}.testTitle`)}</h2>
+                  <RepositoryTestAccess name={repo.name} environments={environments} />
+                </section>
+              )}
               <div className="step-actions">
                 <Button
                   ref={editButton}
