@@ -380,6 +380,35 @@ for (const theme of ["light", "dark"] as const) {
         await page.getByRole("listbox").screenshot({ path: `${shot}-options.png` });
       });
 
+      test("the screen takes the whole width of a wide window, with a tall editor beside an 18rem library", async ({
+        page,
+      }) => {
+        await page.setViewportSize({ width: 1920, height: 1080 });
+        await openQueries(page);
+        const rem = await page.evaluate(() =>
+          Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+        );
+        const screen = await page.locator(".queries").boundingBox();
+        expect(screen?.width ?? 0).toBeGreaterThan(720);
+        // As wide as the working area allows: the page sets no reading width of its own.
+        const main = await page.locator(".shell-main .page").boundingBox();
+        const area = await page.locator(".shell-main").evaluate((element) => {
+          const style = getComputedStyle(element);
+          return (
+            element.clientWidth -
+            Number.parseFloat(style.paddingLeft) -
+            Number.parseFloat(style.paddingRight)
+          );
+        });
+        expect(Math.abs((main?.width ?? 0) - area)).toBeLessThanOrEqual(1);
+        const editorBox = await page.locator(".queries-editor").boundingBox();
+        expect(editorBox?.height ?? 0).toBeGreaterThanOrEqual(20 * rem - 0.5);
+        await expect(page.locator(".queries-editor")).toHaveCSS("resize", "vertical");
+        const library = await page.getByRole("complementary").boundingBox();
+        expect(Math.abs((library?.width ?? 0) - 18 * rem)).toBeLessThanOrEqual(0.5);
+        expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(0);
+      });
+
       test("no horizontal scroll at 320 px, with the library folded", async ({ page }) => {
         await page.setViewportSize({ width: 320, height: 640 });
         const editor = await openQueries(page);
