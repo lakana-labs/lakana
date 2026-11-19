@@ -147,7 +147,7 @@ describe("ConfigurationPage", () => {
   });
 
   it("never shows a secret's value, even if the server sent one", async () => {
-    const calls = (["log", "info", "warn", "error"] as const).map((method) =>
+    const calls = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
       vi.spyOn(console, method),
     );
     const { storage } = renderShell(PATH, {
@@ -165,7 +165,9 @@ describe("ConfigurationPage", () => {
       "LAKANA_SECRETS__MASTER_KEYsecret, setset",
     );
     expect(rowOf(region, "LAKANA_RUN__HTTPS_PROXY")).toHaveTextContent("secret, not set");
-    expect(document.body.textContent).not.toContain("mk-sentinel");
+    expect(document.title).not.toContain("mk-sentinel");
+    expect(document.head.outerHTML).not.toContain("mk-sentinel");
+    expect(document.body.outerHTML).not.toContain("mk-sentinel");
     for (const element of document.querySelectorAll("*")) {
       for (const attribute of element.attributes) {
         expect(attribute.value).not.toContain("mk-sentinel");

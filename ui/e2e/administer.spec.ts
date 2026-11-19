@@ -175,9 +175,8 @@ test.describe("administering sign-in", () => {
     });
     const server = await fakeAdministration(page);
     const errors: string[] = [];
-    // The step-up refusal (403) is the browser's own log line, not an error of the interface.
     page.on("console", (message) => {
-      if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) {
+      if (message.type() === "error") {
         errors.push(message.text());
       }
     });

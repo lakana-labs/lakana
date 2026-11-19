@@ -1,7 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { freshSession } from "../test/access";
+import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -40,6 +40,14 @@ function principal(name: string, heldAdmin: boolean): { status: number; body: un
     body: { name, type: "USER", is_active: true, picture: null, held_admin: heldAdmin },
   };
 }
+
+/** A recovery link for kim, as the route that issues it answers. */
+const ISSUED_LINK = {
+  id: "r-1",
+  name: "kim",
+  url: "https://lakana.example.com/sign-in#l=a&s=b",
+  expires_at: "2026-11-08T11:00:00Z",
+};
 
 describe("PersonPage", () => {
   it("shows another person's passkeys and sessions, without adding one for them", async () => {
@@ -114,43 +122,63 @@ describe("PersonPage", () => {
     expect(server.sent.some((request) => request.path.endsWith("/permissions"))).toBe(false);
   });
 
-  it("issues a recovery link for the person shown, with a passkey touch", async () => {
-    fakeWebAuthn();
+  it("issues a recovery link for the person shown, with the passkey touch first", async () => {
+    const webauthn = fakeWebAuthn();
+    const { user, server } = renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": principal("kim", false),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        ...STEP_UP_ROUTES,
+        "POST /api/v1/principals/kim/recovery-link": { status: 201, body: ISSUED_LINK },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Issue a recovery link" }));
+    const from = server.sent.length;
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText(ISSUED_LINK.url)).toBeInTheDocument();
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
+    expect(
+      server.sent
+        .slice(from)
+        .filter((request) => request.method !== "GET" || request.path === "/api/v1/sign-in/session")
+        .map((request) => `${request.method} ${request.path}`),
+    ).toEqual([
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      "POST /api/v1/principals/kim/recovery-link",
+    ]);
+  });
+
+  it("falls back to the touch and one retry when the server still answers StepUpRequired", async () => {
+    const webauthn = fakeWebAuthn();
     let tries = 0;
     const { user } = renderShell("/settings/access/people/kim", {
       routes: {
         "GET /api/v1/principals/kim": principal("kim", false),
         "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
         "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        // The touch looks fresh, but ends before the request reaches the server.
         "GET /api/v1/sign-in/session": freshSession(),
+        ...STEP_UP_ROUTES,
         "POST /api/v1/principals/kim/recovery-link": () => {
           tries += 1;
           return tries === 1
             ? { status: 403, body: { type: "StepUpRequired", detail: "Touch." } }
-            : {
-                status: 201,
-                body: {
-                  id: "r-1",
-                  name: "kim",
-                  url: "https://lakana.example.com/sign-in#l=a&s=b",
-                  expires_at: "2026-11-08T11:00:00Z",
-                },
-              };
+            : { status: 201, body: ISSUED_LINK };
         },
-        "POST /api/v1/sign-in/step-up/options": {
-          status: 200,
-          body: { ceremony_id: "c", public_key: {} },
-        },
-        "POST /api/v1/sign-in/step-up": { status: 204 },
       },
     });
 
     await user.click(await screen.findByRole("button", { name: "Issue a recovery link" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    expect(
-      await screen.findByText("https://lakana.example.com/sign-in#l=a&s=b"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(ISSUED_LINK.url)).toBeInTheDocument();
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
     expect(tries).toBe(2);
   });
 

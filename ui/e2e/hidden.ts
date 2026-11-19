@@ -182,7 +182,6 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["high"]': "HealthBandOut",
   '["id","name","principal_type"]': "SubjectPrincipalOut",
   '["is_active","name","picture","type"]': "PrincipalOut",
-  '["landing","raw"]': "-",
   '["is_protected","name"]': "EnvironmentCreate",
   '["item","others","state","text"]': "HealthSummaryOut",
   '["items","next_cursor","path"]': "RawPageOut",
@@ -195,6 +194,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["kind","name"]': "OwnerOut",
   '["kind","source","target"]': "GraphEdgeOut",
   '["kind"]': "DeployTriggerOut",
+  '["landing","raw"]': "-",
   '["last_read_at","principal","read_count"]': "ReaderOut",
   '["memory_limit_bytes","memory_used_bytes","slots_busy","slots_total","workers"]':
     "StatusDetailOut",
