@@ -71,7 +71,7 @@ describe("Attempts", () => {
     expect(cells(2)[4]).toHaveTextContent("evicted");
   });
 
-  it('an unmeasured figure shows a dash and says "Not measured", never zero', () => {
+  it("an unmeasured figure shows a dash for the eye and words for a screen reader, never zero", () => {
     render(
       <Attempts
         asset="silver.orders"
@@ -89,14 +89,40 @@ describe("Attempts", () => {
     );
 
     const row = cells(0);
-    expect(row[3]).toHaveTextContent(/^$/u);
     expect(row[4]).toHaveTextContent("Running");
-    // Rows is the sixth cell and Failure the seventh, which has no figure to miss.
+    // Failure, the seventh cell, has no figure to miss.
     expect(row[6]).toHaveTextContent(/^$/u);
-    for (const index of [5, 7, 8, 9]) {
-      expect(row[index]).toHaveTextContent("–Not measured");
-      expect(row[index]).not.toHaveTextContent("0");
+    for (const [index, words] of [
+      [3, "Not finished yet"],
+      [5, "Not measured"],
+      [7, "Not measured"],
+      [8, "Not measured"],
+      [9, "Not measured"],
+    ] as const) {
+      const cell = row[index] as HTMLElement;
+      expect(within(cell).getByText("–")).toHaveAttribute("aria-hidden", "true");
+      expect(within(cell).getByText(words)).toHaveClass("visually-hidden");
+      expect(cell).not.toHaveTextContent(/\d/u);
     }
+  });
+
+  it("a measured zero is still shown as zero, not as a dash", () => {
+    render(
+      <Attempts
+        asset="silver.orders"
+        attempts={[
+          anAttempt({ rows_written: 0, peak_memory_bytes: 0, cpu_seconds: 0, bytes_read: 0 }),
+        ]}
+      />,
+    );
+
+    const row = cells(0);
+    expect(row[5]).toHaveTextContent(/^0$/u);
+    expect(row[7]).toHaveTextContent(/^0 B$/u);
+    expect(row[8]).toHaveTextContent(/^0\.0 s$/u);
+    expect(row[9]).toHaveTextContent(/^0 B$/u);
+    expect(screen.queryByText("Not measured")).not.toBeInTheDocument();
+    expect(screen.queryByText("–")).not.toBeInTheDocument();
   });
 
   it("says when the task has no attempt yet", () => {

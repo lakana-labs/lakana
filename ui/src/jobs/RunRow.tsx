@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import { Unknown } from "../catalog/cells";
 import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -120,8 +121,11 @@ export function RunRow({ run }: RunRowProps): JSX.Element {
         <time dateTime={run.created_at}>{when(run.created_at)}</time>
       </td>
       <td className="number">
-        {run.started_at !== null &&
-          formatDuration(secondsBetween(run.started_at, run.finished_at ?? undefined), t)}
+        {run.started_at === null ? (
+          <Unknown words={t("jobs.duration.notStarted")} />
+        ) : (
+          formatDuration(secondsBetween(run.started_at, run.finished_at ?? undefined), t)
+        )}
       </td>
       <td>
         <Tasks run={run} />

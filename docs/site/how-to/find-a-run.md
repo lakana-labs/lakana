@@ -55,9 +55,11 @@ A failed run under **Needs your attention** on Home opens the run's page. A
 job's page, opened from **Your work** on Home, lists the job's runs under **Runs** and shows the
 one you choose below the list. A run lists its tasks with their state, duration and rows; a task
 that failed or never ran has a second line with its code, the cause and the next step. **Logs**
-opens the task that failed first, and a task's name opens its page: its attempts with the memory,
-processor time and bytes each used (a dash where nobody measured it), and its log, which the page follows while the task runs and
-offers as **Save log** once it is complete.
+opens the task that failed first, and a task's name opens its page: its attempts with the rows,
+memory, processor time and bytes each used, and its log, which the page follows while the task
+runs and offers as **Save log** once it is complete. A dash in an attempt's table, with "Not
+measured" for a screen reader, means nobody measured that figure; a dash under Duration means the
+attempt has not finished yet. A measured zero shows as `0`.
 
 The **Runs** tab of the Jobs page lists every run of the environments you may read, newest first,
 50 at a time with **Show more**. Narrow it by **Environment**, **State** (**Queued or running** is

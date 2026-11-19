@@ -90,8 +90,11 @@ export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
               </td>
               <td>{when(attempt.started_at)}</td>
               <td className="number">
-                {attempt.finished_at !== null &&
-                  formatDuration(secondsBetween(attempt.started_at, attempt.finished_at), t)}
+                {attempt.finished_at === null ? (
+                  <Unknown words={t("jobs.duration.notFinished")} />
+                ) : (
+                  formatDuration(secondsBetween(attempt.started_at, attempt.finished_at), t)
+                )}
               </td>
               <td>
                 {attempt.outcome === null ? (

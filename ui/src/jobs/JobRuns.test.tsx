@@ -151,7 +151,9 @@ describe("JobRuns", () => {
       "After a deploy",
       "Ad hoc",
     ]);
-    expect(within(rows[2] as HTMLElement).getAllByRole("cell")[2]).toHaveTextContent(/^$/);
+    const running = within(rows[2] as HTMLElement).getAllByRole("cell")[2] as HTMLElement;
+    expect(within(running).getByText("–")).toHaveAttribute("aria-hidden", "true");
+    expect(within(running).getByText("Not finished yet")).toHaveClass("visually-hidden");
   });
 
   it("says when no run is in the period", async () => {

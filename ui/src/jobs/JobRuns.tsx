@@ -10,6 +10,7 @@ import { Link, useSearchParams } from "react-router";
 
 import type { RequestOptions } from "../api/client";
 import { listJobRuns, type RunOut } from "../api/jobs";
+import { Unknown } from "../catalog/cells";
 import { ViewList } from "../catalog/views/ViewList";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { useWhen } from "../shell/useWhen";
@@ -195,9 +196,11 @@ export function JobRuns({
               </Link>
             </td>
             <td className="number">
-              {run.started_at !== null &&
-                run.finished_at !== null &&
-                formatDuration(secondsBetween(run.started_at, run.finished_at), t)}
+              {run.started_at === null || run.finished_at === null ? (
+                <Unknown words={t("jobs.duration.notFinished")} />
+              ) : (
+                formatDuration(secondsBetween(run.started_at, run.finished_at), t)
+              )}
             </td>
             <td>{t(`jobs.trigger.${run.trigger ?? "none"}`)}</td>
             <td>

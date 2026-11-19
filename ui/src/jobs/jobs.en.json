@@ -13,6 +13,8 @@
     "loadingDeploys": "Loading the deploys…"
   },
   "duration": {
+    "notFinished": "Not finished yet",
+    "notStarted": "Not started yet",
     "tenths": "{{n}} s",
     "seconds": "{{n}} s",
     "minutes": "{{n}} min",
