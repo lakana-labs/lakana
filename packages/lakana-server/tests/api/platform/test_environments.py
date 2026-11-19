@@ -1,5 +1,6 @@
 """Tests for the environments platform API."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -719,3 +720,59 @@ def test_a_storage_root_in_another_scheme_is_422_naming_both_schemes(client: Tes
     assert "storage scheme is 'file'" in detail
     assert "'file:///data/lakana'" in detail
     assert client.get("/api/v1/environments/dev", headers=AUTH_HEADER).status_code == 404
+
+
+def test_storage_names_the_option_keys_never_a_value(
+    client: TestClient, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The keys come back sorted; the values are in neither the answer nor the log."""
+    _create(client, tmp_path)
+    caplog.set_level(logging.DEBUG)
+    patched = client.patch(
+        "/api/v1/environments/dev/storage",
+        headers=AUTH_HEADER,
+        json={"options": {"key": "AKIA-sentinel", "endpoint": "https://s3.corp"}},
+    )
+    assert patched.status_code == 200, patched.text
+
+    response = client.get("/api/v1/environments/dev/storage", headers=AUTH_HEADER)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "root": f"file://{tmp_path}/dev",
+        "secret_ref": None,
+        "option_keys": ["endpoint", "key"],
+    }
+    for planted in ("AKIA-sentinel", "s3.corp"):
+        assert planted not in response.text
+        assert planted not in caplog.text
+
+
+def test_storage_needs_manage_environment_on_the_instance(
+    client: TestClient, settings: Settings, tmp_path: Path
+) -> None:
+    """An administrator of the environment alone is refused, and the denial is audited."""
+    from lakana_core.models import AuditEvent, AuditEventType
+
+    _create(client, tmp_path, "sandbox")
+    bob = _grant_environment_admin(client, "sandbox")
+
+    refused = client.get("/api/v1/environments/sandbox/storage", headers=bob)
+
+    assert refused.status_code == 403, refused.text
+    engine = create_engine(settings.database)
+    with Session(engine) as session:
+        denied = session.scalars(
+            select(AuditEvent.detail).where(
+                AuditEvent.event_type == AuditEventType.AUTHORIZATION_DENIED
+            )
+        ).all()
+    engine.dispose()
+    assert any(d.get("action") == "MANAGE_ENVIRONMENT" for d in denied), denied
+
+
+def test_storage_of_an_unknown_environment_is_404(client: TestClient) -> None:
+    """No such environment: 404, as every lookup by name."""
+    response = client.get("/api/v1/environments/nope/storage", headers=AUTH_HEADER)
+
+    assert response.status_code == 404

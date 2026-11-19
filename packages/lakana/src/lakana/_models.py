@@ -159,6 +159,27 @@ class UsagePart:
 
 
 @dataclass(frozen=True)
+class EnvironmentStorage:
+    """What `Client.environments.storage` returns: where an environment's data lives.
+
+    Never an option's value, which can be an inline credential; only its key.
+
+    Parameters
+    ----------
+    root
+        The storage root URI.
+    secret_ref
+        The name of the secret holding the storage credential, or `None`.
+    option_keys
+        The keys of the storage options that are set, sorted.
+    """
+
+    root: str
+    secret_ref: str | None
+    option_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class EnvironmentUsage:
     """What `Client.environments.usage` returns: the storage one environment takes.
 

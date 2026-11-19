@@ -3469,6 +3469,28 @@ class WorkOut(BaseModel):
     jobs: list[WorkJobOut]
 
 
+class EnvironmentStorageOut(BaseModel):
+    """Where an environment's data lives, and which storage options are set.
+
+    Never a value: an option can hold an inline credential, so only its key is named.
+
+    Parameters
+    ----------
+    root
+        The storage root URI.
+    secret_ref
+        The name of the secret holding the storage credential, or `null`.
+    option_keys
+        The keys of the storage options that are set, sorted.
+    """
+
+    model_config = {"from_attributes": True}
+
+    root: str
+    secret_ref: str | None
+    option_keys: list[str]
+
+
 class EnvironmentStorageUpdate(BaseModel):
     """Request body for updating an environment's storage configuration.
 

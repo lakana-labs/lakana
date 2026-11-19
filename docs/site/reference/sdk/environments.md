@@ -112,6 +112,25 @@ For an environment the worker's clean-up skips because its storage cannot be res
 | `lakana.NotFound` | If no environment of this name exists. |
 | `lakana.Conflict` | If it is not deleted, its storage can still be reached (the clean-up deletes it then; `delete(name, purge=True)` makes that happen at the next clean-up), or its root contains ``::`` (releases before 0.18.0 wrote files to the part before it). |
 
+### `client.environments.storage`
+
+Signature: `client.environments.storage(name: str) -> EnvironmentStorage`
+
+Show where an environment's data lives and which storage options are set.
+
+Names each option's key, never its value: a value can be an inline credential. Needs `MANAGE_ENVIRONMENT` on the instance, as `update_storage` does.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | The environment's name. |
+
+Returns: `EnvironmentStorage`. The root, the storage secret's name and the sorted option keys.
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | If no environment of this name exists. |
+| `lakana.PermissionDenied` | Without `MANAGE_ENVIRONMENT` on the instance. |
+
 ### `client.environments.update_storage`
 
 Signature: `client.environments.update_storage(name: str, options: dict[str, str] | None = None, secret_ref: str | None = None) -> Environment`

@@ -83,6 +83,7 @@
 "env restore": { class: ui, part: 8 }
 "env retention": { class: ui, part: 8 }
 "env set-storage": { class: ui, part: 8 }
+"env storage": { class: ui, part: 8 }
 "env unprotect": { class: ui, part: 8 }
 "env usage": { class: ui, part: 8 }
 "grant create": { class: ui, part: 7, done: true }
@@ -398,6 +399,7 @@
 "GET /api/v1/environments/{env}/terms/{key}": { class: read, part: 3 }
 "GET /api/v1/environments/{name}": { class: ui, part: 8 }
 "GET /api/v1/environments/{name}/orphaned-locations": { class: ui, part: 8 }
+"GET /api/v1/environments/{name}/storage": { class: ui, part: 8 }
 "GET /api/v1/environments/{name}/usage": { class: ui, part: 8 }
 "GET /api/v1/grants":
   {

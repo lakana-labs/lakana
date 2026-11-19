@@ -31,6 +31,7 @@ from lakana._models import (
     Column,
     DroppedTable,
     Environment,
+    EnvironmentStorage,
     ExternalTable,
     Failure,
     HistoryResult,
@@ -3917,3 +3918,27 @@ def test_status_of_an_older_server_reads_them_as_none() -> None:
     assert status.result_bytes is None
     assert status.error_line is None
     assert status.error_column is None
+
+
+def test_environments_storage_reads_the_root_the_secret_and_the_option_keys() -> None:
+    """`environments.storage` GETs `/storage`; a field it does not know is ignored."""
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return httpx.Response(
+            200,
+            json={
+                "root": "s3://corp-lake/dev",
+                "secret_ref": "corp-s3",
+                "option_keys": ["endpoint", "region"],
+                "added_later": 1,
+            },
+        )
+
+    storage = Environments(_transport(handler)).storage("dev")
+
+    assert seen == [("GET", "/api/v1/environments/dev/storage")]
+    assert storage == EnvironmentStorage(
+        root="s3://corp-lake/dev", secret_ref="corp-s3", option_keys=("endpoint", "region")
+    )
