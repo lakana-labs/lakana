@@ -42,7 +42,8 @@
     "days": "Days",
     "daysHelp": "1 to 3,650 days after a table's last write or read.",
     "save": "Save",
-    "held": "Give a number of days from 1 to 3,650."
+    "held": "Give a number of days from 1 to 3,650.",
+    "onlyOff": "A protected environment keeps its tables: only turning the retention off is possible."
   },
   "storage": {
     "title": "Change the storage of {{name}}",
@@ -51,8 +52,6 @@
     "secret": "Storage secret",
     "keepSecret": "Keep the current secret",
     "noSecretYet": "No secret yet",
-    "secretTyped": "Secret name",
-    "secretTypedHelp": "Leave it empty to keep the current secret. The secret must exist in this environment.",
     "secretNoneHere": "This environment has no secret yet. Add one under Access › Secrets.",
     "options": "Options",
     "keepOptions": "Keep the options as they are",
@@ -61,7 +60,9 @@
     "noneSetNow": "No option is set now.",
     "replaceHelp": "Sending replaces every option: name each one the storage needs.",
     "submit": "Change storage",
-    "held": "Choose another secret or replace the options."
+    "held": "Choose another secret or replace the options.",
+    "secretNeedsRight": "Choosing the storage secret needs the right to manage secrets in {{name}}.",
+    "optionsNeedRight": "Changing the options of a storage with a secret needs the right to manage secrets in {{name}}: an option such as s3.endpoint decides where the secret is sent."
   },
   "delete": {
     "title": "Delete environment {{name}}?",

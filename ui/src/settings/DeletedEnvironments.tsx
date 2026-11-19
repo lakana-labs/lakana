@@ -19,6 +19,7 @@ import { markedText, VisibleText } from "../shell/VisibleText";
 import type { DeletedAction, DeletedEnvironmentDialogProps } from "./EnvironmentDialogs";
 import "./environments.css";
 import "./environmentStrings";
+import type { DeletedRow } from "./deletedRows";
 import { managesEnvironment, mayCreateEnvironments } from "./places";
 import { storageScheme } from "./storageSummary";
 import { useSettingsViewer } from "./viewer";
@@ -48,7 +49,7 @@ export function unreachable(root: string): boolean {
 /** Properties of {@link DeletedEnvironments}. */
 export interface DeletedEnvironmentsProps {
   /** The deleted environments' read. */
-  readonly read: Resource<readonly EnvironmentOut[]>;
+  readonly read: Resource<readonly DeletedRow[]>;
   /** Called once an action is done, so the place reads both lists again. */
   readonly onChanged: (action: DeletedAction, name: string) => void;
 }
@@ -131,8 +132,15 @@ export function DeletedEnvironments({
             <td>{when(environment.purge_after as string)}</td>
             <td>
               <div className="environment-actions">
-                {button(environment, "restore")}
-                {button(environment, "purgeFiles")}
+                {/* Once purge_after has passed the server refuses a restore: the files go. */}
+                {!environment.due ? (
+                  <>
+                    {button(environment, "restore")}
+                    {button(environment, "purgeFiles")}
+                  </>
+                ) : (
+                  <span>{t(`${P}.purgeDue`)}</span>
+                )}
                 {removes &&
                   unreachable(environment.storage_root) &&
                   button(environment, "removeRows")}

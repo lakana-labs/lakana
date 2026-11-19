@@ -112,18 +112,39 @@ describe("Change storage", () => {
     expect(within(dialog).getByText("Choose another secret or replace the options.")).toBeVisible();
   });
 
-  it("without secret rights the secret is typed", async () => {
+  it("without secret rights the secret is not offered, and says what is needed", async () => {
     const shell = await openStorage({}, []);
-    const { dialog, user } = shell;
+    const { dialog } = shell;
 
-    await user.type(within(dialog).getByRole("textbox", { name: "Secret name" }), "corp-s3");
-    await user.click(within(dialog).getByRole("button", { name: "Change storage" }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-    expect(patches(shell)).toEqual([[{ secret_ref: "corp-s3" }, "/api/v1/sign-in/session"]]);
+    expect(
+      within(dialog).getByText(
+        "Choosing the storage secret needs the right to manage secrets in dev.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByRole("textbox", { name: "Secret name" })).toBeNull();
+    expect(within(dialog).getByRole("radio", { name: "Replace the options" })).toBeEnabled();
     expect(shell.server.sent.some((request) => request.path.endsWith("/secrets"))).toBe(false);
+  });
+
+  it("without secret rights the options of a secret-backed storage stay as they are", async () => {
+    const shell = await openStorage(
+      {
+        "GET /api/v1/environments/dev": {
+          status: 200,
+          body: { ...DEV, storage_secret_ref: "corp-s3" },
+        },
+      },
+      [],
+    );
+    const { dialog } = shell;
+
+    expect(within(dialog).queryByRole("radio", { name: "Replace the options" })).toBeNull();
+    expect(
+      within(dialog).getByText(
+        "Changing the options of a storage with a secret needs the right to manage secrets in dev: an option such as s3.endpoint decides where the secret is sent.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Change storage" })).toBeDisabled();
   });
 
   it("keeps the options unless told to replace them", async () => {
@@ -184,7 +205,7 @@ describe("Change storage", () => {
     ]);
   });
 
-  it("a refusal for options without secret rights is shown", async () => {
+  it("a refusal of the options is shown with the fields kept", async () => {
     const shell = await openStorage({
       "GET /api/v1/environments/dev/storage": {
         status: 200,

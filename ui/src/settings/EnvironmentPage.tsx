@@ -283,7 +283,8 @@ function Overview({
         <dt>{t(`${P}.retention`)}</dt>
         <dd>
           <RetentionWords environment={environment} />
-          {manages && (
+          {/* A protected environment may only turn its retention off (the server's rule). */}
+          {manages && !(environment.is_protected && environment.retention_days === null) && (
             <>
               {" "}
               <Button

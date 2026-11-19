@@ -230,15 +230,12 @@ describe("EnvironmentPage", () => {
   });
 
   it("a refused retention keeps the dialog", async () => {
-    const { user } = asAdmin(
-      {
-        "PUT /api/v1/environments/dev/retention": {
-          status: 422,
-          body: { detail: "Environment dev is protected: its tables never expire." },
-        },
+    const { user } = asAdmin({
+      "PUT /api/v1/environments/dev/retention": {
+        status: 422,
+        body: { detail: "Retention is 1 to 3,650 days." },
       },
-      { ...DEV, is_protected: true },
-    );
+    });
 
     await user.click(await screen.findByRole("button", { name: "Set retention of dev" }));
     const dialog = await screen.findByRole("dialog", { name: "Set retention of dev" });
@@ -250,8 +247,33 @@ describe("EnvironmentPage", () => {
     await user.type(field, "45");
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
-    expect(await within(dialog).findByRole("alert")).toHaveTextContent("is protected");
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("1 to 3,650 days");
     expect(within(dialog).getByRole("textbox", { name: "Days" })).toHaveValue("45");
+  });
+
+  it("a protected environment may only turn its retention off", async () => {
+    const { server, user } = asAdmin({}, { ...DEV, is_protected: true, retention_days: 30 });
+
+    await user.click(await screen.findByRole("button", { name: "Set retention of dev" }));
+    const dialog = await screen.findByRole("dialog", { name: "Set retention of dev" });
+    expect(dialog).toHaveTextContent(
+      "A protected environment keeps its tables: only turning the retention off is possible.",
+    );
+    expect(within(dialog).queryByRole("radio", { name: "Tables expire after" })).toBeNull();
+    expect(within(dialog).getByRole("radio", { name: "Keep tables" })).toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(server.sent.find((request) => request.method === "PUT")?.body).toEqual({
+        days: null,
+      });
+    });
+  });
+
+  it("a protected environment that keeps its tables offers no Set retention", async () => {
+    asAdmin({}, { ...DEV, is_protected: true });
+
+    expect(await screen.findByText("keeps tables")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set retention of dev" })).not.toBeInTheDocument();
   });
 
   it("shows usage with its parts, and the incomplete sentence", async () => {

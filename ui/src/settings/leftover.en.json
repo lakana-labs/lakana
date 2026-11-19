@@ -27,7 +27,12 @@
   "continue": "Continue",
   "confirmTitle_one": "Delete {{count}} directory, {{size}}?",
   "confirmTitle_other": "Delete {{count}} directories, {{size}}?",
-  "confirmBody": "Their files are deleted for good; no table owns them. Recent directories are kept.",
   "confirm": "Delete them",
-  "tryAgain": "Try again"
+  "tryAgain": "Try again",
+  "confirmTitlePartial_one": "Delete at least {{count}} directory, {{size}}?",
+  "confirmTitlePartial_other": "Delete at least {{count}} directories, {{size}}?",
+  "confirmBody_one": "Their files are older than {{count}} day and are deleted for good; no table owns them. Recent directories are kept.",
+  "confirmBody_other": "Their files are older than {{count}} days and are deleted for good; no table owns them. Recent directories are kept.",
+  "confirmPartial": "The search stopped at its time limit, so the deletion may remove more than was counted.",
+  "stale": "This list was found with {{found}} days; Find again to use {{days}}."
 }

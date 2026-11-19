@@ -130,13 +130,13 @@ export async function stubEnvironments(page: Page): Promise<void> {
     ["prod", environment("prod", { is_protected: true, retention_days: 90 })],
   ]);
   const deleted = new Map<string, Environment>([
-    ["dev-old", environment("dev-old", { deleted_at: AT, purge_after: "2026-11-25T08:00:00Z" })],
+    ["dev-old", environment("dev-old", { deleted_at: AT, purge_after: "2099-11-25T08:00:00Z" })],
     [
       "hdfs-old",
       environment("hdfs-old", {
         storage_root: "hdfs://old-cluster/lake",
         deleted_at: AT,
-        purge_after: "2026-11-25T08:00:00Z",
+        purge_after: "2099-11-25T08:00:00Z",
       }),
     ],
   ]);
@@ -194,7 +194,7 @@ export async function stubEnvironments(page: Page): Promise<void> {
           const gone = {
             ...was,
             deleted_at: AT,
-            purge_after: purge ? AT : "2026-11-25T08:00:00Z",
+            purge_after: purge ? AT : "2099-11-25T08:00:00Z",
           };
           deleted.set(name, gone);
           return answer(route, gone);

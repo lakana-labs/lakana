@@ -23,7 +23,6 @@ import {
   type EnvironmentOut,
   type EnvironmentUsageOut,
   getUsage,
-  listDeletedEnvironments,
   listEnvironmentsFull,
 } from "../api/environments";
 import { formatBytes } from "../catalog/format";
@@ -31,6 +30,7 @@ import { ViewList } from "../catalog/views/ViewList";
 import { inPool, READS_IN_FLIGHT } from "../shell/inPool";
 import { type Resource, useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
+import { type DeletedRow, readDeleted } from "./deletedRows";
 import type { DeletedAction, DeletedState } from "./EnvironmentDialogs";
 import { VisibleText } from "../shell/VisibleText";
 import "./environments.css";
@@ -267,7 +267,7 @@ export function EnvironmentsPlace(): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const read = useResource(listEnvironmentsFull);
   const loadDeleted = useCallback(
-    () => (managesAny ? listDeletedEnvironments() : Promise.resolve([])),
+    (): Promise<readonly DeletedRow[]> => (managesAny ? readDeleted() : Promise.resolve([])),
     [managesAny],
   );
   const deleted = useResource(loadDeleted);

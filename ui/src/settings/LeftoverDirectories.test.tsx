@@ -167,6 +167,44 @@ describe("LeftoverDirectories", () => {
     expect(server.sent.some((request) => request.path === "/api/v1/sign-in/session")).toBe(false);
   });
 
+  it("deletes with the days the list was found with, not the field's new value", async () => {
+    const { server, user } = renderPanel({
+      [FIND]: { status: 200, body: report(THREE) },
+      [DELETE]: { status: 200, body: report([]) },
+    });
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await screen.findByRole("region", { name: "Leftover directories" });
+    const days = screen.getByRole("textbox", { name: "Older than" });
+    await user.clear(days);
+    await user.type(days, "1");
+    await user.tab();
+    expect(
+      screen.getByText("This list was found with 30 days; Find again to use 1."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete the old ones" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveTextContent("older than 30 days");
+    await user.click(within(dialog).getByRole("button", { name: "Delete them" }));
+
+    expect(await screen.findByText("Nothing left over.")).toBeInTheDocument();
+    const post = server.sent.find((request) => request.method === "POST");
+    expect(post?.body).toEqual({ older_than_days: 30 });
+  });
+
+  it("after a partial search the question says more may go", async () => {
+    const { user } = renderPanel({ [FIND]: { status: 200, body: report(THREE, false) } });
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await user.click(await screen.findByRole("button", { name: "Delete the old ones" }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: "Delete at least 2 directories, 2.5 MB?",
+    });
+    expect(dialog).toHaveTextContent(
+      "The search stopped at its time limit, so the deletion may remove more than was counted.",
+    );
+  });
+
   it("names what a deletion kept without a reason, and Cancel deletes nothing", async () => {
     const { server, user } = renderPanel({
       [FIND]: { status: 200, body: report(THREE) },

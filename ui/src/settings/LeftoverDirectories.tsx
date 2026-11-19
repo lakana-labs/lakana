@@ -54,6 +54,8 @@ interface Failed {
   readonly text: string;
   /** What Try again repeats; null when asking again does not help (502). */
   readonly again: "found" | "deleted" | null;
+  /** The days the failed call asked with, which Try again asks with too. */
+  readonly days: number;
 }
 
 /**
@@ -112,20 +114,24 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
    * Searches, or deletes the old directories, and shows the answer or why it failed.
    *
    * @param kind - A search or a deletion.
+   * @param olderThan - The days: a deletion's are those of the list the person confirmed, never
+   *   the field's if it changed since.
    * @returns When the answer is shown.
    */
-  const run = async (kind: Shown["kind"]): Promise<void> => {
+  const run = async (kind: Shown["kind"], olderThan: number): Promise<void> => {
     setBusy(kind);
     setSlowFor(null);
     setFailed(null);
     try {
-      const report = await (kind === "found" ? findOrphans(name, days) : deleteOrphans(name, days));
+      const report = await (kind === "found"
+        ? findOrphans(name, olderThan)
+        : deleteOrphans(name, olderThan));
       if (kind === "deleted") armSummary();
       setShown({ kind, report });
     } catch (failure: unknown) {
       // A 502 says the storage refused the credentials: asking again does not help.
       const refused = (failure as Partial<ApiError>).status === 502;
-      setFailed({ text: problemText(t, failure), again: refused ? null : kind });
+      setFailed({ text: problemText(t, failure), again: refused ? null : kind, days: olderThan });
     } finally {
       setBusy(null);
     }
@@ -134,6 +140,9 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
   const old = locations.filter((location) => !location.recent);
   const oldBytes = old.reduce((sum, location) => sum + location.bytes, 0);
   const total = locations.reduce((sum, location) => sum + location.bytes, 0);
+  // What the question names and the deletion asks with: the list as found.
+  const foundDays = shown?.report.older_than_days ?? days;
+  const shownComplete = shown?.report.complete ?? true;
   return (
     <section className="flat-panel settings-panel">
       <h2>{t(`${L}.title`)}</h2>
@@ -156,7 +165,7 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
           pending={busy === "found"}
           isDisabled={!valid || (busy !== null && busy !== "found")}
           onPress={() => {
-            void run("found");
+            void run("found", days);
           }}
         >
           {shown === null ? t(`${L}.find`) : t(`${L}.findAgain`)}
@@ -174,7 +183,7 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
             <Button
               className="button"
               onPress={() => {
-                void run(failed.again as Shown["kind"]);
+                void run(failed.again as Shown["kind"], failed.days);
               }}
             >
               {t(`${L}.tryAgain`)}
@@ -189,6 +198,9 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
               ? t(`${L}.nothing`)
               : t(`${L}.summary`, { count: locations.length, size: size(total) })}
           </p>
+          {shown.kind === "found" && foundDays !== days && (
+            <p>{t(`${L}.stale`, { found: foundDays, days })}</p>
+          )}
           {!shown.report.complete && (
             <p>{t(shown.kind === "found" ? `${L}.partial` : `${L}.partialDelete`)}</p>
           )}
@@ -255,7 +267,7 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
                 className="button"
                 pending={busy === "deleted"}
                 onPress={() => {
-                  void run("deleted");
+                  void run("deleted", shown.report.older_than_days);
                 }}
               >
                 {t(`${L}.continue`)}
@@ -266,9 +278,12 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
       )}
       {confirming && (
         <ConfirmDialog
-          title={t(`${L}.confirmTitle`, { count: old.length, size: size(oldBytes) })}
+          title={t(shownComplete ? `${L}.confirmTitle` : `${L}.confirmTitlePartial`, {
+            count: old.length,
+            size: size(oldBytes),
+          })}
           confirmLabel={t(`${L}.confirm`)}
-          onConfirm={() => run("deleted")}
+          onConfirm={() => run("deleted", foundDays)}
           onCancel={() => {
             setConfirming(false);
           }}
@@ -276,7 +291,8 @@ export function LeftoverDirectories({ name }: LeftoverDirectoriesProps): JSX.Ele
             setConfirming(false);
           }}
         >
-          <p>{t(`${L}.confirmBody`)}</p>
+          <p>{t(`${L}.confirmBody`, { count: foundDays })}</p>
+          {!shownComplete && <p>{t(`${L}.confirmPartial`)}</p>}
         </ConfirmDialog>
       )}
     </section>

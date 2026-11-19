@@ -40,5 +40,6 @@
     "restore": "Restored {{name}}.",
     "purgeFiles": "The files of {{name}} are deleted at the next clean-up.",
     "removeRows": "Removed {{name}} from the catalog."
-  }
+  },
+  "purgeDue": "Its files are deleted at the next clean-up."
 }

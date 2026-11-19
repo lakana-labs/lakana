@@ -18,7 +18,7 @@ const DEV_OLD: EnvironmentOut = {
   properties: {},
   retention_days: null,
   deleted_at: "2026-11-10T09:00:00Z",
-  purge_after: "2026-11-27T09:00:00Z",
+  purge_after: "2099-11-27T09:00:00Z",
 };
 
 /** A deleted environment an older release stored on HDFS, which Lakana never reached. */
@@ -116,13 +116,18 @@ describe("DeletedEnvironments", () => {
 
   it("deletes the files now after the name and the touch", async () => {
     fakeWebAuthn();
+    const deleted = [DEV_OLD];
     const { server, user } = renderShell(
       "/settings/environments",
       asMara({
-        ...lists([], [DEV_OLD]),
+        ...lists([], deleted),
         "GET /api/v1/sign-in/session": STALE_SESSION,
         ...STEP_UP_ROUTES,
-        "DELETE /api/v1/environments/dev-old": { status: 200, body: DEV_OLD },
+        "DELETE /api/v1/environments/dev-old": () => {
+          // The files are due now: the row stays until the clean-up deletes them.
+          deleted[0] = { ...DEV_OLD, purge_after: new Date(Date.now() - 1000).toISOString() };
+          return { status: 200, body: deleted[0] };
+        },
       }),
     );
 
@@ -144,6 +149,10 @@ describe("DeletedEnvironments", () => {
     expect(
       screen.getByText("The files of dev-old are deleted at the next clean-up."),
     ).toBeInTheDocument();
+    expect(
+      await screen.findByText("Its files are deleted at the next clean-up."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore dev-old" })).not.toBeInTheDocument();
     const start = server.sent.findIndex((request) => request.path === "/api/v1/sign-in/session");
     expect(
       server.sent.slice(start, start + 4).map((request) => `${request.method} ${request.path}`),
@@ -218,6 +227,21 @@ describe("DeletedEnvironments", () => {
     expect(screen.getByRole("button", { name: "Delete the files of hdfs-old now" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "Remove hdfs-old from the catalog" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers no Restore once the files are due, and says so", async () => {
+    renderShell(
+      "/settings/environments",
+      asMara(lists([], [{ ...DEV_OLD, purge_after: "2026-01-01T00:00:00Z" }])),
+    );
+
+    expect(
+      await screen.findByText("Its files are deleted at the next clean-up."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore dev-old" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Delete the files of dev-old now" }),
     ).not.toBeInTheDocument();
   });
 
