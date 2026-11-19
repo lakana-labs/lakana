@@ -177,6 +177,77 @@ _DEEP = b"SELECT " + b"(" * 1500 + b"1" + b")" * 1500
 """A query whose parse alone hits the parser's limit on nesting."""
 
 
+_NEAR_THE_LIMIT = (
+    b"SELECT iEl{ pivtyp"
+    + b"\0" * 10
+    + b"{{{rders.adrd{{{{{{"
+    + b"\x0e" * 21
+    + b"{\x0e\x0e\x0e{"
+    + b"\0" * 7
+    + b"Y"
+    + b"{" * 16
+    + b"u{{{\0\0"
+    + b"{" * 9
+    + b"\x0e" * 18
+    + b"{{u{{{this"
+    + b"{" * 7
+    + b"\x0e" * 18
+    + b"\0\0ident\0\0\0)( tF sROM gold.t"
+)
+"""The nightly run's input of #733: its parse ends, in a syntax error, near the recursion limit."""
+
+
+def _parses_under(sql: str, limit: int) -> bool:
+    """Say whether parsing `sql` from here stays under the recursion limit `limit`.
+
+    Parameters
+    ----------
+    sql
+        The query text.
+    limit
+        The recursion limit to parse under.
+
+    Returns
+    -------
+    bool
+        `False` when the parse raises `RecursionError`.
+    """
+    previous = sys.getrecursionlimit()
+    sys.setrecursionlimit(limit)
+    try:
+        query_rewrite._parse_sql(sql, "duckdb")
+    except RecursionError:
+        return False
+    except query_rewrite.SQL_SYNTAX_ERRORS:
+        pass
+    finally:
+        sys.setrecursionlimit(previous)
+    return True
+
+
+def test_a_parse_near_the_limit_is_judged_the_same_wherever_the_stack_stands() -> None:
+    """The guard parses a few frames below `parse_alone_recurses`; the verdict must not differ.
+
+    Under every recursion limit from the lowest at which the text parses from this frame up, the
+    target accepts or refuses the text. The guard's own parse hitting the limit while the
+    shallower parse alone did not was the crash of #733: it says nothing about the guard, only
+    where the stack stood when the fuzzer happened on a text this deep.
+    """
+    sql = _NEAR_THE_LIMIT.decode()
+    low, high = 100, 5000
+    assert _parses_under(sql, high)
+    while low < high:
+        middle = (low + high) // 2
+        low, high = (low, middle) if _parses_under(sql, middle) else (middle + 1, high)
+    previous = sys.getrecursionlimit()
+    try:
+        for candidate in range(low, low + 40):
+            sys.setrecursionlimit(candidate)
+            targets.query_guard(_NEAR_THE_LIMIT)
+    finally:
+        sys.setrecursionlimit(previous)
+
+
 @pytest.mark.parametrize("attribute", ["_check_blacklist", "_extract_lineage", "_rewrite_query"])
 def test_a_recursion_error_is_a_refusal_only_when_parsing_alone_raises_it(
     attribute: str, monkeypatch: pytest.MonkeyPatch

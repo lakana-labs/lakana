@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import sys
 from collections.abc import Callable
 
 import sqlglot.errors
@@ -115,8 +116,26 @@ def decode(data: bytes) -> str | None:
         return None
 
 
+PARSE_HEADROOM = 16
+"""Frames by which `parse_alone_recurses` lowers the recursion limit for its parse.
+
+The guard, the lineage and the rewrite call the parser a few frames deeper than
+`parse_alone_recurses` does (``query_guard``, ``check_blacklist``, ``_parse_with_hints``,
+``_parse_sql``: one more than ``query_guard``, ``parse_alone_recurses``, ``_parse_sql``; two more
+through ``_parse_checked``). A text whose parse ends within those frames of the limit recursed
+there and not here, and the target reported the guard's syntax refusal as a crash (#733). The
+headroom covers those frames with room for a wrapper or two; it is far less than one level of
+nesting, about 25 of the parser's frames, so a walker's `RecursionError` over a tree that parses
+well within the limit is still a crash.
+"""
+
+
 def parse_alone_recurses(sql: str) -> bool:
     """Say whether parsing the text alone hits the parser's limit on nesting.
+
+    The parse runs with the recursion limit lowered by `PARSE_HEADROOM`, as though it were called
+    from at least as deep as the target's own parses: where the stack stands when the fuzzer finds
+    a text must not decide whether the text is a refusal or a crash.
 
     Parameters
     ----------
@@ -128,12 +147,16 @@ def parse_alone_recurses(sql: str) -> bool:
     bool
         `True` when the guard's own parse (`_parse_sql`) raises `RecursionError`.
     """
+    limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(limit - PARSE_HEADROOM)
     try:
         _parse_sql(sql, "duckdb")
     except RecursionError:
         return True
     except GUARD_REFUSALS:
         pass
+    finally:
+        sys.setrecursionlimit(limit)
     return False
 
 
