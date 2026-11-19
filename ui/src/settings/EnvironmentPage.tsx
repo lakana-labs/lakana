@@ -71,6 +71,11 @@ const DeleteEnvironmentDialog: ComponentType<DeleteEnvironmentDialogProps> = laz
   default: (await import("./EnvironmentDialogs")).DeleteEnvironmentDialog,
 }));
 
+// Leftover directories load on their own, only for those who manage environments on the instance.
+const LeftoverDirectories = lazy(async () => ({
+  default: (await import("./LeftoverDirectories")).LeftoverDirectories,
+}));
+
 /** The dialog open on the page. */
 type Open = "retention" | "storage" | "unprotect" | "delete";
 
@@ -423,6 +428,11 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
               >
                 <p>{t(`${P}.unprotectBody`)}</p>
               </ConfirmDialog>
+            )}
+            {creates && (
+              <Suspense fallback={null}>
+                <LeftoverDirectories name={environment.name} />
+              </Suspense>
             )}
             {manages && (
               <DeletePanel

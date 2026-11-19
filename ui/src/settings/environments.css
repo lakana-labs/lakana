@@ -62,3 +62,20 @@
   flex-wrap: wrap;
   gap: var(--space-2);
 }
+
+/* Leftover directories: the age beside Find, wrapping on a narrow screen; the directories scroll
+   in their own region, each location kept whole. */
+.leftover-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+
+.list-scroll.leftover-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.leftover-scroll .leftover-location {
+  overflow-wrap: normal;
+}
