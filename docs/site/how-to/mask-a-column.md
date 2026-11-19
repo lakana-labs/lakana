@@ -109,8 +109,8 @@ lakana column-mask list --principal alice
 lakana column-mask revoke 49fa89ee-275a-4b86-a6fc-76b2b5b32b7e --yes
 ```
 
-`list` takes `--principal`, `--group` or `--env` to narrow the list; it shows the id of each mask,
-which `revoke` needs. The `column` and the `expression` are shown with the column names the table
+`list` takes `--principal`, `--group` or `--env` to narrow the list, and without them lists every
+mask; it shows the id of each mask, which `revoke` needs. The `column` and the `expression` are shown with the column names the table
 has now: after a column was renamed, a mask on it is listed under the new name. The `bound` column
 says whether the mask follows its column through such a rename: `yes` for every mask you create
 now. `no` marks a mask of an earlier release that is not bound yet: right after an upgrade the worker
@@ -140,7 +140,18 @@ Revoking is the only way to change a mask: to change an expression, create the n
 the old one. Until you revoke the old one, the two masks on the column make it read `NULL`. The same
 commands are `client.column_masks.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
 (each mask has `bound`, and the name of who it is for in `principal` or `group`; each is `None`
-from a server before this release) and `/api/v1/column-masks` in the REST API.
+from a server before this release) and `/api/v1/column-masks` in the REST API, which lists them
+100 at a time (follow the `X-Next-Cursor` header; the SDK's `list` reads every page).
+
+## In the web interface
+
+**Settings → Access → Row filters & masks** lists the column masks beside the row filters, for
+whoever holds `MANAGE_POLICY` on the instance. **Add filter or mask** with **Column mask** chosen
+asks for the table, the column, who the mask is for and what they see instead, such as
+`'***' || substr(email, -4)`; **Delete** says who then sees the column as it is stored. Both ask
+for a passkey touch first. A mask in an environment an access file manages is marked **⌂ Git** and
+is changed in the file. [Show some people only some
+rows](filter-rows.md#in-the-web-interface) describes the page.
 
 ## An expression must not fail on any stored value
 

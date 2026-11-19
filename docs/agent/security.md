@@ -4785,6 +4785,15 @@ work.
   accepted, because that holder already writes policies by subject name and is told
   `No principal named …` for a name that does not exist, and a name comes with its type
   (`user` or `service`) only. A subject deleted since answers `null`, never an error.
+- **Every policy is listed, filters combined and paged (M7 parts 7 and 8).** `GET
+  /api/v1/row-filters` and `/column-masks` take every filter as optional (`principal_name` or
+  `group_name`, `environment`, then `namespace`, then `table`) and page newest first with
+  `X-Next-Cursor`, as the grants list does (`PolicyShowing.list_page`). `MANAGE_POLICY` on the
+  instance is still asked first, before any name is looked up, so an unknown name answers 403,
+  not 404, to a caller without it (`test_list_page_needs_manage_policy_first`). The answer is
+  shown with one metadata read per table per page, never per row
+  (`test_a_page_reads_each_table_s_columns_once`). A holder already listed every policy by
+  subject or table; listing them all at once reveals nothing new.
 
 - **Row filters and column masks are written** in a restricted expression subset
   (comparisons, boolean logic, literals, column references, and exactly two context
@@ -7244,6 +7253,20 @@ matter for an operator deciding where to run it:
   The SDK sends the request with `retry=False`, so a lost answer never becomes a second apply.
 - **The fingerprint binds the file.** It hashes the file's `file_sha256` as well as the live access
   and the managed-scope records, so a fingerprint planned for file A never applies file B.
+- **The managed scopes, for a policy manager (M7 parts 7 and 8).** `GET
+  /api/v1/access/managed-scopes` (`AccessService.managed_scopes`) answers each managed scope's
+  name, file name and apply time to whoever holds `MANAGE_POLICY` on the instance; a task or
+  CI token is refused. No hash, commit, applier or override: what a write's 409 in that scope
+  would tell them, told before the write. It is listed in `_EXEMPT` of
+  `test_admin_only_call_sites` with that reason. `whoami.manage_policy`
+  (`GrantService.may_manage_policies`) is about the caller only, asked with `permits`, records
+  nothing, and is false for a task or CI token.
+- **The interface keeps the exported text nowhere and never overrides.** Download access file
+  sends `GET /access/export` and puts the answer into one `Blob` for the save; the text is never
+  React state, storage, the address or a log (`the exported text is kept nowhere`, and the e2e
+  `download by keyboard`). The saved name is the managed file's base name without folder parts
+  or invisible characters (`fileName`). No request of the interface carries `override_managed`
+  or `override_reason`; a managed scope's page shows the CLI command for an emergency.
 - **The CLI confirms, the server decides.** `lakana access apply` without `--plan-fingerprint`
   plans, prints and asks (`--yes` skips the question; no terminal and no `--yes` is refused
   before anything is sent). The confirmation is a convenience: the authority is the fingerprint

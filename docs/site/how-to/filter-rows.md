@@ -68,8 +68,8 @@ condition that reads no column (`has_group('staff')`) is not checked against the
 lakana row-filter list --principal alice
 ```
 
-`list` takes `--principal`, `--group` or `--env` to narrow the list; it shows the id of each filter,
-which `revoke` needs. The `expression` is shown with the column names the table has now:
+`list` takes `--principal`, `--group` or `--env` to narrow the list, and without them lists every
+filter; it shows the id of each filter, which `revoke` needs. The `expression` is shown with the column names the table has now:
 after a column was renamed, a filter on it is listed under the new name. The `bound` column says whether the
 filter follows its columns through such a rename: `yes` for every filter you create now. `no` marks
 a filter of an earlier release that is not bound yet: right after an upgrade the worker binds them over
@@ -88,7 +88,23 @@ Revoking is the only way to change a filter: to change a condition, create the n
 revoke the old one. When several filters apply to one person, a row must pass all of them. The same
 commands are `client.row_filters.create(...)`, `.list(...)` and `.revoke(...)` in the Python SDK
 (each filter has `bound`, and the name of who it is for in `principal` or `group`; each is `None`
-from a server before this release) and `/api/v1/row-filters` in the REST API.
+from a server before this release) and `/api/v1/row-filters` in the REST API, which lists them
+100 at a time (follow the `X-Next-Cursor` header; the SDK's `list` reads every page).
+
+## In the web interface
+
+**Settings → Access → Row filters & masks** lists every row filter and every column mask, for
+whoever holds `MANAGE_POLICY` on the instance (the `ADMIN` role holds it). Filter the lists by
+environment, by table (written `namespace.table`, such as `gold.station_ranking`) and by who; a
+policy manager who may read no environment types the environment's name instead of choosing it.
+Each row names who the filter is for, its table (a link to the table's Access tab), the expression
+and when it was made. **Add filter or mask** asks for the table, who it is for and the expression;
+**Delete** says who then sees more. Both ask for a passkey touch first, like the other changes of
+access. The server checks the expression as it does for `lakana row-filter create`, and its reason
+for a refusal shows in the form, with what you typed kept. A filter in an environment an access
+file manages is marked **⌂ Git** and cannot be changed there: change the file instead
+([Keep access in a reviewed file](keep-access-in-a-reviewed-file.md)). The table's own Access tab
+shows its filters and masks too, and links to the place.
 
 ## An expression must not fail on any stored value
 
