@@ -717,6 +717,26 @@ class GrantService:
         allowed = permits_each(self._authz, p, questions)
         return [name for name, yes in zip(names, allowed, strict=True) if yes]
 
+    def may_manage_policies(self, p: PrincipalRef) -> bool:
+        """Say whether the caller may manage row filters and column masks with this credential.
+
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. It follows the credential's scope, as `may_deploy_somewhere` does: a task or CI
+        token manages none. The web interface offers Row filters & masks from it.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            Whether `permits(MANAGE_POLICY)` holds on the instance, where the policy routes ask
+            for it.
+        """
+        return self._authz.permits(p, Action.MANAGE_POLICY, Securable.instance_scope())
+
     def explain(self, p: PrincipalRef, principal_name: str, scope: Securable) -> PermissionReport:
         """Say what a principal may do on an object, and through which grant or group.
 

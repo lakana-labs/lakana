@@ -404,6 +404,9 @@ _EXEMPT = {
     ("GrantService", "secret_environments"): "answers about the caller only (`whoami`) with "
     "`permits`, naming only the environments where the caller may manage secrets, and writing "
     "nothing",
+    ("GrantService", "may_manage_policies"): "answers about the caller only (`whoami`) with "
+    "`permits`, about `MANAGE_POLICY` on the instance, reading nothing about anyone else and "
+    "writing nothing",
     ("CiTrustRuleService", "check_rule"): "validates without writing; its caller "
     "(`grant`/`create`, or `AccessService`) has authorized",
 }

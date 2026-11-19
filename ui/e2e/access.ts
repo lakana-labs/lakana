@@ -613,6 +613,7 @@ export async function stubSecretsOfDevOnly(page: Page): Promise<void> {
       has_access: true,
       may_deploy: false,
       secret_environments: ["dev"],
+      manage_policy: false,
       picture: "e1",
     }),
   );

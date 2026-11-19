@@ -492,7 +492,7 @@ def test_with_ci_oidc_off_the_exchange_says_how_to_turn_it_on(client: TestClient
 def test_whoami_of_an_administrators_ci_token_is_no_admin_but_may_deploy(
     ci_client: TestClient,
 ) -> None:
-    """`admin` and `secret_environments` follow the CI token's scope (none).
+    """`admin`, `secret_environments` and `manage_policy` follow the CI token's scope (none).
 
     `may_deploy` follows its one environment.
     """
@@ -508,12 +508,14 @@ def test_whoami_of_an_administrators_ci_token_is_no_admin_but_may_deploy(
     body = ci_client.get("/api/v1/whoami", headers=_bearer(answer.json()["token"])).json()
     assert (body["name"], body["admin"], body["may_deploy"]) == ("deployer", False, True)
     assert body["secret_environments"] == []
+    assert body["manage_policy"] is False
     issued = ci_client.post(
         "/api/v1/principals/deployer/tokens", headers=AUTH_HEADER, json={"name": "laptop"}
     )
     personal = ci_client.get("/api/v1/whoami", headers=_bearer(issued.json()["token"])).json()
     assert (personal["admin"], personal["may_deploy"]) == (True, True)
     assert personal["secret_environments"] == ["dev", "prod"]
+    assert personal["manage_policy"] is True
 
 
 def test_a_disabled_rule_ends_the_token_at_the_next_request(
