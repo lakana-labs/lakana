@@ -85,6 +85,7 @@ export type {
   RepositoryOut,
   RepositoryProbeIn,
   RepositoryProbeOut,
+  TrustedHostKeyOut,
 } from "./repositories";
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";

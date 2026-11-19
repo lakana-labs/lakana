@@ -23,7 +23,7 @@ import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
 
-import { getRepositoryPage, type RepositoryOut } from "../api";
+import { getRepositoryPage, type RepositoryOut, type TrustedHostKeyOut } from "../api";
 import { listEnvironments } from "../api/environments";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { CopyLine } from "../shell/CopyLine";
@@ -126,6 +126,39 @@ function Overview({ repo }: BlockProps): JSX.Element {
   );
 }
 
+/** Properties of {@link HostKeyList}. */
+interface HostKeyListProps {
+  /** The keys. */
+  readonly keys: readonly TrustedHostKeyOut[];
+  /** The list's name. */
+  readonly label: string;
+}
+
+/**
+ * Host keys, each with its type, fingerprint and what a certificate authority's key means.
+ *
+ * @param props - The keys and the list's name.
+ * @param props.keys - The keys.
+ * @param props.label - The list's name.
+ * @returns The list.
+ */
+function HostKeyList({ keys, label }: HostKeyListProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <ul className="repository-keys" aria-label={label}>
+      {keys.map((key) => (
+        <li key={`${key.marker ?? ""} ${key.type} ${key.fingerprint}`}>
+          <VisibleText text={key.type} />{" "}
+          <code>
+            <VisibleText text={key.fingerprint} />
+          </code>
+          {key.marker === "cert-authority" && <> {t(`${P}.authority`)}</>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 /** Properties of {@link SshKeys}. */
 interface SshKeysProps extends BlockProps {
   /** The Deploy keys heading, focused after a key is replaced. */
@@ -159,24 +192,24 @@ function SshKeys({
 }: SshKeysProps): JSX.Element {
   const { t } = useTranslation();
   const hostKeys = repo.host_keys ?? [];
+  // A revoked key is refused even where the text also names it plainly: ssh reads @revoked first.
+  const revoked = hostKeys.filter((key) => key.marker === "revoked");
+  const refused = new Set(revoked.map((key) => key.fingerprint));
+  const trusted = hostKeys.filter((key) => !refused.has(key.fingerprint));
   const keyed = new Set(repo.deploy_keys.map((key) => key.environment));
   return (
     <>
       <h3>{t(`${P}.hostKeys`)}</h3>
-      {hostKeys.length === 0 ? (
+      {trusted.length === 0 ? (
         <p>{t(`${P}.noHostKey`)}</p>
       ) : (
-        <ul className="repository-keys">
-          {hostKeys.map((key) => (
-            <li key={`${key.type} ${key.fingerprint}`}>
-              <VisibleText text={key.type} />{" "}
-              <code>
-                <VisibleText text={key.fingerprint} />
-              </code>
-              {key.marker != null && <> {t(`${P}.markers.${key.marker}`)}</>}
-            </li>
-          ))}
-        </ul>
+        <HostKeyList keys={trusted} label={t(`${P}.hostKeys`)} />
+      )}
+      {revoked.length > 0 && (
+        <>
+          <p>{t(`${P}.revokedNote`)}</p>
+          <HostKeyList keys={revoked} label={t(`${P}.revokedKeys`)} />
+        </>
       )}
       <h3 ref={keysHeading} tabIndex={-1}>
         {t(`${P}.deployKeys`)}

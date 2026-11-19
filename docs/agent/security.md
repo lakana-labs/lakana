@@ -6084,11 +6084,14 @@ fuller text of each part where it already lives.
     `test_whoami_flags.py`, `test_admin_only_call_sites.py` (`_EXEMPT`).
   - **Host keys are trusted only by ticking fetched keys.** Edit never offers a text field for
     `ssh_known_hosts`: **Fetch host keys again** runs a worker's `host_keys` check and only the
-    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` gives each key's type (read from
-    the key's blob, not the line's word), fingerprint and marker (`@cert-authority`, which trusts
-    every host certificate it signed, or `@revoked`, which ssh refuses), so the browser hashes
-    nothing and the page never shows a revoked or authority key as a plain trusted host key
-    (`known_host_keys`; a line with an unknown marker is skipped, as ssh skips it). Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
+    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` lists every key the text
+    names with its line's type word, its fingerprint and its marker (`@cert-authority`, which
+    trusts every host certificate it signed, or `@revoked`, which ssh refuses), so the browser
+    hashes nothing; the page lists revoked keys apart and never as trusted. `known_host_keys`
+    skips the lines OpenSSH skips: an unknown marker, a key that names an empty type, or a type
+    word the key contradicts (`rsa-sha2-256` and `rsa-sha2-512` name an `ssh-rsa` key). The
+    audit log's fingerprints (`known_hosts_fingerprints`) read the same lines but count every
+    base64 key. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
     ticked, never typed`), `test_repositories.py`, `test_repository_probes.py`.
   - **A replaced deploy key's private half never leaves the server.** Replace key and Make the
     missing keys call `POST /api/v1/repositories/{name}/deploy-key` through `guarded` (step-up

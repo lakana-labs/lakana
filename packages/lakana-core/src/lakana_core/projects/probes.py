@@ -142,6 +142,9 @@ HostKeyMarker = Literal["cert-authority", "revoked"]
 
 _MARKERS: dict[str, HostKeyMarker] = {"cert-authority": "cert-authority", "revoked": "revoked"}
 
+_KEY_TYPES_OF_WORD = {"rsa-sha2-256": "ssh-rsa", "rsa-sha2-512": "ssh-rsa"}
+"""The signature names OpenSSH accepts as a known_hosts line's word for an ssh-rsa key."""
+
 
 @dataclass(frozen=True)
 class KnownHostKey:
@@ -150,7 +153,7 @@ class KnownHostKey:
     Parameters
     ----------
     type
-        The key type its blob names, such as ``ssh-ed25519``.
+        The key type its line names, such as ``ssh-ed25519``; the key itself names the same.
     fingerprint
         Its fingerprint (`key_fingerprint`), ``SHA256:`` and the digest.
     marker
@@ -163,8 +166,8 @@ class KnownHostKey:
     marker: HostKeyMarker | None = None
 
 
-def _known_lines(text: str) -> list[tuple[str | None, bytes]]:
-    """Read the marker and the key blob of each line of a known_hosts text.
+def _known_lines(text: str) -> list[tuple[str | None, str, bytes]]:
+    """Read the marker, the type word and the key blob of each line of a known_hosts text.
 
     A line is ``[@marker] <hosts> <type> <base64> [comment]``; blank lines and comments are
     skipped, and so is a line whose key is not base64 (ssh skips it too).
@@ -177,9 +180,9 @@ def _known_lines(text: str) -> list[tuple[str | None, bytes]]:
     Returns
     -------
     list of tuple
-        Each line's marker without its ``@`` (or `None`) and its decoded key.
+        Each line's marker without its ``@`` (or `None`), its type word and its decoded key.
     """
-    found: list[tuple[str | None, bytes]] = []
+    found: list[tuple[str | None, str, bytes]] = []
     for line in text.splitlines():
         fields = line.split()
         marker = None
@@ -188,7 +191,7 @@ def _known_lines(text: str) -> list[tuple[str | None, bytes]]:
         if len(fields) < 3 or fields[0].startswith("#"):
             continue
         try:
-            found.append((marker, base64.b64decode(fields[2], validate=True)))
+            found.append((marker, fields[1], base64.b64decode(fields[2], validate=True)))
         except ValueError:
             continue
     return found
@@ -197,8 +200,10 @@ def _known_lines(text: str) -> list[tuple[str | None, bytes]]:
 def known_host_keys(text: str) -> list[KnownHostKey]:
     """Read every key of a known_hosts text with its type, its marker and its fingerprint.
 
-    The type is the one the key's blob names, not the line's own word. A line with a marker
-    ssh does not know, or whose blob names no type, is skipped, as ssh skips it.
+    The type is the line's own word, as OpenSSH reads it. A line is skipped, as OpenSSH skips
+    it, when its marker is one ssh does not know, when its key names an empty type, or when
+    that type is not the one the word names (``rsa-sha2-256`` and ``rsa-sha2-512`` name an
+    ``ssh-rsa`` key).
 
     Parameters
     ----------
@@ -211,12 +216,13 @@ def known_host_keys(text: str) -> list[KnownHostKey]:
         The distinct keys, sorted by type, then fingerprint, then marker.
     """
     found: set[KnownHostKey] = set()
-    for marker, blob in _known_lines(text):
-        key_type = _blob_type(blob)
+    for marker, word, blob in _known_lines(text):
         known = None if marker is None else _MARKERS.get(marker)
-        if key_type is None or (marker is not None and known is None):
+        if marker is not None and known is None:
             continue
-        found.add(KnownHostKey(type=key_type, fingerprint=key_fingerprint(blob), marker=known))
+        if not _blob_type(blob) or _blob_type(blob) != _KEY_TYPES_OF_WORD.get(word, word):
+            continue
+        found.add(KnownHostKey(type=word, fingerprint=key_fingerprint(blob), marker=known))
     return sorted(found, key=lambda key: (key.type, key.fingerprint, key.marker or ""))
 
 
@@ -234,7 +240,7 @@ def known_hosts_fingerprints(text: str) -> list[str]:
     list of str
         The distinct fingerprints (`key_fingerprint`), sorted.
     """
-    return sorted({key_fingerprint(blob) for _, blob in _known_lines(text)})
+    return sorted({key_fingerprint(blob) for _, _, blob in _known_lines(text)})
 
 
 def _blob_type(blob: bytes) -> str | None:

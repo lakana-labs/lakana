@@ -104,8 +104,8 @@ interface RepositoryDeployKeyOut {
   readonly fingerprint: string;
 }
 
-/** A host key a repository trusts, by type and fingerprint. */
-interface TrustedHostKeyOut {
+/** A key a repository's known_hosts names, by type, fingerprint and marker. */
+export interface TrustedHostKeyOut {
   /** The key type, such as `ssh-ed25519`. */
   readonly type: string;
   /** `SHA256:…`, to compare with the host's published fingerprints. */

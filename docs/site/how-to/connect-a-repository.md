@@ -63,8 +63,8 @@ on the instance, or `READ_ENVIRONMENT` in any environment. Each row names the UR
 (SSH, HTTPS or a local folder), the credential and the default ref, and opens the repository's
 page. The page shows the URL (with **Open in your git host ›** for GitHub, GitLab and
 Bitbucket), the credential: an HTTPS repository's secret and username, an SSH repository's
-trusted host keys by type and fingerprint (a certificate authority's key or a revoked key
-says so) and its public deploy keys of the environments you
+trusted host keys by type and fingerprint (a certificate authority's key says so, and
+revoked keys are listed apart, since ssh refuses them) and its public deploy keys of the environments you
 read, each with **Copy public key**. Someone who only reads sees this read-only, as the
 command line answers them (`lakana repo show NAME`); no private key and no secret's value is
 ever shown.

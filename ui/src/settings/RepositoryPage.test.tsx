@@ -156,21 +156,35 @@ describe("RepositoryPage", () => {
     expect(screen.getByRole("button", { name: "Edit repository analytics" })).toBeInTheDocument();
   });
 
-  it("names a certificate authority and a revoked key", async () => {
+  it("names a certificate authority, and lists revoked keys apart", async () => {
     renderPage({
       ...ANALYTICS,
       host_keys: [
         { type: "ssh-ed25519", fingerprint: "SHA256:authority", marker: "cert-authority" },
+        { type: "ssh-ed25519", fingerprint: "SHA256:old", marker: null },
         { type: "ssh-ed25519", fingerprint: "SHA256:old", marker: "revoked" },
       ],
     });
 
-    expect(await screen.findByText("SHA256:authority")).toBeInTheDocument();
-    const keys = screen.getByText("SHA256:authority").closest("ul");
-    expect(keys).toHaveTextContent(
+    const authority = await screen.findByText("SHA256:authority");
+    expect(authority.closest("li")).toHaveTextContent(
       "certificate authority: trusts every host certificate it signed",
     );
-    expect(keys).toHaveTextContent("revoked: ssh refuses it");
+    const revoked = screen.getByRole("list", { name: "Revoked keys" });
+    expect(within(revoked).getByText("SHA256:old")).toBeInTheDocument();
+    expect(screen.getAllByText("SHA256:old")).toHaveLength(1);
+  });
+
+  it("says ssh trusts no key when every key is revoked", async () => {
+    renderPage({
+      ...ANALYTICS,
+      host_keys: [{ type: "ssh-ed25519", fingerprint: "SHA256:old", marker: "revoked" }],
+    });
+
+    expect(
+      await screen.findByText("No host key is trusted yet; deploys over SSH are refused."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Revoked keys" })).toHaveTextContent("SHA256:old");
   });
 
   it("says when no host key is trusted", async () => {
