@@ -1,19 +1,23 @@
 /**
- * Settings → Sign-in: how long a browser session lasts, edited in place.
+ * Settings → Sign-in: how long a browser session lasts, edited in place in its own section, so
+ * that company login can later be a section beside it.
  *
  * @packageDocumentation
  */
 import type { TFunction } from "i18next";
-import { type JSX, useState } from "react";
+import { type JSX, useId, useState } from "react";
 import { Form, Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
-import { changeSignInSettings, getSignInSettings, type SignInSettingsOut } from "../api";
+import { getSignInSettings, type SignInSettingsOut } from "../api";
+import { saveSignInSettings } from "../api/signInAdmin";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
 import { useAttempt } from "../sign-in/Attempt";
 import { SettingsFrame } from "./SettingsFrame";
 import "./settingsStrings";
+import "./signInStrings";
 import { PendingButton } from "../shell/PendingButton";
 
 const HOUR = 60;
@@ -66,7 +70,8 @@ interface LengthsFormProps {
 
 /**
  * The two lengths and Save. A value outside its bounds is refused before anything is sent, with
- * the bounds named.
+ * the bounds named; Save asks for the passkey touch first when the session's is stale, and a
+ * cancelled touch saves nothing and keeps what was typed.
  *
  * @param props - The settings as read.
  * @param props.current - The settings.
@@ -112,7 +117,7 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
           return;
         }
         attempt.run(async () => {
-          const changed = await changeSignInSettings({
+          const changed = await saveSignInSettings({
             idle_timeout_minutes: idleMinutes as number,
             absolute_lifetime_minutes: absoluteMinutes as number,
           });
@@ -156,6 +161,12 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
       {error !== null && (
         <p className="step-error" role="alert">
           {error}
+          {problem === null && attempt.addPasskey && (
+            <>
+              {" "}
+              <Link to="/account">{t("passkey.add")}</Link>
+            </>
+          )}
         </p>
       )}
     </Form>
@@ -163,17 +174,21 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
 }
 
 /**
- * Renders Settings → Sign-in: the session lengths.
+ * Renders Settings → Sign-in: the purpose, then the session lengths in a section of their own.
  *
  * @returns The place.
  */
 export function SignInSettings(): JSX.Element {
   const { t } = useTranslation();
   const settings = useResource(getSignInSettings);
+  const lengthsHeading = useId();
   return (
     <SettingsFrame title={t("settings.places.signIn")}>
       <p className="page-purpose">{t("settings.signIn.intro")}</p>
-      <Loaded resource={settings}>{(current) => <LengthsForm current={current} />}</Loaded>
+      <section className="flat-panel settings-panel" aria-labelledby={lengthsHeading}>
+        <h2 id={lengthsHeading}>{t("settings.signIn.lengths")}</h2>
+        <Loaded resource={settings}>{(current) => <LengthsForm current={current} />}</Loaded>
+      </section>
     </SettingsFrame>
   );
 }

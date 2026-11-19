@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  createInvite,
-  createRecoveryLink,
   getPrincipal,
   isAdministrator,
   listInvites,
@@ -46,16 +44,6 @@ function permissions(roles: readonly (string | null)[]): unknown {
 }
 
 describe("access", () => {
-  it("creates an invite with its display name, or without one", async () => {
-    const server = fakeServer({ "POST /api/v1/invites": { status: 201, body: INVITE } });
-
-    expect(await createInvite("kim", "Kim Lee")).toEqual(INVITE);
-    await createInvite("kim", "  ");
-
-    expect(server.sent[0]?.body).toEqual({ name: "kim", display_name: "Kim Lee" });
-    expect(server.sent[1]?.body).toEqual({ name: "kim", display_name: null });
-  });
-
   it("lists and withdraws invites", async () => {
     const server = fakeServer({
       "GET /api/v1/invites": { status: 200, body: [INVITE] },
@@ -68,19 +56,16 @@ describe("access", () => {
     expect(server.sent[1]).toMatchObject({ method: "DELETE", path: "/api/v1/invites/i%201" });
   });
 
-  it("issues, lists and withdraws recovery links", async () => {
+  it("lists and withdraws recovery links", async () => {
     const server = fakeServer({
-      "POST /api/v1/principals/a b/recovery-link": { status: 201, body: INVITE },
       "GET /api/v1/recovery-links": { status: 200, body: [] },
       "DELETE /api/v1/recovery-links/r 1": { status: 204 },
     });
 
-    await createRecoveryLink("a b");
     expect(await listRecoveryLinks()).toEqual([]);
     await withdrawRecoveryLink("r 1");
 
     expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([
-      "POST /api/v1/principals/a%20b/recovery-link",
       "GET /api/v1/recovery-links",
       "DELETE /api/v1/recovery-links/r%201",
     ]);

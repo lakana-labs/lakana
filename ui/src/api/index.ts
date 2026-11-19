@@ -12,8 +12,6 @@ import { stepUp } from "./passkeys";
 setStepUp(stepUp);
 
 export {
-  createInvite,
-  createRecoveryLink,
   getPrincipal,
   isAdministrator,
   listInvites,
@@ -87,7 +85,7 @@ export type {
   RepositoryProbeOut,
   TrustedHostKeyOut,
 } from "./repositories";
-export { changeSignInSettings, getSignInSettings } from "./settings";
+export { getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
 export {
   ACTIVE_STATUSES,

@@ -993,7 +993,7 @@ export function consoleErrors(page: Page): string[] {
  * @param target - The element.
  */
 export async function tabTo(page: Page, target: Locator): Promise<void> {
-  // Enough to come round the page once: Settings lists fifteen places beside the sidebar.
+  // Enough to come round the page once: Settings lists sixteen places beside the sidebar.
   for (let step = 0; step < 60; step += 1) {
     if (await target.evaluate((node) => node === document.activeElement)) {
       return;

@@ -22,9 +22,11 @@ import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
+import "../settings/signInStrings";
 
 /**
- * Renders the open recovery links; each row opens its person, and is withdrawn in place.
+ * Renders the open recovery links in their own scrolling region, names kept whole; each row opens
+ * its person, and is withdrawn in place.
  *
  * @returns The place.
  */
@@ -57,49 +59,58 @@ export function RecoveryLinksPage(): JSX.Element {
           open.length === 0 ? (
             <p className="empty">{t("access.recovery.none")}</p>
           ) : (
-            <table className="list">
-              <ListHead
-                columns={[t("list.name"), t("list.expires")]}
-                hidden={[t("list.actions"), t("list.open")]}
-              />
-              <tbody>
-                {open.map((link) => (
-                  <tr key={link.id}>
-                    <td>
-                      <Link className="row-name" to={personPath(link.name)}>
-                        <VisibleText text={link.name} />
-                      </Link>
-                    </td>
-                    <td>{when(link.expires_at)}</td>
-                    <td>
-                      <PendingButton
-                        className="button"
-                        aria-label={t("access.recovery.withdrawOf", {
-                          name: markedText(link.name),
-                        })}
-                        pending={withdraw.busy && pressed === link.id}
-                        isDisabled={withdraw.busy && pressed !== link.id}
-                        onPress={() => {
-                          setPressed(link.id);
-                          withdraw.run(async () => {
-                            await withdrawRecoveryLink(link.id);
-                            armFocus();
-                            links.reload();
-                          });
-                        }}
-                      >
-                        {t("access.withdraw")}
-                      </PendingButton>
-                    </td>
-                    <td>
-                      <span className="chevron" aria-hidden="true">
-                        ›
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div
+              className="list-scroll recovery-scroll"
+              role="region"
+              aria-label={t("settings.signIn.recoveryRegion")}
+              // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+              tabIndex={0}
+            >
+              <table className="list">
+                <ListHead
+                  columns={[t("list.name"), t("list.expires")]}
+                  hidden={[t("list.actions"), t("list.open")]}
+                />
+                <tbody>
+                  {open.map((link) => (
+                    <tr key={link.id}>
+                      <td>
+                        <Link className="row-name" to={personPath(link.name)}>
+                          <VisibleText text={link.name} />
+                        </Link>
+                      </td>
+                      <td>{when(link.expires_at)}</td>
+                      <td>
+                        <PendingButton
+                          className="button"
+                          aria-label={t("access.recovery.withdrawOf", {
+                            name: markedText(link.name),
+                          })}
+                          pending={withdraw.busy && pressed === link.id}
+                          isDisabled={withdraw.busy && pressed !== link.id}
+                          onPress={() => {
+                            setPressed(link.id);
+                            withdraw.run(async () => {
+                              await withdrawRecoveryLink(link.id);
+                              armFocus();
+                              links.reload();
+                            });
+                          }}
+                        >
+                          {t("access.withdraw")}
+                        </PendingButton>
+                      </td>
+                      <td>
+                        <span className="chevron" aria-hidden="true">
+                          ›
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )
         }
       </Loaded>

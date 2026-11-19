@@ -857,3 +857,186 @@ export async function stubPolicies(page: Page, options: PoliciesStubOptions = {}
     false,
   );
 }
+
+/** A CA bundle path of over 300 characters: its value must wrap inside its cell. */
+export const CA_BUNDLE = `/etc/ssl/${"certs/".repeat(48)}ca.pem`;
+
+/** The link of a new invite, shown once. */
+export const INVITE_URL = "http://localhost:4173/sign-in#l=pub-e2e&s=sec-e2e-shown-once";
+
+/**
+ * The paths the Sign-in and Configuration stubs answer, beside those of `session.ts`, and the
+ * step-up pair that `stubStepUpCeremony` (`manage.ts`) answers.
+ */
+export const SIGN_IN_STUBBED = [
+  "/api/v1/settings/configuration",
+  "/api/v1/sign-in/step-up/options",
+  "/api/v1/sign-in/step-up",
+  "/api/v1/principals/kim.schulz",
+  "/api/v1/principals/kim.schulz/recovery-link",
+];
+
+/**
+ * The server's settings as `GET /api/v1/settings/configuration` answers them: a dozen across
+ * three groups and General, with the secrets as the server sends them (no value), a list, an
+ * object, a setting without a value and a long path.
+ */
+export const CONFIGURATION = [
+  { name: "LAKANA_DATABASE__URL", value: null, secret: true, has_value: true, source: "set" },
+  {
+    name: "LAKANA_DATABASE__ECHO",
+    value: false,
+    secret: false,
+    has_value: true,
+    source: "default",
+  },
+  {
+    name: "LAKANA_BOOTSTRAP_ADMIN",
+    value: "ops-admin",
+    secret: false,
+    has_value: true,
+    source: "set",
+  },
+  { name: "LAKANA_SECRETS__MASTER_KEY", value: null, secret: true, has_value: true, source: "set" },
+  {
+    name: "LAKANA_RUN__LEASE_SECONDS",
+    value: 60,
+    secret: false,
+    has_value: true,
+    source: "default",
+  },
+  {
+    name: "LAKANA_RUN__HTTPS_PROXY",
+    value: null,
+    secret: true,
+    has_value: false,
+    source: "default",
+  },
+  { name: "LAKANA_RUN__NO_PROXY", value: null, secret: false, has_value: false, source: "default" },
+  {
+    name: "LAKANA_RUN__CA_BUNDLE",
+    value: CA_BUNDLE,
+    secret: false,
+    has_value: true,
+    source: "set",
+  },
+  {
+    name: "LAKANA_RUN__INGESTION_ROOTS",
+    value: { raw: "/srv/lakana/raw", landing: "/srv/lakana/landing" },
+    secret: false,
+    has_value: true,
+    source: "set",
+  },
+  { name: "LAKANA_CI_OIDC__PROXY", value: null, secret: true, has_value: false, source: "default" },
+  {
+    name: "LAKANA_CI_OIDC__ALGORITHMS",
+    value: ["RS256"],
+    secret: false,
+    has_value: true,
+    source: "default",
+  },
+  { name: "LAKANA_PORT", value: 8000, secret: false, has_value: true, source: "set" },
+];
+
+/** One open invite and one open recovery link, each with a long name (a 300-character name). */
+const OPEN_INVITE = {
+  id: "i-1",
+  name: LONG_NAME,
+  display_name: "Maria Lopez",
+  created_at: "2026-11-18T09:00:00Z",
+  expires_at: "2026-11-25T09:00:00Z",
+};
+const OPEN_LINK = {
+  id: "r-1",
+  name: LONG_NAME,
+  created_at: "2026-11-18T09:00:00Z",
+  expires_at: "2026-11-18T10:00:00Z",
+};
+
+/**
+ * Stubs Settings › Sign-in's writes and lists and Configuration's read, over `signInAsAdmin`'s:
+ * the session lengths saved as sent, an invite and a recovery link for kim.schulz issued and
+ * then listed, and the configuration.
+ *
+ * @param page - The page.
+ */
+export async function stubSignInAndConfiguration(page: Page): Promise<void> {
+  let lengths = {
+    idle_timeout_minutes: 720,
+    absolute_lifetime_minutes: 10080,
+    bounds: {
+      idle_timeout_minutes_min: 15,
+      idle_timeout_minutes_max: 1440,
+      absolute_lifetime_minutes_min: 60,
+      absolute_lifetime_minutes_max: 43200,
+    },
+  };
+  const invites: unknown[] = [OPEN_INVITE];
+  const links: unknown[] = [OPEN_LINK];
+  await page.route("**/api/v1/settings/sign-in", async (route) => {
+    if (route.request().method() === "PATCH") {
+      lengths = { ...lengths, ...(route.request().postDataJSON() as object) };
+    }
+    await route.fulfill({ json: lengths });
+  });
+  await page.route("**/api/v1/invites", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.fulfill({ json: invites });
+      return;
+    }
+    const body = route.request().postDataJSON() as { name: string; display_name: string | null };
+    const invite = {
+      id: "i-2",
+      name: body.name,
+      display_name: body.display_name,
+      created_at: "2026-11-19T09:00:00Z",
+      expires_at: "2026-11-26T09:00:00Z",
+    };
+    invites.push(invite);
+    await route.fulfill({
+      status: 201,
+      json: {
+        id: invite.id,
+        name: invite.name,
+        display_name: invite.display_name,
+        url: INVITE_URL,
+        expires_at: invite.expires_at,
+      },
+    });
+  });
+  await page.route("**/api/v1/recovery-links", (route) => route.fulfill({ json: links }));
+  await page.route("**/api/v1/principals/kim.schulz", (route) =>
+    route.fulfill({
+      json: { name: "kim.schulz", type: "USER", is_active: true, picture: null, held_admin: false },
+    }),
+  );
+  await page.route("**/api/v1/principals/kim.schulz/recovery-link", async (route) => {
+    const link = {
+      id: "r-2",
+      name: "kim.schulz",
+      created_at: "2026-11-19T09:00:00Z",
+      expires_at: "2026-11-19T10:00:00Z",
+    };
+    links.push(link);
+    await route.fulfill({
+      status: 201,
+      json: { id: link.id, name: link.name, url: INVITE_URL, expires_at: link.expires_at },
+    });
+  });
+  await stubConfiguration(page);
+}
+
+/**
+ * Stubs Configuration's read.
+ *
+ * @param page - The page.
+ * @param settings - The settings it answers; {@link CONFIGURATION} by default.
+ */
+export async function stubConfiguration(
+  page: Page,
+  settings: readonly unknown[] = CONFIGURATION,
+): Promise<void> {
+  await page.route("**/api/v1/settings/configuration", (route) =>
+    route.fulfill({ json: settings }),
+  );
+}
