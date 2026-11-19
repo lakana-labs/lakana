@@ -28,7 +28,8 @@ import { markedText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
 import { recogniseHost } from "./hosts";
 import { CheckOutcome, HostKeys, MadeKeys, useCheck } from "./repositoryCheck";
-import "./repositoryStrings";
+import "./repositoryDialogStrings";
+import "./repositoryPageStrings";
 
 const P = "settings.repositoryPages";
 

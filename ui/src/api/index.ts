@@ -163,7 +163,7 @@ export type {
   ArtifactVersionOut,
 } from "./artifacts";
 export { getScheduler, getStatus } from "./status";
-export type { InstanceStatusOut, SchedulerOut, StatusDetailOut, StatusWorkerOut } from "./status";
+export type { InstanceStatusOut, StatusDetailOut, StatusWorkerOut } from "./status";
 export {
   createConnection,
   deleteConnection,

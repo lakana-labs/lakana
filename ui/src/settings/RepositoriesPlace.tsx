@@ -56,6 +56,11 @@ function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element 
     );
   }
   const rows = read.data ?? [];
+  const again = (): Promise<void> => {
+    heading.current?.focus();
+    read.reload();
+    return Promise.resolve();
+  };
   return (
     <ViewList
       pages={{
@@ -63,10 +68,9 @@ function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element 
         error: read.error,
         busy: read.data === undefined && read.error === null,
         hasMore: false,
-        loadMore: () => Promise.resolve(),
+        loadMore: again,
         reload: () => {
-          heading.current?.focus();
-          read.reload();
+          void again();
         },
       }}
       rowCount={rows.length}

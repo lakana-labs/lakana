@@ -37,7 +37,7 @@ import { httpsForm, recogniseHost } from "./hosts";
 import { mayManageRepositories } from "./places";
 import "./repositories.css";
 import { REPOSITORIES_PATH } from "./repositoryPaths";
-import "./repositoryStrings";
+import "./repositoryPageStrings";
 import { RepositoryTestAccess } from "./RepositoryTestAccess";
 import "./settingsStrings";
 import type { RepositoryDialogProps } from "./RepositoryDialogs";
@@ -130,7 +130,7 @@ interface SshKeysProps extends BlockProps {
   /** The Deploy keys heading, focused after a key is replaced. */
   readonly keysHeading: RefObject<HTMLHeadingElement | null>;
   /** The environments whose keys the person may replace or make; none for a reader. */
-  readonly keyEnvironments: readonly string[];
+  readonly keyEnvironments: ReadonlySet<string>;
   /** Opens a dialog. */
   readonly onOpen: (open: Open) => void;
 }
@@ -181,7 +181,7 @@ function SshKeys({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): 
                 <VisibleText text={key.fingerprint} />
               </code>
               <CopyLine text={key.public_key} copyLabel={t(`${P}.copyPublicKey`)} />
-              {keyEnvironments.includes(key.environment) && (
+              {keyEnvironments.has(key.environment) && (
                 <Button
                   className="button"
                   aria-label={t(`${P}.replaceKeyOf`, { environment: markedText(key.environment) })}
@@ -196,7 +196,7 @@ function SshKeys({ repo, keysHeading, keyEnvironments, onOpen }: SshKeysProps): 
           ))}
         </ul>
       )}
-      {keyEnvironments.some((environment) => !keyed.has(environment)) && (
+      {[...keyEnvironments].some((environment) => !keyed.has(environment)) && (
         <Button
           className="button"
           onPress={() => {
@@ -305,7 +305,7 @@ export function RepositoryPage({ name }: RepositoryPageProps): JSX.Element {
   const { target: keysHeading, arm: armKeys } = useFocusAfter<HTMLHeadingElement>(repo);
   const { target: editButton, arm: armEdit } = useFocusAfter<HTMLButtonElement>(repo);
   const [open, setOpen] = useState<Open | null>(null);
-  const keyEnvironments = manages ? (viewer.secretEnvironments ?? []) : [];
+  const keyEnvironments = new Set(manages ? viewer.secretEnvironments : null);
   const close = (): void => {
     setOpen(null);
   };

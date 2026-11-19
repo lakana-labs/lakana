@@ -15,7 +15,7 @@ import { readRemembered, writeRemembered } from "../shell/remembered";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { CheckOutcome, useCheck } from "./repositoryCheck";
-import "./repositoryStrings";
+import "./repositoryPageStrings";
 
 /** Where the last environment chosen for Test access is remembered. */
 const TEST_ENVIRONMENT_KEY = "lakana.repositories.testEnvironment";

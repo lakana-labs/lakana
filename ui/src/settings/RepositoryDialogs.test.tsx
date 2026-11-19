@@ -166,6 +166,8 @@ describe("RepositoryDialogs", () => {
       url: "git@github.com:acme/analytics.git",
     });
     await user.click(tick);
+    await user.click(tick);
+    await user.click(tick);
     await user.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
@@ -186,13 +188,16 @@ describe("RepositoryDialogs", () => {
       created_at: "2026-11-18T08:00:00Z",
       finished_at: "2026-11-18T08:00:01Z",
     };
-    const { server, user } = renderPage({
-      "POST /api/v1/repository-probes": { status: 202, body: found },
-      "PATCH /api/v1/repositories/analytics": {
-        status: 422,
-        body: { detail: "nothing to change" },
+    const { server, user } = renderPage(
+      {
+        "POST /api/v1/repository-probes": { status: 202, body: found },
+        "PATCH /api/v1/repositories/analytics": {
+          status: 422,
+          body: { detail: "nothing to change" },
+        },
       },
-    });
+      { ...ANALYTICS, credential_secret: null, default_ref: null },
+    );
     await user.click(await screen.findByRole("button", { name: "Edit repository analytics" }));
     const dialog = await screen.findByRole("dialog");
     await user.click(within(dialog).getByRole("button", { name: "Fetch host keys again" }));
@@ -353,5 +358,18 @@ describe("RepositoryDialogs", () => {
       "prod still deploys analytics: undeploy it there first",
     );
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("Cancel closes a dialog and changes nothing", async () => {
+    const { server, user } = renderPage({});
+    await user.click(await screen.findByRole("button", { name: "Delete repository analytics" }));
+    const dialog = await screen.findByRole("dialog");
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+    expect(server.sent.filter((request) => request.method !== "GET")).toEqual([]);
   });
 });
