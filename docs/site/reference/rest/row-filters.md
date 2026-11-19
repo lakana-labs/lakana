@@ -64,19 +64,21 @@ Answer fields: `RowFilterOut`
 
 ## `GET /api/v1/row-filters`
 
-List the row filters of a principal, group or table
+List row filters
 
-Give exactly one of `principal_name`, `group_name` or `environment` with `namespace` and `table`; a row filter always belongs to one table, so there is no list of all of them. Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given and 422 when none of those combinations is given.
+Lists the active row filters, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a row filter is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
 
 Parameters:
 
 | Name | In | Required | Type | Description |
 |---|---|---|---|---|
-| `principal_name` | query | no | text or null | List this principal's own direct filters. |
-| `group_name` | query | no | text or null | List this group's own direct filters. |
-| `environment` | query | no | text or null | The environment to match, for a table-scoped listing. |
-| `namespace` | query | no | text or null | The dot-joined namespace to match, for a table-scoped listing. |
-| `table` | query | no | text or null | The table to match, for a table-scoped listing. |
+| `principal_name` | query | no | text or null | Only the row filters made to this principal. |
+| `group_name` | query | no | text or null | Only the row filters made to this group. |
+| `environment` | query | no | text or null | Only the row filters in this environment. |
+| `namespace` | query | no | text or null | Only the row filters on tables of this dot-joined namespace. |
+| `table` | query | no | text or null | Only the row filters on this table. |
+| `limit` | query | no | whole number | Most row filters returned (1 to 200). |
+| `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same filters. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

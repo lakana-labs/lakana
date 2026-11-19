@@ -5,11 +5,10 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
+from lakana_core.auth import AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.models import AuditEventType, Group, Principal, RowFilter
@@ -94,7 +93,7 @@ def _check_columns_exist(
     return description.schema_id, binding_for(description, wanted)
 
 
-class RowFilterService(PolicyShowing):
+class RowFilterService(PolicyShowing[RowFilter]):
     """Create, list, and revoke row filters.
 
     Parameters
@@ -110,60 +109,15 @@ class RowFilterService(PolicyShowing):
         table does not have is refused whoever calls it. `CatalogService` is one.
     """
 
+    _model = RowFilter
+    _list_kind = "row-filters"
+
     def __init__(
         self, session: Session, authz: AuthorizationService, catalog: ColumnSource
     ) -> None:
         self._session = session
         self._authz = authz
         self._catalog = catalog
-
-    def _get_principal(self, name: str) -> Principal:
-        """Look up a principal by name.
-
-        Parameters
-        ----------
-        name
-            Principal name.
-
-        Returns
-        -------
-        Principal
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has that name.
-        """
-        principal = self._session.execute(
-            select(Principal).where(Principal.name == name)
-        ).scalar_one_or_none()
-        if principal is None:
-            raise NotFoundError(f"No principal named {name!r}.")
-        return principal
-
-    def _get_group(self, name: str) -> Group:
-        """Look up a group by name.
-
-        Parameters
-        ----------
-        name
-            Group name.
-
-        Returns
-        -------
-        Group
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no group has that name.
-        """
-        group = self._session.execute(select(Group).where(Group.name == name)).scalar_one_or_none()
-        if group is None:
-            raise NotFoundError(f"No group named {name!r}.")
-        return group
 
     def _subject_name(self, row: RowFilter) -> str:
         """Resolve a row filter's own subject (principal or group) to its name.
@@ -343,114 +297,6 @@ class RowFilterService(PolicyShowing):
         if commit:
             self._session.commit()
         return row
-
-    def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[RowFilter]:
-        """List a principal's own active, direct row filters.
-
-        Parameters
-        ----------
-        p
-            The acting principal.
-        principal_name
-            The principal whose filters to list.
-
-        Returns
-        -------
-        list of RowFilter
-            Every active filter made directly to this principal.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has `principal_name`.
-        PermissionDenied
-            If the acting principal may not manage policies.
-        """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        principal = self._get_principal(principal_name)
-        return list(
-            self._session.execute(
-                select(RowFilter).where(
-                    RowFilter.principal_id == principal.id, RowFilter.revoked_at.is_(None)
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-    def list_for_group(self, p: PrincipalRef, group_name: str) -> list[RowFilter]:
-        """List a group's active, direct row filters.
-
-        Parameters
-        ----------
-        p
-            The acting principal.
-        group_name
-            The group whose filters to list.
-
-        Returns
-        -------
-        list of RowFilter
-            Every active filter made directly to this group.
-
-        Raises
-        ------
-        NotFoundError
-            If no group has `group_name`.
-        PermissionDenied
-            If the acting principal may not manage policies.
-        """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        group = self._get_group(group_name)
-        return list(
-            self._session.execute(
-                select(RowFilter).where(
-                    RowFilter.group_id == group.id, RowFilter.revoked_at.is_(None)
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-    def list_for_table(
-        self, p: PrincipalRef, *, environment: str, namespace: str, table: str
-    ) -> list[RowFilter]:
-        """List every active row filter on a specific table — an exact match.
-
-        Parameters
-        ----------
-        p
-            The acting principal.
-        environment
-            The environment to match.
-        namespace
-            The namespace (unit-separator-joined) to match.
-        table
-            The table to match.
-
-        Returns
-        -------
-        list of RowFilter
-            Every active filter whose stored table exactly matches.
-
-        Raises
-        ------
-        PermissionDenied
-            If the acting principal may not manage policies.
-        """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        return list(
-            self._session.execute(
-                select(RowFilter).where(
-                    RowFilter.environment == environment,
-                    RowFilter.namespace == namespace,
-                    RowFilter.table == table,
-                    RowFilter.revoked_at.is_(None),
-                )
-            )
-            .scalars()
-            .all()
-        )
 
     def revoke(self, p: PrincipalRef, row_filter_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a row filter.

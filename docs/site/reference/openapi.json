@@ -13708,8 +13708,8 @@
         "tags": [
           "row-filters"
         ],
-        "summary": "List the row filters of a principal, group or table",
-        "description": "Give exactly one of `principal_name`, `group_name` or `environment` with `namespace` and `table`; a row filter always belongs to one table, so there is no list of all of them. Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given and 422 when none of those combinations is given.",
+        "summary": "List row filters",
+        "description": "Lists the active row filters, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a row filter is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
         "operationId": "list_row_filters_api_v1_row_filters_get",
         "parameters": [
           {
@@ -13719,7 +13719,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -13727,7 +13728,7 @@
               ],
               "title": "Principal Name"
             },
-            "description": "List this principal's own direct filters."
+            "description": "Only the row filters made to this principal."
           },
           {
             "name": "group_name",
@@ -13736,7 +13737,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -13744,7 +13746,7 @@
               ],
               "title": "Group Name"
             },
-            "description": "List this group's own direct filters."
+            "description": "Only the row filters made to this group."
           },
           {
             "name": "environment",
@@ -13753,7 +13755,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -13761,7 +13764,7 @@
               ],
               "title": "Environment"
             },
-            "description": "The environment to match, for a table-scoped listing."
+            "description": "Only the row filters in this environment."
           },
           {
             "name": "namespace",
@@ -13770,7 +13773,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 1024
                 },
                 {
                   "type": "null"
@@ -13778,7 +13782,7 @@
               ],
               "title": "Namespace"
             },
-            "description": "The dot-joined namespace to match, for a table-scoped listing."
+            "description": "Only the row filters on tables of this dot-joined namespace."
           },
           {
             "name": "table",
@@ -13787,7 +13791,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -13795,7 +13800,38 @@
               ],
               "title": "Table"
             },
-            "description": "The table to match, for a table-scoped listing."
+            "description": "Only the row filters on this table."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most row filters returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same filters."
           },
           {
             "name": "authorization",
@@ -14137,8 +14173,8 @@
         "tags": [
           "column-masks"
         ],
-        "summary": "List the column masks of a principal, group or table",
-        "description": "Give exactly one of `principal_name`, `group_name` or `environment` with `namespace` and `table`; a column mask always belongs to one table, so there is no list of all of them. Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given and 422 when none of those combinations is given.",
+        "summary": "List column masks",
+        "description": "Lists the active column masks, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a column mask is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
         "operationId": "list_column_masks_api_v1_column_masks_get",
         "parameters": [
           {
@@ -14148,7 +14184,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -14156,7 +14193,7 @@
               ],
               "title": "Principal Name"
             },
-            "description": "List this principal's own direct masks."
+            "description": "Only the column masks made to this principal."
           },
           {
             "name": "group_name",
@@ -14165,7 +14202,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -14173,7 +14211,7 @@
               ],
               "title": "Group Name"
             },
-            "description": "List this group's own direct masks."
+            "description": "Only the column masks made to this group."
           },
           {
             "name": "environment",
@@ -14182,7 +14220,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -14190,7 +14229,7 @@
               ],
               "title": "Environment"
             },
-            "description": "The environment to match, for a table-scoped listing."
+            "description": "Only the column masks in this environment."
           },
           {
             "name": "namespace",
@@ -14199,7 +14238,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 1024
                 },
                 {
                   "type": "null"
@@ -14207,7 +14247,7 @@
               ],
               "title": "Namespace"
             },
-            "description": "The dot-joined namespace to match, for a table-scoped listing."
+            "description": "Only the column masks on tables of this dot-joined namespace."
           },
           {
             "name": "table",
@@ -14216,7 +14256,8 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "string",
+                  "maxLength": 255
                 },
                 {
                   "type": "null"
@@ -14224,7 +14265,38 @@
               ],
               "title": "Table"
             },
-            "description": "The table to match, for a table-scoped listing."
+            "description": "Only the column masks on this table."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most column masks returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same filters."
           },
           {
             "name": "authorization",

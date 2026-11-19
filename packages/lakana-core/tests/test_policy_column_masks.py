@@ -318,7 +318,7 @@ def test_create_then_list_for_principal(session: Session) -> None:
         column="ssn",
         expression="NULL",
     )
-    listed = service.list_for_principal(admin, "alice")
+    listed = service.list_page(admin, principal_name="alice").items
     assert [m.id for m in listed] == [created.id]
     # The fake catalog has no table metadata to rename from: shown as written, bound.
     assert service.shown(admin, listed) == {created.id: ShownPolicy("NULL", "ssn", True)}
@@ -342,7 +342,7 @@ def test_create_then_list_for_group(session: Session) -> None:
         column="ssn",
         expression="NULL",
     )
-    listed = service.list_for_group(admin, "analysts")
+    listed = service.list_page(admin, group_name="analysts").items
     assert [m.id for m in listed] == [created.id]
 
 
@@ -374,7 +374,7 @@ def test_list_for_principal_excludes_a_different_principals_masks(session: Sessi
         expression="NULL",
     )
 
-    listed = service.list_for_principal(admin, "alice")
+    listed = service.list_page(admin, principal_name="alice").items
     assert [m.id for m in listed] == [created.id]
 
 
@@ -406,7 +406,7 @@ def test_list_for_group_excludes_a_different_groups_masks(session: Session) -> N
         expression="NULL",
     )
 
-    listed = service.list_for_group(admin, "analysts")
+    listed = service.list_page(admin, group_name="analysts").items
     assert [m.id for m in listed] == [created.id]
 
 
@@ -429,7 +429,7 @@ def test_list_for_group_excludes_a_revoked_mask(session: Session) -> None:
     )
     service.revoke(admin, created.id)
 
-    assert service.list_for_group(admin, "analysts") == []
+    assert service.list_page(admin, group_name="analysts").items == []
 
 
 def test_list_for_table_is_an_exact_match(session: Session) -> None:
@@ -450,15 +450,18 @@ def test_list_for_table_is_an_exact_match(session: Session) -> None:
         expression="NULL",
     )
 
-    matching = service.list_for_table(admin, environment="dev", namespace="gold", table="customers")
+    matching = service.list_page(
+        admin, environment="dev", namespace="gold", table="customers"
+    ).items
     assert [m.id for m in matching] == [created.id]
-    assert service.list_for_table(admin, environment="dev", namespace="gold", table="orders") == []
+    assert service.list_page(admin, environment="dev", namespace="gold", table="orders").items == []
     assert (
-        service.list_for_table(admin, environment="dev", namespace="silver", table="customers")
+        service.list_page(admin, environment="dev", namespace="silver", table="customers").items
         == []
     )
     assert (
-        service.list_for_table(admin, environment="prod", namespace="gold", table="customers") == []
+        service.list_page(admin, environment="prod", namespace="gold", table="customers").items
+        == []
     )
 
 
@@ -482,7 +485,7 @@ def test_list_for_table_excludes_a_revoked_mask(session: Session) -> None:
     service.revoke(admin, created.id)
 
     assert (
-        service.list_for_table(admin, environment="dev", namespace="gold", table="customers") == []
+        service.list_page(admin, environment="dev", namespace="gold", table="customers").items == []
     )
 
 
@@ -510,7 +513,7 @@ def test_revoke_sets_revoked_at_and_revoked_by(session: Session) -> None:
     assert row is not None
     assert row.revoked_at is not None
     assert row.revoked_by == admin.id
-    assert service.list_for_principal(admin, "alice") == []
+    assert service.list_page(admin, principal_name="alice").items == []
 
 
 def test_revoke_raises_not_found_for_an_unknown_id(session: Session) -> None:
@@ -544,7 +547,7 @@ def test_list_for_principal_authorizes_manage_policy_at_instance_scope(session: 
     service = ColumnMaskService(session, recorder, FakeColumnCatalog())
     admin = _admin()
     with pytest.raises(NotFoundError):
-        service.list_for_principal(admin, "nobody")
+        service.list_page(admin, principal_name="nobody")
     assert recorder.calls == [(admin, Action.MANAGE_POLICY, Securable.instance_scope())]
 
 
@@ -554,7 +557,7 @@ def test_list_for_group_authorizes_manage_policy_at_instance_scope(session: Sess
     service = ColumnMaskService(session, recorder, FakeColumnCatalog())
     admin = _admin()
     with pytest.raises(NotFoundError):
-        service.list_for_group(admin, "nobody")
+        service.list_page(admin, group_name="nobody")
     assert recorder.calls == [(admin, Action.MANAGE_POLICY, Securable.instance_scope())]
 
 
@@ -563,7 +566,7 @@ def test_list_for_table_authorizes_manage_policy_at_instance_scope(session: Sess
     recorder = _RecordingAuthz()
     service = ColumnMaskService(session, recorder, FakeColumnCatalog())
     admin = _admin()
-    result = service.list_for_table(admin, environment="dev", namespace="gold", table="customers")
+    result = service.list_page(admin, environment="dev", namespace="gold", table="customers").items
     assert result == []
     assert recorder.calls == [(admin, Action.MANAGE_POLICY, Securable.instance_scope())]
 
@@ -586,7 +589,7 @@ def test_list_for_principal_with_no_masks(session: Session) -> None:
     _persist_actor(session, admin)
     principals.create_principal(admin, name="bob", type=PrincipalType.SERVICE_ACCOUNT)
 
-    listed = service.list_for_principal(admin, "bob")
+    listed = service.list_page(admin, principal_name="bob").items
     assert listed == []
 
 
@@ -598,7 +601,7 @@ def test_list_for_group_with_no_masks(session: Session) -> None:
     _persist_actor(session, admin)
     groups.create_group(admin, name="readers")
 
-    listed = service.list_for_group(admin, "readers")
+    listed = service.list_page(admin, group_name="readers").items
     assert listed == []
 
 
@@ -1242,3 +1245,140 @@ def test_a_mask_reading_a_missing_column_gets_the_type_check_message(session: Se
 
     assert "to bind the policy to" not in str(exc_info.value)
     assert "md5(nope)" in str(exc_info.value)
+
+
+class _ListFilters(TypedDict, total=False):
+    """The filters of `list_page` a test passes."""
+
+    principal_name: str
+    group_name: str
+    environment: str
+    namespace: str
+    table: str
+
+
+def _four_masks(session: Session) -> tuple[ColumnMaskService, PrincipalRef, list[ColumnMask]]:
+    """Make three masks on two tables of dev and one in prod, at known times.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    tuple
+        The service, the acting principal, and the masks oldest first: maria on
+        dev.gold.customers, the group analysts on dev.gold.orders, bob on dev.gold.customers, and
+        maria on prod.gold.customers.
+    """
+    service = ColumnMaskService(session, AllowAllAuthorization(), FakeColumnCatalog())
+    admin = _admin()
+    _persist_actor(session, admin)
+    principals = PrincipalService(session, AllowAllAuthorization())
+    principals.create_principal(admin, name="maria", type=PrincipalType.USER)
+    principals.create_principal(admin, name="bob", type=PrincipalType.USER)
+    GroupService(session, AllowAllAuthorization()).create_group(admin, name="analysts")
+    made = []
+    for second, (environment, table, principal, group) in enumerate(
+        [
+            ("dev", "customers", "maria", None),
+            ("dev", "orders", None, "analysts"),
+            ("dev", "customers", "bob", None),
+            ("prod", "customers", "maria", None),
+        ]
+    ):
+        ensure_table(session, environment, "gold", table)
+        row = service.create(
+            admin,
+            environment=environment,
+            namespace="gold",
+            table=table,
+            column="ssn",
+            expression="NULL",
+            principal=principal,
+            group=group,
+        )
+        row.created_at = datetime(2026, 11, 18, 12, 0, second, tzinfo=UTC)
+        made.append(row)
+    session.commit()
+    return service, admin, made
+
+
+def test_list_page_lists_every_mask_newest_first(session: Session) -> None:
+    """No filter lists all four, newest first; a cursor continues where the page ended."""
+    service, admin, made = _four_masks(session)
+    newest_first = [row.id for row in reversed(made)]
+
+    assert [row.id for row in service.list_page(admin).items] == newest_first
+    first = service.list_page(admin, limit=2)
+    assert [row.id for row in first.items] == newest_first[:2]
+    assert first.next_cursor is not None
+    rest = service.list_page(admin, limit=2, cursor=first.next_cursor)
+    assert [row.id for row in rest.items] == newest_first[2:]
+    assert rest.next_cursor is None
+
+
+def test_list_page_filters_combine(session: Session) -> None:
+    """Environment, table and subject narrow the list together."""
+    service, admin, made = _four_masks(session)
+
+    def ids(filters: _ListFilters) -> set[uuid.UUID]:
+        return {row.id for row in service.list_page(admin, **filters).items}
+
+    assert ids({"environment": "dev"}) == {made[0].id, made[1].id, made[2].id}
+    assert ids({"environment": "dev", "namespace": "gold", "table": "customers"}) == {
+        made[0].id,
+        made[2].id,
+    }
+    assert ids({"environment": "dev", "namespace": "gold"}) == {made[0].id, made[1].id, made[2].id}
+    assert ids({"principal_name": "maria", "environment": "prod"}) == {made[3].id}
+    assert ids({"group_name": "analysts"}) == {made[1].id}
+
+
+@pytest.mark.parametrize(
+    ("filters", "message"),
+    [
+        (
+            {"namespace": "gold", "table": "customers"},
+            "Name the environment with `namespace`, and the namespace with `table`.",
+        ),
+        (
+            {"environment": "dev", "table": "customers"},
+            "Name the environment with `namespace`, and the namespace with `table`.",
+        ),
+        (
+            {"principal_name": "maria", "group_name": "analysts"},
+            "Pass at most one of `principal_name` and `group_name`: a policy is made to a "
+            "principal or to a group, never to both.",
+        ),
+    ],
+    ids=["a table without its environment", "a table without its namespace", "two subjects"],
+)
+def test_list_page_refuses_a_gap_and_two_subjects(
+    session: Session, filters: _ListFilters, message: str
+) -> None:
+    """A table without its namespace, a namespace without its environment, or two subjects."""
+    service = ColumnMaskService(session, AllowAllAuthorization(), FakeColumnCatalog())
+
+    with pytest.raises(ValidationError) as exc_info:
+        service.list_page(_admin(), **filters)
+
+    assert str(exc_info.value) == message
+
+
+def test_list_page_needs_manage_policy_first(session: Session) -> None:
+    """A caller without MANAGE_POLICY is refused before a name is looked up: 403, not 404."""
+    service = ColumnMaskService(session, _DenyAuthz(), FakeColumnCatalog())
+
+    with pytest.raises(PermissionDenied):
+        service.list_page(_admin(), principal_name="nobody")
+
+
+def test_list_page_leaves_out_revoked_masks(session: Session) -> None:
+    """A revoked mask is not listed."""
+    service, admin, made = _four_masks(session)
+    service.revoke(admin, made[0].id)
+
+    assert made[0].id not in {row.id for row in service.list_page(admin).items}
+    assert len(service.list_page(admin).items) == 3

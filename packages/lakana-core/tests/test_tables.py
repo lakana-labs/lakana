@@ -691,7 +691,7 @@ def test_rename_refreshes_display_columns_for_bound_grants_and_policies(
     (see `test_grants_authorization.py::test_table_grant_follows_rename`
     for the authorization-level guarantee), but a caller that lists by
     name — `GrantService.list_for_securable`, `RowFilterService`/
-    `ColumnMaskService.list_for_table` — must find it under the table's
+    `ColumnMaskService.list_page` — must find it under the table's
     *new* name too. That needs the display columns themselves rewritten,
     not merely the id binding continuing to work.
     """
@@ -744,21 +744,21 @@ def test_rename_refreshes_display_columns_for_bound_grants_and_policies(
     at_old_name = grants.list_grants(admin, scope=Securable.table_scope("dev", ns, "sales"))
     assert at_old_name.items == []
 
-    filters_at_new_name = row_filters.list_for_table(
+    filters_at_new_name = row_filters.list_page(
         admin, environment="dev", namespace=ns.joined(), table="sales2"
-    )
+    ).items
     assert [f.id for f in filters_at_new_name] == [row_filter.id]
     assert (
-        row_filters.list_for_table(admin, environment="dev", namespace=ns.joined(), table="sales")
+        row_filters.list_page(admin, environment="dev", namespace=ns.joined(), table="sales").items
         == []
     )
 
-    masks_at_new_name = column_masks.list_for_table(
+    masks_at_new_name = column_masks.list_page(
         admin, environment="dev", namespace=ns.joined(), table="sales2"
-    )
+    ).items
     assert [m.id for m in masks_at_new_name] == [mask.id]
     assert (
-        column_masks.list_for_table(admin, environment="dev", namespace=ns.joined(), table="sales")
+        column_masks.list_page(admin, environment="dev", namespace=ns.joined(), table="sales").items
         == []
     )
 

@@ -37,25 +37,54 @@ Returns: `ColumnMask`. The created column mask.
 
 ### `client.column_masks.list`
 
-Signature: `client.column_masks.list(*, principal_name: str | None = None, group_name: str | None = None, environment: str | None = None, namespace: str | None = None, table: str | None = None) -> list[ColumnMask]`
+Signature: `client.column_masks.list(**filters: Unpack[PolicyFilters]) -> list[ColumnMask]`
 
-List column masks for a principal, a group, or a specific table.
+List every active column mask that matches, newest first, reading every page.
 
-Exactly one of `principal_name`/`group_name`/(`environment`+ `namespace`+`table` together) must be given.
+Every filter is optional, and they combine; with none, every column mask is listed. `list_page` reads one page, and `iter` yields them as the pages come.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `principal_name` | `str | None` | `None` | List this principal's own direct masks. |
-| `group_name` | `str | None` | `None` | List this group's own direct masks. |
-| `environment` | `str | None` | `None` | The environment to match, for a table-scoped listing. |
-| `namespace` | `str | None` | `None` | The dot-joined namespace to match, for a table-scoped listing. |
-| `table` | `str | None` | `None` | The table to match, for a table-scoped listing. |
+| `**filters` | `Unpack[PolicyFilters]` | any number | The filters of `list_page`: `principal_name` or `group_name`, and `environment`, `namespace`, `table`. |
 
-Returns: `list of ColumnMask`. The matching column masks.
+Returns: `list of ColumnMask`. Newest first.
 
 | Error | When |
 |---|---|
-| `lakana.ValidationError` | If none of the valid parameter combinations is given. |
+| `lakana.ValidationError` | If both `principal_name` and `group_name` are given, or `table` without `namespace` or `namespace` without `environment`. |
+| `lakana.NotFound` | If no principal or group has the name given. |
+| `lakana.PermissionDenied` | Without `MANAGE_POLICY` on the instance. |
+
+### `client.column_masks.list_page`
+
+Signature: `client.column_masks.list_page(*, principal_name: str | None = None, group_name: str | None = None, environment: str | None = None, namespace: str | None = None, table: str | None = None, limit: int | None = None, cursor: str | None = None) -> ColumnMaskPage`
+
+List one page of column masks, newest first, with the cursor of the next page.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `principal_name` | `str | None` | `None` | Only the column masks made to this principal. |
+| `group_name` | `str | None` | `None` | Only the column masks made to this group. |
+| `environment` | `str | None` | `None` | Only the column masks in this environment. |
+| `namespace` | `str | None` | `None` | Only the column masks on tables of this dot-joined namespace; needs `environment`. |
+| `table` | `str | None` | `None` | Only the column masks on this table; needs `namespace`. |
+| `limit` | `int | None` | `None` | Most column masks returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
+
+Returns: `ColumnMaskPage`. The column masks, and the cursor for the next page (`None` on the last).
+
+### `client.column_masks.iter`
+
+Signature: `client.column_masks.iter(*, page_size: int = 100, **filters: Unpack[PolicyFilters]) -> Iterator[ColumnMask]`
+
+Yield every matching column mask, newest first, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `page_size` | `int` | `100` | Column masks per request (1 to 200). |
+| `**filters` | `Unpack[PolicyFilters]` | any number | The filters of `list_page`: `principal_name` or `group_name`, and `environment`, `namespace`, `table`. |
+
+Returns: `Iterator of ColumnMask`. Each column mask, once.
 
 ### `client.column_masks.revoke`
 

@@ -66,19 +66,21 @@ Answer fields: `ColumnMaskOut`
 
 ## `GET /api/v1/column-masks`
 
-List the column masks of a principal, group or table
+List column masks
 
-Give exactly one of `principal_name`, `group_name` or `environment` with `namespace` and `table`; a column mask always belongs to one table, so there is no list of all of them. Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given and 422 when none of those combinations is given.
+Lists the active column masks, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a column mask is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.
 
 Parameters:
 
 | Name | In | Required | Type | Description |
 |---|---|---|---|---|
-| `principal_name` | query | no | text or null | List this principal's own direct masks. |
-| `group_name` | query | no | text or null | List this group's own direct masks. |
-| `environment` | query | no | text or null | The environment to match, for a table-scoped listing. |
-| `namespace` | query | no | text or null | The dot-joined namespace to match, for a table-scoped listing. |
-| `table` | query | no | text or null | The table to match, for a table-scoped listing. |
+| `principal_name` | query | no | text or null | Only the column masks made to this principal. |
+| `group_name` | query | no | text or null | Only the column masks made to this group. |
+| `environment` | query | no | text or null | Only the column masks in this environment. |
+| `namespace` | query | no | text or null | Only the column masks on tables of this dot-joined namespace. |
+| `table` | query | no | text or null | Only the column masks on this table. |
+| `limit` | query | no | whole number | Most column masks returned (1 to 200). |
+| `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same filters. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

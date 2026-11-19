@@ -2389,6 +2389,38 @@ class ColumnMask:
 
 
 @dataclass(frozen=True)
+class RowFilterPage:
+    """One page of row filters, newest first.
+
+    Parameters
+    ----------
+    items
+        The row filters on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[RowFilter]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class ColumnMaskPage:
+    """One page of column masks, newest first.
+
+    Parameters
+    ----------
+    items
+        The column masks on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[ColumnMask]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class SecretCreate:
     """A secret-creation request, held only long enough to build the request body.
 

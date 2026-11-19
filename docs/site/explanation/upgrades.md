@@ -765,6 +765,21 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   log's `SECRET_ROTATED` events remain the record of those. Nothing has to be done: the upgrade
   runs with the others.
 
+### Row filters and column masks are listed in pages
+
+- `GET /api/v1/row-filters` and `GET /api/v1/column-masks` take every filter as optional now, and
+  the filters combine: `principal_name` or `group_name`, and `environment`, with `namespace` and
+  then `table`. Without one they list every row filter or column mask, where they answered 422.
+  `environment` alone lists that environment's.
+- They come newest first, 100 per page by default (`limit`, at most 200). The next page's cursor
+  is in the response header `X-Next-Cursor`, which is absent on the last page; the body stays a
+  JSON array.
+- A script that reads a table's policies in one request reads only its first 100 now: pass
+  `limit` and follow `X-Next-Cursor`. The SDK's `row_filters.list` and `column_masks.list` still
+  return every match, reading every page; `list_page` reads one page with its cursor, and `iter`
+  yields them as the pages come. `lakana row-filter list` and `lakana column-mask list` list
+  every match, and work without a flag now.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

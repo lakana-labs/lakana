@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 from conftest import FakeApi, invoke, make_state
 
 _GRANT = {
@@ -296,6 +297,46 @@ def test_policy_lists_name_the_subject_from_the_answer(tmp_path: Path) -> None:
     assert "user kim.schulz" in masks.stdout
     assert "principal p1" not in masks.stdout and "group g7" not in filters.stdout
     assert len(api.requests) == 2
+
+
+@pytest.mark.parametrize(
+    ("command", "path"),
+    [("row-filter", "/api/v1/row-filters"), ("column-mask", "/api/v1/column-masks")],
+)
+def test_a_policy_list_without_a_flag_lists_every_page(
+    tmp_path: Path, command: str, path: str
+) -> None:
+    """No flag lists every policy, page after page; `--env` alone sends only the environment."""
+    row = {
+        "principal_id": None,
+        "group_id": "g1",
+        "environment": "dev",
+        "namespace": "bronze",
+        "table": "sales",
+        "column": "region",
+        "expression": "'X'",
+        "created_by": "a1",
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if "cursor" in request.url.params:
+            return httpx.Response(200, json=[{**row, "id": "second-page"}])
+        return httpx.Response(
+            200, json=[{**row, "id": "first-page"}], headers={"X-Next-Cursor": "c2"}
+        )
+
+    api = FakeApi()
+    api.routes["GET", path] = respond
+
+    listed = invoke(make_state(tmp_path, api), command, "list")
+    by_env = invoke(make_state(tmp_path, api), command, "list", "--env", "dev")
+
+    assert listed.exit_code == 0, listed.stdout
+    assert "first-page" in listed.stdout and "second-page" in listed.stdout
+    assert dict(api.requests[0].url.params) == {"limit": "100"}
+    assert dict(api.requests[2].url.params) == {"environment": "dev", "limit": "100"}
+    assert by_env.exit_code == 0
 
 
 def test_column_mask_list(tmp_path: Path) -> None:

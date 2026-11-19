@@ -7,14 +7,16 @@ internal storage form itself, so the SDK never needs to.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Any
+from typing import Any, Unpack
 
-from lakana._http import HttpTransport, query_params
-from lakana._models import ColumnMask
+from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, every_page, query_params
+from lakana._models import ColumnMask, ColumnMaskPage
 from lakana._routes import ROUTES
 from lakana.resources._override import override_params
 from lakana.resources._subject import subject_principal
+from lakana.resources.row_filters import PolicyFilters
 
 
 def _column_mask_from_json(data: dict[str, Any]) -> ColumnMask:
@@ -137,7 +139,36 @@ class ColumnMasks:
         )
         return _column_mask_from_json(response.json())
 
-    def list(
+    def list(self, **filters: Unpack[PolicyFilters]) -> _ColumnMaskList:
+        """List every active column mask that matches, newest first, reading every page.
+
+        Every filter is optional, and they combine; with none, every column mask is listed.
+        `list_page` reads one page, and `iter` yields them as the pages come.
+
+        Parameters
+        ----------
+        **filters
+            The filters of `list_page`: `principal_name` or `group_name`, and `environment`,
+            `namespace`, `table`.
+
+        Returns
+        -------
+        list of ColumnMask
+            Newest first.
+
+        Raises
+        ------
+        lakana.errors.ValidationError
+            If both `principal_name` and `group_name` are given, or `table` without `namespace`
+            or `namespace` without `environment`.
+        lakana.errors.NotFound
+            If no principal or group has the name given.
+        lakana.errors.PermissionDenied
+            Without `MANAGE_POLICY` on the instance.
+        """
+        return list(self.iter(**filters))
+
+    def list_page(
         self,
         *,
         principal_name: str | None = None,
@@ -145,34 +176,32 @@ class ColumnMasks:
         environment: str | None = None,
         namespace: str | None = None,
         table: str | None = None,
-    ) -> _ColumnMaskList:
-        """List column masks for a principal, a group, or a specific table.
-
-        Exactly one of `principal_name`/`group_name`/(`environment`+
-        `namespace`+`table` together) must be given.
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> ColumnMaskPage:
+        """List one page of column masks, newest first, with the cursor of the next page.
 
         Parameters
         ----------
         principal_name
-            List this principal's own direct masks.
+            Only the column masks made to this principal.
         group_name
-            List this group's own direct masks.
+            Only the column masks made to this group.
         environment
-            The environment to match, for a table-scoped listing.
+            Only the column masks in this environment.
         namespace
-            The dot-joined namespace to match, for a table-scoped listing.
+            Only the column masks on tables of this dot-joined namespace; needs `environment`.
         table
-            The table to match, for a table-scoped listing.
+            Only the column masks on this table; needs `namespace`.
+        limit
+            Most column masks returned (1 to 200); `None` leaves it to the server (100).
+        cursor
+            A previous page's `next_cursor`. Send the same filters with every page.
 
         Returns
         -------
-        list of ColumnMask
-            The matching column masks.
-
-        Raises
-        ------
-        lakana.errors.ValidationError
-            If none of the valid parameter combinations is given.
+        ColumnMaskPage
+            The column masks, and the cursor for the next page (`None` on the last).
         """
         response = self._transport.request(
             ROUTES["column_masks.list"],
@@ -182,9 +211,34 @@ class ColumnMasks:
                 environment=environment,
                 namespace=namespace,
                 table=table,
+                limit=limit,
+                cursor=cursor,
             ),
         )
-        return [_column_mask_from_json(item) for item in response.json()]
+        return ColumnMaskPage(
+            items=[_column_mask_from_json(item) for item in response.json()],
+            next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
+        )
+
+    def iter(
+        self, *, page_size: int = 100, **filters: Unpack[PolicyFilters]
+    ) -> Iterator[ColumnMask]:
+        """Yield every matching column mask, newest first, fetching pages as needed.
+
+        Parameters
+        ----------
+        page_size
+            Column masks per request (1 to 200).
+        **filters
+            The filters of `list_page`: `principal_name` or `group_name`, and `environment`,
+            `namespace`, `table`.
+
+        Returns
+        -------
+        Iterator of ColumnMask
+            Each column mask, once.
+        """
+        return every_page(lambda cursor: self.list_page(limit=page_size, cursor=cursor, **filters))
 
     def revoke(self, column_mask_id: str, *, override_reason: str | None = None) -> None:
         """Revoke a column mask.
