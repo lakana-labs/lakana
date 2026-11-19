@@ -6118,7 +6118,11 @@ fuller text of each part where it already lives.
     3 or even), whose signatures Lakana cannot check, and a revocation with a bad signature,
     which ssh skips, is shown too (it can only make ssh stricter); a certificate on a
     `@cert-authority` line is listed only when its signature verifies, so one signed by those
-    keys is left out; and `ssh-dss` is skipped, which OpenSSH 10 no longer reads either. A
+    keys is left out; and `ssh-dss` is skipped, which OpenSSH 10 no longer reads either. The
+    reference is portable OpenSSH (8.9 to 10.2, OpenSSL). Apple's build (LibreSSL), which a
+    worker on macOS runs, differs on two crafted keys only: it trusts an ECDSA point that
+    `sshkey_ec_validate_public` refuses (left out here), and it skips a revocation signed by an
+    RSA key with exponent 1 (listed here). A
     character base64 has no place for (non-ASCII, or a no-break space before a comment) skips
     the line, never fails the answer. Each distinct line is read once. The audit log's
     fingerprints (`known_hosts_fingerprints`) read the same lines but count every base64 key,

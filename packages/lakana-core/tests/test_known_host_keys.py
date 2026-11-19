@@ -5,13 +5,15 @@ The keys and certificates in `host_keys/` were made by ssh-keygen (`host_keys/ma
 those with bytes cut, added or changed; a certificate with fields ssh-keygen never writes is
 signed here by a key `cryptography` makes. Every case of `CASES` is also handed to ssh-keygen
 when it is installed: the keys it lists for the host (`ssh-keygen -l -F`) must be the keys
-`known_host_keys` lists.
+`known_host_keys` lists. That comparison runs only with portable OpenSSH 8.9 or newer built
+with OpenSSL (`_comparable_openssh`).
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import re
 import shutil
 import subprocess  # nosec B404 -- runs ssh-keygen on a file the test writes
 from collections.abc import Callable
@@ -1097,7 +1099,38 @@ def _openssh(text: str, path: Path) -> set[tuple[str, str, str | None]]:
     return found
 
 
-@pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="ssh-keygen is not installed")
+def _comparable_openssh() -> str | None:
+    """Tell why the installed OpenSSH cannot serve as the reference, if it cannot.
+
+    The reference is portable OpenSSH 8.9 or newer built with OpenSSL, as Linux distributions
+    ship it (checked with 8.9p1, 9.6p1 and 10.2p1). Apple's build links LibreSSL and reads some
+    keys otherwise: it accepts an ECDSA point that `sshkey_ec_validate_public` refuses, and
+    refuses an RSA authority whose exponent is 1.
+
+    Returns
+    -------
+    str or None
+        The reason to skip; `None` when ssh-keygen and its OpenSSH are fit to compare with.
+    """
+    ssh = shutil.which("ssh")
+    if shutil.which("ssh-keygen") is None or ssh is None:
+        return "ssh-keygen is not installed"
+    version = subprocess.run(  # nosec B603 -- a fixed program, no input
+        [ssh, "-V"], capture_output=True, text=True, check=False
+    ).stderr.strip()
+    found = re.match(r"OpenSSH_(\d+)\.(\d+)", version)
+    if found is None or (int(found[1]), int(found[2])) < (8, 9):
+        return f"not OpenSSH 8.9 or newer: {version!r}"
+    if ", OpenSSL " not in version:
+        return f"not built with OpenSSL: {version!r}"
+    return None
+
+
+OPENSSH_SKIP = _comparable_openssh()
+"""Why the comparison with ssh-keygen is skipped here; `None` when it runs."""
+
+
+@pytest.mark.skipif(OPENSSH_SKIP is not None, reason=str(OPENSSH_SKIP))
 @pytest.mark.parametrize("text", [pytest.param(t, id=i) for i, t, _ in CASES])
 def test_ssh_keygen_finds_the_same_keys(text: str, tmp_path: Path) -> None:
     """OpenSSH itself lists the keys `known_host_keys` lists, by type, fingerprint and marker.
