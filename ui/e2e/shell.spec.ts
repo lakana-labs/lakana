@@ -1,10 +1,8 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
 
+import { runAxe } from "./axe";
 import { signInAsAdmin, STUBBED, violations } from "./session";
 
-const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-const LIVE_ANNOUNCER = "[data-live-announcer]";
 const KEY = "lakana.preferences";
 
 // The area, its address and the heading it opens on: Settings opens on its first place, Status.
@@ -555,7 +553,7 @@ test("axe catches a missing alt text", async ({ page }) => {
   // The positive control: the checks above would pass vacuously if axe found nothing at all.
   await page.setContent('<img src="x.png">');
 
-  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
+  const results = await runAxe(page);
 
   expect(results.violations.map((violation) => violation.id)).toContain("image-alt");
 });

@@ -1383,7 +1383,12 @@ first failure; CI's `ui (gates)` job runs them one step each, `ui (gate proofs)`
 - **Playwright.** Pull requests that touch `ui/` run the smoke test on Chromium; the full
   three-browser suite (`npm --prefix ui run e2e:all`) runs on release. The tests run against
   `vite preview` of the production build, which sends the content security policy of
-  `ui/csp.ts`, so a CSP violation shows as a console error. `e2e:server` runs the sign-in,
+  `ui/csp.ts`, so a CSP violation shows as a console error. Every axe check runs through `runAxe`
+  (`ui/e2e/axe.ts`: the WCAG 2.2 AA tags, without React Aria's live announcer). In Firefox it first
+  makes ARIA element reflection (`ariaLabelledByElements` and the other `aria*Elements`) answer
+  null, so axe reads the attributes: Playwright's Firefox 159 crashes the page ("Page crashed") when
+  axe 4.14 reads `ariaLabelledByElements` of an element React rendered (#700). Remove it once a
+  Firefox update reads the property without crashing. `e2e:server` runs the sign-in,
   Home, Catalog, table page, Queries and profile picture tests against a real `lakana-server` instead (Chromium per pull
   request, Firefox and WebKit nightly); its tests share one server and one database and run one
   at a time, every person and environment they create has a unique name, and each test sets the state it needs

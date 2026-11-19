@@ -10,7 +10,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import AxeBuilder from "@axe-core/playwright";
 import {
   type APIRequestContext,
   type APIResponse,
@@ -21,6 +20,7 @@ import {
   type Page,
 } from "@playwright/test";
 
+import { runAxe } from "../e2e/axe";
 import serverConfig from "../playwright.server.config";
 import { CSRF_STORAGE_KEY } from "../src/api/client";
 
@@ -29,13 +29,6 @@ const BOOTSTRAP_TOKEN = "lakana_pat_e2ekey_e2esecret";
 
 /** The origin the e2e server answers on, as `playwright.server.config.ts` fixes it. */
 export const ORIGIN = "http://localhost:4174";
-
-const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-
-// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
-// names it by the ids of the button's parts, which may be gone by then; it is the library's
-// transient node, not the page.
-const LIVE_ANNOUNCER = "[data-live-announcer]";
 
 /**
  * Opens a browser that has never visited the server.
@@ -55,7 +48,7 @@ export async function freshPage(browser: Browser): Promise<Page> {
  * @returns The violations, each with the elements it found.
  */
 export async function violations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
+  const results = await runAxe(page);
   return results.violations.map(
     (violation) =>
       `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,
