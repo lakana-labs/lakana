@@ -95,7 +95,7 @@ export interface DeployKeyOut {
 }
 
 /** One environment's public deploy key, as a repository lists it. */
-export interface RepositoryDeployKeyOut {
+interface RepositoryDeployKeyOut {
   /** The environment whose secret holds the private half. */
   readonly environment: string;
   /** `ssh-ed25519 <base64> <comment>`, to add at the git host. */
@@ -105,7 +105,7 @@ export interface RepositoryDeployKeyOut {
 }
 
 /** A host key a repository trusts, by type and fingerprint. */
-export interface TrustedHostKeyOut {
+interface TrustedHostKeyOut {
   /** The key type, such as `ssh-ed25519`. */
   readonly type: string;
   /** `SHA256:…`, to compare with the host's published fingerprints. */

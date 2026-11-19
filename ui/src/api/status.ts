@@ -6,7 +6,7 @@
 import { api } from "./client";
 
 /** The memory a worker last reported. */
-export interface WorkerMemoryOut {
+interface WorkerMemoryOut {
   /** The bytes in use. */
   readonly used_bytes: number;
   /** Its limit; null when it runs without one. */
