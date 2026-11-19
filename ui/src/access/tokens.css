@@ -1,0 +1,25 @@
+/* Tokens: one's own on the account page, everyone's in Settings › Access › Tokens. Each list
+   scrolls in its own region, and a token's name and its owner's stay whole. */
+.list-scroll.own-tokens-scroll .list {
+  min-width: 640px;
+}
+
+.list-scroll.tokens-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.own-tokens-scroll .row-name,
+.list-scroll.tokens-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+/* The owner's name and a task token's run: links in a list whose rows open nothing. */
+.tokens-scroll a.token-owner {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.tokens-scroll a.token-owner:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}

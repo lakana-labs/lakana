@@ -89,7 +89,7 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
       ) : (
         <ShownOnce
           title={t("access.shownTitle", { name: markedText(issued.name) })}
-          url={issued.url}
+          value={issued.url}
           onDone={onClose}
         >
           <p>

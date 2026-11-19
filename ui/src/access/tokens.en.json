@@ -1,0 +1,68 @@
+{
+  "name": "Name",
+  "owner": "Owner",
+  "created": "Created",
+  "lastUsed": "Last used",
+  "expires": "Expires",
+  "never": "never",
+  "state": "State",
+  "active": "active",
+  "revokedAt": "revoked {{when}}",
+  "expiredAt": "expired {{when}}",
+  "revoke": "Revoke",
+  "revokeOwn": "Revoke {{name}}",
+  "revokeOf": "Revoke {{name}} of {{owner}}",
+  "revokeTask": "Revoke the task token of {{principal}} in {{environment}}, {{purpose}}",
+  "confirm": {
+    "title": "Revoke this token?",
+    "personal": "The token {{name}} of {{owner}}.",
+    "task": "The task token of {{principal}} in {{environment}}, {{purpose}}.",
+    "effect": "Scripts that use it stop at once.",
+    "cascade": "Task tokens minted with it stop working too.",
+    "action": "Revoke the token"
+  },
+  "own": {
+    "title": "API tokens",
+    "purpose": "A token signs in as you, with exactly your rights, from the command line and scripts.",
+    "none": "You have no API token yet.",
+    "create": "Create a token",
+    "nameHelp": "Say where you use it, such as laptop or nightly-export.",
+    "submit": "Create",
+    "region": "Your API tokens"
+  },
+  "shown": {
+    "title": "Your new token {{name}}",
+    "copy": "Copy token",
+    "login": "It is shown only now. On your computer, run this and paste the token when it asks:",
+    "command": "lakana login --url {{- origin}}"
+  },
+  "personal": {
+    "title": "Personal tokens",
+    "filter": "Owner",
+    "filterHelp": "A person's or service account's name; press Enter to apply.",
+    "none": "No live personal token.",
+    "noneOf": "{{owner}} has no live token.",
+    "serviceAccount": "A service account's token is issued with the command line:",
+    "issueCommand": "lakana token issue NAME LABEL",
+    "reading": "Reading the personal tokens…",
+    "region": "Live personal tokens"
+  },
+  "task": {
+    "title": "Task tokens",
+    "environment": "Environment",
+    "all": "All environments",
+    "for": "For",
+    "principal": "Acts as",
+    "issued": "Issued",
+    "job": "the job {{job}}",
+    "asset": "the asset {{asset}}",
+    "byHand": "minted by hand",
+    "none": "No live task token.",
+    "mint": "Task tokens are minted with the command line:",
+    "mintCommand": "lakana task-token mint PRINCIPAL --env ENVIRONMENT --scope 'PATTERN' --ttl SECONDS",
+    "reading": "Reading the task tokens…",
+    "region": "Live task tokens"
+  },
+  "more": "Show more",
+  "copyCommand": "Copy command"
+}

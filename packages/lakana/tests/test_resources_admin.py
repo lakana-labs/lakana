@@ -928,6 +928,29 @@ def test_secrets_create_with_a_use_sends_it_and_reads_it_back() -> None:
     assert bound.use_target_url == "https://corp.example.org/simple"
 
 
+def test_sdk_reads_when_a_secret_was_rotated() -> None:
+    """`Secret.rotated_at` reads the server's time, and `None` when absent or null."""
+    body = {
+        "id": "s1",
+        "name": "pypi",
+        "environment": "dev",
+        "created_by": "admin1",
+        "created_at": "2024-01-01T00:00:00+00:00",
+    }
+    answers = [
+        {**body, "rotated_at": "2024-02-01T00:00:00+00:00"},
+        {**body, "rotated_at": None},
+        body,
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=answers)
+
+    listed = Secrets(_transport(handler)).list("dev")
+
+    assert [s.rotated_at for s in listed] == [datetime(2024, 2, 1, tzinfo=UTC), None, None]
+
+
 def test_sdk_reads_the_subject_and_tolerates_an_older_server() -> None:
     """The three models read `principal` and `group`; an older answer leaves them `None`."""
     who = {"id": "p1", "name": "kim.schulz", "principal_type": "user"}

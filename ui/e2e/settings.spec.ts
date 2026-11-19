@@ -51,6 +51,8 @@ for (const theme of ["light", "dark"] as const) {
           "People",
           "Groups",
           "Grants",
+          "Tokens",
+          "Secrets",
           "What I may do",
           "Sign-in",
           "Invites",

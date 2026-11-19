@@ -53,10 +53,11 @@ def whoami(
     whether the caller holds the `ADMIN` role on the instance and may use the administrator
     routes with this credential (never with a task or CI token), `has_access` whether it has
     any grant at all (any scope, directly or through a group), `may_deploy` whether it may
-    deploy in at least one environment with this credential: the web interface shows the
-    administration areas, tells a new person to ask for access, and shows the deploy steps of
-    Home from these three. `picture`
-    is the etag of your profile picture, or `null` without one.
+    deploy in at least one environment with this credential, `secret_environments` the
+    environments where it may manage secrets with it: the web interface shows the
+    administration areas, tells a new person to ask for access, shows the deploy steps of Home
+    and offers its Secrets page from these four. `picture` is the etag of your
+    profile picture, or `null` without one.
 
     Parameters
     ----------
@@ -116,6 +117,7 @@ def _describe(principal: PrincipalRef, grants: GrantService, pictures: PictureSe
         admin=grants.is_admin(principal),
         has_access=grants.has_any_grant(principal),
         may_deploy=grants.may_deploy_somewhere(principal),
+        secret_environments=grants.secret_environments(principal),
         picture=pictures.etag_of(principal.id),
     )
 

@@ -377,6 +377,7 @@ _LISTINGS = {
                 "use_target": "team-pakete",
                 "created_by": "admin@example.org",
                 "created_at": _TIME,
+                "rotated_at": _TIME,
             }
         ],
         whole=(("use", "package_index"), ("created_at", _TIME)),

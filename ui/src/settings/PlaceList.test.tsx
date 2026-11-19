@@ -5,8 +5,6 @@ import { describe, expect, it } from "vitest";
 import { PlaceList } from "./PlaceList";
 import type { SettingsPlace } from "./places";
 
-const ADMIN = { admin: true, noAccessYet: false };
-
 /**
  * A page place for the synthetic registry below.
  *
@@ -36,7 +34,7 @@ describe("PlaceList", () => {
   it("names a group without a link and indents each place's children beneath it", () => {
     render(
       <MemoryRouter initialEntries={["/settings/grp/inside"]}>
-        <PlaceList viewer={ADMIN} places={TREE} />
+        <PlaceList places={TREE} />
       </MemoryRouter>,
     );
 

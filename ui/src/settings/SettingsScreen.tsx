@@ -27,12 +27,12 @@ import { useTranslation } from "react-i18next";
 
 import { NotAvailable } from "../shell/NotAvailable";
 import { NotFound } from "../shell/NotFound";
-import { useMe } from "../shell/me";
 import { isRedirect, REDIRECT } from "../shell/redirect";
 import { GroupEntry } from "./GroupEntry";
 import { type PagePlaceId, PLACE_PAGES } from "./placePages";
-import { listedPlaces, placePattern, SETTINGS_PLACES, type SettingsPlace } from "./places";
+import { placePattern, placeState, SETTINGS_PLACES, type SettingsPlace } from "./places";
 import { SettingsLayout } from "./SettingsLayout";
+import { useSettingsViewer } from "./viewer";
 
 // Each page is made lazy once, here, so a render never makes a new component (and loses its state).
 const PAGES = Object.fromEntries(
@@ -105,6 +105,8 @@ interface GuardedProps {
 /**
  * Shows a place's page only to a person who is shown the place; anyone else gets
  * {@link NotAvailable} with its name, so the page is never loaded and its routes never read.
+ * While the place's rule is not known yet it shows nothing, so neither the page nor the refusal
+ * flashes.
  *
  * @remarks
  * It sits inside the place's own route, so the router alone decides which place an address is
@@ -113,16 +115,13 @@ interface GuardedProps {
  * @param props - The place and its page.
  * @param props.place - The place whose route matched.
  * @param props.children - The page.
- * @returns The page, or the permission state.
+ * @returns The page, the permission state, or nothing while pending.
  */
-function Guarded({ place, children }: GuardedProps): JSX.Element {
+function Guarded({ place, children }: GuardedProps): JSX.Element | null {
   const { t } = useTranslation();
-  const { admin, noAccessYet } = useMe();
-  return listedPlaces({ admin, noAccessYet }).includes(place) ? (
-    <>{children}</>
-  ) : (
-    <NotAvailable place={t(place.label)} />
-  );
+  const state = placeState(place, useSettingsViewer());
+  if (state === "pending") return null;
+  return state === "listed" ? <>{children}</> : <NotAvailable place={t(place.label)} />;
 }
 
 /**

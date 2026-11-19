@@ -2,6 +2,7 @@
 
 import base64
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from core_test_helpers import LEGACY_SECRET, LEGACY_VALUES
@@ -27,6 +28,7 @@ from lakana_core.models import (
 from lakana_core.secrets.crypto import decrypt_secret_row
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.secrets.service import SecretService
+from lakana_core.secrets.uses import SecretUse
 
 
 def _key_provider() -> EnvKeyProvider:
@@ -170,6 +172,24 @@ def test_rotate_replaces_the_ciphertext_and_the_wrapped_data_key(session: Sessio
     assert rotated.name == "s3-creds"
     assert rotated.wrapped_data_key != original_wrapped_data_key
     assert decrypt_secret_row(rotated, provider, environment_name="dev") == {"k": "new"}
+
+
+def test_rotate_records_when(session: Session) -> None:
+    """`rotate` sets `rotated_at` to now and keeps `created_at`; `create` and `bind` leave it."""
+    admin = _add_principal(session, "admin")
+    _add_environment(session, "dev")
+    service = SecretService(session, AllowAllAuthorization(), _key_provider())
+    created = service.create(admin, environment="dev", name="s3-creds", values={"k": "old"})
+    created_at = created.created_at
+    assert created.rotated_at is None
+    assert service.bind(admin, created.id, SecretUse.environment()).rotated_at is None
+    before = datetime.now(UTC)
+
+    rotated = service.rotate(admin, created.id, values={"k": "new"})
+
+    assert rotated.created_at == created_at
+    assert rotated.rotated_at is not None
+    assert before <= rotated.rotated_at <= datetime.now(UTC)
 
 
 def test_rotate_raises_not_found_for_an_unknown_id(session: Session) -> None:

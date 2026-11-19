@@ -756,6 +756,15 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   `pat_ended`). The link of every other task token is lost with the column: after the downgrade,
   such a token again lasts until its own expiry, even if its personal token is revoked later.
 
+### A secret shows when it was last rotated
+
+- Migration `0086` adds the column `rotated_at` to `secrets`. Every rotation sets it (`lakana
+  secret rotate`, `PATCH /api/v1/environments/{env}/secrets/{name}`, and a connection's new
+  password). `SecretOut`, the SDK's `Secret` and `lakana secret list` show it as `rotated_at`.
+- It starts empty for every secret: a rotation before the upgrade recorded no time. The audit
+  log's `SECRET_ROTATED` events remain the record of those. Nothing has to be done: the upgrade
+  runs with the others.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

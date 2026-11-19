@@ -13,7 +13,10 @@ the way in: a secret string that stands for one person.
     Invite them instead: [Invite your team](invite-your-team.md) sends a link that creates their
     account, and from then on a passkey signs them in. Then grant them a role as below. Issue a
     token (the steps after the grant) only to someone who also works from the command line; an
-    invited person already exists, so skip "Create the person" for them.
+    invited person already exists, so skip "Create the person" for them. Such a person can also
+    make their own token: on their account page (**Passkeys and sessions** in the menu under their
+    name), **API tokens** → **Create a token** asks for a passkey touch and shows the token once,
+    with the `lakana login` command to paste it into. The token carries exactly their rights.
 
 The steps below give a person called `alice` access to the environment `dev`. Use your own names.
 
@@ -111,6 +114,10 @@ Hand over three things: the token, the address of the instance (the URL that the
 token through a channel that you trust, such as the sharing function of a password manager or a
 message that disappears, and not by e-mail or in a ticket. The address and the environment are not
 secret. Never put the token in a file of a git repository.
+
+In the web interface, an administrator sees everyone's live tokens under **Settings → Access →
+Tokens**, a person's page links to their tokens, and each token can be revoked there. The
+interface issues only one's own token: a service account's still comes from `lakana token issue`.
 
 ## What the new person types
 

@@ -560,6 +560,27 @@ def test_audit_list_rejects_a_bad_timestamp_and_cursor_with_all(tmp_path: Path) 
     assert invoke(state, "audit", "list", "--all", "--cursor", "c1").exit_code == 2
 
 
+def test_secret_list_shows_when_a_secret_was_rotated(tmp_path: Path) -> None:
+    """`lakana secret list` has a `rotated_at` column."""
+    secret = {
+        "id": "s1",
+        "name": "pypi",
+        "environment": "dev",
+        "created_by": "a1",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "rotated_at": "2026-02-01T00:00:00+00:00",
+    }
+    api = FakeApi()
+    api.on("GET", "/api/v1/environments/dev/secrets", json=[secret])
+
+    listing = invoke(
+        make_state(tmp_path, api), "--output", "json", "secret", "list", "--env", "dev"
+    )
+
+    assert listing.exit_code == 0, listing.stderr
+    assert json.loads(listing.stdout)[0]["rotated_at"] == "2026-02-01T00:00:00+00:00"
+
+
 def test_secret_bind_sends_exactly_one_use(tmp_path: Path) -> None:
     """`lakana secret bind` takes exactly one of the four use options."""
     secret = {

@@ -51,6 +51,10 @@ describe("PersonGrants", () => {
       "href",
       "/settings/access/grants?principal=maria",
     );
+    expect(within(panel).getByRole("link", { name: "Tokens of maria" })).toHaveAttribute(
+      "href",
+      "/settings/access/tokens?owner=maria",
+    );
     expect(
       server.sent.some((request) => request.path === "/api/v1/groups?member=maria&limit=50"),
     ).toBe(true);

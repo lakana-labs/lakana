@@ -99,8 +99,9 @@ How the larger pieces are meant to work:
 - **Feature store.** Feature definitions are assets in git, stored as tables, with point-in-time
   correct joins for training. This is the offline half; a low-latency online store is not planned
   until a user needs one.
-- **Sign-in.** Tokens for the CLI, the SDK and automation, and an administrator issues one for
-  each further user with the CLI. For people, the web interface (M7) brings
+- **Sign-in.** Tokens for the CLI, the SDK and automation: an administrator issues one for a
+  further user or a service account with the CLI, and a person makes their own on their account
+  page in the web interface. For people, the web interface (M7) brings
   OpenID Connect (OIDC), or an invite link and a passkey for small teams that have no identity
   provider. No passwords.
 - **Web interface.** Under way (M7) and off by default: sign-in, Home, the Catalog (tables,

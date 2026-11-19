@@ -2998,6 +2998,9 @@ class SecretOut(BaseModel):
         The principal who created this secret.
     created_at
         When this secret was created.
+    rotated_at
+        When its values were last replaced; `None` before the first rotation, and for a secret
+        whose last rotation came before the server recorded it.
     format_version
         How the stored secret is encrypted. 1 is the original format; a
         secret still at 1 becomes the current format when it is set again.
@@ -3019,6 +3022,7 @@ class SecretOut(BaseModel):
     environment: str
     created_by: uuid.UUID
     created_at: datetime
+    rotated_at: datetime | None = None
     format_version: int
     key_id: str
     use: str | None = None
@@ -3158,6 +3162,10 @@ class WhoamiOut(BaseModel):
     may_deploy
         Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role
         or a group); the web interface shows the deploy steps and Your work from it.
+    secret_environments
+        The environments, by name and sorted, where you may manage secrets with this credential
+        (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.
+        The web interface offers its Secrets page for exactly these.
     picture
         The etag of your profile picture, or `null` without one.
     """
@@ -3170,6 +3178,7 @@ class WhoamiOut(BaseModel):
     admin: bool = False
     has_access: bool = False
     may_deploy: bool = False
+    secret_environments: list[str] = []
     picture: str | None = None
 
 

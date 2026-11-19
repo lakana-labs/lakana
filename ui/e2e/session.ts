@@ -768,6 +768,7 @@ export const STUBBED = [
   "/api/v1/whoami",
   "/api/v1/principals",
   "/api/v1/principals/admin/picture",
+  "/api/v1/principals/admin/tokens",
   "/api/v1/settings/sign-in",
   "/api/v1/invites",
   "/api/v1/recovery-links",
@@ -818,6 +819,8 @@ export async function signInAsAdmin(page: Page): Promise<void> {
     route.fulfill({ json: SIGN_IN_SETTINGS }),
   );
   await page.route("**/api/v1/invites", (route) => route.fulfill({ json: [] }));
+  // The account page's API tokens: none.
+  await page.route("**/api/v1/principals/admin/tokens", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/recovery-links", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/whoami", (route) =>
     route.fulfill({
@@ -830,6 +833,7 @@ export async function signInAsAdmin(page: Page): Promise<void> {
         admin: true,
         has_access: true,
         may_deploy: true,
+        secret_environments: ["dev", "prod"],
         picture: "e1",
       },
     }),

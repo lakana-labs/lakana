@@ -32,11 +32,19 @@ const NAMED_LIMITS = [
   // Measured 3.40 kB (2026-11-18) + 10 %: the Settings frame with the loaders of Groups, Grants
   // and What I may do, each of which names the chunks it preloads; the places themselves load on
   // demand, and the first load is unchanged but for their three entries in the registry.
-  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "3.74 kB" },
+  // Raised to the measured 3.95 kB (2026-11-18) + 10 %: the loaders of Tokens and Secrets, each
+  // with the list of chunks it preloads, and the Settings viewer, which reads once per visit where
+  // the person manages secrets; the places themselves load on demand.
+  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "4.35 kB" },
   // Measured 3.83 kB (2026-11-18) + 10 %: Settings › Access › Grants (the filters Who, On exactly
   // and What with its two sections, the list with the Git mark, Remove and its question); Add
   // grant loads when it is opened (AddGrantDialog-, on the shared limit).
   { name: "Grants", prefix: "GrantsPage-", limit: "4.21 kB" },
+  // Measured 3.26 kB (2026-11-18) + 10 %: Settings › Access › Secrets (the environment picker
+  // over the environments where the person manages secrets, the remembered choice, the list with
+  // each secret's use and Rotate, Set use and Delete, and the loaders of the dialogs); the
+  // dialogs load when one is opened (SecretDialogs-, on the shared limit).
+  { name: "Secrets", prefix: "SecretsPage-", limit: "3.59 kB" },
   // Measured 29.08 kB (the Catalog: the list with its columns, health word, owner, header sorting,
   // the Sort by and Order menus, paging and states, 2026-11-13, 13.44 kB; and the tree of places
   // with React Aria's NavigationTree, the search field and the match line, +15.64 kB, almost all

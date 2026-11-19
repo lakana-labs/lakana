@@ -348,3 +348,272 @@ export async function stubAccess(page: Page, options: AccessStubOptions = {}): P
   await page.route("**/api/v1/principals/maria/passkeys", (route) => answer(route, []));
   await page.route("**/api/v1/principals/maria/sessions", (route) => answer(route, []));
 }
+
+/** The token the account page's Create a token answers with, shown once. */
+export const NEW_TOKEN = "lak_e2e_shown_once_4f9c2a";
+
+/** A secret's value a test types, which must reach the server's body and nowhere else. */
+export const SECRET_VALUE = "s3cr3t-e2e-sentinel";
+
+/** The personal tokens: the first page holds two, the second one. */
+const PERSONAL = [
+  { key_id: "k1", name: "laptop", owner: "maria" },
+  { key_id: "k2", name: "nightly-export", owner: "ci-bot" },
+  { key_id: "k3", name: "workstation", owner: "kim.schulz" },
+];
+
+/** The secrets' names, in each environment. */
+const SECRET_NAMES = ["pypi-corp", "alerts-webhook", "warehouse", "prod-hook"];
+
+/** The paths the tokens' and secrets' stubs answer. */
+export const TOKENS_STUBBED = [
+  "/api/v1/tokens",
+  "/api/v1/task-tokens",
+  "/api/v1/task-tokens/t1",
+  "/api/v1/task-tokens/t2",
+  ...PERSONAL.map((token) => `/api/v1/principals/${token.owner}/tokens/${token.key_id}`),
+  "/api/v1/principals/admin/tokens",
+  "/api/v1/principals/admin/tokens/k-own",
+  "/api/v1/principals/admin/passkeys",
+  "/api/v1/principals/admin/sessions",
+  "/api/v1/principals/admin/tokens/k-new",
+  ...["dev", "prod"].flatMap((environment) => [
+    `/api/v1/environments/${environment}/secrets`,
+    ...SECRET_NAMES.flatMap((name) => [
+      `/api/v1/environments/${environment}/secrets/${name}`,
+      `/api/v1/environments/${environment}/secrets/${name}/use`,
+    ]),
+  ]),
+  "/api/v1/sign-in/step-up/options",
+  "/api/v1/sign-in/step-up",
+];
+
+/**
+ * A personal token as the lists answer it.
+ *
+ * @param token - Its key id, name and owner.
+ * @param token.key_id - Its key id.
+ * @param token.name - Its name.
+ * @param token.owner - Its owner.
+ * @returns The token.
+ */
+function personal(token: { key_id: string; name: string; owner: string }): Record<string, unknown> {
+  return {
+    ...token,
+    created_at: AT,
+    last_used_at: null,
+    expires_at: null,
+    revoked_at: null,
+  };
+}
+
+/**
+ * A secret as the secrets routes answer it.
+ *
+ * @param environment - Its environment.
+ * @param name - Its name.
+ * @param use - Its use and target.
+ * @param use.use - The kind of use, or null.
+ * @param use.target - The target's name, or null.
+ * @returns The secret.
+ */
+function secret(
+  environment: string,
+  name: string,
+  use: { use: string | null; target: string | null },
+): Record<string, unknown> {
+  return {
+    id: `${environment}-${name}`,
+    name,
+    environment,
+    created_by: "admin-id",
+    created_at: AT,
+    rotated_at: null,
+    format_version: 2,
+    key_id: "env:0123456789abcdef",
+    use: use.use,
+    use_target: use.target,
+    use_target_url: use.target === null ? null : "https://pkgs.example.org/simple",
+  };
+}
+
+/**
+ * Answers the tokens' and the secrets' routes: everyone's personal tokens over two pages, two
+ * task tokens (one of a job's run in `dev`, one minted by hand in `prod`), the administrator's
+ * own tokens (Create a token answers {@link NEW_TOKEN}), and the secrets of `dev` and `prod`.
+ * Revokes and writes change what the next read answers. Register it after `signInAsAdmin`.
+ *
+ * @param page - The page.
+ */
+export async function stubTokensSecrets(page: Page): Promise<void> {
+  let tokens = PERSONAL.map(personal);
+  let tasks: Record<string, unknown>[] = [
+    {
+      key_id: "t1",
+      principal: "ci-bot",
+      environment: "dev",
+      asset_scope: ["gold.*"],
+      issued_at: AT,
+      expires_at: "2099-01-01T00:00:00Z",
+      run_id: "8a1f4c2e-6b3d-4e5f-9a7b-0c1d2e3f4a5b",
+      job: "daily_sales",
+      asset: null,
+    },
+    {
+      key_id: "t2",
+      principal: "ci-bot",
+      environment: "prod",
+      asset_scope: ["silver.orders"],
+      issued_at: AT,
+      expires_at: "2099-01-01T00:00:00Z",
+      run_id: null,
+      job: null,
+      asset: null,
+    },
+  ];
+  const own = [personal({ key_id: "k-own", name: "laptop", owner: "admin" })];
+  const secrets = new Map<string, Record<string, unknown>[]>([
+    [
+      "dev",
+      [
+        secret("dev", "pypi-corp", { use: "package_index", target: "corp" }),
+        secret("dev", "alerts-webhook", { use: "environment", target: null }),
+      ],
+    ],
+    ["prod", [secret("prod", "prod-hook", { use: null, target: null })]],
+  ]);
+  await page.route(
+    (url) => url.pathname === "/api/v1/tokens",
+    (route) => {
+      const url = new URL(route.request().url());
+      const owner = url.searchParams.get("owner");
+      if (owner !== null && !tokens.some((token) => token["owner"] === owner)) {
+        return answer(
+          route,
+          { detail: `No principal named '${owner}'.`, type: "NotFoundError" },
+          404,
+        );
+      }
+      const mine = tokens.filter((token) => owner === null || token["owner"] === owner);
+      const second = url.searchParams.get("cursor") === "c2";
+      const page = second ? mine.slice(2) : mine.slice(0, 2);
+      return route.fulfill({
+        json: page,
+        headers: !second && mine.length > 2 ? { "X-Next-Cursor": "c2" } : {},
+      });
+    },
+  );
+  await page.route(
+    (url) =>
+      /^\/api\/v1\/principals\/[^/]+\/tokens\/[^/]+$/.test(url.pathname) &&
+      !url.pathname.startsWith("/api/v1/principals/admin/"),
+    (route) => {
+      const key = new URL(route.request().url()).pathname.split("/").at(-1);
+      tokens = tokens.filter((token) => token["key_id"] !== key);
+      return route.fulfill({ status: 204 });
+    },
+  );
+  await page.route(
+    (url) => url.pathname.startsWith("/api/v1/task-tokens"),
+    (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      if (request.method() === "DELETE") {
+        tasks = tasks.filter((task) => task["key_id"] !== url.pathname.split("/").at(-1));
+        return route.fulfill({ status: 204 });
+      }
+      const environment = url.searchParams.get("environment");
+      return answer(
+        route,
+        tasks.filter((task) => environment === null || task["environment"] === environment),
+      );
+    },
+  );
+  await page.route("**/api/v1/principals/admin/passkeys", (route) => answer(route, []));
+  await page.route("**/api/v1/principals/admin/sessions", (route) => answer(route, []));
+  await page.route(
+    (url) => url.pathname.startsWith("/api/v1/principals/admin/tokens"),
+    (route) => {
+      const request = route.request();
+      const key = new URL(request.url()).pathname.split("/")[6];
+      if (request.method() === "POST") {
+        const { name } = request.postDataJSON() as { name: string };
+        own.unshift(personal({ key_id: "k-new", name, owner: "admin" }));
+        return answer(route, { key_id: "k-new", name, token: NEW_TOKEN }, 201);
+      }
+      if (request.method() === "DELETE") {
+        const found = own.find((token) => token["key_id"] === key);
+        if (found !== undefined) found["revoked_at"] = "2026-11-18T09:00:00Z";
+        return route.fulfill({ status: 204 });
+      }
+      return answer(route, own);
+    },
+  );
+  await page.route(
+    (url) => /^\/api\/v1\/environments\/[^/]+\/secrets(\/[^/]+(\/use)?)?$/.test(url.pathname),
+    (route) => {
+      const request = route.request();
+      const [, , , , environment = "", , name, use] = new URL(request.url()).pathname
+        .split("/")
+        .map(decodeURIComponent);
+      const list = secrets.get(environment) ?? [];
+      if (name === undefined) {
+        if (request.method() === "POST") {
+          const body = request.postDataJSON() as {
+            name: string;
+            use?: { kind: string; target: string | null };
+          };
+          const made = secret(environment, body.name, {
+            use: body.use?.kind ?? null,
+            target: body.use?.target ?? null,
+          });
+          secrets.set(environment, [...list, made]);
+          return answer(route, made, 201);
+        }
+        return answer(route, list);
+      }
+      const found = list.find((one) => one["name"] === name);
+      if (found === undefined) {
+        return answer(route, { detail: `No secret named '${name}'.`, type: "NotFoundError" }, 404);
+      }
+      if (request.method() === "DELETE") {
+        secrets.set(
+          environment,
+          list.filter((one) => one !== found),
+        );
+        return route.fulfill({ status: 204 });
+      }
+      if (use !== undefined) {
+        const body = request.postDataJSON() as { kind: string; target: string | null };
+        found["use"] = body.kind;
+        found["use_target"] = body.target;
+      } else {
+        found["rotated_at"] = "2026-11-18T09:00:00Z";
+      }
+      return answer(route, found);
+    },
+  );
+}
+
+/**
+ * Answers whoami as the administrator's account without admin rights that manages the secrets
+ * of `dev` only (and may read `prod`). Register it after `signInAsAdmin`.
+ *
+ * @param page - The page.
+ */
+export async function stubSecretsOfDevOnly(page: Page): Promise<void> {
+  await page.route("**/api/v1/whoami", (route) =>
+    answer(route, {
+      name: "admin",
+      type: "USER",
+      task_token: null,
+      ci_token: null,
+      language: null,
+      admin: false,
+      has_access: true,
+      may_deploy: false,
+      secret_environments: ["dev"],
+      picture: "e1",
+    }),
+  );
+}

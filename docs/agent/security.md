@@ -6028,6 +6028,42 @@ fuller text of each part where it already lives.
   read-only there, marked "⌂ Git", and shows the CLI command for an emergency. The refusal of a
   change that would leave no active administrator names the next step (`LAST_ADMIN_MESSAGE`).
 
+- **Tokens and secrets in the interface (M7 parts 7 and 8, PR 4).**
+  - **A new token is shown once and kept nowhere.** One's own token (`/account`, API tokens) is
+    created with `guarded`, so the passkey touch comes before the POST. The answer's `token`
+    lives only in the state of the dialog that shows it (`OwnTokensPanel`'s `CreateTokenDialog`,
+    `ShownOnce` with `value`), never in storage, the address, a log or another text; Done and
+    Escape unmount the dialog and the token with it. The `lakana login --url ORIGIN` line never
+    holds it. Pins: `OwnTokensPanel.test.tsx` (`shows the token once, never again`),
+    `e2e/tokens-secrets.spec.ts` (`own token by keyboard`, the page and both storages after
+    Done). The interface issues no token for another principal; a service account's token stays
+    with `lakana token issue`. Revoking a personal or task token needs no touch (it removes
+    access); a personal revoke's confirmation says the task tokens it minted stop too (#719).
+  - **A secret's value lives only in its field.** Add secret and Rotate never keep a value in
+    React state: each is an uncontrolled `type="password"` input (`SecretValuesFields`'s
+    `ValueField`), read from the field (`useValueInputs().read`) only when the form sends, since
+    React copies a controlled input's value into its `value` attribute, a password field's too,
+    where `outerHTML`, a DOM snapshot or a CSS attribute selector would reach it. The inputs have
+    no reveal and no `name`, and `autoComplete="new-password"` (browsers ignore `off` on a
+    password field; the Connections form does the same), so no saved password is filled in, with
+    `data-1p-ignore` and `data-lpignore`, which ask password managers to ignore the fields.
+    Chrome and Firefox may still offer to save a typed value once the form is sent; the person
+    can decline. The values go in one request's body (`createSecret`,
+    `rotateSecret`, with `guarded`), never in the address, storage, a log, an error, an
+    attribute, a `title` or an `aria-*` text. A refusal keeps them as typed (the fields stay
+    mounted), closing the dialog drops them with the fields. Pins:
+    `SecretDialogs.test.tsx` (`a value never leaves its form`: the page's `outerHTML` as it is,
+    every attribute, the text, the address, both storages and every console call, after a 422,
+    after a 201 and after Cancel),
+    `api/secrets.test.ts` (`sends the values only in the body`) and
+    `e2e/tokens-secrets.spec.ts` (requests, console and storage).
+  - **`whoami.secret_environments` names only the caller's own rights.** The live environments
+    where `permits(MANAGE_SECRET)` holds for this credential (`GrantService.secret_environments`,
+    one `permits_each` batch, recording nothing; a task or CI token gets `[]`). Settings offers
+    Secrets and exactly those environments from it, so the UI hides only what would answer 403;
+    the server still checks every secrets route. A linked environment outside the list reads
+    nothing. Pins: `test_whoami_flags.py`, `test_ci_oidc.py`, `SecretsPage.test.tsx`.
+
 ## Governed table creation and append (M4a)
 
 - **The append path runs in the API process and executes no SQL.**

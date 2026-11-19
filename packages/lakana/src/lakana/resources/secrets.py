@@ -25,13 +25,14 @@ def _secret_from_json(data: dict[str, Any]) -> Secret:
         value or ciphertext field. A server that predates the stored-format
         fields sends neither `format_version` nor `key_id`; they read as `1`
         and `env`, which is how such a server stores every secret, and neither `use` nor
-        `use_target` or `use_target_url`, which read as `None`.
+        `use_target`, `use_target_url` or `rotated_at`, which read as `None`.
 
     Returns
     -------
     Secret
         The parsed secret metadata.
     """
+    rotated_at = data.get("rotated_at")
     return Secret(
         id=data["id"],
         name=data["name"],
@@ -43,6 +44,7 @@ def _secret_from_json(data: dict[str, Any]) -> Secret:
         use=data.get("use"),
         use_target=data.get("use_target"),
         use_target_url=data.get("use_target_url"),
+        rotated_at=None if rotated_at is None else datetime.fromisoformat(rotated_at),
     )
 
 
