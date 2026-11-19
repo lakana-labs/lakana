@@ -310,13 +310,36 @@ describe("ConnectionPage", () => {
     );
   });
 
-  it("names its environment plainly when it is not protected or cannot be told", async () => {
-    showing(aConnection());
+  it("names its environment plainly when the server says it is not protected", async () => {
+    const server = fakeServer({
+      [CRM]: { status: 200, body: aConnection() },
+      [READABLE_ROUTE]: readableRoute(["dev", "prod"], ["dev"]),
+    });
+    renderPage();
+
+    await screen.findByRole("button", { name: "Test crm" });
+    await waitFor(() => {
+      expect(server.sent.filter((request) => request.path === "/api/v1/environments")).toHaveLength(
+        1,
+      );
+    });
+    const label = document.querySelector(".connection-actions .env-label");
+    expect(label).toHaveTextContent(/^Environment prod$/u);
+    expect(label?.querySelector(".env-protected")).toBeNull();
+  });
+
+  it("names its environment plainly when its protection cannot be read", async () => {
+    fakeServer({
+      [CRM]: { status: 200, body: aConnection() },
+      [READABLE_ROUTE]: { status: 503, body: { detail: "The server is busy; try again." } },
+    });
+    renderPage();
 
     await screen.findByRole("button", { name: "Test crm" });
     expect(document.querySelector(".connection-actions .env-label")).toHaveTextContent(
       /^Environment prod$/u,
     );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("gives a reader no action", async () => {

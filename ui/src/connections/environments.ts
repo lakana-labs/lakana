@@ -28,15 +28,16 @@ export async function readProtected(): Promise<ReadonlySet<string>> {
  * Reads the environments whose connections the person may read and, beside them, which of the
  * environments are protected: the Connections answer does not say, the environments' list does.
  * Both need `READ_ENVIRONMENT`, so they name the same environments; one that only the first
- * names is not protected.
+ * names is not protected. The second read only adds the mark: when it fails, every environment
+ * is named plainly, as on a connection's page.
  *
  * @returns The environments, in the Connections answer's order.
- * @throws {ApiError} when either read is refused.
+ * @throws {ApiError} when the Connections answer is refused.
  */
 export async function readConnectionEnvironments(): Promise<readonly ConnectionEnvironment[]> {
   const [listed, protectedNames] = await Promise.all([
     listConnectionEnvironments(),
-    readProtected(),
+    readProtected().catch(() => new Set<string>()),
   ]);
   return listed.map((environment) => ({
     ...environment,

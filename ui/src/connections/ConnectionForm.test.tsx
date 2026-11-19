@@ -205,6 +205,19 @@ describe("ConnectionForm, add", () => {
     ).toHaveTextContent("● prod · protected");
   });
 
+  it("offers the environments plainly when their protection cannot be read", async () => {
+    const { user } = renderAdd(MANAGER, {
+      [READABLE_ROUTE]: { status: 503, body: { detail: "The server is busy; try again." } },
+    });
+
+    expect(await screen.findByRole("radiogroup", { name: "Kind" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Environment: dev" }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "dev",
+      "prod",
+    ]);
+  });
+
   it("says who may add a connection when no environment allows it", async () => {
     renderAdd([{ name: "prod", actions: ["test"] }]);
 

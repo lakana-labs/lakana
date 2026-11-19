@@ -142,11 +142,15 @@ describe("useRunsFilter", () => {
     });
     expect(result.current.location.pathname).toBe("/jobs/runs");
     expect(result.current.location.search).toBe("?status=failed&environment=prod");
+    expect(result.current.filter.choice.environment).toBe("prod");
     act(() => {
       void result.current.navigate(-1);
     });
     expect(result.current.location.search).toBe("?status=failed");
     expect(result.current.filter.choice.status).toBe("failed");
+    // Back undoes the environment too, though this browser now remembers it for the next visit.
+    expect(result.current.filter.choice.environment).toBeNull();
+    expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("prod");
     act(() => {
       void result.current.navigate(-1);
     });

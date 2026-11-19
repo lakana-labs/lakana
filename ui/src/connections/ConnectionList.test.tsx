@@ -177,19 +177,21 @@ describe("ConnectionList", () => {
     ).toHaveTextContent("● prod · protected");
   });
 
-  it("asks again for both reads when the environments' protection cannot be read", async () => {
+  it("names the environments plainly when their protection cannot be read, and lists the connections", async () => {
     const user = userEvent.setup();
-    const server = fakeServer({
+    fakeServer({
       ...connectionRoutes([aConnection()], MANAGER, ["prod"]),
       [READABLE_ROUTE]: { status: 503, body: { detail: "The server is busy; try again." } },
     });
     renderList();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy; try again.");
-    server.route(connectionRoutes([aConnection()], MANAGER, ["prod"]));
-    await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("link", { name: "crm" })).toBeInTheDocument();
-    expect(screen.getAllByRole("row")[1]).toHaveTextContent("● prod · protected");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      within(screen.getAllByRole("row")[1] as HTMLElement).getAllByRole("cell")[3],
+    ).toHaveTextContent(/^Environment prod$/u);
+    await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
+    expect(screen.getByRole("option", { name: "prod" })).toHaveTextContent(/^prod$/u);
   });
 
   it("the row's name opens the connection's page", async () => {

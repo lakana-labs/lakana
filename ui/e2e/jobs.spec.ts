@@ -711,13 +711,34 @@ for (const theme of ["light", "dark"] as const) {
           .getByRole("link", { name: "Runs" })
           .click();
         await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
+        const listed = page.getByRole("region", { name: "Runs listed" });
+        const devRun = listed.locator(".env-label").filter({ hasText: DEV });
+        await expect(devRun.first()).toBeVisible();
+
+        // Back undoes an environment chosen, though this browser remembers it for the next visit.
+        await page.getByRole("button", { name: "Environment: All environments" }).click();
+        await page.getByRole("option", { name: /prod/u }).click();
+        await expect(page).toHaveURL(new RegExp(`/jobs/runs\\?environment=${ENV}$`, "u"));
+        await expect(
+          page.getByRole("button", { name: `Environment: ${ENV}, protected` }),
+        ).toBeVisible();
+        await expect(devRun).toHaveCount(0);
+        await page.goBack();
+        await expect(page).toHaveURL(/\/jobs\/runs$/u);
+        await expect(
+          page.getByRole("button", { name: "Environment: All environments" }),
+        ).toBeVisible();
+        await expect(devRun.first()).toBeVisible();
 
         await page.getByRole("button", { name: /Trigger/ }).click();
         await page.getByRole("option", { name: "Schedule" }).click();
         await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule$/u);
+        // Each change shows before the next, as a person sees it: the address moves first.
+        await expect(page.getByRole("button", { name: /Trigger/ })).toContainText("Schedule");
         await page.getByRole("button", { name: /Period/ }).click();
         await page.getByRole("option", { name: "Last 7 days" }).click();
         await expect(page).toHaveURL(/\/jobs\/runs\?trigger=schedule&period=7d$/u);
+        await expect(page.getByRole("button", { name: /Period/ })).toContainText("Last 7 days");
         const job = page.getByRole("textbox", { name: "Job" });
         await job.pressSequentially("nightly");
         await job.press("Enter");

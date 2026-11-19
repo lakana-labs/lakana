@@ -62,7 +62,9 @@ function setParam(
  * person may no longer read (or one that is gone) names nothing and the list shows all. While
  * the environments are read, none is chosen. A choice writes the address and this browser's
  * storage; the search is `?q=` in the address. A list replaces the address with each change; the
- * Runs tab pushes, as a job's page does, so Back steps through its filters.
+ * Runs tab pushes, as a job's page does, so Back steps through its filters, and reads the
+ * environment from the address alone (none is all), though a choice is still remembered for
+ * the lists.
  *
  * @param environments - The environments the person may read; undefined while they are read.
  * @param history - How a change reaches the history; `replace` by default.
@@ -77,14 +79,10 @@ export function useJobsFilter(
   const listed = (name: string | null): name is string =>
     name !== null && environments?.some((environment) => environment.name === name) === true;
   const fromAddress = params.get("environment");
-  const environment =
-    fromAddress === null
-      ? listed(remembered)
-        ? remembered
-        : null
-      : listed(fromAddress)
-        ? fromAddress
-        : null;
+  // On the Runs tab the address alone is the filter, so Back to an address without the
+  // parameter is all environments again; the lists fall back to the remembered one.
+  const fallback = history === "push" ? null : remembered;
+  const environment = listed(fromAddress ?? fallback) ? (fromAddress ?? fallback) : null;
   return {
     environment,
     query: params.get("q") ?? "",
