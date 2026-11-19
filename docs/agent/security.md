@@ -6072,6 +6072,29 @@ fuller text of each part where it already lives.
     Secrets and exactly those environments from it, so the UI hides only what would answer 403;
     the server still checks every secrets route. A linked environment outside the list reads
     nothing. Pins: `test_whoami_flags.py`, `test_ci_oidc.py`, `SecretsPage.test.tsx`.
+- **Status and Repositories in the interface (M7 parts 7 and 8, PR 6a).**
+  - **`whoami.reads_environments` and `whoami.instance_actions` describe only the caller.** The
+    first is whether `permits(READ_ENVIRONMENT)` holds on a live environment
+    (`GrantService.reads_some_environment`), the read half of `RepositoryService._authorize_read`
+    without its audited instance-scope fallback; the second the `Action` values `permits` allows
+    on the instance (`GrantService.instance_actions`). Both are one `permits_each` batch and
+    record nothing; a task or CI token gets the scope its credential has (no instance action).
+    Settings lists Repositories and offers Connect, Edit, Delete, Test access and the key
+    changes from them; every repository route still checks its own right. Pins:
+    `test_whoami_flags.py`, `test_admin_only_call_sites.py` (`_EXEMPT`).
+  - **Host keys are trusted only by ticking fetched keys.** Edit never offers a text field for
+    `ssh_known_hosts`: **Fetch host keys again** runs a worker's `host_keys` check and only the
+    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` gives each trusted key's type
+    and fingerprint (`known_host_keys`, the parser the audit log's fingerprints use), so the
+    browser hashes nothing. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
+    ticked, never typed`), `test_repositories.py`, `test_repository_probes.py`.
+  - **A replaced deploy key's private half never leaves the server.** Replace key and Make the
+    missing keys call `POST /api/v1/repositories/{name}/deploy-key` through `guarded` (step-up
+    before the call), and the answer carries only public keys and fingerprints. Delete asks for
+    no touch (`NO_STEP_UP`), as the server.
+  - **Status draws only what `GET /api/v1/status` answers the caller.** The detail (workers,
+    compute, memory) comes only with `MANAGE_ENVIRONMENT` on the instance, and the scheduler is
+    read only while it does; the interface decides nothing from the person's role.
 
 ## Governed table creation and append (M4a)
 

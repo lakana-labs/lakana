@@ -192,6 +192,12 @@ lakana worker list
 lakana scheduler status
 ```
 
+In the web interface, **Settings → Status** shows the same for whoever may manage environments:
+compute and memory as bars, every worker with its state, its work, its memory, its version and
+when it was last seen (a worker on another version than the server says so), and which server
+holds the scheduler with the length of its queues. Everyone else sees there whether the instance
+works, how many workers are up and lost, and the version the server runs.
+
 [Is my instance healthy?](instance-health.md) goes through everything to look at, one question at a
 time: the services, the health route, the workers, the queue, the database, the storage and the disk,
 with what a bad answer looks like. What the two commands show, and what to do when a query waits:

@@ -151,8 +151,10 @@ you.
 
 Whoever may manage environments on the instance also sees every cause, how many task slots of
 the workers are busy and how much of their memory limit they use, as two bars with the numbers
-beside them, and the workers by state. An administrator (the `ADMIN` role on the instance) also
-gets **Details ›**, which leads to Settings → Status. The same answer is on the command line:
+beside them, and the workers by state. **Details ›** leads everyone to Settings → Status: the
+state with every sentence, how many workers are up and lost, and the version the server runs;
+whoever may manage environments also sees every worker with what it does and when it was last
+seen, and the scheduler. The same answer is on the command line:
 
 <!-- source: docs/examples/getting-started/run.sh#status -->
 ```bash
