@@ -48,6 +48,7 @@ from lakana_core.models import (
 )
 from lakana_core.projects.git_input import validate_repo_url
 from lakana_core.projects.lookups import environment_by_name, repository_by_name
+from lakana_core.projects.ssh_keys import key_type, read_key
 from lakana_core.runs.workers import alive_takes
 
 KEY_TYPES = (
@@ -142,8 +143,11 @@ HostKeyMarker = Literal["cert-authority", "revoked"]
 
 _MARKERS: dict[str, HostKeyMarker] = {"cert-authority": "cert-authority", "revoked": "revoked"}
 
-_KEY_TYPES_OF_WORD = {"rsa-sha2-256": "ssh-rsa", "rsa-sha2-512": "ssh-rsa"}
-"""The signature names OpenSSH accepts as a known_hosts line's word for an ssh-rsa key."""
+_FIELD_SEPARATOR = re.compile(r"[ \t]+")
+"""What separates a known_hosts line's fields for OpenSSH: blanks and tabs."""
+
+_BASE64_SKIPPED = str.maketrans("", "", "\r\v\f")
+"""The white space OpenSSH's base64 decoder skips inside a key (blanks and tabs end it)."""
 
 
 @dataclass(frozen=True)
@@ -153,9 +157,12 @@ class KnownHostKey:
     Parameters
     ----------
     type
-        The key type its line names, such as ``ssh-ed25519``; the key itself names the same.
+        The key's type as OpenSSH names it, such as ``ssh-ed25519`` or
+        ``ssh-rsa-cert-v01@openssh.com``: an ``rsa-sha2-256`` or ``rsa-sha2-512`` line names an
+        ``ssh-rsa`` key (and their certificate words an ``ssh-rsa`` certificate).
     fingerprint
-        Its fingerprint (`key_fingerprint`), ``SHA256:`` and the digest.
+        Its fingerprint as ``ssh-keygen -l`` prints it (`key_fingerprint`); a certificate's
+        is its certified key's.
     marker
         ``cert-authority`` for a key that signs the hosts' certificates, ``revoked`` for a key
         ssh refuses; `None` for a plain host key.
@@ -166,11 +173,11 @@ class KnownHostKey:
     marker: HostKeyMarker | None = None
 
 
-def _known_lines(text: str) -> list[tuple[str | None, str, bytes]]:
-    """Read the marker, the type word and the key blob of each line of a known_hosts text.
+def _known_lines(text: str) -> list[tuple[str | None, str, str]]:
+    """Read the marker, the type word and the base64 key of each line of a known_hosts text.
 
-    A line is ``[@marker] <hosts> <type> <base64> [comment]``; blank lines and comments are
-    skipped, and so is a line whose key is not base64 (ssh skips it too).
+    A line is ``[@marker] <hosts> <type> <base64> [comment]``, its fields apart by blanks or
+    tabs; a blank line and one that starts with ``#`` are skipped, as OpenSSH skips them.
 
     Parameters
     ----------
@@ -180,30 +187,49 @@ def _known_lines(text: str) -> list[tuple[str | None, str, bytes]]:
     Returns
     -------
     list of tuple
-        Each line's marker without its ``@`` (or `None`), its type word and its decoded key.
+        Each line's marker without its ``@`` (or `None`), its type word and its base64 key
+        without the white space OpenSSH's decoder skips.
     """
-    found: list[tuple[str | None, str, bytes]] = []
-    for line in text.splitlines():
-        fields = line.split()
+    found: list[tuple[str | None, str, str]] = []
+    for line in text.split("\n"):
+        fields = _FIELD_SEPARATOR.split(line.lstrip(" \t"))
+        if fields[0].startswith("#"):
+            continue
         marker = None
-        if fields and fields[0].startswith("@"):
+        if fields[0].startswith("@"):
             marker, fields = fields[0][1:], fields[1:]
-        if len(fields) < 3 or fields[0].startswith("#"):
-            continue
-        try:
-            found.append((marker, fields[1], base64.b64decode(fields[2], validate=True)))
-        except ValueError:
-            continue
+        if len(fields) >= 3:
+            found.append((marker, fields[1], fields[2].translate(_BASE64_SKIPPED)))
     return found
+
+
+def _base64(encoded: str) -> bytes | None:
+    """Decode a key's base64 as OpenSSH does: padded, and no bit set after the last byte.
+
+    Parameters
+    ----------
+    encoded
+        The base64 key (`_known_lines`).
+
+    Returns
+    -------
+    bytes or None
+        The blob; `None` when OpenSSH could not decode it.
+    """
+    try:
+        blob = base64.b64decode(encoded, validate=True)
+    except binascii.Error:
+        return None
+    return blob if base64.b64encode(blob).decode() == encoded else None
 
 
 def known_host_keys(text: str) -> list[KnownHostKey]:
     """Read every key of a known_hosts text with its type, its marker and its fingerprint.
 
-    The type is the line's own word, as OpenSSH reads it. A line is skipped, as OpenSSH skips
-    it, when its marker is one ssh does not know, when its key names an empty type, or when
-    that type is not the one the word names (``rsa-sha2-256`` and ``rsa-sha2-512`` name an
-    ``ssh-rsa`` key).
+    A line is read as OpenSSH reads it (`lakana_core.projects.ssh_keys.read_key`), and skipped
+    when OpenSSH skips it: a marker ssh does not know, base64 it cannot decode, a key it
+    refuses (any field malformed or a byte left over; a certificate that is malformed or
+    whose signature does not verify), or a type word that names another type than the key.
 
     Parameters
     ----------
@@ -213,16 +239,19 @@ def known_host_keys(text: str) -> list[KnownHostKey]:
     Returns
     -------
     list of KnownHostKey
-        The distinct keys, sorted by type, then fingerprint, then marker.
+        The distinct keys, sorted by type, then fingerprint, then marker: one key is listed
+        once however its lines name its type.
     """
     found: set[KnownHostKey] = set()
-    for marker, word, blob in _known_lines(text):
+    for marker, word, encoded in _known_lines(text):
         known = None if marker is None else _MARKERS.get(marker)
         if marker is not None and known is None:
             continue
-        if not _blob_type(blob) or _blob_type(blob) != _KEY_TYPES_OF_WORD.get(word, word):
+        blob = _base64(encoded)
+        key = None if blob is None else read_key(blob)
+        if key is None or key.type != key_type(word):
             continue
-        found.add(KnownHostKey(type=word, fingerprint=key_fingerprint(blob), marker=known))
+        found.add(KnownHostKey(type=key.type, fingerprint=key_fingerprint(key.plain), marker=known))
     return sorted(found, key=lambda key: (key.type, key.fingerprint, key.marker or ""))
 
 
@@ -238,35 +267,15 @@ def known_hosts_fingerprints(text: str) -> list[str]:
     Returns
     -------
     list of str
-        The distinct fingerprints (`key_fingerprint`), sorted.
+        The distinct fingerprints of the blobs as written (`key_fingerprint`), sorted.
     """
-    return sorted({key_fingerprint(blob) for _, _, blob in _known_lines(text)})
-
-
-def _blob_type(blob: bytes) -> str | None:
-    """Read the key type a key blob starts with.
-
-    Parameters
-    ----------
-    blob
-        The key blob.
-
-    Returns
-    -------
-    str or None
-        The type string (an SSH string: a four-byte length and the bytes); `None` when the
-        blob is too short for it or it is not ASCII.
-    """
-    if len(blob) < 4:
-        return None
-    length = int.from_bytes(blob[:4], "big")
-    name = blob[4 : 4 + length]
-    if len(name) != length:
-        return None
-    try:
-        return name.decode("ascii")
-    except UnicodeDecodeError:
-        return None
+    found: set[str] = set()
+    for _marker, _word, encoded in _known_lines(text):
+        try:
+            found.add(key_fingerprint(base64.b64decode(encoded, validate=True)))
+        except binascii.Error:
+            continue
+    return sorted(found)
 
 
 def known_hosts_host(host: str, port: int) -> str:
@@ -304,8 +313,9 @@ def parse_keyscan(output: str, *, host: str, port: int) -> list[HostKey]:
     -------
     list of HostKey
         In the order found, each key once, at most `MAX_HOST_KEYS`. A line is kept only with
-        exactly three fields, a type in `KEY_TYPES`, strictly valid base64 and a blob that
-        starts with that same type; comments and everything else are dropped.
+        exactly three fields, a type in `KEY_TYPES` and base64 of a key of that same type
+        that OpenSSH reads (`lakana_core.projects.ssh_keys.read_key`); comments and everything
+        else are dropped.
     """
     keys: list[HostKey] = []
     seen: set[str] = set()
@@ -313,16 +323,14 @@ def parse_keyscan(output: str, *, host: str, port: int) -> list[HostKey]:
         fields = raw.split()
         if len(fields) != 3 or fields[1] not in KEY_TYPES:
             continue
-        _host, key_type, encoded = fields
-        try:
-            blob = base64.b64decode(encoded, validate=True)
-        except (binascii.Error, ValueError):
-            continue
-        if _blob_type(blob) != key_type or encoded in seen:
+        _host, word, encoded = fields
+        blob = _base64(encoded)
+        key = None if blob is None else read_key(blob)
+        if key is None or key.type != word or encoded in seen:
             continue
         seen.add(encoded)
-        line = f"{known_hosts_host(host, port)} {key_type} {encoded}"
-        keys.append(HostKey(type=key_type, fingerprint=key_fingerprint(blob), line=line))
+        line = f"{known_hosts_host(host, port)} {word} {encoded}"
+        keys.append(HostKey(type=word, fingerprint=key_fingerprint(key.plain), line=line))
         if len(keys) == MAX_HOST_KEYS:
             return keys
     return keys
