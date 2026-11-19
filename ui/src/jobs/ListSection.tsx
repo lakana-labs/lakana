@@ -89,7 +89,18 @@ export function ListSection({
       inside.current = true;
     };
     const onFocusOut = (event: FocusEvent): void => {
-      inside.current = element?.contains(event.relatedTarget as Node | null) === true;
+      const { target, relatedTarget } = event;
+      if (relatedTarget === null) {
+        // Focus left for the page: a click on a blank part of it, or a removed row (Chrome tells
+        // that blur too). Only an element still in the page was left by the person.
+        setTimeout(() => {
+          if (target instanceof Node && target.isConnected) {
+            inside.current = false;
+          }
+        });
+        return;
+      }
+      inside.current = element?.contains(relatedTarget as Node) === true;
     };
     element?.addEventListener("focusin", onFocusIn);
     element?.addEventListener("focusout", onFocusOut);
