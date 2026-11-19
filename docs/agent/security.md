@@ -641,7 +641,8 @@ ES256 key, chosen origin, RP id hash, UV/UP flags and counter); the verification
   changes where code or data come from or go, irreversibly erases catalog records, or drops data
   (a table, an artifact, an artifact version, a namespace, a rebuild, an environment purge,
   leftover directories); none for removing access (revoking a token, withdrawing a link,
-  deleting a secret, clearing run-as), for operating on existing work under one's own rights (runs, queries, deploys of a registered repository, jobs, table data,
+  deleting a secret, clearing run-as), for operating on existing work under one's own rights
+  (runs, queries, deploys of a registered repository, jobs, table data,
   descriptions, maintenance, a webhook test), or for a new empty group. Deleting an environment
   without `purge` is a data operation undone with restore and asks for no touch; with `purge` it
   is a drop of every table and asks (#619). The
