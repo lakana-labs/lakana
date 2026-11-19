@@ -236,7 +236,12 @@ function inFrom(
     state.expect = "aliasAfterAs";
     return true;
   }
-  if (state.expect !== "none" && SINGLE_WORD.test(token) && !NOT_ALIAS.has(lower)) {
+  // After AS any word is the alias; without it, a keyword is not.
+  if (
+    state.expect !== "none" &&
+    SINGLE_WORD.test(token) &&
+    (state.expect === "aliasAfterAs" || !NOT_ALIAS.has(lower))
+  ) {
     if (state.last !== null) {
       state.last.read.alias = token;
     }
@@ -258,29 +263,49 @@ function inFrom(
 }
 
 /**
- * The parentheses of a text's tokens that are closed: each opening one's index, with the closing
- * one's.
+ * The parentheses that open and close a group.
  *
- * @param tokens - The tokens.
- * @param unclosed - Whether an opening parenthesis that is never closed opens a group too.
+ * @remarks
+ * Before the cursor, a closing parenthesis closes the innermost one open. The ones still open
+ * at the cursor are the groups the cursor is in, the innermost of them perhaps calls being typed
+ * whose closing parenthesis is not written yet. So a closing parenthesis after the cursor that
+ * no opening one after the cursor takes closes the outermost of them still open, and those left
+ * over, the innermost, are no group: `(select max(a.| from gold.a a)` closes the subquery, not
+ * `max(`.
+ * @param tokens - The tokens and where they are.
+ * @param at - Where the cursor is; null for a text that ends at the cursor, whose parentheses
+ *   still open are the groups it is in.
  * @returns The opening parentheses that open a group, and the closing ones that close one.
  */
 function matched(
-  tokens: readonly string[],
-  unclosed: boolean,
+  tokens: readonly { readonly 0: string; readonly index: number }[],
+  at: number | null,
 ): { opens: Set<number>; closes: Set<number> } {
   const opens = new Set<number>();
   const closes = new Set<number>();
   const waiting: number[] = [];
+  const after: number[] = [];
+  let around: number[] | null = null;
   tokens.forEach((token, index) => {
-    if (token === "(") {
+    if (at !== null && token.index >= at) {
+      around ??= [...waiting];
+      if (token[0] === "(") {
+        after.push(index);
+      } else if (token[0] === ")") {
+        const opening = after.length > 0 ? after.pop() : around.shift();
+        if (opening !== undefined) {
+          opens.add(opening);
+          closes.add(index);
+        }
+      }
+    } else if (token[0] === "(") {
       waiting.push(index);
-    } else if (token === ")" && waiting.length > 0) {
+    } else if (token[0] === ")" && waiting.length > 0) {
       opens.add(waiting.pop() as number);
       closes.add(index);
     }
   });
-  if (unclosed) {
+  if (at === null) {
     for (const index of waiting) {
       opens.add(index);
     }
@@ -349,18 +374,14 @@ function outsideFrom(state: GroupState, lower: string, index: number): void {
  * Reads a text's FROM clauses.
  *
  * @param source - The text.
- * @param unclosed - Whether a parenthesis that is never closed opens a group: so for the text
- *   before the cursor, where it is the group being typed in; not for a whole statement, where it
- *   is a call being typed.
+ * @param at - Where the cursor is in it (see {@link matched}); null for a text that ends at the
+ *   cursor.
  * @returns The tables, the groups, and what the end of the text expects.
  */
-function read(source: string, unclosed = false): Reading {
+function read(source: string, at: number | null): Reading {
   const text = source.replace(BLANKS, (blank) => " ".repeat(blank.length));
   const matches = [...text.matchAll(TOKEN)];
-  const { opens, closes } = matched(
-    matches.map((match) => match[0]),
-    unclosed,
-  );
+  const { opens, closes } = matched(matches, at);
   const tables: Found[] = [];
   const groups = [group([0, text.length], -1, 0)];
   const open = [0];
@@ -438,7 +459,7 @@ function read(source: string, unclosed = false): Reading {
  * @returns The place.
  */
 export function placeAfter(before: string): Place {
-  return read(before, true).place;
+  return read(before, null).place;
 }
 
 /**
@@ -449,7 +470,7 @@ export function placeAfter(before: string): Place {
  * @returns The tables.
  */
 export function tablesRead(statement: Statement): TableRead[] {
-  const { tables, groups } = read(statement.text);
+  const { tables, groups } = read(statement.text, statement.at);
   const { at } = statement;
   // The innermost group around the position, then outward until a group that sees nothing more.
   let inner = 0;

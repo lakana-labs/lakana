@@ -79,6 +79,57 @@ describe("tablesRead", () => {
     ]);
   });
 
+  it.each([
+    [
+      "a WHERE subquery",
+      "select * from gold.o o where id in (select max(a.| from gold.a a)",
+      ["o=gold.o", "a=gold.a"],
+    ],
+    [
+      "a WHERE subquery, bare",
+      "select * from gold.o o where id in (select max(i| from gold.a a)",
+      ["o=gold.o", "a=gold.a"],
+    ],
+    ["a CTE", "with x as (select max(a.| from gold.a a) select * from x", ["a=gold.a"]],
+    ["a CTE, bare", "with x as (select sum(i| from gold.a a) select * from gold.b b", ["a=gold.a"]],
+    ["a derived table", "select * from (select sum(a.| from gold.a a) q", ["a=gold.a"]],
+    [
+      "a derived table, bare",
+      "select * from (select sum(i| from gold.a a) q join gold.b b on true",
+      ["a=gold.a"],
+    ],
+    [
+      "a scalar subquery",
+      "select a.ax, (select max(b.| from gold.b b) from gold.a a",
+      ["b=gold.b", "a=gold.a"],
+    ],
+    [
+      "a scalar subquery, bare",
+      "select a.ax, (select max(i| from gold.b b) from gold.a a",
+      ["b=gold.b", "a=gold.a"],
+    ],
+    [
+      "two calls in a subquery",
+      "select * from gold.o o where id in (select coalesce(max(a.| from gold.a a)",
+      ["o=gold.o", "a=gold.a"],
+    ],
+    [
+      "a closed call after the cursor",
+      "select * from gold.o o where id in (select max(a.| from gold.a a where f(a.id) > 0)",
+      ["o=gold.o", "a=gold.a"],
+    ],
+  ])("reads past a call being typed inside %s", (_, sql, tables) => {
+    expect(inScope(sql)).toEqual(tables);
+  });
+
+  it("takes any word after AS for the alias, a keyword too", () => {
+    expect(inScope("select * from gold.a as at where at.|")).toEqual(["at=gold.a"]);
+    expect(inScope("select * from gold.a as asof join gold.b b on true where |")).toEqual([
+      "asof=gold.a",
+      "b=gold.b",
+    ]);
+  });
+
   it("keeps a CTE's body and a derived table to themselves, and lets LATERAL see the tables to its left", () => {
     expect(inScope("with x as (select | from gold.t s) select * from gold.f f")).toEqual([
       "s=gold.t",

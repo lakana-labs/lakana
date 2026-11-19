@@ -320,6 +320,31 @@ describe("catalogCompletion", () => {
     expect(labels(await complete(text))).toEqual(["station_id", "rank"]);
   });
 
+  it.each([
+    [
+      "a WHERE subquery",
+      "select * from gold.sales.fact_sales f where sale_id in (select max(r.| from gold.station_ranking r)",
+    ],
+    ["a CTE", "with x as (select max(r.| from gold.station_ranking r) select * from x"],
+    ["a derived table", "select * from (select sum(r.| from gold.station_ranking r) q"],
+    [
+      "a scalar subquery",
+      "select f.amount, (select max(r.| from gold.station_ranking r) from gold.sales.fact_sales f",
+    ],
+  ])("completes a dotted word in a call being typed inside %s", async (_, text) => {
+    expect(labels(await complete(text))).toEqual(["station_id", "rank"]);
+  });
+
+  it("offers the CTE's own columns for a bare word in a call being typed in its body", async () => {
+    expect(
+      labels(
+        await complete(
+          "with x as (select sum(ra| from gold.station_ranking r) select * from gold.sales.fact_sales f",
+        ),
+      ),
+    ).toEqual(["station_id", "rank"]);
+  });
+
   it("reads no table after a FROM inside an expression", async () => {
     const catalog = aCatalog();
     const columns = vi.spyOn(catalog, "columns");
