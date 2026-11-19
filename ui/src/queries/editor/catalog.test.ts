@@ -233,14 +233,109 @@ describe("catalogCache", () => {
   });
 
   it("a 403 on a table's read gives no columns and no error", async () => {
-    getTable.mockRejectedValue(new ApiError(403, "Forbidden", "You may not read this table."));
+    getTable.mockRejectedValue(
+      new client.ApiError(403, "Forbidden", "You may not read this table."),
+    );
     const prod = catalog.catalogCache("prod");
 
     await expect(prod.columns("gold", "station_ranking")).resolves.toBeNull();
-    // The answer is kept like any other: no second read while it is fresh.
+    // A refusal is kept like an answer: no second read while it is fresh.
     await expect(prod.columns("gold", "station_ranking")).resolves.toBeNull();
     expect(getTable).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    [
+      "a 404",
+      (): Error => new client.ApiError(404, "NotFound", "There is no table station_ranking."),
+    ],
+    ["a 400", (): Error => new client.ApiError(400, "Invalid", "The name is not valid.")],
+  ])("keeps %s like a 403: another read would answer the same", async (_, refused) => {
+    const refusal = refused();
+    getTableTree.mockRejectedValue(refusal);
+    listCompletionTables.mockRejectedValue(refusal);
+    getTable.mockRejectedValue(refusal);
+    const prod = catalog.catalogCache("prod");
+
+    for (let round = 0; round < 2; round += 1) {
+      expect(await prod.namespaces()).toEqual([]);
+      expect(await prod.tables("gold", "")).toEqual([]);
+      expect(await prod.columns("gold", "station_ranking")).toBeNull();
+    }
+    expect(getTableTree).toHaveBeenCalledTimes(1);
+    expect(listCompletionTables).toHaveBeenCalledTimes(1);
+    expect(getTable).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a 503", (): Error => new client.ApiError(503, "Busy", "The server is busy.")],
+    ["a 500", (): Error => new client.ApiError(500, "InternalError", "Something went wrong.")],
+    [
+      "no answer",
+      (): Error => new client.ApiError(0, "NetworkError", "The server could not be reached."),
+    ],
+    [
+      "a 429",
+      (): Error => new client.ApiError(429, "TooManyRequests", "Too many requests; wait a moment."),
+    ],
+    ["a 408", (): Error => new client.ApiError(408, "Timeout", "The request took too long.")],
+    ["an error that is not the server's", (): Error => new TypeError("Failed to fetch")],
+  ])(
+    "keeps nothing after %s: the next ask reads again, and its answer is kept",
+    async (_, failed) => {
+      const failure = failed();
+      const secret = { ...TABLE, name: "station_ranking" };
+      getTableTree.mockRejectedValueOnce(failure);
+      listCompletionTables
+        .mockResolvedValueOnce(pageOf(["daily_sales"]))
+        .mockRejectedValueOnce(failure)
+        .mockResolvedValue(pageOf(["station_ranking"], null));
+      getTable.mockRejectedValueOnce(failure).mockResolvedValue(secret);
+      const prod = catalog.catalogCache("prod");
+
+      expect(await prod.namespaces()).toEqual([]);
+      // What was read before the failure answers this time.
+      expect(await prod.tables("gold", "")).toEqual(["daily_sales"]);
+      expect(await prod.columns("gold", "station_ranking")).toBeNull();
+
+      expect(await prod.namespaces()).toEqual(["bronze", "silver", "gold", "gold.sales"]);
+      expect(await prod.tables("gold", "")).toEqual(["station_ranking"]);
+      expect((await prod.columns("gold", "station_ranking"))?.[0]?.name).toBe("sale_id");
+      expect(getTableTree).toHaveBeenCalledTimes(2);
+      expect(listCompletionTables).toHaveBeenCalledTimes(3);
+      expect(getTable).toHaveBeenCalledTimes(2);
+
+      // Now kept: no third read while it is fresh.
+      await prod.namespaces();
+      await prod.tables("gold", "");
+      await prod.columns("gold", "station_ranking");
+      expect(getTableTree).toHaveBeenCalledTimes(2);
+      expect(listCompletionTables).toHaveBeenCalledTimes(3);
+      expect(getTable).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("keeps nothing of a search that failed for a while", async () => {
+    vi.useFakeTimers();
+    getTableTree.mockResolvedValue(treeHolding(5_000));
+    listCompletionTables.mockImplementation((_environment, q) =>
+      q === ""
+        ? Promise.resolve(pageOf([], null))
+        : Promise.reject(new client.ApiError(503, "Busy", "")),
+    );
+    const prod = catalog.catalogCache("prod");
+    const ask = async (): Promise<readonly string[]> => {
+      const asked = prod.tables("gold", "sta");
+      await vi.advanceTimersByTimeAsync(catalog.SEARCH_QUIET_MS);
+      return asked;
+    };
+
+    expect(await ask()).toEqual([]);
+    listCompletionTables.mockResolvedValue(pageOf(["station_ranking"], null));
+    expect(await ask()).toEqual(["station_ranking"]);
+    expect(await prod.tables("gold", "sta")).toEqual(["station_ranking"]);
+    expect(listCompletionTables.mock.calls.filter((call) => call[1] === "sta")).toHaveLength(2);
+  });
+
   it.each([
     [
       "a sign-out",
