@@ -36,5 +36,10 @@
   "storageIntro": "Where the tables' files are and which secret opens them. The root cannot be changed.",
   "changeStorage": "Change storage",
   "changeStorageOf": "Change the storage of {{name}}",
-  "storageProtected": "The storage of a protected environment cannot be changed. Unprotect it first."
+  "storageProtected": "The storage of a protected environment cannot be changed. Unprotect it first.",
+  "deleteTitle": "Delete environment",
+  "deleteIntro": "Deleting it drops its tables and revokes what is granted on it. It can be restored for the undo period unless its files are deleted too.",
+  "delete": "Delete environment",
+  "deleteOf": "Delete environment {{name}}",
+  "deleteProtected": "Protected environments cannot be deleted. Unprotect it first."
 }

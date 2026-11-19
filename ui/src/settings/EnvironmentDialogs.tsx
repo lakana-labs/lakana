@@ -1,6 +1,7 @@
 /**
- * The dialogs of Settings › Environments: Create environment, and an environment's Set retention
- * and Change storage. They load on demand, when one is opened.
+ * The dialogs of Settings › Environments: Create environment; an environment's Set retention,
+ * Change storage and Delete environment; and a deleted environment's Restore, Delete the files
+ * and Remove from the catalog. They load on demand, when one is opened.
  *
  * @remarks
  * A storage option's value can be an inline credential. It is typed into an uncontrolled
@@ -31,8 +32,11 @@ import { useNavigate } from "react-router";
 import {
   changeStorage,
   createEnvironment,
+  deleteEnvironment,
   type EnvironmentOut,
   getStorage,
+  purgeEnvironmentRows,
+  restoreEnvironment,
   setEnvironmentRetention,
   type StorageScheme,
 } from "../api/environments";
@@ -46,13 +50,15 @@ import {
   type ValueRow,
   valuesReady,
 } from "../access/SecretValuesFields";
+import { ConfirmRow, useConfirm } from "../catalog/actions/ConfirmRow";
 import { ReadFailed } from "../catalog/ReadFailed";
+import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { ActionDialog } from "../shell/ActionDialog";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import "./environmentDialogStrings";
-import { environmentPath } from "./environmentPaths";
+import { ENVIRONMENTS_PATH, environmentPath } from "./environmentPaths";
 import { useSettingsViewer } from "./viewer";
 
 const D = "settings.environmentDialogs";
@@ -449,5 +455,198 @@ export function ChangeStorageDialog({
         />
       </Form>
     </ActionDialog>
+  );
+}
+
+/** What the list shows after an environment was deleted here: what became of it. */
+export interface DeletedState {
+  /** The deletion. */
+  readonly deleted: {
+    /** The environment's name. */
+    readonly name: string;
+    /** Until when it can be restored; null when its files go at the next clean-up. */
+    readonly restorableUntil: string | null;
+  };
+}
+
+/** Properties of {@link TypedName}. */
+interface TypedNameProps {
+  /** Its label, naming what to type. */
+  readonly label: string;
+  /** What was typed. */
+  readonly value: string;
+  /** Called with what is typed. */
+  readonly onChange: (value: string) => void;
+}
+
+/**
+ * The field the name is typed into before something that cannot be taken back.
+ *
+ * @param props - The label, the value and the handler.
+ * @param props.label - Its label.
+ * @param props.value - What was typed.
+ * @param props.onChange - Called with what is typed.
+ * @returns The field.
+ */
+function TypedName({ label, value, onChange }: TypedNameProps): JSX.Element {
+  return (
+    <TextField className="field" value={value} onChange={onChange}>
+      <Label>{label}</Label>
+      <Input autoComplete="off" spellCheck={false} />
+    </TextField>
+  );
+}
+
+/** Properties of {@link DeleteEnvironmentDialog}. */
+export interface DeleteEnvironmentDialogProps {
+  /** The environment, not protected. */
+  readonly environment: EnvironmentOut;
+  /** Closes the dialog without a change. */
+  readonly onClose: () => void;
+}
+
+/**
+ * Delete environment: what it does, the name typed, and whether its files are kept for the undo
+ * period (the default, with no passkey touch) or deleted at the next clean-up (after the touch;
+ * it cannot be restored then). Success goes to the list, which says what became of it; the
+ * server's refusal (a repository still deployed) stays here.
+ *
+ * @param props - The environment and the close handler.
+ * @param props.environment - The environment.
+ * @param props.onClose - Closes the dialog.
+ * @returns The dialog.
+ */
+export function DeleteEnvironmentDialog({
+  environment,
+  onClose,
+}: DeleteEnvironmentDialogProps): JSX.Element {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const attempt = useAttempt();
+  const [typed, setTyped] = useState("");
+  const [purge, setPurge] = useState(false);
+  const name = markedText(environment.name);
+  const d = `${D}.delete`;
+  const confirm = useConfirm({
+    busy: attempt.busy,
+    disabled: typed !== environment.name,
+    onConfirm: () => {
+      attempt.run(async () => {
+        const deleted = await deleteEnvironment(environment.name, purge);
+        const state: DeletedState = {
+          deleted: {
+            name: environment.name,
+            restorableUntil: purge ? null : deleted.purge_after,
+          },
+        };
+        await navigate(ENVIRONMENTS_PATH, { replace: true, state });
+      });
+    },
+  });
+  return (
+    <ActionDialog onClose={onClose}>
+      <Heading slot="title">{t(`${d}.title`, { name })}</Heading>
+      <p>{t(`${d}.body`)}</p>
+      <RadioGroup
+        className="field"
+        value={purge ? "purge" : "keep"}
+        onChange={(value) => {
+          setPurge(value === "purge");
+        }}
+      >
+        <Label>{t(`${d}.files`)}</Label>
+        <RadioField value="keep" className="radio-field">
+          <RadioButton className="radio">{t(`${d}.keep`)}</RadioButton>
+        </RadioField>
+        <RadioField value="purge" className="radio-field">
+          <RadioButton className="radio">{t(`${d}.purge`)}</RadioButton>
+        </RadioField>
+      </RadioGroup>
+      <TypedName label={t(`${d}.type`, { name })} value={typed} onChange={setTyped} />
+      <ConfirmRow attempt={attempt} label={t(`${d}.submit`)} confirm={confirm} onCancel={onClose} />
+    </ActionDialog>
+  );
+}
+
+/** What can be done to a deleted environment. */
+export type DeletedAction = "restore" | "purgeFiles" | "removeRows";
+
+/** Properties of {@link DeletedEnvironmentDialog}. */
+export interface DeletedEnvironmentDialogProps extends EnvironmentDialogProps {
+  /** What is done. */
+  readonly action: DeletedAction;
+}
+
+/**
+ * Delete the files of a deleted environment now: the name typed, then the passkey touch.
+ *
+ * @param props - The environment and what to call.
+ * @param props.environment - The deleted environment.
+ * @param props.onDone - Called once it is done.
+ * @param props.onClose - Closes the dialog.
+ * @returns The dialog.
+ */
+function PurgeFilesDialog({ environment, onDone, onClose }: EnvironmentDialogProps): JSX.Element {
+  const { t } = useTranslation();
+  const attempt = useAttempt();
+  const [typed, setTyped] = useState("");
+  const name = markedText(environment.name);
+  const f = `${D}.purgeFiles`;
+  const confirm = useConfirm({
+    busy: attempt.busy,
+    disabled: typed !== environment.name,
+    onConfirm: () => {
+      attempt.run(async () => {
+        await deleteEnvironment(environment.name, true);
+        onDone();
+      });
+    },
+  });
+  return (
+    <ActionDialog onClose={onClose}>
+      <Heading slot="title">{t(`${f}.title`, { name })}</Heading>
+      <p>{t(`${f}.body`)}</p>
+      <TypedName label={t(`${f}.type`, { name })} value={typed} onChange={setTyped} />
+      <ConfirmRow attempt={attempt} label={t(`${f}.submit`)} confirm={confirm} onCancel={onClose} />
+    </ActionDialog>
+  );
+}
+
+/**
+ * A deleted environment's action: Restore (no passkey touch), Delete the files now (the name
+ * typed, then the touch) or Remove from the catalog (after the touch); a refusal stays here.
+ *
+ * @param props - The action, the environment and what to call.
+ * @param props.action - What is done.
+ * @param props.environment - The deleted environment.
+ * @param props.onDone - Called once it is done.
+ * @param props.onClose - Closes the dialog.
+ * @returns The dialog.
+ */
+export function DeletedEnvironmentDialog({
+  action,
+  environment,
+  onDone,
+  onClose,
+}: DeletedEnvironmentDialogProps): JSX.Element {
+  const { t } = useTranslation();
+  if (action === "purgeFiles") {
+    return <PurgeFilesDialog environment={environment} onDone={onDone} onClose={onClose} />;
+  }
+  const k = `${D}.${action}`;
+  return (
+    <ConfirmDialog
+      title={t(`${k}.title`, { name: markedText(environment.name) })}
+      confirmLabel={t(`${k}.confirm`)}
+      onConfirm={async () => {
+        await (action === "restore"
+          ? restoreEnvironment(environment.name)
+          : purgeEnvironmentRows(environment.name));
+      }}
+      onCancel={onClose}
+      onDone={onDone}
+    >
+      <p>{t(`${k}.body`)}</p>
+    </ConfirmDialog>
   );
 }

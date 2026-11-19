@@ -24,7 +24,6 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
 
 import { type EnvironmentOut, getEnvironment, setProtected } from "../api/environments";
-import { ReadFailed } from "../catalog/ReadFailed";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
@@ -32,7 +31,12 @@ import { useFocusAfter } from "../shell/useFocusAfter";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "../sign-in/Attempt";
-import type { CreatedState, EnvironmentDialogProps } from "./EnvironmentDialogs";
+import { DetailRead } from "./DetailRead";
+import type {
+  CreatedState,
+  DeleteEnvironmentDialogProps,
+  EnvironmentDialogProps,
+} from "./EnvironmentDialogs";
 import "./environmentPageStrings";
 import { DELETED_PATH, ENVIRONMENTS_PATH } from "./environmentPaths";
 import "./environments.css";
@@ -63,8 +67,12 @@ const DIALOGS = {
   storage: dialogOf("ChangeStorageDialog"),
 } as const;
 
+const DeleteEnvironmentDialog: ComponentType<DeleteEnvironmentDialogProps> = lazy(async () => ({
+  default: (await import("./EnvironmentDialogs")).DeleteEnvironmentDialog,
+}));
+
 /** The dialog open on the page. */
-type Open = "retention" | "storage" | "unprotect";
+type Open = "retention" | "storage" | "unprotect" | "delete";
 
 /**
  * The dialog that is open, loaded when it is first opened.
@@ -82,6 +90,46 @@ function OpenDialog({
 }): JSX.Element {
   const Dialog = DIALOGS[kind];
   return <Dialog {...props} />;
+}
+
+/** Properties of {@link DeletePanel}. */
+interface DeletePanelProps {
+  /** The environment. */
+  readonly environment: EnvironmentOut;
+  /** Opens Delete environment. */
+  readonly onOpen: () => void;
+}
+
+/**
+ * Delete environment, at the end of the page, for those who manage it; for a protected
+ * environment the sentence that names Unprotect instead, as the server refuses it.
+ *
+ * @param props - The environment and the handler.
+ * @param props.environment - The environment.
+ * @param props.onOpen - Opens Delete environment.
+ * @returns The panel.
+ */
+function DeletePanel({ environment, onOpen }: DeletePanelProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <section className="flat-panel settings-panel">
+      <h2>{t(`${P}.deleteTitle`)}</h2>
+      {environment.is_protected ? (
+        <p>{t(`${P}.deleteProtected`)}</p>
+      ) : (
+        <>
+          <p className="page-purpose">{t(`${P}.deleteIntro`)}</p>
+          <Button
+            className="button"
+            aria-label={t(`${P}.deleteOf`, { name: markedText(environment.name) })}
+            onPress={onOpen}
+          >
+            {t(`${P}.delete`)}
+          </Button>
+        </>
+      )}
+    </section>
+  );
 }
 
 /** Properties of {@link StoragePanel}. */
@@ -293,12 +341,12 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const load = useCallback(() => getEnvironment(name), [name]);
   const read = useResource(load);
-  const environment = read.data;
   // The focus moves once the page is read again, after the dialog has given it back.
-  const { target: retentionButton, arm: armRetention } =
-    useFocusAfter<HTMLButtonElement>(environment);
-  const { target: protectButton, arm: armProtect } = useFocusAfter<HTMLButtonElement>(environment);
-  const { target: storageButton, arm: armStorage } = useFocusAfter<HTMLButtonElement>(environment);
+  const { target: retentionButton, arm: armRetention } = useFocusAfter<HTMLButtonElement>(
+    read.data,
+  );
+  const { target: protectButton, arm: armProtect } = useFocusAfter<HTMLButtonElement>(read.data);
+  const { target: storageButton, arm: armStorage } = useFocusAfter<HTMLButtonElement>(read.data);
   const [open, setOpen] = useState<Open | null>(null);
   const close = (): void => {
     setOpen(null);
@@ -328,84 +376,84 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
           />
         </p>
       )}
-      {read.failure?.status === 404 ? (
-        <div className="empty">
-          <p role="alert">{read.error}</p>
-          <p>
-            {manages ? (
-              <Link to={DELETED_PATH}>{t(`${P}.seeDeleted`)}</Link>
-            ) : (
-              <Link to={ENVIRONMENTS_PATH}>{t(`${P}.back`)}</Link>
-            )}
-          </p>
-        </div>
-      ) : environment === undefined ? (
-        read.error === null ? (
-          <p className="step-status" role="status">
-            {t("session.loading")}
-          </p>
-        ) : (
-          <ReadFailed
-            message={read.error}
-            onRetry={() => {
-              heading.current?.focus();
-              read.reload();
-            }}
-          />
-        )
-      ) : (
-        <>
-          <Overview
-            environment={environment}
-            manages={manages}
-            creates={creates}
-            onOpen={setOpen}
-            onProtected={protectedAgain}
-            retentionButton={retentionButton}
-            protectButton={protectButton}
-          />
-          {manages && <EnvironmentUsage name={environment.name} />}
-          {creates && (
-            <StoragePanel
+      <DetailRead
+        read={read}
+        heading={heading}
+        missing={
+          manages ? (
+            <Link to={DELETED_PATH}>{t(`${P}.seeDeleted`)}</Link>
+          ) : (
+            <Link to={ENVIRONMENTS_PATH}>{t(`${P}.back`)}</Link>
+          )
+        }
+      >
+        {(environment) => (
+          <>
+            <Overview
               environment={environment}
-              button={storageButton}
-              onOpen={() => {
-                setOpen("storage");
-              }}
+              manages={manages}
+              creates={creates}
+              onOpen={setOpen}
+              onProtected={protectedAgain}
+              retentionButton={retentionButton}
+              protectButton={protectButton}
             />
-          )}
-          {open === "unprotect" && (
-            <ConfirmDialog
-              title={t(`${P}.unprotectTitle`, { name: markedText(environment.name) })}
-              confirmLabel={t(`${P}.unprotect`)}
-              onConfirm={async () => {
-                await setProtected(environment.name, false);
-              }}
-              onCancel={close}
-              onDone={() => {
-                close();
-                protectedAgain();
-              }}
-            >
-              <p>{t(`${P}.unprotectBody`)}</p>
-            </ConfirmDialog>
-          )}
-          {open !== null && open !== "unprotect" && (
-            <Suspense fallback={null}>
-              <OpenDialog
-                kind={open}
+            {manages && <EnvironmentUsage name={environment.name} />}
+            {creates && (
+              <StoragePanel
                 environment={environment}
+                button={storageButton}
+                onOpen={() => {
+                  setOpen("storage");
+                }}
+              />
+            )}
+            {open === "unprotect" && (
+              <ConfirmDialog
+                title={t(`${P}.unprotectTitle`, { name: markedText(environment.name) })}
+                confirmLabel={t(`${P}.unprotect`)}
+                onConfirm={async () => {
+                  await setProtected(environment.name, false);
+                }}
+                onCancel={close}
                 onDone={() => {
                   close();
-                  arms[open]();
-                  read.reload();
+                  protectedAgain();
                 }}
-                onClose={close}
+              >
+                <p>{t(`${P}.unprotectBody`)}</p>
+              </ConfirmDialog>
+            )}
+            {manages && (
+              <DeletePanel
+                environment={environment}
+                onOpen={() => {
+                  setOpen("delete");
+                }}
               />
-            </Suspense>
-          )}
-        </>
-      )}
+            )}
+            {open === "delete" && (
+              <Suspense fallback={null}>
+                <DeleteEnvironmentDialog environment={environment} onClose={close} />
+              </Suspense>
+            )}
+            {(open === "retention" || open === "storage") && (
+              <Suspense fallback={null}>
+                <OpenDialog
+                  kind={open}
+                  environment={environment}
+                  onDone={() => {
+                    close();
+                    arms[open]();
+                    read.reload();
+                  }}
+                  onClose={close}
+                />
+              </Suspense>
+            )}
+          </>
+        )}
+      </DetailRead>
     </Page>
   );
 }

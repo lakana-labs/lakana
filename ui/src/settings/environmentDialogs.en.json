@@ -62,5 +62,30 @@
     "replaceHelp": "Sending replaces every option: name each one the storage needs.",
     "submit": "Change storage",
     "held": "Choose another secret or replace the options."
+  },
+  "delete": {
+    "title": "Delete environment {{name}}?",
+    "body": "Its tables are dropped, the grants, row filters and masks on it are revoked, and its task tokens stop working.",
+    "files": "Its files",
+    "keep": "Keep the files for the undo period, so it can be restored",
+    "purge": "Delete the files at the next clean-up. It cannot be restored.",
+    "type": "Type {{name}} to delete it",
+    "submit": "Delete environment"
+  },
+  "restore": {
+    "title": "Restore {{name}}?",
+    "body": "Its tables come back with the grants, row filters and masks they had. Task tokens it had stay revoked.",
+    "confirm": "Restore"
+  },
+  "purgeFiles": {
+    "title": "Delete the files of {{name}} now?",
+    "body": "The next clean-up deletes its tables' files, and it can no longer be restored.",
+    "type": "Type {{name}} to delete its files",
+    "submit": "Delete the files"
+  },
+  "removeRows": {
+    "title": "Remove {{name}} from the catalog?",
+    "body": "Lakana cannot reach this storage. This removes the environment's records and frees its name; files, if any, stay where they are.",
+    "confirm": "Remove from the catalog"
   }
 }

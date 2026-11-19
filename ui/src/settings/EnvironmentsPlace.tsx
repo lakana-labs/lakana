@@ -5,10 +5,20 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, type RefObject, Suspense, useEffect, useRef, useState } from "react";
+import {
+  type JSX,
+  lazy,
+  type RefObject,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
-import { Link as RouterLink } from "react-router";
+import { Link as RouterLink, useLocation } from "react-router";
 
 import {
   type EnvironmentOut,
@@ -22,6 +32,7 @@ import { ViewList } from "../catalog/views/ViewList";
 import { inPool, READS_IN_FLIGHT } from "../shell/inPool";
 import { type Resource, useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
+import type { DeletedAction, DeletedState } from "./EnvironmentDialogs";
 import { VisibleText } from "../shell/VisibleText";
 import "./environments.css";
 import { environmentPath } from "./environmentPaths";
@@ -35,10 +46,27 @@ import { useWholePages } from "./wholePages";
 
 const P = "settings.environmentPages";
 
-// Create environment loads when it is first opened, so the list stays small.
+// Create environment loads when it is first opened, and the deleted environments only for
+// those who manage one, so the list stays small.
 const CreateEnvironmentDialog = lazy(async () => ({
   default: (await import("./EnvironmentDialogs")).CreateEnvironmentDialog,
 }));
+
+const DeletedEnvironments = lazy(async () => ({
+  default: (await import("./DeletedEnvironments")).DeletedEnvironments,
+}));
+
+/**
+ * Where the focus goes once a list is read again after a change: a restored environment's link
+ * once the live list has its new answer, else the deleted environments' heading (or the place's,
+ * when none is left) once theirs has.
+ */
+interface FocusTarget {
+  /** The restored environment, or null for the deleted environments' heading. */
+  readonly link: string | null;
+  /** The answer read before the change; the focus moves once a newer one is in. */
+  readonly before: unknown;
+}
 
 /** One environment's usage: read, or failed; absent while on its way. */
 type UsageRead = EnvironmentUsageOut | "failed";
@@ -141,7 +169,8 @@ interface EnvironmentListProps {
 }
 
 /**
- * The environments in their own scrolling region, or the sentence that there is none.
+ * The environments in their own scrolling region, or the sentence that there is none. Each
+ * name's link carries the name, so a restored environment's link can take the focus.
  *
  * @param props - The read, the viewer and the heading.
  * @param props.read - The live environments' read.
@@ -193,7 +222,11 @@ function EnvironmentList({ read, viewer, heading }: EnvironmentListProps): JSX.E
       {rows.map((environment) => (
         <tr key={environment.name}>
           <td>
-            <RouterLink className="row-name" to={environmentPath(environment.name)}>
+            <RouterLink
+              className="row-name"
+              to={environmentPath(environment.name)}
+              data-environment={environment.name}
+            >
               <VisibleText text={environment.name} />
             </RouterLink>
           </td>
@@ -219,60 +252,6 @@ function EnvironmentList({ read, viewer, heading }: EnvironmentListProps): JSX.E
 }
 
 /**
- * The deleted environments the person manages, static rows with when each was deleted and when
- * its files go; nothing when there are none.
- *
- * @returns The section, or nothing.
- */
-function DeletedEnvironments(): JSX.Element | null {
-  const { t } = useTranslation();
-  const when = useWhen();
-  const viewer = useSettingsViewer();
-  const read = useResource(listDeletedEnvironments);
-  const heading = useRef<HTMLHeadingElement>(null);
-  const rows = (read.data ?? []).filter((environment) =>
-    managesEnvironment(viewer, environment.name),
-  );
-  const pages = useWholePages(read, heading);
-  if (read.data !== undefined && rows.length === 0) return null;
-  return (
-    <section className="environments-deleted">
-      <h2 id="deleted" tabIndex={-1} ref={heading}>
-        {t(`${P}.deletedTitle`)}
-      </h2>
-      <p className="page-purpose">{t(`${P}.deletedIntro`)}</p>
-      <ViewList
-        pages={pages}
-        rowCount={rows.length}
-        empty=""
-        region={t(`${P}.deletedRegion`)}
-        scroll="environments-scroll"
-        head={
-          <tr>
-            <th scope="col">{t("list.name")}</th>
-            <th scope="col">{t(`${P}.deletedAt`)}</th>
-            <th scope="col">{t(`${P}.purgeAfter`)}</th>
-          </tr>
-        }
-      >
-        {rows.map((environment) => (
-          <tr key={environment.name}>
-            <td>
-              <span className="row-name">
-                <VisibleText text={environment.name} />
-              </span>
-            </td>
-            {/* The server answers both dates for every deleted environment. */}
-            <td>{when(environment.deleted_at as string)}</td>
-            <td>{when(environment.purge_after as string)}</td>
-          </tr>
-        ))}
-      </ViewList>
-    </section>
-  );
-}
-
-/**
  * Renders the purpose, the list, the deleted environments for those who manage one, and for
  * those who manage environments on the instance the way to create one.
  *
@@ -280,11 +259,53 @@ function DeletedEnvironments(): JSX.Element | null {
  */
 export function EnvironmentsPlace(): JSX.Element {
   const { t } = useTranslation();
+  const when = useWhen();
   const viewer = useSettingsViewer();
   const creates = mayCreateEnvironments(viewer) === true;
+  // The place is shown once the facts are read, so the managed environments are known.
+  const managesAny = (viewer.managedEnvironments as readonly string[]).length > 0;
   const heading = useRef<HTMLHeadingElement>(null);
   const read = useResource(listEnvironmentsFull);
+  const loadDeleted = useCallback(
+    () => (managesAny ? listDeletedEnvironments() : Promise.resolve([])),
+    [managesAny],
+  );
+  const deleted = useResource(loadDeleted);
   const [creating, setCreating] = useState(false);
+  const arrived = (useLocation().state as Partial<DeletedState> | null)?.deleted;
+  const [note, setNote] = useState<string | null>(() =>
+    arrived === undefined
+      ? null
+      : arrived.restorableUntil === null
+        ? t(`${P}.deletedPurged`, { name: arrived.name })
+        : t(`${P}.deletedKept`, { name: arrived.name, when: when(arrived.restorableUntil) }),
+  );
+  const focus = useRef<FocusTarget | null>(null);
+  // After a deletion the dialog's page is gone: the focus starts on the place's heading.
+  useLayoutEffect(() => {
+    if (arrived !== undefined) heading.current?.focus();
+  }, [arrived]);
+  useEffect(() => {
+    const target = focus.current;
+    if (target === null || (target.link === null ? deleted.data : read.data) === target.before) {
+      return;
+    }
+    focus.current = null;
+    const element =
+      target.link === null
+        ? document.getElementById("deleted")
+        : document.querySelector<HTMLElement>(`a[data-environment="${CSS.escape(target.link)}"]`);
+    (element ?? heading.current)?.focus();
+  }, [read.data, deleted.data]);
+  const changed = (action: DeletedAction, name: string): void => {
+    setNote(t(`${P}.done.${action}`, { name }));
+    focus.current =
+      action === "restore"
+        ? { link: name, before: read.data }
+        : { link: null, before: deleted.data };
+    read.reload();
+    deleted.reload();
+  };
   return (
     <SettingsFrame
       title={t("settings.places.environments")}
@@ -312,9 +333,15 @@ export function EnvironmentsPlace(): JSX.Element {
         </Suspense>
       )}
       <p className="page-purpose">{t(`${P}.intro`)}</p>
+      <p className="step-status" role="status">
+        {note}
+      </p>
       <EnvironmentList read={read} viewer={viewer} heading={heading} />
-      {/* The place is shown once the facts are read, so the managed environments are known. */}
-      {(viewer.managedEnvironments as readonly string[]).length > 0 && <DeletedEnvironments />}
+      {managesAny && (
+        <Suspense fallback={null}>
+          <DeletedEnvironments read={deleted} onChanged={changed} />
+        </Suspense>
+      )}
     </SettingsFrame>
   );
 }
