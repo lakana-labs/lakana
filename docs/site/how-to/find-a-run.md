@@ -56,7 +56,7 @@ job's page, opened from **Your work** on Home, lists the job's runs under **Runs
 one you choose below the list. A run lists its tasks with their state, duration and rows; a task
 that failed or never ran has a second line with its code, the cause and the next step. **Logs**
 opens the task that failed first, and a task's name opens its page: its attempts with the memory,
-processor time and bytes each used, and its log, which the page follows while the task runs and
+processor time and bytes each used (a dash where nobody measured it), and its log, which the page follows while the task runs and
 offers as **Save log** once it is complete.
 
 The **Runs** tab of the Jobs page lists every run of the environments you may read, newest first,
