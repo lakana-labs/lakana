@@ -20,14 +20,23 @@ const ENVIRONMENTS = [
  * @param props - The first filter and the spy.
  * @param props.start - The first filter.
  * @param props.onChange - Told of every change.
+ * @param props.environments - The environments listed; null while not read.
  * @returns The filters.
  */
-function Harness({ start, onChange }: { start: PolicyFilter; onChange: Mock }): JSX.Element {
+function Harness({
+  start,
+  onChange,
+  environments = ENVIRONMENTS,
+}: {
+  start: PolicyFilter;
+  onChange: Mock;
+  environments?: typeof ENVIRONMENTS | null;
+}): JSX.Element {
   const [filter, setFilter] = useState(start);
   return (
     <PolicyFilters
       filter={filter}
-      environments={ENVIRONMENTS}
+      environments={environments}
       onChange={(next, step) => {
         onChange(next, step);
         setFilter(next);
@@ -40,12 +49,16 @@ function Harness({ start, onChange }: { start: PolicyFilter; onChange: Mock }): 
  * Renders the filters.
  *
  * @param start - The filter shown.
+ * @param environments - The environments listed; null while not read.
  * @returns The change handler and a user-event session.
  */
-function renderFilters(start: PolicyFilter = NO_POLICY_FILTER) {
+function renderFilters(
+  start: PolicyFilter = NO_POLICY_FILTER,
+  environments: typeof ENVIRONMENTS | null = ENVIRONMENTS,
+) {
   const onChange = vi.fn();
   const user = userEvent.setup();
-  render(<Harness start={start} onChange={onChange} />);
+  render(<Harness start={start} onChange={onChange} environments={environments} />);
   return { onChange, user };
 }
 
@@ -129,5 +142,29 @@ describe("PolicyFilters", () => {
       { ...NO_POLICY_FILTER, who: { kind: "group", name: "analysts" } },
       "replace",
     );
+  });
+
+  it("takes a typed environment from a person who may list none", async () => {
+    const { onChange, user } = renderFilters(NO_POLICY_FILTER, []);
+    const environment = screen.getByRole("textbox", { name: "Environment" });
+
+    await user.type(environment, "dev{Enter}");
+    expect(onChange).toHaveBeenLastCalledWith(
+      { ...NO_POLICY_FILTER, environment: "dev" },
+      "replace",
+    );
+    await user.type(environment, "{Enter}");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    await user.clear(environment);
+    await user.tab();
+
+    expect(onChange).toHaveBeenLastCalledWith(NO_POLICY_FILTER, "replace");
+  });
+
+  it("offers the picker while the environments are read", () => {
+    renderFilters(NO_POLICY_FILTER, null);
+
+    expect(screen.getByRole("button", { name: /^Environment/ })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Environment" })).toBeNull();
   });
 });

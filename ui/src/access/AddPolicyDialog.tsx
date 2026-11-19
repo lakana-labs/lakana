@@ -44,8 +44,8 @@ import "./policyStrings";
 export interface AddPolicyDialogProps {
   /** The lists' filter, which the form starts from. */
   readonly start: PolicyFilter;
-  /** The environments to choose from. */
-  readonly environments: readonly EnvironmentChoice[];
+  /** The environments to choose from; null until read, none when the person may list none. */
+  readonly environments: readonly EnvironmentChoice[] | null;
   /** The managed scopes. */
   readonly scopes: readonly ManagedScopeBriefOut[];
   /** Called with the kind once the policy is made. */
@@ -176,11 +176,12 @@ export function AddPolicyDialog({
   const { kind, who, name, environment, namespace, table, column, expression } = fields;
   const managed = environment === null ? null : managedScopeOf(scopes, environment);
   const held = missing(t, fields);
+  const listed = environments ?? [];
   const create = async (): Promise<void> => {
     const body: RowFilterCreateIn = {
       principal: who === "principal" ? name.trim() : null,
       group: who === "group" ? name.trim() : null,
-      environment: environment as string,
+      environment: (environment as string).trim(),
       namespace: namespace.trim(),
       table: table.trim(),
       expression,
@@ -243,30 +244,41 @@ export function AddPolicyDialog({
             set({ name: value });
           }}
         />
-        <Choice<string>
-          label={t("policies.addDialog.environment")}
-          value={environment}
-          options={environments.map((choice) => ({
-            id: choice.name,
-            text: markedText(choice.name),
-          }))}
-          onChange={(id) => {
-            set({ environment: id });
-          }}
-          render={(id) => (
-            <span>
-              <EnvironmentName
-                environment={environments.find((choice) => choice.name === id) as EnvironmentChoice}
-              />
-              {managedScopeOf(scopes, id) !== null && (
-                <>
-                  {" "}
-                  <GitMark />
-                </>
-              )}
-            </span>
-          )}
-        />
+        {environments !== null && environments.length === 0 ? (
+          <PlainField
+            label={t("policies.addDialog.environment")}
+            value={environment ?? ""}
+            help={t("policies.addDialog.environmentHelp")}
+            onChange={(value) => {
+              set({ environment: value.trim() === "" ? null : value });
+            }}
+          />
+        ) : (
+          <Choice<string>
+            label={t("policies.addDialog.environment")}
+            value={environment}
+            options={listed.map((choice) => ({
+              id: choice.name,
+              text: markedText(choice.name),
+            }))}
+            onChange={(id) => {
+              set({ environment: id });
+            }}
+            render={(id) => (
+              <span>
+                <EnvironmentName
+                  environment={listed.find((choice) => choice.name === id) as EnvironmentChoice}
+                />
+                {managedScopeOf(scopes, id) !== null && (
+                  <>
+                    {" "}
+                    <GitMark />
+                  </>
+                )}
+              </span>
+            )}
+          />
+        )}
         <PlainField
           label={t("policies.addDialog.namespace")}
           value={namespace}

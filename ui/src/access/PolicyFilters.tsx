@@ -18,8 +18,11 @@ import { AppliedField, type FilterStep, WhoFilter } from "./WhoFilter";
 export interface PolicyFiltersProps {
   /** The filter the lists show. */
   readonly filter: PolicyFilter;
-  /** The environments to choose from. */
-  readonly environments: readonly EnvironmentChoice[];
+  /**
+   * The environments to choose from; null until they are read. None read means the person may
+   * list none (a policy manager without `READ_ENVIRONMENT`): the environment is typed then.
+   */
+  readonly environments: readonly EnvironmentChoice[] | null;
   /** Called with the next filter, and how to keep it in the history. */
   readonly onChange: (next: PolicyFilter, step: FilterStep) => void;
 }
@@ -37,7 +40,8 @@ function dottedOf(filter: PolicyFilter): string {
 }
 
 /**
- * Renders the Environment picker (with all environments), the Table field (`namespace.table`,
+ * Renders the Environment picker (with all environments; a typed name for a person who may list
+ * none), the Table field (`namespace.table`,
  * applied on Enter or when it is left, usable once an environment is chosen) and Who. A table
  * without a dot says how to write it and changes nothing.
  *
@@ -58,6 +62,25 @@ export function PolicyFilters({ filter, environments, onChange }: PolicyFiltersP
     setTyped(dottedOf(filter));
     setRefused(false);
   }
+  const [typedEnvironment, setTypedEnvironment] = useState(filter.environment ?? "");
+  const [environmentFor, setEnvironmentFor] = useState(filter.environment);
+  if (environmentFor !== filter.environment) {
+    setEnvironmentFor(filter.environment);
+    setTypedEnvironment(filter.environment ?? "");
+  }
+  const chooseEnvironment = (environment: string | null, step: FilterStep): void => {
+    if (environment === filter.environment) return;
+    const keep = environment !== null;
+    onChange(
+      {
+        ...filter,
+        environment,
+        namespace: keep ? filter.namespace : null,
+        table: keep ? filter.table : null,
+      },
+      step,
+    );
+  };
   const applyTable = (): void => {
     const text = typed.trim();
     const split = text === "" ? { namespace: null, name: null } : splitDotted(text);
@@ -70,24 +93,28 @@ export function PolicyFilters({ filter, environments, onChange }: PolicyFiltersP
   };
   return (
     <div className="access-filters" role="group" aria-label={t("policies.filters.label")}>
-      <EnvironmentPicker
-        environments={environments}
-        value={filter.environment}
-        label={t("policies.filters.environment")}
-        all={t("policies.filters.all")}
-        onChange={(environment: string | null) => {
-          const keep = environment !== null;
-          onChange(
-            {
-              ...filter,
-              environment,
-              namespace: keep ? filter.namespace : null,
-              table: keep ? filter.table : null,
-            },
-            "push",
-          );
-        }}
-      />
+      {environments !== null && environments.length === 0 ? (
+        <AppliedField
+          label={t("policies.filters.environment")}
+          value={typedEnvironment}
+          onChange={setTypedEnvironment}
+          help={t("policies.filters.environmentHelp")}
+          onApply={() => {
+            const typedName = typedEnvironment.trim();
+            chooseEnvironment(typedName === "" ? null : typedName, "replace");
+          }}
+        />
+      ) : (
+        <EnvironmentPicker
+          environments={environments ?? []}
+          value={filter.environment}
+          label={t("policies.filters.environment")}
+          all={t("policies.filters.all")}
+          onChange={(environment: string | null) => {
+            chooseEnvironment(environment, "push");
+          }}
+        />
+      )}
       <AppliedField
         label={t("policies.filters.table")}
         value={typed}

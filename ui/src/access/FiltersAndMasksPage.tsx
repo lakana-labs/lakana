@@ -117,7 +117,8 @@ export function FiltersAndMasksPage(): JSX.Element {
   });
   const [adding, setAdding] = useState(false);
   const scopes = managed.data ?? null;
-  const choices = environments.data ?? [];
+  // Null until read; none read means the person may list none, and types a name instead.
+  const choices = environments.data ?? null;
   const managedInstance = scopes === null ? undefined : managedScopeOf(scopes, null);
   const go = (next: PolicyFilter, step: FilterStep): void => {
     setParams(new URLSearchParams(policiesPath(next).split("?")[1] ?? ""), {

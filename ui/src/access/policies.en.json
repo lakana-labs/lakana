@@ -7,7 +7,8 @@
     "all": "All environments",
     "table": "Table (namespace.table)",
     "tableHelp": "Choose an environment first; applied on Enter.",
-    "tableDotted": "Write the table as namespace.table, such as gold.station_ranking."
+    "tableDotted": "Write the table as namespace.table, such as gold.station_ranking.",
+    "environmentHelp": "You may list no environment here: type its name; applied on Enter."
   },
   "row-filter": {
     "title": "Row filters",
@@ -64,6 +65,7 @@
     "tableNeeded": "Name the table.",
     "columnNeeded": "Name the column.",
     "expressionNeeded": "Write the expression.",
-    "managed": "An access file manages {{environment}}: add this in {{file}} instead."
+    "managed": "An access file manages {{environment}}: add this in {{file}} instead.",
+    "environmentHelp": "You may list no environment here: type its name."
   }
 }

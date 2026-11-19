@@ -310,6 +310,42 @@ describe("AddPolicyDialog", () => {
     });
   });
 
+  it("takes a typed environment from a person who may list none", async () => {
+    const shell = await openDialog(
+      PATH,
+      policyRoutes({
+        "GET /api/v1/environments": { status: 200, body: [] },
+        "POST /api/v1/row-filters": { status: 201, body: aRowFilter() },
+      }),
+    );
+    const { user, dialog, server } = shell;
+    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    const environment = within(dialog).getByRole("textbox", { name: "Environment" });
+    await user.type(environment, " dev ");
+    await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
+    await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "t");
+    await user.type(within(dialog).getByRole("textbox", { name: "Expression" }), "TRUE");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const post = server.sent.find((request) => request.method === "POST");
+    expect(post?.body).toMatchObject({ environment: "dev", principal: "maria" });
+  });
+
+  it("offers the choice while the environments are read", async () => {
+    const environments = held();
+    const { dialog } = await openDialog(
+      PATH,
+      policyRoutes({ "GET /api/v1/environments": environments.route }),
+    );
+
+    expect(within(dialog).getByRole("button", { name: /Environment$/ })).toBeInTheDocument();
+    environments.release({ status: 200, body: [] });
+    expect(await within(dialog).findByRole("textbox", { name: "Environment" })).toHaveValue("");
+  });
+
   it("Escape returns the focus to Add filter or mask", async () => {
     const { user } = await openDialog();
 
