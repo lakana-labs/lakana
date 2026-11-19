@@ -445,6 +445,8 @@ Answer fields: `OrphanedLocationsOut`
 
 Delete table directories without a location record
 
+From the web interface it needs a passkey touch within the last 15 minutes (403 `StepUpRequired`); a token never does.
+
 Deletes the directories that older releases left under the environment's storage and whose files are older than `older_than_days`. Needs `MANAGE_ENVIRONMENT` on the instance. Answers 404 when there is no such environment, 422 when `older_than_days` is out of range, 502 when the environment's storage refused its credentials, and 503 when it did not answer; either comes before anything is deleted.
 
 Parameters:

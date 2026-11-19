@@ -164,6 +164,41 @@ for (const theme of ["light", "dark"] as const) {
         expect(errors).toEqual([]);
       });
 
+      test("Delete the old ones asks for the passkey touch first", async ({
+        browserName,
+        context,
+        page,
+      }) => {
+        test.skip(browserName !== "chromium", "the passkey touch uses a virtual authenticator");
+        const errors = consoleErrors(page);
+        await addAdminPasskey(context, page);
+        await stubStepUpCeremony(page);
+        const deletes = mutatingRequests(
+          page,
+          "/api/v1/environments/dev/orphaned-locations/delete",
+        );
+        await page.goto(`${ORIGIN}/settings/environments/dev`);
+        await page.getByRole("button", { name: "Find" }).click();
+        await expect(
+          page.getByRole("region", { name: "Leftover directories" }).getByText("recent, kept"),
+        ).toBeVisible();
+        // Finding deletes nothing and asks for no touch.
+        expect(deletes).toEqual([]);
+
+        await page.getByRole("button", { name: "Delete the old ones" }).click();
+        await page.getByRole("dialog").getByRole("button", { name: "Delete them" }).click();
+
+        await expect(page.getByRole("dialog")).toBeHidden();
+        await expect
+          .poll(() => deletes)
+          .toEqual([
+            "POST /api/v1/sign-in/step-up/options",
+            "POST /api/v1/sign-in/step-up",
+            "POST /api/v1/environments/dev/orphaned-locations/delete",
+          ]);
+        expect(errors).toEqual([]);
+      });
+
       test("mara's rights", async ({ page }) => {
         await stubMara(page);
         const errors = consoleErrors(page);

@@ -93,11 +93,13 @@ A run without `--delete` records nothing.
 **Settings → Environments → an environment → Leftover directories** does the same. Set **Older
 than** (30 days by default), press **Find**, and the page lists each directory with its files, its
 size, its newest file and whether it is recent (and so kept). **Delete the old ones** asks once,
-naming how many directories and how much data go, then lists each directory as deleted or with
-the reason it was kept. When the server's time limit stopped a search, **Find again** continues
-it; a deletion it stopped offers **Continue**. The panel is shown to whoever may manage
-environments on the instance, on the page of a live environment; for a deleted environment, use
-the command.
+naming how many directories and how much data go. The files cannot be restored, so it then asks
+you to confirm with your passkey, unless you did so within the last 15 minutes, as purging a
+deleted environment does. It then lists each directory as deleted or with the reason it was kept.
+When the server's time limit stopped a search, **Find again** continues it; a deletion it stopped
+offers **Continue**, which asks for the passkey again once the 15 minutes are over. **Find**
+never asks for it. The panel is shown to whoever may manage environments on the instance, on the
+page of a live environment; for a deleted environment, use the command.
 
 ## The same over REST and the SDK
 
@@ -105,7 +107,9 @@ the command.
   `POST /api/v1/environments/{name}/orphaned-locations/delete` with `{"older_than_days": 30}`
   deletes. Both answer with `environment`, `older_than_days`, `complete` and `locations`, one
   object per directory with `location`, `files`, `bytes`, `newest_file_at`, `recent`, `deleted`,
-  `files_deleted`, `bytes_deleted` and `kept_because`.
+  `files_deleted`, `bytes_deleted` and `kept_because`. A token is never asked for a passkey; a
+  browser session needs a touch within the last 15 minutes for the delete, or it gets 403
+  `StepUpRequired`.
 - In Python, `client.environments.orphaned_locations("legacy")` and
   `client.environments.delete_orphaned_locations("legacy", older_than_days=30)`.
 

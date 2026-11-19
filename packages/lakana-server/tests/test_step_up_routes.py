@@ -12,7 +12,7 @@ The rule: step-up when a write changes who or what can act or read (identities, 
 run-as, CI trust), handles credentials or secrets, changes where code or data come from or
 go (repositories, package indexes, an environment's storage), or drops data: a table, an
 artifact, an artifact version, a namespace, a rebuild (with or without `purge`), an environment
-with `purge`; none for
+with `purge`, the directories older releases left behind; none for
 operating on existing work under one's own rights (undrop and maintenance included), or for
 removing access.
 """
@@ -844,6 +844,13 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ("DELETE", "/api/v1/environments/{name}"): Case(
         lambda c: (f"/api/v1/environments/{_environment(c)}?purge=true", None), 200
     ),
+    ("POST", "/api/v1/environments/{name}/orphaned-locations/delete"): Case(
+        lambda c: (
+            f"/api/v1/environments/{_environment(c)}/orphaned-locations/delete",
+            {"older_than_days": 30},
+        ),
+        200,
+    ),
     ("POST", "/api/v1/environments/{environment_name}/secrets"): Case(
         lambda c: (
             "/api/v1/environments/dev/secrets",
@@ -988,10 +995,6 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "PUT",
         "/api/v1/environments/{name}/retention",
     ): "how long dropped data is kept; data operation",
-    (
-        "POST",
-        "/api/v1/environments/{name}/orphaned-locations/delete",
-    ): "cleans up unreferenced files",
     ("POST", "/api/v1/environments/{env}/jobs/{job}/runs"): "starts existing work",
     ("POST", "/api/v1/environments/{env}/jobs/{job}/pause"): "operates existing work",
     ("POST", "/api/v1/environments/{env}/jobs/{job}/resume"): "operates existing work",
