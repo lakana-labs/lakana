@@ -241,7 +241,7 @@ describe("RepositoriesPlace", () => {
     expect(link).toHaveAttribute("href", "/settings/repositories/new/about");
     await user.click(link);
 
-    expect(await screen.findByRole("heading", { level: 1, name: "new" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "new" })).toHaveFocus();
     expect(screen.queryByText(/Connect a repository/, { selector: "h1" })).not.toBeInTheDocument();
   });
 

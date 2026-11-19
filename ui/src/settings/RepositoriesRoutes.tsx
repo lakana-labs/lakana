@@ -4,9 +4,9 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense } from "react";
+import { type JSX, lazy, Suspense, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Route, Routes, useParams } from "react-router";
+import { NavigationType, Route, Routes, useNavigationType, useParams } from "react-router";
 
 import { NotAvailable } from "../shell/NotAvailable";
 import { NotFound } from "../shell/NotFound";
@@ -41,6 +41,23 @@ function ConnectRoute(): JSX.Element {
 }
 
 /**
+ * Gives the page's heading the focus once a page that was loading has shown after a move, when
+ * the focus was left on nothing (the link that was pressed is gone with the list). On the first
+ * load the skip link stays the first stop.
+ *
+ * @returns Nothing to show.
+ */
+function FocusIfLost(): null {
+  const moved = useNavigationType() === NavigationType.Push;
+  useEffect(() => {
+    if (moved && document.activeElement === document.body) {
+      document.getElementById("main")?.querySelector("h1")?.focus();
+    }
+  }, [moved]);
+  return null;
+}
+
+/**
  * A repository's page, named by the address; a page of another name starts afresh.
  *
  * @returns The page.
@@ -51,6 +68,7 @@ function RepositoryRoute(): JSX.Element {
   return (
     <Suspense fallback={<p className="step-status">{t("session.loading")}</p>}>
       <RepositoryPage key={name} name={name} />
+      <FocusIfLost />
     </Suspense>
   );
 }
