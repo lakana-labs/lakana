@@ -24,6 +24,7 @@ const NONE: SettingsFacts = {
   managePolicy: false,
   readsEnvironments: false,
   instanceActions: [],
+  managedEnvironments: [],
 };
 
 /**
