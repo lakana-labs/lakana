@@ -475,14 +475,18 @@ describe("AccessTab", () => {
           body: FILTERS,
           headers: { "X-Next-Cursor": "c2" },
         },
+        "GET /api/v1/column-masks": {
+          status: 200,
+          body: MASKS,
+          headers: { "X-Next-Cursor": "c3" },
+        },
       },
     });
 
     const filters = await section("Row filters");
     expect(await within(filters).findByText("Only the first 200 are shown.")).toBeVisible();
     const masks = await section("Column masks");
-    await within(masks).findByText("sha256(customer_email)");
-    expect(within(masks).queryByText("Only the first 200 are shown.")).toBeNull();
+    expect(await within(masks).findByText("Only the first 200 are shown.")).toBeVisible();
   });
 
   it("an administrator can manage the table's policies", async () => {

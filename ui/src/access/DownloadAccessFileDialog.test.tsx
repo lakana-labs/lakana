@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ManagedScopeOut } from "../api/accessFile";
 import { saveBlob } from "../shell/saveFile";
 import { anEnvironment } from "../test/access";
+import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 import type { FakeRoute } from "../test/server";
 import { exportName } from "./DownloadAccessFileDialog";
@@ -116,8 +117,13 @@ describe("DownloadAccessFileDialog", () => {
     const download = within(dialog).getByRole("button", { name: "Download" });
     expect(download).toBeDisabled();
     expect(download).toHaveAccessibleDescription("Choose at least one environment.");
-    await user.click(await within(dialog).findByRole("checkbox", { name: "dev" }));
+    const dev = await within(dialog).findByRole("checkbox", { name: "dev" });
+    await user.click(dev);
+    await user.click(dev);
+    expect(download).toBeDisabled();
+    await user.click(dev);
     await user.click(within(dialog).getByRole("checkbox", { name: "prod" }));
+    expect(dev).toBeChecked();
     await user.click(download);
 
     await waitFor(() => {
@@ -189,6 +195,27 @@ describe("DownloadAccessFileDialog", () => {
     await user.click(within(dialog).getByRole("radio", { name: "Some environments" }));
 
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("The database is down.");
+  });
+
+  it("keeps the dialog open while exporting, and says while it reads the environments", async () => {
+    const answer = held();
+    const environments = held();
+    const { user, dialog } = await openDialog([], {
+      "GET /api/v1/access/export": answer.route,
+      "GET /api/v1/environments": environments.route,
+    });
+
+    await user.click(within(dialog).getByRole("radio", { name: "Some environments" }));
+    expect(within(dialog).getByText("Reading the environments…")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("radio", { name: "The whole instance" }));
+    await user.click(within(dialog).getByRole("button", { name: "Download" }));
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Download access file" })).toBeInTheDocument();
+    answer.release({ status: 200, body: { text: "version: 1\n" } });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    environments.release({ status: 200, body: [] });
   });
 
   it("Escape returns the focus to Download access file", async () => {

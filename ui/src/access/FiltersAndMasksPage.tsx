@@ -117,6 +117,7 @@ export function FiltersAndMasksPage(): JSX.Element {
   });
   const [adding, setAdding] = useState(false);
   const scopes = managed.data ?? null;
+  const choices = environments.data ?? [];
   const managedInstance = scopes === null ? undefined : managedScopeOf(scopes, null);
   const go = (next: PolicyFilter, step: FilterStep): void => {
     setParams(new URLSearchParams(policiesPath(next).split("?")[1] ?? ""), {
@@ -156,7 +157,7 @@ export function FiltersAndMasksPage(): JSX.Element {
           commands={[t("access.managed.filterCommand"), t("access.managed.maskCommand")]}
         />
       )}
-      <PolicyFilters filter={filter} environments={environments.data ?? []} onChange={go} />
+      <PolicyFilters filter={filter} environments={choices} onChange={go} />
       <p className="step-status" role="status">
         {note}
       </p>
@@ -180,7 +181,7 @@ export function FiltersAndMasksPage(): JSX.Element {
         <Suspense fallback={null}>
           <AddPolicyDialog
             start={filter}
-            environments={environments.data ?? []}
+            environments={choices}
             scopes={scopes}
             onClose={() => {
               setAdding(false);

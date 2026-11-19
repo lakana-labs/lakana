@@ -197,8 +197,9 @@ export function AddPolicyDialog({
     <ActionDialog onClose={close}>
       <Form
         onSubmit={(event) => {
+          // Create is disabled while the form is held, absent in a managed environment and
+          // pending while the request runs, so none of them submits the form.
           event.preventDefault();
-          if (held !== null || managed !== null || attempt.busy) return;
           attempt.run(create);
         }}
       >

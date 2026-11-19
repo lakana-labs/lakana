@@ -4,11 +4,10 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useState } from "react";
+import { type JSX, useCallback, useId, useState } from "react";
 import {
   CheckboxButton,
   CheckboxField,
-  CheckboxGroup,
   Form,
   Heading,
   Label,
@@ -81,6 +80,7 @@ export function DownloadAccessFileDialog({
   const environments = useResource(loadEnvironments);
   const [what, setWhat] = useState<"instance" | "some">("instance");
   const [chosen, setChosen] = useState<readonly string[]>([]);
+  const groupId = useId();
   const exported = what === "instance" ? [INSTANCE_SCOPE] : chosen;
   const held = exported.length === 0 ? t("accessFile.download.chooseOne") : null;
   const close = (): void => {
@@ -90,8 +90,8 @@ export function DownloadAccessFileDialog({
     <ActionDialog onClose={close}>
       <Form
         onSubmit={(event) => {
+          // Download is held, and pending while it runs; the form has no field Enter submits.
           event.preventDefault();
-          if (held !== null || attempt.busy) return;
           attempt.run(async () => {
             const text = await exportAccess(exported);
             const name = exportName(exported, scopes);
@@ -118,14 +118,10 @@ export function DownloadAccessFileDialog({
           </RadioField>
         </RadioGroup>
         {what === "some" && (
-          <CheckboxGroup
-            className="field"
-            value={[...chosen]}
-            onChange={(value) => {
-              setChosen(value);
-            }}
-          >
-            <Label>{t("accessFile.download.environments")}</Label>
+          // A group of single checkboxes rather than a CheckboxGroup, whose validation code the
+          // first load would then carry.
+          <div className="field" role="group" aria-labelledby={groupId}>
+            <span id={groupId}>{t("accessFile.download.environments")}</span>
             {environments.data === undefined && environments.error === null && (
               <p className="step-status">{t("accessFile.download.reading")}</p>
             )}
@@ -135,13 +131,23 @@ export function DownloadAccessFileDialog({
               </p>
             )}
             {(environments.data ?? []).map((environment) => (
-              <CheckboxField key={environment.name} value={environment.name}>
+              <CheckboxField
+                key={environment.name}
+                isSelected={chosen.includes(environment.name)}
+                onChange={(selected) => {
+                  setChosen((previous) =>
+                    selected
+                      ? [...previous, environment.name]
+                      : previous.filter((name) => name !== environment.name),
+                  );
+                }}
+              >
                 <CheckboxButton className="checkbox">
                   <EnvironmentName environment={environment} />
                 </CheckboxButton>
               </CheckboxField>
             ))}
-          </CheckboxGroup>
+          </div>
         )}
         <FormFoot
           attempt={attempt}

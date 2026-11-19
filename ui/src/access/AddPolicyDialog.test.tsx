@@ -152,6 +152,7 @@ describe("AddPolicyDialog", () => {
     const create = within(dialog).getByRole("button", { name: "Create" });
     expect(create).toHaveAccessibleDescription("Name the column.");
     await user.type(within(dialog).getByRole("textbox", { name: "Column" }), "email");
+    await user.click(within(dialog).getByRole("radio", { name: "Person or service account" }));
     const masks = reads(server.sent, "column-masks");
 
     await user.click(create);
@@ -162,7 +163,12 @@ describe("AddPolicyDialog", () => {
     const post = server.sent.find(
       (request) => request.path === "/api/v1/column-masks" && request.method === "POST",
     );
-    expect(post?.body).toMatchObject({ column: "email", expression: "'***'", group: "analysts" });
+    expect(post?.body).toMatchObject({
+      column: "email",
+      expression: "'***'",
+      principal: "analysts",
+      group: null,
+    });
     expect(screen.getByText("Column mask created.")).toBeInTheDocument();
     await waitFor(() => {
       expect(reads(server.sent, "column-masks")).toBe(masks + 1);
@@ -211,6 +217,10 @@ describe("AddPolicyDialog", () => {
 
     expect(within(dialog).queryByRole("button", { name: "Create" })).toBeNull();
     expect(dialog).toHaveTextContent("An access file manages prod: add this in team.yaml instead.");
+    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
+    await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "t{Enter}");
+    expect(shell.server.sent.some((request) => request.method === "POST")).toBe(false);
   });
 
   it("keeps every field with the server's sentence", async () => {
@@ -286,8 +296,14 @@ describe("AddPolicyDialog", () => {
     const { user, dialog } = shell;
 
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "{Enter}");
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog", { name: "Add filter or mask" })).toBeInTheDocument();
+    expect(
+      shell.server.sent.filter(
+        (request) => request.method === "POST" && request.path === "/api/v1/row-filters",
+      ),
+    ).toHaveLength(1);
     answer.release({ status: 201, body: aRowFilter() });
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();

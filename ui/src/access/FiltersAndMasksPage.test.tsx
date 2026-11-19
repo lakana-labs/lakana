@@ -273,6 +273,8 @@ describe("FiltersAndMasksPage", () => {
 
     expect(await within(dialog).findByRole("alert")).toBeVisible();
     expect(server.sent.some((request) => request.method === "DELETE")).toBe(false);
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("the focus goes to the section when its last policy goes", async () => {
@@ -335,7 +337,10 @@ describe("FiltersAndMasksPage", () => {
             }),
           ],
         },
-        "GET /api/v1/column-masks": { status: 200, body: [aColumnMask({ column: "e​mail" })] },
+        "GET /api/v1/column-masks": {
+          status: 200,
+          body: [aColumnMask({ group: null, column: "e​mail" })],
+        },
       }),
     });
 
@@ -347,6 +352,12 @@ describe("FiltersAndMasksPage", () => {
     expect(code?.closest("[title]")).toBeNull();
     const masks = await screen.findByRole("region", { name: "Column masks" });
     expect(masks).toHaveTextContent("eU+200Bmail");
+    expect(masks).toHaveTextContent("a removed person or group group-1");
+    expect(
+      screen.getByRole("button", {
+        name: "Delete the mask of eU+200Bmail on dev › gold › station_ranking for a removed person or group",
+      }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
         name: "Delete the row filter on dev › gold › station_ranking for anU+202Eal",
