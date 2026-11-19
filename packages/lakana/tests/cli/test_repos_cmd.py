@@ -103,6 +103,32 @@ def test_repo_list_and_show_render_tables(tmp_path: Path) -> None:
     assert "https://github.com/acme/analytics.git" in shown
 
 
+def test_repo_show_prints_each_host_key_with_its_fingerprint(tmp_path: Path) -> None:
+    """Each trusted host key prints as its type and fingerprint; a server without them, none."""
+    api = FakeApi()
+    fingerprint = "SHA256:BbeSiQQjnjpybq7nV8S8tEVnQiZNHfceXjKvrLVxecI"
+    api.on(
+        "GET",
+        "/api/v1/repositories/infra",
+        json={
+            **_REPO,
+            "name": "infra",
+            "kind": "ssh",
+            "host_keys": [{"type": "ssh-ed25519", "fingerprint": fingerprint}],
+        },
+    )
+    api.on("GET", "/api/v1/repositories/analytics", json=_REPO)
+    state = make_state(tmp_path, api)
+
+    shown = _plain(invoke(state, "repo", "show", "infra", env={"GITHUB_ACTIONS": "true"}).stdout)
+    assert f"host_keys ssh-ed25519 {fingerprint}" in shown
+    client = state.client()
+    assert client.repositories.get("analytics").host_keys == []
+    assert [(k.type, k.fingerprint) for k in client.repositories.get("infra").host_keys] == [
+        ("ssh-ed25519", fingerprint)
+    ]
+
+
 def test_repo_update_sends_only_given_fields_and_clears(tmp_path: Path) -> None:
     """`--clear default_ref` sends null; untouched fields are absent."""
     api = FakeApi()

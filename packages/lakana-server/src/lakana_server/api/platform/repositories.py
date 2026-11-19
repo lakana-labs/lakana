@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 from lakana_core.auth import PrincipalRef
 from lakana_core.models import Repository, RepositoryKind
 from lakana_core.projects.deploy_keys import DeployKeyService
+from lakana_core.projects.probes import known_host_keys
 from lakana_core.projects.repositories import RepositoryService
 from lakana_server.api.platform.schemas import (
     DeployKeyIn,
@@ -20,6 +21,7 @@ from lakana_server.api.platform.schemas import (
     RepositoryDeployKeyOut,
     RepositoryOut,
     RepositoryUpdate,
+    TrustedHostKeyOut,
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -36,7 +38,7 @@ router = APIRouter(
 def _to_out(
     repos: list[Repository], principal: PrincipalRef, keys: DeployKeyService
 ) -> list[RepositoryOut]:
-    """Build response bodies, each with the deploy keys the caller may see.
+    """Build response bodies, each with the deploy keys the caller may see and its host keys.
 
     Parameters
     ----------
@@ -73,6 +75,10 @@ def _to_out(
                     fingerprint=key.fingerprint,
                 )
                 for key in shown.get(repo.id, ())
+            ],
+            host_keys=[
+                TrustedHostKeyOut(type=key.type, fingerprint=key.fingerprint)
+                for key in known_host_keys(repo.ssh_known_hosts or "")
             ],
         )
         for repo in repos

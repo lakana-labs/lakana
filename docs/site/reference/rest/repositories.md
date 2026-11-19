@@ -57,6 +57,7 @@ Answer fields: `RepositoryOut`
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
 | `deploy_keys` | list of `RepositoryDeployKeyOut` | no |  |
+| `host_keys` | list of `TrustedHostKeyOut` | no |  |
 
 ## `GET /api/v1/repositories`
 
@@ -118,6 +119,7 @@ Answer fields: `RepositoryOut`
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
 | `deploy_keys` | list of `RepositoryDeployKeyOut` | no |  |
+| `host_keys` | list of `TrustedHostKeyOut` | no |  |
 
 ## `PATCH /api/v1/repositories/{name}`
 
@@ -170,6 +172,7 @@ Answer fields: `RepositoryOut`
 | `created_at` | text (date-time) | yes |  |
 | `updated_at` | text (date-time) | yes |  |
 | `deploy_keys` | list of `RepositoryDeployKeyOut` | no |  |
+| `host_keys` | list of `TrustedHostKeyOut` | no |  |
 
 ## `DELETE /api/v1/repositories/{name}`
 

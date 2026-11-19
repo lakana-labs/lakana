@@ -8,7 +8,14 @@ from datetime import datetime
 from typing import Any
 
 from lakana._http import HttpTransport
-from lakana._models import DeployKey, DeployKeys, HostKey, Repository, RepositoryProbe
+from lakana._models import (
+    DeployKey,
+    DeployKeys,
+    HostKey,
+    HostKeyFingerprint,
+    Repository,
+    RepositoryProbe,
+)
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
 from lakana.resources.artifacts import _ODD_ANSWER, _object
@@ -71,6 +78,8 @@ UPDATABLE = frozenset(
 def _repository_from_json(data: dict[str, Any]) -> Repository:
     """Build a `Repository` from a `RepositoryOut` body.
 
+    A server that does not answer `host_keys` gives none.
+
     Parameters
     ----------
     data
@@ -94,6 +103,10 @@ def _repository_from_json(data: dict[str, Any]) -> Repository:
         created_at=datetime.fromisoformat(data["created_at"]),
         updated_at=datetime.fromisoformat(data["updated_at"]),
         deploy_keys=[_deploy_key_from_json(k) for k in data.get("deploy_keys") or ()],
+        host_keys=[
+            HostKeyFingerprint(type=k["type"], fingerprint=k["fingerprint"])
+            for k in data.get("host_keys") or ()
+        ],
     )
 
 

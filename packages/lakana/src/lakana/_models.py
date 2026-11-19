@@ -2579,6 +2579,9 @@ class Repository:
     deploy_keys
         The public deploy keys Lakana made for it, one per environment you may read; empty
         when it names no such key.
+    host_keys
+        The host keys `ssh_known_hosts` trusts, each with its fingerprint; empty when it
+        trusts none, or from a server that does not say.
     """
 
     id: str
@@ -2593,6 +2596,23 @@ class Repository:
     created_at: datetime
     updated_at: datetime
     deploy_keys: list[DeployKey] = field(default_factory=list)
+    host_keys: list[HostKeyFingerprint] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class HostKeyFingerprint:
+    """A host key a repository trusts, by type and fingerprint.
+
+    Parameters
+    ----------
+    type
+        The key type, such as ``ssh-ed25519``.
+    fingerprint
+        Its ``SHA256:`` fingerprint, to compare with the one your git host publishes.
+    """
+
+    type: str
+    fingerprint: str
 
 
 @dataclass(frozen=True)

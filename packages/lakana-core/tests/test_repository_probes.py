@@ -52,9 +52,12 @@ from lakana_core.projects.probes import (
     PROBE_UNCLAIMED_AFTER,
     PROBES_OPEN_PER_PERSON,
     HostKey,
+    KnownHostKey,
     RepositoryProbeQueue,
     RepositoryProbeService,
     key_fingerprint,
+    known_host_keys,
+    known_hosts_fingerprints,
     parse_keyscan,
     ssh_endpoint,
 )
@@ -246,6 +249,33 @@ def test_parse_keyscan_keeps_only_well_formed_keys_of_known_types() -> None:
     assert [(k.type, k.line.split()[0]) for k in keys] == [("ssh-ed25519", "git.example.com")]
     assert keys[0].fingerprint == ED25519_FINGERPRINT
     assert keys[0].line == f"git.example.com ssh-ed25519 {ED25519_B64}"
+
+
+def test_known_host_keys_reads_type_and_fingerprint() -> None:
+    """Each distinct key with its type, sorted; comments, blanks and bad base64 skipped."""
+    authority = base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519" + bytes(range(32))).decode()
+    text = (
+        "# trusted on 2026-11-18\n"
+        f"git.example.com ssh-ed25519 {ED25519_B64}\n"
+        "\n"
+        f"git.example.com ecdsa-sha2-nistp256 {ECDSA_B64}\n"
+        f"@cert-authority *.example.com ssh-ed25519 {authority}\n"
+        f"[git.example.com]:2222 ssh-ed25519 {ED25519_B64}\n"
+        "git.example.com ssh-rsa not*base64\n"
+    )
+
+    keys = known_host_keys(text)
+
+    assert keys == sorted(
+        [
+            KnownHostKey(type="ecdsa-sha2-nistp256", fingerprint=ECDSA_FINGERPRINT),
+            KnownHostKey(type="ssh-ed25519", fingerprint=ED25519_FINGERPRINT),
+            KnownHostKey(
+                type="ssh-ed25519", fingerprint=key_fingerprint(base64.b64decode(authority))
+            ),
+        ]
+    )
+    assert known_hosts_fingerprints(text) == sorted({key.fingerprint for key in keys})
 
 
 def test_fingerprints_match_ssh_keygen() -> None:

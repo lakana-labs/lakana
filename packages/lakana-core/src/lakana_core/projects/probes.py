@@ -136,8 +136,24 @@ def key_fingerprint(blob: bytes) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
 
 
-def known_hosts_fingerprints(text: str) -> list[str]:
-    """Fingerprint every key of a known_hosts text, for the audit log.
+@dataclass(frozen=True, order=True)
+class KnownHostKey:
+    """One key a known_hosts text trusts.
+
+    Parameters
+    ----------
+    type
+        The key type its line names, such as ``ssh-ed25519``.
+    fingerprint
+        Its fingerprint (`key_fingerprint`), ``SHA256:`` and the digest.
+    """
+
+    type: str
+    fingerprint: str
+
+
+def known_host_keys(text: str) -> list[KnownHostKey]:
+    """Read every key of a known_hosts text with its type and fingerprint.
 
     A line is ``[@marker] <hosts> <type> <base64> [comment]``; blank lines and comments are
     skipped, and so is a line whose key is not base64 (ssh skips it too).
@@ -149,10 +165,10 @@ def known_hosts_fingerprints(text: str) -> list[str]:
 
     Returns
     -------
-    list of str
-        The distinct fingerprints (`key_fingerprint`), sorted.
+    list of KnownHostKey
+        The distinct pairs of type and fingerprint, sorted.
     """
-    found: set[str] = set()
+    found: set[KnownHostKey] = set()
     for line in text.splitlines():
         fields = line.split()
         if fields and fields[0].startswith("@"):
@@ -163,8 +179,24 @@ def known_hosts_fingerprints(text: str) -> list[str]:
             blob = base64.b64decode(fields[2], validate=True)
         except ValueError:
             continue
-        found.add(key_fingerprint(blob))
+        found.add(KnownHostKey(type=fields[1], fingerprint=key_fingerprint(blob)))
     return sorted(found)
+
+
+def known_hosts_fingerprints(text: str) -> list[str]:
+    """Fingerprint every key of a known_hosts text, for the audit log.
+
+    Parameters
+    ----------
+    text
+        The known_hosts lines a repository trusts, read as `known_host_keys` reads them.
+
+    Returns
+    -------
+    list of str
+        The distinct fingerprints (`key_fingerprint`), sorted.
+    """
+    return sorted({key.fingerprint for key in known_host_keys(text)})
 
 
 def _blob_type(blob: bytes) -> str | None:

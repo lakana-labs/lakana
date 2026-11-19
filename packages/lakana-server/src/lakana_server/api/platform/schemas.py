@@ -3555,6 +3555,21 @@ class RepositoryDeployKeyOut(BaseModel):
     fingerprint: str
 
 
+class TrustedHostKeyOut(BaseModel):
+    """A host key a repository trusts, by type and fingerprint.
+
+    Parameters
+    ----------
+    type
+        The key type, such as ``ssh-ed25519``.
+    fingerprint
+        Its fingerprint as `ssh-keygen -l` prints it, ``SHA256:`` and the digest.
+    """
+
+    type: str
+    fingerprint: str
+
+
 class RepositoryOut(BaseModel):
     """Response body for a repository. Carries a secret's name, never a value.
 
@@ -3585,6 +3600,9 @@ class RepositoryOut(BaseModel):
     deploy_keys
         The public deploy keys Lakana made for it, one per environment you may read, to add at
         the git host; empty when it names no such key. Never a private key.
+    host_keys
+        The keys `ssh_known_hosts` trusts, each with its `SHA256:` fingerprint; empty when it
+        trusts none.
     """
 
     id: uuid.UUID
@@ -3599,6 +3617,7 @@ class RepositoryOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     deploy_keys: list[RepositoryDeployKeyOut] = []
+    host_keys: list[TrustedHostKeyOut] = []
 
 
 class DeployKeyIn(BaseModel):
