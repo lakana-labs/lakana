@@ -2,6 +2,7 @@
 
 from fastapi.testclient import TestClient
 
+from lakana_core.auth import Action
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment, session_headers, signed_in
 
@@ -22,6 +23,9 @@ def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
         "may_deploy": False,
         "secret_environments": [],
         "manage_policy": True,
+        "reads_environments": False,
+        # Reading other people's query text is no part of ADMIN (it is granted on its own).
+        "instance_actions": [a.value for a in Action if a is not Action.READ_QUERY_TEXT],
         "picture": None,
     }
 
@@ -56,6 +60,8 @@ def test_whoami_describes_a_task_token_callers_scope(client: TestClient) -> None
         "may_deploy": False,
         "secret_environments": [],
         "manage_policy": False,
+        "reads_environments": False,
+        "instance_actions": [],
         "picture": None,
     }
 

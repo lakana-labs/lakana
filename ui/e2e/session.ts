@@ -835,6 +835,8 @@ export async function signInAsAdmin(page: Page): Promise<void> {
         may_deploy: true,
         secret_environments: ["dev", "prod"],
         manage_policy: true,
+        reads_environments: true,
+        instance_actions: ["MANAGE_ENVIRONMENT", "MANAGE_REPOSITORY"],
         picture: "e1",
       },
     }),

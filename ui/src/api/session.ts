@@ -66,6 +66,10 @@ interface WhoamiOut {
   readonly secret_environments?: readonly string[];
   /** True when the person manages row filters and column masks; read by Settings' own chunk. */
   readonly manage_policy?: boolean;
+  /** True when the person reads at least one environment; read by Settings' own chunk. */
+  readonly reads_environments?: boolean;
+  /** The actions the person may take on the instance; read by Settings' own chunk. */
+  readonly instance_actions?: readonly string[];
   /** The etag of the caller's profile picture, or null without one. */
   readonly picture: string | null;
 }

@@ -647,6 +647,53 @@ class GrantService:
         questions = [(Action.DEPLOY, Securable.environment_scope(name)) for name in names]
         return any(permits_each(self._authz, p, questions))
 
+    def reads_some_environment(self, p: PrincipalRef) -> bool:
+        """Say whether the caller may read at least one environment with this credential.
+
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. It is the read half of the repository service's read rule, without its
+        instance-scope fallback, which only audits a refusal. The web interface lists
+        Settings, Repositories from it.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            Whether `permits(READ_ENVIRONMENT)` holds on any environment that is not deleted,
+            asked in one batch; `False` without one.
+        """
+        names = self._session.execute(select(Environment.name).where(LIVE_ENVIRONMENT)).scalars()
+        questions = [(Action.READ_ENVIRONMENT, Securable.environment_scope(name)) for name in names]
+        return any(permits_each(self._authz, p, questions))
+
+    def instance_actions(self, p: PrincipalRef) -> list[str]:
+        """Name the actions the caller may take on the instance with this credential.
+
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. It follows the credential's scope, as `may_deploy_somewhere` does: a task or CI
+        token names none. The web interface offers the instance-wide actions of Settings from it,
+        such as connecting a repository.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        list of str
+            The `Action` values for which `permits` holds on the instance, in `Action` order,
+            asked in one batch; empty without one.
+        """
+        actions = list(Action)
+        questions = [(action, Securable.instance_scope()) for action in actions]
+        allowed = permits_each(self._authz, p, questions)
+        return [action.value for action, yes in zip(actions, allowed, strict=True) if yes]
+
     def secret_environments(self, p: PrincipalRef) -> list[str]:
         """Name the environments where the caller may manage secrets with this credential.
 

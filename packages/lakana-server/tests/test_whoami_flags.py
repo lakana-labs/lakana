@@ -1,12 +1,14 @@
 """Tests for the access flags of `GET /api/v1/whoami`.
 
-`may_deploy`, `secret_environments` and `manage_policy`.
+`may_deploy`, `secret_environments`, `manage_policy`, `reads_environments` and
+`instance_actions`.
 """
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from lakana_core.auth import Action
 from tests.api.platform.test_whoami import _new_person, _task_token_header
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
@@ -161,4 +163,84 @@ def test_the_policy_flag_records_no_audit_event(client: TestClient) -> None:
     before = events()
     assert _manage_policy(client, AUTH_HEADER) is True
     assert _manage_policy(client, header) is False
+    assert events() == before
+
+
+def _flags(client: TestClient, header: dict[str, str]) -> tuple[bool, list[str]]:
+    """Read `reads_environments` and `instance_actions` of whoami.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    header
+        The caller's Authorization header.
+
+    Returns
+    -------
+    tuple of bool and list of str
+        Whether the caller reads an environment, and what it may do on the instance.
+    """
+    body = client.get("/api/v1/whoami", headers=header).json()
+    return body["reads_environments"], body["instance_actions"]
+
+
+def test_whoami_says_whether_one_reads_an_environment(client: TestClient) -> None:
+    """VIEWER on a live environment says yes; no grant, or only a deleted environment, says no."""
+    create_environment(client, "dev")
+    create_environment(client, "prod")
+    kim = _new_person(client, "kim")
+    lee = _new_person(client, "lee")
+    _grant(client, {"role": "VIEWER"})
+
+    assert _flags(client, kim)[0] is True
+    assert _flags(client, lee)[0] is False
+    deleted = client.delete("/api/v1/environments/dev", headers=AUTH_HEADER)
+    assert deleted.status_code in {200, 204}, deleted.text
+    assert _flags(client, kim)[0] is False
+
+
+def test_whoami_lists_the_instance_actions(client: TestClient) -> None:
+    """The actions held on the instance, in `Action` order; an environment's grant adds none."""
+    create_environment(client, "dev")
+    pat = _new_person(client, "pat")
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "pat", "kind": "INSTANCE", "action": "MANAGE_REPOSITORY"},
+    )
+    assert granted.status_code == 201, granted.text
+    kim = _new_person(client, "kim")
+    _grant(client, {"role": "DATA_ENGINEER"})
+
+    admin = _flags(client, AUTH_HEADER)[1]
+    assert {"MANAGE_ENVIRONMENT", "MANAGE_REPOSITORY"} <= set(admin)
+    assert admin == sorted(admin, key=list(Action.__members__).index)
+    assert _flags(client, pat)[1] == ["MANAGE_REPOSITORY"]
+    assert not [action for action in _flags(client, kim)[1] if action.startswith("MANAGE_")]
+
+
+def test_a_task_token_lists_no_instance_action(client: TestClient) -> None:
+    """An administrator's task token for dev acts on no instance-wide right, and reads dev."""
+    create_environment(client, "dev")
+
+    assert _flags(client, _task_token_header(client)) == (True, [])
+
+
+def test_whoami_records_no_audit_event_for_the_new_flags(client: TestClient) -> None:
+    """Asking for the two flags writes nothing, for a yes and for a no.
+
+    Reading the audit log records that it was read (`ACTIVITY_VIEWED`), so those are left out.
+    """
+    create_environment(client, "dev")
+    header = _new_person(client, "kim")
+    assert _flags(client, header) == (False, [])  # kim's first sign-in is recorded here
+
+    def events() -> list[dict[str, object]]:
+        items = client.get("/api/v1/audit-events", headers=AUTH_HEADER).json()["items"]
+        return [item for item in items if item["event_type"] != "ACTIVITY_VIEWED"]
+
+    before = events()
+    assert _flags(client, AUTH_HEADER)[0] is True
+    assert _flags(client, header) == (False, [])
     assert events() == before
