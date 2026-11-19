@@ -1,0 +1,17 @@
+/* Settings › Repositories: the list scrolls in its own region, a name stays whole, a long URL
+   wraps inside its own cell, and a repository without a credential says so in the warning colour. */
+.list-scroll.repositories-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.repositories-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+.repository-url {
+  overflow-wrap: anywhere;
+}
+
+.repository-uncredentialed {
+  color: var(--color-warn);
+}

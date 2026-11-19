@@ -133,10 +133,7 @@ export function useCheck(): Check {
  * @param probe - The finished check.
  * @returns The sentence.
  */
-function failure(
-  t: ReturnType<typeof useTranslation>["t"],
-  probe: RepositoryProbeOut,
-): string {
+function failure(t: ReturnType<typeof useTranslation>["t"], probe: RepositoryProbeOut): string {
   if (probe.outcome === "no_worker") {
     return t("settings.connect.keys.noWorker");
   }
