@@ -170,8 +170,11 @@ tr:hover .chevron {
   font-weight: var(--type-section-weight);
 }
 
+/* A dialog taller than the window scrolls inside itself (.float), so its last button is never
+   out of reach. */
 .dialog {
   width: min(520px, 100%);
+  max-height: 100%;
   padding: var(--space-5);
 }
 

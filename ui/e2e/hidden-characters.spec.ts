@@ -1,6 +1,13 @@
 import { expect, type Page, test } from "@playwright/test";
 
-import { ACCESS_STUBBED, stubAccess, stubTokensSecrets, TOKENS_STUBBED } from "./access";
+import {
+  ACCESS_STUBBED,
+  POLICIES_STUBBED,
+  stubAccess,
+  stubPolicies,
+  stubTokensSecrets,
+  TOKENS_STUBBED,
+} from "./access";
 import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { ROUTES, stubConnect } from "./connect";
@@ -847,6 +854,53 @@ walk("Tokens, one's API tokens and Secrets mark hidden characters", async ({ pag
   await expect(page.getByRole("dialog")).toBeHidden();
   expectOnlyStubbed(paths, [...STUBBED, ...TOKENS_STUBBED]);
 });
+
+walk(
+  "Row filters & masks, Add filter or mask and Access file mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await signInAsAdmin(poisoned(page));
+    await stubPolicies(poisoned(page), { managed: ["prod"], overrides: true });
+    await visit(page, "/settings/access/filters-and-masks", [
+      "maria",
+      "analysts",
+      "station_ranking",
+      "email",
+      "access.yaml",
+    ]);
+    await page.getByRole("button", { name: /^Delete the row filter on devU\+202E/ }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectMarked(page, "the Delete row filter dialog", ["maria", "station_ranking"]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await page.getByRole("button", { name: /^Delete the mask of emailU\+202E/ }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expectMarked(page, "the Delete column mask dialog", ["email", "analysts"]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await page.getByRole("button", { name: "Add filter or mask" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /Environment$/ })
+      .click();
+    await expect(page.getByRole("listbox")).toBeVisible();
+    await expectNoRaw(page, "Add filter or mask's environments");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("listbox")).toBeHidden();
+    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+
+    await visit(page, "/settings/access/access-file", ["access.yaml", "incident 42", "admin"]);
+    await page.getByRole("button", { name: "Download access file" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("dialog").getByText("Some environments").click();
+    await expectMarked(page, "the Download access file dialog", ["dev", "prod"]);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    expectOnlyStubbed(paths, [...STUBBED, ...POLICIES_STUBBED]);
+  },
+);
 
 // Last, so that the walks before it have run in this worker: an entry no stub serves is stale.
 walk("Groups, a group, Grants and What I may do mark hidden characters", async ({ page }) => {

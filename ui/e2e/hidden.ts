@@ -207,6 +207,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "HeldGrantOut",
   '["applied_at","applied_by","file_name","file_sha256","scope","source_commit"]':
     "ManagedScopeOut",
+  '["applied_at","file_name","scope"]': "ManagedScopeBriefOut",
+  '["at","by","change","reason","scope"]': "AccessOverrideOut",
   '["held_admin","is_active","name","picture","type"]': "PrincipalOut",
   '["overrides","scopes"]': "AccessStatusOut",
   '["asset","asset_scope","environment","expires_at","issued_at","job","key_id","principal","run_id"]':

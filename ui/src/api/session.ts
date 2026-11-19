@@ -62,6 +62,10 @@ interface WhoamiOut {
   readonly has_access: boolean;
   /** True when the person may deploy in at least one environment. */
   readonly may_deploy: boolean;
+  /** The environments where the person may manage secrets; read by Settings' own chunk. */
+  readonly secret_environments?: readonly string[];
+  /** True when the person manages row filters and column masks; read by Settings' own chunk. */
+  readonly manage_policy?: boolean;
   /** The etag of the caller's profile picture, or null without one. */
   readonly picture: string | null;
 }
