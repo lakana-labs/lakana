@@ -6,7 +6,6 @@
  */
 import { type JSX, lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSearchParams } from "react-router";
 
 import { listDeployments, listDeploys } from "../api/jobs";
 import { ReadFailed } from "../catalog/ReadFailed";
@@ -14,6 +13,7 @@ import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import { settingParam, useAddressParams } from "../shell/useAddressParams";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { DeployRow } from "./DeployRow";
@@ -65,7 +65,7 @@ interface DeploysOfProps {
  */
 function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.Element {
   const { t } = useTranslation();
-  const [params, setParams] = useSearchParams();
+  const [params, update] = useAddressParams();
   const repository = params.get("repository");
   const deployments = useResource(useCallback(() => listDeployments(environment), [environment]));
   const load = useCallback(
@@ -132,16 +132,8 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
           ]}
           selected={repository === null ? ALL_REPOSITORIES : `repo:${repository}`}
           onChoose={(id) => {
-            setParams(
-              (now) => {
-                const next = new URLSearchParams(now);
-                if (id === ALL_REPOSITORIES) {
-                  next.delete("repository");
-                } else {
-                  next.set("repository", id.slice("repo:".length));
-                }
-                return next;
-              },
+            update(
+              settingParam("repository", id === ALL_REPOSITORIES ? null : id.slice("repo:".length)),
               { replace: true },
             );
           }}

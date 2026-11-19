@@ -34,7 +34,7 @@
     },
     "settings": {
       "name": "Settings",
-      "purpose": "Status, environments, repositories, access, sign-in and the server's configuration for the whole instance."
+      "purpose": "Status, environments, repositories, access, sign-in and configuration for the whole instance."
     }
   },
   "comingSoon": {
