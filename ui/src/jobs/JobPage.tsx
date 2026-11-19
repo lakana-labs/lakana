@@ -5,13 +5,14 @@
  */
 import { type JSX, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useSearchParams } from "react-router";
+import { useParams } from "react-router";
 
 import { recordOpened } from "../api";
 import { getJob, type JobOut, type JobStartOut, type RunOut } from "../api/jobs";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
 import { useLivePoll } from "../shell/useLivePoll";
+import { settingParam, useAddressParams } from "../shell/useAddressParams";
 import { ControlNote, type ControlNoteValue } from "./ControlNote";
 import { RunNowButton, ScheduleButton } from "./JobControls";
 import { JobFacts } from "./JobFacts";
@@ -46,7 +47,7 @@ interface JobViewProps {
 function JobView({ env, repository, job }: JobViewProps): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
-  const [params, setParams] = useSearchParams();
+  const [params, update] = useAddressParams();
   const [stopped, setStopped] = useState(false);
   const load = useCallback(() => getJob(env, repository, job), [env, repository, job]);
   const poll = useLivePoll(load, { everyMs: LIST_EVERY_MS, active: !stopped });
@@ -86,10 +87,7 @@ function JobView({ env, repository, job }: JobViewProps): JSX.Element {
   }, []);
 
   const select = (id: string): void => {
-    setParams((current) => {
-      current.set("run", id);
-      return current;
-    });
+    update(settingParam("run", id));
   };
   const onStarted = (result: JobStartOut): void => {
     if (result.run !== null) {
