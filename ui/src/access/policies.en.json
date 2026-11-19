@@ -1,0 +1,43 @@
+{
+  "intro": "A row filter limits the rows of a table someone sees; a column mask shows them something else in place of a column. Each is made to a person, a service account or a group, on one table.",
+  "add": "Add filter or mask",
+  "filters": {
+    "label": "Filters",
+    "environment": "Environment",
+    "all": "All environments",
+    "table": "Table (namespace.table)",
+    "tableHelp": "Choose an environment first; applied on Enter.",
+    "tableDotted": "Write the table as namespace.table, such as gold.station_ranking."
+  },
+  "row-filter": {
+    "title": "Row filters",
+    "none": "No row filter yet.",
+    "noMatch": "No row filter matches these filters.",
+    "reading": "Reading the row filters…",
+    "created": "Row filter created."
+  },
+  "column-mask": {
+    "title": "Column masks",
+    "none": "No column mask yet.",
+    "noMatch": "No column mask matches these filters.",
+    "reading": "Reading the column masks…",
+    "created": "Column mask created."
+  },
+  "who": "Who",
+  "on": "On",
+  "column": "Column",
+  "expression": "Expression",
+  "created": "Created",
+  "clear": "Clear filters",
+  "delete": "Delete",
+  "deleteFilterOf": "Delete the row filter on {{table}} for {{who}}",
+  "deleteMaskOf": "Delete the mask of {{column}} on {{table}} for {{who}}",
+  "deleteFilterTitle": "Delete this row filter?",
+  "deleteFilterText": "<who/> then sees every row of <table/> that their grants allow.",
+  "deleteFilterConfirm": "Delete the row filter",
+  "deleteMaskTitle": "Delete this column mask?",
+  "deleteMaskText": "<who/> then sees <column/> of <table/> as it is stored.",
+  "deleteMaskConfirm": "Delete the column mask",
+  "deleted": "Deleted.",
+  "removed": "a removed person or group"
+}

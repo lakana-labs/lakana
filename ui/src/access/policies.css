@@ -1,0 +1,26 @@
+/* Row filters & masks: two lists, each in its own scrolling region. An expression is code: it
+   wraps inside its cell and is never cut. */
+.list-scroll.policies-scroll .list {
+  min-width: 960px;
+}
+
+.list-scroll.policies-scroll .access-name,
+.list-scroll.policies-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+.policies-scroll .expression {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.policies-scroll a.access-name {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.policies-scroll a.access-name:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
