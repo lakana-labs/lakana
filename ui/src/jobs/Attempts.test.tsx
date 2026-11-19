@@ -57,7 +57,7 @@ describe("Attempts", () => {
       expect.any(String),
       "30 s",
       "Failed",
-      "",
+      "–Not measured",
       "internal",
       "268.4 MB",
       "12 s",
@@ -71,7 +71,7 @@ describe("Attempts", () => {
     expect(cells(2)[4]).toHaveTextContent("evicted");
   });
 
-  it("an unmeasured value is empty, not zero", () => {
+  it('an unmeasured figure shows a dash and says "Not measured", never zero', () => {
     render(
       <Attempts
         asset="silver.orders"
@@ -91,8 +91,11 @@ describe("Attempts", () => {
     const row = cells(0);
     expect(row[3]).toHaveTextContent(/^$/u);
     expect(row[4]).toHaveTextContent("Running");
-    for (const index of [5, 6, 7, 8, 9]) {
-      expect(row[index]).toHaveTextContent(/^$/u);
+    // Rows is the sixth cell and Failure the seventh, which has no figure to miss.
+    expect(row[6]).toHaveTextContent(/^$/u);
+    for (const index of [5, 7, 8, 9]) {
+      expect(row[index]).toHaveTextContent("–Not measured");
+      expect(row[index]).not.toHaveTextContent("0");
     }
   });
 

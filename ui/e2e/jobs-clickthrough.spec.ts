@@ -205,10 +205,6 @@ test.describe("the Jobs screen, checked by clicking through", () => {
   });
 
   test("an attempt's unmeasured figures show a dash, not an empty cell", async ({ page }) => {
-    test.skip(
-      true,
-      "An unmeasured figure is an empty cell: https://github.com/lakana-labs/lakana/issues/738",
-    );
     await page.goto(`/jobs/${ENV}/runs/${FAILED_ID}/tasks/${TIMED_OUT}`);
     const attempts = page.getByRole("region", { name: `Attempts of ${TIMED_OUT}` });
     // The timed-out attempts wrote no rows; the Rows column is the sixth.

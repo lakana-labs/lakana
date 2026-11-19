@@ -176,6 +176,7 @@
   "attempts": {
     "region": "Attempts of {{asset}}",
     "none": "No attempt yet.",
+    "notMeasured": "Not measured",
     "columns": {
       "attempt": "Attempt",
       "worker": "Worker",
