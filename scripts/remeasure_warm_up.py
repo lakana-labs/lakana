@@ -4,12 +4,17 @@
 in its shard again (first in a pytest process per package, then each test still over the line
 in a fresh process of its own), and loads this plugin there with
 ``-p scripts.remeasure_warm_up``. In a fresh process the first test that needs a session- or
-module-scoped fixture pays its setup (``catalog_template`` builds a schema in about 0.7 s); in
-a shard that cost falls on whichever test of the module runs first. So, per candidate, this
+module-scoped fixture pays its setup (``catalog_template`` builds a schema in about 0.7 s, and
+``_openapi_text`` builds the server's OpenAPI document in about 2 s); in a shard that cost falls
+on whichever test runs first. One-off setup is never charged to a candidate: per candidate, this
 plugin keeps the cheapest other test of the same module whose fixtures include all of the
-candidate's session-, package- and module-scoped ones, runs it right before the candidate, and
-deselects everything else. A candidate without such a test runs alone. The candidate's own
-function-scoped setup, call and teardown are still measured in full; only its time is counted.
+candidate's session-, package- and module-scoped ones, and runs it right before the candidate.
+When the module has no such test, it adds a no-op item beside the candidate (named
+``test_x[warm-up][params]`` for ``test_x[params]``) that requests only the candidate's
+fixtures of those scopes and of class scope, with the candidate's parameters, and so sets them
+up; a candidate with no such fixture runs alone. Everything else is deselected. The
+candidate's own function-scoped setup, call and teardown are still measured in full; only its
+time is counted.
 
 ``LAKANA_REMEASURE_WARM_UP`` names a JSON file ``{"candidates": [node id, ...], "seconds":
 {node id: seconds}}``: the candidates, and the shard times of the tests that may warm them up.
@@ -21,6 +26,7 @@ See docs/agent/testing.md, "Time budgets".
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from collections.abc import Sequence
@@ -30,6 +36,9 @@ import pytest
 
 WARM_UP_ENV = "LAKANA_REMEASURE_WARM_UP"
 _SHARED_SCOPES = frozenset({"session", "package", "module"})
+# What a no-op item beside the candidate sets up: its parent is the candidate's, so a class
+# fixture of the candidate's class lives on too.
+_WARMED_SCOPES = _SHARED_SCOPES | {"class"}
 
 
 def read_plan(path: Path) -> tuple[list[str], dict[str, float]]:
@@ -111,8 +120,9 @@ def choose(
     Returns
     -------
     list of pytest.Item
-        The tests to run, in order: each candidate, preceded by its warm-up the first time
-        its module and fixture set come up.
+        The tests to run, in order: each candidate, preceded by its warm-up (a test of its
+        module, or else `fixture_warm_up`'s item) the first time its module and fixture set
+        come up.
     """
     wanted = set(candidates)
     keep: list[pytest.Item] = []
@@ -133,10 +143,64 @@ def choose(
             ]
             if sharing:
                 warm_up = min(sharing, key=lambda item: seconds[item.nodeid])
-                if warm_up not in keep:
-                    keep.append(warm_up)
+            else:
+                warm_up = fixture_warm_up(candidate)
+            if warm_up is not None and warm_up not in keep:
+                keep.append(warm_up)
         keep.append(candidate)
     return keep
+
+
+def fixture_warm_up(candidate: pytest.Item) -> pytest.Function | None:
+    """Make a no-op item that sets up the candidate's shared fixtures, and nothing else.
+
+    It sits beside the candidate (same module, same class), requests by name each fixture of
+    the candidate's at session, package, module or class scope (their own dependencies come
+    with them, autouse fixtures too), and carries the candidate's parameters and markers, so it
+    sets up what the candidate would set up first. Its call does nothing.
+
+    Parameters
+    ----------
+    candidate
+        The test to warm up.
+
+    Returns
+    -------
+    pytest.Function or None
+        The item, named ``<test>[warm-up]`` and the candidate's parameters; None for an
+        item that is not a test function or that uses no such fixture.
+    """
+    parent = candidate.parent
+    if not isinstance(candidate, pytest.Function) or parent is None:
+        return None
+    # pytest has no public API for an item's resolved fixtures or the fixture manager. A name
+    # the manager cannot find beside the candidate is a parameter of `@pytest.mark.parametrize`
+    # with a scope, not a fixture: the candidate's parameters below set it.
+    manager = candidate.session._fixturemanager
+    names = [
+        name
+        for name, defs in candidate._fixtureinfo.name2fixturedefs.items()
+        if defs[-1].scope in _WARMED_SCOPES
+        and name.isidentifier()
+        and manager.getfixturedefs(name, parent)
+    ]
+    if not names:
+        return None
+
+    def warm_up(**fixtures: object) -> None:
+        """Do nothing: the fixtures it requests are its whole point."""
+
+    warm_up.__signature__ = inspect.Signature(  # ty: ignore[missing-attribute]
+        [inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY) for name in names]
+    )
+    item = pytest.Function.from_parent(
+        parent,
+        name=f"{candidate.originalname}[warm-up]",
+        callobj=warm_up,
+        callspec=getattr(candidate, "callspec", None),
+    )
+    item.own_markers.extend(candidate.own_markers)
+    return item
 
 
 @pytest.hookimpl(trylast=True)
