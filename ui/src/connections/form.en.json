@@ -16,6 +16,7 @@
   "caRemove": "Remove the CA certificate",
   "caTooBig": "A CA certificate file holds at most 64 KiB.",
   "unreadable": "The file could not be read; choose it again.",
+  "valueNeeded": "Give this value.",
   "secret": "Secret",
   "secretValues": "New values",
   "secretNamed": "An existing secret of {{environment}}",
