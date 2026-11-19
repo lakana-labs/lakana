@@ -1,6 +1,7 @@
 /**
  * An environment chosen from a list, such as the one a query runs in or the one a list is
- * filtered by; a protected environment is marked in the colour of danger and in words. The
+ * filtered by; a protected environment is marked in the colour of danger and in words
+ * ({@link EnvironmentName}). The
  * Queries, Jobs and Connections screens share it; each screen's stylesheet imports its rules
  * (`environment.css`), so the picker brings no stylesheet of its own.
  *
@@ -19,42 +20,9 @@ import {
 import { useTranslation } from "react-i18next";
 
 import type { EnvironmentChoice } from "../api/environments";
+import { EnvironmentName } from "./EnvironmentName";
 import "./environmentStrings";
 import { markedText, VisibleText } from "./VisibleText";
-
-/** Properties of {@link EnvironmentName}. */
-export interface EnvironmentNameProps {
-  /** The environment. */
-  readonly environment: EnvironmentChoice;
-}
-
-/**
- * An environment's name, and for a protected one the mark: a dot before it and the word
- * "protected" after it, both in the colour of danger, so the colour never stands alone
- * ("● prod · protected").
- *
- * @param props - The environment.
- * @param props.environment - The environment.
- * @returns The name.
- */
-export function EnvironmentName({ environment }: EnvironmentNameProps): JSX.Element {
-  const { t } = useTranslation();
-  if (!environment.protected) {
-    return <VisibleText text={environment.name} />;
-  }
-  return (
-    <>
-      <span className="env-protected" aria-hidden="true">
-        ●
-      </span>{" "}
-      <VisibleText text={environment.name} />{" "}
-      <span className="env-protected">
-        <span aria-hidden="true">· </span>
-        {t("environment.protected")}
-      </span>
-    </>
-  );
-}
 
 /**
  * The key of the option "All environments": a number, so no environment's name is ever it. A

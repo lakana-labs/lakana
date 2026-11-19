@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionEnvironmentOut } from "../api";
 import { MeContext } from "../shell/me";
-import { aConnection, ENVIRONMENTS_ROUTE } from "../test/connections";
+import {
+  aConnection,
+  ENVIRONMENTS_ROUTE,
+  READABLE_ROUTE,
+  readableRoute,
+} from "../test/connections";
 import { fakeServer, type FakeRoute, type FakeServer } from "../test/server";
 import { MemoryStorage } from "../test/storage";
 import { fakeWebAuthn } from "../test/webauthn";
@@ -51,6 +56,7 @@ function renderAdd(
 ): { server: FakeServer; user: UserEvent } {
   const server = fakeServer({
     [ENVIRONMENTS_ROUTE]: { status: 200, body: environments },
+    [READABLE_ROUTE]: readableRoute(environments.map(({ name }) => name)),
     "GET /api/v1/environments/dev/connections/crm": {
       status: 200,
       body: aConnection({ environment: "dev", last_test: null }),
@@ -181,6 +187,22 @@ describe("ConnectionForm, add", () => {
       "prod",
       "staging",
     ]);
+  });
+
+  it("marks a protected environment in the picker and its list", async () => {
+    const { user } = renderAdd(MANAGER, {
+      [READABLE_ROUTE]: readableRoute(["dev", "prod"], ["prod"]),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Environment: dev" }));
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "dev",
+      "● prod · protected",
+    ]);
+    await user.click(screen.getByRole("option", { name: /prod/u }));
+    expect(
+      await screen.findByRole("button", { name: "Environment: prod, protected" }),
+    ).toHaveTextContent("● prod · protected");
   });
 
   it("says who may add a connection when no environment allows it", async () => {

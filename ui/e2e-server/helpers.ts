@@ -281,11 +281,18 @@ export function lakeRoot(name: string): string {
  *
  * @param request - The request context.
  * @param name - The environment's name; unique in the run.
+ * @param options - `protected` for a protected environment; unprotected by default.
+ * @param options.protected - Whether the environment is protected.
  * @returns Resolves once the server answered.
  */
-export function createEnvironment(request: APIRequestContext, name: string): Promise<void> {
+export function createEnvironment(
+  request: APIRequestContext,
+  name: string,
+  options: { readonly protected?: boolean } = {},
+): Promise<void> {
   return create(request, "/api/v1/environments", {
     name,
+    is_protected: options.protected === true,
     storage: {
       scheme: "file",
       root: `file://${lakeRoot(name)}`,

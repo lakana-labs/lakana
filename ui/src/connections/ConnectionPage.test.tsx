@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionOut } from "../api";
-import { aConnection } from "../test/connections";
+import { aConnection, READABLE_ROUTE, readableRoute } from "../test/connections";
 import { held } from "../test/pending";
 import { fakeServer } from "../test/server";
 import { ConnectionPage } from "./ConnectionPage";
@@ -290,6 +290,33 @@ describe("ConnectionPage", () => {
       "/connections/prod/crm/edit",
     );
     expect(screen.getByRole("button", { name: "Delete…" })).not.toHaveClass("button-primary");
+  });
+
+  it("marks its environment when it is protected, and names it plainly until that is known", async () => {
+    const server = fakeServer({
+      [CRM]: { status: 200, body: aConnection() },
+      [READABLE_ROUTE]: readableRoute(["dev", "prod"], ["prod"]),
+    });
+    renderPage();
+
+    await screen.findByRole("button", { name: "Test crm" });
+    const label = document.querySelector(".connection-actions .env-label");
+    await waitFor(() => {
+      expect(label).toHaveTextContent("Environment ● prod · protected");
+    });
+    expect(label?.querySelector(".env-protected")).not.toBeNull();
+    expect(server.sent.filter((request) => request.path === "/api/v1/environments")).toHaveLength(
+      1,
+    );
+  });
+
+  it("names its environment plainly when it is not protected or cannot be told", async () => {
+    showing(aConnection());
+
+    await screen.findByRole("button", { name: "Test crm" });
+    expect(document.querySelector(".connection-actions .env-label")).toHaveTextContent(
+      /^Environment prod$/u,
+    );
   });
 
   it("gives a reader no action", async () => {

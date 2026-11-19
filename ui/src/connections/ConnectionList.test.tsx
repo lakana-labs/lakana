@@ -5,7 +5,13 @@ import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionEnvironmentOut, ConnectionLastTestOut, ConnectionOut } from "../api";
-import { aConnection, connectionRoutes, ENVIRONMENTS_ROUTE } from "../test/connections";
+import {
+  aConnection,
+  connectionRoutes,
+  ENVIRONMENTS_ROUTE,
+  READABLE_ROUTE,
+  readableRoute,
+} from "../test/connections";
 import { held } from "../test/pending";
 import { fakeServer, type FakeRoute } from "../test/server";
 import { MeContext } from "../shell/me";
@@ -140,6 +146,52 @@ describe("ConnectionList", () => {
     ).toHaveClass("test-status-muted");
   });
 
+  it("marks a protected environment in the filter, its list and the rows, never by colour alone", async () => {
+    const user = userEvent.setup();
+    fakeServer(
+      connectionRoutes(
+        [aConnection(), aConnection({ name: "files", environment: "dev" })],
+        MANAGER,
+        ["prod"],
+      ),
+    );
+    renderList();
+
+    const rows = await screen.findAllByRole("row");
+    expect(within(rows[1] as HTMLElement).getAllByRole("cell")[3]).toHaveTextContent(
+      "Environment ● prod · protected",
+    );
+    expect(within(rows[2] as HTMLElement).getAllByRole("cell")[3]).toHaveTextContent(
+      /^Environment dev$/u,
+    );
+    const word = within(rows[1] as HTMLElement).getByText("protected");
+    expect(word.closest(".env-protected")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
+    const prod = screen.getByRole("option", { name: /prod/u });
+    expect(prod).toHaveTextContent("● prod · protected");
+    expect(screen.getByRole("option", { name: "dev" })).toHaveTextContent(/^dev$/u);
+    await user.click(prod);
+    expect(
+      await screen.findByRole("button", { name: "Environment: prod, protected" }),
+    ).toHaveTextContent("● prod · protected");
+  });
+
+  it("asks again for both reads when the environments' protection cannot be read", async () => {
+    const user = userEvent.setup();
+    const server = fakeServer({
+      ...connectionRoutes([aConnection()], MANAGER, ["prod"]),
+      [READABLE_ROUTE]: { status: 503, body: { detail: "The server is busy; try again." } },
+    });
+    renderList();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy; try again.");
+    server.route(connectionRoutes([aConnection()], MANAGER, ["prod"]));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("link", { name: "crm" })).toBeInTheDocument();
+    expect(screen.getAllByRole("row")[1]).toHaveTextContent("● prod · protected");
+  });
+
   it("the row's name opens the connection's page", async () => {
     fakeServer(connectionRoutes([aConnection({ name: "a b" })], MANAGER));
     renderList();
@@ -231,6 +283,7 @@ describe("ConnectionList", () => {
     const user = userEvent.setup();
     fakeServer({
       [ENVIRONMENTS_ROUTE]: { status: 200, body: MANAGER },
+      [READABLE_ROUTE]: readableRoute(["dev", "prod"]),
       [LIST]: byCursor({
         "": { items: [aConnection({ name: "one" })], next_cursor: "c2" },
         c2: { items: [aConnection({ name: "two" })], next_cursor: null },
@@ -298,6 +351,7 @@ describe("ConnectionList", () => {
   it("shows the refusal of the connections themselves with Try again", async () => {
     fakeServer({
       [ENVIRONMENTS_ROUTE]: { status: 200, body: MANAGER },
+      [READABLE_ROUTE]: readableRoute(["dev", "prod"]),
       [LIST]: { status: 503, body: { detail: "The list is busy; try again.", type: "Busy" } },
     });
     renderList();
