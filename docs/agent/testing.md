@@ -1471,20 +1471,31 @@ the test, the budget, and the next step.
   4 s of start-up, the test itself at 2.5 s or more, and its warm-up), about 3 minutes. A test
   past the cap is named in the log and counts by its shard time, so it fails as slow; so does a
   test that fails or raises an error when run again. In each process
-  `scripts/remeasure_warm_up.py` (loaded with `-p`) first
-  runs, untimed, the cheapest other test of the candidate's module that uses all of the
-  candidate's session- and module-scoped fixtures (never a skipped one, nor another candidate
-  of the same process, which runs anyway; a flagged test in a process of its own may be one;
-  without such a test the candidate runs alone), so a fixture such as `catalog_template` is not set up on the
-  candidate's clock. Moving that setup off the candidate is deliberate: in a shard it falls on
-  whichever test of the module runs first, and the rule targets tests that are slow in
-  themselves; the candidate's own function-scoped setup, call and teardown are measured in
-  full. The candidate is run up to three times (`CONFIRM_RUNS`; it stops after the first run below
-  the line) and fails only if its **fastest** run takes `confirm_seconds` (2.5 s, in
-  `scripts/time-budgets.toml` beside the threshold) or more: a margin, because a test that sits at
-  the 2 s threshold passed and failed on the same code, and the fastest of several runs, because
-  runner noise only adds time (on 2026-11-12 two tests that are fast elsewhere took 2.5 s solo
-  on a slow runner; #550). A really slow test is slow in every run and still fails. The in-shard threshold stays 2 s for flagging; the log names each one
+  `scripts/remeasure_warm_up.py` (loaded with `-p`) first runs, untimed, the cheapest other
+  test of the candidate's module that uses all of the candidate's session-, package- and
+  module-scoped fixtures (never a skipped one, nor another candidate of the same process,
+  which runs anyway; a flagged test in a process of its own may be one). When the module has
+  no such test, it adds a no-op item beside the candidate, `test_x[warm-up]`, that requests
+  only the candidate's fixtures of those scopes and of class scope, with the candidate's
+  parameters, and so sets them up; only a candidate without such fixtures runs alone. So no
+  fixture such as `catalog_template` (a schema, about 0.7 s) or `_openapi_text` (the server's
+  whole OpenAPI document, about 2 s) is ever set up on the candidate's clock. Before that
+  fallback, a candidate alone in its module with `openapi_schema` paid the build on every
+  re-run and failed unrelated pull requests (`test_the_result_route_documents_every_format`,
+  2.6 s on its own on PR #739's run; #742 had worked around the same in
+  `test_access_file.py`). Moving that setup off the candidate is deliberate: in a shard it
+  falls on whichever test of the worker process asks first, which is how such a test gets
+  flagged at all, and the rule targets tests that are slow in themselves; the candidate's own
+  function-scoped setup, call and teardown are measured in full. So a test flagged in its
+  shard only for the setup it paid there is counted as noise on its re-run, and the in-shard
+  measurement needs nothing more. The candidate is run up to three times (`CONFIRM_RUNS`; it
+  stops after the first run below the line) and fails only if its **fastest** run takes the
+  confirm line or more: `confirm_seconds` (2.5 s, in `scripts/time-budgets.toml` beside the
+  threshold) scaled to the runner (see "The runner's speed" below). A margin, because a test
+  that sits at the 2 s threshold passed and failed on the same code, and the fastest of
+  several runs, because runner noise only adds time (on 2026-11-12 two tests that are fast
+  elsewhere took 2.5 s solo on a slow runner; #550). A really slow test is slow in every run
+  and still fails. The in-shard threshold stays 2 s for flagging; the log names each one
   counted as noise. A new test over
   the threshold fails with its name and both times: make it faster (a smaller fixture, no real sleep, a shared app;
   see "The CLI tests share one app" for what that once saved), or mark it slow and make another
@@ -1500,6 +1511,23 @@ the test, the budget, and the next step.
   1.5 s or more in one CI run, a margin below the threshold, one that took 2.1 s on its own in
   a later run, and the test of `scripts/select_tests.py` that reads every test file's imports; a test that drifts over 2 s unmarked, and stays there when run again, is a failure
   to fix.
+- **The runner's speed (#725).** GitHub's runners differ by about 2×: in the `test (3.14)`
+  logs of 20 runs on 2026-11-19, the same tests took 0.75 to 1.52 times their median
+  on their own, run by run, and on a slow runner tests of 1.2 to 1.3 s locally took 2.5 to
+  2.7 s and failed (#718). So before the re-runs `--confirm` times a fixed reference workload
+  (`REFERENCE_WORKLOAD` in `scripts/time_budgets.py`: imports, pure Python, SQLite, JSON and
+  compiling source in a fresh interpreter, like a pytest process; the fastest of five runs,
+  a few seconds in all) and divides it by `reference_seconds` in `scripts/time-budgets.toml`,
+  its time on a fast GitHub runner. The confirm line is `confirm_seconds` times that ratio,
+  never below 1 (a fast runner keeps 2.5 s, so the rule is never looser than before) and at
+  most `MAX_SPEED_RATIO` (2: a measurement gone wrong cannot switch the ratchet off). The step
+  log starts with `Runner speed: the reference workload took X s here against Y s on a fast
+  runner (...): ratio R, ... a test run again fails from L s`. Only the re-run's line is
+  scaled: the shard times come from the `unit` jobs' runners, which this step did not
+  measure, and they only pick the tests to run again. A workload that cannot run scales
+  nothing and says so. Change the workload only together with `reference_seconds`, calibrated
+  so the ratio is about 1.0 on a fast runner, from the ratios the step logs of a few runs
+  print.
 - **Locally**, `uv run pytest -m "not slow"` skips the slow tests for a quick loop while you
   work; before a push, run the selection of "Local gates" without it.
 

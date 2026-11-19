@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+import subprocess
+import sys
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
 
 from scripts.remeasure_warm_up import WARM_UP_ENV
 from scripts.time_budgets import (
+    MAX_SPEED_RATIO,
+    REFERENCE_WORKLOAD,
     SOLO_CAP,
     Budgets,
     JobTime,
@@ -18,11 +22,13 @@ from scripts.time_budgets import (
     check_slow_tests,
     file_durations,
     main,
+    measure_reference,
     parse_jobs,
     parse_junit,
     read_baseline,
     read_budgets,
     remeasure,
+    scale_for_runner,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -973,3 +979,155 @@ def test_remeasure_starts_no_process_for_no_tests_or_no_runs(tmp_path: Path) -> 
     assert remeasure([], tmp_path, run=lambda *a, **k: calls.append(a)) == {}
     assert remeasure(tests, tmp_path, run=lambda *a, **k: calls.append(a), runs=0) == {}
     assert calls == []
+
+
+def test_the_reference_is_read_and_may_be_left_out(tmp_path: Path) -> None:
+    """``reference_seconds`` records the reference workload's time on a fast runner."""
+    path = tmp_path / "b.toml"
+    path.write_text(BUDGETS_TOML)
+    assert read_budgets(path).reference_seconds is None
+    path.write_text(BUDGETS_TOML + "reference_seconds = 0.5\n")
+    assert read_budgets(path).reference_seconds == pytest.approx(0.5)
+    for value in ('"fast"', "0", "-1"):
+        path.write_text(BUDGETS_TOML + f"reference_seconds = {value}\n")
+        with pytest.raises(ValueError, match="reference_seconds"):
+            read_budgets(path)
+
+
+def test_the_checked_in_budgets_record_the_reference() -> None:
+    """CI scales by it, so it is there and positive."""
+    reference = read_budgets(ROOT / "scripts" / "time-budgets.toml").reference_seconds
+    assert reference is not None
+    assert reference > 0
+
+
+def _clock(readings: list[float]) -> Callable[[], float]:
+    """Stand in for `time.perf_counter`: the given readings, one per call.
+
+    Parameters
+    ----------
+    readings
+        The readings, in order.
+
+    Returns
+    -------
+    callable
+        The stand-in.
+    """
+    it: Iterator[float] = iter(readings)
+    return lambda: next(it)
+
+
+def test_the_reference_workload_runs_in_fresh_interpreters_and_the_fastest_counts() -> None:
+    """Each run starts Python afresh, as each re-run does; runner noise only adds time."""
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **kwargs: object) -> None:
+        commands.append(command)
+        assert kwargs["check"] is True
+
+    clock = _clock([0.0, 0.7, 1.0, 1.5, 2.0, 2.6])
+    assert measure_reference(run=run, clock=clock, runs=3) == pytest.approx(0.5)
+    assert commands == [[sys.executable, "-I", "-c", REFERENCE_WORKLOAD]] * 3
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("no python"), subprocess.CalledProcessError(1, "python")]
+)
+def test_a_reference_workload_that_cannot_run_measures_nothing(
+    error: Exception, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Then the thresholds stay as they are, and the log says why."""
+
+    def run(command: list[str], **kwargs: object) -> None:
+        raise error
+
+    assert measure_reference(run=run, clock=_clock([0.0, 1.0])) is None
+    assert "not scaled" in capsys.readouterr().err
+
+
+def test_the_reference_workload_runs_here() -> None:
+    """The checked-in workload is valid Python and takes a measurable time."""
+    seconds = measure_reference(runs=1)
+    assert seconds is not None
+    assert seconds > 0
+
+
+def test_a_slower_runner_raises_the_confirm_line_by_its_ratio() -> None:
+    """The ratio to the reference scales the line, and the note names both and the line."""
+    line, note = scale_for_runner(2.5, measured=0.6, reference=0.5)
+    assert line == pytest.approx(3.0)
+    assert "0.600 s" in note
+    assert "1.20" in note
+    assert "0.500 s" in note
+    assert "3.00 s" in note
+
+
+def test_a_faster_runner_never_lowers_the_confirm_line() -> None:
+    """The floor: a fast runner keeps today's line."""
+    line, note = scale_for_runner(2.5, measured=0.4, reference=0.5)
+    assert line == pytest.approx(2.5)
+    assert "0.80" in note
+    assert "2.50 s" in note
+
+
+def test_the_ratio_is_capped() -> None:
+    """A measurement gone wrong cannot switch the ratchet off."""
+    line, note = scale_for_runner(2.5, measured=50.0, reference=0.5)
+    assert line == pytest.approx(2.5 * MAX_SPEED_RATIO)
+    assert "100.00" in note
+    assert f"{MAX_SPEED_RATIO:g}" in note
+
+
+def test_main_scales_the_confirm_line_by_the_runner_and_logs_the_ratio(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """On a runner 1.5 times slower than the reference, 3 s on its own is noise."""
+    (in_tmp / "scripts" / "time-budgets.toml").write_text(
+        BUDGETS_TOML + "confirm_seconds = 2.5\nreference_seconds = 0.5\n"
+    )
+    (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 4.0)))
+    seen: dict[str, object] = {}
+
+    def fake(tests: object, workdir: object, **kwargs: object) -> dict[str, float]:
+        seen.update(kwargs)
+        return {"a.py::t": 3.0}
+
+    monkeypatch.setattr("scripts.time_budgets.remeasure", fake)
+    monkeypatch.setattr("scripts.time_budgets.measure_reference", lambda: 0.75)
+    assert main(["slow-tests", "--confirm", "one.xml"]) == 0
+    out = capsys.readouterr().out
+    assert "1.50" in out
+    assert "counted as noise" in out
+    assert seen["stop_below"] == pytest.approx(3.75)
+
+
+def test_main_measures_the_runner_only_to_confirm(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``--confirm`` the times come from other runners: nothing is scaled."""
+    (in_tmp / "scripts" / "time-budgets.toml").write_text(
+        BUDGETS_TOML + "confirm_seconds = 2.5\nreference_seconds = 0.5\n"
+    )
+    (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 2.2)))
+
+    def never() -> float:
+        raise AssertionError("measured without --confirm")
+
+    monkeypatch.setattr("scripts.time_budgets.measure_reference", never)
+    assert main(["slow-tests", "one.xml"]) == 1
+
+
+def test_main_keeps_the_line_when_the_reference_cannot_be_timed(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No measurement, no scaling: the line stays at ``confirm_seconds``."""
+    (in_tmp / "scripts" / "time-budgets.toml").write_text(
+        BUDGETS_TOML + "confirm_seconds = 2.5\nreference_seconds = 0.5\n"
+    )
+    (in_tmp / "one.xml").write_text(_junit(_case("a.py", "t", 4.0)))
+    monkeypatch.setattr(
+        "scripts.time_budgets.remeasure", lambda tests, workdir, **kwargs: {"a.py::t": 3.0}
+    )
+    monkeypatch.setattr("scripts.time_budgets.measure_reference", lambda: None)
+    assert main(["slow-tests", "--confirm", "one.xml"]) == 1
