@@ -5,7 +5,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, type RefObject, useEffect, useRef, useState } from "react";
+import { type JSX, lazy, type RefObject, Suspense, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link as RouterLink } from "react-router";
@@ -34,6 +34,11 @@ import { useSettingsViewer } from "./viewer";
 import { useWholePages } from "./wholePages";
 
 const P = "settings.environmentPages";
+
+// Create environment loads when it is first opened, so the list stays small.
+const CreateEnvironmentDialog = lazy(async () => ({
+  default: (await import("./EnvironmentDialogs")).CreateEnvironmentDialog,
+}));
 
 /** One environment's usage: read, or failed; absent while on its way. */
 type UsageRead = EnvironmentUsageOut | "failed";
@@ -279,12 +284,33 @@ export function EnvironmentsPlace(): JSX.Element {
   const creates = mayCreateEnvironments(viewer) === true;
   const heading = useRef<HTMLHeadingElement>(null);
   const read = useResource(listEnvironmentsFull);
+  const [creating, setCreating] = useState(false);
   return (
     <SettingsFrame
       title={t("settings.places.environments")}
       headingRef={heading}
-      action={creates && <Button className="button button-primary">{t(`${P}.create`)}</Button>}
+      action={
+        creates && (
+          <Button
+            className="button button-primary"
+            onPress={() => {
+              setCreating(true);
+            }}
+          >
+            {t(`${P}.create`)}
+          </Button>
+        )
+      }
     >
+      {creating && (
+        <Suspense fallback={null}>
+          <CreateEnvironmentDialog
+            onClose={() => {
+              setCreating(false);
+            }}
+          />
+        </Suspense>
+      )}
       <p className="page-purpose">{t(`${P}.intro`)}</p>
       <EnvironmentList read={read} viewer={viewer} heading={heading} />
       {/* The place is shown once the facts are read, so the managed environments are known. */}

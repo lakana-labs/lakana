@@ -1,0 +1,37 @@
+{
+  "options": {
+    "legend": "Options",
+    "help": "Each value is written to the server and never shown again, here or anywhere. Put credentials in a secret, not in an option: after creating, add one under Access › Secrets and choose it under Storage.",
+    "key": "Key",
+    "value": "Value",
+    "add": "Add an option",
+    "remove": "Remove",
+    "removeOf": "Remove the option {{key}}",
+    "removeUnnamed": "Remove this option",
+    "keyMissing": "Name the key.",
+    "keyTwice": "Another option has the key {{key}}; give each its own."
+  },
+  "create": {
+    "title": "Create environment",
+    "name": "Name",
+    "nameHelp": "Lower case letters, digits and hyphens read best, such as staging.",
+    "nameMissing": "Name the environment.",
+    "nameDot": "A name cannot hold a dot.",
+    "kind": "Storage",
+    "root": "Root",
+    "rootMissing": "Say where its data is stored.",
+    "examples": {
+      "file": "A folder on the server, such as file:///srv/lakana/dev",
+      "s3": "A bucket and prefix, such as s3://bucket/prefix",
+      "abfs": "A container and prefix, such as abfs://container@account.dfs.core.windows.net/prefix"
+    },
+    "kinds": {
+      "file": "Local folder",
+      "s3": "Amazon S3 or compatible",
+      "abfs": "Azure"
+    },
+    "protect": "Protect it: refuse deleting it and changing its storage",
+    "submit": "Create environment",
+    "held": "Name it and say where its data is stored."
+  }
+}

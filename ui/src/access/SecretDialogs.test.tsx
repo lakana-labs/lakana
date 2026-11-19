@@ -12,6 +12,7 @@ import {
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { type FakeRoute, whoami } from "../test/server";
+import { whereIs } from "../test/sentinel";
 import { fakeWebAuthn } from "../test/webauthn";
 
 const PATH = "/settings/access/secrets";
@@ -97,38 +98,6 @@ async function fillPypi(shell: ReturnType<typeof renderShell>, dialog: HTMLEleme
   await shell.user.type(values[1] as HTMLElement, SENTINEL);
 }
 
-/**
- * Says where the sentinel is outside the request bodies: the page's HTML as it is (text and
- * every attribute, an input's `value` attribute included), the address, the storages and the
- * console. A still-open input's live value is not in the HTML.
- *
- * @param spies - The console spies.
- * @returns The places found.
- */
-function whereIsTheSentinel(
-  spies: readonly { readonly mock: { readonly calls: readonly unknown[] } }[],
-): string[] {
-  const found: string[] = [];
-  if (document.documentElement.outerHTML.includes(SENTINEL)) found.push("html");
-  if (document.body.textContent.includes(SENTINEL)) found.push("text");
-  for (const element of document.querySelectorAll("*")) {
-    for (const attribute of element.attributes) {
-      if (attribute.value.includes(SENTINEL)) found.push(`attribute ${attribute.name}`);
-    }
-  }
-  if (window.location.href.includes(SENTINEL)) found.push("address");
-  for (const storage of [window.localStorage, window.sessionStorage]) {
-    for (let index = 0; index < storage.length; index += 1) {
-      const key = storage.key(index) ?? "";
-      if (`${key}${storage.getItem(key) ?? ""}`.includes(SENTINEL)) found.push("storage");
-    }
-  }
-  for (const spy of spies) {
-    if (JSON.stringify(spy.mock.calls).includes(SENTINEL)) found.push("console");
-  }
-  return found;
-}
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -187,14 +156,14 @@ describe("SecretDialogs", () => {
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("not valid text");
     expect(valueFields(dialog).values[1]).toHaveValue(SENTINEL);
     expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("pypi-corp");
-    expect(whereIsTheSentinel(spies)).toEqual([]);
+    expect(whereIs(SENTINEL, spies)).toEqual([]);
 
     refuse = false;
     await shell.user.click(within(dialog).getByRole("button", { name: "Add secret" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
-    expect(whereIsTheSentinel(spies)).toEqual([]);
+    expect(whereIs(SENTINEL, spies)).toEqual([]);
     expect(document.body.innerHTML).not.toContain(SENTINEL);
     const carrying = shell.server.sent.filter((request) =>
       JSON.stringify(request).includes(SENTINEL),

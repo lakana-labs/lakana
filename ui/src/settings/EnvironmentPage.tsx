@@ -4,10 +4,13 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
+import { Link, useLocation } from "react-router";
 
 import { Page } from "../shell/Page";
+import type { CreatedState } from "./EnvironmentDialogs";
 import { ENVIRONMENTS_PATH } from "./environmentPaths";
+import "./environmentPageStrings";
 import "./settingsStrings";
 
 /** Properties of {@link EnvironmentPage}. */
@@ -25,6 +28,7 @@ export interface EnvironmentPageProps {
  */
 export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
   const { t } = useTranslation();
+  const created = (useLocation().state as Partial<CreatedState> | null)?.created === true;
   return (
     <Page
       title={name}
@@ -33,7 +37,14 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
         { to: ENVIRONMENTS_PATH, label: t("settings.places.environments") },
       ]}
     >
-      {null}
+      {created && (
+        <p className="step-status" role="status">
+          <Trans
+            i18nKey="settings.environmentPage.created"
+            components={{ grants: <Link to="/settings/access/grants" /> }}
+          />
+        </p>
+      )}
     </Page>
   );
 }
