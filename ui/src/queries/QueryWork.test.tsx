@@ -735,6 +735,52 @@ describe("the Queries screen's work", () => {
     });
   });
 
+  it("shows the note after a delete once: the history entry forgets it, so Back and a reload do not bring it back", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`DELETE ${SAVED_ONE}`]: { status: 204 } }),
+    });
+    await shell.user.click(await screen.findByRole("button", { name: "Delete…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete the saved query Daily sales?" });
+    await shell.user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    const note = await screen.findByText("Deleted Daily sales.");
+    await waitFor(() => {
+      expect(shell.router.state.location.state).toMatchObject({
+        note: { kind: "deleted", name: "Daily sales" },
+        seen: true,
+      });
+    });
+    // The same line, still focused: marking the entry does not show the note again.
+    expect(screen.getByText("Deleted Daily sales.")).toBe(note);
+    expect(note).toHaveFocus();
+    expect(shell.router.state.location.pathname).toBe("/queries");
+
+    await act(async () => {
+      await shell.router.navigate(RUN_PATH);
+    });
+    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+    await act(async () => {
+      await shell.router.navigate(-1);
+    });
+    expect(shell.router.state.location.pathname).toBe("/queries");
+    await editor();
+    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+  });
+
+  it("shows no note for an entry whose note was already shown, as after a reload", async () => {
+    const { router } = renderShell(SAVED_PATH, { routes: routes() });
+    await editor();
+
+    await act(async () => {
+      await router.navigate("/queries", {
+        state: { note: { kind: "deleted", name: "Daily sales" }, seen: true },
+      });
+    });
+
+    expect(await screen.findByText("Untitled query")).toBeInTheDocument();
+    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+  });
+
   it("after save as the address is the saved query's and the Saved list shows it", async () => {
     const created = aSavedQuery({ id: "7b8c9d0e", environment: "dev", name: "Late trains" });
     let listed = [aSavedQuery()];

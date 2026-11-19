@@ -17,6 +17,8 @@ export interface QueriesState {
   readonly saved?: SavedQueryOut | null;
   /** What was just done to a saved query, said at `/queries` after a delete. */
   readonly note?: QueryNoteState;
+  /** Set once the note was shown, so a reload or Back to the entry shows it no more. */
+  readonly seen?: true;
   /** Whether the focus stays where it is after the move (see AppShell). */
   readonly keepFocus?: boolean;
 }

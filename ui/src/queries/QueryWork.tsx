@@ -47,7 +47,8 @@ import { ResultPanel } from "./ResultPanel";
 import { savedWho } from "./SavedList";
 import { SaveQueryDialog } from "./SaveQueryDialog";
 import { useAfter } from "./useAfter";
-import { type QueriesAddress, type QueriesState, useOpenedSaved } from "./useOpenedSaved";
+import { type QueriesAddress, useOpenedSaved } from "./useOpenedSaved";
+import { useQueryNote } from "./useQueryNote";
 import { type QueryRunState, useQueryRun } from "./useQueryRun";
 import "./queries.css";
 import "./queryStrings";
@@ -160,9 +161,9 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
   const me = useMe();
   const navigate = useNavigate();
   const location = useLocation();
-  const state = location.state as QueriesState | null;
   const query = useQueryRun();
   const saved = useOpenedSaved(address);
+  const note = useQueryNote();
   const { opened, error: savedError } = saved;
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
@@ -333,7 +334,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
       {!allowed && (
         <p className="queries-saved-facts">{t("queries.notAllowed", { environment })}</p>
       )}
-      {state?.note !== undefined && <QueryNote note={state.note} />}
+      {note !== null && <QueryNote note={note} />}
       {savedError !== null && (
         // The server's cause, then the next step: Try again when another read may help, and a
         // new query in every case.
