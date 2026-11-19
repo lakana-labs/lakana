@@ -2,9 +2,9 @@
  * Who may sign in: invites, recovery links, and the people an administrator looks after.
  *
  * @remarks
- * Issuing an invite or a recovery link needs a fresh passkey touch; {@link api}.request asks for
- * it and sends the request once more. A new link is in the answer that issues it and nowhere
- * else: the interface shows it once and never keeps it.
+ * Issuing an invite or a recovery link needs a fresh passkey touch, so those writes live in
+ * `signInAdmin.ts`, which asks for it first. A new link is in the answer that issues it and
+ * nowhere else: the interface shows it once and never keeps it.
  * @packageDocumentation
  */
 import { api } from "./client";
@@ -100,21 +100,6 @@ function principalPath(name: string, rest = ""): string {
 }
 
 /**
- * Invites a new person; needs a passkey touch.
- *
- * @param name - The principal name the invite creates.
- * @param displayName - The name to show; blank for none.
- * @returns The invite with its link.
- */
-export async function createInvite(name: string, displayName: string): Promise<InviteOut> {
-  const shown = displayName.trim();
-  return api.request<InviteOut>("POST", "/api/v1/invites", {
-    name,
-    display_name: shown === "" ? null : shown,
-  });
-}
-
-/**
  * Lists the open invites, oldest first.
  *
  * @returns The invites.
@@ -130,16 +115,6 @@ export async function listInvites(): Promise<readonly OpenInviteOut[]> {
  */
 export async function withdrawInvite(id: string): Promise<void> {
   await api.request("DELETE", `/api/v1/invites/${encodeURIComponent(id)}`);
-}
-
-/**
- * Issues a recovery link for a person who is not an administrator; needs a passkey touch.
- *
- * @param name - The person's principal name.
- * @returns The link.
- */
-export async function createRecoveryLink(name: string): Promise<RecoveryLinkOut> {
-  return api.request<RecoveryLinkOut>("POST", principalPath(name, "/recovery-link"));
 }
 
 /**

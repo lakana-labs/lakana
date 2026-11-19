@@ -16,7 +16,8 @@ import {
 } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
-import { createInvite, type InviteOut, listInvites, withdrawInvite } from "../api";
+import { type InviteOut, listInvites, withdrawInvite } from "../api";
+import { issueInvite } from "../api/signInAdmin";
 import { ActionDialog } from "../shell/ActionDialog";
 import { CopyLine } from "../shell/CopyLine";
 import { ListHead } from "../shell/ListHead";
@@ -30,6 +31,7 @@ import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
+import "../settings/signInStrings";
 
 /** Properties of {@link InviteDialog}. */
 interface InviteDialogProps {
@@ -38,8 +40,8 @@ interface InviteDialogProps {
 }
 
 /**
- * Asks for the new person's name, creates the invite (a passkey touch when the server asks for
- * one) and shows its link once.
+ * Asks for the new person's name, creates the invite (after a passkey touch when the session's
+ * is stale) and shows its link once.
  *
  * @param props - The close handler.
  * @param props.onClose - Closes the dialog.
@@ -59,7 +61,7 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
           onSubmit={(event) => {
             event.preventDefault();
             attempt.run(async () => {
-              setIssued(await createInvite(name, displayName));
+              setIssued(await issueInvite(name, displayName));
             });
           }}
         >
@@ -108,8 +110,9 @@ function InviteDialog({ onClose }: InviteDialogProps): JSX.Element {
 }
 
 /**
- * Renders the open invites, each withdrawn in place (an invite has no page of its own), and
- * the one action: invite someone.
+ * Renders the open invites in their own scrolling region, each withdrawn in place (an invite
+ * has no page of its own, so its name is plain text, kept whole), and the one action: invite
+ * someone.
  *
  * @returns The place.
  */
@@ -144,49 +147,58 @@ export function InvitesPage(): JSX.Element {
               <CopyLine text={t("access.invites.cli")} copyLabel={t("comingSoon.copy")} />
             </div>
           ) : (
-            <table className="list">
-              <ListHead
-                columns={[t("list.name"), t("list.expires")]}
-                hidden={[t("list.actions")]}
-              />
-              <tbody>
-                {open.map((invite) => (
-                  <tr key={invite.id}>
-                    <td>
-                      <span>
-                        <VisibleText text={invite.name} />
-                      </span>
-                      {invite.display_name !== null && (
-                        <span className="second">
-                          <VisibleText text={invite.display_name} />
+            <div
+              className="list-scroll invites-scroll"
+              role="region"
+              aria-label={t("settings.signIn.invitesRegion")}
+              // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+              tabIndex={0}
+            >
+              <table className="list list-static">
+                <ListHead
+                  columns={[t("list.name"), t("list.expires")]}
+                  hidden={[t("list.actions")]}
+                />
+                <tbody>
+                  {open.map((invite) => (
+                    <tr key={invite.id}>
+                      <td>
+                        <span className="row-name">
+                          <VisibleText text={invite.name} />
                         </span>
-                      )}
-                    </td>
-                    <td>{when(invite.expires_at)}</td>
-                    <td>
-                      <PendingButton
-                        className="button"
-                        aria-label={t("access.invites.withdrawOf", {
-                          name: markedText(invite.name),
-                        })}
-                        pending={withdraw.busy && pressed === invite.id}
-                        isDisabled={withdraw.busy && pressed !== invite.id}
-                        onPress={() => {
-                          setPressed(invite.id);
-                          withdraw.run(async () => {
-                            await withdrawInvite(invite.id);
-                            armFocus();
-                            invites.reload();
-                          });
-                        }}
-                      >
-                        {t("access.withdraw")}
-                      </PendingButton>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                        {invite.display_name !== null && (
+                          <span className="second">
+                            <VisibleText text={invite.display_name} />
+                          </span>
+                        )}
+                      </td>
+                      <td>{when(invite.expires_at)}</td>
+                      <td>
+                        <PendingButton
+                          className="button"
+                          aria-label={t("access.invites.withdrawOf", {
+                            name: markedText(invite.name),
+                          })}
+                          pending={withdraw.busy && pressed === invite.id}
+                          isDisabled={withdraw.busy && pressed !== invite.id}
+                          onPress={() => {
+                            setPressed(invite.id);
+                            withdraw.run(async () => {
+                              await withdrawInvite(invite.id);
+                              armFocus();
+                              invites.reload();
+                            });
+                          }}
+                        >
+                          {t("access.withdraw")}
+                        </PendingButton>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )
         }
       </Loaded>

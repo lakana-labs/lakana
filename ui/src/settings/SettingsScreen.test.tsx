@@ -81,6 +81,7 @@ describe("SettingsScreen", () => {
       "Sign-in",
       "Invites",
       "Recovery links",
+      "Configuration",
     ]);
     const nav = screen.getByRole("navigation", { name: "Settings places" });
     expect(within(nav).getByRole("link", { name: "Sign-in" })).toHaveAttribute(

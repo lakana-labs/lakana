@@ -60,6 +60,7 @@ for (const theme of ["light", "dark"] as const) {
           "Sign-in",
           "Invites",
           "Recovery links",
+          "Configuration",
         ]) {
           await page.keyboard.press("Tab");
           await expect(list.getByRole("link", { name, exact: true })).toBeFocused();
@@ -202,6 +203,7 @@ test("an encoded address to a hidden place says so and reads nothing", async ({ 
     ["/Settings/Sign-In/%52ecovery-Links", "Recovery links"],
     ["/settings/%61ccess/people", "People"],
     ["/settings/%53IGN-IN", "Sign-in"],
+    ["/settings/%63onfiguration", "Configuration"],
   ] as const) {
     await page.goto(path);
     await expect(
@@ -219,6 +221,7 @@ test("an encoded address to a hidden place says so and reads nothing", async ({ 
         "/api/v1/invites",
         "/api/v1/recovery-links",
         "/api/v1/settings/sign-in",
+        "/api/v1/settings/configuration",
         // People's list; nothing else on these pages asks for it.
         "/api/v1/principals",
       ].includes(path),

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from lakana_core.config import DatabaseConfig, RunConfig, SecretsConfig
@@ -23,24 +25,32 @@ def _entries(response: httpx.Response) -> dict[str, dict[str, Any]]:
     return {item["name"]: item for item in response.json()}
 
 
-def test_no_secret_value_reaches_the_answer(client: TestClient, settings: Settings) -> None:
+def test_no_secret_value_reaches_the_answer(
+    client: TestClient, settings: Settings, caplog: pytest.LogCaptureFixture
+) -> None:
     client.app.state.settings = Settings(
         database=DatabaseConfig(url="postgresql://lakana:pw-sentinel@db.example/lakana"),
         bootstrap_pat_key_id="testkey",
         bootstrap_pat_secret="bootstrap-sentinel",
         secrets=SecretsConfig(master_key=_MASTER),
-        run=RunConfig(index_url="https://u:idx-sentinel@pypi.example/simple"),
+        run=RunConfig(
+            index_url="https://u:idx-sentinel@pypi.example/simple",
+            https_proxy="http://proxy:px-sentinel@proxy.example:3128",
+        ),
     )
+    caplog.set_level(logging.DEBUG)
     response = client.get(_URL, headers=AUTH_HEADER)
     assert response.status_code == 200, response.text
-    for sentinel in ("pw-sentinel", "bootstrap-sentinel", "idx-sentinel", _MASTER):
+    for sentinel in ("pw-sentinel", "bootstrap-sentinel", "idx-sentinel", "px-sentinel", _MASTER):
         assert sentinel not in response.text
+        assert sentinel not in caplog.text
     entries = _entries(response)
     for name in (
         "LAKANA_DATABASE__URL",
         "LAKANA_SECRETS__MASTER_KEY",
         "LAKANA_BOOTSTRAP_PAT_SECRET",
         "LAKANA_RUN__INDEX_URL",
+        "LAKANA_RUN__HTTPS_PROXY",
     ):
         assert entries[name]["secret"] is True, name
         assert entries[name]["value"] is None, name
