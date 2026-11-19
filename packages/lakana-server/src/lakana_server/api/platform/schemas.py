@@ -3640,7 +3640,8 @@ class RepositoryOut(BaseModel):
     host_keys
         The keys `ssh_known_hosts` names that ssh reads, each once with its `SHA256:`
         fingerprint and its marker (a certificate authority, or a revoked key ssh refuses);
-        empty when it names none.
+        a certificate on a line without a marker, which ssh never trusts a host through, is
+        left out. Empty when it names none.
     """
 
     id: uuid.UUID

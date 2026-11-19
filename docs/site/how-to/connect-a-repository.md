@@ -68,8 +68,10 @@ revoked keys are listed apart, since ssh refuses them) and its public deploy key
 environments you read, each with **Copy public key**. The host keys are the ones ssh reads
 from the repository's known_hosts, each listed once, with the fingerprint `ssh-keygen -l`
 prints (a certificate's is that of the key it certifies); a line ssh would skip, such as a
-damaged key, is not listed. Someone who only reads sees this read-only, as the command line
-answers them (`lakana repo show NAME`); no private key and no secret's value is ever shown.
+damaged key, is not listed, and neither is a certificate on a line without a marker, which
+ssh never trusts a host through. Someone who only reads sees this read-only, as the command
+line answers them (`lakana repo show NAME`); no private key and no secret's value is ever
+shown.
 
 Whoever has `MANAGE_REPOSITORY` also sees **Connect a repository** above the list, and on each
 page:

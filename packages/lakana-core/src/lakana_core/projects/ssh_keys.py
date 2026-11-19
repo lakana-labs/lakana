@@ -8,8 +8,10 @@ blob of its plain key, written again as OpenSSH writes it: ``ssh-keygen -l`` pri
 of that blob, for a certificate too.
 
 Pinned against ssh-keygen by ``test_known_host_keys.py``. Not read: a ``ssh-dss`` key, which
-OpenSSH 10 no longer reads either, and a certificate signed by a security key (``sk-``), whose
-signature would need the authenticator's own format.
+OpenSSH 10 no longer reads either. A certificate signed by a security key (``sk-``), whose
+signature has the authenticator's own format, or by an RSA key `cryptography` refuses (an
+exponent under 3 or even) cannot be verified here: it is refused unless the caller asks for no
+signature check (`read_key`'s ``check_signature``).
 """
 
 from __future__ import annotations
@@ -488,14 +490,28 @@ class SshKey:
     type: str
     plain: bytes
 
+    @property
+    def is_certificate(self) -> bool:
+        """Tell whether this is a certificate.
 
-def read_key(blob: bytes) -> SshKey | None:
+        Returns
+        -------
+        bool
+            Whether its type ends in `CERT_SUFFIX`.
+        """
+        return self.type.endswith(CERT_SUFFIX)
+
+
+def read_key(blob: bytes, *, check_signature: bool = True) -> SshKey | None:
     """Read a key blob as OpenSSH does.
 
     Parameters
     ----------
     blob
         The base64-decoded key of a known_hosts or public key line.
+    check_signature
+        Whether a certificate's signature must verify. Without the check, every other field is
+        still read, and any plain key OpenSSH accepts may be the authority, a security key too.
 
     Returns
     -------
@@ -512,7 +528,7 @@ def read_key(blob: bytes) -> SshKey | None:
             reader.string()
         key = _FIELDS[plain](reader)
         if kind != plain:
-            _certificate(reader, blob)
+            _certificate(reader, blob, check_signature=check_signature)
         reader.end()
     except _Refused:
         return None
@@ -543,7 +559,7 @@ def _type(reader: _Reader) -> str:
     return kind
 
 
-def _certificate(reader: _Reader, blob: bytes) -> None:
+def _certificate(reader: _Reader, blob: bytes, *, check_signature: bool) -> None:
     """Read a certificate's fields after its key, and verify its signature.
 
     Parameters
@@ -552,6 +568,8 @@ def _certificate(reader: _Reader, blob: bytes) -> None:
         The certificate, read up to the end of its key's fields.
     blob
         The whole certificate.
+    check_signature
+        Whether the signature must verify (`read_key`).
 
     Raises
     ------
@@ -583,11 +601,12 @@ def _certificate(reader: _Reader, blob: bytes) -> None:
     signed = blob[: reader.offset]
     signature = reader.string()
     kind = _type(authority)
-    if kind not in _SIGNERS:
+    if kind not in _FIELDS or (check_signature and kind not in _SIGNERS):
         raise _Refused
     key = _FIELDS[kind](authority)
     authority.end()
-    _verify(kind, key.public, signature, signed)
+    if check_signature:
+        _verify(kind, key.public, signature, signed)
 
 
 def _verify(kind: str, public: bytes | tuple[int, int], signature: bytes, data: bytes) -> None:

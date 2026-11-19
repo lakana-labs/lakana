@@ -13,7 +13,6 @@ The pure helpers are shared by both sides: `ssh_endpoint` reads the host and por
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import ipaddress
 import re
@@ -218,7 +217,7 @@ def _base64(encoded: str) -> bytes | None:
     """
     try:
         blob = base64.b64decode(encoded, validate=True)
-    except binascii.Error:
+    except ValueError:
         return None
     return blob if base64.b64encode(blob).decode() == encoded else None
 
@@ -230,6 +229,13 @@ def known_host_keys(text: str) -> list[KnownHostKey]:
     when OpenSSH skips it: a marker ssh does not know, base64 it cannot decode, a key it
     refuses (any field malformed or a byte left over; a certificate that is malformed or
     whose signature does not verify), or a type word that names another type than the key.
+    Each distinct line is read once.
+
+    Two rules keep the list from showing as trusted a key ssh refuses. A certificate on a line
+    without a marker is left out, since ssh never trusts a host through it. A certificate on
+    a ``@revoked`` line is listed without its signature checked (a security key's, or that of
+    an RSA key `cryptography` refuses, cannot be checked here): a revocation can only make
+    ssh refuse more.
 
     Parameters
     ----------
@@ -243,13 +249,13 @@ def known_host_keys(text: str) -> list[KnownHostKey]:
         once however its lines name its type.
     """
     found: set[KnownHostKey] = set()
-    for marker, word, encoded in _known_lines(text):
+    for marker, word, encoded in dict.fromkeys(_known_lines(text)):
         known = None if marker is None else _MARKERS.get(marker)
         if marker is not None and known is None:
             continue
         blob = _base64(encoded)
-        key = None if blob is None else read_key(blob)
-        if key is None or key.type != key_type(word):
+        key = None if blob is None else read_key(blob, check_signature=known != "revoked")
+        if key is None or key.type != key_type(word) or (known is None and key.is_certificate):
             continue
         found.add(KnownHostKey(type=key.type, fingerprint=key_fingerprint(key.plain), marker=known))
     return sorted(found, key=lambda key: (key.type, key.fingerprint, key.marker or ""))
@@ -273,7 +279,7 @@ def known_hosts_fingerprints(text: str) -> list[str]:
     for _marker, _word, encoded in _known_lines(text):
         try:
             found.add(key_fingerprint(base64.b64decode(encoded, validate=True)))
-        except binascii.Error:
+        except ValueError:
             continue
     return sorted(found)
 

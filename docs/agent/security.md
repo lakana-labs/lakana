@@ -6109,12 +6109,22 @@ fuller text of each part where it already lives.
     malformed or whose authority's signature does not verify). `rsa-sha2-256` and
     `rsa-sha2-512` (and their certificate words) name an `ssh-rsa` key, listed once as
     `ssh-rsa`. A certificate's fingerprint is its certified key's, so a `@revoked` certificate
-    revokes that key on the page as in ssh. Two differences remain, both towards listing less:
-    a certificate signed by a security key (`sk-`) is skipped, since its signature is not
-    checked, and `ssh-dss` is skipped, which OpenSSH 10 no longer reads either. The audit log's
+    revokes that key on the page as in ssh. Where the list differs from what ssh reads, it never
+    shows as trusted a key ssh refuses: a certificate on a line without a marker is left out,
+    since ssh never trusts a host through it (`sshkey_equal` compares types), so "No host key
+    is trusted yet" shows when it is the only line; a certificate on a `@revoked` line is
+    listed without its signature checked, so a revocation ssh applies always shows, even one
+    signed by a security key (`sk-`) or by an RSA key `cryptography` refuses (an exponent under
+    3 or even), whose signatures Lakana cannot check, and a revocation with a bad signature,
+    which ssh skips, is shown too (it can only make ssh stricter); a certificate on a
+    `@cert-authority` line is listed only when its signature verifies, so one signed by those
+    keys is left out; and `ssh-dss` is skipped, which OpenSSH 10 no longer reads either. A
+    character base64 has no place for (non-ASCII, or a no-break space before a comment) skips
+    the line, never fails the answer. Each distinct line is read once. The audit log's
     fingerprints (`known_hosts_fingerprints`) read the same lines but count every base64 key,
     hashed as written. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
-    ticked, never typed`), `test_repositories.py`, `test_known_host_keys.py` (each case also
+    ticked, never typed`), `test_repositories.py` (`a line with a non-ASCII character still
+    lists`), `test_known_host_keys.py` (each case also
     against `ssh-keygen -l -F` when it is installed), with keys ssh-keygen made
     (`packages/lakana-core/tests/host_keys/make.sh`).
   - **A replaced deploy key's private half never leaves the server.** Replace key and Make the

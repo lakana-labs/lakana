@@ -11,6 +11,7 @@ when it is installed: the keys it lists for the host (`ssh-keygen -l -F`) must b
 from __future__ import annotations
 
 import base64
+import hashlib
 import shutil
 import subprocess  # nosec B404 -- runs ssh-keygen on a file the test writes
 from collections.abc import Callable
@@ -22,6 +23,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
+from lakana_core.projects import probes
 from lakana_core.projects.probes import (
     KEY_TYPES,
     MAX_HOST_KEYS,
@@ -320,8 +322,31 @@ def _certificate(
 
 
 ED25519_CERT_WORD = "ssh-ed25519-cert-v01@openssh.com"
-CERTIFIED = KnownHostKey(type=ED25519_CERT_WORD, fingerprint=SSH_KEYGEN_L["host_ed25519.pub"])
-"""What a well-formed certificate of the ed25519 host key lists."""
+CERTIFIED = KnownHostKey(
+    type=ED25519_CERT_WORD, fingerprint=SSH_KEYGEN_L["host_ed25519.pub"], marker="cert-authority"
+)
+"""What a well-formed certificate of the ed25519 host key lists on a ``@cert-authority`` line.
+
+ssh never trusts a host through a certificate on a line without a marker, so such a line is not
+listed; under ``@cert-authority`` the certified key signs host certificates, as ssh reads it."""
+
+
+def _authority(word: str, encoded: str) -> str:
+    """Write a ``@cert-authority`` line for `HOST`.
+
+    Parameters
+    ----------
+    word
+        The type word.
+    encoded
+        The base64 key.
+
+    Returns
+    -------
+    str
+        The line and its newline.
+    """
+    return _line(word, encoded, "@cert-authority ")
 
 
 # --- keys changed by hand -------------------------------------------------------------------
@@ -517,6 +542,79 @@ def _rsa_ca_blob(e: int) -> bytes:
 
 
 RSA_KEY = _listed("host_rsa.pub")
+
+
+def _security_key_signature(body: bytes) -> bytes:
+    """Sign as an ed25519 security key does, with `ED25519_CA` as the authenticator's key.
+
+    Parameters
+    ----------
+    body
+        The certificate up to its signature.
+
+    Returns
+    -------
+    bytes
+        ``string type, string signature, byte flags, uint32 counter`` over
+        ``sha256(application) || flags || counter || sha256(body)``.
+    """
+    flags, counter = b"\x01", (1).to_bytes(4, "big")
+    signed = hashlib.sha256(b"ssh:").digest() + flags + counter + hashlib.sha256(body).digest()
+    return _string(SK_ED25519.encode()) + _string(ED25519_CA.sign(signed)) + flags + counter
+
+
+SK_CA_BLOB = (
+    _string(SK_ED25519.encode()) + _string(_public_blob(ED25519_CA)[19:]) + _string(b"ssh:")
+)
+"""`ED25519_CA` as an ed25519 security key."""
+
+SHA512_DIGEST_INFO = bytes.fromhex("3051300d060960864801650304020305000440")
+
+
+def _exponent_one_signature(body: bytes) -> bytes:
+    """Sign for an RSA key whose exponent is 1: the PKCS #1 v1.5 block itself.
+
+    OpenSSH verifies it (``s ** 1 mod n`` is the block); `cryptography` refuses such a key.
+
+    Parameters
+    ----------
+    body
+        The certificate up to its signature.
+
+    Returns
+    -------
+    bytes
+        An ``rsa-sha2-512`` signature blob for `_rsa_ca_blob` (1).
+    """
+    size = (RSA_CA.public_key().key_size + 7) // 8
+    digest = SHA512_DIGEST_INFO + hashlib.sha512(body).digest()
+    block = b"\x00\x01" + b"\xff" * (size - 3 - len(digest)) + b"\x00" + digest
+    return _string(b"rsa-sha2-512") + _string(block)
+
+
+def _revoked(encoded: str) -> str:
+    """Write a ``@revoked`` certificate line of the ed25519 host key, beside its plain line.
+
+    Parameters
+    ----------
+    encoded
+        The certificate's base64.
+
+    Returns
+    -------
+    str
+        The two lines.
+    """
+    return _line(ED25519_CERT_WORD, encoded, "@revoked ") + _own("host_ed25519.pub")
+
+
+REVOKED_CERTIFICATE = [
+    _listed("host_ed25519.pub"),
+    KnownHostKey(
+        type=ED25519_CERT_WORD, fingerprint=SSH_KEYGEN_L["host_ed25519.pub"], marker="revoked"
+    ),
+]
+"""A revoked certificate of the ed25519 host key, listed beside the key itself."""
 RSA_B64 = _pub("host_rsa.pub")[1]
 
 
@@ -565,9 +663,9 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     ("truncated", _line(ED25519_WORD, _enc(ED25519_BLOB[:-1])), []),
     (
         "rsa-sha2 certificate words",
-        _line("rsa-sha2-256-cert-v01@openssh.com", RSA_CERT)
-        + _line("rsa-sha2-512-cert-v01@openssh.com", RSA_CERT),
-        [_listed("host_rsa-cert.pub")],
+        _authority("rsa-sha2-256-cert-v01@openssh.com", RSA_CERT)
+        + _authority("rsa-sha2-512-cert-v01@openssh.com", RSA_CERT),
+        [_listed("host_rsa-cert.pub", "cert-authority")],
     ),
     (
         "a revoked certificate",
@@ -588,7 +686,18 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     *(
         (name, _own(name), [_listed(name)])
         for name in sorted(SSH_KEYGEN_L)
-        if not name.startswith("ca_")
+        if not name.startswith("ca_") and not name.endswith("-cert.pub")
+    ),
+    *(
+        (name, _own(name, "@cert-authority "), [_listed(name, "cert-authority")])
+        for name in sorted(SSH_KEYGEN_L)
+        if name.endswith("-cert.pub")
+    ),
+    ("a certificate without a marker", _own("host_rsa-cert.pub"), []),
+    (
+        "a certificate without a marker beside its key",
+        _own("host_ed25519-cert.pub") + _own("host_ed25519.pub"),
+        [_listed("host_ed25519.pub")],
     ),
     (
         "one key plain and revoked",
@@ -617,6 +726,12 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
         [_listed("host_ed25519.pub", "revoked")],
     ),
     # Base64.
+    ("a non-ASCII character in the key", _line(ED25519_WORD, "AAAA\u00e9"), []),
+    (
+        "a no-break space before a comment",
+        f"{HOST} {ED25519_WORD} {ED25519_B64}\u00a0# pasted\n",
+        [],
+    ),
     ("not base64", _line(ED25519_WORD, "AAAA*AAA"), []),
     ("missing padding", _line("ecdsa-sha2-nistp384", _pub("host_ecdsa384.pub")[1].rstrip("=")), []),
     (
@@ -719,7 +834,7 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     ),
     (
         "a security key's certificate",
-        _line(
+        _authority(
             "sk-ssh-ed25519-cert-v01@openssh.com",
             _certificate(
                 name=b"sk-ssh-ed25519-cert-v01@openssh.com",
@@ -730,35 +845,40 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
             KnownHostKey(
                 type="sk-ssh-ed25519-cert-v01@openssh.com",
                 fingerprint=key_fingerprint(SK_ED25519_BLOB),
+                marker="cert-authority",
             )
         ],
     ),
     # Certificates of ssh-keygen with a byte changed.
     *(
-        (f"{name} with another signature", _line(_pub(name)[0], _tampered(name)), [])
+        (f"{name} with another signature", _authority(_pub(name)[0], _tampered(name)), [])
         for name in sorted(SSH_KEYGEN_L)
         if name.endswith("-cert.pub")
     ),
     (
         "a certificate with a byte after it",
-        _line(ED25519_CERT_WORD, _enc(_blob("host_ed25519-cert.pub") + b"\0")),
+        _authority(ED25519_CERT_WORD, _enc(_blob("host_ed25519-cert.pub") + b"\0")),
         [],
     ),
     # Certificates signed here.
-    ("a certificate signed here", _line(ED25519_CERT_WORD, _certificate()), [CERTIFIED]),
-    ("a user certificate", _line(ED25519_CERT_WORD, _certificate(kind=1)), [CERTIFIED]),
-    ("a certificate of type 3", _line(ED25519_CERT_WORD, _certificate(kind=3)), []),
-    ("a key id with a NUL", _line(ED25519_CERT_WORD, _certificate(key_id=b"a\0b")), []),
-    ("a principal with a NUL", _line(ED25519_CERT_WORD, _certificate(principals=[b"a\0b"])), []),
+    ("a certificate signed here", _authority(ED25519_CERT_WORD, _certificate()), [CERTIFIED]),
+    ("a user certificate", _authority(ED25519_CERT_WORD, _certificate(kind=1)), [CERTIFIED]),
+    ("a certificate of type 3", _authority(ED25519_CERT_WORD, _certificate(kind=3)), []),
+    ("a key id with a NUL", _authority(ED25519_CERT_WORD, _certificate(key_id=b"a\0b")), []),
+    (
+        "a principal with a NUL",
+        _authority(ED25519_CERT_WORD, _certificate(principals=[b"a\0b"])),
+        [],
+    ),
     (
         "256 principals",
-        _line(ED25519_CERT_WORD, _certificate(principals=[b"p"] * 256)),
+        _authority(ED25519_CERT_WORD, _certificate(principals=[b"p"] * 256)),
         [CERTIFIED],
     ),
-    ("257 principals", _line(ED25519_CERT_WORD, _certificate(principals=[b"p"] * 257)), []),
+    ("257 principals", _authority(ED25519_CERT_WORD, _certificate(principals=[b"p"] * 257)), []),
     (
         "options and extensions",
-        _line(
+        _authority(
             ED25519_CERT_WORD,
             _certificate(
                 critical=_string(b"force-command") + _string(_string(b"true")),
@@ -769,29 +889,33 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     ),
     (
         "an option without its value",
-        _line(ED25519_CERT_WORD, _certificate(critical=_string(b"x"))),
+        _authority(ED25519_CERT_WORD, _certificate(critical=_string(b"x"))),
         [],
     ),
     (
         "an extension without its value",
-        _line(ED25519_CERT_WORD, _certificate(extensions=_string(b"x"))),
+        _authority(ED25519_CERT_WORD, _certificate(extensions=_string(b"x"))),
         [],
     ),
-    ("signed by an ECDSA key", _line(ED25519_CERT_WORD, _certificate(ca=ECDSA_CA)), [CERTIFIED]),
-    ("signed by an RSA key", _line(ED25519_CERT_WORD, _certificate(ca=RSA_CA)), [CERTIFIED]),
+    (
+        "signed by an ECDSA key",
+        _authority(ED25519_CERT_WORD, _certificate(ca=ECDSA_CA)),
+        [CERTIFIED],
+    ),
+    ("signed by an RSA key", _authority(ED25519_CERT_WORD, _certificate(ca=RSA_CA)), [CERTIFIED]),
     (
         "signed by a certificate",
-        _line(ED25519_CERT_WORD, _certificate(ca_blob=_blob("host_ed25519-cert.pub"))),
+        _authority(ED25519_CERT_WORD, _certificate(ca_blob=_blob("host_ed25519-cert.pub"))),
         [],
     ),
     (
         "signed by a security key",
-        _line(ED25519_CERT_WORD, _certificate(ca_blob=SK_ED25519_BLOB)),
+        _authority(ED25519_CERT_WORD, _certificate(ca_blob=SK_ED25519_BLOB)),
         [],
     ),
     (
         "an ed25519 signature named otherwise",
-        _line(
+        _authority(
             ED25519_CERT_WORD,
             _certificate(sign=lambda body: _string(b"ssh-rsa") + _string(ED25519_CA.sign(body))),
         ),
@@ -799,14 +923,14 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     ),
     (
         "a signature blob with a byte after it",
-        _line(
+        _authority(
             ED25519_CERT_WORD, _certificate(sign=lambda body: _signature(ED25519_CA, body) + b"\0")
         ),
         [],
     ),
     (
         "an ECDSA signature named otherwise",
-        _line(
+        _authority(
             ED25519_CERT_WORD,
             _certificate(
                 ca=ECDSA_CA, sign=lambda body: _ecdsa_sig(body, sig_type=b"ecdsa-sha2-nistp384")
@@ -816,24 +940,24 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     ),
     (
         "an ECDSA signature with a byte after s",
-        _line(
+        _authority(
             ED25519_CERT_WORD, _certificate(ca=ECDSA_CA, sign=lambda body: _ecdsa_sig(body, b"\0"))
         ),
         [],
     ),
     (
         "an RSA signature named ssh-rsa over SHA-512",
-        _line(ED25519_CERT_WORD, _ed25519_signed_by_rsa(b"ssh-rsa", _rsa_sign)),
+        _authority(ED25519_CERT_WORD, _ed25519_signed_by_rsa(b"ssh-rsa", _rsa_sign)),
         [],
     ),
     (
         "an RSA signature of an unknown name",
-        _line(ED25519_CERT_WORD, _ed25519_signed_by_rsa(b"rsa-sha2-384", _rsa_sign)),
+        _authority(ED25519_CERT_WORD, _ed25519_signed_by_rsa(b"rsa-sha2-384", _rsa_sign)),
         [],
     ),
     (
         "an RSA signature longer than the modulus",
-        _line(
+        _authority(
             ED25519_CERT_WORD,
             _ed25519_signed_by_rsa(b"rsa-sha2-512", lambda body: b"\0" + _rsa_sign(body)),
         ),
@@ -841,7 +965,7 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     ),
     (
         "an RSA signature without its leading zero",
-        _line(
+        _authority(
             ED25519_CERT_WORD,
             _ed25519_signed_by_rsa(b"rsa-sha2-512", lambda body: _rsa_sign(body).lstrip(b"\0")),
         ),
@@ -849,13 +973,49 @@ CASES: list[tuple[str, str, list[KnownHostKey]]] = [
     ),
     (
         "an RSA authority whose exponent is even",
-        _line(ED25519_CERT_WORD, _certificate(ca=RSA_CA, ca_blob=_rsa_ca_blob(65538))),
+        _authority(ED25519_CERT_WORD, _certificate(ca=RSA_CA, ca_blob=_rsa_ca_blob(65538))),
         [],
+    ),
+    # A revoked certificate whose signature Lakana does not check.
+    (
+        "a revoked certificate signed by a security key",
+        _revoked(_certificate(ca_blob=SK_CA_BLOB, sign=_security_key_signature)),
+        REVOKED_CERTIFICATE,
+    ),
+    (
+        "a revoked certificate signed by an RSA key whose exponent is 1",
+        _revoked(_certificate(ca=RSA_CA, ca_blob=_rsa_ca_blob(1), sign=_exponent_one_signature)),
+        REVOKED_CERTIFICATE,
     ),
 ]
 
+STRICTER: list[tuple[str, str, list[KnownHostKey]]] = [
+    (
+        "a revoked certificate with another signature",
+        _revoked(_tampered("host_ed25519-cert.pub")),
+        [
+            _listed("host_ed25519.pub"),
+            _listed("host_ed25519-cert.pub", "revoked"),
+        ],
+    ),
+    (
+        "a security key's signature on a cert-authority line",
+        _authority(
+            ED25519_CERT_WORD, _certificate(ca_blob=SK_CA_BLOB, sign=_security_key_signature)
+        ),
+        [],
+    ),
+]
+"""Where the list differs from ssh-keygen; it never shows as trusted a key ssh refuses.
 
-@pytest.mark.parametrize(("text", "expected"), [pytest.param(t, e, id=i) for i, t, e in CASES])
+A certificate on a ``@revoked`` line is listed without its signature checked, since revoking a
+key can only make ssh refuse more. One on another line is listed only when its signature
+verifies, which Lakana cannot check for a security key: such an authority is left out."""
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"), [pytest.param(t, e, id=i) for i, t, e in CASES + STRICTER]
+)
 def test_known_host_keys_lists_what_openssh_reads(text: str, expected: list[KnownHostKey]) -> None:
     """Each case lists the keys OpenSSH reads from its text, each once, by type and fingerprint.
 
@@ -912,7 +1072,8 @@ def _openssh(text: str, path: Path) -> set[tuple[str, str, str | None]]:
     Returns
     -------
     set of tuple
-        ssh-keygen's type name, fingerprint and marker of each key found.
+        ssh-keygen's type name, fingerprint and marker of each key found, but a certificate on
+        a line without a marker, which ssh never trusts a host through.
     """
     path.write_text(text)
     ssh_keygen = shutil.which("ssh-keygen")
@@ -931,7 +1092,8 @@ def _openssh(text: str, path: Path) -> set[tuple[str, str, str | None]]:
             marker = markers.get(line.split()[-1])
         else:
             _host, short, fingerprint = line.split()[:3]
-            found.add((short, fingerprint, marker))
+            if marker is not None or not short.endswith("-CERT"):
+                found.add((short, fingerprint, marker))
     return found
 
 
@@ -960,6 +1122,7 @@ def test_the_audit_counts_every_base64_key() -> None:
         _line(ED25519_WORD, ED25519_B64 + "AAAA")
         + _own("host_rsa-cert.pub")
         + _line(ED25519_WORD, "not*base64")
+        + _line(ED25519_WORD, "AAAA\u00e9")
     )
 
     assert known_hosts_fingerprints(text) == sorted(
@@ -977,6 +1140,32 @@ def test_parse_keyscan_drops_a_malformed_key() -> None:
     assert [(k.type, k.fingerprint) for k in keys] == [
         ("ecdsa-sha2-nistp256", SSH_KEYGEN_L["host_ecdsa256.pub"])
     ]
+
+
+def test_parse_keyscan_drops_a_key_with_a_non_ascii_character() -> None:
+    """A character base64 has no place for drops the line rather than failing the scan."""
+    output = f"x {ED25519_WORD} {ED25519_B64}\u00e9\nx {ED25519_WORD} {ED25519_B64}\n"
+
+    keys = parse_keyscan(output, host=HOST, port=22)
+
+    assert [k.fingerprint for k in keys] == [SSH_KEYGEN_L["host_ed25519.pub"]]
+
+
+def test_one_line_is_read_once() -> None:
+    """A line written again is not read again: a certificate's signature is checked once."""
+    calls: list[bytes] = []
+    real = probes.read_key
+
+    def counting(blob: bytes, *, check_signature: bool) -> object:
+        calls.append(blob)
+        return real(blob, check_signature=check_signature)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(probes, "read_key", counting)
+        keys = known_host_keys(_own("host_rsa-cert.pub", "@cert-authority ") * 50)
+
+    assert keys == [_listed("host_rsa-cert.pub", "cert-authority")]
+    assert len(calls) == 1
 
 
 def test_parse_keyscan_keeps_at_most_ten_keys_and_no_duplicates() -> None:
