@@ -5,7 +5,8 @@
  * `SettingsLayout` provides it: the first load's access, and the environments where the person
  * manages secrets, whether they manage row filters and masks, whether they read an environment,
  * what they may do on the instance and which environments they manage, read by Settings' own
- * chunk so the first load does not grow.
+ * chunk so the first load does not grow. A place that finds the answer out of date (an
+ * environment created since, which it does not name) has it read again.
  * @packageDocumentation
  */
 import { createContext, useContext } from "react";
@@ -33,4 +34,17 @@ export const SettingsViewerContext = createContext<SettingsViewer>(NOBODY);
  */
 export function useSettingsViewer(): SettingsViewer {
   return useContext(SettingsViewerContext);
+}
+
+/** Reads the viewer again; `SettingsLayout` provides it, and outside Settings it does nothing. */
+export const ReloadViewerContext = createContext<() => void>(() => undefined);
+
+/**
+ * Gives the way to read what Settings' rules know about the person again, for a place that finds
+ * it out of date; the rules keep the answer they have until the new one comes.
+ *
+ * @returns The reload.
+ */
+export function useReloadViewer(): () => void {
+  return useContext(ReloadViewerContext);
 }
