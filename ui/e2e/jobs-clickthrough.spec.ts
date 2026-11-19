@@ -84,6 +84,19 @@ test.describe("the Jobs screen, checked by clicking through", () => {
     seen.push(where(page));
     const chosen = runs.locator('a.row-name[aria-current="true"]');
     await expect(chosen).toHaveCount(1);
+    const tint = await page.evaluate(() => {
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue(
+        "--color-accent-bg",
+      );
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return colour;
+    });
+    await expect(
+      runs.locator("tr", { has: page.locator('a.row-name[aria-current="true"]') }),
+    ).toHaveCSS("background-color", tint);
     const weights = await runs.locator("a.row-name").evaluateAll((links) =>
       links.map((link) => ({
         chosen: link.getAttribute("aria-current") === "true",
@@ -224,6 +237,7 @@ test.describe("the Jobs screen, checked by clicking through", () => {
       await button.focus();
       await page.keyboard.press("Shift+Tab");
       await page.keyboard.press("Tab");
+      await expect(button).toBeFocused();
       expect(
         await button.evaluate((node) => {
           const style = getComputedStyle(node);

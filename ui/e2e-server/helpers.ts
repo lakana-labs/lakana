@@ -1062,8 +1062,9 @@ async function workersAlive(request: APIRequestContext): Promise<number> {
 /**
  * Starts a worker on the e2e server's database, with the server's own settings from
  * `playwright.server.config.ts`, and waits until the server counts it alive. The suite runs no
- * worker otherwise (Home's status box, a preview that stays queued); only a file whose queries
- * must run starts one, in its `beforeAll`, and stops it in its `afterAll`. Stopped with SIGTERM,
+ * worker otherwise (Home's status box, a preview that stays queued); only a file whose work must
+ * be carried out (`queries.spec.ts`, whose queries run, and `connection-tests.spec.ts`, whose
+ * connection tests end) starts one, in its `beforeAll`, and stops it in its `afterAll`. Stopped with SIGTERM,
  * the worker drains and removes its own heartbeat, so the server counts none again.
  *
  * `uv` starts `lakana-worker` as its child, so both run in a process group of their own

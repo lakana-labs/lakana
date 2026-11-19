@@ -62,17 +62,23 @@ test("Test all tests every connection of the environment once and counts how the
   const testAll = page.getByRole("button", { name: `Test all in ${environment}` });
   await testAll.click();
   await testAll.click({ force: true });
-  await expect(page.getByText(`Testing 2 connections in ${environment}…`)).toBeVisible();
   await expect(
     page.getByText(`Tested 2 connections in ${environment}: 0 OK, 2 not OK.`),
   ).toBeVisible({ timeout: 60_000 });
   await expect(page.getByRole("alert")).toHaveCount(0);
-  // The second press asked for nothing more: one request per connection at most, or one batch.
+  // Each press asked once (Test all sends one request a page); the second tested nothing twice,
+  // so the summary still counts two.
+  expect(asked.length).toBeGreaterThanOrEqual(1);
   expect(asked.length).toBeLessThanOrEqual(2);
-  for (const name of [nowhere, folder]) {
-    await expect(
-      page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) }),
-    ).not.toContainText(/queued|testing…/u);
+  for (const [name, reason] of [
+    [nowhere, "host name"],
+    [folder, "root missing"],
+  ] as const) {
+    const row = page
+      .getByRole("row")
+      .filter({ has: page.getByRole("link", { name, exact: true }) });
+    await expect(row).toContainText(reason);
+    await expect(row).not.toContainText(/queued|testing…|never tested/u);
   }
   await page.context().close();
 });

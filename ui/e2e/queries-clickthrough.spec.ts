@@ -346,10 +346,23 @@ test.describe("the Queries screen, checked by clicking through", () => {
       await scroll.evaluate((node) => node.scrollWidth > node.clientWidth),
       "the grid is wider than its region",
     ).toBe(true);
-    // The grid itself is the tab stop whose arrow keys scroll the region.
+    // The grid itself is the region's tab stop, and its arrow keys scroll the region.
     expect(await scroll.evaluate((node) => getComputedStyle(node).overflowX)).toMatch(
       /^(auto|scroll)$/u,
     );
+    await page.getByRole("button", { name: "Download CSV" }).focus();
+    for (
+      let step = 0;
+      step < 10 && !(await grid.evaluate((node) => node.contains(document.activeElement)));
+      step += 1
+    ) {
+      await page.keyboard.press("Tab");
+    }
+    expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+    for (let step = 0; step < 6; step += 1) {
+      await page.keyboard.press("ArrowRight");
+    }
+    await expect.poll(() => scroll.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
     for (const line of [
       page.getByText(/^Showing the first 1,000/u),
       page.getByText(/^Too many rows for a spreadsheet/u),
