@@ -3,7 +3,9 @@ import { expect, type Page, test } from "@playwright/test";
 import {
   ACCESS_STUBBED,
   POLICIES_STUBBED,
+  SIGN_IN_STUBBED,
   stubAccess,
+  stubConfiguration,
   stubPolicies,
   stubTokensSecrets,
   TOKENS_STUBBED,
@@ -86,6 +88,7 @@ const LITERAL_CODES: Record<string, string> = {
   AttentionItemOut: "kind",
   CheckResultOut: "outcome",
   ColumnOut: "description_source label_source",
+  ConfigurationSettingOut: "source",
   ConnectionCreateIn: "kind",
   ConnectionEnvironmentOut: "actions",
   ConnectionLastTestOut: "outcome state",
@@ -572,6 +575,14 @@ walk(
     expectOnlyStubbed(paths, [...STUBBED, ...ACCOUNTS]);
   },
 );
+
+walk("Settings › Configuration marks hidden characters in values", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubConfiguration(poisoned(page));
+  await visit(page, "/settings/configuration", ["ops-admin", "/srv/lakana/raw"]);
+  expectOnlyStubbed(paths, [...STUBBED, ...SIGN_IN_STUBBED]);
+});
 
 walk("an invite link marks hidden characters in the name it signs in as", async ({ page }) => {
   const paths = apiPaths(page);
