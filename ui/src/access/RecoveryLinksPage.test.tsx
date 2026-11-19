@@ -1,8 +1,8 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { expectPending, held } from "../test/pending";
 import { freshSession } from "../test/access";
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 
 const OPEN = {
