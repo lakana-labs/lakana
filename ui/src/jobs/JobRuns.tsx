@@ -6,12 +6,13 @@
  */
 import { type JSX, useCallback, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router";
+import { Link } from "react-router";
 
 import type { RequestOptions } from "../api/client";
 import { listJobRuns, type RunOut } from "../api/jobs";
 import { ViewList } from "../catalog/views/ViewList";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
+import { settingParam, useAddressParams } from "../shell/useAddressParams";
 import { useWhen } from "../shell/useWhen";
 import { StatusLabel } from "../status/StatusLabel";
 import "./jobStrings";
@@ -83,7 +84,7 @@ export function JobRuns({
   const { t } = useTranslation();
   const when = useWhen();
   const heading = useId();
-  const [params, setParams] = useSearchParams();
+  const [params, update] = useAddressParams();
   const { status, period } = readFilter(params);
   const key = JSON.stringify([environment, repository, job, status, period]);
   const load = useCallback(
@@ -113,14 +114,7 @@ export function JobRuns({
   }, [pages.items, onRows]);
 
   const choose = (name: "status" | "period", value: string, fallback: string): void => {
-    setParams((current) => {
-      if (value === fallback) {
-        current.delete(name);
-      } else {
-        current.set(name, value);
-      }
-      return current;
-    });
+    update(settingParam(name, value === fallback ? null : value));
   };
   const selectSearch = (id: string): string => {
     const next = new URLSearchParams(params);

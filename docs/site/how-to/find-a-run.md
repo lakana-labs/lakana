@@ -67,8 +67,11 @@ The **Runs** tab of the Jobs page lists every run of the environments you may re
 50 at a time with **Show more**. Narrow it by **Environment**, **State** (**Queued or running** is
 one choice), **Trigger**, **Job** (an exact name, applied when you press Enter or leave the
 field) and **Period** (the last 30 days unless you choose another). The address holds every
-filter, so a bookmark brings them back, and Back undoes one filter at a time, as on a job's page,
-without leaving the tab; an address without an environment shows all of them. A run you started
+filter, so a bookmark brings them back, and Back undoes one filter at a time, the environment
+included, as on a job's page, without leaving the tab. When you open the tab at an address without
+an environment, it takes the one you chose last on any of the three tabs, **All environments**
+included, in its place, which adds no step for Back; Back to an address without one shows all
+environments. A run you started
 from the command line for a selection of assets says `selection` and its patterns, with
 `+upstream` and `+downstream`; a resume says which run it continues and links to it. The tab starts no run: start a selection with
 `lakana runs start`. The list is read again every 30 seconds until you show more; then **Read
