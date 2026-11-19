@@ -4,7 +4,12 @@ import type { ReactElement } from "react";
 import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ConnectionEnvironmentOut, ConnectionLastTestOut, ConnectionOut } from "../api";
+import {
+  onUnauthorized,
+  type ConnectionEnvironmentOut,
+  type ConnectionLastTestOut,
+  type ConnectionOut,
+} from "../api";
 import {
   aConnection,
   connectionRoutes,
@@ -192,6 +197,58 @@ describe("ConnectionList", () => {
     ).toHaveTextContent(/^Environment prod$/u);
     await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
     expect(screen.getByRole("option", { name: "prod" })).toHaveTextContent(/^prod$/u);
+  });
+
+  it("names the environments plainly when the protection read finds no server", async () => {
+    fakeServer({
+      ...connectionRoutes([aConnection()], MANAGER, ["prod"]),
+      [READABLE_ROUTE]: () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    const user = userEvent.setup();
+    renderList();
+
+    expect(await screen.findByRole("link", { name: "crm" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      within(screen.getAllByRole("row")[1] as HTMLElement).getAllByRole("cell")[3],
+    ).toHaveTextContent(/^Environment prod$/u);
+    await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
+    expect(screen.getByRole("option", { name: "prod" })).toHaveTextContent(/^prod$/u);
+  });
+
+  it("passes a 401 of the protection read to the sign-in flow instead of naming environments plainly", async () => {
+    const listener = vi.fn();
+    const stop = onUnauthorized(listener);
+    fakeServer({
+      ...connectionRoutes([aConnection()], MANAGER, ["prod"]),
+      [READABLE_ROUTE]: { status: 401, body: { detail: "Sign in again.", type: "Unauthorized" } },
+    });
+    try {
+      renderList();
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Sign in again.");
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("link", { name: "crm" })).not.toBeInTheDocument();
+    } finally {
+      stop();
+    }
+  });
+
+  it("shows a 403 of the protection read as the Connections answer's own 403 would be shown", async () => {
+    fakeServer({
+      ...connectionRoutes([aConnection()], MANAGER, ["prod"]),
+      [READABLE_ROUTE]: {
+        status: 403,
+        body: { detail: "You may not read environments.", type: "Forbidden" },
+      },
+    });
+    renderList();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("You may not read environments.");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "crm" })).not.toBeInTheDocument();
   });
 
   it("the row's name opens the connection's page", async () => {

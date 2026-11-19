@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { JSX } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
@@ -329,13 +329,26 @@ describe("ConnectionPage", () => {
   });
 
   it("names its environment plainly when its protection cannot be read", async () => {
+    // The route says when it has answered; a macrotask later the refusal has been built and
+    // the page has settled, so the assertions below are about the settled read.
+    let answered: () => void = () => undefined;
+    const settled = new Promise<void>((resolve) => {
+      answered = resolve;
+    });
     fakeServer({
       [CRM]: { status: 200, body: aConnection() },
-      [READABLE_ROUTE]: { status: 503, body: { detail: "The server is busy; try again." } },
+      [READABLE_ROUTE]: () => {
+        answered();
+        return { status: 503, body: { detail: "The server is busy; try again." } };
+      },
     });
     renderPage();
 
     await screen.findByRole("button", { name: "Test crm" });
+    await settled;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(document.querySelector(".connection-actions .env-label")).toHaveTextContent(
       /^Environment prod$/u,
     );
