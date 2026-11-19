@@ -160,7 +160,7 @@ route with its parameters, its request body and its answers.
 - [Jobs](rest/jobs.md): 7 routes
 - [Audit](rest/audit.md): 1 route
 - [CI trust rules](rest/ci-trust-rules.md): 8 routes
-- [Access](rest/access.md): 4 routes
+- [Access](rest/access.md): 5 routes
 - [Auth](rest/auth.md): 1 route
 - [Whoami](rest/whoami.md): 2 routes
 - [Sign in](rest/sign-in.md): 18 routes

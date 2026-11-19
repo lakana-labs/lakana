@@ -22659,6 +22659,82 @@
         }
       }
     },
+    "/api/v1/access/managed-scopes": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the scopes access files manage, for whoever manages row filters and masks",
+        "description": "Each scope with the name of the file that manages it and when that file was applied, sorted by scope. A write of a row filter or column mask in a managed scope answers 409; this tells a policy manager so before the write. Needs `MANAGE_POLICY` on the instance (which the `ADMIN` role holds); `GET /api/v1/access/status` tells an administrator more.",
+        "operationId": "managed_scopes_api_v1_access_managed_scopes_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ManagedScopeBriefOut"
+                  },
+                  "title": "Response Managed Scopes Api V1 Access Managed Scopes Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/access/status": {
       "get": {
         "tags": [
@@ -32700,6 +32776,31 @@
         "type": "object",
         "title": "MaintenanceIn",
         "description": "Request body for table maintenance.\n\nParameters\n----------\nkeep_days\n    Snapshots younger than this many days are kept.\nkeep_last\n    The most recent this many snapshots are always kept.\ndry_run\n    Report what would happen without changing anything.\nolder_than_hours\n    Unreferenced files younger than this many hours are never deleted;\n    1 to 87600 (ten years)."
+      },
+      "ManagedScopeBriefOut": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Applied At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "file_name",
+          "applied_at"
+        ],
+        "title": "ManagedScopeBriefOut",
+        "description": "A scope an access file manages, as much as a policy manager needs to know of it.\n\nParameters\n----------\nscope\n    ``instance`` or an environment's name.\nfile_name\n    The name of the file that last applied it.\napplied_at\n    When it was applied."
       },
       "ManagedScopeOut": {
         "properties": {

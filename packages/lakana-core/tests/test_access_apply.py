@@ -27,11 +27,18 @@ from lakana_core.access.model import (
     Target,
 )
 from lakana_core.access.plan import PlannedChange
-from lakana_core.access.service import AccessService
+from lakana_core.access.service import AccessService, ManagedScopeBrief
 from lakana_core.audit.authorization import AuditingAuthorization
 from lakana_core.audit.denial_limiter import DenialAuditLimiter
 from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
-from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
+from lakana_core.auth import (
+    Action,
+    AllowAllAuthorization,
+    PrincipalRef,
+    Securable,
+    SecurableKind,
+    TaskScope,
+)
 from lakana_core.ci_oidc.config import GITHUB_ISSUER
 from lakana_core.errors import ConflictError, PermissionDenied, ValidationError
 from lakana_core.grants.admin import holds_instance_admin
@@ -1201,6 +1208,39 @@ def test_status_lists_scopes_and_open_overrides(session: Session) -> None:
         "admin",
         override.created_at,
     )
+
+
+def test_managed_scopes_answers_a_policy_manager(session: Session) -> None:
+    """MANAGE_POLICY alone gives the scope, the file name and the time; so does ADMIN."""
+    world = access_world(session)
+    service = _service(session, world)
+    GrantService(session, AllowAllAuthorization()).grant(
+        world.admin, principal="alice", action=Action.MANAGE_POLICY, kind=SecurableKind.INSTANCE
+    )
+    assert service.managed_scopes(world.ref("alice")) == ()
+    text = "version: 1\nmanages: [prod]\n"
+    result = service.apply(
+        world.admin, text, plan_fingerprint=service.plan(world.admin, text).fingerprint
+    )
+
+    expected = (ManagedScopeBrief("prod", "access.yaml", result.applied_at),)
+    assert service.managed_scopes(world.ref("alice")) == expected
+    assert service.managed_scopes(world.admin) == expected
+
+
+def test_managed_scopes_refuses_others(session: Session) -> None:
+    """Without MANAGE_POLICY, and with an administrator's task token, the answer is 403."""
+    world = access_world(session)
+    service = _service(session, world)
+    task = PrincipalRef(
+        id=world.admin.id,
+        name="admin",
+        type=PrincipalType.USER,
+        task_scope=TaskScope(environment="prod", asset_scope=["gold.*"], token_id=uuid.uuid4()),
+    )
+    for caller in (world.ref("bob"), task):
+        with pytest.raises(PermissionDenied):
+            service.managed_scopes(caller)
 
 
 @pytest.mark.parametrize(

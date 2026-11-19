@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi.testclient import TestClient
 
 from tests.conftest import AUTH_HEADER
@@ -242,3 +244,39 @@ def test_status_has_the_shape_the_sdk_reads(client: TestClient) -> None:
         "applied_by",
         "applied_at",
     }
+
+
+def test_managed_scopes_tells_nothing_else(
+    client: TestClient, openapi_schema: dict[str, Any]
+) -> None:
+    """A policy manager reads the scope, the file name and the time; nothing more."""
+    header = _user_header(client, "pat")
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "pat", "action": "MANAGE_POLICY", "kind": "INSTANCE"},
+    )
+    assert granted.status_code == 201, granted.text
+    assert client.get("/api/v1/access/managed-scopes", headers=header).json() == []
+    text = client.get("/api/v1/access/export", headers=AUTH_HEADER).json()["text"]
+    applied = client.post(
+        "/api/v1/access/apply",
+        headers=AUTH_HEADER,
+        json={"text": text, "plan_fingerprint": _plan(client, text)["fingerprint"]},
+    )
+    assert applied.status_code == 200, applied.text
+
+    response = client.get("/api/v1/access/managed-scopes", headers=header)
+
+    assert response.status_code == 200, response.text
+    [scope] = response.json()
+    assert (scope["scope"], scope["file_name"]) == ("instance", "access.yaml")
+    properties = openapi_schema["components"]["schemas"]["ManagedScopeBriefOut"]["properties"]
+    assert set(scope) == set(properties) == {"scope", "file_name", "applied_at"}
+    assert client.get("/api/v1/access/status", headers=header).status_code == 403
+
+
+def test_managed_scopes_refuse_a_reader_without_manage_policy(client: TestClient) -> None:
+    """403 for a person who does not manage policies."""
+    header = _user_header(client, "alice")
+    assert client.get("/api/v1/access/managed-scopes", headers=header).status_code == 403

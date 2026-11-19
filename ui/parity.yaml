@@ -281,6 +281,8 @@
 "DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7, done: true }
 "GET /api/v1/access/export":
   { class: ui, part: 7, note: "a download of the live access as an access file" }
+"GET /api/v1/access/managed-scopes":
+  { class: read, part: 7, note: "Row filters & masks marks the policies an access file manages" }
 "GET /api/v1/access/status": { class: read, part: 7 }
 "GET /api/v1/audit-events": { class: ui, part: 8 }
 "GET /api/v1/ci-trust-rules": { class: ui, part: 7 }

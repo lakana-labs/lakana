@@ -250,3 +250,29 @@ def test_status_refuses_an_odd_answer() -> None:
     """A body without the lists is named."""
     with pytest.raises(InvalidResponse):
         _access(lambda r: httpx.Response(200, json={"scopes": 3})).status()
+
+
+def test_managed_scopes_reads_the_scope_the_file_and_the_time() -> None:
+    """GET `/api/v1/access/managed-scopes`, one brief per scope."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json=[
+                {"scope": "prod", "file_name": "team.yaml", "applied_at": "2026-11-05T10:00:00Z"}
+            ],
+        )
+
+    [brief] = _access(handler).managed_scopes()
+
+    assert (seen[0].method, seen[0].url.path) == ("GET", "/api/v1/access/managed-scopes")
+    assert (brief.scope, brief.file_name, brief.applied_at.year) == ("prod", "team.yaml", 2026)
+
+
+@pytest.mark.parametrize("body", [{"scopes": []}, [{"scope": "prod"}]], ids=["object", "short"])
+def test_managed_scopes_refuses_an_odd_answer(body: object) -> None:
+    """An answer that is not a list of scopes is named."""
+    with pytest.raises(InvalidResponse):
+        _access(lambda r: httpx.Response(200, json=body)).managed_scopes()

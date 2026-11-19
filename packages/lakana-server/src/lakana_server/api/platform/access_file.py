@@ -24,6 +24,7 @@ from lakana_server.api.platform.schemas import (
     AccessOverrideOut,
     AccessPlanOut,
     AccessStatusOut,
+    ManagedScopeBriefOut,
     ManagedScopeOut,
 )
 from lakana_server.api.responses import errors
@@ -193,6 +194,36 @@ def apply_access(
         released=list(result.released),
         applied_at=result.applied_at,
     )
+
+
+@router.get("/managed-scopes", response_model=list[ManagedScopeBriefOut], responses=errors(403))
+def managed_scopes(
+    principal: PrincipalRef = Depends(get_principal),
+    service: AccessService = Depends(get_access_service),
+) -> list[ManagedScopeBriefOut]:
+    """List the scopes access files manage, for whoever manages row filters and masks.
+
+    Each scope with the name of the file that manages it and when that file was applied, sorted
+    by scope. A write of a row filter or column mask in a managed scope answers 409; this tells
+    a policy manager so before the write. Needs `MANAGE_POLICY` on the instance (which the
+    `ADMIN` role holds); `GET /api/v1/access/status` tells an administrator more.
+
+    Parameters
+    ----------
+    principal
+        The authenticated caller.
+    service
+        The access service.
+
+    Returns
+    -------
+    list of ManagedScopeBriefOut
+        Each managed scope.
+    """
+    return [
+        ManagedScopeBriefOut(scope=s.scope, file_name=s.file_name, applied_at=s.applied_at)
+        for s in service.managed_scopes(principal)
+    ]
 
 
 @router.get("/status", response_model=AccessStatusOut, responses=errors(403))

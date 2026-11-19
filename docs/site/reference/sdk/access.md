@@ -59,6 +59,20 @@ The server plans the file again and refuses when the file or access changed sinc
 
 Returns: `AccessApplyResult`. The apply's id and counts.
 
+### `client.access.managed_scopes`
+
+Signature: `client.access.managed_scopes() -> list[ManagedScopeBrief]`
+
+List the scopes access files manage, for whoever manages row filters and masks.
+
+Needs `MANAGE_POLICY` on the instance, not the `ADMIN` role; `status` tells an administrator more.
+
+Returns: `list of ManagedScopeBrief`. Each managed scope with the name of its file and when it was applied, by scope.
+
+| Error | When |
+|---|---|
+| `lakana.InvalidResponse` | If the answer is not a list of managed scopes. |
+
 ### `client.access.status`
 
 Signature: `client.access.status() -> AccessStatus`

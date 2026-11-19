@@ -20,6 +20,7 @@ from lakana._models import (
     AccessPlan,
     AccessStatus,
     ManagedScope,
+    ManagedScopeBrief,
 )
 from lakana._routes import ROUTES
 from lakana.errors import InvalidResponse
@@ -309,6 +310,35 @@ class Access:
             retry=False,
         )
         return _apply_from_json(_object(response, "the access apply result"))
+
+    def managed_scopes(self) -> list[ManagedScopeBrief]:
+        """List the scopes access files manage, for whoever manages row filters and masks.
+
+        Needs `MANAGE_POLICY` on the instance, not the `ADMIN` role; `status` tells an
+        administrator more.
+
+        Returns
+        -------
+        list of ManagedScopeBrief
+            Each managed scope with the name of its file and when it was applied, by scope.
+
+        Raises
+        ------
+        InvalidResponse
+            If the answer is not a list of managed scopes.
+        """
+        data = self._transport.request(ROUTES["access.managed_scopes"]).json()
+        try:
+            return [
+                ManagedScopeBrief(
+                    scope=str(x["scope"]),
+                    file_name=str(x["file_name"]),
+                    applied_at=datetime.fromisoformat(str(x["applied_at"])),
+                )
+                for x in data
+            ]
+        except (KeyError, TypeError, ValueError):
+            raise InvalidResponse(_ODD_ANSWER.format(what="the managed scopes")) from None
 
     def status(self) -> AccessStatus:
         """List the scopes access files manage and the open overrides.

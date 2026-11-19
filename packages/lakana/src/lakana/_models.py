@@ -5170,6 +5170,25 @@ class ManagedScope:
 
 
 @dataclass(frozen=True)
+class ManagedScopeBrief:
+    """A scope an access file manages, as much as a policy manager needs to know of it.
+
+    Parameters
+    ----------
+    scope
+        ``instance`` or an environment's name.
+    file_name
+        The name of the file that last applied it.
+    applied_at
+        When.
+    """
+
+    scope: str
+    file_name: str
+    applied_at: datetime
+
+
+@dataclass(frozen=True)
 class AccessOverride:
     """A change made by hand in a managed scope that no apply has taken into account yet.
 
