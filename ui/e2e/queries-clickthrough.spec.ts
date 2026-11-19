@@ -204,6 +204,24 @@ async function stubLargeResult(page: Page): Promise<void> {
   );
 }
 
+/**
+ * Runs the large result's query in `dev` at 320 px and waits for its first page.
+ *
+ * @param page - The page.
+ * @returns The result's grid.
+ */
+async function runLarge(page: Page): Promise<Locator> {
+  await stubLargeResult(page);
+  await page.setViewportSize({ width: 320, height: 640 });
+  const editor = await openQueries(page);
+  await choose(page, "dev");
+  await writeSql(page, editor, "SELECT * FROM big");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  const grid = page.getByRole("grid", { name: /^Result of Query /u });
+  await expect(grid).toBeVisible();
+  return grid;
+}
+
 test.describe("the Queries screen, checked by clicking through", () => {
   test.beforeEach(async ({ page }) => {
     await stubQueries(page);
@@ -316,14 +334,9 @@ test.describe("the Queries screen, checked by clicking through", () => {
   test("a result larger than a spreadsheet at 320 px: Show 100 more, the limit line and the downloads wrap, and only the grid scrolls sideways", async ({
     page,
   }) => {
-    await stubLargeResult(page);
-    await page.setViewportSize({ width: 320, height: 640 });
-    const editor = await openQueries(page);
-    await choose(page, "dev");
-    await writeSql(page, editor, "SELECT * FROM big");
-    await page.keyboard.press("ControlOrMeta+Enter");
-    const grid = page.getByRole("grid", { name: /^Result of Query /u });
-    await expect(grid).toBeVisible();
+    // Ten pages of six wide columns drawn at 320 px: on a CI runner this takes over 30 s.
+    test.slow();
+    const grid = await runLarge(page);
     // A header row and a hundred rows, then a hundred more for each press.
     await expect(grid.getByRole("row")).toHaveCount(101);
     for (let press = 0; press < 9; press += 1) {
@@ -346,23 +359,9 @@ test.describe("the Queries screen, checked by clicking through", () => {
       await scroll.evaluate((node) => node.scrollWidth > node.clientWidth),
       "the grid is wider than its region",
     ).toBe(true);
-    // The grid itself is the region's tab stop, and its arrow keys scroll the region.
     expect(await scroll.evaluate((node) => getComputedStyle(node).overflowX)).toMatch(
       /^(auto|scroll)$/u,
     );
-    await page.getByRole("button", { name: "Download CSV" }).focus();
-    for (
-      let step = 0;
-      step < 10 && !(await grid.evaluate((node) => node.contains(document.activeElement)));
-      step += 1
-    ) {
-      await page.keyboard.press("Tab");
-    }
-    expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(true);
-    for (let step = 0; step < 6; step += 1) {
-      await page.keyboard.press("ArrowRight");
-    }
-    await expect.poll(() => scroll.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
     for (const line of [
       page.getByText(/^Showing the first 1,000/u),
       page.getByText(/^Too many rows for a spreadsheet/u),
@@ -373,6 +372,27 @@ test.describe("the Queries screen, checked by clicking through", () => {
         "the line wraps inside the window",
       ).toBe(true);
     }
+  });
+
+  test("at 320 px the wide grid is the Tab stop of its region, and the arrow keys scroll it sideways", async ({
+    page,
+  }) => {
+    // The first page alone: a hundred rows are enough to be wider than the window.
+    const grid = await runLarge(page);
+    const scroll = page.locator(".data-grid-scroll");
+    await page.getByRole("button", { name: "Download CSV" }).focus();
+    for (
+      let step = 0;
+      step < 10 && !(await grid.evaluate((node) => node.contains(document.activeElement)));
+      step += 1
+    ) {
+      await page.keyboard.press("Tab");
+    }
+    expect(await grid.evaluate((node) => node.contains(document.activeElement))).toBe(true);
+    expect(await scroll.evaluate((node) => node.scrollLeft)).toBe(0);
+    // To the row's last column: the region scrolls to keep the focused cell in sight.
+    await page.keyboard.press("End");
+    await expect.poll(() => scroll.evaluate((node) => node.scrollLeft)).toBeGreaterThan(0);
   });
 
   test("a name pasted from two lines becomes one line with a space", async ({
