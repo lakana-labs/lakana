@@ -241,7 +241,8 @@ yet. Ask an administrator for READ_ENVIRONMENT on one." and the command that lis
 
 **Environment** filters the list: **All environments**, or one of those you may read. The screen
 remembers the choice for you in this browser, and falls back to all environments when the one it
-remembers is gone. **Add connection**, the one primary action, is at the top right when you may
+remembers is gone. A protected environment says so wherever the screen names it, in the filter,
+the rows, Add and a connection's page: "● prod · protected", as in Queries and Jobs. **Add connection**, the one primary action, is at the top right when you may
 add a connection in any environment. Each row shows:
 
 - **Name**, a link that opens the connection's page, and **Kind** by its name (PostgreSQL, MariaDB,
