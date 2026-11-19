@@ -651,9 +651,9 @@ class GrantService:
         """Say whether the caller may read at least one environment with this credential.
 
         About the caller only, so it needs no authorization; asked with `permits`, so it records
-        nothing. It is the read half of the repository service's read rule, without its
-        instance-scope fallback, which only audits a refusal. The web interface lists
-        Settings, Repositories from it.
+        nothing. It is the repository service's read rule without its `MANAGE_REPOSITORY`
+        shortcut: `READ_ENVIRONMENT` on the instance, or on any live environment. The web
+        interface lists Settings, Repositories from it.
 
         Parameters
         ----------
@@ -663,11 +663,12 @@ class GrantService:
         Returns
         -------
         bool
-            Whether `permits(READ_ENVIRONMENT)` holds on any environment that is not deleted,
-            asked in one batch; `False` without one.
+            Whether `permits(READ_ENVIRONMENT)` holds on the instance or on any environment that
+            is not deleted, asked in one batch.
         """
         names = self._session.execute(select(Environment.name).where(LIVE_ENVIRONMENT)).scalars()
-        questions = [(Action.READ_ENVIRONMENT, Securable.environment_scope(name)) for name in names]
+        questions = [(Action.READ_ENVIRONMENT, Securable.instance_scope())]
+        questions += [(Action.READ_ENVIRONMENT, Securable.environment_scope(n)) for n in names]
         return any(permits_each(self._authz, p, questions))
 
     def instance_actions(self, p: PrincipalRef) -> list[str]:

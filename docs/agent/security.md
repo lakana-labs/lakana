@@ -6074,9 +6074,9 @@ fuller text of each part where it already lives.
     nothing. Pins: `test_whoami_flags.py`, `test_ci_oidc.py`, `SecretsPage.test.tsx`.
 - **Status and Repositories in the interface (M7 parts 7 and 8, PR 6a).**
   - **`whoami.reads_environments` and `whoami.instance_actions` describe only the caller.** The
-    first is whether `permits(READ_ENVIRONMENT)` holds on a live environment
-    (`GrantService.reads_some_environment`), the read half of `RepositoryService._authorize_read`
-    without its audited instance-scope fallback; the second the `Action` values `permits` allows
+    first is whether `permits(READ_ENVIRONMENT)` holds on the instance or on a live environment
+    (`GrantService.reads_some_environment`), `RepositoryService._authorize_read` without its
+    `MANAGE_REPOSITORY` shortcut; the second the `Action` values `permits` allows
     on the instance (`GrantService.instance_actions`). Both are one `permits_each` batch and
     record nothing; a task or CI token gets the scope its credential has (no instance action).
     Settings lists Repositories and offers Connect, Edit, Delete, Test access and the key

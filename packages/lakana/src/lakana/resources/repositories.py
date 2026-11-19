@@ -104,7 +104,7 @@ def _repository_from_json(data: dict[str, Any]) -> Repository:
         updated_at=datetime.fromisoformat(data["updated_at"]),
         deploy_keys=[_deploy_key_from_json(k) for k in data.get("deploy_keys") or ()],
         host_keys=[
-            HostKeyFingerprint(type=k["type"], fingerprint=k["fingerprint"])
+            HostKeyFingerprint(type=k["type"], fingerprint=k["fingerprint"], marker=k.get("marker"))
             for k in data.get("host_keys") or ()
         ],
     )

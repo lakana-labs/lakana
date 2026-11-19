@@ -55,11 +55,12 @@ def whoami(
     any grant at all (any scope, directly or through a group), `may_deploy` whether it may
     deploy in at least one environment with this credential, `secret_environments` the
     environments where it may manage secrets with it, `manage_policy` whether it may manage
-    row filters and column masks with it, `reads_environments` whether it may read at least one
-    environment with it (and so the repositories), and `instance_actions` the actions it may take
-    on the instance with it: the web interface shows the administration areas, tells a new
-    person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters
-    & masks and Repositories pages, and the instance-wide actions of Settings, from these seven.
+    row filters and column masks with it, `reads_environments` whether it may read environments
+    with it, on the instance or in at least one (and so the repositories), and
+    `instance_actions` the actions it may take on the instance with it: the web interface shows
+    the administration areas, tells a new person to ask for access, shows the deploy steps of
+    Home and offers its Secrets, Row filters & masks and Repositories pages, and the
+    instance-wide actions of Settings, from these seven.
     `picture` is the etag of your profile picture, or `null` without one.
 
     Parameters

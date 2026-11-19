@@ -157,7 +157,7 @@ _ED25519_B64 = "AAAAC3NzaC1lZDI1NTE5AAAAIIuE9bmUom2wGn1ig3NKAYhOQ46XwTSXMg9/uXaf
 
 
 def test_the_repository_answers_its_host_keys(client: TestClient) -> None:
-    """An ssh repository answers each trusted key's type and fingerprint; an https one none."""
+    """An ssh repository answers each key's type, fingerprint and marker; an https one none."""
     created = client.post(
         "/api/v1/repositories",
         headers=AUTH_HEADER,
@@ -166,7 +166,8 @@ def test_the_repository_answers_its_host_keys(client: TestClient) -> None:
             "kind": "ssh",
             "url": "git@gitlab.internal:data/infra.git",
             "credential_secret": "deploy-key",
-            "ssh_known_hosts": f"gitlab.internal ssh-ed25519 {_ED25519_B64}\n",
+            "ssh_known_hosts": f"gitlab.internal ssh-ed25519 {_ED25519_B64}\n"
+            f"@revoked gitlab.internal ssh-ed25519 {_ED25519_B64}\n",
         },
     )
     assert created.status_code == 201, created.text
@@ -180,7 +181,13 @@ def test_the_repository_answers_its_host_keys(client: TestClient) -> None:
             {
                 "type": "ssh-ed25519",
                 "fingerprint": "SHA256:BbeSiQQjnjpybq7nV8S8tEVnQiZNHfceXjKvrLVxecI",
-            }
+                "marker": None,
+            },
+            {
+                "type": "ssh-ed25519",
+                "fingerprint": "SHA256:BbeSiQQjnjpybq7nV8S8tEVnQiZNHfceXjKvrLVxecI",
+                "marker": "revoked",
+            },
         ],
     }
 

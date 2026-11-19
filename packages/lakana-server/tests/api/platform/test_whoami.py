@@ -23,7 +23,7 @@ def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
         "may_deploy": False,
         "secret_environments": [],
         "manage_policy": True,
-        "reads_environments": False,
+        "reads_environments": True,
         # Reading other people's query text is no part of ADMIN (it is granted on its own).
         "instance_actions": [a.value for a in Action if a is not Action.READ_QUERY_TEXT],
         "picture": None,

@@ -114,18 +114,24 @@ def test_repo_show_prints_each_host_key_with_its_fingerprint(tmp_path: Path) -> 
             **_REPO,
             "name": "infra",
             "kind": "ssh",
-            "host_keys": [{"type": "ssh-ed25519", "fingerprint": fingerprint}],
+            "host_keys": [
+                {"type": "ssh-ed25519", "fingerprint": fingerprint, "marker": None},
+                {"type": "ssh-ed25519", "fingerprint": fingerprint, "marker": "cert-authority"},
+            ],
         },
     )
     api.on("GET", "/api/v1/repositories/analytics", json=_REPO)
     state = make_state(tmp_path, api)
 
     shown = _plain(invoke(state, "repo", "show", "infra", env={"GITHUB_ACTIONS": "true"}).stdout)
-    assert f"host_keys ssh-ed25519 {fingerprint}" in shown
+    assert f"host_keys ssh-ed25519 {fingerprint} @cert-authority ssh-ed25519 {fingerprint}" in (
+        shown
+    )
     client = state.client()
     assert client.repositories.get("analytics").host_keys == []
-    assert [(k.type, k.fingerprint) for k in client.repositories.get("infra").host_keys] == [
-        ("ssh-ed25519", fingerprint)
+    assert [(k.marker, k.type) for k in client.repositories.get("infra").host_keys] == [
+        (None, "ssh-ed25519"),
+        ("cert-authority", "ssh-ed25519"),
     ]
 
 

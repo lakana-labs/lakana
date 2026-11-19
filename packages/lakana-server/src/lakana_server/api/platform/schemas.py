@@ -3171,9 +3171,10 @@ class WhoamiOut(BaseModel):
         (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task
         or CI token. The web interface offers Row filters & masks from it.
     reads_environments
-        Whether you may read at least one environment that is not deleted with this credential
-        (`READ_ENVIRONMENT`, directly, through a role or a group), which lets you read the
-        repositories. The web interface lists Settings, Repositories from it.
+        Whether you may read environments with this credential (`READ_ENVIRONMENT` on the
+        instance or on at least one environment that is not deleted, directly, through a role or
+        a group), which lets you read the repositories. The web interface lists Settings,
+        Repositories from it.
     instance_actions
         The actions you may take on the instance with this credential (such as
         `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the
@@ -3556,18 +3557,22 @@ class RepositoryDeployKeyOut(BaseModel):
 
 
 class TrustedHostKeyOut(BaseModel):
-    """A host key a repository trusts, by type and fingerprint.
+    """A key a repository's known_hosts names, by type, fingerprint and marker.
 
     Parameters
     ----------
     type
-        The key type, such as ``ssh-ed25519``.
+        The key type its key names, such as ``ssh-ed25519``.
     fingerprint
         Its fingerprint as `ssh-keygen -l` prints it, ``SHA256:`` and the digest.
+    marker
+        ``cert-authority`` for a key that signs the hosts' certificates (ssh trusts every host
+        certificate it signed), ``revoked`` for a key ssh refuses; `null` for a plain host key.
     """
 
     type: str
     fingerprint: str
+    marker: Literal["cert-authority", "revoked"] | None = None
 
 
 class RepositoryOut(BaseModel):
@@ -3601,8 +3606,8 @@ class RepositoryOut(BaseModel):
         The public deploy keys Lakana made for it, one per environment you may read, to add at
         the git host; empty when it names no such key. Never a private key.
     host_keys
-        The keys `ssh_known_hosts` trusts, each with its `SHA256:` fingerprint; empty when it
-        trusts none.
+        The keys `ssh_known_hosts` names, each with its `SHA256:` fingerprint and its marker
+        (a certificate authority, or a revoked key ssh refuses); empty when it names none.
     """
 
     id: uuid.UUID

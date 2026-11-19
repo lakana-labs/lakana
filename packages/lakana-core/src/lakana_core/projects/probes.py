@@ -20,6 +20,7 @@ import re
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 from urllib.parse import urlsplit
 
 from sqlalchemy import Select, delete, func, select, update
@@ -136,27 +137,68 @@ def key_fingerprint(blob: bytes) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip("=")
 
 
-@dataclass(frozen=True, order=True)
+HostKeyMarker = Literal["cert-authority", "revoked"]
+"""The markers ssh reads at the start of a known_hosts line; a line with another one is ignored."""
+
+_MARKERS: dict[str, HostKeyMarker] = {"cert-authority": "cert-authority", "revoked": "revoked"}
+
+
+@dataclass(frozen=True)
 class KnownHostKey:
-    """One key a known_hosts text trusts.
+    """One key a known_hosts text names.
 
     Parameters
     ----------
     type
-        The key type its line names, such as ``ssh-ed25519``.
+        The key type its blob names, such as ``ssh-ed25519``.
     fingerprint
         Its fingerprint (`key_fingerprint`), ``SHA256:`` and the digest.
+    marker
+        ``cert-authority`` for a key that signs the hosts' certificates, ``revoked`` for a key
+        ssh refuses; `None` for a plain host key.
     """
 
     type: str
     fingerprint: str
+    marker: HostKeyMarker | None = None
 
 
-def known_host_keys(text: str) -> list[KnownHostKey]:
-    """Read every key of a known_hosts text with its type and fingerprint.
+def _known_lines(text: str) -> list[tuple[str | None, bytes]]:
+    """Read the marker and the key blob of each line of a known_hosts text.
 
     A line is ``[@marker] <hosts> <type> <base64> [comment]``; blank lines and comments are
     skipped, and so is a line whose key is not base64 (ssh skips it too).
+
+    Parameters
+    ----------
+    text
+        The known_hosts lines.
+
+    Returns
+    -------
+    list of tuple
+        Each line's marker without its ``@`` (or `None`) and its decoded key.
+    """
+    found: list[tuple[str | None, bytes]] = []
+    for line in text.splitlines():
+        fields = line.split()
+        marker = None
+        if fields and fields[0].startswith("@"):
+            marker, fields = fields[0][1:], fields[1:]
+        if len(fields) < 3 or fields[0].startswith("#"):
+            continue
+        try:
+            found.append((marker, base64.b64decode(fields[2], validate=True)))
+        except ValueError:
+            continue
+    return found
+
+
+def known_host_keys(text: str) -> list[KnownHostKey]:
+    """Read every key of a known_hosts text with its type, its marker and its fingerprint.
+
+    The type is the one the key's blob names, not the line's own word. A line with a marker
+    ssh does not know, or whose blob names no type, is skipped, as ssh skips it.
 
     Parameters
     ----------
@@ -166,21 +208,16 @@ def known_host_keys(text: str) -> list[KnownHostKey]:
     Returns
     -------
     list of KnownHostKey
-        The distinct pairs of type and fingerprint, sorted.
+        The distinct keys, sorted by type, then fingerprint, then marker.
     """
     found: set[KnownHostKey] = set()
-    for line in text.splitlines():
-        fields = line.split()
-        if fields and fields[0].startswith("@"):
-            fields = fields[1:]
-        if len(fields) < 3 or fields[0].startswith("#"):
+    for marker, blob in _known_lines(text):
+        key_type = _blob_type(blob)
+        known = None if marker is None else _MARKERS.get(marker)
+        if key_type is None or (marker is not None and known is None):
             continue
-        try:
-            blob = base64.b64decode(fields[2], validate=True)
-        except ValueError:
-            continue
-        found.add(KnownHostKey(type=fields[1], fingerprint=key_fingerprint(blob)))
-    return sorted(found)
+        found.add(KnownHostKey(type=key_type, fingerprint=key_fingerprint(blob), marker=known))
+    return sorted(found, key=lambda key: (key.type, key.fingerprint, key.marker or ""))
 
 
 def known_hosts_fingerprints(text: str) -> list[str]:
@@ -189,14 +226,15 @@ def known_hosts_fingerprints(text: str) -> list[str]:
     Parameters
     ----------
     text
-        The known_hosts lines a repository trusts, read as `known_host_keys` reads them.
+        The known_hosts lines a repository trusts; every base64 key counts, whatever its
+        marker or blob.
 
     Returns
     -------
     list of str
         The distinct fingerprints (`key_fingerprint`), sorted.
     """
-    return sorted({key.fingerprint for key in known_host_keys(text)})
+    return sorted({key_fingerprint(blob) for _, blob in _known_lines(text)})
 
 
 def _blob_type(blob: bytes) -> str | None:

@@ -244,3 +244,19 @@ def test_whoami_records_no_audit_event_for_the_new_flags(client: TestClient) -> 
     assert _flags(client, AUTH_HEADER)[0] is True
     assert _flags(client, header) == (False, [])
     assert events() == before
+
+
+def test_read_environment_on_the_instance_reads_before_any_environment_exists(
+    client: TestClient,
+) -> None:
+    """The repositories' read rule ends on the instance: that grant alone says yes."""
+    kim = _new_person(client, "kim")
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={"principal": "kim", "kind": "INSTANCE", "action": "READ_ENVIRONMENT"},
+    )
+    assert granted.status_code == 201, granted.text
+
+    assert _flags(client, kim)[0] is True
+    assert client.get("/api/v1/repositories", headers=kim).status_code == 200

@@ -251,31 +251,49 @@ def test_parse_keyscan_keeps_only_well_formed_keys_of_known_types() -> None:
     assert keys[0].line == f"git.example.com ssh-ed25519 {ED25519_B64}"
 
 
-def test_known_host_keys_reads_type_and_fingerprint() -> None:
-    """Each distinct key with its type, sorted; comments, blanks and bad base64 skipped."""
+def test_known_host_keys_reads_type_marker_and_fingerprint() -> None:
+    """Each distinct key with the type its blob names and its line's marker, sorted.
+
+    Comments, blanks, bad base64, a blob that names no type and an unknown marker are skipped;
+    the audit's fingerprints still cover every base64 key.
+    """
     authority = base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519" + bytes(range(32))).decode()
+    revoked = base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519" + bytes(range(1, 33))).decode()
     text = (
         "# trusted on 2026-11-18\n"
         f"git.example.com ssh-ed25519 {ED25519_B64}\n"
         "\n"
-        f"git.example.com ecdsa-sha2-nistp256 {ECDSA_B64}\n"
+        f"git.example.com ssh-rsa {ECDSA_B64}\n"
         f"@cert-authority *.example.com ssh-ed25519 {authority}\n"
+        f"@revoked git.example.com ssh-ed25519 {revoked}\n"
+        f"@unknown git.example.com ssh-ed25519 {ED25519_B64}\n"
         f"[git.example.com]:2222 ssh-ed25519 {ED25519_B64}\n"
         "git.example.com ssh-rsa not*base64\n"
+        "git.example.com ssh-rsa AAAA\n"
     )
 
     keys = known_host_keys(text)
 
-    assert keys == sorted(
-        [
-            KnownHostKey(type="ecdsa-sha2-nistp256", fingerprint=ECDSA_FINGERPRINT),
-            KnownHostKey(type="ssh-ed25519", fingerprint=ED25519_FINGERPRINT),
-            KnownHostKey(
-                type="ssh-ed25519", fingerprint=key_fingerprint(base64.b64decode(authority))
-            ),
-        ]
-    )
-    assert known_hosts_fingerprints(text) == sorted({key.fingerprint for key in keys})
+    assert keys == [
+        KnownHostKey(type="ecdsa-sha2-nistp256", fingerprint=ECDSA_FINGERPRINT, marker=None),
+        *sorted(
+            [
+                KnownHostKey(type="ssh-ed25519", fingerprint=ED25519_FINGERPRINT, marker=None),
+                KnownHostKey(
+                    type="ssh-ed25519",
+                    fingerprint=key_fingerprint(base64.b64decode(authority)),
+                    marker="cert-authority",
+                ),
+                KnownHostKey(
+                    type="ssh-ed25519",
+                    fingerprint=key_fingerprint(base64.b64decode(revoked)),
+                    marker="revoked",
+                ),
+            ],
+            key=lambda key: key.fingerprint,
+        ),
+    ]
+    assert key_fingerprint(base64.b64decode("AAAA")) in known_hosts_fingerprints(text)
 
 
 def test_fingerprints_match_ssh_keygen() -> None:

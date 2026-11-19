@@ -77,7 +77,7 @@ def _to_out(
                 for key in shown.get(repo.id, ())
             ],
             host_keys=[
-                TrustedHostKeyOut(type=key.type, fingerprint=key.fingerprint)
+                TrustedHostKeyOut(type=key.type, fingerprint=key.fingerprint, marker=key.marker)
                 for key in known_host_keys(repo.ssh_known_hosts or "")
             ],
         )
