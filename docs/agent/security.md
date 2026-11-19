@@ -7256,8 +7256,9 @@ matter for an operator deciding where to run it:
 - **The managed scopes, for a policy manager (M7 parts 7 and 8).** `GET
   /api/v1/access/managed-scopes` (`AccessService.managed_scopes`) answers each managed scope's
   name, file name and apply time to whoever holds `MANAGE_POLICY` on the instance; a task or
-  CI token is refused. No hash, commit, applier or override: what a write's 409 in that scope
-  would tell them, told before the write. It is listed in `_EXEMPT` of
+  CI token is refused. A write's 409 in that scope names the scope and the apply time; this
+  route also names the file that manages it, which the 409 does not, so a policy manager learns
+  which file to change. No hash, commit, applier or override. It is listed in `_EXEMPT` of
   `test_admin_only_call_sites` with that reason. `whoami.manage_policy`
   (`GrantService.may_manage_policies`) is about the caller only, asked with `permits`, records
   nothing, and is false for a task or CI token.

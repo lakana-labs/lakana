@@ -407,9 +407,10 @@ _EXEMPT = {
     ("GrantService", "may_manage_policies"): "answers about the caller only (`whoami`) with "
     "`permits`, about `MANAGE_POLICY` on the instance, reading nothing about anyone else and "
     "writing nothing",
-    ("AccessService", "managed_scopes"): "names the managed scopes, their file names and apply "
-    "times only, to whoever holds `MANAGE_POLICY` on the instance (it authorizes that itself): "
-    "what a policy write's 409 would tell them, told before the write",
+    ("AccessService", "managed_scopes"): "authorizes `MANAGE_POLICY` on the instance itself and "
+    "names each managed scope, its apply time and the name of the file that manages it: the 409 "
+    "of a policy write there names the scope and the time only, so the file name is more than a "
+    "policy manager learned before; no hash, commit, applier or override",
     ("CiTrustRuleService", "check_rule"): "validates without writing; its caller "
     "(`grant`/`create`, or `AccessService`) has authorized",
 }

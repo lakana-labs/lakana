@@ -848,9 +848,10 @@ class AccessService:
     def managed_scopes(self, p: PrincipalRef) -> tuple[ManagedScopeBrief, ...]:
         """Name the scopes access files manage, for whoever manages row filters and masks.
 
-        A write of a policy in a managed scope answers 409, so a policy manager learns here what
-        that refusal would tell them, before the write: the scope, the file's name and when it
-        was applied. No hash, commit, applier or override.
+        A write of a policy in a managed scope answers 409 naming the scope and when it was
+        applied. This answers those two before the write, and also the name of the file that
+        manages the scope, which the 409 does not name, so a policy manager knows which file to
+        change. No hash, commit, applier or override.
 
         Parameters
         ----------

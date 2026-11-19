@@ -765,7 +765,7 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   log's `SECRET_ROTATED` events remain the record of those. Nothing has to be done: the upgrade
   runs with the others.
 
-### Row filters and column masks are listed in pages
+### Row filters and column masks are listed in pages (breaking)
 
 - `GET /api/v1/row-filters` and `GET /api/v1/column-masks` take every filter as optional now, and
   the filters combine: `principal_name` or `group_name`, and `environment`, with `namespace` and
@@ -779,6 +779,9 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   return every match, reading every page; `list_page` reads one page with its cursor, and `iter`
   yields them as the pages come. `lakana row-filter list` and `lakana column-mask list` list
   every match, and work without a flag now.
+- Upgrade every `lakana` package (SDK and CLI) together with the server: an older client reads
+  one request and so gets only the first 100 row filters or column masks of a list, without a
+  sign that more exist.
 
 ## Notes for 0.22.0
 

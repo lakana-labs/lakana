@@ -174,7 +174,8 @@ export function AddPolicyDialog({
     setFields((previous) => ({ ...previous, ...change }));
   };
   const { kind, who, name, environment, namespace, table, column, expression } = fields;
-  const managed = environment === null ? null : managedScopeOf(scopes, environment);
+  // Judged as the request names it: a typed name is sent trimmed.
+  const managed = environment === null ? null : managedScopeOf(scopes, environment.trim());
   const held = missing(t, fields);
   const listed = environments ?? [];
   const create = async (): Promise<void> => {

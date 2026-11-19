@@ -334,6 +334,21 @@ describe("AddPolicyDialog", () => {
     expect(post?.body).toMatchObject({ environment: "dev", principal: "maria" });
   });
 
+  it("refuses a typed managed environment, spaces and all", async () => {
+    const { user, dialog } = await openDialog(
+      PATH,
+      policyRoutes({
+        ...managedScopesRoute(["prod"], "team.yaml"),
+        "GET /api/v1/environments": { status: 200, body: [] },
+      }),
+    );
+
+    await user.type(within(dialog).getByRole("textbox", { name: "Environment" }), "prod ");
+
+    expect(within(dialog).queryByRole("button", { name: "Create" })).toBeNull();
+    expect(dialog).toHaveTextContent("An access file manages prod: add this in team.yaml instead.");
+  });
+
   it("offers the choice while the environments are read", async () => {
     const environments = held();
     const { dialog } = await openDialog(
