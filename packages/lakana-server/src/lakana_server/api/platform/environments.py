@@ -13,6 +13,7 @@ from lakana_server.api.platform.schemas import (
     EnvironmentOut,
     EnvironmentPatch,
     EnvironmentRetentionIn,
+    EnvironmentStorageOut,
     EnvironmentStorageUpdate,
     EnvironmentUsageOut,
     OrphanedLocationsDeleteIn,
@@ -76,6 +77,41 @@ def create_environment(
         properties=body.properties,
     )
     return EnvironmentOut.model_validate(env)
+
+
+@router.get("/{name}/storage", response_model=EnvironmentStorageOut, responses=errors(403, 404))
+def get_environment_storage(
+    name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    catalog: CatalogService = Depends(get_catalog),
+) -> EnvironmentStorageOut:
+    """Show an environment's storage: its root, its secret and the keys of its options.
+
+    Never a value: an option can hold an inline credential, so the answer names only its key,
+    which says what `PATCH /api/v1/environments/{name}/storage` with `options` would replace.
+    Needs `MANAGE_ENVIRONMENT` on the instance, as changing the storage does. Answers 404 when
+    there is no such environment, or it is deleted.
+
+    Parameters
+    ----------
+    name
+        Environment name.
+    principal
+        The authenticated caller; needs `MANAGE_ENVIRONMENT` on the instance.
+    catalog
+        The catalog service for this request.
+
+    Returns
+    -------
+    EnvironmentStorageOut
+        The root, the storage secret's name and the sorted option keys.
+
+    Raises
+    ------
+    lakana_core.errors.NotFoundError
+        Mapped to 404 by `install_exception_handlers`.
+    """
+    return EnvironmentStorageOut.model_validate(catalog.environment_storage(principal, name))
 
 
 @router.patch("/{name}/storage", response_model=EnvironmentOut, responses=errors(403, 404))

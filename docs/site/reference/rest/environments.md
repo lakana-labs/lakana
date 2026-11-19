@@ -72,6 +72,37 @@ Answers:
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
+## `GET /api/v1/environments/{name}/storage`
+
+Show an environment's storage: its root, its secret and the keys of its options
+
+Never a value: an option can hold an inline credential, so the answer names only its key, which says what `PATCH /api/v1/environments/{name}/storage` with `options` would replace. Needs `MANAGE_ENVIRONMENT` on the instance, as changing the storage does. Answers 404 when there is no such environment, or it is deleted.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `name` | path | yes | text | Environment name. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `EnvironmentStorageOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `EnvironmentStorageOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `root` | text | yes |  |
+| `secret_ref` | text or null | yes |  |
+| `option_keys` | list of text | yes |  |
+
 ## `PATCH /api/v1/environments/{name}/storage`
 
 Change an environment's storage

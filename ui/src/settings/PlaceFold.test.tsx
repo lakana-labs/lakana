@@ -32,6 +32,7 @@ describe("PlaceFold", () => {
         .map((link) => link.textContent),
     ).toEqual([
       "Status",
+      "Environments",
       "Repositories",
       "People",
       "Groups",

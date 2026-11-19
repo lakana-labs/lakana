@@ -12,6 +12,7 @@ import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { ROUTES, stubConnect } from "./connect";
 import { CONNECTIONS_STUBBED, stubConnections } from "./connections";
+import { ENVIRONMENTS_STUBBED, stubEnvironments } from "./environments";
 import { REPOSITORIES_STUBBED, stubRepositories } from "./repositories";
 import {
   apiPaths,
@@ -93,6 +94,7 @@ const LITERAL_CODES: Record<string, string> = {
   DeployOut: "actions kind status",
   DeployTriggerOut: "kind",
   DroppedTableOut: "actions",
+  "EnvironmentCreate.storage": "scheme",
   ExternalTableOut: "format",
   GetStartedOut: "audience",
   GetStartedStepOut: "id",
@@ -627,6 +629,25 @@ walk("Status and Repositories mark hidden characters", async ({ page }) => {
   await expectMarked(page, "Replace key", ["dev"]);
   await page.keyboard.press("Escape");
   expectOnlyStubbed(paths, [...STUBBED, ...REPOSITORIES_STUBBED]);
+});
+
+walk("Environments mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubEnvironments(poisoned(page));
+  await visit(page, "/settings/environments", ["prod", "s3://corp-lake/prod", "dev-old"]);
+  await visit(page, "/settings/environments/dev", ["file:///srv/lakana/dev", "data-platform"]);
+  await page.getByRole("button", { name: "Find" }).click();
+  await expectMarked(page, "Leftover directories", ["managed/gold/station_ranking-7f3a"]);
+  await page.getByRole("button", { name: /^Change storage of dev/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "Change storage", ["endpoint", "region"]);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: /^Delete environment dev/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "Delete environment", ["dev"]);
+  await page.keyboard.press("Escape");
+  expectOnlyStubbed(paths, [...STUBBED, ...ENVIRONMENTS_STUBBED]);
 });
 
 walk("the results of the catalog's actions mark hidden characters", async ({ page }) => {

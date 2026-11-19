@@ -846,6 +846,7 @@ export async function signInAsAdmin(page: Page): Promise<void> {
         manage_policy: true,
         reads_environments: true,
         instance_actions: ["MANAGE_ENVIRONMENT", "MANAGE_REPOSITORY"],
+        managed_environments: ["dev", "prod"],
         picture: "e1",
       },
     }),
@@ -992,7 +993,8 @@ export function consoleErrors(page: Page): string[] {
  * @param target - The element.
  */
 export async function tabTo(page: Page, target: Locator): Promise<void> {
-  for (let step = 0; step < 40; step += 1) {
+  // Enough to come round the page once: Settings lists fifteen places beside the sidebar.
+  for (let step = 0; step < 60; step += 1) {
     if (await target.evaluate((node) => node === document.activeElement)) {
       return;
     }

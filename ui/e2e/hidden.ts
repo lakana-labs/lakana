@@ -83,8 +83,15 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "DroppedTableOut",
   '["actions","exists","kind","repository","table"]': "OrphanOut",
   '["active","note","permissions","principal","scope"]': "PermissionsOut",
-  '["admin","ci_token","has_access","instance_actions","language","manage_policy","may_deploy","name","picture","reads_environments","secret_environments","task_token","type"]':
+  '["admin","ci_token","has_access","instance_actions","language","manage_policy","managed_environments","may_deploy","name","picture","reads_environments","secret_environments","task_token","type"]':
     "WhoamiOut",
+  '["artifacts","code_archives","complete","dropped_tables","environment","tables","total_bytes"]':
+    "EnvironmentUsageOut",
+  '["bytes","count","unmeasured"]': "UsagePartOut",
+  '["complete","environment","locations","older_than_days"]': "OrphanedLocationsOut",
+  '["bytes","bytes_deleted","deleted","files","files_deleted","kept_because","location","newest_file_at","recent"]':
+    "OrphanedLocationOut",
+  '["option_keys","root","secret_ref"]': "EnvironmentStorageOut",
   '["alert","band","column","effect","id","last_fired_at","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
     "HealthSignalOut",
   '["alert","band","column","effect","id","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
@@ -174,7 +181,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["high"]': "HealthBandOut",
   '["id","name","principal_type"]': "SubjectPrincipalOut",
   '["is_active","name","picture","type"]': "PrincipalOut",
-  '["is_protected","name"]': "EnvironmentOut",
+  '["is_protected","name"]': "EnvironmentCreate",
   '["item","others","state","text"]': "HealthSummaryOut",
   '["items","next_cursor","path"]': "RawPageOut",
   '["items","next_cursor"]': "WirePage",
@@ -205,6 +212,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["tls","user"]': "-",
   '["version"]': "InfoOut",
   "[]": "-",
+  // An environment's properties (Settings › Environments): keys and values are data.
+  '["cost-centre"]': "-",
   '["actions","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
     "DeployOut",
   '["commit_sha","project_version_id","repository","updated_at"]': "DeploymentOut",

@@ -633,6 +633,28 @@ class _TextEdit:
 
 
 @dataclass(frozen=True)
+class EnvironmentStorage:
+    """Where an environment's data lives, with the names of its storage options only.
+
+    The options' values can hold inline credentials (`_check_storage_options`), so they are
+    never part of it.
+
+    Parameters
+    ----------
+    root
+        The storage root URI.
+    secret_ref
+        The name of the secret holding the storage credential, or `None`.
+    option_keys
+        The keys of the storage options, sorted.
+    """
+
+    root: str
+    secret_ref: str | None
+    option_keys: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class PropertyUpdateSummary:
     """What an update to a namespace's properties actually changed.
 
@@ -2506,6 +2528,40 @@ class CatalogService:
         )
         self._session.commit()
         return env
+
+    def environment_storage(self, p: PrincipalRef, name: str) -> EnvironmentStorage:
+        """Say where an environment's data lives and which storage options are set.
+
+        Names the options' keys, never their values: a value can be an inline credential.
+        Reads the row only and records nothing but a denial.
+
+        Parameters
+        ----------
+        p
+            The acting principal; needs ``MANAGE_ENVIRONMENT`` on the instance, as changing
+            the storage does.
+        name
+            Environment name.
+
+        Returns
+        -------
+        EnvironmentStorage
+            The root, the storage secret's name and the sorted option keys.
+
+        Raises
+        ------
+        PermissionDenied
+            If the principal may not manage environments on the instance.
+        NotFoundError
+            If no environment has that name, or it is deleted.
+        """
+        self._authz.authorize(p, Action.MANAGE_ENVIRONMENT, Securable.instance_scope())
+        env = self._find_environment(name, p)
+        return EnvironmentStorage(
+            root=env.storage_root,
+            secret_ref=env.storage_secret_ref,
+            option_keys=tuple(sorted(env.storage_options)),
+        )
 
     def set_environment_protection(
         self, p: PrincipalRef, name: str, protected: bool

@@ -271,7 +271,7 @@ async function create(request: APIRequestContext, path: string, body: object): P
  * @param name - The environment's name.
  * @returns The directory's absolute path.
  */
-function lakeRoot(name: string): string {
+export function lakeRoot(name: string): string {
   return resolve(import.meta.dirname, "..", ".e2e-server", `lake-${name}`);
 }
 

@@ -14,6 +14,7 @@ import { ReadFailed } from "../catalog/ReadFailed";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
+import { inPool, READS_IN_FLIGHT } from "../shell/inPool";
 import { useMe } from "../shell/me";
 import { useResource } from "../shell/useResource";
 import { problemText } from "../sign-in/messages";
@@ -21,9 +22,6 @@ import "./access.css";
 import "./accessStrings";
 import { HeldGrants } from "./HeldGrants";
 import { actionWords, isAction } from "./words";
-
-/** How many environments are asked about at once. */
-const READS_IN_FLIGHT = 4;
 
 /** One scope's read: on its way, its answer, or why it failed. */
 type ScopeRead =
@@ -33,27 +31,6 @@ type ScopeRead =
 
 /** The key of the whole instance among the scopes; no environment's name is empty. */
 const INSTANCE = "";
-
-/**
- * Runs `work` over `items`, at most `limit` at once.
- *
- * @param items - The items.
- * @param limit - How many run at once.
- * @param work - What runs for each; it never rejects.
- */
-async function inPool(
-  items: readonly string[],
-  limit: number,
-  work: (item: string) => Promise<void>,
-): Promise<void> {
-  const queue = [...items];
-  const worker = async (): Promise<void> => {
-    for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
-      await work(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, queue.length) }, worker));
-}
 
 /**
  * Reads what a person may do on the instance and in each environment, a few at a time, and

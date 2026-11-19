@@ -23,6 +23,7 @@ describe("mySettingsFacts", () => {
       managePolicy: true,
       readsEnvironments: true,
       instanceActions: ["MANAGE_REPOSITORY"],
+      managedEnvironments: [],
     });
     expect(server.sent).toHaveLength(1);
   });
@@ -35,6 +36,7 @@ describe("mySettingsFacts", () => {
       managePolicy: false,
       readsEnvironments: false,
       instanceActions: [],
+      managedEnvironments: [],
     });
   });
 });

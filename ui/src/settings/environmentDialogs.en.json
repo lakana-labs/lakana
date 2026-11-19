@@ -1,0 +1,91 @@
+{
+  "options": {
+    "legend": "Options",
+    "help": "Each value is written to the server and never shown again, here or anywhere. Put credentials in a secret under Access › Secrets, not in an option, and choose it as the storage secret.",
+    "key": "Key",
+    "value": "Value",
+    "add": "Add an option",
+    "remove": "Remove",
+    "removeOf": "Remove the option {{key}}",
+    "removeUnnamed": "Remove this option",
+    "keyMissing": "Name the key.",
+    "keyTwice": "Another option has the key {{key}}; give each its own."
+  },
+  "create": {
+    "title": "Create environment",
+    "name": "Name",
+    "nameHelp": "Lower case letters, digits and hyphens read best, such as staging.",
+    "nameMissing": "Name the environment.",
+    "nameDot": "A name cannot hold a dot.",
+    "kind": "Storage",
+    "root": "Root",
+    "rootMissing": "Say where its data is stored.",
+    "examples": {
+      "file": "A folder on the server, such as file:///srv/lakana/dev",
+      "s3": "A bucket and prefix, such as s3://bucket/prefix",
+      "abfs": "A container and prefix, such as abfs://container@account.dfs.core.windows.net/prefix"
+    },
+    "kinds": {
+      "file": "Local folder",
+      "s3": "Amazon S3 or compatible",
+      "abfs": "Azure"
+    },
+    "protect": "Protect it: refuse deleting it and changing its storage",
+    "submit": "Create environment",
+    "held": "Name it and say where its data is stored."
+  },
+  "retention": {
+    "title": "Set retention of {{name}}",
+    "rule": "Tables that set no retention of their own",
+    "keep": "Keep tables",
+    "expire": "Tables expire after",
+    "days": "Days",
+    "daysHelp": "1 to 3,650 days after a table's last write or read.",
+    "save": "Save",
+    "held": "Give a number of days from 1 to 3,650.",
+    "onlyOff": "A protected environment keeps its tables: only turning the retention off is possible."
+  },
+  "storage": {
+    "title": "Change the storage of {{name}}",
+    "reading": "Reading the storage…",
+    "root": "Root",
+    "secret": "Storage secret",
+    "keepSecret": "Keep the current secret",
+    "noSecretYet": "No secret yet",
+    "secretNoneHere": "This environment has no secret yet. Add one under Access › Secrets.",
+    "options": "Options",
+    "keepOptions": "Keep the options as they are",
+    "replaceOptions": "Replace the options",
+    "setNow": "Set now: {{keys}}",
+    "noneSetNow": "No option is set now.",
+    "replaceHelp": "Sending replaces every option: name each one the storage needs.",
+    "submit": "Change storage",
+    "held": "Choose another secret or replace the options.",
+    "secretNeedsRight": "Choosing the storage secret needs the right to manage secrets in {{name}}."
+  },
+  "delete": {
+    "title": "Delete environment {{name}}?",
+    "body": "Its tables are dropped, the grants, row filters and masks on it are revoked, and its task tokens stop working.",
+    "files": "Its files",
+    "keep": "Keep the files for the undo period, so it can be restored",
+    "purge": "Delete the files at the next clean-up. It cannot be restored.",
+    "type": "Type {{name}} to delete it",
+    "submit": "Delete environment"
+  },
+  "restore": {
+    "title": "Restore {{name}}?",
+    "body": "Its tables come back with the grants, row filters and masks they had. Task tokens it had stay revoked.",
+    "confirm": "Restore"
+  },
+  "purgeFiles": {
+    "title": "Delete the files of {{name}} now?",
+    "body": "The next clean-up deletes its tables' files, and it can no longer be restored.",
+    "type": "Type {{name}} to delete its files",
+    "submit": "Delete the files"
+  },
+  "removeRows": {
+    "title": "Remove {{name}} from the catalog?",
+    "body": "Lakana cannot reach this storage. This removes the environment's records and frees its name; files, if any, stay where they are.",
+    "confirm": "Remove from the catalog"
+  }
+}

@@ -22,6 +22,7 @@ import "./repositoryStrings";
 import { SettingsFrame } from "./SettingsFrame";
 import "./settingsStrings";
 import { useSettingsViewer } from "./viewer";
+import { useWholePages } from "./wholePages";
 
 /** Properties of {@link RepositoryList}. */
 interface RepositoryListProps {
@@ -42,6 +43,7 @@ interface RepositoryListProps {
 function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element {
   const { t } = useTranslation();
   const read = useResource(listRepositories);
+  const pages = useWholePages(read, heading);
   const p = "settings.repositoryPages";
   if (read.data?.length === 0) {
     return manages ? (
@@ -56,23 +58,9 @@ function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element 
     );
   }
   const rows = read.data ?? [];
-  const again = (): Promise<void> => {
-    heading.current?.focus();
-    read.reload();
-    return Promise.resolve();
-  };
   return (
     <ViewList
-      pages={{
-        items: read.data,
-        error: read.error,
-        busy: read.data === undefined && read.error === null,
-        hasMore: false,
-        loadMore: again,
-        reload: () => {
-          void again();
-        },
-      }}
+      pages={pages}
       rowCount={rows.length}
       empty=""
       region={t(`${p}.region`)}

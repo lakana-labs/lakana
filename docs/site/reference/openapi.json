@@ -174,6 +174,96 @@
       }
     },
     "/api/v1/environments/{name}/storage": {
+      "get": {
+        "tags": [
+          "environments"
+        ],
+        "summary": "Show an environment's storage: its root, its secret and the keys of its options",
+        "description": "Never a value: an option can hold an inline credential, so the answer names only its key, which says what `PATCH /api/v1/environments/{name}/storage` with `options` would replace. Needs `MANAGE_ENVIRONMENT` on the instance, as changing the storage does. Answers 404 when there is no such environment, or it is deleted.",
+        "operationId": "get_environment_storage_api_v1_environments__name__storage_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "Environment name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnvironmentStorageOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "patch": {
         "tags": [
           "environments"
@@ -22887,7 +22977,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), and `instance_actions` the actions it may take on the instance with it: the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, and the instance-wide actions of Settings, from these seven. `picture` is the etag of your profile picture, or `null` without one.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), `instance_actions` the actions it may take on the instance with it, and `managed_environments` the environments it may manage with it (deleted ones too, until their files are deleted): the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, the instance-wide actions of Settings and each environment's own, from these eight. `picture` is the etag of your profile picture, or `null` without one.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -30496,6 +30586,40 @@
         ],
         "title": "EnvironmentRetentionIn",
         "description": "Request body that sets an environment's retention, or turns it off.\n\nParameters\n----------\ndays\n    Its tables that set no retention of their own expire this many days (1 to 3,650) after\n    their last activity; `null` turns it off. The field must be sent."
+      },
+      "EnvironmentStorageOut": {
+        "properties": {
+          "root": {
+            "type": "string",
+            "title": "Root"
+          },
+          "secret_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret Ref"
+          },
+          "option_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Option Keys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "root",
+          "secret_ref",
+          "option_keys"
+        ],
+        "title": "EnvironmentStorageOut",
+        "description": "Where an environment's data lives, and which storage options are set.\n\nNever a value: an option can hold an inline credential, so only its key is named.\n\nParameters\n----------\nroot\n    The storage root URI.\nsecret_ref\n    The name of the secret holding the storage credential, or `null`.\noption_keys\n    The keys of the storage options that are set, sorted."
       },
       "EnvironmentStorageUpdate": {
         "properties": {
@@ -39898,6 +40022,14 @@
             "title": "Instance Actions",
             "default": []
           },
+          "managed_environments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Managed Environments",
+            "default": []
+          },
           "picture": {
             "anyOf": [
               {
@@ -39917,7 +40049,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\nreads_environments\n    Whether you may read environments with this credential (`READ_ENVIRONMENT` on the\n    instance or on at least one environment that is not deleted, directly, through a role or\n    a group), which lets you read the repositories. The web interface lists Settings,\n    Repositories from it.\ninstance_actions\n    The actions you may take on the instance with this credential (such as\n    `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the\n    order of the action list; empty for a task or CI token. It describes you only.\npicture\n    The etag of your profile picture, or `null` without one."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\nreads_environments\n    Whether you may read environments with this credential (`READ_ENVIRONMENT` on the\n    instance or on at least one environment that is not deleted, directly, through a role or\n    a group), which lets you read the repositories. The web interface lists Settings,\n    Repositories from it.\ninstance_actions\n    The actions you may take on the instance with this credential (such as\n    `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the\n    order of the action list; empty for a task or CI token. It describes you only.\nmanaged_environments\n    The environments, by name and sorted, that you may manage with this credential\n    (`MANAGE_ENVIRONMENT` on the environment, directly, through a role or a group),\n    including deleted ones whose files are not deleted yet; empty for a task or CI token.\n    The web interface offers an environment's usage, retention, deletion and restore for\n    exactly these. It describes you only.\npicture\n    The etag of your profile picture, or `null` without one."
       },
       "WorkEnvironmentOut": {
         "properties": {

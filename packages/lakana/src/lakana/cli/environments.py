@@ -330,6 +330,25 @@ def purge(
     )
 
 
+@env_app.command("storage")
+def storage(ctx: typer.Context, name: str) -> None:
+    """Show environment NAME's storage: its root, its secret and which options are set.
+
+    Each option is named by its key, never its value, which can be a credential. Run it before
+    `lakana env set-storage --option`, which replaces every option. Needs MANAGE_ENVIRONMENT on
+    the instance.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The environment.
+    """
+    state = state_of(ctx)
+    _output.emit(state, state.client().environments.storage(name))
+
+
 @env_app.command("set-storage")
 def set_storage(
     ctx: typer.Context,

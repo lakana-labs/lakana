@@ -13,6 +13,7 @@ const ADMIN = {
   managePolicy: true,
   readsEnvironments: true,
   instanceActions: new Set(["MANAGE_REPOSITORY"]),
+  managedEnvironments: [],
 };
 
 /** A repository as the server answers it, read over SSH with the deploy keys of dev and prod. */

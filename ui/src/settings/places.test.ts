@@ -8,7 +8,9 @@ import {
   listedPlaces,
   placeAt,
   placePath,
+  mayCreateEnvironments,
   mayManageRepositories,
+  managesEnvironment,
   placeState,
 } from "./places";
 
@@ -19,6 +21,7 @@ const NOTHING = {
   secretEnvironments: [],
   readsEnvironments: false,
   instanceActions: new Set<string>(),
+  managedEnvironments: [],
 };
 const ADMIN = {
   ...NOTHING,
@@ -69,6 +72,7 @@ describe("places", () => {
       listedPlaces({ ...ADMIN, secretEnvironments: ["dev"] }).map((place) => place.id),
     ).toEqual([
       "status",
+      "environments",
       "repositories",
       "access",
       "people",
@@ -108,6 +112,35 @@ describe("places", () => {
     );
     expect(placeState(real("repositories"), { ...KIM, readsEnvironments: null })).toBe("pending");
     expect(placeState(real("repositories"), { ...KIM, instanceActions: null })).toBe("pending");
+  });
+
+  it("a reader or a creator is listed Environments, a person with neither is not", () => {
+    const ids = (viewer: Parameters<typeof listedPlaces>[0]): readonly string[] =>
+      listedPlaces(viewer).map((place) => place.id);
+    expect(ids({ ...KIM, readsEnvironments: true })).toEqual([
+      "status",
+      "environments",
+      "repositories",
+      "access",
+      "what-i-may-do",
+    ]);
+    expect(ids({ ...KIM, instanceActions: new Set(["MANAGE_ENVIRONMENT"]) })).toContain(
+      "environments",
+    );
+    expect(ids(KIM)).not.toContain("environments");
+    expect(placeState(real("environments"), { ...KIM, readsEnvironments: null })).toBe("pending");
+    expect(placeState(real("environments"), { ...KIM, instanceActions: null })).toBe("pending");
+  });
+
+  it("says who creates environments and who manages one, and nothing before it is read", () => {
+    expect(mayCreateEnvironments(ADMIN)).toBe(true);
+    expect(mayCreateEnvironments(KIM)).toBe(false);
+    expect(mayCreateEnvironments({ ...KIM, instanceActions: null })).toBeNull();
+    const mara = { ...KIM, managedEnvironments: ["dev"] };
+    expect(managesEnvironment(mara, "dev")).toBe(true);
+    expect(managesEnvironment(mara, "prod")).toBe(false);
+    expect(managesEnvironment({ ...KIM, managedEnvironments: null }, "dev")).toBe(false);
+    expect(managesEnvironment({ ...ADMIN, managedEnvironments: [] }, "staging")).toBe(true);
   });
 
   it("says who manages repositories, and nothing before it is read", () => {

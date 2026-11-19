@@ -8,6 +8,7 @@ from typing import Any
 from lakana._http import HttpTransport
 from lakana._models import (
     Environment,
+    EnvironmentStorage,
     EnvironmentUsage,
     OrphanedLocation,
     OrphanedLocations,
@@ -274,6 +275,38 @@ class Environments:
             contains ``::`` (releases before 0.18.0 wrote files to the part before it).
         """
         self._transport.request(ROUTES["environments.purge_rows"], path_params={"name": name})
+
+    def storage(self, name: str) -> EnvironmentStorage:
+        """Show where an environment's data lives and which storage options are set.
+
+        Names each option's key, never its value: a value can be an inline credential. Needs
+        `MANAGE_ENVIRONMENT` on the instance, as `update_storage` does.
+
+        Parameters
+        ----------
+        name
+            The environment's name.
+
+        Returns
+        -------
+        EnvironmentStorage
+            The root, the storage secret's name and the sorted option keys.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If no environment of this name exists.
+        lakana.errors.PermissionDenied
+            Without `MANAGE_ENVIRONMENT` on the instance.
+        """
+        data = self._transport.request(
+            ROUTES["environments.storage"], path_params={"name": name}
+        ).json()
+        return EnvironmentStorage(
+            root=data["root"],
+            secret_ref=data["secret_ref"],
+            option_keys=tuple(data["option_keys"]),
+        )
 
     def update_storage(
         self, name: str, options: dict[str, str] | None = None, secret_ref: str | None = None

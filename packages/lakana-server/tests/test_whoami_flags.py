@@ -1,14 +1,23 @@
 """Tests for the access flags of `GET /api/v1/whoami`.
 
-`may_deploy`, `secret_environments`, `manage_policy`, `reads_environments` and
-`instance_actions`.
+`may_deploy`, `secret_environments`, `manage_policy`, `reads_environments`,
+`instance_actions` and `managed_environments`.
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action
+from lakana_core.catalog.environment_deletion import purge_environment
+from lakana_core.db import create_engine
+from lakana_core.grants.roles import ROLE_ACTIONS, Role
+from lakana_core.models import Environment
+from lakana_server.settings import Settings
 from tests.api.platform.test_whoami import _new_person, _task_token_header
 from tests.conftest import AUTH_HEADER
 from tests.server_test_helpers import create_environment
@@ -260,3 +269,102 @@ def test_read_environment_on_the_instance_reads_before_any_environment_exists(
 
     assert _flags(client, kim)[0] is True
     assert client.get("/api/v1/repositories", headers=kim).status_code == 200
+
+
+def _managed(client: TestClient, header: dict[str, str]) -> list[str]:
+    """Read `managed_environments` of whoami.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    header
+        The caller's Authorization header.
+
+    Returns
+    -------
+    list of str
+        The environments the caller manages.
+    """
+    return client.get("/api/v1/whoami", headers=header).json()["managed_environments"]
+
+
+def _sweep(settings: Settings, name: str) -> None:
+    """Remove a deleted environment's row as the location sweep does once its files are gone.
+
+    Parameters
+    ----------
+    settings
+        The settings the `client` fixture's app was built from.
+    name
+        The deleted environment, purged and holding no location record.
+    """
+    engine = create_engine(settings.database)
+    with Session(engine) as session:
+        env_id = session.execute(
+            select(Environment.id).where(Environment.name == name)
+        ).scalar_one()
+        session.commit()
+        assert purge_environment(session, env_id, now=datetime.now(UTC) + timedelta(days=1))
+    engine.dispose()
+
+
+def test_whoami_names_the_environments_one_manages(client: TestClient, settings: Settings) -> None:
+    """MANAGE_ENVIRONMENT on dev names dev; DATA_ENGINEER on prod, which lacks it, adds nothing.
+
+    A deleted environment stays named until the sweep removes its row.
+    """
+    assert Action.MANAGE_ENVIRONMENT not in ROLE_ACTIONS[Role.DATA_ENGINEER]
+    create_environment(client, "dev")
+    create_environment(client, "prod")
+    kim = _new_person(client, "kim")
+    assert _managed(client, kim) == []
+    _grant(client, {"action": "MANAGE_ENVIRONMENT"})
+    granted = client.post(
+        "/api/v1/grants",
+        headers=AUTH_HEADER,
+        json={
+            "principal": "kim",
+            "kind": "ENVIRONMENT",
+            "environment": "prod",
+            "role": "DATA_ENGINEER",
+        },
+    )
+    assert granted.status_code == 201, granted.text
+
+    assert _managed(client, kim) == ["dev"]
+    assert _managed(client, AUTH_HEADER) == ["dev", "prod"]
+    deleted = client.delete("/api/v1/environments/dev", headers=AUTH_HEADER)
+    assert deleted.status_code == 200, deleted.text
+    assert _managed(client, AUTH_HEADER) == ["dev", "prod"]
+    purged = client.delete("/api/v1/environments/dev?purge=true", headers=AUTH_HEADER)
+    assert purged.status_code == 200, purged.text
+    _sweep(settings, "dev")
+    assert _managed(client, AUTH_HEADER) == ["prod"]
+
+
+def test_a_task_token_manages_no_environment(client: TestClient) -> None:
+    """An administrator's task token for dev manages nothing; its personal token manages dev."""
+    create_environment(client, "dev")
+
+    assert _managed(client, _task_token_header(client)) == []
+    assert _managed(client, AUTH_HEADER) == ["dev"]
+
+
+def test_whoami_records_no_audit_event_for_managed_environments(client: TestClient) -> None:
+    """Asking which environments one manages writes nothing, for a yes and for a no.
+
+    Reading the audit log records that it was read (`ACTIVITY_VIEWED`), so those are left out.
+    """
+    create_environment(client, "dev")
+    header = _new_person(client, "kim")
+    assert _managed(client, header) == []  # kim's first sign-in is recorded here
+
+    def events() -> list[dict[str, object]]:
+        items = client.get("/api/v1/audit-events", headers=AUTH_HEADER).json()["items"]
+        return [item for item in items if item["event_type"] != "ACTIVITY_VIEWED"]
+
+    before = events()
+    assert _managed(client, AUTH_HEADER) == ["dev"]
+    assert _managed(client, header) == []
+    assert events() == before
