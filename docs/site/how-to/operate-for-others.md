@@ -69,6 +69,18 @@ bundle creates one, `dev`, in its own object storage. `lakana env create` makes 
 ([the command](../reference/cli/lakana-env.md#lakana-env-create)), and each environment can be protected
 so that only deployed projects change its tables: [Protected environments](projects.md#protected-environments-lockdown-and-break-glass).
 
+In the web interface, **Settings → Environments** lists the environments a person may read, with
+whether each is protected, where its data is stored and how long its tables are kept. Whoever
+manages environments on the instance (an administrator) creates one there (**Create
+environment**), and on an environment's page protects or unprotects it, changes its storage
+secret or options, sets its retention, deletes it (keeping its files for the undo period, or
+deleting them at the next clean-up) and cleans up the directories older releases left. Below the
+list, the deleted environments can be restored, or their files deleted now. A person granted
+`MANAGE_ENVIRONMENT` on one environment sees its usage there and may set its retention, delete
+and restore it, but not protect it, change its storage or create environments, which need the
+right on the instance. Creating, protecting, changing the storage and deleting the files ask for
+a passkey touch first.
+
 A second environment, such as `prod`, needs the bundle's storage and its secret; the commands are in
 [Add an environment to a Compose instance](deploy-with-compose.md#add-an-environment-to-a-compose-instance).
 

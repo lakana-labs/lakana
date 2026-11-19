@@ -126,7 +126,8 @@ the storage options of an environment that has a storage secret: `lakana env set
 --option KEY=VALUE` needs `MANAGE_SECRET` in `ENV` (the `ADMIN` role) as well as
 `MANAGE_ENVIRONMENT`, because an option such as `s3.endpoint` decides where the secret is sent.
 `--option` replaces all the options, so pass every option the environment should have (for
-example `--option s3.endpoint=URL --option s3.region=REGION`). Sending the options the
+example `--option s3.endpoint=URL --option s3.region=REGION`); `lakana env storage ENV` names the
+options set now by their keys, never their values. Sending the options the
 environment already has changes nothing and needs no extra right.
 
 A deploy key that Lakana made (`lakana repo deploy-key`, see

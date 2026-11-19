@@ -6100,6 +6100,31 @@ fuller text of each part where it already lives.
   - **Status draws only what `GET /api/v1/status` answers the caller.** The detail (workers,
     compute, memory) comes only with `MANAGE_ENVIRONMENT` on the instance, and the scheduler is
     read only while it does; the interface decides nothing from the person's role.
+- **Environments in the interface (M7 parts 7 and 8, PR 6b).**
+  - **`whoami.managed_environments` describes only the caller.** The environments, live or
+    deleted with their row still kept, where `permits(MANAGE_ENVIRONMENT)` holds
+    (`GrantService.managed_environments`), in one `permits_each` batch that records nothing; a task
+    or CI token names none. The interface offers usage, retention, delete and the deleted
+    environments' actions from it (and from `MANAGE_ENVIRONMENT` on the instance, which covers
+    every environment); every route still checks its own right. Pins: `test_whoami_flags.py`,
+    `test_admin_only_call_sites.py` (`_EXEMPT`).
+  - **Storage option values are written, never shown or kept.** An option can hold an inline
+    credential (`_check_storage_options`). `GET /api/v1/environments/{name}/storage`
+    (`CatalogService.environment_storage`, `MANAGE_ENVIRONMENT` on the instance, as changing the
+    storage) answers the root, the secret's name and the option keys only; a test plants a value
+    and looks for it in the answer and the log (`test_storage_names_the_option_keys_never_a_value`).
+    In Create environment and Change storage a value is typed into an uncontrolled password field
+    (`autoComplete="new-password"`, `data-1p-ignore`, `data-lpignore`) and read from it only when
+    the form sends (`SecretValuesFields`): never React state, the address, a storage, a log, an
+    error or an accessible name. Pins: `CreateEnvironment.test.tsx` and `ChangeStorage.test.tsx`
+    (`an option's value never leaves its form`), `e2e/environments.spec.ts` (`an option goes
+    nowhere`).
+  - **The irreversible writes ask for the passkey first.** Create, protect and unprotect, change
+    storage, a purging delete (`?purge=true`, also Delete the files of a deleted environment) and
+    purge rows go through `guarded`, as `STEP_UP_ROUTES` lists them; a delete that keeps the
+    files, restore, retention and the leftover clean-up ask for none (`NO_STEP_UP`). Remove from
+    the catalog is offered only for a root no release could reach (the server's 409 stays the
+    authority).
 
 ## Governed table creation and append (M4a)
 
