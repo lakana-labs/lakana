@@ -41,5 +41,6 @@
   "deleteIntro": "Deleting it drops its tables and revokes what is granted on it. It can be restored for the undo period unless its files are deleted too.",
   "delete": "Delete environment",
   "deleteOf": "Delete environment {{name}}",
-  "deleteProtected": "Protected environments cannot be deleted. Unprotect it first."
+  "deleteProtected": "Protected environments cannot be deleted. Unprotect it first.",
+  "storageNeedsSecrets": "Changing the storage of an environment with a storage secret needs the right to manage secrets in {{name}}: an option such as s3.endpoint decides where the secret is sent."
 }

@@ -126,25 +126,23 @@ describe("Change storage", () => {
     expect(shell.server.sent.some((request) => request.path.endsWith("/secrets"))).toBe(false);
   });
 
-  it("without secret rights the options of a secret-backed storage stay as they are", async () => {
-    const shell = await openStorage(
-      {
+  it("without secret rights a storage with a secret offers no Change storage, and says why", async () => {
+    renderShell("/settings/environments/dev", {
+      routes: {
+        "GET /api/v1/whoami": { status: 200, body: whoami("admin", true, true, true, []) },
         "GET /api/v1/environments/dev": {
           status: 200,
           body: { ...DEV, storage_secret_ref: "corp-s3" },
         },
       },
-      [],
-    );
-    const { dialog } = shell;
+    });
 
-    expect(within(dialog).queryByRole("radio", { name: "Replace the options" })).toBeNull();
     expect(
-      within(dialog).getByText(
-        "Changing the options of a storage with a secret needs the right to manage secrets in dev: an option such as s3.endpoint decides where the secret is sent.",
+      await screen.findByText(
+        "Changing the storage of an environment with a storage secret needs the right to manage secrets in dev: an option such as s3.endpoint decides where the secret is sent.",
       ),
     ).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Change storage" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Change storage of dev" })).not.toBeInTheDocument();
   });
 
   it("keeps the options unless told to replace them", async () => {

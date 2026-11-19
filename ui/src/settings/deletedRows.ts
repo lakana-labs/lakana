@@ -12,13 +12,18 @@ export type DeletedRow = EnvironmentOut & {
 };
 
 /**
- * Reads the deleted environments and marks those whose files are due.
+ * Reads the deleted environments and marks those whose files are due: by the browser's clock,
+ * and those whose files were deleted here whatever it says, as it may be behind the server's.
  *
+ * @param purged - The environments whose files were deleted in this visit.
  * @returns The rows.
  */
-export async function readDeleted(): Promise<readonly DeletedRow[]> {
+export async function readDeleted(purged: ReadonlySet<string>): Promise<readonly DeletedRow[]> {
   const rows = await listDeletedEnvironments();
   const now = Date.now();
   // The server answers purge_after for every deleted environment.
-  return rows.map((row) => ({ ...row, due: Date.parse(row.purge_after as string) <= now }));
+  return rows.map((row) => ({
+    ...row,
+    due: purged.has(row.name) || Date.parse(row.purge_after as string) <= now,
+  }));
 }

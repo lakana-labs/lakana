@@ -266,8 +266,11 @@ export function EnvironmentsPlace(): JSX.Element {
   const managesAny = creates || (viewer.managedEnvironments as readonly string[]).length > 0;
   const heading = useRef<HTMLHeadingElement>(null);
   const read = useResource(listEnvironmentsFull);
+  // The environments whose files were deleted here: due whatever the browser's clock says.
+  const purged = useRef(new Set<string>());
   const loadDeleted = useCallback(
-    (): Promise<readonly DeletedRow[]> => (managesAny ? readDeleted() : Promise.resolve([])),
+    (): Promise<readonly DeletedRow[]> =>
+      managesAny ? readDeleted(purged.current) : Promise.resolve([]),
     [managesAny],
   );
   const deleted = useResource(loadDeleted);
@@ -298,6 +301,7 @@ export function EnvironmentsPlace(): JSX.Element {
     (element ?? heading.current)?.focus();
   }, [read.data, deleted.data]);
   const changed = (action: DeletedAction, name: string): void => {
+    if (action === "purgeFiles") purged.current.add(name);
     setNote(t(`${P}.done.${action}`, { name }));
     focus.current =
       action === "restore"

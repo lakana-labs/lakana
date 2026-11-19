@@ -160,12 +160,19 @@ interface StoragePanelProps {
  */
 function StoragePanel({ environment, onOpen, button }: StoragePanelProps): JSX.Element {
   const { t } = useTranslation();
+  // The panel shows once the viewer is read. With a storage secret, every change of the storage
+  // needs the right to manage secrets in the environment as well.
+  const managesSecrets = (useSettingsViewer().secretEnvironments as readonly string[]).includes(
+    environment.name,
+  );
   return (
     <section className="flat-panel settings-panel">
       <h2>{t(`${P}.storageTitle`)}</h2>
       <p className="page-purpose">{t(`${P}.storageIntro`)}</p>
       {environment.is_protected ? (
         <p>{t(`${P}.storageProtected`)}</p>
+      ) : environment.storage_secret_ref !== null && !managesSecrets ? (
+        <p>{t(`${P}.storageNeedsSecrets`, { name: markedText(environment.name) })}</p>
       ) : (
         <Button
           ref={button}

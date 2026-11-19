@@ -61,8 +61,7 @@
     "replaceHelp": "Sending replaces every option: name each one the storage needs.",
     "submit": "Change storage",
     "held": "Choose another secret or replace the options.",
-    "secretNeedsRight": "Choosing the storage secret needs the right to manage secrets in {{name}}.",
-    "optionsNeedRight": "Changing the options of a storage with a secret needs the right to manage secrets in {{name}}: an option such as s3.endpoint decides where the secret is sent."
+    "secretNeedsRight": "Choosing the storage secret needs the right to manage secrets in {{name}}."
   },
   "delete": {
     "title": "Delete environment {{name}}?",

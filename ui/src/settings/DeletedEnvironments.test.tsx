@@ -125,7 +125,8 @@ describe("DeletedEnvironments", () => {
         ...STEP_UP_ROUTES,
         "DELETE /api/v1/environments/dev-old": () => {
           // The files are due now: the row stays until the clean-up deletes them.
-          deleted[0] = { ...DEV_OLD, purge_after: new Date(Date.now() - 1000).toISOString() };
+          // The server's clock is a minute behind the browser's: the row is due all the same.
+          deleted[0] = { ...DEV_OLD, purge_after: new Date(Date.now() + 60_000).toISOString() };
           return { status: 200, body: deleted[0] };
         },
       }),

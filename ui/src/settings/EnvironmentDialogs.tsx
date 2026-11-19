@@ -344,10 +344,9 @@ function SecretChoice({ environment, value, onChange }: SecretChoiceProps): JSX.
 
 /**
  * Change storage: the storage secret, chosen from the environment's secrets, and the options,
- * kept as they are or replaced whole; what the server would refuse without the right to manage
- * secrets in the environment (the secret, and the options of a storage with one) is not offered,
- * and a sentence names that right instead. It names
- * the options set now by their keys (never a value), asks for the passkey touch first when the
+ * kept as they are or replaced whole. Without the right to manage secrets in the environment the
+ * secret is not offered (a sentence names the right), and the page offers no Change storage at
+ * all for a storage with a secret, whose options need that right too. It names the options set now by their keys (never a value), asks for the passkey touch first when the
  * last one is old, and sends only what changes; the server's refusal stays here.
  *
  * @param props - The environment and what to call.
@@ -375,8 +374,6 @@ export function ChangeStorageDialog({
   const [checked, setChecked] = useState(false);
   const s = `${D}.storage`;
   const chosen = secret === KEEP ? "" : secret.slice("secret:".length);
-  // With a storage secret, changing the options needs the right to manage secrets there too.
-  const mayReplace = picks || environment.storage_secret_ref === null;
   const secretRef = chosen === "" || chosen === environment.storage_secret_ref ? null : chosen;
   const keys = storage.data?.option_keys;
   return (
@@ -416,25 +413,22 @@ export function ChangeStorageDialog({
         ) : (
           <p>{t(`${s}.secretNeedsRight`, { name: markedText(environment.name) })}</p>
         )}
-        {mayReplace ? (
-          <RadioGroup
-            className="field"
-            value={replace ? "replace" : "keep"}
-            onChange={(value) => {
-              setReplace(value === "replace");
-            }}
-          >
-            <Label>{t(`${s}.options`)}</Label>
-            <RadioField value="keep" className="radio-field">
-              <RadioButton className="radio">{t(`${s}.keepOptions`)}</RadioButton>
-            </RadioField>
-            <RadioField value="replace" className="radio-field">
-              <RadioButton className="radio">{t(`${s}.replaceOptions`)}</RadioButton>
-            </RadioField>
-          </RadioGroup>
-        ) : (
-          <p>{t(`${s}.optionsNeedRight`, { name: markedText(environment.name) })}</p>
-        )}
+
+        <RadioGroup
+          className="field"
+          value={replace ? "replace" : "keep"}
+          onChange={(value) => {
+            setReplace(value === "replace");
+          }}
+        >
+          <Label>{t(`${s}.options`)}</Label>
+          <RadioField value="keep" className="radio-field">
+            <RadioButton className="radio">{t(`${s}.keepOptions`)}</RadioButton>
+          </RadioField>
+          <RadioField value="replace" className="radio-field">
+            <RadioButton className="radio">{t(`${s}.replaceOptions`)}</RadioButton>
+          </RadioField>
+        </RadioGroup>
         {keys === undefined ? (
           storage.error === null ? (
             <p className="step-status">{t(`${s}.reading`)}</p>

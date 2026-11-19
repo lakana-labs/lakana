@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -190,6 +190,64 @@ describe("LeftoverDirectories", () => {
     expect(await screen.findByText("Nothing left over.")).toBeInTheDocument();
     const post = server.sent.find((request) => request.method === "POST");
     expect(post?.body).toEqual({ older_than_days: 30 });
+  });
+
+  it("continues a deletion with the found days, not the field's new value", async () => {
+    let calls = 0;
+    const { server, user } = renderPanel({
+      [FIND]: { status: 200, body: report(THREE) },
+      [DELETE]: () => {
+        calls += 1;
+        return { status: 200, body: report([], calls > 1) };
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await screen.findByRole("region", { name: "Leftover directories" });
+    const days = screen.getByRole("textbox", { name: "Older than" });
+    await user.clear(days);
+    await user.type(days, "1");
+    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Delete the old ones" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete them" }),
+    );
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+
+    await waitFor(() => {
+      expect(server.sent.filter((request) => request.method === "POST")).toHaveLength(2);
+    });
+    expect(
+      server.sent.filter((request) => request.method === "POST").map((request) => request.body),
+    ).toEqual([{ older_than_days: 30 }, { older_than_days: 30 }]);
+  });
+
+  it("tries a failed deletion again with the found days, not the field's new value", async () => {
+    let fail = true;
+    const { server, user } = renderPanel({
+      [FIND]: { status: 200, body: report(THREE) },
+      [DELETE]: () =>
+        fail
+          ? { status: 503, body: { detail: "The storage of dev did not answer." } }
+          : { status: 200, body: report([]) },
+    });
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await screen.findByRole("region", { name: "Leftover directories" });
+    const days = screen.getByRole("textbox", { name: "Older than" });
+    await user.clear(days);
+    await user.type(days, "1");
+    await user.tab();
+    await user.click(screen.getByRole("button", { name: "Delete the old ones" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete them" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("did not answer");
+    fail = false;
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Nothing left over.")).toBeInTheDocument();
+    expect(
+      server.sent.filter((request) => request.method === "POST").map((request) => request.body),
+    ).toEqual([{ older_than_days: 30 }, { older_than_days: 30 }]);
   });
 
   it("after a partial search the question says more may go", async () => {
