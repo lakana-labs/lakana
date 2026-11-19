@@ -29,7 +29,7 @@ import {
   type RowFilterCreateIn,
 } from "../api/policies";
 import { ActionDialog } from "../shell/ActionDialog";
-import { EnvironmentName } from "../shell/EnvironmentPicker";
+import { EnvironmentName } from "../shell/EnvironmentName";
 import { markedText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import "./accessStrings";

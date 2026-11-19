@@ -7,7 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EnvironmentChoice } from "../api/environments";
 import { QUERY_ENVIRONMENTS } from "../test/queries";
-import { EnvironmentName, EnvironmentPicker } from "./EnvironmentPicker";
+import { EnvironmentName } from "./EnvironmentName";
+import { EnvironmentPicker } from "./EnvironmentPicker";
 
 describe("EnvironmentPicker", () => {
   it("lists only the given environments, protected ones with the dot and the word protected", async () => {

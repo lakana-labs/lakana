@@ -64,15 +64,16 @@ function readChoice<T extends string>(choices: readonly T[], value: string | nul
 /**
  * The Runs tab's filter. The environment is the Jobs list's (`useJobsFilter`: the address, else
  * the one this browser remembers); the states (`?status=queued,running`), the trigger, the job
- * and the period (the last 30 days by default) are the address's. A change replaces the address
- * in the history, so Back leaves the tab with its filter.
+ * and the period (the last 30 days by default) are the address's. A change adds an entry to the
+ * history, as a job's page does, so Back undoes one filter at a time and stays on the tab; the
+ * Job field writes its name on Enter or when it is left, not on each key.
  *
  * @param environments - The environments the person may read.
  * @returns The filter and how to change it.
  */
 export function useRunsFilter(environments: readonly EnvironmentChoice[]): RunsFilter {
   const [params, setParams] = useSearchParams();
-  const jobs = useJobsFilter(environments);
+  const jobs = useJobsFilter(environments, "push");
   const choice: RunsChoice = {
     environment: jobs.environment,
     status: readChoice(STATE_CHOICES, params.get("status")),
@@ -81,35 +82,32 @@ export function useRunsFilter(environments: readonly EnvironmentChoice[]): RunsF
     period: readPeriod(params.get("period")),
   };
   const write = (change: Partial<Omit<RunsChoice, "environment">>): void => {
-    setParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        const values: Record<string, string | undefined> = {
-          status: change.status,
-          trigger: change.trigger,
-          job: change.job?.trim(),
-          period: change.period,
-        };
-        const defaults: Record<string, string> = {
-          status: "all",
-          trigger: "all",
-          job: "",
-          period: DEFAULT_PERIOD,
-        };
-        for (const [name, value] of Object.entries(values)) {
-          if (value === undefined) {
-            continue;
-          }
-          if (value === defaults[name]) {
-            next.delete(name);
-          } else {
-            next.set(name, value);
-          }
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      const values: Record<string, string | undefined> = {
+        status: change.status,
+        trigger: change.trigger,
+        job: change.job?.trim(),
+        period: change.period,
+      };
+      const defaults: Record<string, string> = {
+        status: "all",
+        trigger: "all",
+        job: "",
+        period: DEFAULT_PERIOD,
+      };
+      for (const [name, value] of Object.entries(values)) {
+        if (value === undefined) {
+          continue;
         }
-        return next;
-      },
-      { replace: true },
-    );
+        if (value === defaults[name]) {
+          next.delete(name);
+        } else {
+          next.set(name, value);
+        }
+      }
+      return next;
+    });
   };
   return {
     choice,
