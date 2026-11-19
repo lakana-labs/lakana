@@ -207,8 +207,8 @@ test.describe("the Jobs screen, checked by clicking through", () => {
   test("an attempt's unmeasured figures show a dash, not an empty cell", async ({ page }) => {
     await page.goto(`/jobs/${ENV}/runs/${FAILED_ID}/tasks/${TIMED_OUT}`);
     const attempts = page.getByRole("region", { name: `Attempts of ${TIMED_OUT}` });
-    // The timed-out attempts measured nothing: Rows, Peak memory, Processor time and Bytes read
-    // are the sixth, eighth, ninth and tenth cells.
+    // The first attempt measured nothing: Rows, Peak memory, Processor time and Bytes read are
+    // the sixth, eighth, ninth and tenth cells.
     const row = attempts.getByRole("row").nth(1).getByRole("cell");
     for (const index of [5, 7, 8, 9]) {
       const cell = row.nth(index);

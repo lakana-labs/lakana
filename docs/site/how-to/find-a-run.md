@@ -59,7 +59,9 @@ opens the task that failed first, and a task's name opens its page: its attempts
 memory, processor time and bytes each used, and its log, which the page follows while the task
 runs and offers as **Save log** once it is complete. A dash in an attempt's table, with "Not
 measured" for a screen reader, means nobody measured that figure; a dash under Duration means the
-attempt has not finished yet. A measured zero shows as `0`.
+attempt has not finished yet. The run lists dash a run's Duration the same way: a queued run has
+not started, and a run cancelled before it started has nothing measured. A measured zero shows
+as `0`.
 
 The **Runs** tab of the Jobs page lists every run of the environments you may read, newest first,
 50 at a time with **Show more**. Narrow it by **Environment**, **State** (**Queued or running** is
