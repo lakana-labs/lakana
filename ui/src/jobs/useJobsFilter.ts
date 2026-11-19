@@ -4,8 +4,13 @@
  *
  * @packageDocumentation
  */
-import { useEffect, useState } from "react";
-import { useLocation } from "react-router";
+import { useContext, useEffect, useState } from "react";
+import {
+  NavigationType,
+  UNSAFE_NavigationContext,
+  useLocation,
+  useNavigationType,
+} from "react-router";
 
 import type { EnvironmentChoice } from "../api/environments";
 import { settingParam, useAddressParams } from "../shell/useAddressParams";
@@ -30,15 +35,21 @@ export interface JobsFilter {
 export type FilterHistory = "replace" | "push";
 
 /**
+ * The routers whose first address has been shown: Back to it later is not a fresh load.
+ */
+const shown = new WeakSet<object>();
+
+/**
  * The list's environment and search. The environment is the address's `?environment=`, else the
  * one this browser remembers, else all of them; only a listed environment counts, so one the
  * person may no longer read (or one that is gone) names nothing and the list shows all. While
  * the environments are read, none is chosen. A choice writes the address and this browser's
  * storage (all environments as a choice of its own); the search is `?q=` in the address. A list
  * replaces the address with each change. The Runs tab pushes, as a job's page does, so Back
- * steps through its filters: it opens on the remembered environment, written into its address
- * in place of the address it opened at (no step of the history), and from then on reads the
- * environment from the address alone, so Back to an address without one is all environments.
+ * steps through its filters. Opened by a link, a redirect or a fresh load at an address without
+ * an environment, it writes the remembered one into that address in its place (no step of the
+ * history); otherwise, and from then on, it reads the environment from the address alone, so
+ * Back to an address without one, from the tab or from another page, is all environments.
  *
  * @param environments - The environments the person may read; undefined while they are read.
  * @param history - How a change reaches the history; `replace` by default.
@@ -50,15 +61,36 @@ export function useJobsFilter(
 ): JobsFilter {
   const [params, update] = useAddressParams();
   const location = useLocation();
+  const navigationType = useNavigationType();
+  const { navigator } = useContext(UNSAFE_NavigationContext);
   const [remembered, setRemembered] = useState(readJobsFilter);
-  // The address the Runs tab opened at, and what was remembered then.
-  const [opening] = useState(() => ({ key: location.key, environment: remembered }));
+  // The address the Runs tab opened at, what was remembered then, and whether it is new: reached
+  // by a link or a redirect, or the page's first address on a fresh load. Back or Forward to an
+  // address shown before (from a run's page, say) shows it as it was.
+  const [opening] = useState(() => ({
+    key: location.key,
+    environment: remembered,
+    fresh:
+      navigationType !== NavigationType.Pop ||
+      (location.key === "default" && !shown.has(navigator)),
+  }));
+  useEffect(() => {
+    shown.add(navigator);
+  }, [navigator]);
+  // Once the tab has left that address (a change pushed while the environments were read),
+  // coming back to it fills in nothing either.
+  const [left, setLeft] = useState(false);
+  if (!left && location.key !== opening.key) {
+    setLeft(true);
+  }
   const listed = (name: string | null): name is string =>
     name !== null && environments?.some((environment) => environment.name === name) === true;
   const fromAddress = params.get("environment");
   // The Runs tab opened without an environment, on one remembered and listed: the address takes it.
   const filling =
     history === "push" &&
+    opening.fresh &&
+    !left &&
     fromAddress === null &&
     location.key === opening.key &&
     listed(opening.environment);

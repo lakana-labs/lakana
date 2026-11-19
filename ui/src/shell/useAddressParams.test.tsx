@@ -1,9 +1,59 @@
-import { act, renderHook } from "@testing-library/react";
-import type { ReactNode } from "react";
-import { MemoryRouter, useLocation, useNavigate } from "react-router";
+import { act, render, renderHook } from "@testing-library/react";
+import { type ReactNode, useEffect } from "react";
+import {
+  createMemoryRouter,
+  MemoryRouter,
+  type NavigateFunction,
+  RouterProvider,
+  useLocation,
+  useNavigate,
+} from "react-router";
 import { describe, expect, it } from "vitest";
 
-import { useAddressParams } from "./useAddressParams";
+import { settingParam, type UpdateParams, useAddressParams } from "./useAddressParams";
+
+/** What the data router's screen last rendered with. */
+let shown: { update: UpdateParams; navigate: NavigateFunction } | null = null;
+
+/**
+ * A screen of the data router that hands out its change and its navigation.
+ *
+ * @returns Nothing visible.
+ */
+function Screen(): null {
+  const [, update] = useAddressParams();
+  const navigate = useNavigate();
+  useEffect(() => {
+    shown = { update, navigate };
+  });
+  return null;
+}
+
+/**
+ * Renders {@link Screen} in a data router, as the interface does, opened at an address.
+ *
+ * @param path - The address.
+ * @returns The router.
+ */
+function renderDataRouter(path: string) {
+  const router = createMemoryRouter([{ path: "*", element: <Screen /> }], {
+    initialEntries: [path],
+  });
+  render(<RouterProvider router={router} />);
+  return router;
+}
+
+/**
+ * The screen's last change and navigation.
+ *
+ * @returns Them.
+ */
+function screenNow(): { update: UpdateParams; navigate: NavigateFunction } {
+  if (shown === null) {
+    throw new Error("the screen did not render");
+  }
+  return shown;
+}
 
 /**
  * Renders two users of the address's parameters side by side, as a screen's filters are.
@@ -91,5 +141,77 @@ describe("useAddressParams", () => {
       void result.current.navigate(-1);
     });
     expect(result.current.location.pathname).toBe("/home");
+  });
+
+  it("Back before the change renders forgets it, though Back gives the same location again", () => {
+    const { result } = renderHook(
+      () => ({ params: useAddressParams(), location: useLocation(), navigate: useNavigate() }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) => (
+          <MemoryRouter initialEntries={["/jobs/runs"]}>{children}</MemoryRouter>
+        ),
+      },
+    );
+    const [, update] = result.current.params;
+    const { navigate } = result.current;
+
+    act(() => {
+      update(setting("period", "7d"));
+      void navigate(-1);
+    });
+    expect(result.current.location.search).toBe("");
+    act(() => {
+      result.current.params[1](setting("job", "nightly"));
+    });
+    expect(result.current.location.search).toBe("?job=nightly");
+  });
+});
+
+describe("useAddressParams in a data router", () => {
+  it("two changes before a render both reach the address", async () => {
+    const router = renderDataRouter("/jobs/runs?trigger=schedule");
+    const { update } = screenNow();
+
+    await act(async () => {
+      update(settingParam("period", "7d"));
+      update(settingParam("job", "nightly"));
+      await Promise.resolve();
+    });
+    expect(router.state.location.search).toBe("?trigger=schedule&period=7d&job=nightly");
+    // Each was a step of its own.
+    await act(async () => {
+      await screenNow().navigate(-1);
+    });
+    expect(router.state.location.search).toBe("?trigger=schedule&period=7d");
+  });
+
+  it("Back before the change renders forgets it", async () => {
+    const router = renderDataRouter("/jobs/runs");
+    const { update, navigate } = screenNow();
+
+    await act(async () => {
+      update(settingParam("period", "7d"));
+      await navigate(-1);
+    });
+    expect(router.state.location.search).toBe("");
+    await act(async () => {
+      screenNow().update(settingParam("job", "nightly"));
+      await Promise.resolve();
+    });
+    expect(router.state.location.search).toBe("?job=nightly");
+  });
+
+  it("a change made after the last one landed but before it rendered builds on it", async () => {
+    const router = renderDataRouter("/jobs/runs");
+    const { update } = screenNow();
+
+    await act(async () => {
+      update(settingParam("period", "7d"));
+      // The router has the address; the screen has not rendered it.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      update(settingParam("job", "nightly"));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(router.state.location.search).toBe("?period=7d&job=nightly");
   });
 });

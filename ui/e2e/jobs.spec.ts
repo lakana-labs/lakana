@@ -731,8 +731,8 @@ for (const theme of ["light", "dark"] as const) {
         await expect(devRun.first()).toBeVisible();
 
         // Each change goes straight on to the next, without waiting for the list (#744). The
-        // Period is chosen and the job typed in one task of the page, before any render: both
-        // reach the address.
+        // Period is chosen and the job typed in one task of the page, before the address the
+        // Period led to renders: both reach the address.
         await page.getByRole("button", { name: /Trigger/ }).click();
         await page.getByRole("option", { name: "Schedule" }).click();
         await page.getByRole("button", { name: /Period/ }).click();
