@@ -253,9 +253,13 @@ export async function generateDeployKey(name: string): Promise<DeployKeyOut> {
   );
 }
 
-/** The path of a repository, its name encoded. */
-const repositoryPath = (name: string): string =>
-  `/api/v1/repositories/${encodeURIComponent(name)}`;
+/**
+ * The path of a repository.
+ *
+ * @param name - Its name, encoded here.
+ * @returns The path.
+ */
+const repositoryPath = (name: string): string => `/api/v1/repositories/${encodeURIComponent(name)}`;
 
 /**
  * Lists the repositories, by name; the server answers them all at once.

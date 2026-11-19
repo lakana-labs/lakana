@@ -27,10 +27,10 @@ export interface StatusWorkerOut {
   readonly started_at: string;
   /** Its last heartbeat. */
   readonly heartbeat_at: string;
-  /** `alive` or `lost`. */
-  readonly status: string;
-  /** The work it takes: `all`, `interactive` or `pipeline`. */
-  readonly takes: string;
+  /** Whether its heartbeat is younger than the lease. */
+  readonly status: "alive" | "lost";
+  /** The work it takes: everything, ad-hoc queries, or deploys and pipeline tasks. */
+  readonly takes: "all" | "interactive" | "pipeline";
   /** Its oldest running query, if any. */
   readonly query_run_id: string | null;
   /** Its oldest running deploy, if any. */
