@@ -1,6 +1,7 @@
 /**
- * Repositories as the Connect a repository page uses them: the checks a worker runs (the host's
- * SSH keys, access with a deploy key), registering an SSH repository and making its keys.
+ * Repositories: the checks a worker runs (the host's SSH keys, access with a deploy key),
+ * registering an SSH repository and making its keys, as Connect a repository uses them; and the
+ * list, a repository's page, its edit, its deploy keys and its removal, as Settings uses them.
  *
  * @remarks
  * No answer and no request here carries a private key: the server keeps each environment's
@@ -8,6 +9,7 @@
  * @packageDocumentation
  */
 import { api } from "./client";
+import { guarded } from "./stepUpFirst";
 
 /** How often a check is asked about while a worker runs it. */
 const POLL_MS = 1000;
@@ -92,17 +94,64 @@ export interface DeployKeyOut {
   readonly notes: readonly string[];
 }
 
-/** A registered repository, as far as the page reads it. */
-interface RepositoryOut {
+/** One environment's public deploy key, as a repository lists it. */
+interface RepositoryDeployKeyOut {
+  /** The environment whose secret holds the private half. */
+  readonly environment: string;
+  /** `ssh-ed25519 <base64> <comment>`, to add at the git host. */
+  readonly public_key: string;
+  /** `SHA256:…`. */
+  readonly fingerprint: string;
+}
+
+/** A key a repository's known_hosts names, by type, fingerprint and marker. */
+export interface TrustedHostKeyOut {
+  /** The key type, such as `ssh-ed25519`. */
+  readonly type: string;
+  /** `SHA256:…`, to compare with the host's published fingerprints. */
+  readonly fingerprint: string;
+  /** A key that signs the hosts' certificates, or one ssh refuses; null (or absent) for a host key. */
+  readonly marker?: "cert-authority" | "revoked" | null;
+}
+
+/** A registered repository, as `GET /api/v1/repositories/{name}` answers it. */
+export interface RepositoryOut {
+  /** Its id. */
+  readonly id: string;
   /** Its name. */
   readonly name: string;
-  /** `local`, `https` or `ssh`. */
-  readonly kind: string;
-  /** Its URL. */
+  /** Where it is read from. */
+  readonly kind: "local" | "https" | "ssh";
+  /** Its URL, or a folder on the server for `local`. */
   readonly url: string;
+  /** The secret holding its credential, by name; null without one. */
+  readonly credential_secret: string | null;
+  /** The HTTPS username; null for `oauth2`. */
+  readonly credential_username: string | null;
   /** The host keys it trusts, as known_hosts lines; null without any. */
   readonly ssh_known_hosts: string | null;
+  /** The ref deployed when none is given; null for the remote's default. */
+  readonly default_ref: string | null;
+  /** When it was registered. */
+  readonly created_at: string;
+  /** When it last changed. */
+  readonly updated_at: string;
+  /** The public deploy keys of the environments the person may read. */
+  readonly deploy_keys: readonly RepositoryDeployKeyOut[];
+  /** The keys `ssh_known_hosts` names, each with its fingerprint and marker; absent from an older server. */
+  readonly host_keys?: readonly TrustedHostKeyOut[];
 }
+
+/** What Connect reads of a registered repository. */
+type RegisteredRepository = Pick<RepositoryOut, "name" | "kind" | "url" | "ssh_known_hosts">;
+
+/** The fields an edit may change; null clears an optional one. */
+export type RepositoryChanges = Partial<
+  Record<
+    "url" | "credential_secret" | "credential_username" | "ssh_known_hosts" | "default_ref",
+    string | null
+  >
+>;
 
 /**
  * Queues a check for a worker to run.
@@ -178,7 +227,7 @@ export async function createRepository(body: RepositoryCreate): Promise<void> {
  * @param name - Its name.
  * @returns Its name, kind, URL and trusted host keys.
  */
-export async function getRepository(name: string): Promise<RepositoryOut> {
+export async function getRepository(name: string): Promise<RegisteredRepository> {
   const repository = await api.request<RepositoryOut>(
     "GET",
     `/api/v1/repositories/${encodeURIComponent(name)}`,
@@ -204,4 +253,80 @@ export async function generateDeployKey(name: string): Promise<DeployKeyOut> {
     `/api/v1/repositories/${encodeURIComponent(name)}/deploy-key`,
     {},
   );
+}
+
+/**
+ * The path of a repository.
+ *
+ * @param name - Its name, encoded here.
+ * @returns The path.
+ */
+const repositoryPath = (name: string): string => `/api/v1/repositories/${encodeURIComponent(name)}`;
+
+/**
+ * Lists the repositories, by name; the server answers them all at once.
+ *
+ * @returns The repositories.
+ */
+export async function listRepositories(): Promise<readonly RepositoryOut[]> {
+  return api.request<readonly RepositoryOut[]>("GET", "/api/v1/repositories");
+}
+
+/**
+ * Reads one repository whole, for its page.
+ *
+ * @param name - Its name.
+ * @returns The repository.
+ */
+export async function getRepositoryPage(name: string): Promise<RepositoryOut> {
+  return api.request<RepositoryOut>("GET", repositoryPath(name));
+}
+
+/**
+ * Changes a repository; the passkey is asked for first when the last touch is old.
+ *
+ * @param name - Its name.
+ * @param changes - Only the fields that change; null clears an optional one.
+ * @returns The repository as changed.
+ */
+export async function updateRepository(
+  name: string,
+  changes: RepositoryChanges,
+): Promise<RepositoryOut> {
+  return guarded<RepositoryOut>("PATCH", repositoryPath(name), changes);
+}
+
+/**
+ * Removes a repository; the server refuses while an environment still deploys it.
+ *
+ * @param name - Its name.
+ * @returns When it is removed.
+ */
+export async function deleteRepository(name: string): Promise<void> {
+  await api.request("DELETE", repositoryPath(name));
+}
+
+/**
+ * Replaces one environment's deploy key, after the passkey; the old key stops working at once.
+ *
+ * @param name - The repository's name.
+ * @param environment - The environment whose key is replaced.
+ * @returns The new public key, and the note to replace it at the git host.
+ */
+export async function replaceDeployKey(name: string, environment: string): Promise<DeployKeyOut> {
+  return guarded<DeployKeyOut>("POST", `${repositoryPath(name)}/deploy-key`, {
+    environments: [environment],
+    replace: true,
+  });
+}
+
+/**
+ * Makes the missing deploy keys, after the passkey: one in every environment where the person
+ * may manage secrets and the repository has none yet.
+ *
+ * @param name - The repository's name.
+ * @returns The public keys, by environment, and the environments skipped.
+ */
+export async function makeMissingDeployKeys(name: string): Promise<DeployKeyOut> {
+  return guarded<DeployKeyOut>("POST", `${repositoryPath(name)}/deploy-key`, {});
 }

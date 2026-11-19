@@ -5,17 +5,24 @@ import { mySettingsFacts } from "./settingsFacts";
 import { fakeServer } from "../test/server";
 
 describe("mySettingsFacts", () => {
-  it("reads both facts in one whoami read", async () => {
+  it("reads every fact in one whoami read", async () => {
     const server = fakeServer({
       "GET /api/v1/whoami": {
         status: 200,
-        body: { secret_environments: ["dev"], manage_policy: true },
+        body: {
+          secret_environments: ["dev"],
+          manage_policy: true,
+          reads_environments: true,
+          instance_actions: ["MANAGE_REPOSITORY"],
+        },
       },
     });
 
     await expect(mySettingsFacts()).resolves.toEqual({
       secretEnvironments: ["dev"],
       managePolicy: true,
+      readsEnvironments: true,
+      instanceActions: ["MANAGE_REPOSITORY"],
     });
     expect(server.sent).toHaveLength(1);
   });
@@ -26,6 +33,8 @@ describe("mySettingsFacts", () => {
     await expect(mySettingsFacts()).resolves.toEqual({
       secretEnvironments: [],
       managePolicy: false,
+      readsEnvironments: false,
+      instanceActions: [],
     });
   });
 });

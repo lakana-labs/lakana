@@ -3,7 +3,9 @@
  *
  * @remarks
  * `SettingsLayout` provides it: the first load's access, and the environments where the person
- * manages secrets and whether they manage row filters and masks, read by Settings' own chunk so the first load does not grow.
+ * manages secrets, whether they manage row filters and masks, whether they read an environment
+ * and what they may do on the instance, read by Settings' own chunk so the first load does not
+ * grow.
  * @packageDocumentation
  */
 import { createContext, useContext } from "react";
@@ -16,6 +18,8 @@ const NOBODY: SettingsViewer = {
   noAccessYet: false,
   secretEnvironments: null,
   managePolicy: null,
+  readsEnvironments: null,
+  instanceActions: null,
 };
 
 /** The viewer of Settings; `SettingsLayout` provides it. */

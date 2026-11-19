@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { setStepUp } from "./client";
 import {
   createRepository,
+  deleteRepository,
   generateDeployKey,
   getRepository,
+  getRepositoryPage,
+  listRepositories,
+  makeMissingDeployKeys,
+  replaceDeployKey,
   requestProbe,
+  updateRepository,
   waitForProbe,
 } from "./repositories";
 
@@ -21,6 +28,17 @@ const QUEUED = {
   finished_at: null,
 };
 const DONE = { ...QUEUED, state: "done", outcome: "ok", message: "Found 1 key.", host_keys: [] };
+
+/** A session whose passkey touch is fresh for ten more minutes. */
+const FRESH = {
+  status: 200,
+  body: { step_up_until: new Date(Date.now() + 10 * 60_000).toISOString() },
+};
+
+const KEYS = { secret: "analytics-deploy-key", keys: [], skipped: [], replaced: [], notes: [] };
+
+const calls = (server: ReturnType<typeof fakeServer>): string[] =>
+  server.sent.map((request) => `${request.method} ${request.path}`);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -111,5 +129,67 @@ describe("repositories", () => {
       url: "git@github.com:acme/a.git",
       ssh_known_hosts: "github.com ssh-ed25519 AAAA\n",
     });
+  });
+
+  it("edits and replaces keys with the passkey asked first", async () => {
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": FRESH,
+      "PATCH /api/v1/repositories/analytics": { status: 200, body: { name: "analytics" } },
+      "POST /api/v1/repositories/analytics/deploy-key": { status: 201, body: KEYS },
+    });
+    setStepUp(() => Promise.resolve());
+
+    await updateRepository("analytics", { default_ref: "release" });
+    await expect(replaceDeployKey("analytics", "dev")).resolves.toEqual(KEYS);
+    await makeMissingDeployKeys("analytics");
+
+    expect(calls(server)).toEqual([
+      "GET /api/v1/sign-in/session",
+      "PATCH /api/v1/repositories/analytics",
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/repositories/analytics/deploy-key",
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/repositories/analytics/deploy-key",
+    ]);
+    expect(server.sent[3]?.body).toEqual({ environments: ["dev"], replace: true });
+    expect(server.sent[5]?.body).toEqual({});
+  });
+
+  it("deletes without asking for a touch", async () => {
+    const server = fakeServer({ "DELETE /api/v1/repositories/analytics": { status: 204 } });
+
+    await deleteRepository("analytics");
+
+    expect(calls(server)).toEqual(["DELETE /api/v1/repositories/analytics"]);
+  });
+
+  it("sends only the changed fields", async () => {
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": FRESH,
+      "PATCH /api/v1/repositories/analytics": { status: 200, body: { name: "analytics" } },
+    });
+    setStepUp(() => Promise.resolve());
+
+    await updateRepository("analytics", { default_ref: null });
+
+    expect(server.sent[1]?.body).toStrictEqual({ default_ref: null });
+  });
+
+  it("encodes the name in the path", async () => {
+    const server = fakeServer({
+      "GET /api/v1/repositories": { status: 200, body: [] },
+      "GET /api/v1/repositories/a b": { status: 200, body: { name: "a b" } },
+      "DELETE /api/v1/repositories/x%y": { status: 204 },
+    });
+
+    await expect(listRepositories()).resolves.toEqual([]);
+    await expect(getRepositoryPage("a b")).resolves.toEqual({ name: "a b" });
+    await deleteRepository("x%y");
+
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/repositories",
+      "/api/v1/repositories/a%20b",
+      "/api/v1/repositories/x%25y",
+    ]);
   });
 });

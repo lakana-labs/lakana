@@ -48,6 +48,14 @@ export const STRING_CODES: Readonly<Record<string, readonly string[]>> = {
  * serves.
  */
 export const READ_AS: Readonly<Record<string, string>> = {
+  '["active_runs","heartbeat_at","holder","pending","ready","running"]': "SchedulerOut",
+  '["created_at","created_by","credential_secret","credential_username","default_ref","deploy_keys","host_keys","id","kind","name","ssh_known_hosts","updated_at","url"]':
+    "RepositoryOut",
+  '["deploy_run_id","heartbeat_at","host","id","memory","query_run_id","replaced","started_at","status","takes","task_run_id","version"]':
+    "StatusWorkerOut",
+  '["environment","fingerprint","public_key"]': "RepositoryDeployKeyOut",
+  '["fingerprint","marker","type"]': "TrustedHostKeyOut",
+  '["limit_bytes","measured_at","used_bytes"]': "WorkerMemoryOut",
   '["absolute_expires_at","browser","created_at","current","id","last_seen_at","peer","user_agent","via"]':
     "BrowserSessionOut",
   '["absolute_expires_at","display_name","name","needs_passkey","offer_passkey","step_up_until","type","via"]':
@@ -75,7 +83,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "DroppedTableOut",
   '["actions","exists","kind","repository","table"]': "OrphanOut",
   '["active","note","permissions","principal","scope"]': "PermissionsOut",
-  '["admin","ci_token","has_access","language","manage_policy","may_deploy","name","picture","secret_environments","task_token","type"]':
+  '["admin","ci_token","has_access","instance_actions","language","manage_policy","may_deploy","name","picture","reads_environments","secret_environments","task_token","type"]':
     "WhoamiOut",
   '["alert","band","column","effect","id","last_fired_at","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
     "HealthSignalOut",

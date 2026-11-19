@@ -556,9 +556,6 @@
     "effect": "{{name}} is signed out in every browser and signs in again with a passkey."
   },
   "settings": {
-    "status": {
-      "intro": "The instance in detail: each worker with its work and memory, and why the instance is degraded or down."
-    },
     "signIn": {
       "intro": "How long a browser session lasts. API tokens are not affected. Saving asks for a passkey touch when yours is older than 15 minutes.",
       "idle": "Idle timeout in minutes",

@@ -35,7 +35,15 @@ const NAMED_LIMITS = [
   // Raised to the measured 3.95 kB (2026-11-18) + 10 %: the loaders of Tokens and Secrets, each
   // with the list of chunks it preloads, and the Settings viewer, which reads once per visit where
   // the person manages secrets; the places themselves load on demand.
-  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "4.35 kB" },
+  // Raised to the measured 4.49 kB (2026-11-19) + 10 %: the viewer also learns whether the person
+  // reads an environment and what they may do on the instance (Repositories' rule and its
+  // Connect, Edit and Delete), and the frame's stylesheet gains the panels of Status and a
+  // repository's page; Status and Repositories themselves load on demand.
+  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "4.94 kB" },
+  // Measured 3.27 kB (2026-11-19) + 10 %: a repository's page (its overview, credential, host
+  // keys and deploy keys, Test access with the environment picker, and the loaders of its
+  // dialogs, which load when one is opened: RepositoryDialogs-, on the shared limit).
+  { name: "a repository's page", prefix: "RepositoryPage-", limit: "3.6 kB" },
   // Measured 3.83 kB (2026-11-18) + 10 %: Settings › Access › Grants (the filters Who, On exactly
   // and What with its two sections, the list with the Git mark, Remove and its question); Add
   // grant loads when it is opened (AddGrantDialog-, on the shared limit).
@@ -636,6 +644,9 @@ export default [
   // the managed note, the grants', members' and held grants' tables in their scrolling regions,
   // the filters' row and the environment picker's rules it imports), loaded with Groups, Grants
   // and What I may do only; the first load's stylesheet is unchanged.
-  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "14.17 kB" },
+  // Raised to the measured 14.85 kB (2026-11-19) + 10 %: the instance's state, shared by Home and
+  // Settings › Status (moved out of Home's stylesheet), the Status panels and workers' table,
+  // and the repositories' list and page, each loaded with its own place.
+  { name: "CSS", path: `${ASSETS}/*.css`, gzip: true, limit: "16.34 kB" },
   { name: "Fonts", path: `${ASSETS}/*.woff2`, gzip: false, limit: "200 kB" },
 ];

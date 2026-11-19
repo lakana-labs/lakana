@@ -3170,6 +3170,15 @@ class WhoamiOut(BaseModel):
         Whether you may manage row filters and column masks with this credential
         (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task
         or CI token. The web interface offers Row filters & masks from it.
+    reads_environments
+        Whether you may read environments with this credential (`READ_ENVIRONMENT` on the
+        instance or on at least one environment that is not deleted, directly, through a role or
+        a group), which lets you read the repositories. The web interface lists Settings,
+        Repositories from it.
+    instance_actions
+        The actions you may take on the instance with this credential (such as
+        `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the
+        order of the action list; empty for a task or CI token. It describes you only.
     picture
         The etag of your profile picture, or `null` without one.
     """
@@ -3184,6 +3193,8 @@ class WhoamiOut(BaseModel):
     may_deploy: bool = False
     secret_environments: list[str] = []
     manage_policy: bool = False
+    reads_environments: bool = False
+    instance_actions: list[str] = []
     picture: str | None = None
 
 
@@ -3545,6 +3556,25 @@ class RepositoryDeployKeyOut(BaseModel):
     fingerprint: str
 
 
+class TrustedHostKeyOut(BaseModel):
+    """A key a repository's known_hosts names, by type, fingerprint and marker.
+
+    Parameters
+    ----------
+    type
+        The key type its key names, such as ``ssh-ed25519``.
+    fingerprint
+        Its fingerprint as `ssh-keygen -l` prints it, ``SHA256:`` and the digest.
+    marker
+        ``cert-authority`` for a key that signs the hosts' certificates (ssh trusts every host
+        certificate it signed), ``revoked`` for a key ssh refuses; `null` for a plain host key.
+    """
+
+    type: str
+    fingerprint: str
+    marker: Literal["cert-authority", "revoked"] | None = None
+
+
 class RepositoryOut(BaseModel):
     """Response body for a repository. Carries a secret's name, never a value.
 
@@ -3575,6 +3605,9 @@ class RepositoryOut(BaseModel):
     deploy_keys
         The public deploy keys Lakana made for it, one per environment you may read, to add at
         the git host; empty when it names no such key. Never a private key.
+    host_keys
+        The keys `ssh_known_hosts` names, each with its `SHA256:` fingerprint and its marker
+        (a certificate authority, or a revoked key ssh refuses); empty when it names none.
     """
 
     id: uuid.UUID
@@ -3589,6 +3622,7 @@ class RepositoryOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     deploy_keys: list[RepositoryDeployKeyOut] = []
+    host_keys: list[TrustedHostKeyOut] = []
 
 
 class DeployKeyIn(BaseModel):

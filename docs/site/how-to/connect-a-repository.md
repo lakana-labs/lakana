@@ -56,6 +56,40 @@ three and a half minutes after it was asked: two minutes for a worker to take it
 The sections below take the same steps with the command line, and cover what comes later:
 another environment, replacing a key.
 
+## Repositories in Settings
+
+**Settings → Repositories** lists every repository to whoever may read one: `MANAGE_REPOSITORY`
+on the instance, or `READ_ENVIRONMENT` in any environment. Each row names the URL, the kind
+(SSH, HTTPS or a local folder), the credential and the default ref, and opens the repository's
+page. The page shows the URL (with **Open in your git host ›** for GitHub, GitLab and
+Bitbucket), the credential: an HTTPS repository's secret and username, an SSH repository's
+trusted host keys by type and fingerprint (a certificate authority's key says so, and
+revoked keys are listed apart, since ssh refuses them) and its public deploy keys of the environments you
+read, each with **Copy public key**. Someone who only reads sees this read-only, as the
+command line answers them (`lakana repo show NAME`); no private key and no secret's value is
+ever shown.
+
+Whoever has `MANAGE_REPOSITORY` also sees **Connect a repository** above the list, and on each
+page:
+
+- **Test access**: pick an environment and press **Test**; a worker reads the repository with
+  that environment's credential and the page says what it found and what to do about it, as
+  `lakana repo test` does. The environment chosen last is remembered.
+- **Edit**: the URL and the default ref, and for HTTPS the secret's name and the username.
+  Host keys are never typed: **Fetch host keys again** asks a worker for the host's keys, and
+  only the keys you tick replace the trusted ones. Saving asks for a passkey touch when yours is
+  older than 15 minutes.
+- **Replace key**, per environment where you may manage secrets: the page says first that the
+  old key stops working at once, then shows the new public key with the host's deploy-key page.
+  Remove the old key at your git host and add the new one, then test access. **Make the missing
+  keys** makes a key in each environment that has none. Both ask for a passkey touch.
+- **Delete repository**, once you type its name. It is refused while an environment still
+  deploys the repository, with the environment to undeploy it from first; nothing changes at
+  your git host.
+
+A repository named `new` has its page at `/settings/repositories/new/about`, since
+`/settings/repositories/new` is Connect a repository.
+
 ## Confirm the host keys
 
 A worker trusts an SSH host only with the keys you confirmed. Let a worker fetch them; you need
@@ -143,7 +177,7 @@ lakana repo deploy-key analytics --environment dev --replace
 
 `--replace` makes a new key only for the environments you name with `--environment`
 (repeatable); without `--environment` it is refused, so you never replace every key by
-accident. The command then says: "The old key for dev stops working: replace it at your git
+accident. In the web interface it is **Replace key** on the repository's page. The command then says: "The old key for dev stops working: replace it at your git
 host now." Remove the old key there and add the new one.
 
 ## Replace a leaked key
@@ -162,7 +196,8 @@ Add the new public keys at your git host, and test each environment.
 
 ## Remove a repository
 
-`lakana repo remove NAME --yes` removes the repository, but not its keys: each environment's
+`lakana repo remove NAME --yes` (or **Delete repository** on its page) removes the repository,
+but not its keys: each environment's
 `NAME-deploy-key` secret stays stored, and its public key still reads the repository at your git
 host. When you no longer need them, remove the deploy keys at your git host first, then revoke
 the secret in each environment that held one, for example

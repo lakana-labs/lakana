@@ -35,7 +35,7 @@ List repositories.
 
 Usage: `lakana repo show [OPTIONS] {name}`
 
-Show repository NAME.
+Show repository NAME, with the fingerprint of each host key it names and its marker.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

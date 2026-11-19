@@ -1,0 +1,25 @@
+{
+  "region": "Repositories",
+  "url": "URL",
+  "kind": "Kind",
+  "credentialHead": "Credential",
+  "defaultRef": "Default ref",
+  "remoteDefault": "the remote's default",
+  "kinds": {
+    "ssh": "SSH",
+    "https": "HTTPS",
+    "local": "Local folder"
+  },
+  "credential": {
+    "deployKeys_one": "Deploy key in {{count}} environment",
+    "deployKeys_other": "Deploy key in {{count}} environments",
+    "sshSecret": "SSH key in secret {{secret}}",
+    "token": "Token in secret {{secret}}",
+    "local": "None",
+    "none": "No credential"
+  },
+  "noneManager": "No repository yet.",
+  "noneReader": "No repository is connected yet. Someone who manages repositories connects them.",
+  "listCommand": "lakana repo list",
+  "copyCommand": "Copy the command"
+}

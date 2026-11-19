@@ -38,7 +38,8 @@ a dashboard that is slow or a job that did not run is a signal too.
 
 ## What the status says
 
-`lakana status` and Home read the same answer. Anyone who is signed in may ask.
+`lakana status`, Home and **Settings → Status** in the web interface read the same answer.
+Anyone who is signed in may ask.
 
 - **Healthy.** The catalog database and the storage answer, and every registered worker is alive
   or was replaced by a restart on its host.

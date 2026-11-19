@@ -170,6 +170,48 @@ describe("SettingsScreen", () => {
     expect(server.sent.filter((request) => request.path.includes("/secrets"))).toEqual([]);
   });
 
+  it("a pending rule shows nothing at Repositories, then the place", async () => {
+    let answer: (value: FakeAnswer) => void = () => undefined;
+    const held = new Promise<FakeAnswer>((resolve) => {
+      answer = resolve;
+    });
+    renderShell("/settings/repositories", {
+      access: MEMBER,
+      me: { name: "kim", admin: false },
+      routes: {
+        "GET /api/v1/whoami": () => held,
+        "GET /api/v1/repositories": { status: 200, body: [] },
+      },
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(screen.queryByRole("heading", { name: /You cannot use/ })).not.toBeInTheDocument();
+
+    answer({
+      status: 200,
+      body: whoami("kim", false, true, false, [], false, { readsEnvironments: true }),
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Repositories" }),
+    ).toBeInTheDocument();
+    expect(await placeNames()).toEqual(["Status", "Repositories", "What I may do"]);
+  });
+
+  it("a failed read hides Repositories", async () => {
+    const { server } = renderShell("/settings/repositories", {
+      access: MEMBER,
+      me: { name: "kim", admin: false },
+      routes: { "GET /api/v1/whoami": { status: 500, body: { detail: "down" } } },
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "You cannot use Repositories" }),
+    ).toBeInTheDocument();
+    expect(server.sent.filter((request) => request.path === "/api/v1/repositories")).toEqual([]);
+  });
+
   it("a policy manager lands on Row filters & masks", async () => {
     let answer: (value: FakeAnswer) => void = () => undefined;
     const held = new Promise<FakeAnswer>((resolve) => {

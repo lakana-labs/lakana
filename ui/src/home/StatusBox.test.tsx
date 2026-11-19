@@ -45,7 +45,7 @@ describe("StatusBox", () => {
     },
   );
 
-  it("shows the bars and Details only to administrators", async () => {
+  it("shows the bars to administrators", async () => {
     withStatus({ ...HEALTHY, workers_alive: 2, workers_total: 3, detail: DETAIL });
 
     const region = await box();
@@ -62,7 +62,7 @@ describe("StatusBox", () => {
     );
   });
 
-  it("shows the figures but no Details to a non-administrator who may manage the instance", async () => {
+  it("shows the figures to a non-administrator who may manage the instance", async () => {
     renderShell("/", {
       access: new Set(["home", "catalog", "queries", "jobs", "connections"]),
       me: { name: "kim", admin: false, mayDeploy: true },
@@ -71,7 +71,6 @@ describe("StatusBox", () => {
 
     const region = await box();
     expect(await within(region).findByRole("meter", { name: "Compute" })).toBeInTheDocument();
-    expect(within(region).queryByRole("link", { name: "Details" })).not.toBeInTheDocument();
   });
 
   it("hides the bars from a person who may not manage the instance", async () => {
@@ -80,7 +79,20 @@ describe("StatusBox", () => {
     const region = await box();
     await within(region).findByText("Healthy");
     expect(within(region).queryByRole("meter")).not.toBeInTheDocument();
-    expect(within(region).queryByRole("link", { name: "Details" })).not.toBeInTheDocument();
+  });
+
+  it("Details goes to Status for everyone", async () => {
+    renderShell("/", {
+      access: new Set(["home", "catalog", "queries", "jobs", "connections", "settings"]),
+      me: { name: "kim", admin: false },
+      routes: { "GET /api/v1/status": { status: 200, body: HEALTHY } },
+    });
+
+    const region = await box();
+    expect(await within(region).findByRole("link", { name: "Details" })).toHaveAttribute(
+      "href",
+      "/settings/status",
+    );
   });
 
   it("says when no worker runs and when the memory limit is unknown", async () => {

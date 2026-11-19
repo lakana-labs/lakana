@@ -22887,7 +22887,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, and `manage_policy` whether it may manage row filters and column masks with it: the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets and Row filters & masks pages from these five. `picture` is the etag of your profile picture, or `null` without one.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), and `instance_actions` the actions it may take on the instance with it: the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, and the instance-wide actions of Settings, from these seven. `picture` is the etag of your profile picture, or `null` without one.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -35101,6 +35101,14 @@
             "type": "array",
             "title": "Deploy Keys",
             "default": []
+          },
+          "host_keys": {
+            "items": {
+              "$ref": "#/components/schemas/TrustedHostKeyOut"
+            },
+            "type": "array",
+            "title": "Host Keys",
+            "default": []
           }
         },
         "type": "object",
@@ -35118,7 +35126,7 @@
           "updated_at"
         ],
         "title": "RepositoryOut",
-        "description": "Response body for a repository. Carries a secret's name, never a value.\n\nParameters\n----------\nid\n    The repository's id.\nname\n    Its name.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    Its URL.\ncredential_secret\n    The bound secret's name.\ncredential_username\n    HTTPS username, or `None` for ``oauth2``.\nssh_known_hosts\n    Trusted host keys.\ndefault_ref\n    Default ref.\ncreated_by\n    Who registered it.\ncreated_at\n    When.\nupdated_at\n    Last change.\ndeploy_keys\n    The public deploy keys Lakana made for it, one per environment you may read, to add at\n    the git host; empty when it names no such key. Never a private key."
+        "description": "Response body for a repository. Carries a secret's name, never a value.\n\nParameters\n----------\nid\n    The repository's id.\nname\n    Its name.\nkind\n    ``local``, ``https`` or ``ssh``.\nurl\n    Its URL.\ncredential_secret\n    The bound secret's name.\ncredential_username\n    HTTPS username, or `None` for ``oauth2``.\nssh_known_hosts\n    Trusted host keys.\ndefault_ref\n    Default ref.\ncreated_by\n    Who registered it.\ncreated_at\n    When.\nupdated_at\n    Last change.\ndeploy_keys\n    The public deploy keys Lakana made for it, one per environment you may read, to add at\n    the git host; empty when it names no such key. Never a private key.\nhost_keys\n    The keys `ssh_known_hosts` names, each with its `SHA256:` fingerprint and its marker\n    (a certificate authority, or a revoked key ssh refuses); empty when it names none."
       },
       "RepositoryProbeIn": {
         "properties": {
@@ -39551,6 +39559,40 @@
         "title": "TreeNamespaceOut",
         "description": "A namespace of the catalog tree.\n\nParameters\n----------\npath\n    Its path, dotted.\ncount\n    The readable tables in it and beneath it.\nactions\n    What the reader's rights allow on it: ``create_namespace``, ``create_external_table``,\n    ``drop``. Rights only; nothing about protection, git or emptiness."
       },
+      "TrustedHostKeyOut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "marker": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "cert-authority",
+                  "revoked"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "fingerprint"
+        ],
+        "title": "TrustedHostKeyOut",
+        "description": "A key a repository's known_hosts names, by type, fingerprint and marker.\n\nParameters\n----------\ntype\n    The key type its key names, such as ``ssh-ed25519``.\nfingerprint\n    Its fingerprint as `ssh-keygen -l` prints it, ``SHA256:`` and the digest.\nmarker\n    ``cert-authority`` for a key that signs the hosts' certificates (ssh trusts every host\n    certificate it signed), ``revoked`` for a key ssh refuses; `null` for a plain host key."
+      },
       "UndropIn": {
         "properties": {
           "new_name": {
@@ -39843,6 +39885,19 @@
             "title": "Manage Policy",
             "default": false
           },
+          "reads_environments": {
+            "type": "boolean",
+            "title": "Reads Environments",
+            "default": false
+          },
+          "instance_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instance Actions",
+            "default": []
+          },
           "picture": {
             "anyOf": [
               {
@@ -39862,7 +39917,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\npicture\n    The etag of your profile picture, or `null` without one."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\nreads_environments\n    Whether you may read environments with this credential (`READ_ENVIRONMENT` on the\n    instance or on at least one environment that is not deleted, directly, through a role or\n    a group), which lets you read the repositories. The web interface lists Settings,\n    Repositories from it.\ninstance_actions\n    The actions you may take on the instance with this credential (such as\n    `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the\n    order of the action list; empty for a task or CI token. It describes you only.\npicture\n    The etag of your profile picture, or `null` without one."
       },
       "WorkEnvironmentOut": {
         "properties": {

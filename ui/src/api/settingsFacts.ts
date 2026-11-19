@@ -14,11 +14,16 @@ export interface SettingsFacts {
   readonly secretEnvironments: readonly string[];
   /** Whether the person may manage row filters and column masks. */
   readonly managePolicy: boolean;
+  /** Whether the person may read at least one environment, and so the repositories. */
+  readonly readsEnvironments: boolean;
+  /** The actions the person may take on the instance, such as `MANAGE_REPOSITORY`. */
+  readonly instanceActions: readonly string[];
 }
 
 /**
- * Reads, in one whoami read, where the person may manage secrets and whether they manage row
- * filters and masks; a background read, since nobody asked for it.
+ * Reads, in one whoami read, where the person may manage secrets, whether they manage row
+ * filters and masks, whether they read an environment and what they may do on the instance; a
+ * background read, since nobody asked for it.
  *
  * @returns The facts; none and no from a server that does not say.
  * @throws {ApiError} for a refusal or an unreachable server.
@@ -27,9 +32,13 @@ export async function mySettingsFacts(): Promise<SettingsFacts> {
   const me = await api.request<{
     readonly secret_environments?: readonly string[];
     readonly manage_policy?: boolean;
+    readonly reads_environments?: boolean;
+    readonly instance_actions?: readonly string[];
   }>("GET", "/api/v1/whoami", undefined, { background: true });
   return {
     secretEnvironments: me.secret_environments ?? [],
     managePolicy: me.manage_policy ?? false,
+    readsEnvironments: me.reads_environments ?? false,
+    instanceActions: me.instance_actions ?? [],
   };
 }

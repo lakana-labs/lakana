@@ -127,79 +127,6 @@
   background: var(--color-surface);
 }
 
-.home-state {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  margin: 0 0 var(--space-1);
-  font-weight: 500;
-}
-
-.home-sentence {
-  margin: 0 0 var(--space-1);
-  color: var(--color-text-muted);
-}
-
-/* The figures: the name, the bar, the number right-aligned with its unit. */
-.home-figures {
-  margin: var(--space-4) 0 var(--space-3);
-}
-
-.home-figures > div {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-1) var(--space-3);
-  padding: var(--space-2) 0;
-  border-top: 1px solid var(--color-line);
-}
-
-.home-figures dt {
-  flex-basis: 96px;
-  color: var(--color-text-muted);
-}
-
-.home-figures dd {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  margin: 0;
-}
-
-.home-figures meter {
-  flex: 1 1 96px;
-  min-height: 8px;
-  max-height: 8px;
-  border: 1px solid var(--color-edge);
-  border-radius: var(--radius-control);
-  background: var(--color-sunk);
-  appearance: none;
-}
-
-.home-figures meter::-webkit-meter-bar {
-  height: 100%;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.home-figures meter::-webkit-meter-optimum-value {
-  background: var(--color-text-muted);
-}
-
-.home-figures meter::-moz-meter-bar {
-  background: var(--color-text-muted);
-}
-
-.home-number {
-  flex: 0 0 160px;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
 /* Your work's repositories: not rows that open, so a plain list. */
 .home-repos {
   margin: 0;
@@ -236,10 +163,4 @@
   color: var(--color-text-muted);
   font-size: var(--type-dense-size);
   line-height: var(--type-dense-line);
-}
-
-@media (forced-colors: active) {
-  .home-figures meter {
-    border-color: CanvasText;
-  }
 }

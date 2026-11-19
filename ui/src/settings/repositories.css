@@ -1,0 +1,72 @@
+/* Settings › Repositories: the list scrolls in its own region, a name stays whole, a long URL
+   wraps inside its own cell, and a repository without a credential says so in the warning colour. */
+.list-scroll.repositories-scroll .list {
+  min-width: 760px;
+}
+
+.list-scroll.repositories-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+.repository-url {
+  overflow-wrap: anywhere;
+}
+
+.repository-uncredentialed {
+  color: var(--color-warn);
+}
+
+/* A repository's page: its facts as name and value, its keys one per line, kept whole. */
+.repository-facts {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.repository-facts dt {
+  color: var(--color-text-muted);
+}
+
+.repository-facts dd {
+  min-width: 0;
+  margin: 0;
+}
+
+.repository-keys {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.repository-keys li {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.repository-keys code {
+  overflow-wrap: anywhere;
+}
+
+.settings-panel h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: 500;
+}
+
+.settings-panel h3:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.repository-host-keys {
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border: 0;
+}
+
+.repository-host-keys legend {
+  padding: 0;
+  font-weight: 500;
+}

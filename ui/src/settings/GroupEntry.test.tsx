@@ -31,6 +31,8 @@ function renderAccess(
     noAccessYet: false,
     secretEnvironments: known,
     managePolicy: admin,
+    readsEnvironments: admin,
+    instanceActions: new Set(),
   });
   const router = createMemoryRouter(
     [

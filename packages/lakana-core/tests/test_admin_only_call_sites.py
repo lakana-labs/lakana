@@ -407,6 +407,12 @@ _EXEMPT = {
     ("GrantService", "may_manage_policies"): "answers about the caller only (`whoami`) with "
     "`permits`, about `MANAGE_POLICY` on the instance, reading nothing about anyone else and "
     "writing nothing",
+    ("GrantService", "reads_some_environment"): "answers about the caller only (`whoami`) with "
+    "`permits`, about `READ_ENVIRONMENT` on live environments, reading nothing about anyone else "
+    "and writing nothing",
+    ("GrantService", "instance_actions"): "answers about the caller only (`whoami`) with "
+    "`permits`, naming only the actions the caller may take on the instance, reading nothing "
+    "about anyone else and writing nothing",
     ("AccessService", "managed_scopes"): "authorizes `MANAGE_POLICY` on the instance itself and "
     "names each managed scope, its apply time and the name of the file that manages it: the 409 "
     "of a policy write there names the scope and the time only, so the file name is more than a "

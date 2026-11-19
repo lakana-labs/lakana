@@ -52,9 +52,12 @@ from lakana_core.projects.probes import (
     PROBE_UNCLAIMED_AFTER,
     PROBES_OPEN_PER_PERSON,
     HostKey,
+    KnownHostKey,
     RepositoryProbeQueue,
     RepositoryProbeService,
     key_fingerprint,
+    known_host_keys,
+    known_hosts_fingerprints,
     parse_keyscan,
     ssh_endpoint,
 )
@@ -246,6 +249,68 @@ def test_parse_keyscan_keeps_only_well_formed_keys_of_known_types() -> None:
     assert [(k.type, k.line.split()[0]) for k in keys] == [("ssh-ed25519", "git.example.com")]
     assert keys[0].fingerprint == ED25519_FINGERPRINT
     assert keys[0].line == f"git.example.com ssh-ed25519 {ED25519_B64}"
+
+
+def test_known_host_keys_reads_type_marker_and_fingerprint() -> None:
+    """Each distinct key with its line's type word and marker, sorted.
+
+    Comments, blanks, bad base64, an unknown marker, a blob that names no type and a type word
+    the blob contradicts are skipped, as OpenSSH skips them; the audit's fingerprints still
+    cover every base64 key.
+    """
+    authority = base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519" + bytes(range(32))).decode()
+    revoked = base64.b64encode(b"\x00\x00\x00\x0bssh-ed25519" + bytes(range(1, 33))).decode()
+    text = (
+        "# trusted on 2026-11-18\n"
+        f"git.example.com ssh-ed25519 {ED25519_B64}\n"
+        "\n"
+        f"git.example.com ecdsa-sha2-nistp256 {ECDSA_B64}\n"
+        f"@cert-authority *.example.com ssh-ed25519 {authority}\n"
+        f"@revoked git.example.com ssh-ed25519 {revoked}\n"
+        f"@unknown git.example.com ssh-ed25519 {ED25519_B64}\n"
+        f"[git.example.com]:2222 ssh-ed25519 {ED25519_B64}\n"
+        "git.example.com ssh-rsa not*base64\n"
+        "git.example.com ssh-rsa AAAA\n"
+    )
+
+    keys = known_host_keys(text)
+
+    assert keys == [
+        KnownHostKey(type="ecdsa-sha2-nistp256", fingerprint=ECDSA_FINGERPRINT, marker=None),
+        *sorted(
+            [
+                KnownHostKey(type="ssh-ed25519", fingerprint=ED25519_FINGERPRINT, marker=None),
+                KnownHostKey(
+                    type="ssh-ed25519",
+                    fingerprint=key_fingerprint(base64.b64decode(authority)),
+                    marker="cert-authority",
+                ),
+                KnownHostKey(
+                    type="ssh-ed25519",
+                    fingerprint=key_fingerprint(base64.b64decode(revoked)),
+                    marker="revoked",
+                ),
+            ],
+            key=lambda key: key.fingerprint,
+        ),
+    ]
+    assert key_fingerprint(base64.b64decode("AAAA")) in known_hosts_fingerprints(text)
+
+
+def test_a_type_word_the_key_contradicts_names_no_key() -> None:
+    """OpenSSH refuses a line whose word and blob disagree, or whose blob names no type.
+
+    The rsa-sha2 signature names stand for an ssh-rsa key, as OpenSSH reads them.
+    """
+    rsa = base64.b64encode(b"\x00\x00\x00\x07ssh-rsa" + bytes(range(40))).decode()
+    untyped = base64.b64encode(b"\x00\x00\x00\x00" + bytes(range(40))).decode()
+
+    assert known_host_keys(f"h1 ssh-rsa {ECDSA_B64}\n") == []
+    assert known_host_keys(f"h1 ssh-ed25519 {untyped}\n") == []
+    assert known_host_keys(f"h1 rsa-sha2-256 {rsa}\nh1 rsa-sha2-512 {rsa}\nh1 ssh-rsa {rsa}\n") == [
+        KnownHostKey(type=word, fingerprint=key_fingerprint(base64.b64decode(rsa)))
+        for word in ("rsa-sha2-256", "rsa-sha2-512", "ssh-rsa")
+    ]
 
 
 def test_fingerprints_match_ssh_keygen() -> None:

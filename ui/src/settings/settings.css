@@ -83,3 +83,40 @@
     border-left-color: Highlight;
   }
 }
+
+/* Settings › Status and a repository's page: blocks 24 px apart, each under a title-step
+   heading; a word beside its glyph. */
+.settings-panel {
+  margin: 0 0 var(--space-5);
+}
+
+.settings-panel h2 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--type-title-size);
+  font-weight: var(--type-title-weight);
+  line-height: var(--type-title-line);
+}
+
+.settings-panel h2:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.status-word {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* The workers scroll in their own region; a host stays whole. */
+.list-scroll.status-workers .list {
+  min-width: 760px;
+}
+
+.list-scroll.status-workers .row-name {
+  overflow-wrap: normal;
+}
+
+.status-differs {
+  color: var(--color-warn);
+}

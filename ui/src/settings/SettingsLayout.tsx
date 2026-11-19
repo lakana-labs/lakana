@@ -19,15 +19,21 @@ import "./settingsStrings";
 import { SettingsViewerContext } from "./viewer";
 
 /** Nothing: what a failed read of the facts gives, so no place is offered on a guess. */
-const NONE: SettingsFacts = { secretEnvironments: [], managePolicy: false };
+const NONE: SettingsFacts = {
+  secretEnvironments: [],
+  managePolicy: false,
+  readsEnvironments: false,
+  instanceActions: [],
+};
 
 /**
  * Renders the list (wide) or Section (narrow), then the place. Whether the person may see the
  * place is decided inside the place's own route (`SettingsScreen`), not here.
  *
  * @remarks
- * It reads, once per visit to Settings, where the person manages secrets and whether they
- * manage row filters and masks (`GET /api/v1/whoami`), and provides the viewer the rules read;
+ * It reads, once per visit to Settings, where the person manages secrets, whether they manage
+ * row filters and masks, whether they read an environment and what they may do on the instance
+ * (`GET /api/v1/whoami`), and provides the viewer the rules read;
  * until the answer comes, the places that need it are neither listed nor refused.
  * @returns The layout.
  */
@@ -41,6 +47,8 @@ export function SettingsLayout(): JSX.Element {
       noAccessYet,
       secretEnvironments: facts?.secretEnvironments ?? null,
       managePolicy: facts?.managePolicy ?? null,
+      readsEnvironments: facts?.readsEnvironments ?? null,
+      instanceActions: facts === null ? null : new Set(facts.instanceActions),
     }),
     [admin, noAccessYet, facts],
   );

@@ -66,17 +66,26 @@ export {
 export type { AccessOut, NoticeOut, SessionOut } from "./session";
 export {
   createRepository,
+  deleteRepository,
   generateDeployKey,
   getRepository,
+  getRepositoryPage,
+  listRepositories,
+  makeMissingDeployKeys,
+  replaceDeployKey,
   requestProbe,
+  updateRepository,
   waitForProbe,
 } from "./repositories";
 export type {
   DeployKeyOut,
   HostKeyOut,
+  RepositoryChanges,
   RepositoryCreate,
+  RepositoryOut,
   RepositoryProbeIn,
   RepositoryProbeOut,
+  TrustedHostKeyOut,
 } from "./repositories";
 export { changeSignInSettings, getSignInSettings } from "./settings";
 export type { SignInSettingsOut } from "./settings";
@@ -154,8 +163,8 @@ export type {
   ArtifactVersionDeletedOut,
   ArtifactVersionOut,
 } from "./artifacts";
-export { getStatus } from "./status";
-export type { InstanceStatusOut, StatusDetailOut } from "./status";
+export { getScheduler, getStatus } from "./status";
+export type { InstanceStatusOut, StatusDetailOut, StatusWorkerOut } from "./status";
 export {
   createConnection,
   deleteConnection,

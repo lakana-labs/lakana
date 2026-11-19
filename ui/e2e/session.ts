@@ -106,6 +106,15 @@ const HOME: Record<string, unknown> = {
     { kind: "table", environment: "prod", ref: "gold.station_ranking", opened_at: AT },
   ],
   "/api/v1/info": { version: "0.23.0" },
+  // Settings › Status reads it while the status answers the detail.
+  "/api/v1/scheduler": {
+    holder: "lakana-server-1",
+    heartbeat_at: AT,
+    active_runs: 2,
+    pending: 1,
+    ready: 0,
+    running: 1,
+  },
 };
 
 /** What an administrator may do on each namespace of the tree. */
@@ -835,6 +844,8 @@ export async function signInAsAdmin(page: Page): Promise<void> {
         may_deploy: true,
         secret_environments: ["dev", "prod"],
         manage_policy: true,
+        reads_environments: true,
+        instance_actions: ["MANAGE_ENVIRONMENT", "MANAGE_REPOSITORY"],
         picture: "e1",
       },
     }),

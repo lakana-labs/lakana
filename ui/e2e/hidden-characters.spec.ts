@@ -12,6 +12,7 @@ import { apiTypes, typeOf } from "./api-types";
 import { ARTIFACTS_STUBBED, stubArtifacts } from "./artifacts";
 import { ROUTES, stubConnect } from "./connect";
 import { CONNECTIONS_STUBBED, stubConnections } from "./connections";
+import { REPOSITORIES_STUBBED, stubRepositories } from "./repositories";
 import {
   apiPaths,
   expectMarked,
@@ -119,6 +120,7 @@ const LITERAL_CODES: Record<string, string> = {
   RawEntryOut: "kind",
   RecentOut: "kind",
   RepositoryCreate: "kind",
+  RepositoryOut: "kind",
   RepositoryProbeOut: "kind outcome state",
   RunOut: "actions kind status trigger",
   SavedQueryIn: "visibility",
@@ -127,6 +129,7 @@ const LITERAL_CODES: Record<string, string> = {
   ScopeOut: "kind",
   SecretOut: "use",
   SecretUseIn: "kind",
+  StatusWorkerOut: "status takes",
   SubjectPrincipalOut: "principal_type",
   TableDefinitionFileOut: "reason",
   TableListItemOut: "kind state",
@@ -136,6 +139,7 @@ const LITERAL_CODES: Record<string, string> = {
   "TableTreeOut.environments": "actions",
   "TableTreeOut.environments.namespaces": "actions",
   TaskRunOut: "kind status",
+  TrustedHostKeyOut: "marker",
   ViaOut: "kind role",
 };
 
@@ -606,6 +610,23 @@ walk("Connect a repository marks hidden characters in every step", async ({ page
   await expect(page.getByRole("alert")).toBeVisible();
   await expectMarked(page, "a refused test", ["then test again."]);
   expectOnlyStubbed(paths, [...STUBBED, ...ROUTES]);
+});
+
+walk("Status and Repositories mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  await signInAsAdmin(poisoned(page));
+  await stubRepositories(poisoned(page));
+  await visit(page, "/settings/status", ["worker-1.internal", "lakana-server-1"]);
+  await visit(page, "/settings/repositories", ["dbt-models", "gh-token"]);
+  await visit(page, "/settings/repositories/analytics", [
+    "SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU",
+    "lakana analytics dev",
+  ]);
+  await page.getByRole("button", { name: /^Replace key of dev/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expectMarked(page, "Replace key", ["dev"]);
+  await page.keyboard.press("Escape");
+  expectOnlyStubbed(paths, [...STUBBED, ...REPOSITORIES_STUBBED]);
 });
 
 walk("the results of the catalog's actions mark hidden characters", async ({ page }) => {

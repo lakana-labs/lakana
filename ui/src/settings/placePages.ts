@@ -17,11 +17,11 @@ export type PagePlaceId = Extract<(typeof SETTINGS_PLACES)[number], { kind: "pag
 /** Each page place's loader: it imports the page's chunk and hands back its component. */
 export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
   /**
-   * Status: the placeholder until part 8.
+   * Status: health, workers and version; compute, memory, workers and scheduler in detail.
    *
    * @returns The page.
    */
-  status: async () => (await import("./StatusPlaceholder")).StatusPlaceholder,
+  status: async () => (await import("./StatusPage")).StatusPage,
   /**
    * Repositories, with Connect a repository below it.
    *

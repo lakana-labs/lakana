@@ -122,7 +122,7 @@ def list_repos(ctx: typer.Context) -> None:
 
 @repo_app.command("show")
 def show(ctx: typer.Context, name: str) -> None:
-    """Show repository NAME.
+    """Show repository NAME, with the fingerprint of each host key it names and its marker.
 
     Parameters
     ----------
@@ -132,7 +132,16 @@ def show(ctx: typer.Context, name: str) -> None:
         The repository name.
     """
     state = state_of(ctx)
-    _output.emit(state, state.client().repositories.get(name))
+    _output.emit(
+        state,
+        state.client().repositories.get(name),
+        derived={
+            "host_keys": lambda repo: "\n".join(
+                f"{'' if key.marker is None else f'@{key.marker} '}{key.type} {key.fingerprint}"
+                for key in repo.host_keys
+            )
+        },
+    )
 
 
 @repo_app.command("update")

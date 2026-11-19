@@ -1,0 +1,35 @@
+{
+  "editDialog": {
+    "title": "Edit {{name}}",
+    "url": "URL",
+    "urlHelp": "Changing it asks for the host keys of a new SSH host again.",
+    "defaultRef": "Default ref",
+    "defaultRefHelp": "Leave it empty to deploy the remote's default branch.",
+    "secret": "Secret with the token",
+    "username": "Username",
+    "usernameHelp": "Leave it empty for oauth2.",
+    "hostKeys": "Host keys",
+    "hostKeysIntro": "Fetch the host's keys again to trust another key. Only the keys you tick replace the trusted ones.",
+    "fetch": "Fetch host keys again",
+    "waiting": "Asking a worker to fetch the keys…",
+    "none": "The host offered no SSH key. Check the URL, then fetch again.",
+    "save": "Save"
+  },
+  "replaceDialog": {
+    "title": "Replace the deploy key of {{environment}}?",
+    "body": "The old key stops working at once. Deploys from {{environment}} fail until you add the new key at your git host.",
+    "confirm": "Replace key"
+  },
+  "missingDialog": {
+    "title": "Make the missing keys of {{name}}?",
+    "body": "Lakana makes a deploy key in each environment where you manage secrets and the repository has none. The private keys stay on the server.",
+    "confirm": "Make the keys"
+  },
+  "keysDone": "Done",
+  "deleteDialog": {
+    "title": "Delete repository {{name}}?",
+    "body": "Jobs already deployed keep running until undeployed; nothing at your git host changes.",
+    "type": "Type {{name}} to delete it",
+    "submit": "Delete repository"
+  }
+}
