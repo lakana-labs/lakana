@@ -353,6 +353,55 @@ function tableFilter(environment: string, namespace: string, table: string): Pol
 }
 
 /**
+ * A list of the table's policies, and the sentence that says when the server holds more.
+ *
+ * @param props - The header cells, the rows and whether there are more.
+ * @param props.head - The header row's cells.
+ * @param props.more - Whether the server named a next page.
+ * @param props.children - The rows.
+ * @returns The list.
+ */
+function PolicyTable({
+  head,
+  more,
+  children,
+}: {
+  readonly head: ReactNode;
+  readonly more: boolean;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <>
+      <table className="list list-static">
+        <thead>
+          <tr>{head}</tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+      {more && <p className="second">{t("table.access.policiesCut")}</p>}
+    </>
+  );
+}
+
+/**
+ * A policy's expression, as code.
+ *
+ * @param props - The expression.
+ * @param props.expression - The SQL expression.
+ * @returns The cell.
+ */
+function ExpressionCell({ expression }: { readonly expression: string }): JSX.Element {
+  return (
+    <td>
+      <code className="expression">
+        <VisibleText text={expression} breakable />
+      </code>
+    </td>
+  );
+}
+
+/**
  * The table's row filters: who each is for and the rows it shows them.
  *
  * @returns The section.
@@ -377,31 +426,24 @@ function RowFilters(): JSX.Element {
         filters.length === 0 ? (
           <p className="second">{t("table.access.filters.none")}</p>
         ) : (
-          <>
-            <table className="list list-static">
-              <thead>
-                <tr>
-                  <th scope="col">{t("table.access.who.subject")}</th>
-                  <th scope="col">{t("table.access.filters.expression")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filters.map((filter) => (
-                  <tr key={filter.id}>
-                    <td>
-                      <SubjectName subject={filter} link />
-                    </td>
-                    <td>
-                      <code className="expression">
-                        <VisibleText text={filter.expression} breakable />
-                      </code>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {nextCursor !== null && <p className="second">{t("table.access.policiesCut")}</p>}
-          </>
+          <PolicyTable
+            more={nextCursor !== null}
+            head={
+              <>
+                <th scope="col">{t("table.access.who.subject")}</th>
+                <th scope="col">{t("table.access.filters.expression")}</th>
+              </>
+            }
+          >
+            {filters.map((filter) => (
+              <tr key={filter.id}>
+                <td>
+                  <SubjectName subject={filter} link />
+                </td>
+                <ExpressionCell expression={filter.expression} />
+              </tr>
+            ))}
+          </PolicyTable>
         )
       }
     </ListSection>
@@ -433,35 +475,28 @@ function ColumnMasks(): JSX.Element {
         masks.length === 0 ? (
           <p className="second">{t("table.access.masks.none")}</p>
         ) : (
-          <>
-            <table className="list list-static">
-              <thead>
-                <tr>
-                  <th scope="col">{t("table.access.who.subject")}</th>
-                  <th scope="col">{t("table.access.masks.column")}</th>
-                  <th scope="col">{t("table.access.masks.expression")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {masks.map((mask) => (
-                  <tr key={mask.id}>
-                    <td>
-                      <SubjectName subject={mask} link />
-                    </td>
-                    <td>
-                      <VisibleText text={mask.column} breakable />
-                    </td>
-                    <td>
-                      <code className="expression">
-                        <VisibleText text={mask.expression} breakable />
-                      </code>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {nextCursor !== null && <p className="second">{t("table.access.policiesCut")}</p>}
-          </>
+          <PolicyTable
+            more={nextCursor !== null}
+            head={
+              <>
+                <th scope="col">{t("table.access.who.subject")}</th>
+                <th scope="col">{t("table.access.masks.column")}</th>
+                <th scope="col">{t("table.access.masks.expression")}</th>
+              </>
+            }
+          >
+            {masks.map((mask) => (
+              <tr key={mask.id}>
+                <td>
+                  <SubjectName subject={mask} link />
+                </td>
+                <td>
+                  <VisibleText text={mask.column} breakable />
+                </td>
+                <ExpressionCell expression={mask.expression} />
+              </tr>
+            ))}
+          </PolicyTable>
         )
       }
     </ListSection>
