@@ -36,25 +36,54 @@ Returns: `RowFilter`. The created row filter.
 
 ### `client.row_filters.list`
 
-Signature: `client.row_filters.list(*, principal_name: str | None = None, group_name: str | None = None, environment: str | None = None, namespace: str | None = None, table: str | None = None) -> list[RowFilter]`
+Signature: `client.row_filters.list(**filters: Unpack[PolicyFilters]) -> list[RowFilter]`
 
-List row filters for a principal, a group, or a specific table.
+List every active row filter that matches, newest first, reading every page.
 
-Exactly one of `principal_name`/`group_name`/(`environment`+ `namespace`+`table` together) must be given.
+Every filter is optional, and they combine; with none, every row filter is listed. `list_page` reads one page, and `iter` yields them as the pages come.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
-| `principal_name` | `str | None` | `None` | List this principal's own direct filters. |
-| `group_name` | `str | None` | `None` | List this group's own direct filters. |
-| `environment` | `str | None` | `None` | The environment to match, for a table-scoped listing. |
-| `namespace` | `str | None` | `None` | The dot-joined namespace to match, for a table-scoped listing. |
-| `table` | `str | None` | `None` | The table to match, for a table-scoped listing. |
+| `**filters` | `Unpack[PolicyFilters]` | any number | The filters of `list_page`: `principal_name` or `group_name`, and `environment`, `namespace`, `table`. |
 
-Returns: `list of RowFilter`. The matching row filters.
+Returns: `list of RowFilter`. Newest first.
 
 | Error | When |
 |---|---|
-| `lakana.ValidationError` | If none of the valid parameter combinations is given. |
+| `lakana.ValidationError` | If both `principal_name` and `group_name` are given, or `table` without `namespace` or `namespace` without `environment`. |
+| `lakana.NotFound` | If no principal or group has the name given. |
+| `lakana.PermissionDenied` | Without `MANAGE_POLICY` on the instance. |
+
+### `client.row_filters.list_page`
+
+Signature: `client.row_filters.list_page(*, principal_name: str | None = None, group_name: str | None = None, environment: str | None = None, namespace: str | None = None, table: str | None = None, limit: int | None = None, cursor: str | None = None) -> RowFilterPage`
+
+List one page of row filters, newest first, with the cursor of the next page.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `principal_name` | `str | None` | `None` | Only the row filters made to this principal. |
+| `group_name` | `str | None` | `None` | Only the row filters made to this group. |
+| `environment` | `str | None` | `None` | Only the row filters in this environment. |
+| `namespace` | `str | None` | `None` | Only the row filters on tables of this dot-joined namespace; needs `environment`. |
+| `table` | `str | None` | `None` | Only the row filters on this table; needs `namespace`. |
+| `limit` | `int | None` | `None` | Most row filters returned (1 to 200); `None` leaves it to the server (100). |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
+
+Returns: `RowFilterPage`. The row filters, and the cursor for the next page (`None` on the last).
+
+### `client.row_filters.iter`
+
+Signature: `client.row_filters.iter(*, page_size: int = 100, **filters: Unpack[PolicyFilters]) -> Iterator[RowFilter]`
+
+Yield every matching row filter, newest first, fetching pages as needed.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `page_size` | `int` | `100` | Row filters per request (1 to 200). |
+| `**filters` | `Unpack[PolicyFilters]` | any number | The filters of `list_page`: `principal_name` or `group_name`, and `environment`, `namespace`, `table`. |
+
+Returns: `Iterator of RowFilter`. Each row filter, once.
 
 ### `client.row_filters.revoke`
 

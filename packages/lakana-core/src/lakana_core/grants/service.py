@@ -32,6 +32,7 @@ from lakana_core.grants.admin import (
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
+from lakana_core.identity.named import group_named, principal_named
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -181,54 +182,6 @@ class GrantService:
     def __init__(self, session: Session, authz: AuthorizationService) -> None:
         self._session = session
         self._authz = authz
-
-    def _get_principal(self, name: str) -> Principal:
-        """Look up a principal by name.
-
-        Parameters
-        ----------
-        name
-            Principal name.
-
-        Returns
-        -------
-        Principal
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has that name.
-        """
-        principal = self._session.execute(
-            select(Principal).where(Principal.name == name)
-        ).scalar_one_or_none()
-        if principal is None:
-            raise NotFoundError(f"No principal named {name!r}.")
-        return principal
-
-    def _get_group(self, name: str) -> Group:
-        """Look up a group by name.
-
-        Parameters
-        ----------
-        name
-            Group name.
-
-        Returns
-        -------
-        Group
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no group has that name.
-        """
-        group = self._session.execute(select(Group).where(Group.name == name)).scalar_one_or_none()
-        if group is None:
-            raise NotFoundError(f"No group named {name!r}.")
-        return group
 
     def _resolve_securable_ids(
         self, kind: SecurableKind, environment: str | None, namespace: str | None, table: str | None
@@ -440,8 +393,10 @@ class GrantService:
             namespace=namespace,
             table=table,
         )
-        principal_id = self._get_principal(principal).id if principal is not None else None
-        group_id = self._get_group(group).id if group is not None else None
+        principal_id = (
+            principal_named(self._session, principal).id if principal is not None else None
+        )
+        group_id = group_named(self._session, group).id if group is not None else None
         row = Grant(
             id=uuid.uuid4(),
             principal_id=principal_id,
@@ -590,9 +545,11 @@ class GrantService:
             )
         query = select(Grant).where(Grant.revoked_at.is_(None))
         if principal_name is not None:
-            query = query.where(Grant.principal_id == self._get_principal(principal_name).id)
+            query = query.where(
+                Grant.principal_id == principal_named(self._session, principal_name).id
+            )
         if group_name is not None:
-            query = query.where(Grant.group_id == self._get_group(group_name).id)
+            query = query.where(Grant.group_id == group_named(self._session, group_name).id)
         if action is not None:
             roles = [role for role, actions in ROLE_ACTIONS.items() if action in actions]
             query = query.where(or_(Grant.action == action, Grant.role.in_(roles)))
@@ -717,6 +674,26 @@ class GrantService:
         allowed = permits_each(self._authz, p, questions)
         return [name for name, yes in zip(names, allowed, strict=True) if yes]
 
+    def may_manage_policies(self, p: PrincipalRef) -> bool:
+        """Say whether the caller may manage row filters and column masks with this credential.
+
+        About the caller only, so it needs no authorization; asked with `permits`, so it records
+        nothing. It follows the credential's scope, as `may_deploy_somewhere` does: a task or CI
+        token manages none. The web interface offers Row filters & masks from it.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        bool
+            Whether `permits(MANAGE_POLICY)` holds on the instance, where the policy routes ask
+            for it.
+        """
+        return self._authz.permits(p, Action.MANAGE_POLICY, Securable.instance_scope())
+
     def explain(self, p: PrincipalRef, principal_name: str, scope: Securable) -> PermissionReport:
         """Say what a principal may do on an object, and through which grant or group.
 
@@ -749,7 +726,7 @@ class GrantService:
         own = p.task_scope is None and p.ci_scope is None and principal_name == p.name
         if not own:
             authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
-        target = self._get_principal(principal_name)
+        target = principal_named(self._session, principal_name)
         if not own:
             self._resolve_securable_ids(
                 scope.kind,
@@ -788,7 +765,7 @@ class GrantService:
         own = p.task_scope is None and p.ci_scope is None and principal_name == p.name
         if not own:
             authorize_admin_only(self._session, self._authz, p, Action.MANAGE_GRANT)
-        target = self._get_principal(principal_name)
+        target = principal_named(self._session, principal_name)
         member_of = select(GroupMembership.group_id).where(
             GroupMembership.principal_id == target.id
         )

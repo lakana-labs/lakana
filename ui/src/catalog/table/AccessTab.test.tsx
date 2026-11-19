@@ -451,6 +451,55 @@ describe("AccessTab", () => {
     expect(who.querySelector(".grants-cut b")).toBeNull();
   });
 
+  it("reads at most 200 policies of the table", async () => {
+    const { server } = renderShell(TAB);
+
+    await section("Column masks");
+    await waitFor(() => {
+      expect(
+        server.sent
+          .map((request) => request.path)
+          .filter((path) => /^\/api\/v1\/(row-filters|column-masks)/.test(path)),
+      ).toEqual([
+        "/api/v1/row-filters?environment=prod&namespace=gold.sales&table=fact_sales&limit=200",
+        "/api/v1/column-masks?environment=prod&namespace=gold.sales&table=fact_sales&limit=200",
+      ]);
+    });
+  });
+
+  it("says when the table has more", async () => {
+    renderShell(TAB, {
+      routes: {
+        "GET /api/v1/row-filters": {
+          status: 200,
+          body: FILTERS,
+          headers: { "X-Next-Cursor": "c2" },
+        },
+        "GET /api/v1/column-masks": {
+          status: 200,
+          body: MASKS,
+          headers: { "X-Next-Cursor": "c3" },
+        },
+      },
+    });
+
+    const filters = await section("Row filters");
+    expect(await within(filters).findByText("Only the first 200 are shown.")).toBeVisible();
+    const masks = await section("Column masks");
+    expect(await within(masks).findByText("Only the first 200 are shown.")).toBeVisible();
+  });
+
+  it("an administrator can manage the table's policies", async () => {
+    renderShell(TAB);
+
+    expect(
+      await screen.findByRole("link", { name: "Manage row filters and masks" }),
+    ).toHaveAttribute(
+      "href",
+      "/settings/access/filters-and-masks?environment=prod&table=gold.sales.fact_sales",
+    );
+  });
+
   it("shows row filters without a column and masks with one", async () => {
     renderShell(TAB);
 

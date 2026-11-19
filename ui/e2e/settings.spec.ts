@@ -53,6 +53,8 @@ for (const theme of ["light", "dark"] as const) {
           "Grants",
           "Tokens",
           "Secrets",
+          "Row filters & masks",
+          "Access file",
           "What I may do",
           "Sign-in",
           "Invites",

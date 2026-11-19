@@ -40,6 +40,11 @@ const NAMED_LIMITS = [
   // and What with its two sections, the list with the Git mark, Remove and its question); Add
   // grant loads when it is opened (AddGrantDialog-, on the shared limit).
   { name: "Grants", prefix: "GrantsPage-", limit: "4.21 kB" },
+  // Measured 4.23 kB (2026-11-19) + 10 %: Settings › Access › Row filters & masks (the filter
+  // of environment (typed by a person who may list none), table and who shared with Grants, the two lists with the Git mark, Delete
+  // and its question, the managed note with both commands, and the place's strings); Add filter
+  // or mask loads when it is opened (AddPolicyDialog-, on the shared limit).
+  { name: "Row filters & masks", prefix: "FiltersAndMasksPage-", limit: "4.65 kB" },
   // Measured 3.26 kB (2026-11-18) + 10 %: Settings › Access › Secrets (the environment picker
   // over the environments where the person manages secrets, the remembered choice, the list with
   // each secret's use and Rotate, Set use and Delete, and the loaders of the dialogs); the

@@ -184,6 +184,18 @@ lakana access status
 └──────────┴─────────────┴─────────┴──────────────┴──────────────────────────────────┘
 ```
 
+In the web interface, **Settings → Access → Access file** (administrators) shows the same: each
+managed scope with its file, the start of its hash and commit, and who applied it when. A scope
+reads **In sync**, or **Changed by hand** with the number of changes made with
+`--override-managed` since the last apply; those changes are listed below with why, by whom and
+when, and the next apply reverts each one the file does not list. The page cannot tell whether
+Git holds a newer file than the one applied: `lakana access plan` does. Plan and apply stay on the
+command line and in CI, and the page shows their commands. **Download access file** saves the live
+access of the whole instance or of the environments you choose as an access file, named after the
+managed file when you download exactly one managed scope: a way to start a file, or to compare.
+Where a scope is managed, the pages of People, Groups, Grants and Row filters & masks mark what it
+holds **⌂ Git** and offer no change.
+
 ## 6. What a managed scope refuses
 
 From the first apply the file is the only way to change access in its scopes. A command that

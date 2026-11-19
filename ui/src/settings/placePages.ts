@@ -59,6 +59,19 @@ export const PLACE_PAGES: Record<PagePlaceId, () => Promise<ComponentType>> = {
    */
   secrets: async () => (await import("../access/SecretsPage")).SecretsPage,
   /**
+   * Row filters & masks: every row filter and column mask, filtered, with Add and Delete.
+   *
+   * @returns The page.
+   */
+  "filters-and-masks": async () =>
+    (await import("../access/FiltersAndMasksPage")).FiltersAndMasksPage,
+  /**
+   * Access file: the managed scopes, the changes by hand, and Download access file.
+   *
+   * @returns The page.
+   */
+  "access-file": async () => (await import("../access/AccessFilePage")).AccessFilePage,
+  /**
    * What I may do: one's own grants and what they add up to.
    *
    * @returns The page.

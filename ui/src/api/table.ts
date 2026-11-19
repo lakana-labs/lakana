@@ -367,7 +367,7 @@ interface SubjectPrincipalOut {
 }
 
 /** Who a grant, row filter or column mask is for, as the server names them. */
-interface SubjectOut {
+export interface SubjectOut {
   /** The principal's id; null for a group's. */
   readonly principal_id: string | null;
   /** The group's id; null for a principal's. */
@@ -493,42 +493,6 @@ async function firstGrants(query: URLSearchParams): Promise<GrantPage> {
   query.set("limit", String(MOST_GRANTS));
   const page = await api.page(`/api/v1/grants?${query.toString()}`);
   return { grants: page.body as readonly GrantOut[], more: page.nextCursor !== null };
-}
-
-/**
- * The query that names one table to the policy listings.
- *
- * @param ref - The table.
- * @returns The query, without its `?`.
- */
-function tableQuery(ref: TableRef): string {
-  return new URLSearchParams({
-    environment: ref.environment,
-    namespace: ref.namespace,
-    table: ref.name,
-  }).toString();
-}
-
-/**
- * Lists a table's row filters. Needs the right to manage policies on the instance.
- *
- * @param ref - The table.
- * @returns The row filters.
- * @throws {ApiError} for a refusal.
- */
-export function listRowFilters(ref: TableRef): Promise<readonly RowFilterOut[]> {
-  return api.request<readonly RowFilterOut[]>("GET", `/api/v1/row-filters?${tableQuery(ref)}`);
-}
-
-/**
- * Lists a table's column masks. Needs the right to manage policies on the instance.
- *
- * @param ref - The table.
- * @returns The column masks.
- * @throws {ApiError} for a refusal.
- */
-export function listColumnMasks(ref: TableRef): Promise<readonly ColumnMaskOut[]> {
-  return api.request<readonly ColumnMaskOut[]>("GET", `/api/v1/column-masks?${tableQuery(ref)}`);
 }
 
 /**

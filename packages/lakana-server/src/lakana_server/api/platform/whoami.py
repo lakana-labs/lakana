@@ -54,9 +54,10 @@ def whoami(
     routes with this credential (never with a task or CI token), `has_access` whether it has
     any grant at all (any scope, directly or through a group), `may_deploy` whether it may
     deploy in at least one environment with this credential, `secret_environments` the
-    environments where it may manage secrets with it: the web interface shows the
-    administration areas, tells a new person to ask for access, shows the deploy steps of Home
-    and offers its Secrets page from these four. `picture` is the etag of your
+    environments where it may manage secrets with it, and `manage_policy` whether it may manage
+    row filters and column masks with it: the web interface shows the administration areas,
+    tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets
+    and Row filters & masks pages from these five. `picture` is the etag of your
     profile picture, or `null` without one.
 
     Parameters
@@ -118,6 +119,7 @@ def _describe(principal: PrincipalRef, grants: GrantService, pictures: PictureSe
         has_access=grants.has_any_grant(principal),
         may_deploy=grants.may_deploy_somewhere(principal),
         secret_environments=grants.secret_environments(principal),
+        manage_policy=grants.may_manage_policies(principal),
         picture=pictures.etag_of(principal.id),
     )
 

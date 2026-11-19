@@ -9,7 +9,7 @@ import type { ManagedScopeOut } from "../api/accessFile";
 import type { HeldGrantOut } from "../api/grants";
 import type { EnvironmentOut } from "../api/environments";
 import type { SecretOut } from "../api/secrets";
-import type { GrantOut, PermissionsOut } from "../api/table";
+import type { ColumnMaskOut, GrantOut, PermissionsOut, RowFilterOut } from "../api/table";
 import type { FakeRoute } from "./server";
 
 /**
@@ -208,5 +208,74 @@ export function aSecret(over: Partial<SecretOut> = {}): SecretOut {
     use_target: "corp",
     use_target_url: "https://pkgs.example.org/simple",
     ...over,
+  };
+}
+
+/**
+ * A row filter, as the row filters list answers it.
+ *
+ * @param over - What differs from maria's `region = 'EU'` on dev › gold › station_ranking.
+ * @returns The row filter.
+ */
+export function aRowFilter(over: Partial<RowFilterOut> = {}): RowFilterOut {
+  return {
+    id: "f-1",
+    principal_id: "maria-id",
+    group_id: null,
+    principal: { id: "maria-id", name: "maria", principal_type: "user" },
+    group: null,
+    environment: "dev",
+    namespace: "gold",
+    table: "station_ranking",
+    expression: "region = 'EU'",
+    created_by: "admin-id",
+    created_at: "2026-11-01T09:00:00Z",
+    bound: true,
+    ...over,
+  };
+}
+
+/**
+ * A column mask, as the column masks list answers it.
+ *
+ * @param over - What differs from the group analysts' `'***'` of `email` on dev › gold ›
+ *   station_ranking.
+ * @returns The column mask.
+ */
+export function aColumnMask(over: Partial<ColumnMaskOut> = {}): ColumnMaskOut {
+  return {
+    ...aRowFilter({
+      id: "m-1",
+      principal_id: null,
+      group_id: "group-1",
+      principal: null,
+      group: "analysts",
+      expression: "'***'",
+    }),
+    column: "email",
+    ...over,
+  };
+}
+
+/**
+ * The managed scopes route a policy manager reads.
+ *
+ * @param scopes - The managed scopes' names.
+ * @param fileName - The file that manages them.
+ * @returns The route.
+ */
+export function managedScopesRoute(
+  scopes: readonly string[] = [],
+  fileName = "access.yaml",
+): Record<string, FakeRoute> {
+  return {
+    "GET /api/v1/access/managed-scopes": {
+      status: 200,
+      body: scopes.map((scope) => ({
+        scope,
+        file_name: fileName,
+        applied_at: "2026-11-17T09:00:00Z",
+      })),
+    },
   };
 }

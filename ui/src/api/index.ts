@@ -92,10 +92,8 @@ export {
   getResultPage,
   getTable,
   getTableHealth,
-  listColumnMasks,
   listGrantsAt,
   listInstanceGrants,
-  listRowFilters,
   myPermissions,
   submitPreview,
 } from "./table";

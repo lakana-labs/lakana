@@ -12,14 +12,18 @@ import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
+from typing import Generic, TypeVar
 
 from pyiceberg.types import NestedField
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable
 from lakana_core.errors import ValidationError
+from lakana_core.identity.named import group_named, principal_named
 from lakana_core.models import ColumnMask, RowFilter
+from lakana_core.pagination import Page, newest_first
 from lakana_core.policy.columns import ColumnSource
 from lakana_core.policy.field_binding import (
     BOUND_STATES,
@@ -122,12 +126,110 @@ def shown_policies(
     return found
 
 
-class PolicyShowing:
+_Policy = TypeVar("_Policy", RowFilter, ColumnMask)
+
+
+class PolicyShowing(Generic[_Policy]):
     """The methods the row filter and column mask services share, written once."""
 
     _catalog: ColumnSource
     _session: Session
     _authz: AuthorizationService
+    _model: type[_Policy]
+    _list_kind: str
+
+    def list_page(
+        self,
+        p: PrincipalRef,
+        *,
+        principal_name: str | None = None,
+        group_name: str | None = None,
+        environment: str | None = None,
+        namespace: str | None = None,
+        table: str | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> Page[_Policy]:
+        """List active policies of this kind, newest first, one page at a time.
+
+        Every filter is optional, and they combine with AND. Each matches exactly: `environment`
+        alone lists that environment's policies, with `namespace` that namespace's, and with
+        `table` that table's.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+        principal_name
+            Only policies made to this principal.
+        group_name
+            Only policies made to this group.
+        environment
+            Only policies in this environment.
+        namespace
+            Only policies on tables of this namespace (unit-separator-joined); needs
+            `environment`.
+        table
+            Only policies on this table; needs `namespace`.
+        limit
+            Most policies returned.
+        cursor
+            The `next_cursor` of the previous page. Send the same filters with every page.
+
+        Returns
+        -------
+        Page
+            The policies by time created, newest first, equal times by id, and the cursor of
+            the next page.
+
+        Raises
+        ------
+        PermissionDenied
+            If the acting principal may not manage policies; asked before any name is looked
+            up, so an unknown name is not told apart from a known one.
+        ValidationError
+            If both `principal_name` and `group_name` are given, `table` without `namespace`,
+            `namespace` without `environment`, `limit` is below 1, or `cursor` is not one this
+            server issued for this list.
+        NotFoundError
+            If no principal has `principal_name`, or no group has `group_name`.
+        """
+        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
+        if principal_name is not None and group_name is not None:
+            raise ValidationError(
+                "Pass at most one of `principal_name` and `group_name`: a policy is made to a "
+                "principal or to a group, never to both."
+            )
+        if (table is not None and namespace is None) or (
+            namespace is not None and environment is None
+        ):
+            raise ValidationError(
+                "Name the environment with `namespace`, and the namespace with `table`."
+            )
+        model = self._model
+        query = select(model).where(model.revoked_at.is_(None))
+        if principal_name is not None:
+            query = query.where(
+                model.principal_id == principal_named(self._session, principal_name).id
+            )
+        if group_name is not None:
+            query = query.where(model.group_id == group_named(self._session, group_name).id)
+        if environment is not None:
+            query = query.where(model.environment == environment)
+        if namespace is not None:
+            query = query.where(model.namespace == namespace)
+        if table is not None:
+            query = query.where(model.table == table)
+        return newest_first(
+            self._session,
+            query,
+            kind=self._list_kind,
+            at=model.created_at,
+            row_id=model.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
 
     def _guard(self, p: PrincipalRef, environment: str, change: str) -> None:
         """Guard a change of a policy in a scope an access file may manage (#46).

@@ -75,7 +75,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "DroppedTableOut",
   '["actions","exists","kind","repository","table"]': "OrphanOut",
   '["active","note","permissions","principal","scope"]': "PermissionsOut",
-  '["admin","ci_token","has_access","language","may_deploy","name","picture","secret_environments","task_token","type"]':
+  '["admin","ci_token","has_access","language","manage_policy","may_deploy","name","picture","secret_environments","task_token","type"]':
     "WhoamiOut",
   '["alert","band","column","effect","id","last_fired_at","observed","observed_at","signal","snapshot_id","state","values_hidden"]':
     "HealthSignalOut",
@@ -207,6 +207,8 @@ export const READ_AS: Readonly<Record<string, string>> = {
     "HeldGrantOut",
   '["applied_at","applied_by","file_name","file_sha256","scope","source_commit"]':
     "ManagedScopeOut",
+  '["applied_at","file_name","scope"]': "ManagedScopeBriefOut",
+  '["at","by","change","reason","scope"]': "AccessOverrideOut",
   '["held_admin","is_active","name","picture","type"]': "PrincipalOut",
   '["overrides","scopes"]': "AccessStatusOut",
   '["asset","asset_scope","environment","expires_at","issued_at","job","key_id","principal","run_id"]':

@@ -3166,6 +3166,10 @@ class WhoamiOut(BaseModel):
         The environments, by name and sorted, where you may manage secrets with this credential
         (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.
         The web interface offers its Secrets page for exactly these.
+    manage_policy
+        Whether you may manage row filters and column masks with this credential
+        (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task
+        or CI token. The web interface offers Row filters & masks from it.
     picture
         The etag of your profile picture, or `null` without one.
     """
@@ -3179,6 +3183,7 @@ class WhoamiOut(BaseModel):
     has_access: bool = False
     may_deploy: bool = False
     secret_environments: list[str] = []
+    manage_policy: bool = False
     picture: str | None = None
 
 
@@ -6912,6 +6917,24 @@ class ManagedScopeOut(BaseModel):
     file_sha256: str
     source_commit: str | None
     applied_by: str | None
+    applied_at: datetime
+
+
+class ManagedScopeBriefOut(BaseModel):
+    """A scope an access file manages, as much as a policy manager needs to know of it.
+
+    Parameters
+    ----------
+    scope
+        ``instance`` or an environment's name.
+    file_name
+        The name of the file that last applied it.
+    applied_at
+        When it was applied.
+    """
+
+    scope: str
+    file_name: str
     applied_at: datetime
 
 

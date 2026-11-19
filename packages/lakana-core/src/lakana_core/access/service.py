@@ -135,6 +135,25 @@ class ManagedScopeView:
 
 
 @dataclass(frozen=True)
+class ManagedScopeBrief:
+    """A scope an access file manages, as much as a policy manager needs to know of it.
+
+    Parameters
+    ----------
+    scope
+        ``instance`` or an environment's name.
+    file_name
+        The name of the file that last applied it.
+    applied_at
+        When.
+    """
+
+    scope: str
+    file_name: str
+    applied_at: datetime
+
+
+@dataclass(frozen=True)
 class OverrideView:
     """A change made by hand in a managed scope that no apply has taken into account yet.
 
@@ -825,6 +844,34 @@ class AccessService:
             },
         )
         return result
+
+    def managed_scopes(self, p: PrincipalRef) -> tuple[ManagedScopeBrief, ...]:
+        """Name the scopes access files manage, for whoever manages row filters and masks.
+
+        A write of a policy in a managed scope answers 409 naming the scope and when it was
+        applied. This answers those two before the write, and also the name of the file that
+        manages the scope, which the 409 does not name, so a policy manager knows which file to
+        change. No hash, commit, applier or override.
+
+        Parameters
+        ----------
+        p
+            The acting principal.
+
+        Returns
+        -------
+        tuple of ManagedScopeBrief
+            Every managed scope, sorted by name.
+
+        Raises
+        ------
+        PermissionDenied
+            Without `MANAGE_POLICY` on the instance (which the `ADMIN` role holds); a task or CI
+            token is refused too.
+        """
+        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
+        rows = self._session.scalars(select(AccessManagedScope).order_by(AccessManagedScope.scope))
+        return tuple(ManagedScopeBrief(row.scope, row.file_name, row.applied_at) for row in rows)
 
     def status(self, p: PrincipalRef) -> AccessStatus:
         """Report the scopes access files manage and the open overrides.

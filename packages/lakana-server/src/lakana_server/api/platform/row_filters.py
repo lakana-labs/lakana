@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.errors import ValidationError
 from lakana_core.models import RowFilter
 from lakana_core.policy.row_filters import RowFilterService
 from lakana_core.policy.shown import ShownPolicy
+from lakana_server.api.platform.listing import set_next_cursor
 from lakana_server.api.platform.namespace_forms import dotted_namespace, joined_namespace
 from lakana_server.api.platform.schemas import RowFilterCreate, RowFilterOut
 from lakana_server.api.platform.subjects import SubjectNames, subject_names
@@ -137,34 +137,45 @@ def create_row_filter(
 
 @router.get("", response_model=list[RowFilterOut], responses=errors(403, 404))
 def list_row_filters(
+    response: Response,
     principal_name: str | None = None,
     group_name: str | None = None,
     environment: str | None = None,
     namespace: str | None = None,
     table: str | None = None,
+    limit: int = Query(default=100, ge=1, le=200),
+    cursor: str | None = Query(default=None, max_length=512),
     principal: PrincipalRef = Depends(get_principal),
     service: RowFilterService = Depends(get_row_filter_service),
     session: Session = Depends(get_session),
 ) -> list[RowFilterOut]:
-    """List the row filters of a principal, group or table.
+    """List row filters.
 
-    Give exactly one of `principal_name`, `group_name` or `environment` with `namespace` and
-    `table`; a row filter always belongs to one table, so there is no list of all of them.
-    Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the
-    name given and 422 when none of those combinations is given.
+    Lists the active row filters, newest first. Every filter is optional, and they combine:
+    `principal_name` or `group_name` (not both) for whom a row filter is made to, and
+    `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs
+    `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the
+    instance. Answers 404 when no principal or group has the name given. The cursor of the
+    next page is in the `X-Next-Cursor` response header.
 
     Parameters
     ----------
+    response
+        The response, for the cursor header.
     principal_name
-        List this principal's own direct filters.
+        Only the row filters made to this principal.
     group_name
-        List this group's own direct filters.
+        Only the row filters made to this group.
     environment
-        The environment to match, for a table-scoped listing.
+        Only the row filters in this environment.
     namespace
-        The dot-joined namespace to match, for a table-scoped listing.
+        Only the row filters on tables of this dot-joined namespace.
     table
-        The table to match, for a table-scoped listing.
+        Only the row filters on this table.
+    limit
+        Most row filters returned (1 to 200).
+    cursor
+        The `X-Next-Cursor` of the previous page; send the same filters.
     principal
         The authenticated caller.
     service
@@ -176,27 +187,21 @@ def list_row_filters(
     -------
     list of RowFilterOut
         The matching row filters.
-
-    Raises
-    ------
-    lakana_core.errors.ValidationError
-        If none of the valid parameter combinations is given.
     """
-    if principal_name is not None:
-        rows = service.list_for_principal(principal, principal_name)
-    elif group_name is not None:
-        rows = service.list_for_group(principal, group_name)
-    elif environment is not None and namespace is not None and table is not None:
-        rows = service.list_for_table(
-            principal, environment=environment, namespace=joined_namespace(namespace), table=table
-        )
-    else:
-        raise ValidationError(
-            "Provide 'principal_name', 'group_name', or 'environment'+'namespace'+'table' together."
-        )
-    shown = service.shown(principal, rows)
-    names = subject_names(session, rows)
-    return [_to_out(row, shown[row.id], names) for row in rows]
+    page = service.list_page(
+        principal,
+        principal_name=principal_name,
+        group_name=group_name,
+        environment=environment,
+        namespace=None if namespace is None else joined_namespace(namespace),
+        table=table,
+        limit=limit,
+        cursor=cursor,
+    )
+    set_next_cursor(response, page.next_cursor)
+    shown = service.shown(principal, page.items)
+    names = subject_names(session, page.items)
+    return [_to_out(row, shown[row.id], names) for row in page.items]
 
 
 @router.delete("/{row_filter_id}", status_code=204, responses=errors(403, 404, 409))

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.ipc
+import pytest
 from fastapi.testclient import TestClient
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
@@ -130,12 +131,121 @@ def test_create_requires_exactly_one_of_principal_or_group(client: TestClient) -
     assert response.status_code == 422
 
 
-def test_list_by_table_requires_all_three_fields_together(client: TestClient) -> None:
-    """Listing by table needs environment, namespace, and table all given."""
-    response = client.get(
-        "/api/v1/column-masks", headers=AUTH_HEADER, params={"environment": "dev"}
+def _three_column_masks(client: TestClient) -> list[str]:
+    """Make three column masks on two tables of dev, oldest first.
+
+    Parameters
+    ----------
+    client
+        The test client.
+
+    Returns
+    -------
+    list of str
+        The ids of the column masks: alice's on customers, the group's on orders, alice's on orders.
+    """
+    create_environment(client)
+    create_table(client, "dev", "gold", "customers")
+    create_table(client, "dev", "gold", "orders")
+    client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": "alice", "type": "USER"})
+    client.post("/api/v1/groups", headers=AUTH_HEADER, json={"name": "analysts"})
+    ids = []
+    for subject, table in [
+        ({"principal": "alice"}, "customers"),
+        ({"group": "analysts"}, "orders"),
+        ({"principal": "alice"}, "orders"),
+    ]:
+        created = client.post(
+            "/api/v1/column-masks",
+            headers=AUTH_HEADER,
+            json={
+                **subject,
+                "environment": "dev",
+                "namespace": "gold",
+                "table": table,
+                "column": "id",
+                "expression": "NULL",
+            },
+        )
+        assert created.status_code == 201, created.text
+        ids.append(created.json()["id"])
+    return ids
+
+
+def test_list_without_a_filter_lists_every_policy(client: TestClient) -> None:
+    """With no filter, every column mask is listed, newest first (was 422)."""
+    ids = _three_column_masks(client)
+
+    listed = client.get("/api/v1/column-masks", headers=AUTH_HEADER)
+
+    assert listed.status_code == 200, listed.text
+    assert [f["id"] for f in listed.json()] == list(reversed(ids))
+    assert "X-Next-Cursor" not in listed.headers
+
+
+def test_list_pages_with_the_next_cursor_header(client: TestClient) -> None:
+    """A page names the next one in `X-Next-Cursor`, and the last page names none."""
+    ids = _three_column_masks(client)
+
+    first = client.get("/api/v1/column-masks", headers=AUTH_HEADER, params={"limit": 2})
+    rest = client.get(
+        "/api/v1/column-masks",
+        headers=AUTH_HEADER,
+        params={"limit": 2, "cursor": first.headers["X-Next-Cursor"]},
     )
-    assert response.status_code == 422
+
+    assert [f["id"] for f in first.json()] == list(reversed(ids))[:2]
+    assert [f["id"] for f in rest.json()] == ids[:1]
+    assert "X-Next-Cursor" not in rest.headers
+
+
+def test_list_by_environment_alone(client: TestClient) -> None:
+    """`environment` alone lists that environment's column masks, and the filters combine."""
+    ids = _three_column_masks(client)
+
+    def listed(**params: str) -> list[str]:
+        response = client.get("/api/v1/column-masks", headers=AUTH_HEADER, params=params)
+        assert response.status_code == 200, response.text
+        return [f["id"] for f in response.json()]
+
+    assert sorted(listed(environment="dev")) == sorted(ids)
+    assert listed(environment="prod") == []
+    assert listed(principal_name="alice", environment="dev", namespace="gold", table="orders") == [
+        ids[2]
+    ]
+
+
+def test_a_page_reads_each_table_s_columns_once(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Three column masks on two tables read the columns of each table once."""
+    _three_column_masks(client)
+    read: list[uuid.UUID] = []
+    real = CatalogService.policy_fields
+
+    def spy(self: CatalogService, p: PrincipalRef, table_id: uuid.UUID) -> object:
+        read.append(table_id)
+        return real(self, p, table_id)
+
+    monkeypatch.setattr(CatalogService, "policy_fields", spy)
+
+    assert client.get("/api/v1/column-masks", headers=AUTH_HEADER).status_code == 200
+    assert len(read) == 2
+    assert len(set(read)) == 2
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"namespace": "gold", "table": "customers"},
+        {"environment": "dev", "table": "customers"},
+        {"principal_name": "alice", "group_name": "analysts"},
+    ],
+    ids=["a table without its environment", "a table without its namespace", "two subjects"],
+)
+def test_list_refuses_a_gap_and_two_subjects(client: TestClient, params: dict[str, str]) -> None:
+    """A table without its namespace, a namespace without its environment, or both subjects."""
+    assert client.get("/api/v1/column-masks", headers=AUTH_HEADER, params=params).status_code == 422
 
 
 def test_list_by_table_is_an_exact_match(client: TestClient) -> None:

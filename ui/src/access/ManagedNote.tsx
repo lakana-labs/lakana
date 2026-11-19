@@ -7,7 +7,7 @@
 import type { JSX } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
-import type { ManagedScopeOut } from "../api/accessFile";
+import type { ManagedScopeBriefOut } from "../api/accessFile";
 import { CopyLine } from "../shell/CopyLine";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
@@ -18,21 +18,21 @@ import { INSTANCE_SCOPE } from "./managed";
 /** Properties of {@link ManagedNote}. */
 export interface ManagedNoteProps {
   /** The managed scope. */
-  readonly scope: ManagedScopeOut;
-  /** The command an administrator runs in an emergency. */
-  readonly command: string;
+  readonly scope: ManagedScopeBriefOut;
+  /** The commands an administrator runs in an emergency, each with its own Copy. */
+  readonly commands: readonly string[];
 }
 
 /**
  * Renders the mark, the sentence naming the file and when it was applied, and the emergency
- * command to copy. The interface itself never overrides a managed scope.
+ * commands to copy. The interface itself never overrides a managed scope.
  *
- * @param props - The scope and the command.
+ * @param props - The scope and the commands.
  * @param props.scope - The managed scope.
- * @param props.command - The emergency command.
+ * @param props.commands - The emergency commands.
  * @returns The note.
  */
-export function ManagedNote({ scope, command }: ManagedNoteProps): JSX.Element {
+export function ManagedNote({ scope, commands }: ManagedNoteProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   return (
@@ -54,7 +54,9 @@ export function ManagedNote({ scope, command }: ManagedNoteProps): JSX.Element {
           }}
         />
       </p>
-      <CopyLine text={command} copyLabel={t("access.managed.copy")} />
+      {commands.map((command) => (
+        <CopyLine key={command} text={command} copyLabel={t("access.managed.copy")} />
+      ))}
     </div>
   );
 }

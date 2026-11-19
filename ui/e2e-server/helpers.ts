@@ -1145,3 +1145,53 @@ export async function startWorker(request: APIRequestContext): Promise<() => Pro
   }
   return stop;
 }
+
+/**
+ * Gives a person one action on the whole instance, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param principal - The person.
+ * @param action - The action, such as `MANAGE_POLICY`.
+ * @returns Resolves once the server answered.
+ */
+export function grantInstanceAction(
+  request: APIRequestContext,
+  principal: string,
+  action: string,
+): Promise<void> {
+  return create(request, "/api/v1/grants", { principal, action, kind: "INSTANCE" });
+}
+
+/**
+ * Creates a row filter, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param body - The row filter, as `POST /api/v1/row-filters` takes it.
+ * @returns Resolves once the server answered.
+ */
+export function createRowFilter(request: APIRequestContext, body: object): Promise<void> {
+  return create(request, "/api/v1/row-filters", body);
+}
+
+/**
+ * Plans and applies an access file, as the bootstrap administrator, the way `lakana access
+ * plan` and `apply` do.
+ *
+ * @param request - The request context.
+ * @param text - The file.
+ */
+export async function applyAccessFile(request: APIRequestContext, text: string): Promise<void> {
+  const headers = { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` };
+  const planned = await request.post("/api/v1/access/plan", { headers, data: { text } });
+  await ensureOk("POST /api/v1/access/plan", planned);
+  const { fingerprint, problems } = (await planned.json()) as {
+    fingerprint: string;
+    problems: string[];
+  };
+  if (problems.length > 0) throw new Error(problems.join("\n"));
+  const applied = await request.post("/api/v1/access/apply", {
+    headers,
+    data: { text, plan_fingerprint: fingerprint },
+  });
+  await ensureOk("POST /api/v1/access/apply", applied);
+}

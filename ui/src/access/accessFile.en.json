@@ -1,0 +1,51 @@
+{
+  "intro": "An access file in Git manages the whole instance or one environment: there, every change to people, groups, grants, row filters and masks goes through the file.",
+  "reading": "Reading the access files' status…",
+  "scopes": {
+    "title": "Managed scopes",
+    "scope": "Scope",
+    "file": "File",
+    "applied": "Last apply",
+    "state": "State",
+    "instance": "The whole instance",
+    "sha": "sha256 {{sha}}",
+    "commit": ", commit {{commit}}",
+    "by": "by <name/>",
+    "byDeleted": "by a deleted account",
+    "inSync": "In sync",
+    "changed": "Changed by hand ({{count}})",
+    "none": "No access file manages any scope yet. Access is changed here and from the command line."
+  },
+  "changes": {
+    "title": "Changes by hand since the last apply",
+    "region": "Changes by hand",
+    "scope": "Scope",
+    "change": "Change",
+    "why": "Why",
+    "by": "By",
+    "when": "When",
+    "deleted": "a deleted account",
+    "revert": "The next apply reverts each change the file does not list."
+  },
+  "plan": {
+    "title": "Plan and apply",
+    "text": "Plan and apply run from the command line or CI, with the file from Git. <code>lakana access plan</code> also tells whether Git holds a newer file than the one applied.",
+    "planCommand": "lakana access plan {{- file}}",
+    "applyCommand": "lakana access apply {{- file}} --source-commit COMMIT",
+    "exportCommand": "lakana access export --scope instance -o {{- file}}",
+    "copy": "Copy command"
+  },
+  "download": {
+    "action": "Download access file",
+    "title": "Download access file",
+    "what": "What to export",
+    "instance": "The whole instance",
+    "some": "Some environments",
+    "environments": "Environments",
+    "help": "The live access of what you choose, as an access file: groups, service accounts, memberships, grants, row filters, column masks and CI trust rules. It holds no token, secret or person.",
+    "submit": "Download",
+    "chooseOne": "Choose at least one environment.",
+    "reading": "Reading the environments…",
+    "done": "Downloaded {{name}}."
+  }
+}

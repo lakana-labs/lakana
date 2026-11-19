@@ -844,12 +844,12 @@ _ARTIFACT_HANDLING = {
     "RowFilterService": {
         "check_target": "refuses",
         "create": "refuses",
-        "list_for_table": "describes",
+        "list_page": "describes",
     },
     "ColumnMaskService": {
         "check_target": "refuses",
         "create": "refuses",
-        "list_for_table": "describes",
+        "list_page": "describes",
     },
     "ArtifactService": {
         "list_artifacts": "artifact-surface",

@@ -17,7 +17,8 @@ import "../settings/settingsStrings";
 import { useResource } from "../shell/useResource";
 import "./access.css";
 import "./accessStrings";
-import { type FilterStep, GrantFilters } from "./GrantFilters";
+import { GrantFilters } from "./GrantFilters";
+import type { FilterStep } from "./WhoFilter";
 import { GrantsList } from "./GrantsList";
 import { managedScopeOf } from "./managed";
 import { ManagedNote } from "./ManagedNote";
@@ -83,7 +84,7 @@ export function GrantsPage(): JSX.Element {
         />
       )}
       {managedInstance !== undefined && managedInstance !== null && (
-        <ManagedNote scope={managedInstance} command={t("access.managed.grantCommand")} />
+        <ManagedNote scope={managedInstance} commands={[t("access.managed.grantCommand")]} />
       )}
       <GrantFilters filter={filter} environments={choices} onChange={go} />
       <p className="step-status" role="status">

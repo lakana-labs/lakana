@@ -613,7 +613,247 @@ export async function stubSecretsOfDevOnly(page: Page): Promise<void> {
       has_access: true,
       may_deploy: false,
       secret_environments: ["dev"],
+      manage_policy: false,
       picture: "e1",
     }),
+  );
+}
+
+/** The text the stubbed export answers, with a sentinel that must stay nowhere on the page. */
+export const EXPORTED = "version: 1\n# sentinel-e2e-7Qx\nmanages: [instance]\n";
+
+/** An expression of 4,000 characters, the longest a statement may be by default. */
+export const LONG_EXPRESSION = `region IN (${"'EU', ".repeat(570)}'US')`.slice(0, 4000);
+
+/** The paths {@link stubPolicies} answers, beside those of `session.ts`. */
+export const POLICIES_STUBBED = [
+  "/api/v1/access/managed-scopes",
+  "/api/v1/access/status",
+  "/api/v1/access/export",
+  "/api/v1/environments",
+  "/api/v1/row-filters",
+  "/api/v1/column-masks",
+  ...["f-1", "f-2", "f-3", "f-4"].map((id) => `/api/v1/row-filters/${id}`),
+  ...["m-1", "m-2", "m-3"].map((id) => `/api/v1/column-masks/${id}`),
+  "/api/v1/sign-in/step-up/options",
+  "/api/v1/sign-in/step-up",
+];
+
+/** Options of {@link stubPolicies}. */
+export interface PoliciesStubOptions {
+  /** The scopes an access file manages: `instance`, environments' names. */
+  readonly managed?: readonly string[];
+  /** Whether the managed scopes carry a change made by hand. */
+  readonly overrides?: boolean;
+  /** Whether a row filter's expression is 4,000 characters long. */
+  readonly longExpression?: boolean;
+  /** Whether the person is a policy manager who is no administrator. */
+  readonly policyManager?: boolean;
+}
+
+/**
+ * A row filter or column mask as the lists answer it.
+ *
+ * @param id - Its id.
+ * @param who - The group, or the person or service account.
+ * @param on - Its environment, namespace and table.
+ * @param on.environment - The environment.
+ * @param on.namespace - The dotted namespace.
+ * @param on.table - The table.
+ * @param expression - The expression.
+ * @param column - A mask's column.
+ * @returns The policy.
+ */
+function policy(
+  id: string,
+  who: { group: string } | { person: string; service?: boolean },
+  on: { environment: string; namespace: string; table: string },
+  expression: string,
+  column?: string,
+): Record<string, unknown> {
+  const person = "person" in who ? who : null;
+  return {
+    id,
+    principal_id: person === null ? null : `${person.person}-id`,
+    group_id: person === null ? "analysts-id" : null,
+    principal:
+      person === null
+        ? null
+        : {
+            id: `${person.person}-id`,
+            name: person.person,
+            principal_type: person.service === true ? "service" : "user",
+          },
+    group: "group" in who ? who.group : null,
+    ...on,
+    expression,
+    created_by: "admin-id",
+    created_at: AT,
+    bound: true,
+    ...(column === undefined ? {} : { column }),
+  };
+}
+
+/**
+ * Answers Row filters & masks and Access file: three row filters (the list in two pages) and two
+ * column masks on dev and prod, the managed scopes, the access files' status and the export;
+ * writes change what the next read answers. Register it after `signInAsAdmin`.
+ *
+ * @param page - The page.
+ * @param options - The managed scopes, the hand changes, the long expression and the person.
+ */
+export async function stubPolicies(page: Page, options: PoliciesStubOptions = {}): Promise<void> {
+  const managed = options.managed ?? [];
+  const station = { environment: "dev", namespace: "gold", table: "station_ranking" };
+  const sales = { environment: "prod", namespace: "gold.sales", table: "fact_sales" };
+  let filters = [
+    policy("f-1", { person: "maria" }, station, "region = 'EU'"),
+    policy("f-2", { group: "analysts" }, sales, "store_id IN (1, 2, 3)"),
+    policy(
+      "f-3",
+      { person: "ci-bot", service: true },
+      station,
+      options.longExpression === true ? LONG_EXPRESSION : "has_group('ops')",
+    ),
+  ];
+  let masks = [
+    policy("m-1", { group: "analysts" }, station, "'***' || substr(email, -4)", "email"),
+    policy("m-2", { person: "maria" }, sales, "md5(customer_email)", "customer_email"),
+  ];
+  if (options.policyManager === true) {
+    await page.route("**/api/v1/whoami", (route) =>
+      answer(route, {
+        name: "admin",
+        type: "USER",
+        task_token: null,
+        ci_token: null,
+        language: null,
+        admin: false,
+        has_access: true,
+        may_deploy: false,
+        secret_environments: [],
+        manage_policy: true,
+        picture: "e1",
+      }),
+    );
+  }
+  await page.route(
+    (url) => url.pathname === "/api/v1/environments",
+    (route) =>
+      answer(
+        route,
+        ["dev", "prod"].map((name) => ({
+          name,
+          storage_root: `file:///srv/lakana/${name}`,
+          storage_secret_ref: null,
+          is_protected: name === "prod",
+          properties: {},
+          retention_days: null,
+          deleted_at: null,
+          purge_after: null,
+        })),
+      ),
+  );
+  await page.route("**/api/v1/access/managed-scopes", (route) =>
+    answer(
+      route,
+      managed.map((scope) => ({ scope, file_name: "access.yaml", applied_at: AT })),
+    ),
+  );
+  await page.route("**/api/v1/access/status", (route) =>
+    answer(route, {
+      scopes: managed.map((scope) => ({
+        scope,
+        file_name: "access.yaml",
+        file_sha256: "3f2a9b8c7d6e5f4a3b2c1d0e",
+        source_commit: "0123456789abcdef0123",
+        applied_by: "admin",
+        applied_at: AT,
+      })),
+      overrides:
+        options.overrides === true
+          ? [
+              {
+                scope: managed[0] ?? "instance",
+                change: "grant VIEWER on prod to user:bob",
+                reason: "incident 42",
+                by: "admin",
+                at: AT,
+              },
+            ]
+          : [],
+    }),
+  );
+  await page.route("**/api/v1/access/export*", (route) => answer(route, { text: EXPORTED }));
+  /**
+   * Serves one kind of policy: the list (the row filters in two pages), a new one and a delete.
+   *
+   * @param path - The list's path.
+   * @param read - The policies now.
+   * @param write - Replaces them.
+   * @param paged - Whether the list comes in two pages.
+   */
+  const serve = async (
+    path: string,
+    read: () => Record<string, unknown>[],
+    write: (next: Record<string, unknown>[]) => void,
+    paged: boolean,
+  ): Promise<void> => {
+    await page.route(
+      (url) => url.pathname === path || url.pathname.startsWith(`${path}/`),
+      (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.method() === "DELETE") {
+          write(read().filter((one) => one["id"] !== url.pathname.split("/").at(-1)));
+          return route.fulfill({ status: 204 });
+        }
+        if (request.method() === "POST") {
+          const body = request.postDataJSON() as Record<string, string | null>;
+          const made = policy(
+            path.endsWith("masks") ? "m-3" : "f-4",
+            body["group"] === null
+              ? { person: body["principal"] ?? "" }
+              : { group: body["group"] ?? "" },
+            {
+              environment: body["environment"] ?? "",
+              namespace: body["namespace"] ?? "",
+              table: body["table"] ?? "",
+            },
+            body["expression"] ?? "",
+            body["column"] ?? undefined,
+          );
+          write([made, ...read()]);
+          return answer(route, made, 201);
+        }
+        const environment = url.searchParams.get("environment");
+        const found = read().filter(
+          (one) => environment === null || one["environment"] === environment,
+        );
+        if (!paged || environment !== null) return answer(route, found);
+        if (url.searchParams.get("cursor") === "c2") return answer(route, found.slice(2));
+        return route.fulfill({
+          status: 200,
+          json: found.slice(0, 2),
+          ...(found.length > 2 ? { headers: { "X-Next-Cursor": "c2" } } : {}),
+        });
+      },
+    );
+  };
+  await serve(
+    "/api/v1/row-filters",
+    () => filters,
+    (next) => {
+      filters = next;
+    },
+    true,
+  );
+  await serve(
+    "/api/v1/column-masks",
+    () => masks,
+    (next) => {
+      masks = next;
+    },
+    false,
   );
 }

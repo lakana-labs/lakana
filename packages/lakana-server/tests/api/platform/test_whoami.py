@@ -21,6 +21,7 @@ def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
         "has_access": True,
         "may_deploy": False,
         "secret_environments": [],
+        "manage_policy": True,
         "picture": None,
     }
 
@@ -54,6 +55,7 @@ def test_whoami_describes_a_task_token_callers_scope(client: TestClient) -> None
         "has_access": True,
         "may_deploy": False,
         "secret_environments": [],
+        "manage_policy": False,
         "picture": None,
     }
 

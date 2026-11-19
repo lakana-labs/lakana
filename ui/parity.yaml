@@ -22,9 +22,10 @@
 "access apply": { class: git, reason: "access file in managed scopes; status shown in 7" }
 "access explain": { class: ui, part: 7, done: true }
 "access grants": { class: read, part: 7, done: true }
-"access export": { class: ui, part: 7, note: "a download of the live access as an access file" }
+"access export":
+  { class: ui, part: 7, note: "a download of the live access as an access file", done: true }
 "access plan": { class: git, reason: "pre-commit validation of an access file" }
-"access status": { class: read, part: 7 }
+"access status": { class: read, part: 7, done: true }
 "artifact download":
   {
     class: ui,
@@ -57,9 +58,9 @@
 "ci-trust list": { class: ui, part: 7 }
 "ci-trust show": { class: ui, part: 7 }
 "ci-trust update": { class: ui, part: 7 }
-"column-mask create": { class: ui, part: 7 }
-"column-mask list": { class: ui, part: 7 }
-"column-mask revoke": { class: ui, part: 7 }
+"column-mask create": { class: ui, part: 7, done: true }
+"column-mask list": { class: ui, part: 7, done: true }
+"column-mask revoke": { class: ui, part: 7, done: true }
 "configuration": { class: read, part: 8 }
 "connection create": { class: ui, part: 6, done: true }
 "connection delete": { class: ui, part: 6, done: true }
@@ -162,9 +163,9 @@
 "repo test": { class: ui, part: 2 }
 "repo update": { class: ui, part: 8 }
 "rollback": { class: ui, part: 5, done: true }
-"row-filter create": { class: ui, part: 7 }
-"row-filter list": { class: ui, part: 7 }
-"row-filter revoke": { class: ui, part: 7 }
+"row-filter create": { class: ui, part: 7, done: true }
+"row-filter list": { class: ui, part: 7, done: true }
+"row-filter revoke": { class: ui, part: 7, done: true }
 "run": { class: ui, part: 5 }
 "runs cancel": { class: ui, part: 5, done: true }
 "runs failed": { class: ui, part: 5, done: true }
@@ -246,7 +247,7 @@
 "whoami": { class: read, part: 1 }
 "worker list": { class: ui, part: 8 }
 "DELETE /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
-"DELETE /api/v1/column-masks/{column_mask_id}": { class: ui, part: 7 }
+"DELETE /api/v1/column-masks/{column_mask_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/environments/{environment_name}/connections/{connection_name}":
   { class: ui, part: 6, done: true }
 "DELETE /api/v1/environments/{environment_name}/secrets/{secret_name}":
@@ -275,18 +276,30 @@
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1 }
 "DELETE /api/v1/repositories/{name}": { class: ui, part: 8 }
-"DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7 }
+"DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/sign-in/notices/{notice_id}": { class: ui, part: 1 }
 "DELETE /api/v1/sign-in/session": { class: ui, part: 1 }
 "DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7, done: true }
 "GET /api/v1/access/export":
-  { class: ui, part: 7, note: "a download of the live access as an access file" }
-"GET /api/v1/access/status": { class: read, part: 7 }
+  { class: ui, part: 7, note: "a download of the live access as an access file", done: true }
+"GET /api/v1/access/managed-scopes":
+  {
+    class: read,
+    part: 7,
+    note: "Row filters & masks marks the policies an access file manages",
+    done: true,
+  }
+"GET /api/v1/access/status": { class: read, part: 7, done: true }
 "GET /api/v1/audit-events": { class: ui, part: 8 }
 "GET /api/v1/ci-trust-rules": { class: ui, part: 7 }
 "GET /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7 }
 "GET /api/v1/column-masks":
-  { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
+  {
+    class: ui,
+    part: 7,
+    note: "Settings › Access › Row filters & masks; the table page's Access tab shows a table's",
+    done: true,
+  }
 "GET /api/v1/connections": { class: ui, part: 6, done: true }
 "GET /api/v1/connections/environments": { class: ui, part: 6, done: true }
 "GET /api/v1/deploys": { class: read, part: 5 }
@@ -437,7 +450,12 @@
 "GET /api/v1/repositories/{name}": { class: ui, part: 8 }
 "GET /api/v1/repository-probes/{probe_id}": { class: ui, part: 2 }
 "GET /api/v1/row-filters":
-  { class: ui, part: 7, note: "the table page's Access tab shows them read-only" }
+  {
+    class: ui,
+    part: 7,
+    note: "Settings › Access › Row filters & masks; the table page's Access tab shows a table's",
+    done: true,
+  }
 "GET /api/v1/runs": { class: ui, part: 5, done: true }
 "GET /api/v1/runs/failed": { class: ui, part: 5, done: true }
 "GET /api/v1/scheduler": { class: ui, part: 8 }
@@ -486,7 +504,7 @@
 "POST /api/v1/ci-trust-rules/explain": { class: ui, part: 7 }
 "POST /api/v1/ci-trust-rules/{rule_id}/disable": { class: ui, part: 7 }
 "POST /api/v1/ci-trust-rules/{rule_id}/enable": { class: ui, part: 7 }
-"POST /api/v1/column-masks": { class: ui, part: 7 }
+"POST /api/v1/column-masks": { class: ui, part: 7, done: true }
 "POST /api/v1/environments": { class: ui, part: 8 }
 "POST /api/v1/environments/{environment_name}/connection-tests": { class: ui, part: 6, done: true }
 "POST /api/v1/environments/{environment_name}/connections": { class: ui, part: 6, done: true }
@@ -567,7 +585,7 @@
 "POST /api/v1/repositories": { class: ui, part: 8 }
 "POST /api/v1/repositories/{name}/deploy-key": { class: ui, part: 2 }
 "POST /api/v1/repository-probes": { class: ui, part: 2 }
-"POST /api/v1/row-filters": { class: ui, part: 7 }
+"POST /api/v1/row-filters": { class: ui, part: 7, done: true }
 "POST /api/v1/sign-in/links/describe": { class: ui, part: 1 }
 "POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
 "POST /api/v1/sign-in/local-link":

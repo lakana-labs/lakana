@@ -13708,8 +13708,8 @@
         "tags": [
           "row-filters"
         ],
-        "summary": "List the row filters of a principal, group or table",
-        "description": "Give exactly one of `principal_name`, `group_name` or `environment` with `namespace` and `table`; a row filter always belongs to one table, so there is no list of all of them. Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given and 422 when none of those combinations is given.",
+        "summary": "List row filters",
+        "description": "Lists the active row filters, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a row filter is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
         "operationId": "list_row_filters_api_v1_row_filters_get",
         "parameters": [
           {
@@ -13727,7 +13727,7 @@
               ],
               "title": "Principal Name"
             },
-            "description": "List this principal's own direct filters."
+            "description": "Only the row filters made to this principal."
           },
           {
             "name": "group_name",
@@ -13744,7 +13744,7 @@
               ],
               "title": "Group Name"
             },
-            "description": "List this group's own direct filters."
+            "description": "Only the row filters made to this group."
           },
           {
             "name": "environment",
@@ -13761,7 +13761,7 @@
               ],
               "title": "Environment"
             },
-            "description": "The environment to match, for a table-scoped listing."
+            "description": "Only the row filters in this environment."
           },
           {
             "name": "namespace",
@@ -13778,7 +13778,7 @@
               ],
               "title": "Namespace"
             },
-            "description": "The dot-joined namespace to match, for a table-scoped listing."
+            "description": "Only the row filters on tables of this dot-joined namespace."
           },
           {
             "name": "table",
@@ -13795,7 +13795,38 @@
               ],
               "title": "Table"
             },
-            "description": "The table to match, for a table-scoped listing."
+            "description": "Only the row filters on this table."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most row filters returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same filters."
           },
           {
             "name": "authorization",
@@ -14137,8 +14168,8 @@
         "tags": [
           "column-masks"
         ],
-        "summary": "List the column masks of a principal, group or table",
-        "description": "Give exactly one of `principal_name`, `group_name` or `environment` with `namespace` and `table`; a column mask always belongs to one table, so there is no list of all of them. Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given and 422 when none of those combinations is given.",
+        "summary": "List column masks",
+        "description": "Lists the active column masks, newest first. Every filter is optional, and they combine: `principal_name` or `group_name` (not both) for whom a column mask is made to, and `environment`, with `namespace` and then `table`, for where it applies (`namespace` needs `environment`, and `table` needs `namespace`; 422 otherwise). Needs `MANAGE_POLICY` on the instance. Answers 404 when no principal or group has the name given. The cursor of the next page is in the `X-Next-Cursor` response header.",
         "operationId": "list_column_masks_api_v1_column_masks_get",
         "parameters": [
           {
@@ -14156,7 +14187,7 @@
               ],
               "title": "Principal Name"
             },
-            "description": "List this principal's own direct masks."
+            "description": "Only the column masks made to this principal."
           },
           {
             "name": "group_name",
@@ -14173,7 +14204,7 @@
               ],
               "title": "Group Name"
             },
-            "description": "List this group's own direct masks."
+            "description": "Only the column masks made to this group."
           },
           {
             "name": "environment",
@@ -14190,7 +14221,7 @@
               ],
               "title": "Environment"
             },
-            "description": "The environment to match, for a table-scoped listing."
+            "description": "Only the column masks in this environment."
           },
           {
             "name": "namespace",
@@ -14207,7 +14238,7 @@
               ],
               "title": "Namespace"
             },
-            "description": "The dot-joined namespace to match, for a table-scoped listing."
+            "description": "Only the column masks on tables of this dot-joined namespace."
           },
           {
             "name": "table",
@@ -14224,7 +14255,38 @@
               ],
               "title": "Table"
             },
-            "description": "The table to match, for a table-scoped listing."
+            "description": "Only the column masks on this table."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "Most column masks returned (1 to 200)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 512
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            },
+            "description": "The `X-Next-Cursor` of the previous page; send the same filters."
           },
           {
             "name": "authorization",
@@ -22587,6 +22649,82 @@
         }
       }
     },
+    "/api/v1/access/managed-scopes": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List the scopes access files manage, for whoever manages row filters and masks",
+        "description": "Each scope with the name of the file that manages it and when that file was applied, sorted by scope. A write of a row filter or column mask in a managed scope answers 409; this tells a policy manager so before the write. Needs `MANAGE_POLICY` on the instance (which the `ADMIN` role holds); `GET /api/v1/access/status` tells an administrator more.",
+        "operationId": "managed_scopes_api_v1_access_managed_scopes_get",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ManagedScopeBriefOut"
+                  },
+                  "title": "Response Managed Scopes Api V1 Access Managed Scopes Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/access/status": {
       "get": {
         "tags": [
@@ -22749,7 +22887,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it: the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets page from these four. `picture` is the etag of your profile picture, or `null` without one.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, and `manage_policy` whether it may manage row filters and column masks with it: the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets and Row filters & masks pages from these five. `picture` is the etag of your profile picture, or `null` without one.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -32629,6 +32767,31 @@
         "title": "MaintenanceIn",
         "description": "Request body for table maintenance.\n\nParameters\n----------\nkeep_days\n    Snapshots younger than this many days are kept.\nkeep_last\n    The most recent this many snapshots are always kept.\ndry_run\n    Report what would happen without changing anything.\nolder_than_hours\n    Unreferenced files younger than this many hours are never deleted;\n    1 to 87600 (ten years)."
       },
+      "ManagedScopeBriefOut": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "file_name": {
+            "type": "string",
+            "title": "File Name"
+          },
+          "applied_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Applied At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "file_name",
+          "applied_at"
+        ],
+        "title": "ManagedScopeBriefOut",
+        "description": "A scope an access file manages, as much as a policy manager needs to know of it.\n\nParameters\n----------\nscope\n    ``instance`` or an environment's name.\nfile_name\n    The name of the file that last applied it.\napplied_at\n    When it was applied."
+      },
       "ManagedScopeOut": {
         "properties": {
           "scope": {
@@ -39675,6 +39838,11 @@
             "title": "Secret Environments",
             "default": []
           },
+          "manage_policy": {
+            "type": "boolean",
+            "title": "Manage Policy",
+            "default": false
+          },
           "picture": {
             "anyOf": [
               {
@@ -39694,7 +39862,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\npicture\n    The etag of your profile picture, or `null` without one."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\npicture\n    The etag of your profile picture, or `null` without one."
       },
       "WorkEnvironmentOut": {
         "properties": {

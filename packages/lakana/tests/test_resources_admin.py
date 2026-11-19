@@ -483,7 +483,12 @@ def test_row_filters_list_sends_only_the_given_filters() -> None:
     row_filters = RowFilters(_transport(handler))
     row_filters.list(environment="dev", namespace="gold", table="customers")
 
-    assert seen["params"] == {"environment": "dev", "namespace": "gold", "table": "customers"}
+    assert seen["params"] == {
+        "environment": "dev",
+        "namespace": "gold",
+        "table": "customers",
+        "limit": "100",
+    }
 
 
 def test_a_listed_policy_carries_bound_and_one_from_an_older_server_has_none() -> None:
@@ -588,7 +593,7 @@ def test_column_masks_list_sends_only_the_given_filters() -> None:
     column_masks = ColumnMasks(_transport(handler))
     column_masks.list(group_name="admins")
 
-    assert seen["params"] == {"group_name": "admins"}
+    assert seen["params"] == {"group_name": "admins", "limit": "100"}
 
 
 def test_column_masks_revoke_sends_a_delete() -> None:
@@ -601,6 +606,79 @@ def test_column_masks_revoke_sends_a_delete() -> None:
 
     column_masks = ColumnMasks(_transport(handler))
     column_masks.revoke("cm1")
+
+
+def _policy_pages(row: dict[str, Any]) -> tuple[list[dict[str, str]], HttpTransport]:
+    """Serve two pages of policies, the first naming the second in `X-Next-Cursor`.
+
+    Parameters
+    ----------
+    row
+        The fields every policy of the answer shares.
+
+    Returns
+    -------
+    tuple
+        The query parameters of each request, as sent, and the transport.
+    """
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        params = dict(request.url.params)
+        seen.append(params)
+        if "cursor" not in params:
+            return httpx.Response(
+                200,
+                json=[{**row, "id": "a"}, {**row, "id": "b"}],
+                headers={"X-Next-Cursor": "c2"},
+            )
+        return httpx.Response(200, json=[{**row, "id": "c"}])
+
+    return seen, _transport(handler)
+
+
+_POLICY_ROW = {
+    "principal_id": "p1",
+    "group_id": None,
+    "environment": "dev",
+    "namespace": "gold",
+    "table": "customers",
+    "column": "ssn",
+    "expression": "NULL",
+    "created_by": "admin1",
+    "created_at": "2024-01-01T00:00:00+00:00",
+}
+
+
+@pytest.mark.parametrize("kind", [RowFilters, ColumnMasks], ids=["row filters", "column masks"])
+def test_a_policy_list_follows_the_cursor_to_the_last_page(
+    kind: type[RowFilters] | type[ColumnMasks],
+) -> None:
+    """`list` returns every match, reading page after page until no cursor comes."""
+    seen, transport = _policy_pages(_POLICY_ROW)
+
+    listed = kind(transport).list(environment="dev")
+
+    assert [policy.id for policy in listed] == ["a", "b", "c"]
+    assert seen == [
+        {"environment": "dev", "limit": "100"},
+        {"environment": "dev", "limit": "100", "cursor": "c2"},
+    ]
+
+
+@pytest.mark.parametrize("kind", [RowFilters, ColumnMasks], ids=["row filters", "column masks"])
+def test_a_policy_list_page_sends_the_limit_and_returns_the_cursor(
+    kind: type[RowFilters] | type[ColumnMasks],
+) -> None:
+    """`list_page` reads one page and names the next; `iter` walks every page."""
+    seen, transport = _policy_pages(_POLICY_ROW)
+    policies = kind(transport)
+
+    page = policies.list_page(limit=2, group_name="analysts")
+
+    assert ([policy.id for policy in page.items], page.next_cursor) == (["a", "b"], "c2")
+    assert seen == [{"group_name": "analysts", "limit": "2"}]
+    assert [policy.id for policy in policies.iter(page_size=2)] == ["a", "b", "c"]
 
 
 # --- Secrets -------------------------------------------------------------

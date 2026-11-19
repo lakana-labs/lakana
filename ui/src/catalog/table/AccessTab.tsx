@@ -12,16 +12,15 @@ import { Link } from "react-router";
 import {
   type ColumnMaskOut,
   type GrantLevel,
-  type GrantOut,
-  listColumnMasks,
   listGrantsAt,
   listInstanceGrants,
-  listRowFilters,
   type PermissionOut,
   type RowFilterOut,
 } from "../../api";
-import { grantsPath } from "../../access/accessPaths";
-import { personPath } from "../../access/personPath";
+import { grantsPath, policiesPath } from "../../access/accessPaths";
+import { SubjectName } from "../../access/SubjectName";
+import type { CursorPage } from "../../api/manage";
+import { listColumnMaskPage, listRowFilterPage, type PolicyFilter } from "../../api/policies";
 import { useMe } from "../../shell/me";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { type Resource, useResource } from "../../shell/useResource";
@@ -34,47 +33,6 @@ import { useTableData } from "./TableContext";
 
 /** The actions the tab answers, besides editing the texts, in the order it shows them. */
 const ACTIONS = ["READ_TABLE", "WRITE_TABLE", "DROP_TABLE"] as const;
-
-/** Who a grant, row filter or column mask is for. */
-type Subject = Pick<GrantOut, "principal_id" | "group_id" | "principal" | "group">;
-
-/**
- * Who a grant or a policy is for: a person or service account, linked to their page; a group,
- * as plain text; or, when the subject was deleted while the list was read, words and the id.
- *
- * @param props - The subject.
- * @param props.subject - Who it is for.
- * @returns The subject.
- */
-function SubjectName({ subject }: { readonly subject: Subject }): JSX.Element {
-  const { t } = useTranslation();
-  if (subject.principal !== null) {
-    return (
-      <>
-        <Link to={personPath(subject.principal.name)}>
-          <VisibleText text={subject.principal.name} breakable />
-        </Link>
-        {subject.principal.principal_type === "service" && (
-          <span className="second">{t("table.access.serviceAccount")}</span>
-        )}
-      </>
-    );
-  }
-  if (subject.group !== null) {
-    return (
-      <Trans
-        t={t}
-        i18nKey="table.access.group"
-        components={{ name: <VisibleText text={subject.group} breakable /> }}
-      />
-    );
-  }
-  return (
-    <>
-      {t("table.access.removed")} <code>{subject.principal_id ?? subject.group_id}</code>
-    </>
-  );
-}
 
 /** One answer of the "What you may do" list. */
 interface Answer {
@@ -284,7 +242,7 @@ function GrantsAt({ level, heading }: GrantsAtProps): JSX.Element {
                 {grants.map((grant) => (
                   <tr key={grant.id}>
                     <td>
-                      <SubjectName subject={grant} />
+                      <SubjectName subject={grant} link />
                     </td>
                     <td>
                       {/* A grant gives a role or a single action, never both. */}
@@ -379,6 +337,70 @@ function WhoHasAccess(): JSX.Element {
   );
 }
 
+/** The most row filters or column masks the tab reads of a table: the server's largest page. */
+const MOST_POLICIES = 200;
+
+/**
+ * The policy lists' filter of exactly one table.
+ *
+ * @param environment - The table's environment.
+ * @param namespace - Its dotted namespace.
+ * @param table - Its name.
+ * @returns The filter.
+ */
+function tableFilter(environment: string, namespace: string, table: string): PolicyFilter {
+  return { who: null, environment, namespace, table };
+}
+
+/**
+ * A list of the table's policies, and the sentence that says when the server holds more.
+ *
+ * @param props - The header cells, the rows and whether there are more.
+ * @param props.head - The header row's cells.
+ * @param props.more - Whether the server named a next page.
+ * @param props.children - The rows.
+ * @returns The list.
+ */
+function PolicyTable({
+  head,
+  more,
+  children,
+}: {
+  readonly head: ReactNode;
+  readonly more: boolean;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <>
+      <table className="list list-static">
+        <thead>
+          <tr>{head}</tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+      {more && <p className="second">{t("table.access.policiesCut")}</p>}
+    </>
+  );
+}
+
+/**
+ * A policy's expression, as code.
+ *
+ * @param props - The expression.
+ * @param props.expression - The SQL expression.
+ * @returns The cell.
+ */
+function ExpressionCell({ expression }: { readonly expression: string }): JSX.Element {
+  return (
+    <td>
+      <code className="expression">
+        <VisibleText text={expression} breakable />
+      </code>
+    </td>
+  );
+}
+
 /**
  * The table's row filters: who each is for and the rows it shows them.
  *
@@ -389,10 +411,10 @@ function RowFilters(): JSX.Element {
   const { ref } = useTableData();
   const { environment, namespace, name } = ref;
   const load = useCallback(
-    () => listRowFilters({ environment, namespace, name }),
+    () => listRowFilterPage(tableFilter(environment, namespace, name), null, MOST_POLICIES),
     [environment, namespace, name],
   );
-  const resource = useResource<readonly RowFilterOut[]>(load);
+  const resource = useResource<CursorPage<RowFilterOut>>(load);
   return (
     <ListSection
       heading={t("table.access.filters.heading")}
@@ -400,32 +422,28 @@ function RowFilters(): JSX.Element {
       resource={resource}
       reading={t("table.access.filters.reading")}
     >
-      {(filters) =>
+      {({ items: filters, nextCursor }) =>
         filters.length === 0 ? (
           <p className="second">{t("table.access.filters.none")}</p>
         ) : (
-          <table className="list list-static">
-            <thead>
-              <tr>
+          <PolicyTable
+            more={nextCursor !== null}
+            head={
+              <>
                 <th scope="col">{t("table.access.who.subject")}</th>
                 <th scope="col">{t("table.access.filters.expression")}</th>
+              </>
+            }
+          >
+            {filters.map((filter) => (
+              <tr key={filter.id}>
+                <td>
+                  <SubjectName subject={filter} link />
+                </td>
+                <ExpressionCell expression={filter.expression} />
               </tr>
-            </thead>
-            <tbody>
-              {filters.map((filter) => (
-                <tr key={filter.id}>
-                  <td>
-                    <SubjectName subject={filter} />
-                  </td>
-                  <td>
-                    <code className="expression">
-                      <VisibleText text={filter.expression} breakable />
-                    </code>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </PolicyTable>
         )
       }
     </ListSection>
@@ -442,10 +460,10 @@ function ColumnMasks(): JSX.Element {
   const { ref } = useTableData();
   const { environment, namespace, name } = ref;
   const load = useCallback(
-    () => listColumnMasks({ environment, namespace, name }),
+    () => listColumnMaskPage(tableFilter(environment, namespace, name), null, MOST_POLICIES),
     [environment, namespace, name],
   );
-  const resource = useResource<readonly ColumnMaskOut[]>(load);
+  const resource = useResource<CursorPage<ColumnMaskOut>>(load);
   return (
     <ListSection
       heading={t("table.access.masks.heading")}
@@ -453,36 +471,32 @@ function ColumnMasks(): JSX.Element {
       resource={resource}
       reading={t("table.access.masks.reading")}
     >
-      {(masks) =>
+      {({ items: masks, nextCursor }) =>
         masks.length === 0 ? (
           <p className="second">{t("table.access.masks.none")}</p>
         ) : (
-          <table className="list list-static">
-            <thead>
-              <tr>
+          <PolicyTable
+            more={nextCursor !== null}
+            head={
+              <>
                 <th scope="col">{t("table.access.who.subject")}</th>
                 <th scope="col">{t("table.access.masks.column")}</th>
                 <th scope="col">{t("table.access.masks.expression")}</th>
+              </>
+            }
+          >
+            {masks.map((mask) => (
+              <tr key={mask.id}>
+                <td>
+                  <SubjectName subject={mask} link />
+                </td>
+                <td>
+                  <VisibleText text={mask.column} breakable />
+                </td>
+                <ExpressionCell expression={mask.expression} />
               </tr>
-            </thead>
-            <tbody>
-              {masks.map((mask) => (
-                <tr key={mask.id}>
-                  <td>
-                    <SubjectName subject={mask} />
-                  </td>
-                  <td>
-                    <VisibleText text={mask.column} breakable />
-                  </td>
-                  <td>
-                    <code className="expression">
-                      <VisibleText text={mask.expression} breakable />
-                    </code>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+            ))}
+          </PolicyTable>
         )
       }
     </ListSection>
@@ -498,6 +512,7 @@ function ColumnMasks(): JSX.Element {
 export default function AccessTab(): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
+  const { ref } = useTableData();
   return (
     <div className="access-tab">
       <Mine />
@@ -506,6 +521,17 @@ export default function AccessTab(): JSX.Element {
           <WhoHasAccess />
           <RowFilters />
           <ColumnMasks />
+          <p>
+            <Link
+              to={policiesPath({
+                environment: ref.environment,
+                namespace: ref.namespace,
+                table: ref.name,
+              })}
+            >
+              {t("table.access.managePolicies")}
+            </Link>
+          </p>
         </>
       )}
       {!me.admin && <p className="second">{t("table.access.later")}</p>}

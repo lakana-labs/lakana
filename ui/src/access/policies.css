@@ -1,0 +1,46 @@
+/* Row filters & masks: two lists, each in its own scrolling region. An expression is code: it
+   wraps inside its cell and is never cut. */
+.list-scroll.policies-scroll .list {
+  min-width: 960px;
+}
+
+.list-scroll.policies-scroll .access-name,
+.list-scroll.policies-scroll .row-name {
+  overflow-wrap: normal;
+}
+
+.policies-scroll .expression {
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.policies-scroll a.access-name {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.policies-scroll a.access-name:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+/* The expression a policy is created with: code, typed in a monospace box that grows with it. */
+.field textarea.expression-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 96px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  font-size: var(--type-code-size);
+  line-height: var(--type-code-line);
+}
+
+.field textarea.expression-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}

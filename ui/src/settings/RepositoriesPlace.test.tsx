@@ -4,7 +4,12 @@ import { describe, expect, it } from "vitest";
 import { renderShell } from "../test/render";
 import { entryPath, SETTINGS_PLACES } from "./places";
 
-const ADMIN = { admin: true, noAccessYet: false, secretEnvironments: ["dev", "prod"] };
+const ADMIN = {
+  admin: true,
+  noAccessYet: false,
+  secretEnvironments: ["dev", "prod"],
+  managePolicy: true,
+};
 
 describe("RepositoriesPlace", () => {
   it("shows the heading, the list of places, the intro and the way to connect", async () => {

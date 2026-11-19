@@ -15,7 +15,7 @@ namespace exactly as it matched the old one — nothing here fails closed on
 its own. Either way, the stale row never stops looking "active"
 (`revoked_at` stays `None`), so an admin listing by name
 (`GrantService.list_for_securable`, `RowFilterService`/
-`ColumnMaskService.list_for_table`) keeps showing it long after its target
+`ColumnMaskService.list_page`) keeps showing it long after its target
 is gone. `revoke_attached` is the one place `CatalogService.drop_table`,
 `drop_namespace`, and `delete_environment` go to close both gaps, each
 called after its own authorization and existence checks but before the

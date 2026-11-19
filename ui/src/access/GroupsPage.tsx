@@ -149,7 +149,7 @@ export function GroupsPage(): JSX.Element {
         />
       )}
       {managed !== undefined && managed !== null && (
-        <ManagedNote scope={managed} command={t("access.managed.groupsCommand")} />
+        <ManagedNote scope={managed} commands={[t("access.managed.groupsCommand")]} />
       )}
       <SearchField className="field" value={typed} onChange={setTyped}>
         <Label className="visually-hidden">{t("access.groups.find")}</Label>

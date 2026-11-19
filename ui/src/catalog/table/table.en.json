@@ -378,9 +378,6 @@
       "role": "{{role}} role",
       "instance": "On the whole instance"
     },
-    "group": "group <name/>",
-    "removed": "a removed person or group",
-    "serviceAccount": "service account",
     "filters": {
       "heading": "Row filters",
       "none": "No row filters on this table.",
@@ -395,7 +392,9 @@
       "reading": "Reading the column masks…"
     },
     "later": "An administrator changes access under Settings › Access › Grants.",
-    "manage": "Manage grants"
+    "manage": "Manage grants",
+    "policiesCut": "Only the first 200 are shown.",
+    "managePolicies": "Manage row filters and masks"
   },
   "loadingTab": "Loading the tab…"
 }

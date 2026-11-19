@@ -30,6 +30,7 @@ function renderAccess(
     admin,
     noAccessYet: false,
     secretEnvironments: known,
+    managePolicy: admin,
   });
   const router = createMemoryRouter(
     [

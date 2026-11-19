@@ -12,9 +12,11 @@ import {
 } from "./places";
 
 const i18n = initI18n();
-const ADMIN = { admin: true, noAccessYet: false, secretEnvironments: [] };
-const KIM = { admin: false, noAccessYet: false, secretEnvironments: [] };
-const NEW = { admin: false, noAccessYet: true, secretEnvironments: [] };
+const ADMIN = { admin: true, noAccessYet: false, secretEnvironments: [], managePolicy: true };
+const KIM = { admin: false, noAccessYet: false, secretEnvironments: [], managePolicy: false };
+const NEW = { admin: false, noAccessYet: true, secretEnvironments: [], managePolicy: false };
+/** A person who manages row filters and masks and is no administrator. */
+const PAT = { admin: false, noAccessYet: false, secretEnvironments: [], managePolicy: true };
 
 /**
  * A place of the registry, by id.
@@ -60,11 +62,26 @@ describe("places", () => {
       "grants",
       "tokens",
       "secrets",
+      "filters-and-masks",
+      "access-file",
       "what-i-may-do",
       "sign-in",
       "invites",
       "recovery-links",
     ]);
+  });
+
+  it("lists Row filters & masks to a policy manager, and Access file to administrators only", () => {
+    expect(listedPlaces(PAT).map((place) => place.id)).toEqual([
+      "status",
+      "access",
+      "filters-and-masks",
+      "what-i-may-do",
+    ]);
+    expect(listedPlaces(KIM).map((place) => place.id)).not.toContain("filters-and-masks");
+    expect(placeState(real("filters-and-masks"), { ...PAT, managePolicy: null })).toBe("pending");
+    expect(placeState(real("access-file"), PAT)).toBe("hidden");
+    expect(placeState(real("access-file"), ADMIN)).toBe("listed");
   });
 
   it("lists Status, Access and What I may do for a person who is not an administrator", () => {
@@ -160,6 +177,7 @@ describe("places", () => {
     expect(entryPath(access, { ...KIM, secretEnvironments: ["dev"] })).toBe(
       "/settings/access/secrets",
     );
+    expect(entryPath(access, PAT)).toBe("/settings/access/filters-and-masks");
   });
 
   it("leaves Access open to everyone, so only its places decide whether it is listed", () => {

@@ -127,6 +127,27 @@ Answer fields: `AccessApplyOut`
 | `released` | list of text | yes |  |
 | `applied_at` | text (date-time) | yes |  |
 
+## `GET /api/v1/access/managed-scopes`
+
+List the scopes access files manage, for whoever manages row filters and masks
+
+Each scope with the name of the file that manages it and when that file was applied, sorted by scope. A write of a row filter or column mask in a managed scope answers 409; this tells a policy manager so before the write. Needs `MANAGE_POLICY` on the instance (which the `ADMIN` role holds); `GET /api/v1/access/status` tells an administrator more.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | list of `ManagedScopeBriefOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
 ## `GET /api/v1/access/status`
 
 List the scopes access files manage and the open overrides

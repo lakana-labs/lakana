@@ -347,7 +347,7 @@ export function GroupPage({ name }: GroupPageProps): JSX.Element {
           {managed !== undefined && managed !== null && (
             <ManagedNote
               scope={managed}
-              command={t("access.managed.groupCommand", { group: name })}
+              commands={[t("access.managed.groupCommand", { group: name })]}
             />
           )}
           <p className="step-status" role="status">

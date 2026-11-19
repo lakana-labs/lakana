@@ -1,6 +1,6 @@
 {
-  "duplicated_lines": 1088,
-  "clones": 58,
+  "duplicated_lines": 976,
+  "clones": 57,
   "pairs": {
     "lakana/_artifact_manifest.py ↔ lakana_core/artifacts/manifest.py": {
       "clones": 1,
@@ -27,8 +27,8 @@
       "lines": 23
     },
     "lakana/resources/column_masks.py ↔ lakana/resources/row_filters.py": {
-      "clones": 1,
-      "lines": 17
+      "clones": 3,
+      "lines": 54
     },
     "lakana/resources/column_masks.py ↔ lakana_server/api/platform/schemas.py": {
       "clones": 1,
@@ -58,17 +58,9 @@
       "clones": 2,
       "lines": 38
     },
-    "lakana_core/grants/service.py ↔ lakana_core/identity/groups.py": {
-      "clones": 2,
-      "lines": 44
-    },
-    "lakana_core/grants/service.py ↔ lakana_core/identity/pats.py": {
+    "lakana_core/identity/groups.py ↔ lakana_core/identity/pats.py": {
       "clones": 1,
-      "lines": 26
-    },
-    "lakana_core/grants/service.py ↔ lakana_core/policy/column_masks.py": {
-      "clones": 1,
-      "lines": 49
+      "lines": 23
     },
     "lakana_core/migrations/versions/0008_row_filters_and_column_masks.py ↔ lakana_core/migrations/versions/0008_row_filters_and_column_masks.py": {
       "clones": 2,
@@ -99,8 +91,8 @@
       "lines": 11
     },
     "lakana_core/policy/column_masks.py ↔ lakana_core/policy/row_filters.py": {
-      "clones": 5,
-      "lines": 121
+      "clones": 3,
+      "lines": 51
     },
     "lakana_core/projects/checks.py ↔ lakana_core/projects/discovery.py": {
       "clones": 1,
@@ -131,8 +123,8 @@
       "lines": 9
     },
     "lakana_server/api/platform/column_masks.py ↔ lakana_server/api/platform/row_filters.py": {
-      "clones": 1,
-      "lines": 25
+      "clones": 3,
+      "lines": 42
     },
     "lakana_server/api/platform/tables.py ↔ lakana_server/api/platform/tables.py": {
       "clones": 2,

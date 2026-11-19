@@ -5,13 +5,13 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, SecurableKind
+from lakana_core.auth import AuthorizationService, PrincipalRef, Securable, SecurableKind
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.identity.named import group_named, principal_named
 from lakana_core.models import AuditEventType, ColumnMask, Group, Principal
 from lakana_core.policy.columns import (
     ColumnSource,
@@ -103,7 +103,7 @@ def _check_column_exists(
     raise ValidationError(message)
 
 
-class ColumnMaskService(PolicyShowing):
+class ColumnMaskService(PolicyShowing[ColumnMask]):
     """Create, list, and revoke column masks.
 
     Parameters
@@ -119,60 +119,15 @@ class ColumnMaskService(PolicyShowing):
         table does not have is refused whoever calls it. `CatalogService` is one.
     """
 
+    _model = ColumnMask
+    _list_kind = "column-masks"
+
     def __init__(
         self, session: Session, authz: AuthorizationService, catalog: ColumnSource
     ) -> None:
         self._session = session
         self._authz = authz
         self._catalog = catalog
-
-    def _get_principal(self, name: str) -> Principal:
-        """Look up a principal by name.
-
-        Parameters
-        ----------
-        name
-            Principal name.
-
-        Returns
-        -------
-        Principal
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has that name.
-        """
-        principal = self._session.execute(
-            select(Principal).where(Principal.name == name)
-        ).scalar_one_or_none()
-        if principal is None:
-            raise NotFoundError(f"No principal named {name!r}.")
-        return principal
-
-    def _get_group(self, name: str) -> Group:
-        """Look up a group by name.
-
-        Parameters
-        ----------
-        name
-            Group name.
-
-        Returns
-        -------
-        Group
-            The matching row.
-
-        Raises
-        ------
-        NotFoundError
-            If no group has that name.
-        """
-        group = self._session.execute(select(Group).where(Group.name == name)).scalar_one_or_none()
-        if group is None:
-            raise NotFoundError(f"No group named {name!r}.")
-        return group
 
     def _subject_name(self, row: ColumnMask) -> str:
         """Resolve a column mask's own subject (principal or group) to its name.
@@ -325,8 +280,10 @@ class ColumnMaskService(PolicyShowing):
         authorize_policy_change(self._authz, p)
         if (principal is None) == (group is None):
             raise ValidationError("Exactly one of 'principal' or 'group' must be given.")
-        principal_id = self._get_principal(principal).id if principal is not None else None
-        group_id = self._get_group(group).id if group is not None else None
+        principal_id = (
+            principal_named(self._session, principal).id if principal is not None else None
+        )
+        group_id = group_named(self._session, group).id if group is not None else None
         target = self.check_target(
             p,
             environment=environment,
@@ -376,114 +333,6 @@ class ColumnMaskService(PolicyShowing):
             return row
         self._session.commit()
         return row
-
-    def list_for_principal(self, p: PrincipalRef, principal_name: str) -> list[ColumnMask]:
-        """List a principal's own active, direct column masks.
-
-        Parameters
-        ----------
-        p
-            The acting principal.
-        principal_name
-            The principal whose masks to list.
-
-        Returns
-        -------
-        list of ColumnMask
-            Every active mask made directly to this principal.
-
-        Raises
-        ------
-        NotFoundError
-            If no principal has `principal_name`.
-        PermissionDenied
-            If the acting principal may not manage policies.
-        """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        principal = self._get_principal(principal_name)
-        return list(
-            self._session.execute(
-                select(ColumnMask).where(
-                    ColumnMask.principal_id == principal.id, ColumnMask.revoked_at.is_(None)
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-    def list_for_group(self, p: PrincipalRef, group_name: str) -> list[ColumnMask]:
-        """List a group's active, direct column masks.
-
-        Parameters
-        ----------
-        p
-            The acting principal.
-        group_name
-            The group whose masks to list.
-
-        Returns
-        -------
-        list of ColumnMask
-            Every active mask made directly to this group.
-
-        Raises
-        ------
-        NotFoundError
-            If no group has `group_name`.
-        PermissionDenied
-            If the acting principal may not manage policies.
-        """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        group = self._get_group(group_name)
-        return list(
-            self._session.execute(
-                select(ColumnMask).where(
-                    ColumnMask.group_id == group.id, ColumnMask.revoked_at.is_(None)
-                )
-            )
-            .scalars()
-            .all()
-        )
-
-    def list_for_table(
-        self, p: PrincipalRef, *, environment: str, namespace: str, table: str
-    ) -> list[ColumnMask]:
-        """List every active column mask on a specific table — an exact match.
-
-        Parameters
-        ----------
-        p
-            The acting principal.
-        environment
-            The environment to match.
-        namespace
-            The namespace (unit-separator-joined) to match.
-        table
-            The table to match.
-
-        Returns
-        -------
-        list of ColumnMask
-            Every active mask whose stored table exactly matches.
-
-        Raises
-        ------
-        PermissionDenied
-            If the acting principal may not manage policies.
-        """
-        self._authz.authorize(p, Action.MANAGE_POLICY, Securable.instance_scope())
-        return list(
-            self._session.execute(
-                select(ColumnMask).where(
-                    ColumnMask.environment == environment,
-                    ColumnMask.namespace == namespace,
-                    ColumnMask.table == table,
-                    ColumnMask.revoked_at.is_(None),
-                )
-            )
-            .scalars()
-            .all()
-        )
 
     def revoke(self, p: PrincipalRef, column_mask_id: uuid.UUID, *, commit: bool = True) -> None:
         """Revoke a column mask.

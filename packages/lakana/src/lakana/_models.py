@@ -2389,6 +2389,38 @@ class ColumnMask:
 
 
 @dataclass(frozen=True)
+class RowFilterPage:
+    """One page of row filters, newest first.
+
+    Parameters
+    ----------
+    items
+        The row filters on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[RowFilter]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class ColumnMaskPage:
+    """One page of column masks, newest first.
+
+    Parameters
+    ----------
+    items
+        The column masks on this page.
+    next_cursor
+        Pass back as ``cursor=`` to fetch the next page; ``None`` on the last page.
+    """
+
+    items: list[ColumnMask]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True)
 class SecretCreate:
     """A secret-creation request, held only long enough to build the request body.
 
@@ -5134,6 +5166,25 @@ class ManagedScope:
     file_sha256: str
     source_commit: str | None
     applied_by: str | None
+    applied_at: datetime
+
+
+@dataclass(frozen=True)
+class ManagedScopeBrief:
+    """A scope an access file manages, as much as a policy manager needs to know of it.
+
+    Parameters
+    ----------
+    scope
+        ``instance`` or an environment's name.
+    file_name
+        The name of the file that last applied it.
+    applied_at
+        When.
+    """
+
+    scope: str
+    file_name: str
     applied_at: datetime
 
 
