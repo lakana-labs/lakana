@@ -30,7 +30,7 @@ import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { policyFilterKey } from "./accessPaths";
 import "./accessStrings";
-import { GitMark } from "./GitMark";
+import { ClearFilters, ManagedMark } from "./ListBits";
 import { managedScopeOf } from "./managed";
 import "./policyStrings";
 import { SubjectName } from "./SubjectName";
@@ -188,12 +188,7 @@ export function PolicyList({
               </td>
               <td>
                 {managed !== null ? (
-                  <>
-                    <GitMark />
-                    <span className="second">
-                      {t("access.managed.markOf", { file: managed.file_name })}
-                    </span>
-                  </>
+                  <ManagedMark file={managed.file_name} />
                 ) : (
                   scopes !== null && (
                     <Button
@@ -223,13 +218,12 @@ export function PolicyList({
           );
         })}
       </ViewList>
-      {filtered && pages.items !== undefined && rows.length === 0 && !pages.busy && (
-        <p>
-          <Button className="button" onPress={onClear}>
-            {t("policies.clear")}
-          </Button>
-        </p>
-      )}
+      <ClearFilters
+        pages={pages}
+        filtered={filtered}
+        label={t("policies.clear")}
+        onClear={onClear}
+      />
       {deleting !== null && (
         <ConfirmDialog
           title={masks ? t("policies.deleteMaskTitle") : t("policies.deleteFilterTitle")}

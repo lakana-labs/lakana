@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useRef, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
@@ -26,6 +26,11 @@ import { PolicyList } from "./PolicyList";
 import "./policyStrings";
 import { useManagedScopes } from "./useManagedScopes";
 import type { FilterStep } from "./WhoFilter";
+
+// Add filter or mask's form loads when it is opened, not with the lists.
+const AddPolicyDialog = lazy(() =>
+  import("./AddPolicyDialog").then((module) => ({ default: module.AddPolicyDialog })),
+);
 
 /** The two lists, in the order they are shown. */
 const KINDS: readonly PolicyKind[] = ["row-filter", "column-mask"];
@@ -106,7 +111,11 @@ export function FiltersAndMasksPage(): JSX.Element {
   const environments = useResource(loadEnvironments);
   const heading = useRef<HTMLHeadingElement>(null);
   const [note, setNote] = useState("");
-  const [rounds] = useState<Record<PolicyKind, number>>({ "row-filter": 0, "column-mask": 0 });
+  const [rounds, setRounds] = useState<Record<PolicyKind, number>>({
+    "row-filter": 0,
+    "column-mask": 0,
+  });
+  const [adding, setAdding] = useState(false);
   const scopes = managed.data ?? null;
   const managedInstance = scopes === null ? undefined : managedScopeOf(scopes, null);
   const go = (next: PolicyFilter, step: FilterStep): void => {
@@ -120,7 +129,14 @@ export function FiltersAndMasksPage(): JSX.Element {
       headingRef={heading}
       action={
         managedInstance === null && (
-          <Button className="button button-primary">{t("policies.add")}</Button>
+          <Button
+            className="button button-primary"
+            onPress={() => {
+              setAdding(true);
+            }}
+          >
+            {t("policies.add")}
+          </Button>
         )
       }
     >
@@ -160,6 +176,23 @@ export function FiltersAndMasksPage(): JSX.Element {
           }}
         />
       ))}
+      {adding && scopes !== null && (
+        <Suspense fallback={null}>
+          <AddPolicyDialog
+            start={filter}
+            environments={environments.data ?? []}
+            scopes={scopes}
+            onClose={() => {
+              setAdding(false);
+            }}
+            onCreated={(kind) => {
+              setAdding(false);
+              setNote(t(`policies.${kind}.created`));
+              setRounds((previous) => ({ ...previous, [kind]: previous[kind] + 1 }));
+            }}
+          />
+        </Suspense>
+      )}
     </SettingsFrame>
   );
 }

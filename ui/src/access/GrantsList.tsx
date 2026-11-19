@@ -19,7 +19,7 @@ import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import "./accessStrings";
-import { GitMark } from "./GitMark";
+import { ClearFilters, ManagedMark } from "./ListBits";
 import { managedScopeOf } from "./managed";
 import { filterKey, groupPath } from "./accessPaths";
 import { personPath } from "./personPath";
@@ -188,12 +188,7 @@ export function GrantsList({
               </td>
               <td>
                 {managed !== null ? (
-                  <>
-                    <GitMark />
-                    <span className="second">
-                      {t("access.managed.markOf", { file: managed.file_name })}
-                    </span>
-                  </>
+                  <ManagedMark file={managed.file_name} />
                 ) : (
                   scopes !== null && (
                     <Button
@@ -212,13 +207,12 @@ export function GrantsList({
           );
         })}
       </ViewList>
-      {filtered && pages.items !== undefined && rows.length === 0 && !pages.busy && (
-        <p>
-          <Button className="button" onPress={onClear}>
-            {t("access.grants.clear")}
-          </Button>
-        </p>
-      )}
+      <ClearFilters
+        pages={pages}
+        filtered={filtered}
+        label={t("access.grants.clear")}
+        onClear={onClear}
+      />
       {removing !== null && (
         <ConfirmDialog
           title={t("access.grants.removeTitle")}

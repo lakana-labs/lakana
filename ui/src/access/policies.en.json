@@ -39,5 +39,31 @@
   "deleteMaskText": "<who/> then sees <column/> of <table/> as it is stored.",
   "deleteMaskConfirm": "Delete the column mask",
   "deleted": "Deleted.",
-  "removed": "a removed person or group"
+  "removed": "a removed person or group",
+  "addDialog": {
+    "title": "Add filter or mask",
+    "kind": "Kind",
+    "rowFilter": "Row filter",
+    "columnMask": "Column mask",
+    "for": "For",
+    "person": "Person or service account",
+    "group": "Group",
+    "name": "Name",
+    "environment": "Environment",
+    "namespace": "Namespace",
+    "namespaceHelp": "Dotted, such as gold.sales.",
+    "table": "Table",
+    "column": "Column",
+    "expression": "Expression",
+    "filterHelp": "Which rows they see: comparisons, AND, OR, NOT, current_user() and has_group('name'), such as region = 'EU'.",
+    "maskHelp": "What they see instead: the same, plus substr, || and md5, such as '***' || substr(email, -4).",
+    "create": "Create",
+    "nameNeeded": "Name who it is for.",
+    "environmentNeeded": "Choose the environment.",
+    "namespaceNeeded": "Name the namespace.",
+    "tableNeeded": "Name the table.",
+    "columnNeeded": "Name the column.",
+    "expressionNeeded": "Write the expression.",
+    "managed": "An access file manages {{environment}}: add this in {{file}} instead."
+  }
 }
