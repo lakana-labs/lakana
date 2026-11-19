@@ -732,7 +732,7 @@
         "text": "The databases and services your project loads its data from."
       },
       "settings": {
-        "text": "The instance’s status, and for those who manage them, its environments, repositories, access and sign-in."
+        "text": "The instance’s status, and for those who manage them, its environments, repositories, access, sign-in and configuration."
       },
       "search": {
         "text": "Press {{keys}} anywhere to go to a place or run a command by typing a few letters."

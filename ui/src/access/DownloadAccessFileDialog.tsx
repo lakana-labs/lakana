@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 import { exportAccess, type ManagedScopeOut } from "../api/accessFile";
 import { listEnvironments } from "../api/environments";
 import { ActionDialog } from "../shell/ActionDialog";
-import { EnvironmentName } from "../shell/EnvironmentPicker";
+import { EnvironmentName } from "../shell/EnvironmentName";
 import { fileName, saveBlob } from "../shell/saveFile";
 import { useResource } from "../shell/useResource";
 import { useAttempt } from "../sign-in/Attempt";
