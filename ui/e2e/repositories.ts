@@ -36,7 +36,7 @@ function worker(id: string, host: string, over: Record<string, unknown> = {}): o
 }
 
 /** The status an administrator sees: one worker lost, one on an older version. */
-export const STATUS_DETAIL = {
+const STATUS_DETAIL = {
   state: "degraded",
   causes: ["worker_lost"],
   workers_alive: 2,
@@ -55,10 +55,10 @@ export const STATUS_DETAIL = {
 };
 
 /** The same instance as a person who may not manage it sees it. */
-export const STATUS_PLAIN = { ...STATUS_DETAIL, detail: null };
+const STATUS_PLAIN = { ...STATUS_DETAIL, detail: null };
 
 /** An SSH repository with the deploy key of dev and two trusted host keys. */
-export const ANALYTICS = {
+const ANALYTICS = {
   id: "r-1",
   name: "analytics",
   kind: "ssh",
