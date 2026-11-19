@@ -9,7 +9,14 @@ import type { Page, Route } from "@playwright/test";
 
 const AT = "2026-11-18T08:00:00Z";
 
-/** A worker as the status's detail lists it. */
+/**
+ * A worker as the status's detail lists it.
+ *
+ * @param id - Its id.
+ * @param host - Its host.
+ * @param over - What differs from an alive, idle worker on the server's version.
+ * @returns The worker.
+ */
 function worker(id: string, host: string, over: Record<string, unknown> = {}): object {
   return {
     id,

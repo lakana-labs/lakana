@@ -1195,3 +1195,14 @@ export async function applyAccessFile(request: APIRequestContext, text: string):
   });
   await ensureOk("POST /api/v1/access/apply", applied);
 }
+
+/**
+ * Registers a repository, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param body - The repository, as `POST /api/v1/repositories` takes it.
+ * @returns Resolves once the server answered.
+ */
+export function createRepository(request: APIRequestContext, body: object): Promise<void> {
+  return create(request, "/api/v1/repositories", body);
+}
