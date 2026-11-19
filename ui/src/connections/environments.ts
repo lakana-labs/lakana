@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type ConnectionEnvironmentOut, listConnectionEnvironments } from "../api/connections";
+import { type ConnectionEnvironmentOut, listConnectionEnvironments } from "../api";
 import { listEnvironments } from "../api/environments";
 
 /** An environment whose connections the person may read, and whether it is protected. */
