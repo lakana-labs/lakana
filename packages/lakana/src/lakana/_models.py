@@ -1563,6 +1563,31 @@ class QueryStatus:
 
 
 @dataclass(frozen=True)
+class ProviderLink:
+    """A person's link to the organisation's identity provider.
+
+    Parameters
+    ----------
+    issuer
+        The provider's issuer the person is linked to.
+    email
+        The e-mail address of their last provider sign-in, for showing only.
+    name
+        The name of their last provider sign-in, for showing only.
+    last_sign_in_at
+        When they last signed in through the provider.
+    token_window_ends_at
+        Until when their personal API tokens work without another provider sign-in.
+    """
+
+    issuer: str
+    email: str | None
+    name: str | None
+    last_sign_in_at: datetime | None
+    token_window_ends_at: datetime | None
+
+
+@dataclass(frozen=True)
 class Principal:
     """A platform principal: a human user or a service account.
 
@@ -1579,12 +1604,16 @@ class Principal:
         or through a group: only the server operator recovers such a person
         (`lakana recovery create` with the bootstrap token). `None` unless you are an
         administrator, or from a server older than this field.
+    provider_link
+        The person's link to the organisation's identity provider; `None` when they are not
+        linked, when you are neither an administrator nor the person, or from an older server.
     """
 
     name: str
     type: str
     is_active: bool
     held_admin: bool | None = None
+    provider_link: ProviderLink | None = None
 
 
 @dataclass(frozen=True)

@@ -25,6 +25,7 @@ from lakana._models import (
     IssuedToken,
     MintedTaskToken,
     Principal,
+    ProviderLink,
     RowFilter,
     Secret,
     SecretCreate,
@@ -128,6 +129,38 @@ def test_principals_read_whether_someone_holds_or_held_admin() -> None:
     result = Principals(_transport(handler)).list()
 
     assert [p.held_admin for p in result] == [True, False, None, None]
+
+
+def test_principals_read_the_link_to_the_identity_provider() -> None:
+    """`provider_link` comes through with its times; unlinked, hidden or an older server: None."""
+    link = {
+        "issuer": "https://idp.example.com",
+        "email": "carol@example.com",
+        "name": "Carol",
+        "last_sign_in_at": "2026-11-20T09:00:00Z",
+        "token_window_ends_at": "2026-12-20T09:00:00Z",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json=[
+                {"name": "carol", "type": "USER", "is_active": True, "provider_link": link},
+                {"name": "dave", "type": "USER", "is_active": True, "provider_link": None},
+                {"name": "old", "type": "USER", "is_active": True},
+            ],
+        )
+
+    carol, dave, old = Principals(_transport(handler)).list()
+
+    assert carol.provider_link == ProviderLink(
+        issuer="https://idp.example.com",
+        email="carol@example.com",
+        name="Carol",
+        last_sign_in_at=datetime(2026, 11, 20, 9, tzinfo=UTC),
+        token_window_ends_at=datetime(2026, 12, 20, 9, tzinfo=UTC),
+    )
+    assert dave.provider_link is None and old.provider_link is None
 
 
 def test_principals_deactivate_sends_a_delete() -> None:

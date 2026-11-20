@@ -9,7 +9,13 @@ import httpx
 import pytest
 from conftest import FakeApi, invoke, make_state
 
-_BOB = {"name": "bob", "type": "SERVICE_ACCOUNT", "is_active": True, "held_admin": False}
+_BOB = {
+    "name": "bob",
+    "type": "SERVICE_ACCOUNT",
+    "is_active": True,
+    "held_admin": False,
+    "provider_link": None,
+}
 
 
 def test_principal_create_maps_the_type_flag(tmp_path: Path) -> None:
