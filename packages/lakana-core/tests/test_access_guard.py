@@ -624,3 +624,37 @@ def test_moving_from_instance_to_environments_lists_the_instance_override(
     assert [(d.scope, d.text) for d in plan.drift if d.text.endswith("(override)")] == [
         ("instance", "grant VIEWER to bob (override)")
     ]
+
+
+def test_an_apply_locks_the_admin_count_before_its_last_count(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#724: the apply's own lockout check counts administrators under the same lock."""
+    from lakana_core.access import service as access_service_module
+
+    world = access_world(session)
+    calls: list[str] = []
+    counted = access_service_module.active_instance_admin_ids
+    monkeypatch.setattr(
+        access_service_module, "lock_admin_count", lambda _session: calls.append("lock")
+    )
+
+    def count(inner: Session) -> set[uuid.UUID]:
+        """Record a count and make it.
+
+        Parameters
+        ----------
+        inner
+            Database session.
+
+        Returns
+        -------
+        set of uuid.UUID
+            The active administrators.
+        """
+        calls.append("count")
+        return counted(inner)
+
+    monkeypatch.setattr(access_service_module, "active_instance_admin_ids", count)
+    _apply(session, world, f"version: 1\nmanages: [instance]\n{_ADMIN_KEPT}")
+    assert calls == ["lock", "count"]
