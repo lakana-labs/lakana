@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import event, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
@@ -43,6 +43,21 @@ _WAIT_LIMIT = 30.0
 _ISSUER = "https://idp.example.com/realms/lakana"
 
 
+def _bounded_lock_waits(connection: object, _record: object) -> None:
+    """Make every lock wait of a new connection give up after 60 seconds.
+
+    Parameters
+    ----------
+    connection
+        The DBAPI connection.
+    _record
+        The pool's record, unused.
+    """
+    cursor = connection.cursor()  # ty: ignore[missing-attribute]
+    cursor.execute("SET lock_timeout = '60s'")
+    cursor.close()
+
+
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
     """Start one Postgres, migrated to head.
@@ -56,6 +71,9 @@ def engine() -> Iterator[Engine]:
         url = pg.get_connection_url()
         migrate.upgrade(url)
         engine = create_engine(DatabaseConfig(url=url))
+        # A wait on a lock that never comes fails the test within a minute instead of hanging
+        # the run: the races wait on the advisory lock only briefly.
+        event.listen(engine, "connect", _bounded_lock_waits)
         yield engine
         engine.dispose()
 

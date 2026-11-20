@@ -4147,10 +4147,13 @@ is the only way to change access there, so that what was reviewed in git is what
   that question, and a count that relies on the member must then wait for the removal); and an
   apply's own last check (`AccessService._recheck_lockout`). Under READ COMMITTED the second change
   waits for the first's commit, counts what it left and is refused with `LAST_ADMIN_MESSAGE`.
-  Changes that raise the count (a grant, a new member, a reactivation) take no lock: a count never
-  sees them before they commit, so on an instance with an administrator they can only make a check
-  refuse, never let one through. (On an instance with no administrator at all,
-  `assert_admin_headroom` lets every change through anyway.) Deleting a group needs no lock, since
+  For this count alone, changes that raise it (a grant, a new member, a reactivation) need no lock:
+  a count never sees them before they commit, so on an instance with an administrator they can only
+  make a check refuse, never let one through. (On an instance with no administrator at all,
+  `assert_admin_headroom` lets every change through anyway.) The break-glass rule can be broken by
+  raising, though, so a grant of instance ADMIN and a new member of a group that holds it take the
+  lock as well (#32, below); `test_a_member_removal_decides_under_the_lock_while_its_group_gains_admin`
+  now sees the removal wait for the grant. Deleting a group needs no lock, since
   it is refused while the group holds any active grant. The order is the access lock first, then
   this one: an apply holds the access lock alone and takes this one inside it. The break-glass count
   of OIDC sign-in (the unlinked administrators, #32 PR 2) counts under this lock too: linking a
