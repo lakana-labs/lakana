@@ -99,6 +99,7 @@ from lakana_server.deps import (
 )
 from lakana_server.errors import TooManyAttemptsError
 from lakana_server.oidc_flow import (
+    LINK_PARAMETERS,
     MAX_PARAMETER,
     STEP_UP_PARAMETERS,
     authorization_url,
@@ -396,6 +397,7 @@ def start_oidc_sign_in(
         body.return_to,
         principal_id=row.principal_id,
         link_id=row.id,
+        extra=LINK_PARAMETERS,
     )
 
 
@@ -678,6 +680,7 @@ def start_oidc_link(
         body.return_to,
         principal_id=principal.id,
         session_id=context.session_id,
+        extra=LINK_PARAMETERS,
     )
 
 

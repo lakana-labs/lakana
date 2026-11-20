@@ -1291,3 +1291,42 @@ def test_a_refused_flow_finishes_in_session_once(linking: TestClient, clock: Set
     _callback_to(linking, r.json()["authorization_url"], nonce="wrong")
     _refused(linking.post(FINISH_IN_SESSION, headers=headers, json={}), "token_invalid")
     _refused(linking.post(FINISH_IN_SESSION, headers=headers, json={}), "flow_expired")
+
+
+def test_every_link_flow_asks_the_provider_for_a_fresh_sign_in(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    """An invite, a recovery link and a profile link send prompt=login; a sign-in does not."""
+
+    def prompt(url: str) -> list[str] | None:
+        """Read the prompt of an authorization URL.
+
+        Parameters
+        ----------
+        url
+            The URL.
+
+        Returns
+        -------
+        list of str or None
+            The values of ``prompt``.
+        """
+        return parse_qs(urlsplit(url).query).get("prompt")
+
+    _, public_id, secret = _invite(linking)
+    assert prompt(
+        _start_with_link(linking, "invite", public_id, secret).json()["authorization_url"]
+    ) == ["login"]
+    _link(linking, "alice")
+    r = linking.post("/api/v1/principals/alice/recovery-link", headers=AUTH_HEADER)
+    public_id, secret = _halves(r.json()["url"])
+    assert prompt(
+        _start_with_link(linking, "recovery", public_id, secret).json()["authorization_url"]
+    ) == ["login"]
+    _person_with_passkey(linking, "bob")
+    headers = _in_session(linking, "bob", touched_at=clock.now)
+    assert prompt(
+        linking.post(LINK_START, headers=headers, json={}).json()["authorization_url"]
+    ) == ["login"]
+    linking.cookies.clear()
+    assert prompt(_start(linking)) is None
