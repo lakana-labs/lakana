@@ -180,10 +180,11 @@ export async function listDeletedEnvironments(): Promise<readonly EnvironmentOut
  * Reads one environment.
  *
  * @param name - Its name.
+ * @param signal - Aborted when the read is no longer wanted.
  * @returns The environment.
  */
-export async function getEnvironment(name: string): Promise<EnvironmentOut> {
-  return api.request<EnvironmentOut>("GET", environmentApiPath(name));
+export async function getEnvironment(name: string, signal?: AbortSignal): Promise<EnvironmentOut> {
+  return api.request<EnvironmentOut>("GET", environmentApiPath(name), undefined, { signal });
 }
 
 /**
@@ -280,11 +281,13 @@ export async function purgeEnvironmentRows(name: string): Promise<void> {
  * Reads how much storage an environment uses; a background read, since nobody asked for it.
  *
  * @param name - Its name.
+ * @param signal - Aborted when the read is no longer wanted.
  * @returns The usage.
  */
-export async function getUsage(name: string): Promise<EnvironmentUsageOut> {
+export async function getUsage(name: string, signal?: AbortSignal): Promise<EnvironmentUsageOut> {
   return api.request<EnvironmentUsageOut>("GET", `${environmentApiPath(name)}/usage`, undefined, {
     background: true,
+    signal,
   });
 }
 

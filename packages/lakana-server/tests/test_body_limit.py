@@ -220,6 +220,11 @@ _OPEN_ROUTES = {
     # usernameless sign-in, <= 16 KiB body
     "/api/v1/sign-in/passkey/options",
     "/api/v1/sign-in/passkey",
+    # OIDC sign-in (#32): the info and the callback read no body, start and finish <= 16 KiB
+    "/api/v1/sign-in/oidc",
+    "/api/v1/sign-in/oidc/start",
+    "/api/v1/sign-in/oidc/callback",
+    "/api/v1/sign-in/oidc/finish",
 }
 """The routes that answer without a credential, by design: the CI token exchange takes an ID
 token, not a credential, and reads at most 16 KiB of body; `/readyz` has no body and answers

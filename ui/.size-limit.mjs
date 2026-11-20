@@ -39,7 +39,10 @@ const NAMED_LIMITS = [
   // reads an environment and what they may do on the instance (Repositories' rule and its
   // Connect, Edit and Delete), and the frame's stylesheet gains the panels of Status and a
   // repository's page; Status and Repositories themselves load on demand.
-  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "4.94 kB" },
+  // Raised 2026-11-20 to the measured 4.95 kB + 10 %: the Settings PRs left it at its limit, and
+  // any change that renames a lazy chunk the frame preloads (its import map grows a few bytes) put
+  // it over by 2–8 B on unrelated pull requests (#761, #762).
+  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "5.45 kB" },
   // Measured 3.27 kB (2026-11-19) + 10 %: a repository's page (its overview, credential, host
   // keys and deploy keys, Test access with the environment picker, and the loaders of its
   // dialogs, which load when one is opened: RepositoryDialogs-, on the shared limit).
@@ -140,7 +143,10 @@ const NAMED_LIMITS = [
   // Measured 9.85 kB (2026-11-17) with the editor's catalog cache (queries/editor/catalog.ts),
   // which the screen now hands to the editor, so that the editor's chunk reaches no API module
   // (see the first load below); the limit holds.
-  { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
+  // Raised to the measured 10.13 kB (2026-11-20) + 10 %: the catalog cache hands a catalog an
+  // editor still holds after a session ended to the next person's, and Try again on a saved query
+  // moves the focus to Run once it opens and forgets that after a failed read (#753).
+  { name: "Queries", prefix: "QueriesScreen-", limit: "11.14 kB" },
   // Measured 1.1 kB (2026-11-17) + 10 %: the Jobs area's screen, for now its routes (a job, a run and
   // a task, each a page of its own below), the area's page at /jobs and the screen's strings. The
   // lists, facts and logs come in the next changes.

@@ -58,6 +58,7 @@ Answer fields: `ConnectionOut`
 | `environment` | text | yes |  |
 | `last_test` | `ConnectionLastTestOut` or null | yes |  |
 | `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
+| `last_run_failure` | `ConnectionRunFailureOut` or null | no |  |
 
 ## `GET /api/v1/environments/{environment_name}/connections`
 
@@ -131,6 +132,7 @@ Answer fields: `ConnectionOut`
 | `environment` | text | yes |  |
 | `last_test` | `ConnectionLastTestOut` or null | yes |  |
 | `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
+| `last_run_failure` | `ConnectionRunFailureOut` or null | no |  |
 
 ## `PATCH /api/v1/environments/{environment_name}/connections/{connection_name}`
 
@@ -185,6 +187,7 @@ Answer fields: `ConnectionOut`
 | `environment` | text | yes |  |
 | `last_test` | `ConnectionLastTestOut` or null | yes |  |
 | `actions` | list of one of `test`, `update`, `delete`, `name_secret` | yes |  |
+| `last_run_failure` | `ConnectionRunFailureOut` or null | no |  |
 
 ## `DELETE /api/v1/environments/{environment_name}/connections/{connection_name}`
 
