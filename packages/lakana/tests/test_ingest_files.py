@@ -400,8 +400,8 @@ def test_modified_from_without_since_is_refused(root: Path) -> None:
     """A name pattern only means something with `since=`."""
     with pytest.raises(IngestError, match="modified_from= applies only with since=") as caught:
         files.read("exports", "*.csv", modified_from="export-%Y-%m-%d.csv")
-    # A mistake in the call names the connection too: the call on it is what failed.
-    assert caught.value.connection == "exports"
+    # A mistake in the asset's call is no problem of the source: it names no connection.
+    assert caught.value.connection is None
 
 
 def test_since_takes_a_datetime_or_none(root: Path) -> None:

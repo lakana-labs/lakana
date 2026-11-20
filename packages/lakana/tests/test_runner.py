@@ -4808,6 +4808,19 @@ def test_an_ingest_error_says_whether_another_attempt_could_help(
 
 def test_the_record_names_the_connection_an_ingest_error_concerns(world: _World) -> None:
     """A helper's error names its connection; the record carries it beside `error_type`."""
+    record = _failing(
+        world,
+        "from lakana.ingest import SourceRefused\n"
+        "e = SourceRefused('`crm-db`: the database refused the credential')\n"
+        "e.connection = 'crm-db'\n"
+        "raise e",
+    )
+    assert record["error_type"] == "SourceRefused"
+    assert record["failure_connection"] == "crm-db"
+
+
+def test_a_mistake_in_a_helpers_call_names_no_connection(world: _World) -> None:
+    """A `UsageError` is the asset's code, not the source: the record names no connection."""
     world.client.task_connections = _FetchedConnections()  # ty: ignore[missing-attribute]
     record = _failing(
         world,
@@ -4815,7 +4828,7 @@ def test_the_record_names_the_connection_an_ingest_error_concerns(world: _World)
         **_v3("replace", connections=_CRM, expected=41),
     )
     assert record["error_type"] == "UsageError"
-    assert record["failure_connection"] == "crm-db"
+    assert "failure_connection" not in record
 
 
 @pytest.mark.parametrize(

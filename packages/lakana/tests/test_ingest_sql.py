@@ -426,7 +426,7 @@ def test_parameters_are_bound_and_checked_before_any_connection(driver: _Driver)
     sql.read("crm-db", "SELECT id FROM t WHERE u > :since", params={"since": 5})
     with pytest.raises(UsageError, match="placeholder :x has no value") as caught:
         sql.read("crm-db", "SELECT :x")
-    assert caught.value.connection == "crm-db"
+    assert caught.value.connection is None
 
     assert driver.cursor.executed == [("SELECT id FROM t WHERE u > $1", [5])]
     assert len(driver.seen) == 1
@@ -440,7 +440,7 @@ def test_a_none_parameter_is_refused_before_the_query_runs(driver: _Driver) -> N
         sql.read("crm-db", "SELECT * FROM t WHERE u > :since", params={"since": None})
 
     assert driver.seen == []
-    assert caught.value.connection == "crm-db"
+    assert caught.value.connection is None
 
 
 @pytest.mark.parametrize(

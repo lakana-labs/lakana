@@ -20,9 +20,9 @@ class IngestError(Exception):
 
     Every helper (`connections.get`, `files.read`, `files.list`, `rest.read`, `sql.read`) sets
     `connection` to the connection it was called with, for every error it raises but
-    `ConnectionNotDeclared`. A run that fails with such an error records the connection, and the
-    connection's page shows the run. An error the asset raises itself names none, unless the
-    asset sets it.
+    `ConnectionNotDeclared` and `UsageError` (a mistake in the asset's code, not the source's).
+    A run that fails with such an error records the connection, and the connection's page shows
+    the run. An error the asset raises itself names none, unless the asset sets it.
     """
 
     retryable: ClassVar[bool | None] = None
@@ -94,8 +94,10 @@ _R = TypeVar("_R")
 def names_connection(helper: Callable[_P, _R]) -> Callable[_P, _R]:
     """Make a helper name its connection on every `IngestError` it raises.
 
-    The helper's first parameter is the connection. An error that names one already keeps it,
-    and `ConnectionNotDeclared` names none: the name is no connection of the asset.
+    The helper's first parameter is the connection. An error that names one already keeps it.
+    `ConnectionNotDeclared` names none, since the name is no connection of the asset, and neither
+    does `UsageError`: a mistake in the asset's code (an argument, the kind of connection it
+    asked for, how it or the worker is set up) is no problem of the source.
 
     Parameters
     ----------
@@ -117,7 +119,7 @@ def names_connection(helper: Callable[_P, _R]) -> Callable[_P, _R]:
             if (
                 exc.connection is None
                 and isinstance(name, str)
-                and not isinstance(exc, ConnectionNotDeclared)
+                and not isinstance(exc, ConnectionNotDeclared | UsageError)
             ):
                 exc.connection = name
             raise
