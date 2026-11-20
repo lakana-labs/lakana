@@ -385,7 +385,7 @@ def get_passkey_service(
     )
 
 
-def record_failed_passkey(request: Request, session: Session) -> None:
+def record_failed_passkey(request: Request, session: Session, reason: str | None = None) -> None:
     """Record a refused passkey sign-in, if the per-address limit admits it.
 
     The same limiter as a failed token or link. Neither the browser's answer nor the challenge
@@ -398,9 +398,15 @@ def record_failed_passkey(request: Request, session: Session) -> None:
     session
         The current request's database session; rolled back first, so nothing the refused
         attempt left pending is committed with the row.
+    reason
+        Why, when the passkey verified and was refused anyway (``provider_only``: its person
+        signs in through the identity provider).
     """
     session.rollback()
-    _record_failure(request, AuditService(session), None, {"credential": "passkey"})
+    detail: dict[str, str | int] = {"credential": "passkey"}
+    if reason is not None:
+        detail["reason"] = reason
+    _record_failure(request, AuditService(session), None, detail)
 
 
 def record_refused_oidc(

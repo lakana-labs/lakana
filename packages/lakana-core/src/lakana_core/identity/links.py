@@ -57,6 +57,7 @@ from lakana_core.errors import (
     NotFoundError,
     OidcSignInRefused,
     PermissionDenied,
+    ProviderSignInRequired,
     ValidationError,
 )
 from lakana_core.grants.admin import holds_instance_admin
@@ -166,6 +167,13 @@ def already_set_up(bootstrap_name: str) -> str:
         "runs."
     )
 
+
+PROVIDER_RECOVERY_MESSAGE = (
+    "This recovery link is for an account that signs in through your organisation's identity "
+    "provider, so it cannot add a passkey. Use it with Sign in with the identity provider "
+    "instead; the link still works."
+)
+"""The 403 `ProviderSignInRequired` of `/links/redeem` for a linked person's recovery link."""
 
 LOCAL_OFF = (
     "Local sign-in is off on this server; it is only for `lakana server start --local` on one "
@@ -1150,6 +1158,9 @@ class LinkService:
         PermissionDenied
             If the person cannot sign in (deactivated; a local link's token revoked), and for a
             local link on a server no longer in local mode (the link is closed).
+        ProviderSignInRequired
+            For an administrator's recovery link of a person linked to the identity provider,
+            which works only through it (`claim_for_provider`); it is left unused.
         """
         row = self._by_public_id(public_id)
         if row is None or not verify_secret(secret, row.secret_hash):
@@ -1159,6 +1170,9 @@ class LinkService:
                 "This browser is already signed in, so the local sign-in link was not used. "
                 "Keep working as you are, or sign out first and open the link again."
             )
+        if self._linked_needs_provider(row):
+            # Not used: the same link still works through the provider.
+            raise ProviderSignInRequired(PROVIDER_RECOVERY_MESSAGE)
         now = self._clock()
         if not self._claim(row.id, now, peer=peer, user_agent=user_agent):
             self._session.rollback()
@@ -1648,6 +1662,11 @@ class LinkService:
                 PermissionDenied(f"{not_operator_recovery(principal.name)} This link was closed."),
                 "became_admin",
             )
+        if kind == "recovery" and is_linked(principal):
+            # Only the operator's link gets here (`redeem`): the break-glass path.
+            OidcLinkService(
+                self._session, self._authz, clock=self._clock, bootstrap_name=self._bootstrap_name
+            ).unlink_for_operator_recovery(principal, row.id)
         if kind == "recovery":
             self._recover(principal, row)
         started = self._sessions.start(

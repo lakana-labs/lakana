@@ -75,6 +75,8 @@ from lakana_core.errors import (
     NotFoundError,
     PasskeyRefused,
     PermissionDenied,
+    ProviderSignInRequired,
+    ProviderStepUpRequired,
     ValidationError,
 )
 from lakana_core.grants.admin_lock import lock_admin_count
@@ -82,6 +84,7 @@ from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, leaves_n
 from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.links import has_passkey
 from lakana_core.identity.notices import NoticeService
+from lakana_core.identity.oidc_links import is_linked
 from lakana_core.identity.sessions import (
     SessionService,
     StartedSession,
@@ -152,6 +155,18 @@ _NOT_VERIFIED = (
     "without user verification (a PIN, fingerprint or face), or damaged. Open the interface at "
     "{origin} and try again."
 )
+ONE_WAY_IN_MESSAGE = (
+    "Your account signs in through your organisation's identity provider, so its passkeys no "
+    "longer sign you in and no passkey can be added. Sign in with the identity provider instead."
+)
+"""The 403 `ProviderSignInRequired` of a passkey sign-in or registration of a linked person."""
+
+PROVIDER_STEP_UP_MESSAGE = (
+    "You sign in through your organisation's identity provider: confirm by signing in there "
+    "again (POST /api/v1/sign-in/oidc/step-up/start), then try the action again."
+)
+"""The 409 `ProviderStepUpRequired` of a passkey step-up of a linked person."""
+
 _CLONE = (
     "This passkey was just disabled: its signature counter went backwards, which means it may "
     "have been copied. Every session of its account was ended. Sign in with another passkey, or "
@@ -289,6 +304,22 @@ class PasskeyService:
         if p.session is None:
             raise ConflictError(_NO_SESSION)
         return p.session
+
+    def _linked(self, principal_id: uuid.UUID) -> bool:
+        """Say whether a person signs in only through the identity provider.
+
+        Parameters
+        ----------
+        principal_id
+            The person.
+
+        Returns
+        -------
+        bool
+            Whether they are linked to it (`lakana_core.identity.oidc_links.is_linked`).
+        """
+        principal = self._session.get(Principal, principal_id)
+        return principal is not None and is_linked(principal)
 
     def _require_admin(self, p: PrincipalRef) -> None:
         """Refuse unless `p` is an instance administrator (`require_principal_admin`).
@@ -765,12 +796,16 @@ class PasskeyService:
             For a local-link session of a person who has a passkey already, and for a link
             session of a person without a usable passkey outside the first-passkey window (a
             touch cannot help).
+        ProviderSignInRequired
+            For a person linked to the identity provider, who signs in only there.
         StepUpRequired
             Otherwise, without a fresh touch.
         NotFoundError
             If the caller's principal no longer exists.
         """
         context = self._session_of(p)
+        if self._linked(p.id):
+            raise ProviderSignInRequired(ONE_WAY_IN_MESSAGE)
         now = self._clock()
         usable = self.has_usable_passkey(p.id)
         if context.via == "local" and usable:
@@ -863,8 +898,13 @@ class PasskeyService:
             verify (origin, relying-party id, user verification, format).
         AlreadyExistsError
             If the credential id is stored already, for anyone.
+        ProviderSignInRequired
+            For a person linked to the identity provider (one way in), even with a challenge
+            issued before the link.
         """
         context = self._session_of(p)
+        if self._linked(p.id):
+            raise ProviderSignInRequired(ONE_WAY_IN_MESSAGE)
         label = _passkey_name(name)
         challenge = self._consume(
             ceremony_id, "register", session_id=context.session_id, error=PasskeyRefused
@@ -975,10 +1015,18 @@ class PasskeyService:
         AuthenticationError
             For a used or expired challenge, an unknown, disabled or copied passkey, a wrong
             user handle, a deactivated person or an answer that does not verify.
+        ProviderSignInRequired
+            For a passkey that verifies, of a person linked to the identity provider: they sign
+            in only there.
         """
         parsed = self._parse(credential_json, AuthenticationError)
         challenge = self._use_sign_in_challenge(ceremony_id, parsed)
         _, principal = self._assert(parsed, challenge, AuthenticationError, owner=None)
+        if is_linked(principal):
+            # After the check, so an unknown passkey still reads as a failed sign-in; the counter
+            # just verified is kept, so a copy is still found later.
+            self._session.commit()
+            raise ProviderSignInRequired(ONE_WAY_IN_MESSAGE)
         started = self._sessions.start(
             principal.id,
             via="passkey",
@@ -1010,8 +1058,13 @@ class PasskeyService:
             If the caller authenticated with a token: step-up is for browser sessions.
         NoPasskeyError
             If the caller has no passkey that can sign in at this address.
+        ProviderStepUpRequired
+            For a person linked to the identity provider: they confirm by signing in there
+            again (provider step-up).
         """
         self._session_of(p)
+        if self._linked(p.id):
+            raise ProviderStepUpRequired(PROVIDER_STEP_UP_MESSAGE)
         if not self.has_usable_passkey(p.id):
             raise NoPasskeyError(_NO_PASSKEY)
         return self._authentication_options("step_up", p=p)
@@ -1040,8 +1093,13 @@ class PasskeyService:
         PasskeyRefused
             For a used, expired or other session's challenge, another person's passkey, or any
             refusal `sign_in` would give.
+        ProviderStepUpRequired
+            For a person linked to the identity provider, even with a challenge issued before
+            the link.
         """
         context = self._session_of(p)
+        if self._linked(p.id):
+            raise ProviderStepUpRequired(PROVIDER_STEP_UP_MESSAGE)
         challenge = self._consume(
             ceremony_id, "step_up", session_id=context.session_id, error=PasskeyRefused
         )

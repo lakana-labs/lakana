@@ -23,6 +23,7 @@ from lakana_core.errors import (
     LinkUnusableError,
     NotFoundError,
     PermissionDenied,
+    ProviderSignInRequired,
     SessionEndedError,
     StepUpRequired,
     ValidationError,
@@ -58,6 +59,7 @@ from lakana_core.models import (
     Principal,
     PrincipalType,
     SignInLink,
+    SignInNotice,
 )
 
 START = datetime(2026, 11, 8, 9, 0, tzinfo=UTC)
@@ -1606,3 +1608,63 @@ def test_withdraw_for_principal_commits_when_asked(world: World) -> None:
     assert world.links.withdraw_for_principal(bob.id, commit=True) == 1
     world.session.rollback()
     assert world.links.describe(parts(link.url)[0]).state == "withdrawn"
+
+
+# -- one way in for a person linked to the identity provider (#32, PR 2) ------------------------
+
+
+def _linked(world: World, row: Principal) -> None:
+    """Link a person to a provider identity directly.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    row
+        The person.
+    """
+    row.oidc_issuer, row.oidc_subject = "https://idp.example.com", row.name
+    world.session.commit()
+
+
+def test_admin_recovery_link_for_linked_person_needs_the_provider(world: World) -> None:
+    """An administrator's recovery link of a linked person adds no passkey; it stays usable."""
+    bob = world.person("bob")
+    boss = world.person("boss", admin=True)
+    _passkey(world, bob)
+    _linked(world, bob)
+    link = world.links.issue_recovery(world.pat(boss), principal_name="bob")
+    with pytest.raises(ProviderSignInRequired) as refused:
+        world.redeem(link)
+    assert "identity provider" in str(refused.value)
+    assert world.links.describe(parts(link.url)[0]).state == "open"
+    assert (
+        len(world.session.execute(select(Passkey).where(Passkey.principal_id == bob.id)).all()) == 1
+    )
+
+
+def test_operator_recovery_unlinks_and_registers_a_passkey(world: World) -> None:
+    """The break-glass path: the operator's link unlinks a linked administrator."""
+    world.person("other", admin=True)
+    boss = world.person("boss", admin=True)
+    _passkey(world, boss)
+    _linked(world, boss)
+    link = world.links.issue_recovery(world.operator, principal_name="boss")
+    redeemed = world.redeem(link)
+    assert (redeemed.kind, redeemed.needs_passkey) == ("recovery", True)
+    world.session.refresh(boss)
+    assert boss.oidc_subject is None and boss.oidc_issuer is None
+    [event] = world.session.execute(
+        select(AuditEvent.detail).where(
+            AuditEvent.event_type == AuditEventType.PRINCIPAL_OIDC_UNLINKED
+        )
+    ).scalars()
+    assert (event["reason"], event["link_id"]) == ("operator_recovery", str(link.id))
+    recipients = world.session.execute(
+        select(SignInNotice.recipient_id).where(SignInNotice.kind == "oidc_unlinked")
+    ).scalars()
+    admins = {world.operator.id, boss.id}
+    admins.add(
+        world.session.execute(select(Principal.id).where(Principal.name == "other")).scalar_one()
+    )
+    assert set(recipients) == admins

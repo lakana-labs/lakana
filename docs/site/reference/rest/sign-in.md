@@ -188,7 +188,7 @@ Answer fields: `IssuedLinkOut`
 
 Start confirming your browser session with a passkey touch (step-up)
 
-Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A token has no browser session, so it gets 409: step-up never applies to a token's requests.
+Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A person linked to the identity provider gets 409 `ProviderStepUpRequired`: confirm by signing in there again (`POST /api/v1/sign-in/oidc/step-up/start`). A token has no browser session, so it gets 409: step-up never applies to a token's requests.
 
 Parameters:
 
@@ -273,7 +273,7 @@ Answer fields: `PasskeyOptionsOut`
 
 Sign in with a passkey
 
-Send the browser's `credential.toJSON()` for the ceremony the options route started. A passkey that verifies starts a browser session with a fresh id (a session the browser had is ended), sets its cookie, and counts as a passkey touch for 15 minutes of step-up actions. An unknown, disabled or copied passkey, an answer from another address or without user verification, or a used or expired challenge answers 401 and is recorded in the audit log. A passkey whose signature counter went backwards is disabled (it may have been copied) and the person and every administrator are told.
+Send the browser's `credential.toJSON()` for the ceremony the options route started. A passkey that verifies starts a browser session with a fresh id (a session the browser had is ended), sets its cookie, and counts as a passkey touch for 15 minutes of step-up actions. An unknown, disabled or copied passkey, an answer from another address or without user verification, or a used or expired challenge answers 401 and is recorded in the audit log. A passkey whose signature counter went backwards is disabled (it may have been copied) and the person and every administrator are told. A person linked to the identity provider signs in only there: their passkey, once it verifies, answers 403 `ProviderSignInRequired`, recorded in the audit log too.
 
 Request body (application/json, required): `PasskeyAnswerIn`
 
@@ -290,6 +290,7 @@ Answers:
 | `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
 | `413` | The request body is larger than the server accepts. | `ErrorOut` |
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
 Answer fields: `SignInOut`
