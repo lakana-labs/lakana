@@ -4151,11 +4151,12 @@ is the only way to change access there, so that what was reviewed in git is what
   sees them before they commit, so on an instance with an administrator they can only make a check
   refuse, never let one through. (On an instance with no administrator at all,
   `assert_admin_headroom` lets every change through anyway.) Deleting a group needs no lock, since
-  it is refused while the group holds any active grant. Removing a passkey does not count
-  administrators today. The order is the access lock first, then this one: an apply holds the access
-  lock alone and takes this one inside it. A later rule of the same kind (the unlinked
-  administrators of OIDC sign-in) counts under this lock too. On SQLite nothing is taken, as with
-  the access lock. `packages/lakana-core/tests/test_admin_count_postgres_integration.py` races two
+  it is refused while the group holds any active grant. The order is the access lock first, then
+  this one: an apply holds the access lock alone and takes this one inside it. The break-glass count
+  of OIDC sign-in (the unlinked administrators, #32 PR 2) counts under this lock too: linking a
+  person, removing a passkey (`PasskeyService.remove` takes the lock before it counts) and every
+  change `assert_admin_headroom` guards; see "OIDC sign-in (#32, PR 2)". On SQLite nothing is
+  taken, as with the access lock. `packages/lakana-core/tests/test_admin_count_postgres_integration.py` races two
   removals per pair on a real Postgres, and a grant to a group against the removal of its member and
   the revoke of the other administrator; each test commits the first change only once
   `pg_stat_activity` shows the second waiting on the lock, or finished.
@@ -7008,8 +7009,102 @@ in; linking, the token window and `lakana login` are the next pull requests of #
   required `auth_time` (maintainer decision 5), is PR 2's; until then a linked person confirms
   step-up with a passkey (`test_linked_person_is_signed_in`,
   `test_a_provider_sign_in_is_no_step_up_touch`).
-- **Residuals:** a person's passkeys still sign them in after a provider sign-in (one way in per
-  linked person is PR 2); provider-initiated logout does not end a Lakana session (a non-goal).
+- **Residuals:** provider-initiated logout does not end a Lakana session (a non-goal). One way in
+  per linked person and provider step-up landed with PR 2 (below).
+
+## OIDC sign-in (#32, PR 2)
+
+People Lakana knows link their provider identity; nobody is created by the provider. A linked
+person signs in only through it, steps up there, and uses their personal tokens only within the
+token window. Threat model: "OIDC sign-in (#32)".
+
+- **L1, flow purposes** (`FlowPurpose`: `sign_in`, `invite`, `recovery`, `link`, `step_up`).
+  `invite` and `recovery` start from the open `start` with the link's `link_id` and `secret`: the
+  link is checked without being used (`LinkService.check_open`, a wrong secret answers like an
+  unknown link, `test_start_with_a_wrong_secret_is_like_unknown`) and the flow keeps only its row
+  id; the secret is never stored, logged or audited
+  (`test_invite_through_the_provider_signs_in_and_links`). The finish uses the link by id with
+  `redeem`'s conditional update, in the transaction that links and starts the session, so a link
+  withdrawn or used meanwhile is `link_unusable` and creates nobody
+  (`test_invite_withdrawn_after_start_creates_nobody`, `test_invite_used_twice_one_wins`). `link`
+  (`/link/start`, a session with a fresh step-up) and `step_up` (`/step-up/start`, a linked person's
+  session) keep the principal and the session; they finish at `/finish-in-session` only in that
+  same session (`test_link_finish_from_another_session_is_refused`). The callback sends them to the
+  fixed page `/sign-in/oidc/confirmed`, the others to `/sign-in/oidc`
+  (`test_callback_redirects_link_flows_to_confirmed`); `finish` and `finish-in-session` answer 409
+  for each other's flows and leave them usable
+  (`test_finish_and_finish_in_session_refuse_the_other_purposes`).
+- **L2, refusal reasons:** `identity_taken` (the sentence names neither account,
+  `test_identity_taken_names_no_account`), `identity_mismatch`, `link_unusable`,
+  `last_unlinked_admin`, `cannot_link_operator` (the bootstrap principal and service accounts,
+  `test_bootstrap_principal_can_never_be_linked`), `already_linked`, `auth_too_old`. Each is a 403
+  `OidcSignInRefused` with one rate-limited `SIGN_IN_OIDC_REFUSED` row carrying `iss` and `sub`.
+- **One identity per account.** `OidcLinkService.link` looks the identity up and refuses
+  `identity_taken`; the unique constraint on `(oidc_issuer, oidc_subject)` decides a race, in a
+  nested transaction, and the loser gets the refusal, never a 500
+  (`test_two_accounts_linking_one_identity_one_wins`, and on Postgres
+  `test_two_accounts_linking_one_identity_concurrently`).
+- **L3, break-glass** (`lakana_core.grants.break_glass`). An unlinked administrator is active,
+  holds ADMIN directly or through a group, is not linked and has a passkey that is not disabled
+  (`test_admin_through_a_group_counts`, `test_admin_without_a_working_passkey_does_not_count`). The
+  count is taken under `lock_admin_count`, not with row locks: the lock already serialises every
+  change that lowers the administrator count, in the documented order (the access lock first). The
+  rule refuses a change that takes the count from one or more to none while a linked administrator
+  remains: linking the last one (`last_unlinked_admin`, `test_last_unlinked_admin_is_refused`), and
+  with `LAST_UNLINKED_ADMIN_MESSAGE` (409) deactivating them, revoking their ADMIN, removing them
+  from the group that holds it and deleting their last working passkey
+  (`test_deactivating_the_last_unlinked_admin_is_refused`,
+  `test_revoking_the_last_unlinked_admins_role_is_refused`,
+  `test_removing_the_last_unlinked_admin_from_the_admins_group_is_refused`,
+  `test_deleting_the_last_unlinked_admins_last_passkey_is_refused`). An instance that links nobody
+  keeps today's rules, and a count already at zero blocks nothing
+  (`test_lowering_the_count_is_allowed_while_no_administrator_is_linked`,
+  `test_a_count_already_at_zero_blocks_nothing`). On Postgres,
+  `test_oidc_links_postgres_integration.py` links the last two at once and a link against a
+  deactivation of the other; the second waits on the lock and is refused, and one unlinked
+  administrator is left.
+- **L4, linking keeps passkeys stored and ends no session**
+  (`test_link_from_profile_links_and_keeps_passkeys_stored`).
+- **L5, recovery links.** An administrator's recovery link of a linked person answers 403
+  `ProviderSignInRequired` at `/links/redeem`, stays usable, and works through the provider only as
+  the same identity (`test_admin_recovery_link_for_linked_person_needs_the_provider`,
+  `test_recovery_of_a_linked_person_needs_the_same_identity`); `/links/describe` says
+  `provider_only`. Of an unlinked person it may link them (`test_recovery_of_an_unlinked_person_may_link`).
+  A recovery through the provider ends the sessions and notifies as a passkey recovery does, and
+  deletes no passkey. The operator's recovery link of a linked administrator unlinks them on the
+  passkey path (`PRINCIPAL_OIDC_UNLINKED`, reason `operator_recovery`, an `oidc_unlinked` notice to
+  every administrator) and then registers a passkey: the break-glass path, whatever the provider
+  says (`test_operator_recovery_unlinks_and_registers_a_passkey`).
+- **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN and
+  step-up) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
+  oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`) and
+  clears the identity, in one transaction (`test_unlink_deletes_passkeys_revokes_tokens_ends_sessions`,
+  `test_unlink_needs_step_up_and_admin`). Unlinking oneself is 409 (`test_unlinking_oneself_is_refused`).
+- **L7, the token window** (`sign_in.token_provider_window_days`, default 30, 1 to 365, changed with
+  the session lengths and audited in `SIGN_IN_SETTINGS_CHANGED`). `PatService.verify` accepts a
+  linked person's personal token only while `now < last_provider_sign_in_at + window`; otherwise 401
+  with the next step, and the token is not revoked
+  (`test_token_outside_the_window_is_401_and_not_revoked`, `test_a_provider_sign_in_reopens_the_window`,
+  `test_window_change_applies_at_once`). Task and CI tokens are not personal tokens and are untouched
+  (`test_task_and_ci_tokens_ignore_the_window`); the bootstrap principal is never linked.
+- **L8, one way in.** A passkey sign-in of a linked person verifies and then answers 403
+  `ProviderSignInRequired`, audited through the refusal limiter (an unknown passkey still reads as
+  today's 401); registering a passkey is refused the same way, also with a challenge issued before
+  the link; passkey step-up answers 409 `ProviderStepUpRequired`
+  (`test_linked_person_passkey_sign_in_is_refused`, `test_linked_person_cannot_add_a_passkey`,
+  `test_linked_person_step_up_options_is_409_provider`). Provider step-up asks `prompt=login` and
+  `max_age=0`, needs the person's own identity and an `auth_time` no earlier than the flow's start
+  less 60 s (without one, as Entra ID does unless it is configured, it is refused), and then writes
+  the session's `last_touch_at`, which `require_step_up` reads as before
+  (`test_step_up_start_asks_prompt_login_and_max_age_zero`, `test_provider_step_up_sets_the_touch`,
+  `test_provider_step_up_with_old_auth_time_is_refused`,
+  `test_provider_step_up_as_someone_else_is_refused`). Every operation of `STEP_UP_ROUTES` goes
+  through for a linked administrator after a provider step-up
+  (`test_a_linked_administrator_steps_up_through_the_provider`). `SessionOut.provider_linked` tells
+  the interface which ceremony to offer.
+- **Residuals:** a passkey disabled as a copy can take the last unlinked administrator (a security
+  response, never refused); the operator's recovery is then the way in. Operator recovery leaves
+  the person's personal tokens as they were: once unlinked, they are no longer under the window.
 
 ## Git fetch hardening (M5b)
 
