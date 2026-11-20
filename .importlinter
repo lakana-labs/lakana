@@ -38,6 +38,19 @@ ignore_imports =
     lakana_core.** -> pyiceberg
     lakana_core.** -> fsspec
 
+# Authlib builds the OIDC sign-in's protocol messages in the server only
+# (`lakana_server.oidc_flow`). Core verifies ID tokens with its own code, shared with CI OIDC,
+# and the SDK and the worker never sign anyone in.
+[importlinter:contract:only-the-server-imports-authlib]
+name = Only lakana_server imports authlib
+type = forbidden
+source_modules =
+    lakana
+    lakana_core
+    lakana_worker
+forbidden_modules =
+    authlib
+
 [importlinter:contract:sdk-is-independent]
 name = lakana must not depend on core, server or worker
 type = forbidden

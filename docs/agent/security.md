@@ -6920,6 +6920,97 @@ User documentation: `docs/site/reference/ci-trust-rules.md`. Threat model: "CI O
   stays refused for a CI scope unless it is `DEPLOY`; nothing logs or records a JWT or a
   `lakana_ci_` token; a refusal after verification keeps the one text.
 
+## OIDC sign-in (#32, PR 1)
+
+People sign in to the web interface through the organisation's identity provider: the
+authorization-code flow with PKCE against the one provider of `LAKANA_OIDC__ISSUER`. Off without an
+issuer; with one, the server does not start without `LAKANA_OIDC__CLIENT_ID`,
+`LAKANA_OIDC__CLIENT_SECRET`, `LAKANA_UI__ENABLED=true` and `LAKANA_UI__PUBLIC_URL`
+(`test_settings.py`). Only a person whose provider identity is already linked to their account signs
+in; linking, the token window and `lakana login` are the next pull requests of #32. Threat model:
+"OIDC sign-in (#32)".
+
+- **One verification path with CI.** `lakana_core.oidc` holds the ID-token checks and the key cache
+  that CI OIDC used (above); `lakana_core.ci_oidc.jwks` and `.verification` are bindings with the
+  same names, signatures, codes and messages, and no `test_ci_oidc*` file changed. CI still requires
+  a `jti` and checks no `azp`, `nonce` or `typ`; its `RefusalCode` keeps its 18 values, and a
+  refusal of the shared code is turned into CI's by its value.
+- **The provider's address** (R2). The issuer is checked like CI's, without presets: `https`, a host
+  name, no credentials, query, fragment or trailing slash, at most 255 characters
+  (`test_issuer_is_checked_like_ci`). It may name a port (maintainer decision of 2026-11-20): the
+  fetcher then allows 443 and that port for every request to the provider (`KeySource.ports`,
+  `check(..., ports=)`); loopback, link-local and metadata addresses stay refused on every port
+  (`test_the_issuers_port_never_opens_loopback_or_metadata`). Discovery's `authorization_endpoint`,
+  `token_endpoint` and `jwks_uri` must each be `https`, without userinfo, on the issuer's host or a
+  host of `LAKANA_OIDC__ALLOW_HOSTS` (`test_token_endpoint_on_a_foreign_host_is_refused`,
+  `test_authorization_endpoint_must_be_https`). Every request to the provider, the token endpoint's
+  too, goes through `lakana_core.net.https_json`: `post_form_json` has `fetch_json`'s checks (pinned
+  address, no redirect, `trust_env=False`, 200 only, 64 KiB, 10 s per request), and its
+  `FetchFailed` never contains the form or a header (`test_post_reason_never_contains_the_secret`,
+  `test_post_refuses_a_redirect_and_a_large_answer`, `test_post_refuses_a_metadata_address`).
+  Authlib (BSD-3-Clause, `>=1.6`; an import contract keeps it in `lakana_server`) builds the
+  authorization URL, the S256 challenge and the token request's body; its HTTP client is never used.
+- **The ID token** (R4, `OidcProvider.rules`): the shared order, then `typ`, when present, is `ID`
+  (Keycloak marks access tokens `Bearer`), and the header's `typ` is not `at+jwt` (an RFC 9068
+  access token, `test_an_rfc_9068_access_token_is_refused_by_its_header`); `aud` contains the client
+  id; `azp`, when present, is the client id, and is required when `aud` has more than one member;
+  `iat` at most 600 s old and a lifetime of at most a day; `nonce` equals the flow's (compared in
+  constant time); `sub` present and at most 255 characters; no `jti` required (Entra ID sends none).
+  The algorithms are discovery's `id_token_signing_alg_values_supported` that Lakana supports (RSA
+  only), `RS256` when it lists none. Only the `id_token` member of the token answer is read
+  (`test_sign_in_rules_refuse_an_access_token`, `test_azp_must_be_ours_when_present`,
+  `test_two_audiences_need_azp`, `test_nonce_must_match`, `test_token_confusion_is_token_invalid`).
+- **The flow** (R5, R6, `lakana_core.identity.oidc_flows`): `start` stores the SHA-256 of `state`
+  and of the flow cookie's random value, the nonce and the PKCE verifier in `oidc_flows`; the flow
+  expires after 10 minutes. The callback takes the flow only when `state` and the browser's flow
+  cookie name it together, in one conditional `UPDATE`, committed before anything else, so a `state`
+  from another browser's flow or a callback without the cookie signs nobody in and a replayed
+  callback finds nothing (`test_callback_with_another_browsers_state_is_refused`,
+  `test_a_replayed_callback_is_refused`). The callback never starts a session: it writes the outcome
+  on the flow and always answers 303 to `<public_url>/sign-in/oidc`. That page calls `finish`, a
+  same-origin POST (the guard's `Origin` rule applies), which takes the flow once, starts the
+  session with a fresh id (a presented session ends as `replaced`) and returns the CSRF token in its
+  body, as every sign-in does (`test_finish_replaces_the_presented_session`,
+  `test_finish_without_the_flow_cookie_is_refused`, `test_finish_works_once`). The person is found
+  by `(oidc_issuer, oidc_subject)` only, unique together; `email` and `name` are shown, never
+  matched (`test_same_email_on_another_account_does_not_match`, `test_one_identity_per_account`).
+- **The flow cookie** (R7): `__Host-lakana_oidc` over HTTPS, `lakana_oidc_<port>` on localhost;
+  `HttpOnly`, `Path=/`, `Max-Age=600`, `Secure` over HTTPS, `SameSite=Lax` (a `Strict` cookie is not
+  sent on the provider's cross-site redirect); 32 random bytes; it does not start with
+  `lakana_session`, so neither the guard nor `get_principal` takes it for a session
+  (`test_the_flow_cookie_over_https`,
+  `test_start_sets_the_flow_cookie_and_answers_the_authorization_url`).
+- **The return path** (R13, `safe_return_to`): `return_to` comes in `start`'s body and stays on the
+  server; it is kept only as a path with one leading `/`, no `//` or `\` (also percent-encoded), no
+  control or format character, at most 2048 characters, not a sign-in page, and is otherwise `/`.
+  `finish` returns it and the page navigates inside the app; no redirect carries it
+  (`test_return_to_is_kept_only_when_it_is_an_app_path`,
+  `test_callback_always_redirects_to_the_public_url`).
+- **The client secret** is a `SecretStr`, masked in Settings › Configuration, sent only to the token
+  endpoint (`client_secret_basic`, form-urlencoded per RFC 6749 2.3.1, unless the provider lists
+  only `client_secret_post`), and is in no answer, log line or audit row
+  (`test_the_client_secret_is_sent_basic_and_never_logged`, `test_secrets_are_hidden_in_errors`).
+  The access log writes the callback's query (the code and the state) as `?…`
+  (`test_callback_query_is_not_in_the_access_log`).
+- **Refusals and limits.** `start` has two limiters of its own with the passkey options' rates
+  (`test_start_is_rate_limited`). Every refusal is a 403 `OidcSignInRefused` with a `reason`
+  (`not_linked`, `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`,
+  `flow_expired`) and one `SIGN_IN_OIDC_REFUSED` row, written only when `auth_audit_limiter` admits
+  the client (`test_refusal_rows_are_rate_limited`); a provider that answers badly (another issuer
+  in discovery, a foreign token endpoint, a 302, 500 or 70 KiB answer, a metadata address) is a
+  reason, never a 500 (`test_unreachable_provider_is_a_reason_not_an_error`). Each request to the
+  provider has its own 10 s deadline; a callback with a cold cache makes up to three in a row
+  (discovery, keys, token endpoint), so it answers within about 30 s at worst. A success is
+  `SIGN_IN_OIDC` with `iss`, `sub`, the session's key id and the peer, and sets
+  `last_provider_sign_in_at`; the session is `via="oidc"` and is **no** step-up touch: a provider
+  may answer silently from its own session (an unlocked browser, a days-old IdP cookie), so a
+  provider sign-in proves no fresh presence. Provider step-up, with `prompt=login`, `max_age` and a
+  required `auth_time` (maintainer decision 5), is PR 2's; until then a linked person confirms
+  step-up with a passkey (`test_linked_person_is_signed_in`,
+  `test_a_provider_sign_in_is_no_step_up_touch`).
+- **Residuals:** a person's passkeys still sign them in after a provider sign-in (one way in per
+  linked person is PR 2); provider-initiated logout does not end a Lakana session (a non-goal).
+
 ## Git fetch hardening (M5b)
 
 `lakana_worker.git.fetch_commit` and `check_access` (one shared setup, `_prepared`) are the only
