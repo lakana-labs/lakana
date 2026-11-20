@@ -957,8 +957,7 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ): "signing in: the provider's checked answer is the proof",
     ("POST", "/api/v1/sign-in/oidc/step-up/start"): "the provider step-up ceremony itself",
     ("POST", "/api/v1/sign-in/oidc/finish-in-session"): (
-        "finishes a provider step-up (the ceremony itself) or a link, whose start asked for "
-        "step-up"
+        "finishes a provider step-up (the ceremony itself) or a link, whose start asked for step-up"
     ),
     ("POST", "/api/v1/sign-in/step-up/options"): "the step-up ceremony itself",
     ("POST", "/api/v1/sign-in/step-up"): "the step-up ceremony itself",
