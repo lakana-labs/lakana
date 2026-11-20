@@ -14,9 +14,12 @@ from lakana.ingest import (
     ConnectionChanged,
     ConnectionNotDeclared,
     ConnectionRefused,
+    ConnectionSetupError,
     IngestError,
     SourceError,
+    UsageError,
     _connections,
+    _errors,
     connections,
 )
 
@@ -177,6 +180,7 @@ def test_an_undeclared_name_is_refused_before_any_request() -> None:
         "`files` is not declared by this asset: add it to @asset(connections=[...]) and deploy."
     )
     assert fake.asked == []
+    assert refused.value.connection is None
 
 
 def test_a_refusal_of_the_server_keeps_its_text() -> None:
@@ -185,6 +189,7 @@ def test_a_refusal_of_the_server_keeps_its_text() -> None:
         connections.get("crm-db")
     assert str(refused.value) == "connection `crm-db` is not in environment `dev`"
     assert refused.value.__cause__ is None
+    assert refused.value.connection == "crm-db"
 
 
 def test_an_answer_that_is_not_a_connection_is_refused_without_its_values() -> None:
@@ -193,6 +198,7 @@ def test_an_answer_that_is_not_a_connection_is_refused_without_its_values() -> N
         connections.get("crm-db")
     assert "7" not in str(refused.value)
     assert "crm-db" in str(refused.value)
+    assert refused.value.connection == "crm-db"
 
 
 def test_outside_a_task_the_lookup_says_so() -> None:
@@ -212,6 +218,40 @@ def test_the_errors_say_whether_another_attempt_could_help() -> None:
         assert issubclass(kind, IngestError)
 
 
+def test_a_helper_names_its_connection_once() -> None:
+    """The decorator names the connection, by position or keyword; a named error keeps its name."""
+
+    @_errors.names_connection
+    def helper(connection: str, *, error: Exception) -> None:
+        raise error
+
+    with pytest.raises(SourceError) as named:
+        helper("crm-db", error=SourceError("the database went away"))
+    assert named.value.connection == "crm-db"
+    with pytest.raises(SourceError) as by_keyword:
+        helper(connection="crm-db", error=SourceError("the database went away"))
+    assert by_keyword.value.connection == "crm-db"
+    kept = SourceError("the database went away")
+    kept.connection = "other"
+    with pytest.raises(SourceError) as caught:
+        helper("crm-db", error=kept)
+    assert caught.value.connection == "other"
+    with pytest.raises(SourceError) as unnamed:
+        helper(7, error=SourceError("no name"))  # ty: ignore[invalid-argument-type]
+    assert unnamed.value.connection is None
+    with pytest.raises(UsageError) as mistake:
+        helper("crm-db", error=UsageError("sql.read needs a query"))
+    assert mistake.value.connection is None
+    with pytest.raises(ConnectionSetupError) as setup:
+        helper("crm-db", error=ConnectionSetupError("`crm-db` has no secret with `password`"))
+    assert setup.value.connection == "crm-db"
+    assert issubclass(ConnectionSetupError, UsageError)
+    assert ConnectionSetupError.retryable is False
+    with pytest.raises(ValueError, match="not an ingest error"):
+        helper("crm-db", error=ValueError("not an ingest error"))
+    assert IngestError("made by the asset").connection is None
+
+
 _GRANT: dict[str, object] = {"kind": "postgresql", "grant": [["db.example.com", 5432]]}
 
 
@@ -227,6 +267,7 @@ def test_a_connection_changed_since_the_grant_fails_transiently() -> None:
         "address"
     )
     assert caught.value.retryable is True
+    assert caught.value.connection == "crm-db"
     with pytest.raises(ConnectionChanged):
         connections.get("crm-db")
     assert fake.asked == ["crm-db", "crm-db"]
@@ -389,6 +430,7 @@ def test_a_mounted_connection_moved_since_the_grant_fails_transiently(
     with pytest.raises(ConnectionChanged) as caught:
         connections.get("crm-db")
     assert caught.value.retryable is True
+    assert caught.value.connection == "crm-db"
     with pytest.raises(ConnectionChanged):
         connections.get("crm-db")
     assert fake.asked == ["crm-db", "crm-db"]

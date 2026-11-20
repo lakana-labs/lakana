@@ -1080,6 +1080,7 @@ class DeployService:
         reader: PrincipalRef | None = None,
         reads: _WarningReads | None = None,
         submitted_by: str | None = None,
+        names: tuple[str, str] | None = None,
     ) -> DeployRunView:
         """Build the API view of a run.
 
@@ -1101,6 +1102,9 @@ class DeployService:
             `None`.
         submitted_by
             The submitting principal's name (`_runs_with_submitter` reads it with the run).
+        names
+            The environment's and the repository's names, when the caller read them for a whole
+            page (`_names_of`); read here, one statement each, when `None`.
 
         Returns
         -------
@@ -1113,16 +1117,7 @@ class DeployService:
             If the run's environment or repository was deleted meanwhile.
         """
         reads = reads or _WarningReads()
-        env_name = self._session.execute(
-            select(Environment.name).where(Environment.id == run.environment_id)
-        ).scalar_one_or_none()
-        if env_name is None:
-            raise NotFoundError("The environment of this deploy no longer exists.")
-        repo_name = self._session.execute(
-            select(Repository.name).where(Repository.id == run.repository_id)
-        ).scalar_one_or_none()
-        if repo_name is None:
-            raise NotFoundError("The repository of this deploy no longer exists.")
+        env_name, repo_name = names or self._names_of([run])[run.id]
         diff = run.diff_json
         hidden_adopted = 0
         if reader is not None and diff is not None:
@@ -1170,6 +1165,57 @@ class DeployService:
                 environment=env_name,
             ),
         )
+
+    def _names_of(self, runs: Collection[DeployRun]) -> dict[uuid.UUID, tuple[str, str]]:
+        """Read the environment and repository names of some runs, one statement for each kind.
+
+        Parameters
+        ----------
+        runs
+            The rows.
+
+        Returns
+        -------
+        dict
+            Each run's id to its ``(environment name, repository name)``.
+
+        Raises
+        ------
+        NotFoundError
+            If the environment or the repository of a run was deleted meanwhile.
+        """
+        envs = self._names(Environment, {r.environment_id for r in runs})
+        repos = self._names(Repository, {r.repository_id for r in runs})
+        out: dict[uuid.UUID, tuple[str, str]] = {}
+        for run in runs:
+            if run.environment_id not in envs:
+                raise NotFoundError("The environment of this deploy no longer exists.")
+            if run.repository_id not in repos:
+                raise NotFoundError("The repository of this deploy no longer exists.")
+            out[run.id] = (envs[run.environment_id], repos[run.repository_id])
+        return out
+
+    def _names(
+        self, model: type[Environment] | type[Repository], ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, str]:
+        """Read the names of some rows in one statement.
+
+        Parameters
+        ----------
+        model
+            `Environment` or `Repository`.
+        ids
+            The rows' ids.
+
+        Returns
+        -------
+        dict
+            Id to name, for those that exist.
+        """
+        if not ids:
+            return {}
+        rows = self._session.execute(select(model.id, model.name).where(model.id.in_(ids))).all()
+        return {row_id: name for row_id, name in rows}
 
     def _runs_with_submitter(self) -> Select[*tuple[Any, ...]]:
         """Start a select of deploy runs, each with the name of the principal that submitted it.
@@ -2333,7 +2379,8 @@ class DeployService:
             "deploys", [env.id], repository=repository, limit=limit, cursor=cursor
         )
         reads = _WarningReads()
-        return [self._view(run, p, reads, name) for run, name in page], next_cursor
+        names = self._names_of([run for run, _ in page])
+        return [self._view(run, p, reads, name, names[run.id]) for run, name in page], next_cursor
 
     def list_all_deploys_page(
         self,
@@ -2391,7 +2438,8 @@ class DeployService:
             "all-deploys", list(names), repository=repository, limit=limit, cursor=cursor
         )
         reads = _WarningReads()
-        return [self._view(run, p, reads, name) for run, name in page], next_cursor
+        names = self._names_of([run for run, _ in page])
+        return [self._view(run, p, reads, name, names[run.id]) for run, name in page], next_cursor
 
     def _deploys_page(
         self,

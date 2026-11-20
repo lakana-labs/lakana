@@ -772,3 +772,35 @@ def test_safe_source_keeps_printable_text_tabs_and_lines_exactly() -> None:
 
 def test_safe_source_escapes_a_zero_width_joiner_and_keeps_the_emoji() -> None:
     assert _output.safe_source("\U0001f469\u200d\U0001f4bb") == "\U0001f469\\u200d\U0001f4bb"
+
+
+def test_json_output_escapes_what_a_terminal_would_act_on_and_keeps_other_text(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """JSON output escapes what a terminal would act on, and keeps other text as it is.
+
+    C0 and C1 controls, DEL, bidirectional and zero-width characters (format characters, an
+    astral one too) and the line separators come out as JSON escapes; the parsed value is the
+    same.
+    """
+    tricky = "a\x1b[2J\x7f\x9b\u202e\u2066\u200b\ufeff\u2028\U000e0041 ü 東 😀"
+
+    _output.emit(_state(tmp_path, "json"), _Row(tricky, datetime(2026, 1, 1)))
+
+    out = capsys.readouterr().out
+    assert json.loads(out)["name"] == tricky
+    for raw in "\x1b\x7f\x9b\u202e\u2066\u200b\ufeff\u2028\U000e0041":
+        assert raw not in out
+    for escape in (
+        "\\u001b",
+        "\\u007f",
+        "\\u009b",
+        "\\u202e",
+        "\\u2066",
+        "\\u200b",
+        "\\ufeff",
+        "\\u2028",
+        "\\udb40\\udc41",
+    ):
+        assert escape in out
+    assert "ü 東 😀" in out

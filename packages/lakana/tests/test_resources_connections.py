@@ -150,6 +150,7 @@ def test_the_model_has_no_field_for_a_secret_value() -> None:
         "environment",
         "last_test",
         "actions",
+        "last_run_failure",
     }
 
 

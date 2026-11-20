@@ -7,6 +7,7 @@
 import { useCallback } from "react";
 import { useLocation } from "react-router";
 
+import type { ApiError } from "../api/client";
 import { getSavedQuery, type SavedQueryOut } from "../api/savedQueries";
 import { useResource } from "../shell/useResource";
 import type { QueryNoteState } from "./QueryNote";
@@ -44,6 +45,8 @@ export interface OpenedSaved {
    * false while nothing failed.
    */
   readonly retryable: boolean;
+  /** The refusal of the latest failed read, a new one each time a read fails; else null. */
+  readonly failure: ApiError | null;
   /** Reads the saved query again. */
   readonly reload: () => void;
 }
@@ -67,10 +70,10 @@ export function useOpenedSaved(address: QueriesAddress | null): OpenedSaved {
   const read = useResource(load);
   const { reload } = read;
   if (address === null) {
-    return { opened: null, error: null, retryable: false, reload };
+    return { opened: null, error: null, retryable: false, failure: null, reload };
   }
   if (address.kind === "run") {
-    return { opened: carried, error: null, retryable: false, reload };
+    return { opened: carried, error: null, retryable: false, failure: null, reload };
   }
   const fresh = [carried, read.data].find((saved) => saved?.id === address.id) ?? null;
   const error = fresh === null ? read.error : null;
@@ -79,6 +82,7 @@ export function useOpenedSaved(address: QueriesAddress | null): OpenedSaved {
     opened: fresh,
     error,
     retryable: error !== null && status !== 403 && status !== 404,
+    failure: error === null ? null : read.failure,
     reload,
   };
 }
