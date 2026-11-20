@@ -7485,7 +7485,8 @@ expected exception, and nothing else. `_fail_closed` turns any exception but its
 refusal, which would hide a bug, so the harness calls the functions under it. Its refusals are
 narrower than that list (`GUARD_REFUSALS`): `LakanaError`, `ParseError` and `TokenError`; a
 `RecursionError` only when parsing the text alone raises it too (the parser's nesting limit, not a
-walker's), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
+walker's; that parse runs `PARSE_HEADROOM` frames short of the limit, since the target's own parses
+sit a few frames deeper and a text at the edge once read as a crash, #733), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
 (`scripts/tests/test_fuzz.py`) reads `_fail_closed`'s list from its source and compares it with
 `FAIL_CLOSED_PASSES`, and runs every seed on every pull request. The guard's seeds are the statements of its own tests
 that earlier guard-fuzzing runs collected, one per sequence of token types
