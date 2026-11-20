@@ -191,14 +191,35 @@ def test_a_variable_that_leaves_its_prefix_is_refused_before_anything_runs(
     assert store.seen == []
 
 
-def test_known_residual_a_literal_dotdot_reaches_the_same_server(store: Serving) -> None:
-    """Known residual (#14): DuckDB compares the URL string; the request leaves the prefix.
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("t1/../t2/a.parquet", id="dotdot"),
+        pytest.param("t1/%2e%2e/t2/a.parquet", id="escaped dotdot"),
+        pytest.param("t1/%2E%2E/t2/a.parquet", id="escaped dotdot upper"),
+        pytest.param("t1/./../t2/a.parquet", id="dot then dotdot"),
+    ],
+)
+def test_a_literal_dotdot_is_refused_and_reaches_no_server(store: Serving, path: str) -> None:
+    """A former residual (#14), closed by DuckDB 2.0.1: a dot segment in a literal URL is refused.
 
-    Production file lists are variables, which the child checks; only SQL that got past the
-    guard can write a literal. What it reaches is what the same host serves to a request
-    without a valid signature. Pinned so that a DuckDB change shows.
+    DuckDB 2.0.0 compared the URL string, let ``..`` through, and the HTTP client asked the
+    store for ``/t2/a.parquet``. 2.0.1 refuses the URL with a ``Permission Error`` before any
+    request. Production file lists are variables, which the child checks itself; only SQL that
+    got past the guard can write a literal.
+
+    Parameters
+    ----------
+    store
+        The store serving ``t1`` and ``t2``.
+    path
+        The URL's path below the store.
     """
-    assert _read(store.url("t1/../t2/a.parquet"), (store.url("t1/"),)) == [2]
+    with pytest.raises(ValidationError) as caught:
+        _read(store.url(path), (store.url("t1/"),))
+    assert type(caught.value) is ValidationError
+    assert str(caught.value) == REFUSED_LOCATION
+    assert not [line for line in store.seen if "t2" in line]
 
 
 def test_known_residual_a_redirect_from_the_store_is_followed_to_another_host(
