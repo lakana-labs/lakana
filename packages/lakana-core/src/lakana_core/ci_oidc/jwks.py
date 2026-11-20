@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 
 from lakana_core.ci_oidc.config import CiOidcConfig
 from lakana_core.ci_oidc.errors import IdTokenRefused, RefusalCode
@@ -81,55 +81,37 @@ class JwksCache(keys.JwksCache):
         )
         super().__init__(source, fetcher=fetcher, clock=clock)
 
-    def _fetch_with_settings(self, url: str, allowed_hosts: Collection[str]) -> object:
-        """Fetch a document with the operator's proxy, CA bundle and private hosts.
-
-        Parameters
-        ----------
-        url
-            The URL.
-        allowed_hosts
-            The host names it may be on.
+    def _json_fetcher(self) -> Callable[..., object]:
+        """Name the function the default fetcher calls: this module's `fetch_json`, now.
 
         Returns
         -------
-        object
-            The parsed document.
+        Callable
+            `fetch_json` as this module holds it when the fetch runs.
         """
-        # Only the operator's own list may resolve to private addresses: an issuer's host
-        # (or a jwks_uri on it) needs to be listed there too.
-        return fetch_json(
-            url,
-            allowed_hosts=allowed_hosts,
-            private_hosts=self._source.allow_hosts,
-            proxy=self._source.proxy,
-            ca_bundle=self._source.ca_bundle,
-        )
+        return fetch_json
 
-    def signing_key(self, issuer: str, kid: str) -> SigningKey:
-        """Return an issuer's key by its key id.
-
-        Parameters
-        ----------
-        issuer
-            The issuer URL, exactly as configured.
-        kid
-            The key id from the token's header.
+    def _fetch_options(self) -> dict[str, object]:
+        """Name no further keyword arguments: CI's issuers have no port, so 443 only.
 
         Returns
         -------
-        SigningKey
-            The key.
-
-        Raises
-        ------
-        IdTokenRefused
-            `ISSUER_NOT_ALLOWED` for an issuer that is not configured (nothing is fetched),
-            `KEYS_UNAVAILABLE` when there are no usable keys, `UNKNOWN_KEY` when the keys lack
-            this key id; with CI's messages.
+        dict
+            Empty.
         """
-        try:
-            return super().signing_key(issuer, kid)
-        except shared.IdTokenRefused as refused:
-            code = RefusalCode(refused.code.value)
-        raise IdTokenRefused(code)
+        return {}
+
+    def _refusal(self, code: shared.RefusalCode) -> Exception:
+        """Build CI's refusal of a key lookup, with CI's code and message.
+
+        Parameters
+        ----------
+        code
+            Why, as the shared cache names it.
+
+        Returns
+        -------
+        Exception
+            CI's `IdTokenRefused`.
+        """
+        return IdTokenRefused(RefusalCode(code.value))

@@ -292,6 +292,41 @@ class JwksCache:
         self._clock = clock
         self._issuers = {url: _Issuer(url) for url in source.issuers}
 
+    def _json_fetcher(self) -> Callable[..., object]:
+        """Name the function the default fetcher calls, looked up when a fetch runs.
+
+        Returns
+        -------
+        Callable
+            `lakana_core.net.https_json.fetch_json` as this module imported it.
+        """
+        return fetch_json
+
+    def _fetch_options(self) -> dict[str, object]:
+        """Name the further keyword arguments of the default fetcher.
+
+        Returns
+        -------
+        dict
+            The ports a request to the source may use (`KeySource.ports`).
+        """
+        return {"ports": self._source.ports}
+
+    def _refusal(self, code: RefusalCode) -> Exception:
+        """Build the refusal of a key lookup.
+
+        Parameters
+        ----------
+        code
+            Why.
+
+        Returns
+        -------
+        Exception
+            An `IdTokenRefused` with the shared message; a binding may name its settings.
+        """
+        return IdTokenRefused(code)
+
     def _fetch_with_settings(self, url: str, allowed_hosts: Collection[str]) -> object:
         """Fetch a document with the source's proxy, CA bundle and private hosts.
 
@@ -309,13 +344,13 @@ class JwksCache:
         """
         # Only the operator's own list may resolve to private addresses: an issuer's host
         # (or a jwks_uri on it) needs to be listed there too.
-        return fetch_json(
+        return self._json_fetcher()(
             url,
             allowed_hosts=allowed_hosts,
             private_hosts=self._source.allow_hosts,
             proxy=self._source.proxy,
             ca_bundle=self._source.ca_bundle,
-            ports=self._source.ports,
+            **self._fetch_options(),
         )
 
     def _load(self, issuer: str, now: float) -> _Snapshot:
@@ -418,7 +453,7 @@ class JwksCache:
         """
         state = self._issuers.get(issuer)
         if state is None:
-            raise IdTokenRefused(RefusalCode.ISSUER_NOT_ALLOWED)
+            raise self._refusal(RefusalCode.ISSUER_NOT_ALLOWED)
         snapshot = self._fresh(state, self._clock())
         if snapshot is not None and enough(snapshot):
             return snapshot
@@ -431,7 +466,7 @@ class JwksCache:
                 self._refresh(state, now)
         snapshot = state.snapshot
         if snapshot is None or now - snapshot.fetched_at >= FRESH_SECONDS + STALE_SECONDS:
-            raise IdTokenRefused(RefusalCode.KEYS_UNAVAILABLE)
+            raise self._refusal(RefusalCode.KEYS_UNAVAILABLE)
         return snapshot
 
     def signing_key(self, issuer: str, kid: str) -> SigningKey:
@@ -458,7 +493,7 @@ class JwksCache:
         """
         key = self._snapshot(issuer, lambda snapshot: kid in snapshot.keys).keys.get(kid)
         if key is None:
-            raise IdTokenRefused(RefusalCode.UNKNOWN_KEY)
+            raise self._refusal(RefusalCode.UNKNOWN_KEY)
         return key
 
     def discovery(self, issuer: str) -> Mapping[str, object]:

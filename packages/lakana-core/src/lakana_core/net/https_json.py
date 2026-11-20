@@ -523,26 +523,26 @@ def post_form_json(
     Parameters
     ----------
     url
-        An ``https`` URL on port 443, or on one of `ports`.
+        The token endpoint: ``https``, and port 443 unless `ports` allows another.
     form
-        The fields.
+        The fields, form-encoded into the body.
     headers
-        Further headers, such as ``Authorization``.
+        Headers to add, such as ``Authorization`` for ``client_secret_basic``.
     allowed_hosts
-        The lower-case host names the request may reach.
+        Lower-case names of the hosts this POST may go to.
     private_hosts
-        The lower-case host names the operator allowed to resolve to private addresses.
+        Lower-case names (a subset of the operator's list) that may resolve to a private address.
     proxy
-        The operator's proxy, or `None`.
+        The proxy to go through, or `None` to connect to the checked address.
     ca_bundle
-        The operator's CA file, which replaces the built-in store, or `None`.
+        A CA file to trust instead of the built-in store, or `None`.
     ports
-        The ports the URL may name; 443 alone by default.
+        Ports besides 443 that the URL may name; 443 alone by default.
 
     Returns
     -------
     object
-        The parsed JSON value.
+        The answer, parsed as JSON.
     """
     target = check(url, allowed_hosts, private_hosts=private_hosts, ports=ports)
     return post_target(

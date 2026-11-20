@@ -10,6 +10,8 @@ from __future__ import annotations
 import enum
 
 
+# jscpd:ignore-start -- lakana_core.ci_oidc.errors keeps CI's own copy of the first 18 codes:
+# test_ci_oidc_verification.py pins CI's enum at exactly those values, and no CI test may change.
 class RefusalCode(enum.StrEnum):
     """Why an ID token was refused; the values are stable."""
 
@@ -34,6 +36,9 @@ class RefusalCode(enum.StrEnum):
     AUTHORIZED_PARTY_MISMATCH = "authorized_party_mismatch"
     NONCE_MISMATCH = "nonce_mismatch"
     NOT_AN_ID_TOKEN = "not_an_id_token"  # nosec B105 -- a refusal code, not a credential
+
+
+# jscpd:ignore-end
 
 
 MESSAGES = {

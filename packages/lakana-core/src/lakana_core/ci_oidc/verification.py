@@ -124,9 +124,10 @@ class IdTokenVerifier:
             verified = id_token.verify_id_token(
                 token, keys=self._keys, issuers=self._issuers, rules=rules, now=now
             )
-        except shared.IdTokenRefused as refused:
-            # CI's codes are the shared ones it can meet; it never sets the rules that raise
-            # the others (azp, nonce, typ).
+        except (shared.IdTokenRefused, IdTokenRefused) as refused:
+            # The key cache raises CI's refusals already, the checks the shared ones. CI's codes
+            # are the shared ones it can meet; it never sets the rules that raise the others
+            # (azp, nonce, typ).
             code = RefusalCode(refused.code.value)
         else:
             return VerifiedIdToken(
