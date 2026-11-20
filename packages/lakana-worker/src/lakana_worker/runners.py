@@ -86,6 +86,8 @@ FILES_READ_FILE = "files-read.json"
 
 _MAX_RESULT_BYTES = 64 * 1024
 _MAX_ERROR_TYPE_CHARS = 100
+_MAX_CONNECTION_NAME_CHARS = 63
+"""The longest connection name (`lakana_core.connections.kinds.NAME`)."""
 _MAX_INT64 = 2**63 - 1
 _STDIN_CHUNK = 65536
 _MAX_UNPACK_MESSAGE = 500
@@ -326,6 +328,10 @@ class RunOutcome:
         Whether it was stopped for its timeout.
     error_type
         The harness's exception class name, sanitised; display text only.
+    failure_connection
+        The connection the harness's ``failure_connection`` names, sanitised: what the asset's
+        code says the failure concerns. The worker keeps it only for a connection the asset
+        declares.
     retryable
         `False` when the harness says a retry cannot help.
     conflict
@@ -347,6 +353,7 @@ class RunOutcome:
     killed: bool = False
     timed_out: bool = False
     error_type: str | None = None
+    failure_connection: str | None = None
     retryable: bool = True
     conflict: bool = False
     failure_code: FailureCode | None = None
@@ -739,7 +746,7 @@ def _outcome_from(
             failure_code=_STOP_CODES.get(stop.reason, FailureCode.INTERNAL),
         )
     if record is not None and record["status"] == "failed":
-        kind = record.get("error_type")
+        kind, connection = record.get("error_type"), record.get("failure_connection")
         message = _clean(str(record["message"]), secrets_to_hide, MAX_ERROR_MESSAGE_CHARS)
         return RunOutcome(
             succeeded=False,
@@ -747,6 +754,11 @@ def _outcome_from(
             error_type=(
                 _clean(kind, secrets_to_hide, _MAX_ERROR_TYPE_CHARS)
                 if isinstance(kind, str)
+                else None
+            ),
+            failure_connection=(
+                _clean(connection, secrets_to_hide, _MAX_CONNECTION_NAME_CHARS)
+                if isinstance(connection, str)
                 else None
             ),
             retryable=record.get("retryable") is not False,

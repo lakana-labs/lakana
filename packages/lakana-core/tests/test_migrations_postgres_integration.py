@@ -4204,3 +4204,46 @@ def test_0086_on_postgres() -> None:
         with engine.connect() as conn:
             assert conn.execute(query).all() == []
         engine.dispose()
+
+
+def test_0087_on_postgres() -> None:
+    """0087 adds the nullable columns of what a failure concerns and two indexes; undone down."""
+    revision_0086 = "4d96fb277743"
+    revision_0087 = "95737c487bf3"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0086)
+        engine = sqlalchemy.create_engine(url)
+        columns = sqlalchemy.text(
+            "SELECT table_name, column_name, is_nullable, character_maximum_length"
+            " FROM information_schema.columns"
+            " WHERE column_name IN ('error_type', 'failure_connection')"
+            " ORDER BY table_name, column_name"
+        )
+        indexes = sqlalchemy.text(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'task_runs'"
+            " AND indexname IN ('ix_task_runs_failure_connection',"
+            " 'ix_task_runs_asset_finished_at') ORDER BY indexname"
+        )
+        with engine.connect() as conn:
+            assert conn.execute(columns).all() == []
+            assert conn.execute(indexes).all() == []
+        migrate.upgrade(url, revision_0087)
+        assert _alembic_version(engine) == revision_0087
+        with engine.connect() as conn:
+            assert [tuple(row) for row in conn.execute(columns)] == [
+                ("task_attempts", "error_type", "YES", 100),
+                ("task_attempts", "failure_connection", "YES", 63),
+                ("task_runs", "error_type", "YES", 100),
+                ("task_runs", "failure_connection", "YES", 63),
+            ]
+            assert conn.execute(indexes).scalars().all() == [
+                "ix_task_runs_asset_finished_at",
+                "ix_task_runs_failure_connection",
+            ]
+        migrate.downgrade(url, revision_0086)
+        assert _alembic_version(engine) == revision_0086
+        with engine.connect() as conn:
+            assert conn.execute(columns).all() == []
+            assert conn.execute(indexes).all() == []
+        engine.dispose()

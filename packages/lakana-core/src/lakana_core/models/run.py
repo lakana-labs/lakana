@@ -177,7 +177,11 @@ class TaskRun(Base):
     """
 
     __tablename__ = "task_runs"
-    __table_args__ = (UniqueConstraint("run_id", "asset"),)
+    __table_args__ = (
+        UniqueConstraint("run_id", "asset"),
+        Index("ix_task_runs_failure_connection", "failure_connection"),
+        Index("ix_task_runs_asset_finished_at", "asset", "finished_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"))
@@ -245,6 +249,13 @@ class TaskRun(Base):
     """A `lakana_core.runs.failures.FailureCode` value, stored with `error_message`: why the task
     failed. Null for a task that did not fail, and for a row from before the codes existed
     (shown as ``unknown``)."""
+    error_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    """The class name of the exception a Python task's code ended with, stored with
+    `failure_code` (migration ``0087``); null for any other ending and for older rows."""
+    failure_connection: Mapped[str | None] = mapped_column(String(63), nullable=True)
+    """The connection the failure concerns: one the asset declares, named by an error of
+    `lakana.ingest` (``IngestError.connection``), stored with `failure_code` (migration
+    ``0087``); null when the failure names none, for any other ending and for older rows."""
     check_message_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     """What `error_message` was built from besides the check results, when the check phase built
     it (`lakana_core.runs.check_message.CheckMessageState`); null for any other message."""
@@ -279,6 +290,10 @@ class TaskAttempt(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     failure_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     """Why this attempt did not succeed (a `FailureCode` value); null otherwise and for old rows."""
+    error_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    """The exception class name of this attempt's failure, as on the task run."""
+    failure_connection: Mapped[str | None] = mapped_column(String(63), nullable=True)
+    """The connection this attempt's failure concerns, as on the task run."""
     check_message_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     """The `CheckMessageState` of this attempt's `error_message`, as on the task run."""
     peak_memory_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

@@ -1140,6 +1140,18 @@ def test_record_text_is_sanitised_before_it_is_stored(harness: Harness) -> None:
     assert len(outcome.error_type) == 100
 
 
+def test_the_connection_a_failure_concerns_is_read_and_sanitised(harness: Harness) -> None:
+    """The harness's `failure_connection` is kept as text, cleaned and cut to a name's length."""
+    named = harness.run(_failed(failure_connection="crm-db"))
+    assert named.failure_connection == "crm-db"
+    dirty = harness.run(_failed(failure_connection="crm\x00db" + "x" * 100))
+    assert dirty.failure_connection is not None
+    assert dirty.failure_connection.startswith("crm?dbxx")
+    assert len(dirty.failure_connection) == 63
+    assert harness.run(_failed(failure_connection=7)).failure_connection is None
+    assert harness.run(_failed()).failure_connection is None
+
+
 def test_cleaning_never_joins_a_split_secret(harness: Harness) -> None:
     """Control characters are replaced, not deleted: deleting could assemble a secret."""
     outcome = harness.run(_failed(message="s3cr3t_part\x00-x and s3cr3t_part-x"))

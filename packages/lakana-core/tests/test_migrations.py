@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import sqlalchemy as sa
@@ -6834,5 +6834,49 @@ def test_0086_adds_rotated_at(migrated_db: MigratedDb) -> None:
             assert connection.execute(sa.text("SELECT name FROM secrets")).scalars().all() == [
                 "pypi-corp"
             ]
+    finally:
+        engine.dispose()
+
+
+_REVISION_0087 = "95737c487bf3"
+
+
+def test_0087_adds_what_a_failure_concerns(migrated_db: MigratedDb) -> None:
+    """Revision `0087`: nullable `error_type` and `failure_connection`, and two indexes.
+
+    Both columns are on `task_runs` and `task_attempts`; the downgrade drops all of it.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0086)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def columns(table: str) -> dict[str, Any]:
+        return {c["name"]: c for c in inspect(engine).get_columns(table)}
+
+    def indexes() -> set[str]:
+        return {str(i["name"]) for i in inspect(engine).get_indexes("task_runs")}
+
+    added = {"ix_task_runs_failure_connection", "ix_task_runs_asset_finished_at"}
+    try:
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
+        command.upgrade(config, _REVISION_0087)
+        for table in ("task_runs", "task_attempts"):
+            found = columns(table)
+            assert found["error_type"]["nullable"]
+            assert getattr(found["error_type"]["type"], "length", None) == 100
+            assert found["failure_connection"]["nullable"]
+            assert getattr(found["failure_connection"]["type"], "length", None) == 63
+        assert added <= indexes()
+        command.downgrade(config, _REVISION_0086)
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
     finally:
         engine.dispose()

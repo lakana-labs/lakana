@@ -8575,6 +8575,41 @@ def test_the_task_carries_the_kind_of_every_declared_connection(py: PyWorld) -> 
 
 
 @pytest.mark.parametrize(
+    ("named", "stored"),
+    [("crm-db", "crm-db"), ("not-declared", None), (None, None)],
+    ids=["declared", "not-declared", "none"],
+)
+def test_a_failure_stores_the_declared_connection_it_names_and_its_exception(
+    py: PyWorld, named: str | None, stored: str | None
+) -> None:
+    """The record is the asset's own word: only a connection it declares is kept."""
+    _connection(py)
+    py.deploy(connections=["crm-db"])
+
+    def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        return RunOutcome(
+            succeeded=False,
+            error_message="SourceRefused: `crm-db`: refused",
+            error_type="SourceRefused",
+            failure_connection=named,
+            retryable=False,
+            failure_code=FailureCode.BUILD_FAILED,
+        )
+
+    engine = py.engine(script)
+    claimed = py.claim_python(engine)
+    run_claimed(engine, claimed)
+    task = _task(py.world, "gold.scores")
+    attempt = _attempts(py.world, claimed.task_run_id)[0]
+    assert (task.status, task.error_type, task.failure_connection) == (
+        TaskStatus.FAILED,
+        "SourceRefused",
+        stored,
+    )
+    assert (attempt.error_type, attempt.failure_connection) == ("SourceRefused", stored)
+
+
+@pytest.mark.parametrize(
     ("entry", "evolves"),
     [
         ({}, False),
