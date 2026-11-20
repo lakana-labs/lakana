@@ -825,13 +825,75 @@ def test_a_failed_task_carries_failure_with_the_detail_kept(client: TestClient) 
     shown = client.get(f"{_RUNS}/{started['id']}", headers=AUTH_HEADER).json()
     (task_body,) = shown["tasks"]
     assert task_body["error_message"] == "timed out after 10 s"
-    assert task_body["failure"] == {"code": "timeout", "cause": cause, "next_step": next_step}
+    plain = {"connection": None, "error_type": None}
+    assert task_body["failure"] == {
+        "code": "timeout",
+        "cause": cause,
+        "next_step": next_step,
+        **plain,
+    }
     assert shown["failed_tasks"] == 1
     listed = client.get(_RUNS, headers=AUTH_HEADER).json()
     assert [(r["id"], r["failed_tasks"]) for r in listed] == [(started["id"], 1)]
     log = client.get(f"{_RUNS}/{started['id']}/tasks/silver.clean/log", headers=AUTH_HEADER).json()
     (attempt,) = log["attempts"]
-    assert attempt["failure"] == {"code": "timeout", "cause": cause, "next_step": next_step}
+    assert attempt["failure"] == {
+        "code": "timeout",
+        "cause": cause,
+        "next_step": next_step,
+        **plain,
+    }
+
+
+def test_a_failure_names_the_connection_and_the_exception_it_concerns(client: TestClient) -> None:
+    """A Python task's stored connection and exception class reach the task, attempt and list."""
+    from lakana_core.models import AttemptOutcome, TaskAttempt
+    from lakana_core.runs.failures import FAILURES, FailureCode
+
+    _deploy(client)
+    started = client.post(_RUNS, headers=AUTH_HEADER, json={"repository": "analytics"}).json()
+    with Session(client.app.state.engine) as session:
+        run = session.get(Run, uuid.UUID(started["id"]))
+        assert run is not None
+        task = session.query(TaskRun).filter(TaskRun.run_id == run.id).one()
+        task.status = TaskStatus.FAILED
+        task.error_message = "SourceRefused: `crm-db`: the database refused the credential"
+        task.failure_code = "build_failed"
+        task.failure_connection = "crm-db"
+        task.error_type = "SourceRefused"
+        task.finished_at = run.created_at
+        run.status = RunStatus.FAILED
+        run.finished_at = run.created_at
+        session.add(
+            TaskAttempt(
+                id=uuid.uuid4(),
+                task_run_id=task.id,
+                attempt=1,
+                worker="w1",
+                started_at=run.created_at,
+                outcome=AttemptOutcome.FAILED,
+                error_message=task.error_message,
+                failure_code="build_failed",
+                failure_connection="crm-db",
+                error_type="SourceRefused",
+            )
+        )
+        session.commit()
+
+    cause, next_step = FAILURES[FailureCode.BUILD_FAILED]
+    expected = {
+        "code": "build_failed",
+        "cause": cause,
+        "next_step": next_step,
+        "connection": "crm-db",
+        "error_type": "SourceRefused",
+    }
+    shown = client.get(f"{_RUNS}/{started['id']}", headers=AUTH_HEADER).json()
+    assert [t["failure"] for t in shown["tasks"]] == [expected]
+    log = client.get(f"{_RUNS}/{started['id']}/tasks/silver.clean/log", headers=AUTH_HEADER).json()
+    assert [a["failure"] for a in log["attempts"]] == [expected]
+    failed = client.get("/api/v1/runs/failed", headers=AUTH_HEADER).json()
+    assert [item["failure"] for item in failed["items"]] == [expected]
 
 
 def test_an_old_failed_task_without_a_code_is_unknown_over_rest(client: TestClient) -> None:
@@ -1070,7 +1132,13 @@ def test_get_failed_runs_answers_items_with_task_failure_and_actions(client: Tes
         )
         assert (row["run"]["total_tasks"], row["run"]["ended_tasks"]) == (1, 1)
         assert row["task"] == "silver.clean"
-        assert row["failure"] == {"code": "timeout", "cause": cause, "next_step": next_step}
+        assert row["failure"] == {
+            "code": "timeout",
+            "cause": cause,
+            "next_step": next_step,
+            "connection": None,
+            "error_type": None,
+        }
     scoped = client.get(_FAILED, headers=reader, params={"environment": "dev"}).json()
     assert [row["run"]["id"] for row in scoped["items"]] == [run_id]
     assert client.get(_FAILED).status_code == 401

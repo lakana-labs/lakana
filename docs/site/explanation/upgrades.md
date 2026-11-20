@@ -785,6 +785,30 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   after a new upgrade each of them has to be linked again. Sign-in flows open during the
   downgrade are lost; their people start the sign-in again.
 
+### A run records the connection it failed on
+
+- Migration `0088` adds `failure_connection` and `error_type` to `task_runs` and
+  `task_attempts`, and two indexes on `task_runs`. A Python task that fails with an error of a
+  `lakana.ingest` helper stores the connection the helper was called with (only one the asset
+  declares) and the exception's class name. Runs from before the upgrade keep both empty: nothing
+  recorded what they concerned. Nothing has to be done: the upgrade runs with the others. Going
+  back drops the columns and the indexes.
+- `failure` on tasks, attempts and failed runs gains `connection` and `error_type`; a connection
+  gains `last_run_failure`, the newest run that failed on it ([A run that failed on a
+  connection](../reference/connections.md#a-run-that-failed-on-a-connection)). The Connections
+  screen and `lakana connection show` show it, `lakana runs show` names the connection.
+- The SDK: every error of `lakana.ingest` has `connection`, set by the helper (`None` for
+  `ConnectionNotDeclared`, for a `UsageError` that is a mistake in the asset's code, and for an
+  error your code raises). The connection's own configuration (another kind, a missing secret
+  key, a token endpoint or CA certificate that does not work) raises the new
+  `lakana.ingest.ConnectionSetupError`, a `UsageError`, which names it; code that catches
+  `UsageError` catches it too. The task harness writes it into its
+  result as `failure_connection`. A task image with an older `lakana` records no connection; a
+  worker older than the server ignores the field.
+- New values for a connection's secret now change its `updated_at` (`lakana connection update
+  --password-stdin`, `--values-stdin`, and `lakana secret rotate` of the secret it uses), so its
+  last test reads "tested before the last change" afterwards, as for any other change.
+
 ### Row filters and column masks are listed in pages (breaking)
 
 - `GET /api/v1/row-filters` and `GET /api/v1/column-masks` take every filter as optional now, and

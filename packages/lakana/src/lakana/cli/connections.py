@@ -627,6 +627,32 @@ def _last_test_line(connection: Connection) -> str:
     return f"{line}: {_output.inline(test.message)}" if test.message else line
 
 
+def _last_run_lines(connection: Connection) -> list[str]:
+    """Write the newest run that failed on a connection, as `show` prints it.
+
+    Parameters
+    ----------
+    connection
+        The connection.
+
+    Returns
+    -------
+    list of str
+        ``Last run:    failed on it at <ISO time>: <asset> in run <id>`` and the command that
+        shows the run; nothing when no run failed on it.
+    """
+    failure = connection.last_run_failure
+    if failure is None:
+        return []
+    run = _output.inline(failure.run_id)
+    # A server that sends the failure sends the environment too.
+    env = _output.inline(connection.environment or "ENVIRONMENT")
+    return [
+        f"Last run:    failed on it at {failure.finished_at.isoformat()}: "
+        f"{_output.inline(failure.asset)} in run {run} (lakana runs show {run} --env {env})"
+    ]
+
+
 @connection_app.command("create")
 @_with_kind_options
 def create(
@@ -764,6 +790,7 @@ def show(ctx: typer.Context, name: str, env: _ENV = None) -> None:
         f"Secret:      {_output.inline(connection.secret or '(none)')}",
         f"Declared by: {_declared(connection)}",
         f"Last test:   {_last_test_line(connection)}",
+        *_last_run_lines(connection),
         f"Created:     {connection.created_at.isoformat()} by "
         f"{_output.inline(connection.created_by or '(unknown)')}",
         f"Updated:     {connection.updated_at.isoformat()}",

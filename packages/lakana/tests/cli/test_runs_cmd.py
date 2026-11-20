@@ -1889,6 +1889,19 @@ def test_runs_show_prints_the_code_the_cause_and_the_next_step_of_a_failed_task(
     assert "a.c" in shown and "failed: upstream_failed" not in shown
 
 
+def test_runs_show_names_the_connection_a_failed_task_concerns(tmp_path: Path) -> None:
+    """A failure that names its connection says so between the cause and the next step."""
+    named = {**_TIMEOUT_FAILURE, "connection": "crm-db", "error_type": "SourceRefused"}
+    api = FakeApi()
+    api.on("GET", _RUN_PATH, json=_run("failed", _failed_with_a_code(failure=named)))
+
+    shown = _plain(
+        invoke(make_state(tmp_path, api), "runs", "show", _ID, "--env", "dev", env=_CI).stdout
+    )
+
+    assert "The task ran longer than its time limit. Connection: crm-db Next: " in shown
+
+
 def test_a_task_that_failed_before_the_codes_existed_shows_unknown(tmp_path: Path) -> None:
     """The server sends `unknown` for such a task; the CLI shows it like any other code."""
     unknown = {
@@ -1992,7 +2005,11 @@ def test_runs_show_json_keeps_the_failure_and_the_failed_task_count(tmp_path: Pa
     )
 
     assert shown["failed_tasks"] == 1
-    assert shown["tasks"][0]["failure"] == _TIMEOUT_FAILURE
+    assert shown["tasks"][0]["failure"] == {
+        **_TIMEOUT_FAILURE,
+        "connection": None,
+        "error_type": None,
+    }
 
 
 def test_runs_show_marks_a_generated_check(tmp_path: Path) -> None:
