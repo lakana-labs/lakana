@@ -437,6 +437,17 @@ def bootstrap_if_needed(
         .all()
     ):
         pat.revoked_at = now
+        # As `PatService.revoke` does, but marked as coming from recovery, not from a person.
+        AuditService(session).record(
+            principal.id,
+            AuditEventType.PAT_REVOKED,
+            detail={
+                "actor": principal.name,
+                "subject": principal.name,
+                "key_id": pat.key_id,
+                "source": "bootstrap_recovery",
+            },
+        )
         # As `PatService.revoke` does: the task tokens minted with it end with it, audited.
         revoke_task_tokens_of_pat(session, principal, pat)
 
