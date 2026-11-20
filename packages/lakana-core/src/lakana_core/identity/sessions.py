@@ -590,8 +590,8 @@ class SessionService:
         user_agent
             The browser's `User-Agent`, cut to 255 characters.
         touched
-            Whether the sign-in included a passkey touch or a provider sign-in (it then counts
-            for step-up).
+            Whether the sign-in included a passkey touch (it then counts for step-up). A provider
+            sign-in never does: it may be silent.
 
         Returns
         -------
