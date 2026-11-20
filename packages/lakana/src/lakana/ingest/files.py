@@ -37,6 +37,7 @@ from lakana.ingest import _check, _directory, _formats, _http, _read_set, _store
 from lakana.ingest._connections import FetchedConnection, fetch
 from lakana.ingest._errors import (
     CapExceeded,
+    ConnectionSetupError,
     FileShapeError,
     SourceError,
     SourceRefused,
@@ -829,16 +830,17 @@ def _source(conn: FetchedConnection) -> _Source:
 
     Raises
     ------
+    ConnectionSetupError
+        For a kind `read` does not read, naming the helper that does.
     UsageError
-        For a kind `read` does not read, naming the helper that does, a ``directory``
-        connection the task description has no root for, or a store or client that cannot be
-        built (`_stores.store_for`, `_http.client_for`).
+        For a ``directory`` connection the task description has no root for, or a store or
+        client that cannot be built (`_stores.store_for`, `_http.client_for`).
     """
     if conn.kind not in KINDS:
         kinds = ", ".join(KINDS[:-1]) + " and " + KINDS[-1]
         helper = _OTHER_HELPER.get(conn.kind)
         hint = f": use {helper}" if helper else ""
-        raise UsageError(
+        raise ConnectionSetupError(
             f"files.read reads {kinds} connections; `{conn.name}` is {conn.kind}{hint}"
         )
     environment = context.current().environment

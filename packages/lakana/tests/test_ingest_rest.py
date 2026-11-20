@@ -20,6 +20,7 @@ from sdk_tls_fixture import Answer, Authority, Exchange, make_authority, scripte
 from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
+    ConnectionSetupError,
     FileShapeError,
     SourceError,
     SourceRefused,
@@ -1157,6 +1158,9 @@ def test_arguments_are_checked_before_any_request(
 
     assert text in str(caught.value)
     assert caught.value.retryable is False
+    # A mistake in the call (params=, paginate=, records=, ...) is the asset's, not the source's.
+    assert not isinstance(caught.value, ConnectionSetupError)
+    assert caught.value.connection is None
 
 
 @pytest.mark.parametrize(
@@ -1182,9 +1186,11 @@ def test_a_connection_of_another_kind_names_its_helper(authority: Authority) -> 
     _task("https://api.test", authority, kind="s3")
 
     with pytest.raises(
-        UsageError, match=r"rest\.read reads http connections; `api` is s3: use files\.read"
-    ):
+        ConnectionSetupError,
+        match=r"rest\.read reads http connections; `api` is s3: use files\.read",
+    ) as caught:
         rest.read("api", "items")
+    assert caught.value.connection == "api"
 
 
 @pytest.mark.parametrize(

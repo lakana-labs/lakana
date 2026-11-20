@@ -25,6 +25,7 @@ from pymysql import converters as real_converters
 from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
+    ConnectionSetupError,
     SourceError,
     SourceRefused,
     UsageError,
@@ -478,6 +479,17 @@ def test_a_relay_reset_points_to_the_relay_line(driver: _Driver) -> None:
     )
 
 
+def test_a_missing_database_at_login_is_the_connections_setup(driver: _Driver) -> None:
+    """The login names the connection's own database: fixing the connection is the fix."""
+    driver.refuse = _Error('FATAL:  database "missing" does not exist')
+    _postgres(relay=False)
+
+    with pytest.raises(ConnectionSetupError, match=r'database "missing" does not exist') as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert caught.value.connection == "crm-db"
+
+
 def test_the_same_reset_without_a_relay_keeps_the_drivers_words(driver: _Driver) -> None:
     """Locally there is no relay to blame."""
     driver.refuse = _Error("server closed the connection unexpectedly")
@@ -621,10 +633,12 @@ def test_a_connection_of_another_kind_names_the_helper(driver: _Driver) -> None:
     )
 
     with pytest.raises(
-        UsageError,
+        ConnectionSetupError,
         match=r"sql.read reads postgresql, mariadb and sqlite-file connections; `landing` is s3",
-    ):
+    ) as caught:
         sql.read("landing", "SELECT 1")
+    # The connection's kind is its configuration: fixing the connection is the fix.
+    assert caught.value.connection == "landing"
 
 
 def test_without_the_assets_extra_the_error_says_what_to_add(
@@ -725,12 +739,13 @@ def test_a_connection_without_a_password_names_the_command_that_stores_it(
     _postgres(relay=False, password=None)
 
     with pytest.raises(
-        UsageError,
+        ConnectionSetupError,
         match=r"`crm-db` has no secret with `password`.*--env prod --password-stdin",
-    ):
+    ) as caught:
         sql.read("crm-db", "SELECT 1")
 
     assert driver.seen == []
+    assert caught.value.connection == "crm-db"
 
 
 def test_an_empty_query_is_refused() -> None:

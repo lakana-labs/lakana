@@ -14,6 +14,7 @@ from lakana.ingest import (
     ConnectionChanged,
     ConnectionNotDeclared,
     ConnectionRefused,
+    ConnectionSetupError,
     IngestError,
     SourceError,
     UsageError,
@@ -241,6 +242,11 @@ def test_a_helper_names_its_connection_once() -> None:
     with pytest.raises(UsageError) as mistake:
         helper("crm-db", error=UsageError("sql.read needs a query"))
     assert mistake.value.connection is None
+    with pytest.raises(ConnectionSetupError) as setup:
+        helper("crm-db", error=ConnectionSetupError("`crm-db` has no secret with `password`"))
+    assert setup.value.connection == "crm-db"
+    assert issubclass(ConnectionSetupError, UsageError)
+    assert ConnectionSetupError.retryable is False
     with pytest.raises(ValueError, match="not an ingest error"):
         helper("crm-db", error=ValueError("not an ingest error"))
     assert IngestError("made by the asset").connection is None

@@ -48,6 +48,7 @@ from lakana.ingest import _check, _directory
 from lakana.ingest._connections import FetchedConnection, fetch
 from lakana.ingest._errors import (
     CapExceeded,
+    ConnectionSetupError,
     SourceError,
     SourceRefused,
     UsageError,
@@ -308,6 +309,9 @@ def _postgres_error(
             "a value of the column's type, such as a datetime for a timestamp, or cast the "
             "placeholder, such as :since::timestamptz"
         )
+    if connecting and (state == "3D000" or "does not exist" in text):
+        # At the login only the connection's own database can be missing.
+        return ConnectionSetupError(f"`{conn.name}`: the query failed (PostgreSQL said: {said})")
     if state.startswith(("42", "0A", "22", "21")) or "does not exist" in text:
         return UsageError(f"`{conn.name}`: the query failed (PostgreSQL said: {said})")
     if connecting:
@@ -338,8 +342,10 @@ def _read_postgres(
 
     Raises
     ------
+    ConnectionSetupError
+        Without a password, or for a secret value a connection string cannot carry.
     UsageError
-        Without the assets extra or a password, or for a query that fails or writes.
+        Without the assets extra, or for a query that fails or writes.
     SourceRefused
         When PostgreSQL refuses the password or its certificate is not trusted.
     SourceError
@@ -370,7 +376,7 @@ def _read_postgres(
     )
     for key, value in parts.items():
         if "\x00" in value:
-            raise UsageError(
+            raise ConnectionSetupError(
                 f"the `{key}` of `{conn.name}` holds a NUL character, which a connection string "
                 f"cannot carry; set it again with `lakana connection update {conn.name}`"
             )
@@ -908,7 +914,7 @@ def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Except
     if code in (2013, 2006) and "relay_port" in conn.routing:
         return SourceError(_RELAY_CLOSED.format(name=conn.name, product="MariaDB"))
     if isinstance(exc, RuntimeError) and "cryptography" in str(exc):
-        return UsageError(
+        return ConnectionSetupError(
             f"`{conn.name}`: the server asks for caching_sha2_password over a connection without "
             "TLS, which needs the cryptography package; use tls: verify-full, or add "
             "cryptography to the project's dependencies"
@@ -951,16 +957,17 @@ def _mariadb_statement(
 
     Raises
     ------
+    ConnectionSetupError
+        For a sql_mode the tokenizer does not know.
     UsageError
-        For a sql_mode the tokenizer does not know, a statement that does not only read, or
-        ``INTO OUTFILE``.
+        For a statement that does not only read, or ``INTO OUTFILE``.
     SourceError
         When the sql_mode and the status disagree about backslashes.
     """
     flags = {flag.strip() for flag in mode.upper().split(",")}
     unknown = sorted(flags - _KNOWN_MODES)
     if unknown:
-        raise UsageError(
+        raise ConnectionSetupError(
             f"`{conn.name}`: the session's sql_mode has {', '.join(unknown)}, which sql.read does "
             "not know: it changes how MariaDB reads quotes or names, so a value could land "
             "where MariaDB reads code. Remove it from the server's or the user's sql_mode."
@@ -1133,9 +1140,12 @@ def read(
 
     Raises
     ------
+    ConnectionSetupError
+        For a connection of the wrong kind or a missing secret: the connection's configuration,
+        named in its `connection`.
     UsageError
-        For arguments or a connection of the wrong kind, a placeholder without a value, a query
-        that fails or writes, a column type without a faithful Arrow form.
+        For arguments, a placeholder without a value, a query that fails or writes, a column
+        type without a faithful Arrow form.
     SourceRefused
         When the database refuses the credential or its certificate is not trusted.
     SourceError
@@ -1156,7 +1166,7 @@ def read(
     if conn.kind not in KINDS:
         helper = _OTHER_HELPER.get(conn.kind)
         hint = f": use {helper}" if helper else ""
-        raise UsageError(
+        raise ConnectionSetupError(
             f"sql.read reads postgresql, mariadb and sqlite-file connections; `{conn.name}` is "
             f"{conn.kind}{hint}"
         )

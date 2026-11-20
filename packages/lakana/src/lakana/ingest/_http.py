@@ -36,6 +36,7 @@ import httpx
 from lakana import _usage, context
 from lakana.ingest._check import trust_context
 from lakana.ingest._errors import (
+    ConnectionSetupError,
     IngestError,
     SourceError,
     SourceRefused,
@@ -161,13 +162,13 @@ def header_value(name: str, key: str, value: str) -> str:
 
     Raises
     ------
-    UsageError
+    ConnectionSetupError
         For a value with a line break, another control character or a character outside
         ASCII, which no header can carry (a line break would add a header of its own); the
         value is never shown.
     """
     if _HEADER_SAFE.fullmatch(value) is None:
-        raise UsageError(
+        raise ConnectionSetupError(
             f"the secret's `{key}` of `{name}` holds a line break, another control character or "
             "a character outside ASCII, which an HTTP header cannot carry; store it again: "
             f"`lakana connection update {name} --env {task_environment()} --password-stdin`"
@@ -267,7 +268,7 @@ def transport_failure(name: str, host: str, error: httpx.HTTPError) -> IngestErr
             f"{status or '?'})"
         )
     if isinstance(error, httpx.LocalProtocolError | httpx.UnsupportedProtocol):
-        return UsageError(
+        return ConnectionSetupError(
             f"`{name}`: httpx refused to send a request to `{shown}` "
             f"({type(error).__name__}); check the connection's settings"
         )
@@ -551,7 +552,7 @@ class ClientCredentials:
             When the endpoint refuses the client credentials (HTTP 400 or 401), answers with a
             redirect, another 4xx, a 1xx or a 2xx other than 200, or its certificate is not
             trusted.
-        UsageError
+        ConnectionSetupError
             When it answers 200 without a usable bearer token: the connection's ``token_url``
             is not a token endpoint.
         SourceError
@@ -590,7 +591,7 @@ class ClientCredentials:
             try:
                 body = read_capped(response, MAX_TOKEN_ANSWER, self.name)
             except OverflowError:
-                raise UsageError(
+                raise ConnectionSetupError(
                     f"`{self.name}`: the token endpoint `{where}` answered more than "
                     f"{MAX_TOKEN_ANSWER} bytes; check the connection's token_url"
                 ) from None
@@ -613,7 +614,7 @@ class ClientCredentials:
 
         Raises
         ------
-        UsageError
+        ConnectionSetupError
             For an answer that is no JSON object with a bearer ``access_token`` that a header
             can carry.
         """
@@ -628,12 +629,12 @@ class ClientCredentials:
         token = said.get("access_token")
         kind = said.get("token_type", "bearer")
         if not isinstance(token, str) or not token or _HEADER_SAFE.fullmatch(token) is None:
-            raise UsageError(
+            raise ConnectionSetupError(
                 f"`{self.name}`: the token endpoint `{where}` answered without an access_token "
                 "a request can carry; check the connection's token_url"
             )
         if not isinstance(kind, str) or kind.lower() != "bearer":
-            raise UsageError(
+            raise ConnectionSetupError(
                 f"`{self.name}`: the token endpoint `{where}` gave a token of type "
                 f"{safe_name(str(kind))[:40]!r}; Lakana sends bearer tokens only"
             )
@@ -885,15 +886,17 @@ def client_for(conn: Connection) -> httpx.Client:
 
     Raises
     ------
+    ConnectionSetupError
+        For a missing secret, a secret value no header can carry, or a CA certificate that is
+        no PEM certificate.
     UsageError
-        For a missing secret, a secret value no header can carry, a CA certificate that is no
-        PEM certificate, or a trust bundle this task cannot read.
+        For a trust bundle this task cannot read.
     """
     auth_mode = str(conn.settings.get("auth", "none"))
     try:
         verify = trust_context(_ca(conn))
     except ssl.SSLError:
-        raise UsageError(
+        raise ConnectionSetupError(
             f"the CA certificate of `{conn.name}` or the workers' trust bundle holds no PEM "
             f"certificate; give the connection your CA: `lakana connection update {conn.name} "
             f"--env {task_environment()} --ca-file ca.pem`, and check LAKANA_RUN__CA_BUNDLE"

@@ -20,7 +20,8 @@ class IngestError(Exception):
 
     Every helper (`connections.get`, `files.read`, `files.list`, `rest.read`, `sql.read`) sets
     `connection` to the connection it was called with, for every error it raises but
-    `ConnectionNotDeclared` and `UsageError` (a mistake in the asset's code, not the source's).
+    `ConnectionNotDeclared` and a `UsageError` that is a mistake in the asset's code (a
+    `ConnectionSetupError`, the connection's own configuration, names it).
     A run that fails with such an error records the connection, and the connection's page shows
     the run. An error the asset raises itself names none, unless the asset sets it.
     """
@@ -53,11 +54,22 @@ class ConnectionChanged(IngestError):
 class UsageError(IngestError):
     """The call's arguments, or how the connection or the worker is set up, are wrong.
 
-    A connection of another kind, a missing or malformed secret, an auth mode a helper does not
-    support, a trust bundle the worker cannot read: every attempt would fail the same way.
+    An empty query, a `params=` or `paginate=` that does not fit, a trust bundle the worker
+    cannot read: every attempt would fail the same way. A mistake in the asset's code or the
+    worker's setup names no connection; `ConnectionSetupError`, for the connection's own
+    configuration, does.
     """
 
     retryable: ClassVar[bool | None] = False
+
+
+class ConnectionSetupError(UsageError):
+    """The connection is configured in a way the helper cannot use; fixing the connection fixes it.
+
+    A connection of another kind than the helper reads, a missing or malformed secret, a token
+    endpoint or a CA certificate that does not work: every attempt would fail the same way, and
+    the error names the connection, so its page shows the run.
+    """
 
 
 class SourceError(IngestError):
@@ -96,8 +108,9 @@ def names_connection(helper: Callable[_P, _R]) -> Callable[_P, _R]:
 
     The helper's first parameter is the connection. An error that names one already keeps it.
     `ConnectionNotDeclared` names none, since the name is no connection of the asset, and neither
-    does `UsageError`: a mistake in the asset's code (an argument, the kind of connection it
-    asked for, how it or the worker is set up) is no problem of the source.
+    does a `UsageError`: a mistake in the asset's code (an argument, the query) or the worker's
+    setup is no problem of the connection. A `ConnectionSetupError` does name it: its fix is a
+    change of the connection.
 
     Parameters
     ----------
@@ -119,7 +132,8 @@ def names_connection(helper: Callable[_P, _R]) -> Callable[_P, _R]:
             if (
                 exc.connection is None
                 and isinstance(name, str)
-                and not isinstance(exc, ConnectionNotDeclared | UsageError)
+                and not isinstance(exc, ConnectionNotDeclared)
+                and (not isinstance(exc, UsageError) or isinstance(exc, ConnectionSetupError))
             ):
                 exc.connection = name
             raise
@@ -169,7 +183,7 @@ def safe_name(text: str) -> str:
     return _UNSAFE.sub(_escaped, text)
 
 
-def missing_secret(name: str, key: str, option: str) -> UsageError:
+def missing_secret(name: str, key: str, option: str) -> ConnectionSetupError:
     """Make the error of a connection whose secret lacks a value a helper needs.
 
     Parameters
@@ -184,10 +198,10 @@ def missing_secret(name: str, key: str, option: str) -> UsageError:
 
     Returns
     -------
-    UsageError
+    ConnectionSetupError
         Naming the command, with the task's environment inside a task.
     """
-    return UsageError(
+    return ConnectionSetupError(
         f"`{name}` has no secret with `{key}`; give it one: `lakana connection update {name} "
         f"--env {task_environment()} {option}` (see `lakana connection update --help`)"
     )

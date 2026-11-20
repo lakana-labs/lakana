@@ -18,6 +18,7 @@ import pytest
 from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
+    ConnectionSetupError,
     FileShapeError,
     IngestError,
     SourceError,
@@ -501,6 +502,8 @@ def test_another_kind_names_the_helper_that_reads_it(root: Path) -> None:
         "files.read reads http, s3, gcs, azure and directory connections; `crm-db` is "
         "postgresql: use sql.read"
     )
+    assert isinstance(caught.value, ConnectionSetupError)
+    assert caught.value.connection == "crm-db"
 
 
 def test_files_list_returns_name_size_and_modified(root: Path) -> None:

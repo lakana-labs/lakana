@@ -35,6 +35,7 @@ from urllib.parse import quote, unquote, urlsplit
 from lakana.ingest import _http, connections
 from lakana.ingest._errors import (
     CapExceeded,
+    ConnectionSetupError,
     FileShapeError,
     SourceError,
     SourceRefused,
@@ -829,10 +830,12 @@ def read(
 
     Raises
     ------
+    ConnectionSetupError
+        For a connection of another kind or a missing secret: the connection's configuration,
+        named in its `connection`.
     UsageError
-        For arguments, a connection of another kind, a missing secret, records= that do not
-        lead to a list of objects, a page that repeats an earlier page's records, cursor or
-        next link.
+        For arguments, records= that do not lead to a list of objects, a page that repeats an
+        earlier page's records, cursor or next link.
     SourceRefused
         When the API refuses the credential (401, 403) or the request (another 4xx), answers
         with a redirect, its certificate is not trusted, or a next link names another host.
@@ -869,7 +872,9 @@ def read(
     if conn.kind != "http":
         helper = _OTHER_HELPER.get(conn.kind)
         hint = f": use {helper}" if helper else ""
-        raise UsageError(f"rest.read reads http connections; `{conn.name}` is {conn.kind}{hint}")
+        raise ConnectionSetupError(
+            f"rest.read reads http connections; `{conn.name}` is {conn.kind}{hint}"
+        )
     base = str(conn.address["base_url"])
     url: httpx.URL | str = _first_url(base, path)
     reserved: dict[str, str] = {}
