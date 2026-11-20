@@ -827,6 +827,26 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   one request and so gets only the first 100 row filters or column masks of a list, without a
   sign that more exist.
 
+### Queries run on DuckDB 2.0.1
+
+The worker runs queries on DuckDB 2.0.1 instead of 2.0.0, a release of fixes.
+
+- **One more download for a worker installed with `pip`.** Each DuckDB release has its own build
+  of the `httpfs` extension, so such a worker downloads it once more on its first query (see
+  [What leaves the machine](what-leaves-the-machine.md)). The container image already contains
+  it. On a machine without internet access, put the extension for DuckDB 2.0.1 (the folder
+  `v2.0.1/<platform>`) into the worker's extension directory before you upgrade, as
+  [Install without internet access](../how-to/install-without-internet-access.md) describes; with
+  `LAKANA_WORKER__EXTENSION_SOURCE=none` a worker without it refuses to start and names the path.
+- **`x = ANY(ARRAY(SELECT ...))` and `ALL` compare `x` with the list's elements.** DuckDB 2.0.0
+  refused them with "Cannot compare values of type ... in IN/ANY/ALL clause"; such a query now
+  runs.
+- **DuckDB 2.0.1's four new table functions are refused in queries**, like every table function
+  but `range`, `generate_series` and `unnest`. The refusal of `parquet_page_index` says that it
+  reads a file, and `duckdb_live_query_metrics` (the query process's own counters) is refused
+  wherever a query calls it, like the other introspection functions. None existed in 2.0.0, so
+  no query that ran before is affected.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

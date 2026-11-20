@@ -4290,8 +4290,13 @@ own process opens no DuckDB connection and imports no `duckdb`.
   find nothing and try to download `httpfs`; it is told the worker's `~/.duckdb/extensions`
   instead (the image fills it at build time, local mode on the first query), so it loads the
   extension without network access. Then `allow_community_extensions = false` and
-  `allow_extension_repositories = 'forbidden'`: the default `undecided` may still change to
-  `allowed` at run time, `forbidden` may not and refuses `CREATE EXTENSION REPOSITORY`. All
+  `allow_extension_repositories = 'forbidden'`: the default (`undecided` on 2.0.0, which may
+  still change to `allowed` at run time; `hosts` on 2.0.1, under which `CREATE EXTENSION
+  REPOSITORY <host>`, new syntax in 2.0.1, adds a repository by its host name) can be loosened
+  or used, `forbidden` cannot change and refuses `CREATE EXTENSION REPOSITORY` in every form
+  (2.0.1: "allow_extension_repositories is 'forbidden', which does not allow adding any
+  repository"; `test_no_setting_can_be_changed_once_configured` pins the host form and the
+  move back to `hosts` or `allowed`). All
   three read back in `test_the_connection_holds_no_credential_and_loads_nothing_by_itself`, and
   in a real child in `test_a_child_reads_back_the_settings_duckdb_2_names_differently`.
   `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`, `duckdb` or `none`) changes
@@ -4493,7 +4498,8 @@ so too.
 `_BLACKLISTED_FUNCTIONS` covers every file-reading, SQL-evaluating, or
 secret-revealing DuckDB table function found by inspecting DuckDB 1.5.5's function list,
 swept again on 2.0.0 (a diff of `duckdb_functions()`: 225 names new, the 18 new table
-functions refused by the allow-list below, the scalars read one by one)
+functions refused by the allow-list below, the scalars read one by one) and on 2.0.1 (see
+"The 2.0.1 sweep" below)
 — `query`/`query_table`/
 `json_execute_serialized_sql` each evaluate a string argument as SQL/a table reference
 (`json_execute_serialized_sql` takes `json_serialize_sql`'s own output, so a query naming
@@ -4536,7 +4542,7 @@ catalog instead" is no next step for them.
 error points at the SQL the function stands for (`CAST`, `BETWEEN`). Like every entry, the
 name is compared in lower case after sqlglot has removed quotes and any catalog or schema
 qualifier, so `"SETVAL"(…)`, `main.setval(…)` and the method form `'s'.setval(…)` are refused
-alike. This is a reference list confirmed against DuckDB 2.0.0, not a completeness guarantee — DuckDB adds table functions across
+alike. This is a reference list confirmed against DuckDB 2.0.0 and 2.0.1, not a completeness guarantee — DuckDB adds table functions across
 releases, and a future one in any of these categories (file-reading, SQL-evaluating,
 secret-revealing, introspecting, statistics-reading or state-changing) needs adding here as
 it's found.
@@ -4546,6 +4552,38 @@ any table function except the generators in `_ALLOWED_TABLE_FUNCTIONS` (`range`,
 `generate_series`, `unnest`) in any FROM-item position (`FROM fn()`, `LATERAL fn()`, `TABLE(fn())`),
 so a function DuckDB adds later is refused by default.
 `extract_table_refs` never reports a function call as a table.
+
+**The 2.0.1 sweep** (2026-11-21, the lock's move from 2.0.0 to 2.0.1). `duckdb_functions()`,
+`duckdb_settings()`, `duckdb_keywords()`, `duckdb_types()` and `duckdb_extensions()` of both
+versions, each with `httpfs` loaded, were diffed. Functions: 3,233 rows on 2.0.0, 3,327 on
+2.0.1; five names new, none gone. The four new table functions are refused by the allow-list:
+`parquet_page_index` (reads a Parquet file's page index, each page's min and max; also listed in
+`_BLACKLISTED_FUNCTIONS` and `_READER_NAMES`, with the metadata family), `duckdb_live_query_metrics`
+(the connection's I/O and memory counters; listed with the introspection functions), and
+`add_grammar_extension`/`remove_grammar_extension` (switch a parser grammar extension on or off
+for later statements; left to the allow-list like 2.0.0's external-resource functions: the child
+runs one statement and registers no grammar extension). The fifth, the `pg_catalog` macro
+`map_type_id_to_pg_oid`, is a `CASE` over type ids and stays allowed. The other changed rows are
+new `TIMESTAMP_S`/`_MS`/`_NS`/`TIMESTAMPTZ_NS` overloads, stability labels
+(`CONSISTENT_WITHIN_QUERY` on time-zone arithmetic), `fmod` turned from a macro into a scalar,
+new options of the file readers (already refused) and a `type` argument of
+`duckdb_external_resources` (refused). No new lambda-taking function (`_LAMBDA_FUNCTIONS`
+unchanged), no keyword change; one type, `PARQUET_VARIANT`. Settings: seven no longer listed in
+`duckdb_settings()` (`error_on_division_by_zero`, `regex_match_operator_semantics`,
+`table_function_identifier_conversion`, `legacy_disable_null_type`, `delim_join_as_cte`,
+`experimental_metadata_reuse`, `force_column_metadata_reuse`) but still readable, settable before
+the lock and refused after it, like `lambda_syntax` on 2.0.0; `logging_storage` is now listed as
+`logging_sink` (both names locked); new `http_retry_quota_throttled`,
+`http_retry_throttled_wait_ms`, `parquet_can_have_nan`, `parquet_use_page_index` and
+`s3_use_global_endpoint` (all refused after the lock); `allow_extension_repositories` changed as
+described above. What DuckDB enforces did not change: with external access off,
+`parquet_page_index` of a file outside the allowed paths is a `Permission Error`, `LOAD` of
+`glue` or `legacy_parser` (new default extensions in 2.0.1) is refused, and `CREATE SECRET (TYPE
+http, HTTP_PROXY …)` still succeeds on 2.0.1 (DuckDB reverted a change that would have refused it
+before the release; the child refuses it as a statement that is not one `SELECT`). One behaviour
+change touched a test: 2.0.1's profiler writes `profile.json` for a failed statement too (2.0.0
+only for one that succeeded), so a query that ran out of memory without spilling leaves that file,
+and nothing else, in its temp directory.
 
 **Lambdas are re-spelled, not passed through.** DuckDB 2.0 refuses the arrow lambda
 (`x -> x + 1`), so `query_rewrite._render` marks every `exp.Lambda` for sqlglot's keyword form
