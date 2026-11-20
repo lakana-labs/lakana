@@ -514,6 +514,8 @@ export interface DeleteEnvironmentDialogProps {
   readonly onClose: () => void;
   /** Closes the dialog and goes to the address (`useLeave`). */
   readonly onLeave: (to: string, options: NavigateOptions) => void;
+  /** Called with true before the deletion is sent and with false if it is refused. */
+  readonly onDeleting: (deleting: boolean) => void;
 }
 
 /**
@@ -526,12 +528,14 @@ export interface DeleteEnvironmentDialogProps {
  * @param props.environment - The environment.
  * @param props.onClose - Closes the dialog.
  * @param props.onLeave - Closes the dialog and goes to the list.
+ * @param props.onDeleting - Tells the page the deletion starts, and that it failed.
  * @returns The dialog.
  */
 export function DeleteEnvironmentDialog({
   environment,
   onClose,
   onLeave,
+  onDeleting,
 }: DeleteEnvironmentDialogProps): JSX.Element {
   const { t } = useTranslation();
   const attempt = useAttempt();
@@ -544,7 +548,16 @@ export function DeleteEnvironmentDialog({
     disabled: typed !== environment.name,
     onConfirm: () => {
       attempt.run(async () => {
-        const deleted = await deleteEnvironment(environment.name, purge);
+        // The page stops its reads of the environment first: one that arrives after the
+        // deletion is a 404 the browser logs.
+        onDeleting(true);
+        let deleted: EnvironmentOut;
+        try {
+          deleted = await deleteEnvironment(environment.name, purge);
+        } catch (failure) {
+          onDeleting(false);
+          throw failure;
+        }
         const state: DeletedState = {
           deleted: {
             name: environment.name,

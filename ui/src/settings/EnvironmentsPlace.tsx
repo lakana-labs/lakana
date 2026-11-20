@@ -83,16 +83,24 @@ function useUsages(names: readonly string[] | null): ReadonlyMap<string, UsageRe
   const key = names === null ? null : names.join("\n");
   useEffect(() => {
     if (key === null || key === "") return;
+    // The reads on their way are cancelled when the list is left or changes: one that is answered
+    // after the environment is deleted is a 404 the browser logs.
+    const leaving = new AbortController();
+    const gone = (): boolean => leaving.signal.aborted;
     void inPool(key.split("\n"), READS_IN_FLIGHT, async (name) => {
+      if (gone()) return;
       let read: UsageRead;
       try {
-        read = await getUsage(name);
+        read = await getUsage(name, leaving.signal);
       } catch {
         read = "failed";
       }
-      // After the page is gone, React drops the update.
+      if (gone()) return;
       setUsages((previous) => new Map(previous).set(name, read));
     });
+    return () => {
+      leaving.abort();
+    };
   }, [key]);
   return usages;
 }

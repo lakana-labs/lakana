@@ -12,10 +12,10 @@ one (a table name, a check, an error), stays in `detail` / `error_message`.
 
 | You use | The failure appears as |
 |---|---|
-| `lakana runs show RUN_ID` | The `error` column of each failed task, and under the table, for each failed task (at most 50), a block: `<asset> failed: <code>`, the cause and `Next:` and the next step. |
+| `lakana runs show RUN_ID` | The `error` column of each failed task, and under the table, for each failed task (at most 50), a block: `<asset> failed: <code>`, the cause, `Connection: <name>` when the failure names one, and `Next:` and the next step. |
 | `lakana run` | When a task fails, its progress line ends with `failed: <code>. Next: <next step>`, and the summary at the end has the block of `lakana runs show` for each failed task. A task that waits to try again, one that never started and one that was cancelled print no next step. |
-| `lakana runs show RUN_ID --output json` and the REST API | `failure` on each task and on each attempt in `GET .../runs/{run_id}/tasks/{asset}/log`: an object with `code`, `cause` and `next_step`, or `null` for a task with no error. `error_message` keeps the free text, as before. `failed_tasks` on a run counts the tasks that ended `failed`; it is also in the run list. |
-| The SDK | `RunTask.failure` and `TaskAttempt.failure` (a `Failure` with the same three fields), `RunTask.error_message` and `Run.failed_tasks`. |
+| `lakana runs show RUN_ID --output json` and the REST API | `failure` on each task and on each attempt in `GET .../runs/{run_id}/tasks/{asset}/log`, and on each row of `GET /api/v1/runs/failed`: an object with `code`, `cause`, `next_step`, `connection` (the connection the failure concerns: a Python task's code ended with an error of `lakana.ingest` that names one the asset declares, else `null`) and `error_type` (the class name of the exception a Python task's code ended with, such as `SourceRefused`, else `null`), or `null` for a task with no error. `error_message` keeps the free text, as before. `failed_tasks` on a run counts the tasks that ended `failed`; it is also in the run list. |
+| The SDK | `RunTask.failure` and `TaskAttempt.failure` (a `Failure` with the same fields), `RunTask.error_message` and `Run.failed_tasks`. |
 
 In the web interface, a run on its own page or on its job's page gives each task that failed, was
 cancelled or never ran a second line: the code, which links to the table below, then **Cause:** and

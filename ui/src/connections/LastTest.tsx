@@ -14,6 +14,7 @@ import { useWhen } from "../shell/useWhen";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { StatusGlyph } from "../status/StatusGlyph";
 import { OUTCOMES } from "./kinds";
+import { RunFailure } from "./RunFailure";
 import { testStatus } from "./testStatus";
 import { NO_WORKER_AFTER_MS } from "./useOpenTests";
 import "./connectionStrings";
@@ -37,8 +38,9 @@ export interface LastTestProps {
  * A failure says its cause and the next step, which everyone who reads the connection sees; a
  * manager also gets the server's message and who ran it. A test older than the connection's last
  * change says to test again. A test queued for long says no worker has taken it, and one open
- * for ten minutes says Test again closes it. The command that tests it from a terminal is shown
- * only to people who may test it.
+ * for ten minutes says Test again closes it. The newest run that failed on the connection
+ * follows, with its full date, its task and a link to it. The command that tests it from a
+ * terminal is shown only to people who may test it.
  * @param props - The connection, the present and what the screen saw of the test.
  * @param props.connection - The connection.
  * @param props.now - The present.
@@ -95,6 +97,14 @@ export function LastTest({
         queuedSince !== undefined &&
         now - queuedSince >= NO_WORKER_AFTER_MS && <p>{t("connections.page.noWorker")}</p>}
       {stuck && <p>{t("connections.follow.stuck")}</p>}
+      {connection.last_run_failure != null && (
+        <RunFailure
+          environment={connection.environment}
+          failure={connection.last_run_failure}
+          now={now}
+          full
+        />
+      )}
       {connection.actions.includes("test") && (
         <CopyLine
           text={`lakana connection test ${shellQuote(connection.name)} --env ${shellQuote(connection.environment)}`}

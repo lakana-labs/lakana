@@ -373,6 +373,48 @@ def record_failed_passkey(request: Request, session: Session) -> None:
     _record_failure(request, AuditService(session), None, {"credential": "passkey"})
 
 
+def record_refused_oidc(
+    request: Request,
+    session: Session,
+    reason: str,
+    iss: str | None = None,
+    sub: str | None = None,
+) -> None:
+    """Record a refused OIDC sign-in, if the per-address limit admits it.
+
+    The same limiter as a failed token, link or passkey (`app.state.auth_audit_limiter`). The
+    row carries the reason, and the issuer and subject once an ID token verified; never a code,
+    a token, the state or the client secret.
+
+    Parameters
+    ----------
+    request
+        The current request.
+    session
+        The current request's database session; rolled back first, so nothing the refused
+        attempt left pending is committed with the row.
+    reason
+        Why it was refused (`lakana_core.errors.OidcRefusal`).
+    iss
+        The verified issuer, if any.
+    sub
+        The verified subject, if any.
+    """
+    session.rollback()
+    client = request.client.host if request.client else "unknown"
+    admitted, suppressed = request.app.state.auth_audit_limiter.admit(client)
+    if not admitted:
+        return
+    detail: dict[str, str | int] = {"reason": reason, "peer": client[:64]}
+    if iss is not None and sub is not None:
+        detail["iss"], detail["sub"] = iss, sub
+    if suppressed > 0:
+        detail["suppressed"] = suppressed
+    AuditService(session).record(
+        None, AuditEventType.SIGN_IN_OIDC_REFUSED, detail=detail, commit=True
+    )
+
+
 def record_failed_link(request: Request, session: Session, public_id: str) -> None:
     """Record a refused use of a sign-in link, if the per-address limit admits it.
 

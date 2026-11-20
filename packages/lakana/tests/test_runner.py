@@ -4806,6 +4806,53 @@ def test_an_ingest_error_says_whether_another_attempt_could_help(
     assert (record["phase"], record["retryable"]) == ("function", retryable)
 
 
+def test_the_record_names_the_connection_an_ingest_error_concerns(world: _World) -> None:
+    """A helper's error names its connection; the record carries it beside `error_type`."""
+    record = _failing(
+        world,
+        "from lakana.ingest import SourceRefused\n"
+        "e = SourceRefused('`crm-db`: the database refused the credential')\n"
+        "e.connection = 'crm-db'\n"
+        "raise e",
+    )
+    assert record["error_type"] == "SourceRefused"
+    assert record["failure_connection"] == "crm-db"
+
+
+def test_a_mistake_in_a_helpers_call_names_no_connection(world: _World) -> None:
+    """A `UsageError` is the asset's code, not the source: the record names no connection."""
+    world.client.task_connections = _FetchedConnections()  # ty: ignore[missing-attribute]
+    record = _failing(
+        world,
+        "from lakana.ingest import sql\nsql.read('crm-db', '')",
+        **_v3("replace", connections=_CRM, expected=41),
+    )
+    assert record["error_type"] == "UsageError"
+    assert "failure_connection" not in record
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "raise ValueError('no')",
+        "from lakana.ingest import SourceError\nraise SourceError('no')",
+        "from lakana.ingest import SourceError\n"
+        "class E(SourceError):\n"
+        "    @property\n"
+        "    def connection(self):\n"
+        "        raise RuntimeError('a property that raises')\n"
+        "raise E('no')",
+        "from lakana.ingest import SourceError\ne = SourceError('no')\ne.connection = 7\nraise e",
+    ],
+    ids=["not-ingest", "unnamed", "raising-property", "not-text"],
+)
+def test_a_record_names_no_connection_for_an_error_that_names_none(
+    world: _World, body: str
+) -> None:
+    record = _failing(world, body)
+    assert "failure_connection" not in record
+
+
 def test_overlapping_occurrences_of_a_value_are_masked_whole(world: _World) -> None:
     """`abab` in `ababab`: both occurrences overlap, so the whole run is one span."""
     record = _failing(

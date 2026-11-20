@@ -532,6 +532,10 @@ def _apply_task(session: Session, transition: TaskTransition, now: datetime) -> 
     if "error_message" in values:
         # The state of a check phase's text describes that text only (`runs.check_message`).
         values["check_message_state"] = None
+    if "error_message" in values or "failure_code" in values:
+        # What a worker's failure concerned describes that failure only, never the scheduler's.
+        values["error_type"] = None
+        values["failure_connection"] = None
     statement = update(TaskRun).where(
         TaskRun.id == transition.task_id, TaskRun.status == transition.expected
     )

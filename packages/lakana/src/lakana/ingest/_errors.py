@@ -7,17 +7,30 @@ it to the harness's own rule (a function's error is retried).
 
 from __future__ import annotations
 
+import functools
 import re
-from typing import ClassVar
+from collections.abc import Callable
+from typing import ClassVar, ParamSpec, TypeVar
 
 from lakana import context
 
 
 class IngestError(Exception):
-    """An error of a `lakana.ingest` helper; the message names the connection, never a secret."""
+    """An error of a `lakana.ingest` helper; the message names the connection, never a secret.
+
+    Every helper (`connections.get`, `files.read`, `files.list`, `rest.read`, `sql.read`) sets
+    `connection` to the connection it was called with, for every error it raises but
+    `ConnectionNotDeclared` and a `UsageError` that is a mistake in the asset's code (a
+    `ConnectionSetupError`, the connection's own configuration, names it).
+    A run that fails with such an error records the connection, and the connection's page shows
+    the run. An error the asset raises itself names none, unless the asset sets it.
+    """
 
     retryable: ClassVar[bool | None] = None
     """Whether another attempt could end differently; `None` leaves it to the harness."""
+
+    connection: str | None = None
+    """The connection the error concerns, set by the helper; `None` when it concerns none."""
 
 
 class ConnectionNotDeclared(IngestError):
@@ -41,11 +54,22 @@ class ConnectionChanged(IngestError):
 class UsageError(IngestError):
     """The call's arguments, or how the connection or the worker is set up, are wrong.
 
-    A connection of another kind, a missing or malformed secret, an auth mode a helper does not
-    support, a trust bundle the worker cannot read: every attempt would fail the same way.
+    An empty query, a `params=` or `paginate=` that does not fit, a trust bundle the worker
+    cannot read: every attempt would fail the same way. A mistake in the asset's code or the
+    worker's setup names no connection; `ConnectionSetupError`, for the connection's own
+    configuration, does.
     """
 
     retryable: ClassVar[bool | None] = False
+
+
+class ConnectionSetupError(UsageError):
+    """The connection is configured in a way the helper cannot use; fixing the connection fixes it.
+
+    A connection of another kind than the helper reads, a missing or malformed secret, a token
+    endpoint or a CA certificate that does not work: every attempt would fail the same way, and
+    the error names the connection, so its page shows the run.
+    """
 
 
 class SourceError(IngestError):
@@ -73,6 +97,48 @@ class CapExceeded(IngestError):
     """A read went past one of its limits; the same read would again."""
 
     retryable: ClassVar[bool | None] = False
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def names_connection(helper: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Make a helper name its connection on every `IngestError` it raises.
+
+    The helper's first parameter is the connection. An error that names one already keeps it.
+    `ConnectionNotDeclared` names none, since the name is no connection of the asset, and neither
+    does a `UsageError`: a mistake in the asset's code (an argument, the query) or the worker's
+    setup is no problem of the connection. A `ConnectionSetupError` does name it: its fix is a
+    change of the connection.
+
+    Parameters
+    ----------
+    helper
+        A helper whose first parameter is ``connection`` (or ``name``).
+
+    Returns
+    -------
+    Callable
+        The helper, with the same signature.
+    """
+
+    @functools.wraps(helper)
+    def named(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        try:
+            return helper(*args, **kwargs)
+        except IngestError as exc:
+            name = args[0] if args else kwargs.get("connection", kwargs.get("name"))
+            if (
+                exc.connection is None
+                and isinstance(name, str)
+                and not isinstance(exc, ConnectionNotDeclared)
+                and (not isinstance(exc, UsageError) or isinstance(exc, ConnectionSetupError))
+            ):
+                exc.connection = name
+            raise
+
+    return named
 
 
 _UNSAFE = re.compile(
@@ -117,7 +183,7 @@ def safe_name(text: str) -> str:
     return _UNSAFE.sub(_escaped, text)
 
 
-def missing_secret(name: str, key: str, option: str) -> UsageError:
+def missing_secret(name: str, key: str, option: str) -> ConnectionSetupError:
     """Make the error of a connection whose secret lacks a value a helper needs.
 
     Parameters
@@ -132,10 +198,10 @@ def missing_secret(name: str, key: str, option: str) -> UsageError:
 
     Returns
     -------
-    UsageError
+    ConnectionSetupError
         Naming the command, with the task's environment inside a task.
     """
-    return UsageError(
+    return ConnectionSetupError(
         f"`{name}` has no secret with `{key}`; give it one: `lakana connection update {name} "
         f"--env {task_environment()} {option}` (see `lakana connection update --help`)"
     )

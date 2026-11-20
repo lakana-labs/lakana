@@ -295,6 +295,12 @@ class TaskOutcome:
     failure_code
         Why the attempt failed, for a failure; `None` for a success and a release. A failure
         without one is recorded as ``internal``.
+    error_type
+        The class name of the exception a Python task's code ended with, for a failure the
+        harness recorded; `None` otherwise.
+    failure_connection
+        The declared connection a Python task's failure concerns (an error of `lakana.ingest`
+        that names it); `None` otherwise.
     wrote_nothing
         A successful build that committed nothing (an append or merge whose source had nothing
         new, a merge that changed no row): a failed check then has nothing of this run to set
@@ -325,6 +331,8 @@ class TaskOutcome:
     built_snapshot_id: int | None = None
     in_transaction: Callable[[Session], None] | None = None
     failure_code: FailureCode | None = None
+    error_type: str | None = None
+    failure_connection: str | None = None
     wrote_nothing: bool = False
     check_state: dict[str, Any] | None = None
     resources: AttemptResources | None = None

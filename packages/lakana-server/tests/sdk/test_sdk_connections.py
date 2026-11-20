@@ -51,8 +51,9 @@ def test_connection_lifecycle(lakana_client: lakana.Client, storage_root: str) -
         "environment",
         "last_test",
         "actions",
+        "last_run_failure",
     }
-    assert (created.environment, created.last_test) == ("dev", None)
+    assert (created.environment, created.last_test, created.last_run_failure) == ("dev", None, None)
     assert created.actions == ("test", "update", "delete", "name_secret")
     assert _VALUE not in repr(created)
     assert connections.get("dev", "crm-db").created_at.tzinfo is not None

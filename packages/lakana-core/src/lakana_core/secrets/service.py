@@ -16,7 +16,7 @@ import shlex
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -195,7 +195,8 @@ def rotate_values(
 ) -> None:
     """Encrypt new values into a secret under a fresh data key; no authorization, no commit.
 
-    The caller has authorized and commits. Adds `SECRET_ROTATED` and sets `rotated_at` to now.
+    The caller has authorized and commits. Adds `SECRET_ROTATED` and sets `rotated_at` to now,
+    and the `updated_at` of the connection that uses the secret to the same time.
 
     Parameters
     ----------
@@ -235,6 +236,14 @@ def rotate_values(
     secret.format_version = encrypted.format_version
     secret.key_id = encrypted.key_id
     secret.rotated_at = datetime.now(UTC)
+    # New values change the connection that uses them: its last test and the runs that failed on
+    # it are from before (`lakana_core.runs.connection_failures`).
+    session.execute(
+        update(Connection)
+        .where(Connection.secret_id == secret.id)
+        .values(updated_at=secret.rotated_at)
+        .execution_options(synchronize_session="fetch")
+    )
 
 
 def _noun(use: SecretUse) -> str:

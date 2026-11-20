@@ -18,6 +18,7 @@ import pytest
 from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
+    ConnectionSetupError,
     FileShapeError,
     IngestError,
     SourceError,
@@ -284,6 +285,7 @@ def test_a_bad_value_names_the_file_the_column_and_the_problem(root: Path) -> No
     with pytest.raises(SourceError) as caught:
         files.read("exports", "a.csv", schema={"v": pl.Int64})
 
+    assert caught.value.connection == "exports"
     message = str(caught.value)
     assert message.startswith("`exports/a.csv`: ")
     assert "`abc`" in message
@@ -397,8 +399,10 @@ def test_since_from_a_date_in_the_name(root: Path, capsys: pytest.CaptureFixture
 
 def test_modified_from_without_since_is_refused(root: Path) -> None:
     """A name pattern only means something with `since=`."""
-    with pytest.raises(IngestError, match="modified_from= applies only with since="):
+    with pytest.raises(IngestError, match="modified_from= applies only with since=") as caught:
         files.read("exports", "*.csv", modified_from="export-%Y-%m-%d.csv")
+    # A mistake in the asset's call is no problem of the source: it names no connection.
+    assert caught.value.connection is None
 
 
 def test_since_takes_a_datetime_or_none(root: Path) -> None:
@@ -441,6 +445,7 @@ def test_the_sum_over_max_total_bytes_names_how_to_narrow(root: Path) -> None:
 
     with pytest.raises(CapExceeded) as caught:
         files.read("exports", "*.csv", max_total_bytes=9)
+    assert caught.value.connection == "exports"
     assert str(caught.value) == (
         "`exports`: the files matching '*.csv' hold more than max_total_bytes (9); narrow the "
         "pattern or pass since= to read fewer files"
@@ -497,6 +502,8 @@ def test_another_kind_names_the_helper_that_reads_it(root: Path) -> None:
         "files.read reads http, s3, gcs, azure and directory connections; `crm-db` is "
         "postgresql: use sql.read"
     )
+    assert isinstance(caught.value, ConnectionSetupError)
+    assert caught.value.connection == "crm-db"
 
 
 def test_files_list_returns_name_size_and_modified(root: Path) -> None:
