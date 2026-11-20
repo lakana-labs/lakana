@@ -81,9 +81,14 @@ interface Named {
 let tree: Kept<TableTreeOut | null> | undefined;
 const catalogs = new Map<string, CompletionCatalog>();
 
+// One more each time a session ends: a catalog built before then, which an editor may still
+// hold, hands every question to the next person's catalog instead of answering from its own.
+let generation = 0;
+
 onSessionEnd(() => {
   tree = undefined;
   catalogs.clear();
+  generation += 1;
 });
 
 // The reads of columns that wait for a free place, and how many places are taken.
@@ -215,13 +220,31 @@ async function readTables(environment: string, q: string): Promise<Answer<readon
 }
 
 /**
- * Builds the catalog of one environment.
+ * Builds the catalog of one environment; after the session ends it answers from the next one's.
  *
  * @param environment - The environment.
  * @param now - The clock.
  * @returns The catalog.
  */
 function build(environment: string, now: () => number): CompletionCatalog {
+  const era = generation;
+  const own = buildOwn(environment, now);
+  const live = (): CompletionCatalog => (era === generation ? own : catalogCache(environment, now));
+  return {
+    namespaces: () => live().namespaces(),
+    tables: (namespace, prefix) => live().tables(namespace, prefix),
+    columns: (namespace, table) => live().columns(namespace, table),
+  };
+}
+
+/**
+ * Builds the catalog of one environment for the session it is built in.
+ *
+ * @param environment - The environment.
+ * @param now - The clock.
+ * @returns The catalog.
+ */
+function buildOwn(environment: string, now: () => number): CompletionCatalog {
   let first: Kept<readonly Named[]> | undefined;
   const searches = new Map<string, Kept<readonly Named[]>>();
   const columns = new Map<string, Kept<readonly ColumnOut[] | null>>();

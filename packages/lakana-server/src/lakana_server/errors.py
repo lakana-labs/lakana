@@ -28,6 +28,7 @@ from lakana_core.errors import (
     NotFoundError,
     NotPublishedError,
     NoWorkerError,
+    OidcSignInRefused,
     PasskeyRefused,
     PermissionDenied,
     SessionEndedError,
@@ -238,9 +239,10 @@ def install_exception_handlers(app: FastAPI) -> None:
             `Retry-After` header attached for the one error type that needs
             one (`_RETRY_AFTER_SECONDS`). A `SessionEndedError` (401) adds
             `reason` (``idle``, ``lifetime``, ``sign_out``, ...), so the interface can
-            say why the person has to sign in again. A `LinkUnusableError` (410) adds `state`
-            (``used``, ``expired``, ``withdrawn``, ``unknown``), so the sign-in page can say
-            which.
+            say why the person has to sign in again; so does an `OidcSignInRefused` (403:
+            ``not_linked``, ``deactivated``, ``token_invalid``, ...). A `LinkUnusableError`
+            (410) adds `state` (``used``, ``expired``, ``withdrawn``, ``unknown``), so the
+            sign-in page can say which.
 
         Notes
         -----
@@ -259,7 +261,7 @@ def install_exception_handlers(app: FastAPI) -> None:
         retry_after = _RETRY_AFTER_SECONDS.get(type(exc))
         headers = {"Retry-After": retry_after} if retry_after is not None else None
         content = {"detail": str(exc), "type": type(exc).__name__}
-        if isinstance(exc, SessionEndedError):
+        if isinstance(exc, (SessionEndedError, OidcSignInRefused)):
             content["reason"] = exc.reason
         if isinstance(exc, LinkUnusableError):
             content["state"] = exc.state

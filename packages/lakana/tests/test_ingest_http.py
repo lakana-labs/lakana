@@ -23,6 +23,7 @@ from sdk_tls_fixture import Answer, Authority, Exchange, make_authority, scripte
 from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
+    ConnectionSetupError,
     SourceError,
     SourceRefused,
     UsageError,
@@ -879,7 +880,7 @@ def _verify_failure() -> httpx.ConnectError:
         (_verify_failure(), SourceRefused, "certificate is not trusted for `api.test`"),
         (httpx.ConnectError("certificate verify failed"), SourceError, "(ConnectError)"),
         (httpx.ReadTimeout("t"), SourceError, "(ReadTimeout)"),
-        (httpx.LocalProtocolError("bad header"), UsageError, "refused to send"),
+        (httpx.LocalProtocolError("bad header"), ConnectionSetupError, "refused to send"),
     ],
     ids=[
         "proxy-403",
