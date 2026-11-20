@@ -8,17 +8,25 @@
  * {@link STALE_MS}. Only an environment with more than 1,000 tables is searched by the typed word,
  * after {@link SEARCH_AFTER_CHARS} characters and {@link SEARCH_QUIET_MS} of quiet, and each word
  * once. A read that fails, a refusal (403) included, answers nothing rather than an error: help in
- * the editor never stands in the way of writing SQL. Everything kept is what the signed-in person
+ * the editor never stands in the way of writing SQL. A refusal is kept like an answer, since
+ * another read would answer the same; a failure that may pass (a 5xx, a timeout, no answer) is
+ * kept for {@link FAILURE_HOLD_MS} only, so a server that is down gets one read per table in that
+ * time however often the person types, and the first keystroke after it reads again. Everything
+ * kept is what the signed-in person
  * may read, so it is forgotten when the session ends (`onSessionEnd`): the next person to sign in
  * in the same tab reads their own.
  * @packageDocumentation
  */
 import { getTableTree, listCompletionTables, type TableTreeOut } from "../../api/catalog";
-import { onSessionEnd } from "../../api/client";
+import { ApiError, onSessionEnd } from "../../api/client";
 import { type ColumnOut, getTable } from "../../api/table";
 
 /** How long a read is kept before it is read again, in milliseconds (five minutes). */
 export const STALE_MS = 300_000;
+/**
+ * How long a failure that may pass answers before it is read again, in milliseconds (15 s).
+ */
+export const FAILURE_HOLD_MS = 15_000;
 /** How many pages of 200 table names are read for an environment. */
 export const TABLE_PAGES = 5;
 /** How many characters of a table's name are typed before the server is searched. */
@@ -45,12 +53,20 @@ export interface CompletionCatalog {
   columns(namespace: string, table: string): Promise<readonly ColumnOut[] | null>;
 }
 
-/** A read and when it was asked. */
+/** A read and until when it answers. */
 interface Kept<T> {
-  /** When it was asked, in milliseconds. */
-  readonly at: number;
+  /** Until when it answers, in milliseconds: shortened once it has answered a failure that may pass. */
+  until: number;
   /** Its answer. */
   readonly value: Promise<T>;
+}
+
+/** What a read answered, and whether it may be kept. */
+interface Answer<T> {
+  /** The answer. */
+  readonly value: T;
+  /** False after a failure that may pass: then it is kept for {@link FAILURE_HOLD_MS} only. */
+  readonly keep: boolean;
 }
 
 /** A table's place and name. */
@@ -100,26 +116,75 @@ async function limited<T>(read: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Whether a kept read is younger than {@link STALE_MS}.
+ * Whether a failure is a refusal, which another read would answer the same: a 4xx, but for a
+ * timeout (408) and too many requests (429). A 5xx, no answer and an error of the page's own may
+ * pass.
+ *
+ * @param failure - What the read threw.
+ * @returns True for a refusal.
+ */
+function isRefusal(failure: unknown): boolean {
+  return (
+    failure instanceof ApiError &&
+    failure.status >= 400 &&
+    failure.status < 500 &&
+    failure.status !== 408 &&
+    failure.status !== 429
+  );
+}
+
+/**
+ * A read's answer, or `fallback` after a failure, kept only when the failure was a refusal.
+ *
+ * @param read - The read.
+ * @param fallback - What a failure answers.
+ * @returns The answer.
+ */
+function answered<T, F>(read: Promise<T>, fallback: F): Promise<Answer<T | F>> {
+  return read.then(
+    (value) => ({ value, keep: true }),
+    (failure: unknown) => ({ value: fallback, keep: isRefusal(failure) }),
+  );
+}
+
+/**
+ * Whether a kept read may still answer.
  *
  * @param kept - The kept read, if any.
  * @param now - The clock.
  * @returns True when it may answer.
  */
 function isFresh<T>(kept: Kept<T> | undefined, now: () => number): kept is Kept<T> {
-  return kept !== undefined && now() - kept.at < STALE_MS;
+  return kept !== undefined && now() < kept.until;
 }
 
 /**
- * A kept read while it is fresh, else a new one.
+ * A kept read while it may answer, else a new one, kept for {@link STALE_MS}, or for
+ * {@link FAILURE_HOLD_MS} from its answer when that is a failure that may pass.
  *
  * @param kept - The kept read, if any.
  * @param now - The clock.
  * @param read - Asks again.
  * @returns The read to use, which the caller keeps.
  */
-function fresh<T>(kept: Kept<T> | undefined, now: () => number, read: () => Promise<T>): Kept<T> {
-  return isFresh(kept, now) ? kept : { at: now(), value: read() };
+function fresh<T>(
+  kept: Kept<T> | undefined,
+  now: () => number,
+  read: () => Promise<Answer<T>>,
+): Kept<T> {
+  if (isFresh(kept, now)) {
+    return kept;
+  }
+  const made: Kept<T> = {
+    until: now() + STALE_MS,
+    value: read().then(({ value, keep }) => {
+      if (!keep) {
+        made.until = now() + FAILURE_HOLD_MS;
+      }
+      return value;
+    }),
+  };
+  return made;
 }
 
 /**
@@ -127,9 +192,10 @@ function fresh<T>(kept: Kept<T> | undefined, now: () => number, read: () => Prom
  *
  * @param environment - The environment.
  * @param q - The word; empty for every table.
- * @returns The tables read before the last page, the fifth or a failure.
+ * @returns The tables read before the last page, the fifth or a failure; kept unless a failure
+ *   may pass.
  */
-async function readTables(environment: string, q: string): Promise<readonly Named[]> {
+async function readTables(environment: string, q: string): Promise<Answer<readonly Named[]>> {
   const found: Named[] = [];
   let cursor: string | null = null;
   try {
@@ -141,10 +207,11 @@ async function readTables(environment: string, q: string): Promise<readonly Name
         break;
       }
     }
-  } catch {
-    // What was read stays; the rest is missing until the read is stale.
+  } catch (failure: unknown) {
+    // What was read answers; the rest is missing until the read is read again.
+    return { value: found, keep: isRefusal(failure) };
   }
-  return found;
+  return { value: found, keep: true };
 }
 
 /**
@@ -162,7 +229,7 @@ function build(environment: string, now: () => number): CompletionCatalog {
   let latest = 0;
 
   const ownTree = async (): Promise<TableTreeOut["environments"][number] | undefined> => {
-    tree = fresh(tree, now, () => getTableTree().catch(() => null));
+    tree = fresh(tree, now, () => answered(getTableTree(), null));
     const read = await tree.value;
     return read?.environments.find((each) => each.name === environment);
   };
@@ -195,9 +262,11 @@ function build(environment: string, now: () => number): CompletionCatalog {
     columns: (namespace, table) => {
       const key = JSON.stringify([namespace, table]);
       const read = fresh(columns.get(key), now, () =>
-        limited(() => getTable({ environment, namespace, name: table })).then(
-          (found) => found.schema,
-          () => null,
+        answered(
+          limited(() => getTable({ environment, namespace, name: table })).then(
+            (found) => found.schema,
+          ),
+          null,
         ),
       );
       columns.set(key, read);

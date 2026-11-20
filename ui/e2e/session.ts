@@ -4,10 +4,10 @@
  *
  * @packageDocumentation
  */
-import AxeBuilder from "@axe-core/playwright";
 import type { Locator, Page } from "@playwright/test";
 
 import type { GraphNodeOut, GraphOut } from "../src/api";
+import { runAxe } from "./axe";
 
 /** The session of a signed-in administrator, as `GET /api/v1/sign-in/session` answers it. */
 export const ADMIN_SESSION = {
@@ -948,13 +948,6 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   );
 }
 
-const WCAG = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-
-// React Aria's live announcer (a pending button speaks through it) keeps its message for 7 s and
-// names it by the ids of the button's parts, which may be gone by then; it is the library's
-// transient node, not the page.
-const LIVE_ANNOUNCER = "[data-live-announcer]";
-
 /**
  * Runs axe over the page with the WCAG 2.2 AA tags.
  *
@@ -962,7 +955,7 @@ const LIVE_ANNOUNCER = "[data-live-announcer]";
  * @returns The violations' ids and targets.
  */
 export async function violations(page: Page): Promise<string[]> {
-  const results = await new AxeBuilder({ page }).withTags(WCAG).exclude(LIVE_ANNOUNCER).analyze();
+  const results = await runAxe(page);
   return results.violations.map(
     (violation) =>
       `${violation.id}: ${violation.nodes.map((node) => node.target.join(" ")).join(", ")}`,

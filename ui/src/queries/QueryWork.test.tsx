@@ -18,7 +18,8 @@ import {
 import { renderShell } from "../test/render";
 import type { FakeAnswer, FakeRoute } from "../test/server";
 import { catalogCache } from "./editor/catalog";
-import { EditorSkeleton, RunLine } from "./QueryWork";
+import { EditorSkeleton } from "./QueryWork";
+import { RunLine } from "./RunLine";
 import type { QueryRunState } from "./useQueryRun";
 
 vi.mock("./editor/catalog", async (original) => {
@@ -318,6 +319,58 @@ describe("the Queries screen's work", () => {
     expect(await screen.findByRole("grid", {}, { timeout: 3_000 })).toBeInTheDocument();
     expect(await within(recent).findByText("Succeeded")).toBeInTheDocument();
     expect(within(recent).queryByText("Running")).toBeNull();
+  });
+
+  it("a run reads Recent again and leaves Saved, and the pages shown with Show more, as they are", async () => {
+    window.localStorage.setItem("lakana.queries.environment", "prod");
+    const shell = renderShell("/queries", {
+      routes: routes({
+        "GET /api/v1/saved-queries": ({ path }) => ({
+          status: 200,
+          body: path.includes("cursor=c-2")
+            ? { items: [aSavedQuery({ id: "b2", name: "Station ranking" })], next_cursor: null }
+            : { items: [aSavedQuery()], next_cursor: "c-2" },
+        }),
+      }),
+    });
+    const saved = await screen.findByRole("region", { name: "Saved" });
+    await shell.user.click(await within(saved).findByRole("button", { name: "Show more" }));
+    await within(saved).findByRole("link", { name: "Station ranking" });
+    const reads = (list: string): number =>
+      sent(shell).filter((request) => request.startsWith(`GET /api/v1/${list}?`)).length;
+    const recentBefore = reads("queries");
+    type(await editor(), "select 1 as one");
+
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByRole("grid");
+
+    await waitFor(() => {
+      expect(reads("queries")).toBeGreaterThan(recentBefore);
+    });
+    expect(reads("saved-queries")).toBe(2);
+    expect(within(saved).getByRole("link", { name: "Station ranking" })).toBeInTheDocument();
+  });
+
+  it("a save reads Saved again and leaves Recent as it is", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`PUT ${SAVED_ONE}`]: { status: 200, body: aSavedQuery() } }),
+    });
+    await editor();
+    const reads = (list: string): number =>
+      sent(shell).filter((request) => request.startsWith(`GET /api/v1/${list}?`)).length;
+    await waitFor(() => {
+      expect(reads("saved-queries")).toBe(1);
+    });
+    const recentBefore = reads("queries");
+
+    await shell.user.click(screen.getByRole("button", { name: "Save…" }));
+    const dialog = await screen.findByRole("dialog");
+    await shell.user.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(reads("saved-queries")).toBe(2);
+    });
+    expect(reads("queries")).toBe(recentBefore);
   });
 
   it("shows a refusal through problemText above the result", async () => {
@@ -733,6 +786,52 @@ describe("the Queries screen's work", () => {
     await waitFor(() => {
       expect(reads()).toBe(2);
     });
+  });
+
+  it("shows the note after a delete once: the history entry forgets it, so Back and a reload do not bring it back", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`DELETE ${SAVED_ONE}`]: { status: 204 } }),
+    });
+    await shell.user.click(await screen.findByRole("button", { name: "Delete…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete the saved query Daily sales?" });
+    await shell.user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    const note = await screen.findByText("Deleted Daily sales.");
+    await waitFor(() => {
+      expect(shell.router.state.location.state).toMatchObject({
+        note: { kind: "deleted", name: "Daily sales" },
+        seen: true,
+      });
+    });
+    // The same line, still focused: marking the entry does not show the note again.
+    expect(screen.getByText("Deleted Daily sales.")).toBe(note);
+    expect(note).toHaveFocus();
+    expect(shell.router.state.location.pathname).toBe("/queries");
+
+    await act(async () => {
+      await shell.router.navigate(RUN_PATH);
+    });
+    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+    await act(async () => {
+      await shell.router.navigate(-1);
+    });
+    expect(shell.router.state.location.pathname).toBe("/queries");
+    await editor();
+    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+  });
+
+  it("shows no note for an entry whose note was already shown, as after a reload", async () => {
+    const { router } = renderShell(SAVED_PATH, { routes: routes() });
+    await editor();
+
+    await act(async () => {
+      await router.navigate("/queries", {
+        state: { note: { kind: "deleted", name: "Daily sales" }, seen: true },
+      });
+    });
+
+    expect(await screen.findByText("Untitled query")).toBeInTheDocument();
+    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
   });
 
   it("after save as the address is the saved query's and the Saved list shows it", async () => {
