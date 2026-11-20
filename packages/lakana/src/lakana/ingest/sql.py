@@ -764,6 +764,8 @@ def _mariadb_context(conn: FetchedConnection) -> ssl.SSLContext | None:
 
     Raises
     ------
+    ConnectionSetupError
+        When `ssl` refuses the connection's own CA certificate, while the bundle alone is read.
     UsageError
         When the trust bundle cannot be read.
     """
@@ -771,13 +773,36 @@ def _mariadb_context(conn: FetchedConnection) -> ssl.SSLContext | None:
     if tls == "disable":
         return None
     own = conn.settings.get("ca_certificate")
+    own = own if isinstance(own, str) and own else None
     try:
-        return _check.trust_context(own if isinstance(own, str) else None, verify=tls != "require")
-    except (OSError, ssl.SSLError):
+        return _check.trust_context(own, verify=tls != "require")
+    except OSError:
+        if own is not None and _bundle_reads():
+            # The bundle alone is fine, so the connection's own CA is what ssl refused.
+            raise ConnectionSetupError(
+                f"the CA certificate of `{conn.name}` holds no certificate ssl can read; give "
+                f"the connection your CA: `lakana connection update {conn.name} --env "
+                f"{task_environment()} --ca-file ca.pem`"
+            ) from None
         raise UsageError(
             f"the trust bundle `{os.environ.get('LAKANA_CA_BUNDLE')}` (LAKANA_CA_BUNDLE) cannot "
             "be read; check the worker's LAKANA_RUN__CA_BUNDLE"
         ) from None
+
+
+def _bundle_reads() -> bool:
+    """Say whether the worker's trust bundle alone makes a TLS context.
+
+    Returns
+    -------
+    bool
+        `True` when `_check.trust_context` succeeds without a connection's CA.
+    """
+    try:
+        _check.trust_context(None)
+    except OSError:
+        return False
+    return True
 
 
 def _utc_naive(value: object) -> object:
@@ -862,7 +887,9 @@ def _plain_values(params: Mapping[str, object] | None, kind: str | None = None) 
             )
 
 
-def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Exception:
+def _mariadb_error(
+    conn: FetchedConnection, exc: Exception, host: str, *, connecting: bool = False
+) -> Exception:
     """Choose the error for what PyMySQL raised.
 
     Parameters
@@ -873,6 +900,8 @@ def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Except
         PyMySQL's error (``args`` is ``(code, message)`` for a server error).
     host
         The name the certificate is checked for.
+    connecting
+        Whether the error ended the login.
 
     Returns
     -------
@@ -909,6 +938,8 @@ def _mariadb_error(conn: FetchedConnection, exc: Exception, host: str) -> Except
             f"`{conn.name}`: the server requires TLS (MariaDB said: {said}). Run `lakana "
             f"connection update {conn.name} --env {task_environment()} --tls verify-full`."
         )
+    if connecting and code == 1049:  # ER_BAD_DB_ERROR: at the login, the connection's database
+        return ConnectionSetupError(f"`{conn.name}`: the query failed (MariaDB said: {said})")
     if code is not None and 1000 <= code < 2000 and code not in _TRANSIENT:
         return UsageError(f"`{conn.name}`: the query failed (MariaDB said: {said})")
     if code in (2013, 2006) and "relay_port" in conn.routing:
@@ -1066,7 +1097,7 @@ def _read_mariadb(
         else:
             database.connect()
     except (pymysql.MySQLError, OSError, RuntimeError) as exc:
-        failure = _mariadb_error(conn, exc, host)
+        failure = _mariadb_error(conn, exc, host, connecting=True)
         raise failure from None
     try:
         cursor = database.cursor(pymysql.cursors.SSCursor)

@@ -1624,7 +1624,7 @@ def mysql(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return state
 
 
-def _mariadb(*, relay: bool, tls: str = "verify-full") -> None:
+def _mariadb(*, relay: bool, tls: str = "verify-full", ca: str | None = None) -> None:
     """Declare `shop-db`, a MariaDB connection.
 
     Parameters
@@ -1633,12 +1633,17 @@ def _mariadb(*, relay: bool, tls: str = "verify-full") -> None:
         Whether the task runs isolated.
     tls
         The connection's ``tls``.
+    ca
+        The connection's own CA certificate, if any.
     """
+    settings: dict[str, object] = {"user": "reader", "tls": tls}
+    if ca is not None:
+        settings["ca_certificate"] = ca
     body = {
         "name": "shop-db",
         "kind": "mariadb",
         "address": {"host": "db.example.com", "port": 3306, "database": "shop"},
-        "settings": {"user": "reader", "tls": tls},
+        "settings": settings,
         "endpoints": [{"host": "db.example.com", "port": 3306, "role": "service"}],
         "secret": {"password": _PASSWORD},
     }
@@ -1746,6 +1751,52 @@ def test_mariadb_errors_are_classed_by_their_code(
         sql.read("shop-db", "SELECT 1")
 
     assert type(caught.value) is kind
+
+
+def test_mariadb_a_database_missing_at_login_is_the_connections_setup(
+    mysql: dict[str, Any],
+) -> None:
+    """1049 at the login names the connection's own database; in a query it is the query's."""
+    mysql["refuse"] = _MyError(1049, "Unknown database 'shop'")
+    _mariadb(relay=False)
+
+    with pytest.raises(ConnectionSetupError, match="Unknown database 'shop'") as caught:
+        sql.read("shop-db", "SELECT 1")
+    assert caught.value.connection == "shop-db"
+
+    mysql["refuse"] = None
+    mysql["cursor"].fail = _MyError(1049, "Unknown database 'other'")
+    with pytest.raises(UsageError, match="Unknown database 'other'") as query:
+        sql.read("shop-db", "SELECT * FROM other.t")
+    assert type(query.value) is UsageError
+    assert query.value.connection is None
+
+
+def test_mariadb_a_ca_certificate_ssl_refuses_is_the_connections_setup(
+    mysql: dict[str, Any],
+) -> None:
+    """The connection's own CA is its configuration; the worker's bundle stays the worker's."""
+    _mariadb(relay=False, ca="-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n")
+
+    with pytest.raises(ConnectionSetupError, match="CA certificate of `shop-db`") as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert caught.value.connection == "shop-db"
+    assert mysql["made"] == []
+
+
+def test_mariadb_an_unreadable_bundle_is_the_workers_even_with_a_ca_of_its_own(
+    mysql: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the bundle alone fails, the worker is to fix, not the connection."""
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
+    _mariadb(relay=False, ca="-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n")
+
+    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE") as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert type(caught.value) is UsageError
+    assert mysql["made"] == []
 
 
 def test_mariadb_a_certificate_failure_gives_the_tls_text(mysql: dict[str, Any]) -> None:
@@ -1873,10 +1924,12 @@ def test_mariadb_an_unreadable_trust_bundle_names_the_worker_setting(
     monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
     _shop_body({"password": _PASSWORD})
 
-    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE"):
+    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE") as caught:
         sql.read("shop-db", "SELECT 1")
 
     assert mysql["made"] == []
+    assert type(caught.value) is UsageError
+    assert caught.value.connection is None
 
 
 def test_mariadb_caching_sha2_without_tls_names_both_ways_out(mysql: dict[str, Any]) -> None:
