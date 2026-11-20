@@ -955,6 +955,11 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
         "POST",
         "/api/v1/sign-in/oidc/finish",
     ): "signing in: the provider's checked answer is the proof",
+    ("POST", "/api/v1/sign-in/oidc/step-up/start"): "the provider step-up ceremony itself",
+    ("POST", "/api/v1/sign-in/oidc/finish-in-session"): (
+        "finishes a provider step-up (the ceremony itself) or a link, whose start asked for "
+        "step-up"
+    ),
     ("POST", "/api/v1/sign-in/step-up/options"): "the step-up ceremony itself",
     ("POST", "/api/v1/sign-in/step-up"): "the step-up ceremony itself",
     ("POST", "/api/v1/sign-in/links/describe"): "reads a link without using it",
@@ -1097,6 +1102,15 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
 """Every other write of `/api/v1` and why it needs no step-up: it removes access, operates or
 writes existing work under the caller's own rights, or reads."""
 
+STEP_UP_PINNED_ELSEWHERE: dict[tuple[str, str], str] = {
+    ("POST", "/api/v1/sign-in/oidc/link/start"): (
+        "needs step-up, pinned by test_oidc_sign_in.py's "
+        "test_link_from_profile_needs_a_fresh_passkey_touch: the dynamic test's administrator "
+        "is the server operator, who is never linked"
+    ),
+}
+"""Operations that need step-up and are pinned by a test of their own, with why not here."""
+
 
 @pytest.fixture(scope="module")
 def client(
@@ -1229,7 +1243,9 @@ def test_every_listed_route_exists() -> None:
     operations = set(_all_operations(_route_app()))
     assert set(STEP_UP_ROUTES) - operations == set()
     assert set(NO_STEP_UP) - operations == set()
+    assert set(STEP_UP_PINNED_ELSEWHERE) - operations == set()
     assert set(STEP_UP_ROUTES) & set(NO_STEP_UP) == set()
+    assert set(STEP_UP_PINNED_ELSEWHERE) & (set(STEP_UP_ROUTES) | set(NO_STEP_UP)) == set()
 
 
 def _undecided(operations: list[tuple[str, str]]) -> set[tuple[str, str]]:
@@ -1246,7 +1262,7 @@ def _undecided(operations: list[tuple[str, str]]) -> set[tuple[str, str]]:
         The writes without a step-up decision.
     """
     writes = {(method, path) for method, path in operations if method != "GET"}
-    return writes - set(STEP_UP_ROUTES) - set(NO_STEP_UP)
+    return writes - set(STEP_UP_ROUTES) - set(NO_STEP_UP) - set(STEP_UP_PINNED_ELSEWHERE)
 
 
 def test_every_write_decides_on_step_up() -> None:

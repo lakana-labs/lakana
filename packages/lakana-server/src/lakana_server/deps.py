@@ -40,6 +40,7 @@ from lakana_core.identity.groups import GroupService
 from lakana_core.identity.interface_state import InterfaceStateService
 from lakana_core.identity.links import LinkService
 from lakana_core.identity.notices import NoticeService
+from lakana_core.identity.oidc_links import OidcLinkService
 from lakana_core.identity.passkeys import PasskeyService, needs_passkey
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.pictures import PictureService
@@ -297,6 +298,35 @@ def get_link_service(
         local_mode=settings.ui.local_sign_in,
         bootstrap_name=settings.bootstrap_admin,
         clock=clock,
+    )
+
+
+def get_oidc_link_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> OidcLinkService:
+    """Build an OidcLinkService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the settings and the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    OidcLinkService
+        A service using real authorization, the app's clock and `LAKANA_BOOTSTRAP_ADMIN`.
+    """
+    return OidcLinkService(
+        session,
+        authz,
+        clock=get_clock(request),
+        bootstrap_name=request.app.state.settings.bootstrap_admin,
     )
 
 

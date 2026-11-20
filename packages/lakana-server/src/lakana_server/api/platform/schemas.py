@@ -7314,6 +7314,38 @@ class OidcStartIn(BaseModel):
     secret: str | None = Field(default=None, min_length=1, max_length=128, repr=False)
 
 
+class OidcInSessionStartIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/oidc/link/start` and `/step-up/start`.
+
+    Parameters
+    ----------
+    return_to
+        The page of the interface to open afterwards, as a path; anything else becomes ``/``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    return_to: str | None = Field(default=None, max_length=4096)
+
+
+class OidcInSessionOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/oidc/finish-in-session`.
+
+    The session stays the same, so its page keeps its CSRF token.
+
+    Parameters
+    ----------
+    return_to
+        The page to open now: the path the start was given, checked, or ``/``.
+    step_up_until
+        Until when actions that need step-up are allowed without confirming again; `null`
+        when the session has no fresh confirmation.
+    """
+
+    return_to: str
+    step_up_until: datetime | None
+
+
 class OidcStartOut(BaseModel):
     """Response body of `POST /api/v1/sign-in/oidc/start`.
 

@@ -25,12 +25,14 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
+from lakana_core.auth import PrincipalRef
 from lakana_core.errors import (
     ConflictError,
     LinkUnusableError,
@@ -51,12 +53,20 @@ from lakana_core.identity.oidc_flows import (
     safe_return_to,
     sign_in_outcome,
 )
+from lakana_core.identity.oidc_links import OidcLinkService, in_browser_session, is_linked
 from lakana_core.identity.passkeys import OPEN_BODY_LIMIT
-from lakana_core.identity.sessions import SessionService, StartedSession
-from lakana_core.models import AuditEventType, SignInLink
+from lakana_core.identity.sessions import (
+    STEP_UP_WINDOW,
+    SessionService,
+    StartedSession,
+    require_step_up,
+)
+from lakana_core.models import AuditEventType, Principal, SignInLink
 from lakana_core.oidc.provider import OidcProvider, ProviderUnavailable
 from lakana_server.api.platform.schemas import (
     OidcInfoOut,
+    OidcInSessionOut,
+    OidcInSessionStartIn,
     OidcSignInOut,
     OidcStartIn,
     OidcStartOut,
@@ -80,6 +90,8 @@ from lakana_server.browser_session import (
 from lakana_server.deps import (
     get_clock,
     get_link_service,
+    get_oidc_link_service,
+    get_principal,
     get_session,
     get_session_service,
     record_failed_link,
@@ -88,6 +100,7 @@ from lakana_server.deps import (
 from lakana_server.errors import TooManyAttemptsError
 from lakana_server.oidc_flow import (
     MAX_PARAMETER,
+    STEP_UP_PARAMETERS,
     authorization_url,
     complete_callback,
     landing_url,
@@ -100,6 +113,22 @@ OIDC_OFF = (
     "Sign in with a passkey instead."
 )
 """The 409 detail of `start` while OIDC sign-in is off."""
+
+NOT_LINKED_STEP_UP = (
+    "Your account signs in with a passkey, not through the identity provider: confirm with your "
+    "passkey instead (POST /api/v1/sign-in/step-up/options)."
+)
+"""The 409 detail of the provider step-up for a person who is not linked."""
+
+SIGN_IN_FLOW = (
+    "This flow signs a person in, so it finishes without a session: POST "
+    "/api/v1/sign-in/oidc/finish."
+)
+"""The 409 detail of `finish-in-session` for a flow of `SIGN_IN_PURPOSES`."""
+
+AUTH_TIME_SKEW = timedelta(seconds=60)
+"""How much earlier than the step-up's start the provider's ``auth_time`` may be, for clocks
+that differ a little."""
 
 IN_SESSION_FLOW = (
     "This flow links or confirms a signed-in person, so it finishes in that person's session: "
@@ -374,7 +403,14 @@ def start_oidc_sign_in(
     "/callback",
     response_class=RedirectResponse,
     status_code=303,
-    responses={303: {"description": "Always to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`."}},
+    responses={
+        303: {
+            "description": (
+                "To `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, or `/sign-in/oidc/confirmed` for a "
+                "link from the profile or a provider step-up."
+            )
+        }
+    },
 )
 def oidc_callback(
     request: Request,
@@ -389,7 +425,10 @@ def oidc_callback(
     this browser's flow cookie), exchanges the code with the client secret and verifies the ID
     token, writes what it found on the flow, and always answers 303 to
     `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in
-    with `POST /api/v1/sign-in/oidc/finish`. A flow is called back once.
+    with `POST /api/v1/sign-in/oidc/finish`. A flow that links a signed-in person or confirms
+    their session goes to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed` instead, which
+    finishes it with `POST /api/v1/sign-in/oidc/finish-in-session`. Both are fixed pages of the
+    public address. A flow is called back once.
 
     Parameters
     ----------
@@ -409,9 +448,9 @@ def oidc_callback(
     RedirectResponse
         303 to the interface's page that finishes the sign-in.
     """
-    complete_callback(request, session, code=code, state=state, error=error)
+    purpose = complete_callback(request, session, code=code, state=state, error=error)
     origin = request.app.state.settings.public_origin()
-    return RedirectResponse(landing_url(origin), status_code=303)
+    return RedirectResponse(landing_url(origin, purpose), status_code=303)
 
 
 @open_router.post("/finish", response_model=OidcSignInOut, responses=errors(403))
@@ -572,3 +611,277 @@ def _sign_in(
     principal.last_provider_sign_in_at = get_clock(request)()
     principal.oidc_email, principal.oidc_name = found.email, found.name
     return started
+
+
+@router.post(
+    "/link/start",
+    response_model=OidcStartOut,
+    responses=errors(401, 403),
+)
+def start_oidc_link(
+    body: OidcInSessionStartIn,
+    request: Request,
+    response: Response,
+    principal: PrincipalRef = Depends(get_principal),
+    session: Session = Depends(get_session),
+    links: OidcLinkService = Depends(get_oidc_link_service),
+) -> OidcStartOut:
+    """Start linking your account to the identity provider, from your profile.
+
+    Needs a browser session with a passkey touch from the last 15 minutes (403
+    `StepUpRequired`). Answers the provider's sign-in page: send the browser there; the
+    provider sends it back to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed`, which finishes
+    with `POST /api/v1/sign-in/oidc/finish-in-session`. Once linked you sign in only through
+    the provider: your passkeys stay stored, unused, and no session ends. 403
+    `OidcSignInRefused` with `reason` `already_linked`, `cannot_link_operator` (the server
+    operator's account) or `last_unlinked_admin` (the last administrator who signs in with a
+    passkey, who keeps the way in when the provider is down); 409 for a token.
+
+    Parameters
+    ----------
+    body
+        ``{"return_to"}``, optional.
+    request
+        The request, for the provider client and the clock.
+    response
+        The response, to set the flow cookie on.
+    principal
+        The caller.
+    session
+        The request's database session.
+    links
+        The link service.
+
+    Returns
+    -------
+    OidcStartOut
+        The provider's authorization URL for this flow.
+
+    Raises
+    ------
+    OidcSignInRefused
+        403 when the caller cannot be linked.
+    """
+    _provider(request)
+    context = in_browser_session(principal)
+    require_step_up(principal)
+    person = session.get(Principal, principal.id)
+    assert person is not None  # nosec B101 -- a verified session's person exists
+    refusal = links.refusal_for(person)
+    if refusal is not None:
+        raise refusal
+    return _open_flow(
+        request,
+        response,
+        session,
+        "link",
+        body.return_to,
+        principal_id=principal.id,
+        session_id=context.session_id,
+    )
+
+
+@router.post("/step-up/start", response_model=OidcStartOut, responses=errors(401, 403))
+def start_oidc_step_up(
+    body: OidcInSessionStartIn,
+    request: Request,
+    response: Response,
+    principal: PrincipalRef = Depends(get_principal),
+    session: Session = Depends(get_session),
+) -> OidcStartOut:
+    """Start confirming your browser session at the identity provider (provider step-up).
+
+    For a person linked to the provider, who signs in only there: it stands in for the passkey
+    touch that actions such as creating a token ask for (403 `StepUpRequired`). The provider is
+    asked for a fresh sign-in (`prompt=login`, `max_age=0`), and the finish checks the
+    `auth_time` it reports. Then press the action again: for 15 minutes it needs no other
+    confirmation. 409 for a token, or for a person who is not linked (confirm with a passkey,
+    `POST /api/v1/sign-in/step-up/options`).
+
+    Parameters
+    ----------
+    body
+        ``{"return_to"}``, optional: the page to come back to.
+    request
+        The request, for the provider client and the clock.
+    response
+        The response, to set the flow cookie on.
+    principal
+        The caller.
+    session
+        The request's database session.
+
+    Returns
+    -------
+    OidcStartOut
+        The provider's authorization URL for this flow.
+
+    Raises
+    ------
+    ConflictError
+        409 for a person who is not linked.
+    """
+    _provider(request)
+    context = in_browser_session(principal)
+    person = session.get(Principal, principal.id)
+    if person is None or not is_linked(person):
+        raise ConflictError(NOT_LINKED_STEP_UP)
+    return _open_flow(
+        request,
+        response,
+        session,
+        "step_up",
+        body.return_to,
+        principal_id=principal.id,
+        session_id=context.session_id,
+        extra=STEP_UP_PARAMETERS,
+    )
+
+
+@router.post(
+    "/finish-in-session",
+    response_model=OidcInSessionOut,
+    responses=errors(401, 403),
+)
+def finish_oidc_in_session(
+    request: Request,
+    response: Response,
+    principal: PrincipalRef = Depends(get_principal),
+    session: Session = Depends(get_session),
+    sessions: SessionService = Depends(get_session_service),
+    links: OidcLinkService = Depends(get_oidc_link_service),
+) -> OidcInSessionOut:
+    """Finish a link from the profile or a provider step-up, in the session that started it.
+
+    The interface's page at `/sign-in/oidc/confirmed` calls this once, with the session's
+    CSRF token: the session stays, and so does its token. A link links the caller to the
+    identity the provider verified (403 `OidcSignInRefused` `identity_taken` when another
+    account holds it, `last_unlinked_admin`). A step-up needs the caller's own identity
+    (`identity_mismatch` otherwise) and an `auth_time` no earlier than the start, less 60
+    seconds (`auth_too_old`, also when the provider sent none); it then counts as the
+    session's step-up touch, and as a provider sign-in for the token window. Also 403
+    `flow_expired` for a flow of another session, and the callback's refusals. 409 for a token
+    and for a sign-in flow, which finishes at `/finish`.
+
+    Parameters
+    ----------
+    request
+        The request, for the flow cookie and the clock.
+    response
+        The response, to clear the flow cookie on.
+    principal
+        The caller.
+    session
+        The request's database session.
+    sessions
+        The session service, to record the step-up touch.
+    links
+        The link service.
+
+    Returns
+    -------
+    OidcInSessionOut
+        The page to open and until when step-up actions need no other confirmation.
+
+    Raises
+    ------
+    ConflictError
+        409 for a sign-in, invite or recovery flow; it stays usable at `/finish`.
+    OidcSignInRefused
+        403 with the reason.
+    """
+    _provider(request)
+    context = in_browser_session(principal)
+    origin = request.app.state.settings.public_origin()
+    clock = get_clock(request)
+    browser = (request.cookies.get(flow_cookie_name(origin)) or "")[:MAX_PARAMETER]
+    store = OidcFlowStore(session, clock=clock)
+    if store.pending_purpose(browser) in SIGN_IN_PURPOSES:
+        raise ConflictError(SIGN_IN_FLOW)
+    flow = store.finish(browser, purposes=IN_SESSION_PURPOSES)
+    found = sign_in_outcome(flow.outcome if flow is not None else None)
+    session.commit()
+    if not isinstance(found, ProviderIdentity):
+        if flow is None or flow.outcome is None:
+            record_refused_oidc(request, session, found)
+        raise OidcSignInRefused(found)
+    assert flow is not None  # nosec B101 -- an identity comes only from a flow's outcome
+    if flow.session_id != context.session_id or flow.principal_id != principal.id:
+        record_refused_oidc(request, session, "flow_expired", iss=found.issuer, sub=found.subject)
+        raise OidcSignInRefused("flow_expired")
+    touched = context.last_touch_at
+    try:
+        if flow.purpose == "link":
+            links.link(principal.id, found, via="profile")
+        else:
+            touched = _confirm(request, session, sessions, principal, found, flow.created_at)
+    except OidcSignInRefused as refused:
+        record_refused_oidc(request, session, refused.reason, iss=found.issuer, sub=found.subject)
+        raise
+    session.commit()
+    clear_flow_cookie(response, origin)
+    return OidcInSessionOut(
+        return_to=flow.return_to,
+        step_up_until=touched + STEP_UP_WINDOW if touched is not None else None,
+    )
+
+
+def _confirm(
+    request: Request,
+    session: Session,
+    sessions: SessionService,
+    principal: PrincipalRef,
+    found: ProviderIdentity,
+    started_at: datetime,
+) -> datetime:
+    """Record a provider step-up as the session's touch; the caller commits.
+
+    Parameters
+    ----------
+    request
+        The request, for the clock and the client's address.
+    session
+        The request's database session.
+    sessions
+        The session service.
+    principal
+        The caller, in their browser session.
+    found
+        The identity the provider verified.
+    started_at
+        When the step-up flow was opened.
+
+    Returns
+    -------
+    datetime
+        The touch time.
+
+    Raises
+    ------
+    OidcSignInRefused
+        ``identity_mismatch`` for another identity than the caller's, ``auth_too_old`` without
+        an `auth_time` from the start on (less `AUTH_TIME_SKEW`).
+    """
+    person = session.get(Principal, principal.id)
+    assert person is not None  # nosec B101 -- a verified session's person exists
+    context = in_browser_session(principal)
+    if (person.oidc_issuer, person.oidc_subject) != (found.issuer, found.subject):
+        raise OidcSignInRefused("identity_mismatch")
+    if found.auth_time is None or found.auth_time < started_at - AUTH_TIME_SKEW:
+        raise OidcSignInRefused("auth_too_old")
+    now = get_clock(request)()
+    sessions.touch(context.key_id)
+    person.last_provider_sign_in_at = now
+    person.oidc_email, person.oidc_name = found.email, found.name
+    AuditService(session).record(
+        principal.id,
+        AuditEventType.SIGN_IN_OIDC,
+        detail={
+            "iss": found.issuer,
+            "sub": found.subject,
+            "key_id": context.key_id,
+            "peer": request.client.host if request.client else "unknown",
+            "purpose": "step_up",
+        },
+    )
+    return now

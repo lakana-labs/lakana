@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -21,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import lakana_server.ui
-from lakana_core.models import AuditEvent, AuditEventType, OidcFlow, Principal
+from lakana_core.models import AuditEvent, AuditEventType, OidcFlow, Passkey, Principal
 from lakana_core.net.https_json import FetchFailed
 from lakana_core.oidc.provider import OidcProvider
 from lakana_server.app import create_app
@@ -970,3 +971,323 @@ def _all_people(client: TestClient) -> list[Principal]:
     app = cast(FastAPI, client.app)
     with Session(app.state.engine, expire_on_commit=False) as session:
         return list(session.execute(select(Principal)).scalars())
+
+
+# -- linking from the profile, and provider step-up (#32, PR 2) --------------------------------
+
+LINK_START = "/api/v1/sign-in/oidc/link/start"
+STEP_UP_START = "/api/v1/sign-in/oidc/step-up/start"
+FINISH_IN_SESSION = "/api/v1/sign-in/oidc/finish-in-session"
+CONFIRMED = f"{PUBLIC}/sign-in/oidc/confirmed"
+
+
+def _in_session(
+    client: TestClient, name: str, *, touched_at: datetime | None = None
+) -> dict[str, str]:
+    """Sign a person in directly and put the session cookie into the browser.
+
+    Parameters
+    ----------
+    client
+        The browser.
+    name
+        The person.
+    touched_at
+        The session's last step-up touch.
+
+    Returns
+    -------
+    dict of str to str
+        The CSRF header the page sends.
+    """
+    cookie, value, csrf = signed_in(client, name, touched_at=touched_at)
+    client.cookies.set(cookie, value)
+    return {"X-Lakana-CSRF": csrf}
+
+
+def _person_with_passkey(client: TestClient, name: str, *, admin: bool = False) -> None:
+    """Create an unlinked person with a working passkey.
+
+    Parameters
+    ----------
+    client
+        The client of the app.
+    name
+        The name.
+    admin
+        Whether to grant them ADMIN on the instance.
+    """
+    _link(client, name, subject="")
+    if admin:
+        grant = {"principal": name, "role": "ADMIN", "kind": "INSTANCE"}
+        assert client.post("/api/v1/grants", headers=AUTH_HEADER, json=grant).status_code == 201
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        person = session.execute(select(Principal).where(Principal.name == name)).scalar_one()
+        session.add(
+            Passkey(
+                id=uuid.uuid4(),
+                principal_id=person.id,
+                credential_id=uuid.uuid4().hex,
+                public_key=b"k",
+                sign_count=0,
+                rp_id="localhost",
+                name="Passkey",
+                backup_eligible=False,
+                created_at=datetime.now(UTC),
+                created_user_agent="pytest",
+            )
+        )
+        session.commit()
+
+
+def _callback_to(client: TestClient, url: str, **claims: object) -> str:
+    """Sign in at the provider and come back, returning where the callback sent the browser.
+
+    Parameters
+    ----------
+    client
+        The browser.
+    url
+        The authorization URL.
+    **claims
+        Claims of the ID token to change.
+
+    Returns
+    -------
+    str
+        The callback's `Location`.
+    """
+    code, state = fake_of(client).authorize(url, **claims)
+    r = client.get(CALLBACK, params={"code": code, "state": state}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    return r.headers["location"]
+
+
+def fake_of(client: TestClient) -> FakeProvider:
+    """Read the fake provider the client's app talks to.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    FakeProvider
+        The provider.
+    """
+    return cast(FastAPI, client.app).state.fake_provider
+
+
+@pytest.fixture
+def linking(client: TestClient, fake: FakeProvider, clock: SettableClock) -> TestClient:
+    """Provide the browser with the fake provider reachable from the client, and a clock.
+
+    Parameters
+    ----------
+    client
+        The browser.
+    fake
+        The provider.
+    clock
+        The app's clock.
+
+    Returns
+    -------
+    TestClient
+        The browser.
+    """
+    cast(FastAPI, client.app).state.fake_provider = fake
+    return client
+
+
+def test_link_from_profile_needs_a_fresh_passkey_touch(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _person_with_passkey(linking, "bob")
+    headers = _in_session(linking, "bob", touched_at=clock.now - timedelta(minutes=16))
+    r = linking.post(LINK_START, headers=headers, json={})
+    assert (r.status_code, r.json()["type"]) == (403, "StepUpRequired"), r.text
+    assert _flows(linking) == []
+
+
+def test_link_from_profile_needs_a_browser(linking: TestClient) -> None:
+    r = linking.post(LINK_START, headers=AUTH_HEADER, json={})
+    assert r.status_code == 409, r.text
+    assert "browser" in r.json()["detail"]
+
+
+def test_link_from_profile_links_and_keeps_passkeys_stored(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _person_with_passkey(linking, "bob")
+    headers = _in_session(linking, "bob", touched_at=clock.now)
+    r = linking.post(LINK_START, headers=headers, json={"return_to": "/me"})
+    assert r.status_code == 200, r.text
+    [flow] = _flows(linking)
+    assert (flow.purpose, flow.session_id is not None) == ("link", True)
+    assert _callback_to(linking, r.json()["authorization_url"], sub="bob-sub") == CONFIRMED
+    r = linking.post(FINISH_IN_SESSION, headers=headers, json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["return_to"] == "/me"
+    assert r.json()["step_up_until"] is not None
+    bob = _person(linking, "bob")
+    assert (bob.oidc_issuer, bob.oidc_subject) == (ISSUER, "bob-sub")
+    app = cast(FastAPI, linking.app)
+    with Session(app.state.engine) as session:
+        assert (
+            len(session.execute(select(Passkey).where(Passkey.principal_id == bob.id)).all()) == 1
+        )
+    # Linking ends no session: the same one still answers.
+    assert linking.get("/api/v1/sign-in/session", headers=headers).json()["name"] == "bob"
+    [linked] = _events(linking, AuditEventType.PRINCIPAL_OIDC_LINKED)
+    assert linked["via"] == "profile"
+
+
+def test_link_from_profile_refusals(linking: TestClient, clock: SettableClock) -> None:
+    _link(linking, "alice")
+    headers = _in_session(linking, "alice", touched_at=clock.now)
+    _refused(linking.post(LINK_START, headers=headers, json={}), "already_linked")
+    headers = _in_session(linking, "admin", touched_at=clock.now)
+    _refused(linking.post(LINK_START, headers=headers, json={}), "cannot_link_operator")
+
+
+def test_the_last_unlinked_admin_is_told_before_the_provider(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _person_with_passkey(linking, "ann", admin=True)
+    headers = _in_session(linking, "ann", touched_at=clock.now)
+    _refused(linking.post(LINK_START, headers=headers, json={}), "last_unlinked_admin")
+    assert _flows(linking) == []
+
+
+def test_link_finish_from_another_session_is_refused(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _person_with_passkey(linking, "bob")
+    headers = _in_session(linking, "bob", touched_at=clock.now)
+    r = linking.post(LINK_START, headers=headers, json={})
+    _callback_to(linking, r.json()["authorization_url"], sub="bob-sub")
+    other = _in_session(linking, "bob", touched_at=clock.now)
+    _refused(linking.post(FINISH_IN_SESSION, headers=other, json={}), "flow_expired")
+    assert _person(linking, "bob").oidc_subject is None
+
+
+def test_step_up_start_asks_prompt_login_and_max_age_zero(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _link(linking, "alice")
+    headers = _in_session(linking, "alice")
+    r = linking.post(STEP_UP_START, headers=headers, json={})
+    assert r.status_code == 200, r.text
+    query = parse_qs(urlsplit(r.json()["authorization_url"]).query)
+    assert (query["prompt"], query["max_age"]) == (["login"], ["0"])
+    [flow] = _flows(linking)
+    assert flow.purpose == "step_up"
+
+
+def test_step_up_start_needs_a_linked_person(linking: TestClient) -> None:
+    _person_with_passkey(linking, "bob")
+    r = linking.post(STEP_UP_START, headers=_in_session(linking, "bob"), json={})
+    assert r.status_code == 409, r.text
+    assert "passkey" in r.json()["detail"]
+    r = linking.post(STEP_UP_START, headers=AUTH_HEADER, json={})
+    assert r.status_code == 409, r.text
+
+
+def _stepped_up(linking: TestClient, clock: SettableClock, **claims: object) -> Any:  # ruff: ignore[any-type]
+    """Run a provider step-up for Alice, linked, in a session without a touch.
+
+    Parameters
+    ----------
+    linking
+        The browser.
+    clock
+        The app's clock.
+    **claims
+        Claims of the ID token to change.
+
+    Returns
+    -------
+    Any
+        The finish's response.
+    """
+    headers = _in_session(linking, "alice")
+    r = linking.post(STEP_UP_START, headers=headers, json={"return_to": "/tokens"})
+    claims.setdefault("auth_time", int(clock.now.timestamp()))
+    assert _callback_to(linking, r.json()["authorization_url"], **claims) == CONFIRMED
+    return linking.post(FINISH_IN_SESSION, headers=headers, json={})
+
+
+def test_provider_step_up_sets_the_touch(linking: TestClient, clock: SettableClock) -> None:
+    _link(linking, "alice")
+    r = _stepped_up(linking, clock)
+    assert r.status_code == 200, r.text
+    assert r.json()["return_to"] == "/tokens"
+    until = datetime.fromisoformat(r.json()["step_up_until"])
+    assert until == clock.now + timedelta(minutes=15)
+    headers = {"X-Lakana-CSRF": r.request.headers["X-Lakana-CSRF"]}
+    session = linking.get("/api/v1/sign-in/session", headers=headers).json()
+    assert session["step_up_until"] is not None
+    # A step-up action now goes through, as after a passkey touch.
+    r = linking.post("/api/v1/principals/alice/tokens", headers=headers, json={"name": "t"})
+    assert r.status_code == 201, r.text
+    assert _person(linking, "alice").last_provider_sign_in_at == clock.now
+    [event] = _events(linking, AuditEventType.SIGN_IN_OIDC)
+    assert event["purpose"] == "step_up"
+
+
+def test_provider_step_up_with_old_auth_time_is_refused(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _link(linking, "alice")
+    _refused(_stepped_up(linking, clock, auth_time=int(clock.now.timestamp()) - 61), "auth_too_old")
+    _refused(_stepped_up(linking, clock, auth_time=None), "auth_too_old")
+    reasons = [e["reason"] for e in _events(linking, AuditEventType.SIGN_IN_OIDC_REFUSED)]
+    assert reasons == ["auth_too_old", "auth_too_old"]
+
+
+def test_provider_step_up_as_someone_else_is_refused(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _link(linking, "alice")
+    _refused(_stepped_up(linking, clock, sub="mallory"), "identity_mismatch")
+
+
+def test_callback_redirects_link_flows_to_confirmed(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _link(linking, "alice")
+    r = linking.post(STEP_UP_START, headers=_in_session(linking, "alice"), json={})
+    assert _callback_to(linking, r.json()["authorization_url"]) == CONFIRMED
+    linking.cookies.clear()
+    assert _callback_to(linking, _start(linking)) == LANDING
+
+
+def test_finish_and_finish_in_session_refuse_the_other_purposes(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    _link(linking, "alice")
+    headers = _in_session(linking, "alice")
+    r = linking.post(STEP_UP_START, headers=headers, json={})
+    _callback_to(linking, r.json()["authorization_url"], auth_time=int(clock.now.timestamp()))
+    r = linking.post(FINISH, json={})
+    assert (r.status_code, r.json()["type"]) == (409, "ConflictError"), r.text
+    # The flow was left for its own finish.
+    assert linking.post(FINISH_IN_SESSION, headers=headers, json={}).status_code == 200
+    _callback_to(linking, _start(linking))
+    r = linking.post(FINISH_IN_SESSION, headers=headers, json={})
+    assert (r.status_code, r.json()["type"]) == (409, "ConflictError"), r.text
+    assert linking.post(FINISH, json={}).status_code == 200
+    r = linking.post(FINISH_IN_SESSION, headers=AUTH_HEADER, json={})
+    assert r.status_code == 409, r.text
+
+
+def test_a_refused_flow_finishes_in_session_once(linking: TestClient, clock: SettableClock) -> None:
+    _link(linking, "alice")
+    headers = _in_session(linking, "alice")
+    r = linking.post(STEP_UP_START, headers=headers, json={})
+    _callback_to(linking, r.json()["authorization_url"], nonce="wrong")
+    _refused(linking.post(FINISH_IN_SESSION, headers=headers, json={}), "token_invalid")
+    _refused(linking.post(FINISH_IN_SESSION, headers=headers, json={}), "flow_expired")

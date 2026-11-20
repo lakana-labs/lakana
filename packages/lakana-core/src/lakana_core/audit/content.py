@@ -172,6 +172,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "principal",
         "principal_id",
         "probe_id",
+        # what an OIDC sign-in was for, when not a sign-in (``step_up``, #32)
+        "purpose",
         "project_version_id",
         "query_id",
         "ref",

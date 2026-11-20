@@ -31,7 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import AuthorizationService, PrincipalRef
+from lakana_core.auth import AuthorizationService, PrincipalRef, SessionContext
 from lakana_core.errors import ConflictError, NotFoundError, OidcSignInRefused
 from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.break_glass import leaves_no_unlinked_admin, unlinked_admin_ids
@@ -56,6 +56,36 @@ from lakana_core.models import (
 
 LinkVia = Literal["invite", "profile", "recovery"]
 """How a person came to link: an invite, their profile, or a recovery link."""
+
+SESSION_ONLY = (
+    "Linking to the identity provider and confirming at it happen in the web interface: they "
+    "belong to a browser session, and a token has none. Sign in to the web interface and do it "
+    "there."
+)
+"""The 409 detail of linking from the profile and of provider step-up, for a token."""
+
+
+def in_browser_session(p: PrincipalRef) -> SessionContext:
+    """Read the browser session a link from the profile or a provider step-up belongs to.
+
+    Parameters
+    ----------
+    p
+        The caller.
+
+    Returns
+    -------
+    SessionContext
+        The session.
+
+    Raises
+    ------
+    ConflictError
+        With `SESSION_ONLY`, for a token.
+    """
+    if p.session is None:
+        raise ConflictError(SESSION_ONLY)
+    return p.session
 
 
 def is_linked(principal: Principal) -> bool:
@@ -198,19 +228,14 @@ class OidcLinkService:
         principal = self._session.get(Principal, principal_id)
         if principal is None:
             raise NotFoundError("No such principal.")
-        refusal = linking_refusal(principal, bootstrap_name=self._bootstrap_name)
-        if refusal is not None:
-            raise refusal
         # The count must see every other link and removal that committed before it.
         lock_admin_count(self._session)
+        refusal = self.refusal_for(principal)
+        if refusal is not None:
+            raise refusal
         holder = principal_for(self._session, identity)
         if holder is not None and holder.id != principal.id:
             raise OidcSignInRefused("identity_taken")
-        admins = active_instance_admin_ids(self._session)
-        if principal.id in admins and leaves_no_unlinked_admin(
-            self._session, before=admins, after=admins, linking=principal.id
-        ):
-            raise OidcSignInRefused("last_unlinked_admin")
         try:
             with self._session.begin_nested():
                 self._session.execute(
@@ -239,6 +264,33 @@ class OidcLinkService:
             },
         )
         return principal
+
+    def refusal_for(self, principal: Principal) -> OidcSignInRefused | None:
+        """Say why a person cannot be linked now, whatever identity the provider verifies.
+
+        `link` asks under the administrator-count lock; the start of a profile link asks without
+        it, so a person is told before they go to the provider.
+
+        Parameters
+        ----------
+        principal
+            The person.
+
+        Returns
+        -------
+        OidcSignInRefused or None
+            `linking_refusal`'s, or ``last_unlinked_admin`` for the last administrator who signs
+            in with a passkey; `None` when they may be linked.
+        """
+        refusal = linking_refusal(principal, bootstrap_name=self._bootstrap_name)
+        if refusal is not None:
+            return refusal
+        admins = active_instance_admin_ids(self._session)
+        if principal.id in admins and leaves_no_unlinked_admin(
+            self._session, before=admins, after=admins, linking=principal.id
+        ):
+            return OidcSignInRefused("last_unlinked_admin")
+        return None
 
     def _clear(self, principal: Principal) -> tuple[str | None, str | None]:
         """Remove a person's provider identity; the caller audits and commits.

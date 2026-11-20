@@ -23254,7 +23254,7 @@
           "sign-in"
         ],
         "summary": "Describe a sign-in link before it is used",
-        "description": "Needs no credential and never uses the link: the sign-in page shows \"Sign in as X\" (or \"Join as X\") from this, so a link preview or a mail scanner opening the page cannot use it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired, withdrawn or unknown link answers 410 with `state` and what to do next.",
+        "description": "Needs no credential and never uses the link: the sign-in page shows \"Sign in as X\" (or \"Join as X\") from this, so a link preview or a mail scanner opening the page cannot use it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired, withdrawn or unknown link answers 410 with `state` and what to do next. With OIDC sign-in on, `offers_provider` says to offer \"Sign in with <provider>\" for an invite or a recovery link, and `provider_only` that a recovery link of a linked person works only that way.",
         "operationId": "describe_link_api_v1_sign_in_links_describe_post",
         "requestBody": {
           "content": {
@@ -23892,7 +23892,7 @@
           "sign-in"
         ],
         "summary": "Come back from the identity provider",
-        "description": "The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow is called back once.",
+        "description": "The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow that links a signed-in person or confirms their session goes to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed` instead, which finishes it with `POST /api/v1/sign-in/oidc/finish-in-session`. Both are fixed pages of the public address. A flow is called back once.",
         "operationId": "oidc_callback_api_v1_sign_in_oidc_callback_get",
         "parameters": [
           {
@@ -23949,10 +23949,276 @@
         ],
         "responses": {
           "303": {
-            "description": "Always to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`."
+            "description": "To `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, or `/sign-in/oidc/confirmed` for a link from the profile or a provider step-up."
           },
           "409": {
             "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/link/start": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Start linking your account to the identity provider, from your profile",
+        "description": "Needs a browser session with a passkey touch from the last 15 minutes (403 `StepUpRequired`). Answers the provider's sign-in page: send the browser there; the provider sends it back to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed`, which finishes with `POST /api/v1/sign-in/oidc/finish-in-session`. Once linked you sign in only through the provider: your passkeys stay stored, unused, and no session ends. 403 `OidcSignInRefused` with `reason` `already_linked`, `cannot_link_operator` (the server operator's account) or `last_unlinked_admin` (the last administrator who signs in with a passkey, who keeps the way in when the provider is down); 409 for a token.",
+        "operationId": "start_oidc_link_api_v1_sign_in_oidc_link_start_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcInSessionStartIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcStartOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/step-up/start": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Start confirming your browser session at the identity provider (provider step-up)",
+        "description": "For a person linked to the provider, who signs in only there: it stands in for the passkey touch that actions such as creating a token ask for (403 `StepUpRequired`). The provider is asked for a fresh sign-in (`prompt=login`, `max_age=0`), and the finish checks the `auth_time` it reports. Then press the action again: for 15 minutes it needs no other confirmation. 409 for a token, or for a person who is not linked (confirm with a passkey, `POST /api/v1/sign-in/step-up/options`).",
+        "operationId": "start_oidc_step_up_api_v1_sign_in_oidc_step_up_start_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcInSessionStartIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcStartOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/finish-in-session": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Finish a link from the profile or a provider step-up, in the session that started it",
+        "description": "The interface's page at `/sign-in/oidc/confirmed` calls this once, with the session's CSRF token: the session stays, and so does its token. A link links the caller to the identity the provider verified (403 `OidcSignInRefused` `identity_taken` when another account holds it, `last_unlinked_admin`). A step-up needs the caller's own identity (`identity_mismatch` otherwise) and an `auth_time` no earlier than the start, less 60 seconds (`auth_too_old`, also when the provider sent none); it then counts as the session's step-up touch, and as a provider sign-in for the token window. Also 403 `flow_expired` for a flow of another session, and the callback's refusals. 409 for a token and for a sign-in flow, which finishes at `/finish`.",
+        "operationId": "finish_oidc_in_session_api_v1_sign_in_oidc_finish_in_session_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcInSessionOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -23980,7 +24246,7 @@
           "sign-in"
         ],
         "summary": "Start signing in through the identity provider",
-        "description": "Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.",
+        "description": "Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. With `purpose` ``invite`` or ``recovery`` and the link's `link_id` and `secret`, the flow accepts that invite or uses that recovery link: the link is checked here (410 with `state` as `/links/redeem` answers, a wrong secret like an unknown link) and used only at the finish. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, 422 for a link of another kind, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.",
         "operationId": "start_oidc_sign_in_api_v1_sign_in_oidc_start_post",
         "requestBody": {
           "content": {
@@ -24033,6 +24299,16 @@
               }
             }
           },
+          "410": {
+            "description": "The sign-in link cannot be used: `state` says whether it was used, expired, withdrawn or is not known; ask for a new link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
             "content": {
@@ -24062,7 +24338,7 @@
           "sign-in"
         ],
         "summary": "Finish signing in through the identity provider, after the callback",
-        "description": "Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended) and its cookie. A provider sign-in is no passkey touch: an action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes). A flow is finished once, whatever the answer.",
+        "description": "Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended) and its cookie. A flow started with an invite creates the account and links it; one started with a recovery link signs its person in (a linked person only as the same identity, `identity_mismatch` otherwise) and links an unlinked one. The link is used here, so one withdrawn or used since the start answers `link_unusable` and changes nothing. A provider sign-in is no passkey touch: an action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes), or when linking `identity_taken`, `last_unlinked_admin` or `link_unusable`. A flow is finished once, whatever the answer. 409 for a flow that links or confirms a signed-in person: that one finishes at `/finish-in-session`.",
         "operationId": "finish_oidc_sign_in_api_v1_sign_in_oidc_finish_post",
         "responses": {
           "200": {
@@ -27857,6 +28133,8 @@
           "TASK_TOKEN_REVOKED",
           "PRINCIPAL_CREATED",
           "PRINCIPAL_DEACTIVATED",
+          "PRINCIPAL_OIDC_LINKED",
+          "PRINCIPAL_OIDC_UNLINKED",
           "ENVIRONMENT_CREATED",
           "ENVIRONMENT_DELETED",
           "ENVIRONMENT_STORAGE_UPDATED",
@@ -28108,6 +28386,8 @@
           "TASK_TOKEN_REVOKED",
           "PRINCIPAL_CREATED",
           "PRINCIPAL_DEACTIVATED",
+          "PRINCIPAL_OIDC_LINKED",
+          "PRINCIPAL_OIDC_UNLINKED",
           "ENVIRONMENT_CREATED",
           "ENVIRONMENT_DELETED",
           "ENVIRONMENT_STORAGE_UPDATED",
@@ -33028,6 +33308,16 @@
           "state": {
             "type": "string",
             "title": "State"
+          },
+          "provider_only": {
+            "type": "boolean",
+            "title": "Provider Only",
+            "default": false
+          },
+          "offers_provider": {
+            "type": "boolean",
+            "title": "Offers Provider",
+            "default": false
           }
         },
         "type": "object",
@@ -33038,7 +33328,7 @@
           "state"
         ],
         "title": "LinkDescriptionOut",
-        "description": "Response body of `POST /api/v1/sign-in/links/describe`: what the sign-in page shows.\n\nParameters\n----------\nkind\n    ``setup``, ``invite``, ``recovery`` or ``local``.\nname\n    The principal name the link signs in as (an invite: the account it creates).\ndisplay_name\n    The person's display name, if one is known.\nstate\n    Always ``open`` here; a link that cannot be used answers 410 with its state."
+        "description": "Response body of `POST /api/v1/sign-in/links/describe`: what the sign-in page shows.\n\nParameters\n----------\nkind\n    ``setup``, ``invite``, ``recovery`` or ``local``.\nname\n    The principal name the link signs in as (an invite: the account it creates).\ndisplay_name\n    The person's display name, if one is known.\nstate\n    Always ``open`` here; a link that cannot be used answers 410 with its state.\nprovider_only\n    Whether this link can be used only through the identity provider: an administrator's\n    recovery link for a person linked to it. `/links/redeem` then answers 403\n    `ProviderSignInRequired`; start the provider's sign-in with the link instead\n    (`POST /api/v1/sign-in/oidc/start`, `purpose: recovery`).\noffers_provider\n    Whether the sign-in page offers \"Sign in with <provider>\" for this link: an invite or a\n    recovery link while OIDC sign-in is on."
       },
       "LinkIdIn": {
         "properties": {
@@ -33604,6 +33894,53 @@
         "title": "NotifyTestOut",
         "description": "The test of a webhook, queued.\n\nParameters\n----------\ndelivery_id\n    The delivery to read with ``GET /environments/{env}/notifications/{delivery_id}``."
       },
+      "OidcInSessionOut": {
+        "properties": {
+          "return_to": {
+            "type": "string",
+            "title": "Return To"
+          },
+          "step_up_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Up Until"
+          }
+        },
+        "type": "object",
+        "required": [
+          "return_to",
+          "step_up_until"
+        ],
+        "title": "OidcInSessionOut",
+        "description": "Response body of `POST /api/v1/sign-in/oidc/finish-in-session`.\n\nThe session stays the same, so its page keeps its CSRF token.\n\nParameters\n----------\nreturn_to\n    The page to open now: the path the start was given, checked, or ``/``.\nstep_up_until\n    Until when actions that need step-up are allowed without confirming again; `null`\n    when the session has no fresh confirmation."
+      },
+      "OidcInSessionStartIn": {
+        "properties": {
+          "return_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "OidcInSessionStartIn",
+        "description": "Request body of `POST /api/v1/sign-in/oidc/link/start` and `/step-up/start`.\n\nParameters\n----------\nreturn_to\n    The page of the interface to open afterwards, as a path; anything else becomes ``/``."
+      },
       "OidcInfoOut": {
         "properties": {
           "enabled": {
@@ -33667,12 +34004,48 @@
               }
             ],
             "title": "Return To"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "sign_in",
+              "invite",
+              "recovery"
+            ],
+            "title": "Purpose",
+            "default": "sign_in"
+          },
+          "link_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Id"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "OidcStartIn",
-        "description": "Request body of `POST /api/v1/sign-in/oidc/start`.\n\nParameters\n----------\nreturn_to\n    The page of the interface to open after signing in, as a path such as\n    ``/catalog/prod``. Anything that is not a path inside the interface (another site, a\n    sign-in page, more than 2048 characters) is replaced by ``/``."
+        "description": "Request body of `POST /api/v1/sign-in/oidc/start`.\n\nParameters\n----------\nreturn_to\n    The page of the interface to open after signing in, as a path such as\n    ``/catalog/prod``. Anything that is not a path inside the interface (another site, a\n    sign-in page, more than 2048 characters) is replaced by ``/``.\npurpose\n    ``sign_in`` (the default) for a person already linked; ``invite`` to accept an invite,\n    or ``recovery`` to use a recovery link, through the provider: both need `link_id` and\n    `secret`.\nlink_id\n    The link's public id (``l=`` after the ``#``), with `purpose` ``invite`` or\n    ``recovery``.\nsecret\n    The link's secret (``s=``), with `link_id`. Checked here and never stored, logged or\n    audited: the flow keeps only the link's row id, and the link is used at the finish."
       },
       "OidcStartOut": {
         "properties": {
