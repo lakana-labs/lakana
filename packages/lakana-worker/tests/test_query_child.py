@@ -472,6 +472,10 @@ def test_local_mode_may_spill_up_to_the_configured_size(tmp_path: Path) -> None:
         "PRAGMA memory_limit = '64GB'",
         "SET GLOBAL threads = 8",
         "SET SESSION memory_limit = '64GB'",
+        # DuckDB 2.0.1's default is 'hosts', which lets a repository named by its host be added.
+        "SET allow_extension_repositories = 'hosts'",
+        "SET allow_extension_repositories = 'allowed'",
+        "CREATE EXTENSION REPOSITORY example.com",
     ],
 )
 def test_no_setting_can_be_changed_once_configured(tmp_path: Path, statement: str) -> None:
@@ -580,7 +584,9 @@ def test_a_query_over_the_limit_without_spill_is_out_of_memory_with_the_setting_
         "Query failed: the query ran out of memory and cannot spill to disk. "
         f"{MEMORY_LIMIT_ADVICE}",
     )
-    assert list(tmp_path.iterdir()) == []
+    # Nothing spilled. DuckDB 2.0.1 also writes the profile of a failed statement (2.0.0 only of
+    # one that succeeded): the child's own file, which holds the bytes read and nothing else.
+    assert [path.name for path in tmp_path.iterdir()] in ([], [query_child.PROFILE_FILE])
 
 
 def test_a_query_over_the_limit_with_spill_returns_its_result(tmp_path: Path) -> None:
