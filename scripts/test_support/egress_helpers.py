@@ -151,7 +151,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(server.body)
 
     def do_POST(self) -> None:
-        """Answer a POST."""
+        """Answer a POST with the server's status and its POST body (empty by default)."""
         server = cast(Server, self.server)
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
@@ -159,8 +159,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(server.status)
         if server.location:
             self.send_header("Location", server.location)
-        self.send_header("Content-Length", "0")
+        self.send_header("Content-Length", str(len(server.post_body)))
         self.end_headers()
+        self.wfile.write(server.post_body)
 
     def log_message(self, format: str, *args: object) -> None:
         """Stay quiet.
@@ -194,6 +195,8 @@ class Server(http.server.ThreadingHTTPServer):
         self.body = b""
         self.headers: dict[str, str] = {}
         self.send_length = True
+        # What a POST answers.
+        self.post_body = b""
         self.requests: list[tuple[str, dict[str, str], bytes]] = []
         self.sni: list[str | None] = []
         self.context: ssl.SSLContext | None = None

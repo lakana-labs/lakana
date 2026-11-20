@@ -661,6 +661,50 @@ OIDC exchange and CI tokens (#15)"; the user's view is
    the project version it runs, so a deploy by hand that moved the pointer meanwhile cannot have
    its jobs run under the rule.
 
+## OIDC sign-in (#32)
+
+People sign in to the web interface through the organisation's identity provider
+(`/api/v1/sign-in/oidc/*`, the authorization-code flow with PKCE, off without
+`LAKANA_OIDC__ISSUER`). The details and the tests that pin them are in `docs/agent/security.md`,
+"OIDC sign-in (#32, PR 1)". The first pull request signs in people who are already linked; linking,
+one way in per linked person, the token window and `lakana login` follow.
+
+### What is defended
+
+- **Login CSRF.** A callback signs nobody in unless its `state` and the browser's flow cookie
+  name the same open flow; the callback itself never starts a session. A `state` from another
+  browser's flow, or a callback without the cookie, finds nothing.
+- **Step-up by a silent sign-in.** A provider sign-in is no step-up touch, since the provider
+  may answer from its own session without the person present; provider step-up with
+  `prompt=login` and `auth_time` comes with PR 2.
+- **Session fixation.** The session starts in `finish`, a same-origin POST, with a fresh id; a
+  session the browser presented ends as `replaced`. The flow cookie, the flow row and the session
+  id are all new after the callback.
+- **Open redirect.** The callback always redirects to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`,
+  whatever the request named; the page to return to stays on the server and is kept only as a
+  path inside the interface.
+- **Token confusion.** An access token in `id_token` (`typ` other than `ID`, `aud` not the
+  client), an ID token for another client (`aud`, or `azp` with several audiences), a replayed ID
+  token (`nonce`) and a replayed callback (the flow is used once) are refused.
+- **SSRF through discovery.** Discovery, the keys and the token endpoint, which carries the client
+  secret, are fetched only over `https` on the issuer's host or a host of
+  `LAKANA_OIDC__ALLOW_HOSTS`, on port 443 or the issuer's own port, never on a loopback,
+  link-local or metadata address, without redirects, at most 64 KiB in 10 s per request (a
+  callback with a cold cache makes up to three: discovery, keys, token endpoint).
+- **Account takeover by e-mail.** A person is found by the provider's `iss` and `sub` only; the
+  e-mail address and the name are shown, never matched. An identity linked to nobody is refused
+  (`not_linked`): the provider never creates an account.
+
+### Residuals, stated as such
+
+1. **A linked person's passkeys still sign them in** until one way in per linked person lands
+   (#32, PR 2).
+2. **Signing out at the provider does not end a Lakana session** (a non-goal of #32).
+3. **The audit row's per-client bucket trusts `request.client.host`**, as for the other refused
+   sign-ins.
+4. **A reverse proxy's own access log** records the callback's query (the single-use, PKCE-bound
+   code and the state); Lakana's access log writes it as `?…`.
+
 ## Explicitly not defended
 
 Listing these is not a formality — each is excluded for a specific reason, and pretending
