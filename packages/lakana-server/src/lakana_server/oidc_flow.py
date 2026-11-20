@@ -55,7 +55,7 @@ LANDING_PATH = "/sign-in/oidc"
 MAX_PARAMETER = 4096
 """The longest ``code``, ``state`` or ``error`` the callback reads; a longer one is absent."""
 
-TOKEN_UNREACHABLE = (
+TOKEN_UNREACHABLE = (  # nosec B105 -- a sentence for an operator, not a credential
     "the identity provider's token endpoint could not be reached; check the server's outbound "
     "https access to it and the server's log"
 )
@@ -210,7 +210,7 @@ def exchange_code(
     headers: dict[str, str] = {}
     client_id = config.client_id or ""
     secret = config.client_secret.get_secret_value() if config.client_secret else ""
-    if meta.token_auth == "client_secret_basic":
+    if meta.token_auth == "client_secret_basic":  # nosec B105 -- a method name, not a secret
         headers["Authorization"] = _basic(client_id, secret)
     else:
         form.update({"client_id": client_id, "client_secret": secret})

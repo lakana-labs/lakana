@@ -323,9 +323,9 @@ class OidcProvider:
         # OIDC Discovery: an absent list means client_secret_basic.
         token_auth: Literal["client_secret_basic", "client_secret_post"]
         if not methods or "client_secret_basic" in methods:
-            token_auth = "client_secret_basic"
+            token_auth = "client_secret_basic"  # nosec B105 -- a method name, not a secret
         elif "client_secret_post" in methods:
-            token_auth = "client_secret_post"
+            token_auth = "client_secret_post"  # nosec B105 -- a method name, not a secret
         else:
             raise ProviderUnavailable(NO_CLIENT_AUTH)
         return ProviderMetadata(

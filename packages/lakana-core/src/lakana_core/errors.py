@@ -239,7 +239,7 @@ _OIDC_REFUSED: dict[str, str] = {
         "administrator for an invite."
     ),
     "deactivated": ("Your Lakana account is deactivated. Ask an administrator to reactivate it."),
-    "token_invalid": (
+    "token_invalid": (  # nosec B105 -- a sentence for a person, not a credential
         "Lakana could not verify the identity provider's answer, so nobody was signed in. Try "
         "again; if it keeps happening, tell your administrator."
     ),
