@@ -6836,3 +6836,82 @@ def test_0086_adds_rotated_at(migrated_db: MigratedDb) -> None:
             ]
     finally:
         engine.dispose()
+
+
+_REVISION_0087 = "431d39830234"
+
+
+def test_0087_links_principals_to_a_provider_and_keeps_flows(migrated_db: MigratedDb) -> None:
+    """Revision `0087`: the identity columns on `principals` and the `oidc_flows` table.
+
+    Existing people stay unlinked; the pair `(oidc_issuer, oidc_subject)` is unique. The
+    downgrade drops the table and the columns and keeps the people.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0086)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    identity = {
+        "oidc_issuer",
+        "oidc_subject",
+        "oidc_email",
+        "oidc_name",
+        "last_provider_sign_in_at",
+    }
+
+    def columns() -> set[str]:
+        return {c["name"] for c in inspect(engine).get_columns("principals")}
+
+    def insert(connection: sa.Connection, name: str, subject: str | None) -> None:
+        connection.execute(
+            sa.text(
+                "INSERT INTO principals (id, type, name, is_active, held_admin, created_at,"
+                " updated_at, oidc_issuer, oidc_subject)"
+                " VALUES (:id, 'USER', :name, 1, 0, '2026-11-20 00:00:00',"
+                " '2026-11-20 00:00:00', :issuer, :subject)"
+            ),
+            {
+                "id": uuid.uuid4().hex,
+                "name": name,
+                "issuer": "https://idp.example" if subject else None,
+                "subject": subject,
+            },
+        )
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    "INSERT INTO principals (id, type, name, is_active, held_admin, created_at,"
+                    " updated_at) VALUES (:id, 'USER', 'ada', 1, 0, '2026-11-20 00:00:00',"
+                    " '2026-11-20 00:00:00')"
+                ),
+                {"id": uuid.uuid4().hex},
+            )
+        assert identity.isdisjoint(columns())
+        assert "oidc_flows" not in inspect(engine).get_table_names()
+        command.upgrade(config, _REVISION_0087)
+        assert identity <= columns()
+        assert "oidc_flows" in inspect(engine).get_table_names()
+        with engine.connect() as connection:
+            rows = connection.execute(
+                sa.text("SELECT name, oidc_issuer, oidc_subject FROM principals")
+            ).all()
+        assert [tuple(row) for row in rows] == [("ada", None, None)]
+        with engine.begin() as connection:
+            insert(connection, "bob", "248289761001")
+            insert(connection, "cy", None)
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            insert(connection, "dee", "248289761001")
+        command.downgrade(config, _REVISION_0086)
+        assert identity.isdisjoint(columns())
+        assert "oidc_flows" not in inspect(engine).get_table_names()
+        with engine.connect() as connection:
+            names = connection.execute(sa.text("SELECT name FROM principals ORDER BY name"))
+            assert names.scalars().all() == ["ada", "bob", "cy"]
+    finally:
+        engine.dispose()

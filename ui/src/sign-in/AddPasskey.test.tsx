@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -114,6 +114,35 @@ describe("AddPasskey", () => {
     expect(signOut).toBeDisabled();
     request.release({ status: 503, body: { type: "Busy", detail: "Busy." } });
     await screen.findByRole("alert");
+  });
+
+  it("stays finishing, with no second Add, until the session is read again", async () => {
+    fakeWebAuthn();
+    fakeServer({
+      "POST /api/v1/principals/admin/passkeys/options": OPTIONS,
+      "POST /api/v1/principals/admin/passkeys": { status: 201, body: { id: "p-1" } },
+    });
+    let finish: () => void = () => undefined;
+    const { session, user } = renderStep(true);
+    vi.mocked(session.refresh).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add a passkey" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Finishing adding your passkey…");
+    expectPending(screen.getByRole("button", { name: /^Add a passkey/ }));
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /^Add a passkey/ }));
+    expect(session.refresh).toHaveBeenCalledTimes(1);
+
+    finish();
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("");
+    });
   });
 
   it("names a browser that cannot add a passkey", async () => {

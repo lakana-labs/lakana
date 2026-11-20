@@ -7,17 +7,16 @@ may carry a password.
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Annotated, Self
-from urllib.parse import urlsplit
 
 from pydantic import ConfigDict, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import NoDecode
 
 from lakana_core.config import ProxyAndCaBundleChecks
-from lakana_core.net.egress import EgressRefused, is_ip_literal, parse_url
+from lakana_core.oidc.config import as_list, checked_host_names, checked_issuer
+from lakana_core.oidc.id_token import SUPPORTED_ALGORITHMS
 
 GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
 """The issuer of GitHub Actions' ID tokens (the preset ``github``)."""
@@ -27,12 +26,9 @@ GITLAB_ISSUER = "https://gitlab.com"
 
 PRESETS = {"github": GITHUB_ISSUER, "gitlab": GITLAB_ISSUER}
 
-SUPPORTED_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512")
-"""The signature algorithms an operator may allow: RSA only, as GitHub and GitLab sign with it."""
+__all__ = ["GITHUB_ISSUER", "GITLAB_ISSUER", "PRESETS", "SUPPORTED_ALGORITHMS", "CiOidcConfig"]
 
-_MAX_ISSUER = 255
 _MAX_AUDIENCE = 255
-_HOST_NAME = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
 _NO_SPACE = re.compile(r"^[\x21-\x7e]+$")
 
 _ISSUER_MESSAGE = (
@@ -69,29 +65,13 @@ def _as_list(value: object, variable: str) -> object:
     Returns
     -------
     object
-        A list of stripped, non-empty texts for a text; anything else unchanged, for pydantic
-        to check.
-
-    Raises
-    ------
-    ValueError
-        If a text that starts with ``[`` is not a JSON list of texts.
+        See `lakana_core.oidc.config.as_list`.
     """
-    if not isinstance(value, str):
-        return value
-    text = value.strip()
-    if not text.startswith("["):
-        return [part.strip() for part in text.split(",") if part.strip()]
-    try:
-        parsed = json.loads(text)
-    except ValueError:
-        parsed = None
-    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
-        raise ValueError(
-            f"{variable} must be a comma-separated list or a JSON list of texts, "
-            'such as github,gitlab or ["github", "gitlab"]'
-        )
-    return [item.strip() for item in parsed if item.strip()]
+    return as_list(
+        value,
+        f"{variable} must be a comma-separated list or a JSON list of texts, "
+        'such as github,gitlab or ["github", "gitlab"]',
+    )
 
 
 def _issuer(value: str) -> str:
@@ -116,27 +96,7 @@ def _issuer(value: str) -> str:
     preset = PRESETS.get(value.lower())
     if preset is not None:
         return preset
-    host = ""
-    try:
-        _, host, port, _ = parse_url(value, "")
-    except EgressRefused:
-        port = None
-    parts = urlsplit(value)
-    if (
-        not host
-        or parts.scheme != "https"
-        or port is not None
-        or ":" in parts.netloc
-        or is_ip_literal(host)
-        or parts.query
-        or parts.fragment
-        or "?" in value
-        or "#" in value
-        or value.endswith("/")
-        or len(value) > _MAX_ISSUER
-    ):
-        raise ValueError(_ISSUER_MESSAGE)
-    return f"https://{host}{parts.path}"
+    return checked_issuer(value, _ISSUER_MESSAGE)
 
 
 class CiOidcConfig(ProxyAndCaBundleChecks):
@@ -338,12 +298,7 @@ class CiOidcConfig(ProxyAndCaBundleChecks):
         ValueError
             If an entry is not a host name, or its last label is a number (an IP address).
         """
-        names = [entry.strip().rstrip(".").lower() for entry in value]
-        if not all(
-            _HOST_NAME.match(name) and not name.rsplit(".", 1)[-1].isdigit() for name in names
-        ):
-            raise ValueError(_ALLOW_HOSTS_MESSAGE)
-        return names
+        return checked_host_names(value, _ALLOW_HOSTS_MESSAGE)
 
     @model_validator(mode="after")
     def _audience_when_enabled(self) -> Self:
