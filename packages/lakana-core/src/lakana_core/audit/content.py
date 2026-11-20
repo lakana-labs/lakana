@@ -245,6 +245,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # grants a restore left revoked because an identical one is live, each with that one's
         # id (#673)
         "skipped_grants",
+        # where a `PAT_REVOKED` came from when not a person: `bootstrap_recovery`
+        "source",
         "state",
         "status",
         "stopped",
