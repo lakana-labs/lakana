@@ -288,6 +288,7 @@
     "notNow": "Not now",
     "signOut": "Sign out",
     "waiting": "Waiting for your passkey…",
+    "finishing": "Finishing adding your passkey…",
     "signingOut": "Signing you out…"
   },
   "notices": {

@@ -116,6 +116,9 @@ function Work({
   const { opened, error: savedError } = saved;
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
+  // The address whose saved query Try again is reading again: once it is read, the alert (and
+  // Try again with it) goes, and the focus moves to Run, as the run's own Try again does.
+  const focusRunAt = useRef<string | null>(null);
   const [sql, setSql] = useState("");
   // Why the last Format changed nothing: it could not read the text, or its code could not
   // load; null when it worked. The next edit takes the line away.
@@ -157,6 +160,20 @@ function Work({
     setLoaded(opened.id);
     setSql(opened.sql ?? "");
   }
+
+  useEffect(() => {
+    if (opened !== null && focusRunAt.current === at) {
+      focusRunAt.current = null;
+      runButton.current?.focus();
+    }
+  }, [opened, at]);
+  // A read again that fails keeps the alert, and the focus on its Try again: nothing to move.
+  const { failure: savedFailure } = saved;
+  useEffect(() => {
+    if (savedFailure !== null) {
+      focusRunAt.current = null;
+    }
+  }, [savedFailure]);
 
   // Recent lists a run once its submit is taken, and its new state once it ends.
   const { listed } = query;
@@ -255,7 +272,13 @@ function Work({
         <div role="alert" className="step-error queries-alert">
           <p>{savedError}</p>
           {saved.retryable && (
-            <Button className="button" onPress={saved.reload}>
+            <Button
+              className="button"
+              onPress={() => {
+                focusRunAt.current = at;
+                saved.reload();
+              }}
+            >
               {t("queries.tryAgain")}
             </Button>
           )}
