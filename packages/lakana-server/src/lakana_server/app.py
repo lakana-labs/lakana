@@ -36,6 +36,13 @@ from lakana_server.api.platform.audit_events import router as audit_events_route
 from lakana_server.api.platform.catalog import router as catalog_router
 from lakana_server.api.platform.ci_oidc import router as ci_oidc_router
 from lakana_server.api.platform.ci_trust_rules import router as ci_trust_rules_router
+from lakana_server.api.platform.cli_sign_in import (
+    WRONG_CODE_WINDOW,
+    WRONG_CODES,
+    WrongCodeLimit,
+)
+from lakana_server.api.platform.cli_sign_in import open_router as cli_sign_in_open_router
+from lakana_server.api.platform.cli_sign_in import router as cli_sign_in_router
 from lakana_server.api.platform.column_masks import router as column_masks_router
 from lakana_server.api.platform.configuration import router as configuration_router
 from lakana_server.api.platform.connections import all_router as connections_all_router
@@ -165,6 +172,8 @@ ROUTERS = (
     passkey_sign_in_router,
     oidc_sign_in_router,
     oidc_sign_in_open_router,
+    cli_sign_in_router,
+    cli_sign_in_open_router,
     sign_in_notices_router,
     invites_router,
     recovery_link_router,
@@ -258,6 +267,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.oidc_start_network_limiter = AuthAuditLimiter(
             resolved_settings.ui.passkey_options_per_network_per_minute
         )
+        # And the command line's sign-in routes (`lakana login`), in buckets of their own.
+        app.state.cli_sign_in_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_ip_per_minute
+        )
+        app.state.cli_sign_in_network_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_network_per_minute
+        )
+        app.state.cli_user_code_limit = WrongCodeLimit(WRONG_CODES, WRONG_CODE_WINDOW)
         # One verifier per process: it holds the issuers' key cache.
         app.state.ci_oidc_verifier = IdTokenVerifier(resolved_settings.ci_oidc)
         # One provider client per process, for the same reason; `None` while OIDC sign-in is off.
