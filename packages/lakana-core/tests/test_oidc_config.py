@@ -134,3 +134,20 @@ def test_secrets_are_hidden_in_errors() -> None:
     shown = repr(settings) + str(settings)
     assert "s3cr3t-sentinel" not in shown
     assert "pw-sentinel" not in shown
+
+
+@pytest.mark.parametrize("missing", ["client_id", "client_secret"])
+def test_an_issuer_needs_the_client(missing: str) -> None:
+    with pytest.raises(
+        pydantic.ValidationError, match=f"LAKANA_OIDC__{missing.upper()} is required"
+    ):
+        config(**{missing: None})
+    with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__CLIENT_SECRET is required"):
+        config(client_secret="")
+
+
+def test_a_json_list_must_hold_texts() -> None:
+    with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__SCOPES"):
+        config(scopes="[1, 2]")
+    with pytest.raises(pydantic.ValidationError, match="LAKANA_OIDC__SCOPES"):
+        config(scopes="[openid")

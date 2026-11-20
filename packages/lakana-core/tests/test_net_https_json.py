@@ -15,7 +15,7 @@ from scripts.test_support.egress_helpers import Authority, ConnectProxy, Server
 from scripts.test_support.ports import closed_port
 
 from lakana_core.net import egress, https_json
-from lakana_core.net.https_json import FetchFailed, Target, check, fetch_json
+from lakana_core.net.https_json import FetchFailed, Target, check, fetch_json, post_form_json
 
 NAME = "keys.example.test"
 PUBLIC = "93.184.216.34"
@@ -369,6 +369,7 @@ def test_a_pinned_get_returns_the_parsed_document(authority: Authority, tls: Ser
     assert path == "/doc"
     assert headers["Host"] == f"{NAME}:{tls.port}"
     assert headers["Accept-Encoding"] == "identity"
+    assert "Content-Length" not in headers and "Content-Type" not in headers
     assert tls.sni == [NAME]
 
 
@@ -511,3 +512,197 @@ def test_fetch_json_never_fetches_a_refused_url(monkeypatch: pytest.MonkeyPatch)
     with pytest.raises(FetchFailed) as info:
         fetch_json(f"https://{NAME}/doc", allowed_hosts=(NAME,))
     assert info.value.reason == https_json.PRIVATE
+
+
+# -- the issuer's port -----------------------------------------------------------------------
+
+
+def test_a_port_is_allowed_only_when_the_caller_names_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    lookups = resolves_to(monkeypatch, PUBLIC)
+    assert refusal(f"https://{NAME}:8443/x") == https_json.NOT_443
+    target = check(f"https://{NAME}:8443/x", (NAME,), ports=(443, 8443))
+    assert (target.port, lookups) == (8443, [(NAME, 8443)])
+    assert check(f"https://{NAME}/x", (NAME,), ports=(443, 8443)).port == 443
+    with pytest.raises(FetchFailed) as info:
+        check(f"https://{NAME}:9443/x", (NAME,), ports=(443, 8443))
+    assert info.value.reason == https_json.PORT_NOT_ALLOWED
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "::1", "169.254.169.254"])
+def test_the_issuers_port_never_opens_loopback_or_metadata(
+    monkeypatch: pytest.MonkeyPatch, address: str
+) -> None:
+    resolves_to(monkeypatch, address)
+    with pytest.raises(FetchFailed) as info:
+        check(f"https://{NAME}:8443/x", (NAME,), private_hosts=(NAME,), ports=(443, 8443))
+    assert info.value.reason == https_json.NEVER_REACHABLE
+
+
+def test_fetch_json_passes_the_ports_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolves_to(monkeypatch, PUBLIC)
+    seen: list[Target] = []
+
+    def fake(target: Target, *, proxy: object, ca_bundle: object, timeout: float) -> object:
+        seen.append(target)
+        return {}
+
+    monkeypatch.setattr(https_json, "fetch_target", fake)
+    fetch_json(f"https://{NAME}:8443/doc", allowed_hosts=(NAME,), ports=(443, 8443))
+    assert seen[0].port == 8443
+
+
+# -- the form POST ---------------------------------------------------------------------------
+
+
+def post_to(server: Server, ca: Path | None, form: dict[str, str], **headers: str) -> object:
+    """POST a form to `/token` on a loopback server, pinned as `check` would pin `NAME`.
+
+    Parameters
+    ----------
+    server
+        The server.
+    ca
+        The CA bundle.
+    form
+        The form.
+    **headers
+        Further headers.
+
+    Returns
+    -------
+    object
+        The parsed answer.
+    """
+    target = Target(host=NAME, port=server.port, target="/token", addresses=("127.0.0.1",))
+    return https_json.post_target(target, form, headers=headers, ca_bundle=ca, timeout=5)
+
+
+def post_failure(server: Server, ca: Path | None, form: dict[str, str]) -> FetchFailed:
+    """Return the error a POST to a loopback server fails with.
+
+    Parameters
+    ----------
+    server
+        The server.
+    ca
+        The CA bundle.
+    form
+        The form.
+
+    Returns
+    -------
+    FetchFailed
+        The error.
+    """
+    with pytest.raises(FetchFailed) as info:
+        post_to(server, ca, form, Authorization="Basic czNjcjN0LXNlbnRpbmVs")
+    error = info.value
+    assert error.__cause__ is None and error.__context__ is None
+    return error
+
+
+def test_post_sends_the_form_to_the_checked_address(authority: Authority, tls: Server) -> None:
+    tls.post_body = b'{"id_token": "x"}'
+    answer = post_to(
+        tls, authority.bundle, {"grant_type": "authorization_code", "code": "a b&c"}, X_Extra="1"
+    )
+    assert answer == {"id_token": "x"}
+    path, headers, body = tls.requests[0]
+    assert path == "/token"
+    assert body == b"grant_type=authorization_code&code=a+b%26c"
+    assert headers["Content-Type"] == "application/x-www-form-urlencoded"
+    assert headers["Host"] == f"{NAME}:{tls.port}"
+    assert headers["Accept-Encoding"] == "identity"
+    assert headers["X_Extra"] == "1"
+    assert tls.sni == [NAME]
+
+
+def test_post_refuses_a_redirect_and_a_large_answer(authority: Authority, tls: Server) -> None:
+    tls.status = 302
+    tls.location = "https://169.254.169.254/latest/meta-data/"
+    assert post_failure(tls, authority.bundle, {"code": "c"}).reason == https_json.REDIRECT
+    assert len(tls.requests) == 1
+    tls.status, tls.location = 200, None
+    tls.post_body = b'"' + b"a" * (70 * 1024) + b'"'
+    assert post_failure(tls, authority.bundle, {"code": "c"}).reason == https_json.TOO_LARGE
+    tls.status = 500
+    error = post_failure(tls, authority.bundle, {"code": "c"})
+    assert (error.reason, error.status) == ("the server answered 500", 500)
+
+
+def test_post_reason_never_contains_the_secret(
+    authority: Authority, tls: Server, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    tls.status = 400
+    tls.post_body = b'{"error": "invalid_client", "secret": "s3cr3t-sentinel"}'
+    error = post_failure(tls, authority.bundle, {"client_secret": "s3cr3t-sentinel"})
+    assert error.status == 400
+    shown = str(error) + repr(error) + error.reason + caplog.text
+    assert "s3cr3t-sentinel" not in shown
+    assert "czNjcjN0LXNlbnRpbmVs" not in shown
+
+
+def test_post_refuses_a_metadata_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolves_to(monkeypatch, "169.254.169.254")
+    monkeypatch.setattr(https_json, "post_target", pytest.fail)
+    with pytest.raises(FetchFailed) as info:
+        post_form_json(
+            f"https://{NAME}/token",
+            {"client_secret": "s3cr3t-sentinel"},
+            allowed_hosts=(NAME,),
+            private_hosts=(NAME,),
+        )
+    assert info.value.reason == https_json.NEVER_REACHABLE
+    assert "s3cr3t-sentinel" not in str(info.value)
+
+
+def test_post_form_json_checks_then_posts(monkeypatch: pytest.MonkeyPatch) -> None:
+    resolves_to(monkeypatch, PUBLIC)
+    seen: list[tuple[Target, object, object, object, object, float]] = []
+
+    def fake(
+        target: Target,
+        form: object,
+        *,
+        headers: object,
+        proxy: object,
+        ca_bundle: object,
+        timeout: float,
+    ) -> object:
+        seen.append((target, form, headers, proxy, ca_bundle, timeout))
+        return {"ok": True}
+
+    monkeypatch.setattr(https_json, "post_target", fake)
+    proxy = SecretStr("http://proxy.example:3128")
+    answer = post_form_json(
+        f"https://{NAME}:8443/token",
+        {"code": "c"},
+        headers={"Authorization": "Basic x"},
+        allowed_hosts=(NAME,),
+        proxy=proxy,
+        ports=(443, 8443),
+    )
+    assert answer == {"ok": True}
+    assert seen == [
+        (
+            Target(NAME, 8443, "/token", (PUBLIC,)),
+            {"code": "c"},
+            {"Authorization": "Basic x"},
+            proxy,
+            None,
+            https_json.TIMEOUT_SECONDS,
+        )
+    ]
+
+
+def test_a_post_through_the_proxy(authority: Authority, tls: Server) -> None:
+    tls.post_body = b"{}"
+    target = Target(host=NAME, port=tls.port, target="/token", addresses=("127.0.0.1",))
+    with ConnectProxy(tls.port) as proxy:
+        address = SecretStr(f"http://127.0.0.1:{proxy.port}")
+        answer = https_json.post_target(
+            target, {"code": "c"}, headers={}, proxy=address, ca_bundle=authority.bundle
+        )
+    assert answer == {}
+    assert proxy.targets == [f"{NAME}:{tls.port}"]

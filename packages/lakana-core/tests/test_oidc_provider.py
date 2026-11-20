@@ -9,6 +9,7 @@ import pytest
 from ci_oidc_test_helpers import DISCOVERY, ISSUER, JWKS_URI, FakeFetcher, jwk, rsa_key
 
 from lakana_core.net.https_json import FetchFailed
+from lakana_core.oidc import provider as provider_module
 from lakana_core.oidc.config import OidcSignInConfig
 from lakana_core.oidc.errors import IdTokenRefused, RefusalCode
 from lakana_core.oidc.keys import JwksCache
@@ -284,3 +285,54 @@ def test_the_provider_keeps_its_settings() -> None:
 def test_a_provider_needs_an_issuer() -> None:
     with pytest.raises(ValueError, match="LAKANA_OIDC__ISSUER"):
         OidcProvider(OidcSignInConfig())
+
+
+def test_the_default_poster_uses_the_operator_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, object]] = []
+
+    def fake(url: str, form: object, **kwargs: object) -> object:
+        seen.append({"url": url, "form": form, **kwargs})
+        return {"id_token": "t"}
+
+    monkeypatch.setattr(provider_module, "post_form_json", fake)
+    config = OidcSignInConfig.model_validate(
+        {
+            "issuer": "https://idp.example:8443/realms/x",
+            "client_id": CLIENT,
+            "client_secret": "s3cr3t-sentinel",
+            "allow_hosts": "idp.corp.example",
+            "proxy": "http://proxy.example:3128",
+        }
+    )
+    answer = OidcProvider(config).post(
+        "https://idp.example:8443/token", {"code": "c"}, {"Authorization": "Basic x"}
+    )
+    assert answer == {"id_token": "t"}
+    assert seen == [
+        {
+            "url": "https://idp.example:8443/token",
+            "form": {"code": "c"},
+            "headers": {"Authorization": "Basic x"},
+            "allowed_hosts": frozenset({"idp.example", "idp.corp.example"}),
+            "private_hosts": frozenset({"idp.corp.example"}),
+            "proxy": config.proxy,
+            "ca_bundle": None,
+            "ports": frozenset({443, 8443}),
+        }
+    ]
+
+
+def test_a_poster_gets_the_allowed_hosts() -> None:
+    calls: list[tuple[str, object, object, object]] = []
+
+    def poster(url: str, form: object, headers: object, hosts: object) -> object:
+        calls.append((url, form, headers, hosts))
+        return {}
+
+    config = OidcSignInConfig.model_validate(
+        {"issuer": ISSUER, "client_id": CLIENT, "client_secret": "s3cr3t-sentinel"}
+    )
+    OidcProvider(config, poster=poster).post(f"{ISSUER}/token", {"code": "c"}, {})
+    assert calls == [
+        (f"{ISSUER}/token", {"code": "c"}, {}, frozenset({"token.actions.githubusercontent.com"}))
+    ]

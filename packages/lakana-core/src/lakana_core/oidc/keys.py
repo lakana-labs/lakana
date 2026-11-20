@@ -1,7 +1,8 @@
 """Each configured issuer's discovery document and signing keys: cached, refreshed with restraint.
 
 - Only an issuer of the `KeySource` is ever fetched; the verifier checks the token's issuer
-  before it asks for a key, so a token cannot make the server reach any other host.
+  before it asks for a key, so a token cannot make the server reach any other host. Requests
+  use port 443, or the port an issuer URL names (`KeySource.ports`).
 - The discovery document comes from the issuer's own host and must name the issuer exactly; the
   ``jwks_uri`` it names must be ``https`` on the issuer's host or on a host of the source's
   allowed hosts, and the fetcher (`lakana_core.net.https_json`) checks it again. Only an allowed
@@ -83,6 +84,18 @@ class KeySource:
     ca_bundle: Path | None
     label: str
     allow_hosts_variable: str
+
+    @property
+    def ports(self) -> frozenset[int]:
+        """The ports a request to the source may use.
+
+        Returns
+        -------
+        frozenset of int
+            443, and each port an issuer URL names (only the sign-in's issuer may name one).
+        """
+        named = {urlsplit(issuer).port for issuer in self.issuers}
+        return frozenset({443, *(port for port in named if port is not None)})
 
 
 class KeySetInvalid(Exception):
@@ -302,6 +315,7 @@ class JwksCache:
             private_hosts=self._source.allow_hosts,
             proxy=self._source.proxy,
             ca_bundle=self._source.ca_bundle,
+            ports=self._source.ports,
         )
 
     def _load(self, issuer: str, now: float) -> _Snapshot:

@@ -148,7 +148,7 @@ def test_the_refusal_names_no_setting() -> None:
 
 
 def test_the_default_fetcher_uses_the_sources_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[tuple[str, Collection[str], Collection[str], object, object]] = []
+    seen: list[tuple[str, Collection[str], Collection[str], object, object, Collection[int]]] = []
 
     def fake(
         url: str,
@@ -157,8 +157,9 @@ def test_the_default_fetcher_uses_the_sources_settings(monkeypatch: pytest.Monke
         private_hosts: Collection[str],
         proxy: object,
         ca_bundle: object,
+        ports: Collection[int],
     ) -> object:
-        seen.append((url, allowed_hosts, private_hosts, proxy, ca_bundle))
+        seen.append((url, allowed_hosts, private_hosts, proxy, ca_bundle, ports))
         raise FetchFailed("offline")
 
     monkeypatch.setattr(keys, "fetch_json", fake)
@@ -172,6 +173,20 @@ def test_the_default_fetcher_uses_the_sources_settings(monkeypatch: pytest.Monke
     )
     with pytest.raises(IdTokenRefused):
         cache.discovery(ISSUER)
-    url, allowed, private, used_proxy, bundle = seen[0]
+    url, allowed, private, used_proxy, bundle, ports = seen[0]
     assert (url, set(allowed), set(private)) == (DISCOVERY, {ISSUER_HOST}, {"idp.corp.example"})
     assert used_proxy is proxy and bundle == Path("/certs/ca.pem")
+    assert set(ports) == {443}
+
+
+def test_an_issuers_port_is_allowed_for_its_requests() -> None:
+    with_port = KeySource(
+        issuers=frozenset({"https://idp.example:8443/realms/x"}),
+        allow_hosts=frozenset(),
+        proxy=None,
+        ca_bundle=None,
+        label="OIDC sign-in",
+        allow_hosts_variable="LAKANA_OIDC__ALLOW_HOSTS",
+    )
+    assert with_port.ports == frozenset({443, 8443})
+    assert source().ports == frozenset({443})

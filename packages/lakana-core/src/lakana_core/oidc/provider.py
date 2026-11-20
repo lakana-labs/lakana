@@ -18,12 +18,13 @@ never quotes a value from the provider.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 from urllib.parse import urlsplit
 
+from lakana_core.net.https_json import post_form_json
 from lakana_core.oidc.config import OidcSignInConfig
 from lakana_core.oidc.errors import IdTokenRefused, RefusalCode
 from lakana_core.oidc.id_token import (
@@ -53,6 +54,10 @@ NO_CLIENT_AUTH = (
     "the identity provider's token endpoint accepts neither client_secret_basic nor "
     "client_secret_post; configure the client for one of them"
 )
+
+Poster = Callable[[str, Mapping[str, str], Mapping[str, str], Collection[str]], object]
+"""Send a form to the token endpoint: the URL, the form, the headers and the hosts it may be on,
+to the parsed JSON answer. Raises `lakana_core.net.https_json.FetchFailed`."""
 
 
 class ProviderUnavailable(Exception):
@@ -177,6 +182,10 @@ class OidcProvider:
         The sign-in settings; an issuer must be set.
     keys
         The provider's key cache; by default one built from `config` that fetches over https.
+    poster
+        Sends a form to the token endpoint; the default is
+        `lakana_core.net.https_json.post_form_json` with the operator's proxy, CA file and
+        private hosts, and the issuer's port.
 
     Raises
     ------
@@ -189,12 +198,15 @@ class OidcProvider:
         config: OidcSignInConfig,
         *,
         keys: JwksCache | None = None,
+        poster: Poster | None = None,
     ) -> None:
         if config.issuer is None:
             raise ValueError("OIDC sign-in needs LAKANA_OIDC__ISSUER")
         self._config = config
         self._issuer = config.issuer
-        self._keys = keys or JwksCache(key_source(config))
+        self._source = key_source(config)
+        self._keys = keys or JwksCache(self._source)
+        self._post = poster or self._post_with_settings
 
     @property
     def config(self) -> OidcSignInConfig:
@@ -218,6 +230,66 @@ class OidcProvider:
         """
         own = urlsplit(self._issuer).hostname or ""
         return frozenset({own, *self._config.allow_hosts})
+
+    def _post_with_settings(
+        self,
+        url: str,
+        form: Mapping[str, str],
+        headers: Mapping[str, str],
+        allowed_hosts: Collection[str],
+    ) -> object:
+        """Post a form with the operator's proxy, CA file and private hosts.
+
+        Parameters
+        ----------
+        url
+            The URL.
+        form
+            The fields.
+        headers
+            Further headers.
+        allowed_hosts
+            The host names it may be on.
+
+        Returns
+        -------
+        object
+            The parsed answer.
+        """
+        return post_form_json(
+            url,
+            form,
+            headers=headers,
+            allowed_hosts=allowed_hosts,
+            private_hosts=self._source.allow_hosts,
+            proxy=self._source.proxy,
+            ca_bundle=self._source.ca_bundle,
+            ports=self._source.ports,
+        )
+
+    def post(self, url: str, form: Mapping[str, str], headers: Mapping[str, str]) -> object:
+        """Post a form to the provider, on the issuer's host or an allowed one only.
+
+        Parameters
+        ----------
+        url
+            The token endpoint, as `metadata` checked it.
+        form
+            The fields; they carry the code and may carry the client secret.
+        headers
+            Further headers; they may carry the client secret.
+
+        Returns
+        -------
+        object
+            The parsed JSON answer.
+
+        Raises
+        ------
+        lakana_core.net.https_json.FetchFailed
+            With a fixed reason, and the status of an answer other than 200.
+        """
+        return self._post(url, form, headers, self.allowed_hosts)
 
     def metadata(self) -> ProviderMetadata:
         """Read and check the provider's discovery document.
