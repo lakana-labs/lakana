@@ -3120,8 +3120,30 @@ def test_test_all_answers_for_a_connection_deleted_after_its_test_was_queued(
     assert world.session.get(ConnectionTest, item.test.id) is None
 
 
-def _failed_on(world: World, environment: str, name: str) -> LastRunFailure:
-    """Store a failed task whose failure names a connection, ending an hour from now.
+def _dated(world: World, environment: str, name: str, at: datetime) -> None:
+    """Date a connection's creation and last change.
+
+    Parameters
+    ----------
+    world
+        The world.
+    environment
+        Its environment.
+    name
+        Its name.
+    at
+        When it was created and last changed.
+    """
+    world.session.execute(
+        sa_update(Connection)
+        .where(Connection.id == world.connection_id(environment, name))
+        .values(created_at=at, updated_at=at)
+    )
+    world.session.commit()
+
+
+def _failed_on(world: World, environment: str, name: str, at: datetime) -> LastRunFailure:
+    """Store a failed task whose failure names a connection.
 
     Parameters
     ----------
@@ -3131,6 +3153,8 @@ def _failed_on(world: World, environment: str, name: str) -> LastRunFailure:
         The run's environment.
     name
         The connection its failure names.
+    at
+        When the task failed.
 
     Returns
     -------
@@ -3140,19 +3164,23 @@ def _failed_on(world: World, environment: str, name: str) -> LastRunFailure:
     task = python_task_run(
         world.session, world.admin.id, environment=environment, status=TaskStatus.FAILED
     )
-    finished = datetime.now(UTC) + timedelta(hours=1)
     task.failure_connection = name
-    task.finished_at = finished
+    task.finished_at = at
     world.session.commit()
-    return LastRunFailure(task.run_id, task.asset, finished)
+    return LastRunFailure(task.run_id, task.asset, at)
+
+
+_PAST = datetime.now(UTC) - timedelta(days=2)
 
 
 def test_a_connection_shows_the_newest_run_that_failed_on_it(world: World) -> None:
-    """The list, the cross-environment list, the page and an update all carry it."""
+    """The list, the cross-environment list and the page carry it; a change hides it."""
     world.postgres(world.data_engineer)
     _made_at(world, "prod", "files", _NOW)
-    failure = _failed_on(world, "prod", "crm-db")
-    _failed_on(world, "dev", "files")
+    _dated(world, "prod", "crm-db", _PAST)
+    _dated(world, "prod", "files", _PAST)
+    failure = _failed_on(world, "prod", "crm-db", _PAST + timedelta(days=1))
+    _failed_on(world, "dev", "files", _PAST + timedelta(days=1))
     service = world.connections()
 
     listed = {v.name: v.last_run_failure for v in service.list(world.analyst, "prod").items}
@@ -3161,7 +3189,42 @@ def test_a_connection_shows_the_newest_run_that_failed_on_it(world: World) -> No
     assert every == {"crm-db": failure, "files": None}
     assert service.get(world.analyst, "prod", "crm-db").last_run_failure == failure
     changed = service.update(world.data_engineer, "prod", "crm-db", settings={"user": "writer"})
-    assert changed.last_run_failure == failure
+    # The change may be the fix: the next run says whether it was.
+    assert changed.last_run_failure is None
+    assert service.get(world.analyst, "prod", "crm-db").last_run_failure is None
+
+
+def test_a_new_password_is_a_change_of_the_connection(world: World) -> None:
+    """New values hide the failure and date the last test before the change, by either route."""
+    world.postgres(world.data_engineer)
+    service = world.connections()
+    for route in ("connection update", "secret rotate"):
+        _dated(world, "prod", "crm-db", _PAST)
+        _add_test(
+            world,
+            world.connection_id("prod", "crm-db"),
+            at=_PAST + timedelta(hours=1),
+            state=ConnectionTestState.DONE,
+            outcome=ConnectionTestOutcome.CREDENTIALS,
+            environment="prod",
+            message="password authentication failed",
+        )
+        _failed_on(world, "prod", "crm-db", _PAST + timedelta(days=1))
+        assert service.get(world.analyst, "prod", "crm-db").last_run_failure is not None
+
+        if route == "connection update":
+            service.update(
+                world.data_engineer, "prod", "crm-db", secret_values={"password": "n3w-value"}
+            )
+        else:
+            row = world.connection("prod", "crm-db")
+            assert row is not None and row.secret_id is not None
+            world.secrets().rotate(world.admin, row.secret_id, values={"password": "n3w-value"})
+
+        shown = service.get(world.analyst, "prod", "crm-db")
+        assert shown.last_run_failure is None, route
+        assert shown.last_test is not None and shown.last_test.finished_at is not None
+        assert shown.last_test.finished_at < shown.updated_at, route
 
 
 def test_a_reader_who_may_not_read_the_runs_learns_nothing_of_them(
@@ -3169,7 +3232,8 @@ def test_a_reader_who_may_not_read_the_runs_learns_nothing_of_them(
 ) -> None:
     """The runs' own rule is asked: a connection never shows a run its reader may not open."""
     world.postgres(world.data_engineer)
-    _failed_on(world, "prod", "crm-db")
+    _dated(world, "prod", "crm-db", _PAST)
+    _failed_on(world, "prod", "crm-db", _PAST + timedelta(days=1))
     asked: list[tuple[PrincipalRef, list[str]]] = []
 
     def no_runs(authz: object, p: PrincipalRef, environments: list[str]) -> set[str]:
