@@ -806,7 +806,9 @@ def list_failed_runs(
             FailedRunOut(
                 run=run_out(view.run, words[view.run.environment]),
                 task=view.task,
-                failure=None if view.failure is None else FailureOut(**view.failure.to_json()),
+                failure=(
+                    None if view.failure is None else FailureOut(**dataclasses.asdict(view.failure))
+                ),
             )
             for view in views
         ],

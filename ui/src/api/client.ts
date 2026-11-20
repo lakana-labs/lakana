@@ -44,6 +44,8 @@ export interface RequestOptions {
    * sent on `pagehide`.
    */
   readonly keepalive?: boolean;
+  /** Cancels the request when aborted, as a read the page no longer wants. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** A download whose body stream broke before it ended, such as a connection cut in the middle. */
@@ -146,6 +148,25 @@ function forgetToken(sent: string | null): void {
 const unauthorizedListeners = new Set<(error: ApiError) => void>();
 
 /**
+ * Calls each listener in turn. One that throws is reported to the browser (as an uncaught error
+ * would be) and the rest still run, so it neither stops the others nor replaces the error the
+ * caller is about to throw.
+ *
+ * @template A - What the listeners are called with.
+ * @param listeners - The listeners.
+ * @param argument - What they are called with.
+ */
+function tellEach<A>(listeners: ReadonlySet<(argument: A) => void>, argument: A): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener(argument);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+}
+
+/**
  * Listens for answers of 401: the session ended or the person is not signed in.
  *
  * @param listener - Called with the refusal.
@@ -177,9 +198,38 @@ export function onSessionEnd(listener: () => void): () => void {
 
 /** Tells the listeners of {@link onSessionEnd} that the session ended. */
 function sessionEnded(): void {
-  for (const listener of sessionEndListeners) {
-    listener();
-  }
+  tellEach(sessionEndListeners, undefined);
+}
+
+/**
+ * Forgets what the page kept for the person who was signed in, and keeps the CSRF token: for a
+ * read of the session that answers another person (another tab signed them in, or a sign-in
+ * link), whose token is the live one.
+ */
+export function forgetSessionData(): void {
+  sessionEnded();
+}
+
+/**
+ * The CSRF token requests carry now, for a caller that may later end the session it belongs to
+ * ({@link endSessionOf}); it is never shown or sent anywhere else.
+ *
+ * @returns The token, or null.
+ */
+export function sessionToken(): string | null {
+  return csrfToken();
+}
+
+/**
+ * Ends a session in this tab that the page knows has ended (its absolute end passed): forgets
+ * its CSRF token unless another tab has stored a newer one meanwhile, as a 401 does, and tells
+ * {@link onSessionEnd}.
+ *
+ * @param sent - The token the session's requests carried.
+ */
+export function endSessionOf(sent: string | null): void {
+  forgetToken(sent);
+  sessionEnded();
 }
 
 /** Ends the session in this tab: forgets the CSRF token and tells {@link onSessionEnd}. */
@@ -340,6 +390,7 @@ async function exchangeWith(
       ...(exchange.body === undefined ? {} : { body: exchange.body }),
       ...(exchange.cache === undefined ? {} : { cache: exchange.cache }),
       ...(options.keepalive === true ? { keepalive: true } : {}),
+      signal: options.signal ?? null,
     });
   } catch {
     throw new ApiError(0, "NetworkError", "The server could not be reached.");
@@ -348,9 +399,7 @@ async function exchangeWith(
     const error = await refusal(response);
     if (error.status === 401) {
       forgetToken(token);
-      for (const listener of unauthorizedListeners) {
-        listener(error);
-      }
+      tellEach(unauthorizedListeners, error);
       sessionEnded();
     }
     throw error;

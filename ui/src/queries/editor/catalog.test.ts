@@ -414,6 +414,13 @@ describe("catalogCache", () => {
 
   it.each([
     [
+      "a read of the session that answers another person",
+      (): Promise<void> => {
+        client.forgetSessionData();
+        return Promise.resolve();
+      },
+    ],
+    [
       "a sign-out",
       (): Promise<void> => {
         client.endSession();
@@ -453,4 +460,23 @@ describe("catalogCache", () => {
       expect(getTable).toHaveBeenCalledTimes(2);
     },
   );
+
+  it("a catalog the editor still holds after the session ended reads for the next person", async () => {
+    const secret = { ...TABLE, name: "payroll" };
+    getTable.mockResolvedValue(secret);
+    listCompletionTables.mockResolvedValue(pageOf(["payroll"], null));
+    const held = catalog.catalogCache("prod");
+    expect(await held.tables("gold", "")).toEqual(["payroll"]);
+    expect((await held.columns("gold", "payroll"))?.[0]?.name).toBe("sale_id");
+
+    client.forgetSessionData();
+    getTableTree.mockResolvedValue({ count: 0, environments: [] });
+    listCompletionTables.mockResolvedValue(pageOf([], null));
+    getTable.mockRejectedValue(new ApiError(403, "Forbidden", "You may not read this table."));
+
+    expect(await held.namespaces()).toEqual([]);
+    expect(await held.tables("gold", "")).toEqual([]);
+    expect(await held.columns("gold", "payroll")).toBeNull();
+    expect(catalog.catalogCache("prod")).not.toBe(held);
+  });
 });

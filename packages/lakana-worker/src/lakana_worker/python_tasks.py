@@ -1278,6 +1278,8 @@ class PythonRuntime:
             in_transaction: Callable[[Session], None] | None = None,
             failure_code: FailureCode | None = None,
             wrote_nothing: bool = False,
+            error_type: str | None = None,
+            failure_connection: str | None = None,
         ) -> TaskOutcome:
             """Build the outcome, with the output captured so far.
 
@@ -1305,6 +1307,10 @@ class PythonRuntime:
                 Why the attempt failed; `None` for a success and a release.
             wrote_nothing
                 A success whose task run committed nothing to the table.
+            error_type
+                The exception class name the harness recorded for a failure.
+            failure_connection
+                The declared connection the failure concerns.
 
             Returns
             -------
@@ -1325,6 +1331,8 @@ class PythonRuntime:
                 kept_table=kept_table,
                 in_transaction=in_transaction,
                 failure_code=failure_code,
+                error_type=error_type,
+                failure_connection=failure_connection,
                 wrote_nothing=wrote_nothing,
             )
 
@@ -1707,7 +1715,15 @@ class PythonRuntime:
             kind = FailureKind.PERMANENT
         else:
             kind = FailureKind.TRANSIENT
-        return ended(kind, outcome.error_message or _NO_MESSAGE, failure_code=outcome.failure_code)
+        # The record is the asset's own word: a name it does not declare is no connection of it.
+        connection = outcome.failure_connection
+        return ended(
+            kind,
+            outcome.error_message or _NO_MESSAGE,
+            failure_code=outcome.failure_code,
+            error_type=outcome.error_type,
+            failure_connection=connection if connection in prepared.connections else None,
+        )
 
     @staticmethod
     def _attempt_wrote(

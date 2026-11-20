@@ -85,6 +85,7 @@ from lakana_core.models import (
 from lakana_core.models.base import utcnow
 from lakana_core.pagination import Page, newest_first
 from lakana_core.projects.manifest import manifest_assets, read_entry_connections
+from lakana_core.runs.connection_failures import LastRunFailure, last_run_failures, run_readers
 from lakana_core.secrets.keys import KeyProvider
 from lakana_core.secrets.service import insert_secret, rotate_values
 from lakana_core.secrets.uses import (
@@ -268,6 +269,10 @@ class ConnectionView:
         Its newest test of any state, or `None` if it was never tested.
     actions
         What the caller's rights allow on it, drawn from `CONNECTION_ACTIONS` in that order.
+    last_run_failure
+        The newest run that failed on it and is still its asset's newest ending
+        (`lakana_core.runs.connection_failures`); `None` when there is none or the caller may
+        not read the environment's runs.
     """
 
     name: str
@@ -282,6 +287,7 @@ class ConnectionView:
     environment: str
     last_test: LastTest | None
     actions: tuple[ConnectionAction, ...]
+    last_run_failure: LastRunFailure | None = None
 
 
 @dataclass(frozen=True)
@@ -738,6 +744,7 @@ class ConnectionService:
         last: tuple[ConnectionTest, str | None] | None,
         rights: tuple[bool, bool],
         declarations: Mapping[str, builtins.list[tuple[str, str]]] | None = None,
+        failure: LastRunFailure | None = None,
     ) -> ConnectionView:
         """Turn a row into what a caller sees.
 
@@ -754,6 +761,8 @@ class ConnectionService:
             and `MANAGE_SECRET` there.
         declarations
             `_declarations` of the environment, when the caller read it already.
+        failure
+            Its entry of `_run_failures`, `None` without one.
 
         Returns
         -------
@@ -784,6 +793,7 @@ class ConnectionService:
             environment=env.name,
             last_test=None if last is None else self._last_test(*last, manages=manages),
             actions=actions,
+            last_run_failure=failure,
         )
 
     @staticmethod
@@ -833,6 +843,32 @@ class ConnectionService:
             Its entry of `last_tests`, `None` if it was never tested.
         """
         return last_tests(self._session, [row.id]).get(row.id)
+
+    def _run_failures(
+        self, p: PrincipalRef, rows: Iterable[tuple[Connection, Environment]]
+    ) -> dict[uuid.UUID, LastRunFailure]:
+        """Read the newest run that failed on each connection, of the runs the caller may read.
+
+        A connection's reader holds `READ_ENVIRONMENT`, which today also lets them read its
+        environment's runs; the runs' own rule (`run_readers`) is asked all the same, so a
+        connection never shows a run its reader may not open.
+
+        Parameters
+        ----------
+        p
+            The caller.
+        rows
+            The connections, each with its environment.
+
+        Returns
+        -------
+        dict
+            Each connection's id to its `LastRunFailure`; absent for a connection without one
+            and for one whose environment's runs the caller may not read.
+        """
+        pairs = builtins.list(rows)
+        readers = run_readers(self._authz, p, [env.name for _, env in pairs])
+        return last_run_failures(self._session, [row for row, env in pairs if env.name in readers])
 
     def declared_by(self, environment_id: uuid.UUID, name: str) -> builtins.list[tuple[str, str]]:
         """List the assets whose deployed version declares a connection.
@@ -999,7 +1035,13 @@ class ConnectionService:
                 },
             )
             self._commit(env, name)
-        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
+        return self._view(
+            row,
+            env,
+            self._last_of(row),
+            self._rights(p, [env.name])[env.name],
+            failure=self._run_failures(p, [(row, env)]).get(row.id),
+        )
 
     def list(
         self, p: PrincipalRef, environment: str, *, limit: int = 100, cursor: str | None = None
@@ -1049,8 +1091,12 @@ class ConnectionService:
         declarations = self._declarations(env.id)
         found = last_tests(self._session, [row.id for row in page.items])
         rights = self._rights(p, [env.name])[env.name]
+        failures = self._run_failures(p, [(row, env) for row in page.items])
         return Page(
-            [self._view(row, env, found.get(row.id), rights, declarations) for row in page.items],
+            [
+                self._view(row, env, found.get(row.id), rights, declarations, failures.get(row.id))
+                for row in page.items
+            ],
             page.next_cursor,
         )
 
@@ -1116,11 +1162,21 @@ class ConnectionService:
             for env_id in {row.environment_id for row in page.items}
         }
         found = last_tests(self._session, [row.id for row in page.items])
+        failures = self._run_failures(
+            p, [(row, readable[row.environment_id][0]) for row in page.items]
+        )
         views = []
         for row in page.items:
             env, rights = readable[row.environment_id]
             views.append(
-                self._view(row, env, found.get(row.id), rights, declarations[row.environment_id])
+                self._view(
+                    row,
+                    env,
+                    found.get(row.id),
+                    rights,
+                    declarations[row.environment_id],
+                    failures.get(row.id),
+                )
             )
         return Page(views, page.next_cursor)
 
@@ -1184,7 +1240,13 @@ class ConnectionService:
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         env = self._environment(environment)
         row = self._find(env, name)
-        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
+        return self._view(
+            row,
+            env,
+            self._last_of(row),
+            self._rights(p, [env.name])[env.name],
+            failure=self._run_failures(p, [(row, env)]).get(row.id),
+        )
 
     def update(
         self,
@@ -1283,7 +1345,13 @@ class ConnectionService:
                 self._session.rollback()
                 raise
             self._commit(env, row.name)
-        return self._view(row, env, self._last_of(row), self._rights(p, [env.name])[env.name])
+        return self._view(
+            row,
+            env,
+            self._last_of(row),
+            self._rights(p, [env.name])[env.name],
+            failure=self._run_failures(p, [(row, env)]).get(row.id),
+        )
 
     def _change(
         self,

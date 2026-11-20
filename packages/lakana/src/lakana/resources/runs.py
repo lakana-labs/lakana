@@ -105,7 +105,7 @@ def failure_from_json(data: object) -> Failure | None:
     data
         The decoded value, normally an object, or `None` (a task with no error, or a server that
         predates the field). Fields this SDK does not know are ignored; an unknown code is kept
-        as is.
+        as is; a `connection` or `error_type` that is not text is `None`.
 
     Returns
     -------
@@ -117,7 +117,14 @@ def failure_from_json(data: object) -> Failure | None:
     code, cause, next_step = data.get("code"), data.get("cause"), data.get("next_step")
     if not (isinstance(code, str) and isinstance(cause, str) and isinstance(next_step, str)):
         return None
-    return Failure(code, cause, next_step)
+    connection, error_type = data.get("connection"), data.get("error_type")
+    return Failure(
+        code,
+        cause,
+        next_step,
+        connection=connection if isinstance(connection, str) else None,
+        error_type=error_type if isinstance(error_type, str) else None,
+    )
 
 
 def policy_warnings_from_json(data: object) -> tuple[PolicyWarning, ...]:

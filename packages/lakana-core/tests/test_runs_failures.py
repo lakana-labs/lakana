@@ -2,21 +2,31 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from pathlib import Path
 
 import pytest
 
-from lakana_core.models import CheckOutcome, CheckResult
+from lakana_core.models import (
+    AttemptOutcome,
+    CheckOutcome,
+    CheckResult,
+    TaskAttempt,
+    TaskRun,
+    TaskStatus,
+)
 from lakana_core.runs.failures import (
     FAILURES,
     UNKNOWN,
     UNKNOWN_FAILURE,
     Failure,
     FailureCode,
+    attempt_failure,
     check_failure_code,
     failure_of,
     stored_failure,
+    task_failure,
 )
 
 _DOCS = Path(__file__).resolve().parents[3] / "docs" / "site" / "reference" / "why-did-it-fail.md"
@@ -58,14 +68,15 @@ def test_every_code_has_a_cause_and_a_next_step() -> None:
 
 
 def test_failure_of_builds_the_rest_body() -> None:
-    """`failure_of` gives the code, the cause and the next step; `to_json` is the REST body."""
+    """`failure_of` gives the code, the cause and the next step, and names no connection."""
     failure = failure_of(FailureCode.TIMEOUT)
 
-    assert failure.code == "timeout"
-    assert failure.to_json() == {
+    assert dataclasses.asdict(failure) == {
         "code": "timeout",
         "cause": FAILURES[FailureCode.TIMEOUT][0],
         "next_step": FAILURES[FailureCode.TIMEOUT][1],
+        "connection": None,
+        "error_type": None,
     }
 
 
@@ -140,3 +151,33 @@ def test_the_reference_page_lists_every_code_once() -> None:
     for code, cause, next_step in rows:
         assert FAILURES[FailureCode(code)][0] in cause
         assert FAILURES[FailureCode(code)][1] in next_step
+
+
+def test_a_failure_carries_what_its_row_says_it_concerned() -> None:
+    """The stored connection and exception class go with the code, on a task and an attempt."""
+    task = TaskRun(
+        status=TaskStatus.FAILED,
+        failure_code="build_failed",
+        failure_connection="crm-db",
+        error_type="SourceRefused",
+    )
+    attempt = TaskAttempt(
+        outcome=AttemptOutcome.FAILED,
+        failure_code="build_failed",
+        failure_connection=None,
+        error_type="KeyError",
+    )
+
+    shown = task_failure(task)
+    assert shown is not None
+    assert (shown.code, shown.connection, shown.error_type) == (
+        "build_failed",
+        "crm-db",
+        "SourceRefused",
+    )
+    tried = attempt_failure(attempt)
+    assert tried is not None
+    assert (tried.code, tried.connection, tried.error_type) == ("build_failed", None, "KeyError")
+    plain = task_failure(TaskRun(status=TaskStatus.FAILED, failure_code="timeout"))
+    assert plain == failure_of(FailureCode.TIMEOUT)
+    assert task_failure(TaskRun(status=TaskStatus.SUCCEEDED, failure_connection="crm-db")) is None

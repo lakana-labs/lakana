@@ -322,6 +322,8 @@ def _emit_failures(run: Run) -> None:
         typer.echo("")
         typer.echo(f"{task.asset} failed: {_output.inline(task.failure.code, 40)}")
         typer.echo(f"  {_output.inline(task.failure.cause, _PROGRESS_REASON_LIMIT)}")
+        if task.failure.connection is not None:
+            typer.echo(f"  Connection: {_output.inline(task.failure.connection, 63)}")
         typer.echo(f"  Next: {_output.inline(task.failure.next_step, _PROGRESS_REASON_LIMIT)}")
 
 

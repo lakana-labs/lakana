@@ -3279,6 +3279,17 @@ def test_a_run_task_parses_its_failure_and_a_run_its_failed_task_count() -> None
     assert run.failed_tasks == 1
 
 
+def test_a_failure_names_its_connection_and_exception_when_they_are_text() -> None:
+    """`connection` and `error_type` are read when the server sends text, else `None`."""
+    base = {"code": "build_failed", "cause": "c", "next_step": "n"}
+
+    named = failure_from_json({**base, "connection": "crm-db", "error_type": "SourceRefused"})
+    odd = failure_from_json({**base, "connection": 7, "error_type": ["x"]})
+
+    assert named == Failure("build_failed", "c", "n", "crm-db", "SourceRefused")
+    assert odd == Failure("build_failed", "c", "n")
+
+
 def test_a_run_task_without_a_failure_and_a_run_of_an_older_server_default() -> None:
     """A task with no error has none, and an older server sends neither field."""
     run = run_from_json(_run_body(_failed_task(status="succeeded", error_message=None)))

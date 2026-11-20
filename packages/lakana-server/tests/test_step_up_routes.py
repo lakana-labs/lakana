@@ -950,6 +950,11 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/sign-in/notices/{notice_id}"): "dismissing one's own notice",
     ("POST", "/api/v1/sign-in/passkey/options"): "signing in: the passkey is the proof",
     ("POST", "/api/v1/sign-in/passkey"): "signing in: the passkey is the proof",
+    ("POST", "/api/v1/sign-in/oidc/start"): "starts signing in through the identity provider",
+    (
+        "POST",
+        "/api/v1/sign-in/oidc/finish",
+    ): "signing in: the provider's checked answer is the proof",
     ("POST", "/api/v1/sign-in/step-up/options"): "the step-up ceremony itself",
     ("POST", "/api/v1/sign-in/step-up"): "the step-up ceremony itself",
     ("POST", "/api/v1/sign-in/links/describe"): "reads a link without using it",
@@ -1011,7 +1016,10 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     (
         "POST",
         "/api/v1/environments/{env}/saved-queries",
-    ): "keeps text; it runs nothing and grants nothing",
+    ): (
+        "keeps the caller's own text, and may share it with everyone at once; the text runs "
+        "with each runner's own rights and grants nothing, and a session can read it"
+    ),
     (
         "PUT",
         "/api/v1/environments/{env}/saved-queries/{saved_query_id}",

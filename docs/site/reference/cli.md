@@ -15,7 +15,7 @@ Usage: `lakana [OPTIONS] COMMAND [ARGS]...`
 |---|---|---|---|
 | `--profile` | text | none | Profile to use from the profile file. |
 | `--url` | text | none | Override the profile's platform URL. |
-| `--output` | one of `table`, `json` | `table` | Output format. Also read from `LAKANA_OUTPUT`. |
+| `--output` | one of `table`, `json` | `table` | Output format. JSON writes control, bidirectional and zero-width characters as escapes, such as \u202e. Also read from `LAKANA_OUTPUT`. |
 | `--verbose` | flag | off | Show tracebacks for unexpected errors. |
 | `--version` | flag | off | Show the CLI's version and the instance's, then exit. |
 

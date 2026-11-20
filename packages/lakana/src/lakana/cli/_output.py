@@ -59,8 +59,44 @@ def to_jsonable(value: Any) -> Any:  # ruff: ignore[any-type]
     return value
 
 
+_JSON_CANDIDATE = re.compile(r"[\x7f]|[^\x00-\x7f]")
+"""DEL and every non-ASCII character: the ones `_json_escape` has to look at. `json.dumps`
+escapes the C0 controls itself."""
+
+
+def _json_escape(match: re.Match[str]) -> str:
+    r"""Escape one character of JSON output when a terminal could act on it.
+
+    Parameters
+    ----------
+    match
+        One character `_JSON_CANDIDATE` found.
+
+    Returns
+    -------
+    str
+        The JSON escape (`\u007f`, `\u202e`, a surrogate pair such as `\udb40\udc41` above
+        U+FFFF) for a character of category `Cc`, `Cf` or `Cs` and for U+2028 and U+2029; any
+        other character, such as an accent, a CJK character or an emoji, unchanged.
+    """
+    char = match.group()
+    if unicodedata.category(char) not in ("Cc", "Cf", "Cs") and char not in "\u2028\u2029":
+        return char
+    code = ord(char)
+    if code <= 0xFFFF:
+        return f"\\u{code:04x}"
+    code -= 0x10000
+    return f"\\u{0xD800 + (code >> 10):04x}\\u{0xDC00 + (code & 0x3FF):04x}"
+
+
 def print_json(value: Any) -> None:  # ruff: ignore[any-type]
     """Write `value` to stdout as indented JSON, bypassing Rich.
+
+    Text stays readable (an accent or a CJK character is written as it is), but every control
+    character (C0, DEL, C1), every format character (bidirectional controls, zero-width
+    characters, the byte-order mark) and U+2028 and U+2029 are written as JSON escapes, so the
+    output cannot drive a terminal or reorder what the reader sees, and shows such a character
+    where it is. The parsed value is the same.
 
     `allow_nan=False` backs up `to_jsonable`'s non-finite-float conversion:
     if one ever slipped through, this raises rather than print `NaN`, which
@@ -71,7 +107,8 @@ def print_json(value: Any) -> None:  # ruff: ignore[any-type]
     value
         Anything `to_jsonable` accepts.
     """
-    text = json.dumps(to_jsonable(value), indent=2, ensure_ascii=False, allow_nan=False)
+    dumped = json.dumps(to_jsonable(value), indent=2, ensure_ascii=False, allow_nan=False)
+    text = _JSON_CANDIDATE.sub(_json_escape, dumped)
     sys.stdout.write(text + "\n")
 
 

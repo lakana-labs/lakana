@@ -37,6 +37,9 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
   const session = useSession();
   const attempt = useAttempt();
   const [pressed, setPressed] = useState<"add" | "signOut">("add");
+  // After the passkey is added the session is read again; until a read lands the step stays
+  // busy, so nobody adds a second passkey while the step still shows.
+  const [finishing, setFinishing] = useState(false);
   return (
     <Step title={t("addPasskey.title")}>
       <p className="step-who">
@@ -50,8 +53,10 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
           isDisabled={attempt.busy && pressed !== "add"}
           onPress={() => {
             setPressed("add");
+            setFinishing(false);
             attempt.run(async () => {
               await addPasskey(account.name);
+              setFinishing(true);
               await session.refresh();
             });
           }}
@@ -78,7 +83,13 @@ export function AddPasskey({ required, account }: AddPasskeyProps): JSX.Element 
       </div>
       <AttemptStatus
         attempt={attempt}
-        waiting={pressed === "signOut" ? t("addPasskey.signingOut") : t("addPasskey.waiting")}
+        waiting={
+          pressed === "signOut"
+            ? t("addPasskey.signingOut")
+            : finishing
+              ? t("addPasskey.finishing")
+              : t("addPasskey.waiting")
+        }
       />
     </Step>
   );

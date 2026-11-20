@@ -733,6 +733,8 @@ def record_attempt(
     rand: Callable[[], float],
     error_message: str | None = None,
     failure_code: FailureCode | None = None,
+    error_type: str | None = None,
+    failure_connection: str | None = None,
     rows_written: int | None = None,
     on_committed: str | None = None,
     stopped: bool = False,
@@ -788,6 +790,11 @@ def record_attempt(
         Why it failed, stored with the text on the task run and on the attempt. Dropped for a
         success or a release, which are no failure; always ``cancelled`` for a cancel. A failure
         recorded without one is ``internal``: only a failure nobody expected may be.
+    error_type
+        The class name of the exception a Python task's code ended with, stored with the code;
+        dropped with it for a success, a release and a cancel.
+    failure_connection
+        The declared connection the failure concerns, stored and dropped like `error_type`.
     rows_written
         Rows the write wrote.
     on_committed
@@ -876,11 +883,15 @@ def record_attempt(
     figures = resources if resources is not None else _write_run_figures(session, task)
     now = db_now(session)
     stored_code = _stored_code(kind, failure_code)
+    # Only a failure says what it concerns; a cancel's code is the cancel's, not the code's.
+    failed = stored_code not in {None, FailureCode.CANCELLED.value}
     values: dict[str, object] = {
         "lease_owner": None,
         "lease_expires_at": None,
         "error_message": error_message,
         "failure_code": stored_code,
+        "error_type": error_type if failed else None,
+        "failure_connection": failure_connection if failed else None,
         "check_message_state": check_message_state,
     }
     hand_back = not setting_back and _must_be_set_back(session, task, kind, stopped=stopped)
@@ -917,6 +928,8 @@ def record_attempt(
             # the stop's); a drain has none of its own. The same holds for its code.
             del values["error_message"]
             del values["failure_code"]
+            del values["error_type"]
+            del values["failure_connection"]
             del values["check_message_state"]
         else:
             values.update(status=TaskStatus.PENDING, attempt=attempt - 1, next_attempt_at=now)
@@ -970,6 +983,8 @@ def record_attempt(
             rows_written=rows_written,
             error_message=error_message,
             failure_code=stored_code,
+            error_type=values.get("error_type"),
+            failure_connection=values.get("failure_connection"),
             check_message_state=check_message_state,
             peak_memory_bytes=figures.peak_memory_bytes,
             cpu_seconds=figures.cpu_seconds,
