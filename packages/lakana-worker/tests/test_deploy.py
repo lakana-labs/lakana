@@ -195,6 +195,7 @@ def _submit_and_run(
     repository: str = "analytics",
     settings: DeploySettings | None = None,
     to_previous: bool = False,
+    environment: str = "dev",
 ) -> DeployRun:
     """Queue a run and execute it with allow-all authorization.
 
@@ -214,6 +215,8 @@ def _submit_and_run(
         Deploy settings; defaults to the fixture's.
     to_previous
         Roll back to the previous version.
+    environment
+        The environment to deploy to.
 
     Returns
     -------
@@ -221,7 +224,7 @@ def _submit_and_run(
         The finished run.
     """
     view = DeployService(session, AllowAllAuthorization()).submit(
-        principal, "dev", repository=repository, kind=kind, to_previous=to_previous
+        principal, environment, repository=repository, kind=kind, to_previous=to_previous
     )
     run_deploy(session, view.id, AllowAllAuthorization(), _KEY, settings or world.settings)
     run = session.get(DeployRun, view.id)
@@ -2987,11 +2990,16 @@ _SPACED_JOB_YAML = 'repo: analytics\njobs:\n  "daily ":\n    select: ["silver.*"
 
 
 def _deploy_with_a_job_stored_as_spaced(
-    session: Session, principal: PrincipalRef, world: World
+    session: Session,
+    principal: PrincipalRef,
+    world: World,
+    *,
+    repository: str = "analytics",
+    environment: str = "dev",
 ) -> None:
     """Deploy `daily`, then make the stored version name it `daily ` as an earlier release did."""
-    commit(world.repo_path, {"lakana.yaml": _JOBS_YAML})
-    run = _submit_and_run(session, principal, world)
+    commit(world.repo_path.parent / repository, {"lakana.yaml": _JOBS_YAML})
+    run = _submit_and_run(session, principal, world, repository=repository, environment=environment)
     assert run.status is DeployStatus.SUCCEEDED
     version = session.get(JobVersion, run.job_version_id)
     assert version is not None
@@ -3030,6 +3038,53 @@ def test_a_deploy_refuses_a_renamed_job_with_an_outer_space(
     assert run.status is DeployStatus.FAILED
     assert run.error_message is not None
     assert "Job name ' weekly' starts with a space" in run.error_message
+
+
+def test_a_job_deployed_with_an_outer_space_in_another_environment_does_not_excuse_it_here(
+    session: Session, principal: PrincipalRef, world: World, tmp_path: Path
+) -> None:
+    _deploy_with_a_job_stored_as_spaced(session, principal, world)
+    CatalogService(session, StorageResolver(session), AllowAllAuthorization()).create_environment(
+        principal,
+        name="prod",
+        storage=StorageConfig(scheme="file", root=f"file://{tmp_path / 'prod'}", options={}),
+    )
+    commit(world.repo_path, {"lakana.yaml": _SPACED_JOB_YAML})
+    run = _submit_and_run(session, principal, world, environment="prod")
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert "Job name 'daily ' ends with a space" in run.error_message
+
+
+def test_a_job_deployed_with_an_outer_space_by_another_repository_does_not_excuse_it(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    other = world.repo_path.parent / "other"
+    make_repo(other, _FILES)
+    RepositoryService(
+        session, AllowAllAuthorization(), repo_roots=world.settings.repo_roots
+    ).create(principal, name="other", kind=RepositoryKind.LOCAL, url=str(other))
+    _deploy_with_a_job_stored_as_spaced(session, principal, world, repository="other")
+    commit(world.repo_path, {"lakana.yaml": _SPACED_JOB_YAML})
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert "Job name 'daily ' ends with a space" in run.error_message
+
+
+def test_a_failed_deploy_keeps_the_exception_of_a_deployed_job_with_an_outer_space(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    _deploy_with_a_job_stored_as_spaced(session, principal, world)
+    commit(
+        world.repo_path,
+        {"lakana.yaml": 'repo: analytics\njobs:\n  other:\n    select: ["platinum.*"]\n'},
+    )
+    failed = _submit_and_run(session, principal, world)
+    assert failed.status is DeployStatus.FAILED
+    commit(world.repo_path, {"lakana.yaml": _SPACED_JOB_YAML})
+    run = _submit_and_run(session, principal, world)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
 
 
 def test_a_deploy_refuses_an_override_that_leaves_a_schedule_without_cron(
