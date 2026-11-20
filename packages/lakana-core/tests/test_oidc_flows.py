@@ -76,7 +76,7 @@ def store(session: Session, clock: Clock) -> OidcFlowStore:
 def test_a_flow_is_called_back_once(store: OidcFlowStore, session: Session) -> None:
     opened = store.open("sign_in", "/catalog")
     session.commit()
-    flow = store.called_back(opened.state, opened.browser_secret)
+    flow = store.called_back(opened.state, opened.cookie_value)
     assert flow is not None
     assert (flow.nonce, flow.code_verifier, flow.return_to) == (
         opened.nonce,
@@ -84,7 +84,7 @@ def test_a_flow_is_called_back_once(store: OidcFlowStore, session: Session) -> N
         "/catalog",
     )
     assert flow.called_back_at == START
-    assert store.called_back(opened.state, opened.browser_secret) is None
+    assert store.called_back(opened.state, opened.cookie_value) is None
 
 
 def test_a_flow_expires_after_ten_minutes(
@@ -95,35 +95,35 @@ def test_a_flow_expires_after_ten_minutes(
     soon = store.open("sign_in", "/")
     session.commit()
     clock.now = START + FLOW_LIFETIME - timedelta(seconds=1)
-    assert store.called_back(soon.state, soon.browser_secret) is not None
+    assert store.called_back(soon.state, soon.cookie_value) is not None
     clock.now = START + FLOW_LIFETIME + timedelta(seconds=1)
-    assert store.called_back(late.state, late.browser_secret) is None
-    assert store.finish(soon.browser_secret) is None
+    assert store.called_back(late.state, late.cookie_value) is None
+    assert store.finish(soon.cookie_value) is None
 
 
 def test_state_of_another_browser_does_not_match(store: OidcFlowStore, session: Session) -> None:
     victim = store.open("sign_in", "/")
     attacker = store.open("sign_in", "/")
     session.commit()
-    assert store.called_back(attacker.state, victim.browser_secret) is None
-    assert store.called_back(victim.state, attacker.browser_secret) is None
+    assert store.called_back(attacker.state, victim.cookie_value) is None
+    assert store.called_back(victim.state, attacker.cookie_value) is None
     assert store.called_back(victim.state, "") is None
-    assert store.called_back(victim.state, victim.browser_secret) is not None
+    assert store.called_back(victim.state, victim.cookie_value) is not None
 
 
 def test_finish_works_once(store: OidcFlowStore, session: Session, clock: Clock) -> None:
     opened = store.open("sign_in", "/")
     session.commit()
-    assert store.finish(opened.browser_secret) is None  # not called back yet
-    flow = store.called_back(opened.state, opened.browser_secret)
+    assert store.finish(opened.cookie_value) is None  # not called back yet
+    flow = store.called_back(opened.state, opened.cookie_value)
     assert flow is not None
     store.record(flow.id, {"ok": False, "reason": "not_linked"})
     clock.now += timedelta(seconds=5)
-    finished = store.finish(opened.browser_secret)
+    finished = store.finish(opened.cookie_value)
     assert finished is not None
     assert finished.outcome == {"ok": False, "reason": "not_linked"}
     assert finished.finished_at == START + timedelta(seconds=5)
-    assert store.finish(opened.browser_secret) is None
+    assert store.finish(opened.cookie_value) is None
     assert store.finish("") is None
 
 
@@ -134,12 +134,12 @@ def test_only_hashes_of_state_and_browser_are_stored(
     session.commit()
     row = session.execute(select(OidcFlow)).scalar_one()
     assert row.state_hash == hash_secret(opened.state)
-    assert row.browser_hash == hash_secret(opened.browser_secret)
+    assert row.browser_hash == hash_secret(opened.cookie_value)
     stored = " ".join(str(value) for value in vars(row).values())
     assert opened.state not in stored
-    assert opened.browser_secret not in stored
+    assert opened.cookie_value not in stored
     shown = repr(opened)
-    for secret in (opened.state, opened.browser_secret, opened.nonce, opened.code_verifier):
+    for secret in (opened.state, opened.cookie_value, opened.nonce, opened.code_verifier):
         assert secret not in shown
         assert len(secret) >= 43
     assert len(opened.code_verifier) <= 128

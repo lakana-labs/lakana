@@ -222,7 +222,7 @@ def start_oidc_sign_in(
         nonce=opened.nonce,
         code_verifier=opened.code_verifier,
     )
-    set_flow_cookie(response, origin, opened.browser_secret)
+    set_flow_cookie(response, origin, opened.cookie_value)
     return OidcStartOut(authorization_url=url)
 
 
