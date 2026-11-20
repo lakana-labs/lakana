@@ -122,7 +122,19 @@ describe("tablesRead", () => {
     expect(inScope(sql)).toEqual(tables);
   });
 
-  it("takes any word after AS for the alias, a keyword too", () => {
+  it("does not take a reserved word after an unfinished AS for the alias", () => {
+    expect(inScope("select | from gold.a as join gold.b b on true")).toEqual([
+      "gold.a=gold.a",
+      "b=gold.b",
+    ]);
+    expect(inScope("select * from gold.a a join gold.b as on a.id = |")).toEqual([
+      "a=gold.a",
+      "gold.b=gold.b",
+    ]);
+    expect(inScope("select * from gold.a as where |")).toEqual(["gold.a=gold.a"]);
+  });
+
+  it("keeps taking at, asof and other words after AS for the alias", () => {
     expect(inScope("select * from gold.a as at where at.|")).toEqual(["at=gold.a"]);
     expect(inScope("select * from gold.a as asof join gold.b b on true where |")).toEqual([
       "asof=gold.a",

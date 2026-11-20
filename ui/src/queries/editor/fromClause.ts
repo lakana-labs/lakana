@@ -65,6 +65,98 @@ const NOT_ALIAS = new Set([
   "where",
   "window",
 ]);
+// Words DuckDB refuses as an alias even after AS (its reserved keywords, and the join words of its
+// type-function ones, from `duckdb_keywords()` and a parse of `from t as <word>`, DuckDB 2.0).
+// `at` and `asof` are left out on purpose: the editor keeps taking them as an alias.
+const NOT_ALIAS_AFTER_AS = new Set([
+  "all",
+  "analyse",
+  "analyze",
+  "and",
+  "anti",
+  "any",
+  "array",
+  "as",
+  "asc",
+  "asymmetric",
+  "both",
+  "case",
+  "cast",
+  "check",
+  "collate",
+  "column",
+  "constraint",
+  "create",
+  "cross",
+  "default",
+  "deferrable",
+  "desc",
+  "describe",
+  "distinct",
+  "do",
+  "else",
+  "end",
+  "except",
+  "false",
+  "fetch",
+  "for",
+  "foreign",
+  "from",
+  "full",
+  "group",
+  "having",
+  "in",
+  "initially",
+  "inner",
+  "intersect",
+  "into",
+  "join",
+  "lambda",
+  "lateral",
+  "leading",
+  "left",
+  "limit",
+  "natural",
+  "not",
+  "null",
+  "offset",
+  "on",
+  "only",
+  "or",
+  "order",
+  "outer",
+  "pivot",
+  "pivot_longer",
+  "pivot_wider",
+  "placing",
+  "positional",
+  "primary",
+  "qualify",
+  "references",
+  "returning",
+  "right",
+  "select",
+  "semi",
+  "show",
+  "some",
+  "summarize",
+  "symmetric",
+  "table",
+  "tablesample",
+  "then",
+  "to",
+  "trailing",
+  "true",
+  "union",
+  "unique",
+  "unpivot",
+  "using",
+  "variadic",
+  "when",
+  "where",
+  "window",
+  "with",
+]);
 // Words that end a FROM clause in its group.
 const FROM_ENDS = new Set([
   "except",
@@ -236,11 +328,11 @@ function inFrom(
     state.expect = "aliasAfterAs";
     return true;
   }
-  // After AS any word is the alias; without it, a keyword is not.
+  // After AS any word is the alias but the ones DuckDB refuses there; without AS, a keyword is not.
   if (
     state.expect !== "none" &&
     SINGLE_WORD.test(token) &&
-    (state.expect === "aliasAfterAs" || !NOT_ALIAS.has(lower))
+    (state.expect === "aliasAfterAs" ? !NOT_ALIAS_AFTER_AS.has(lower) : !NOT_ALIAS.has(lower))
   ) {
     if (state.last !== null) {
       state.last.read.alias = token;
