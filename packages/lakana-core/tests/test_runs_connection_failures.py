@@ -68,6 +68,7 @@ class _World:
         minutes: int,
         connection: str | None = None,
         repository: uuid.UUID | None = None,
+        task_id: uuid.UUID | None = None,
     ) -> TaskRun:
         """Store a run with one finished task.
 
@@ -85,6 +86,8 @@ class _World:
             The connection its failure names.
         repository
             The run's repository; the environment's `analytics` when `None`.
+        task_id
+            The task's id; a new one when `None`.
 
         Returns
         -------
@@ -117,7 +120,7 @@ class _World:
         )
         self.session.add(run)
         task = TaskRun(
-            id=uuid.uuid4(),
+            id=task_id if task_id is not None else uuid.uuid4(),
             run_id=run.id,
             asset=asset,
             status=status,
@@ -237,6 +240,30 @@ def test_only_a_later_ending_of_that_asset_in_that_repository_hides_it(world: _W
 
     assert world.failures() == {
         "dev": LastRunFailure(failed.run_id, "silver.a", _T0 + timedelta(minutes=1))
+    }
+
+
+@pytest.mark.parametrize("failure_first", [True, False], ids=["failure-id-larger", "smaller"])
+def test_a_success_at_the_same_moment_hides_the_failure(world: _World, failure_first: bool) -> None:
+    """Equal times: the success counts as the later ending, whichever task id is larger."""
+    low, high = uuid.UUID(int=1), uuid.UUID(int=2)
+    world.task(
+        "dev", "silver.a", TaskStatus.FAILED, 1, "crm-db", task_id=high if failure_first else low
+    )
+    world.task("dev", "silver.a", TaskStatus.SUCCEEDED, 1, task_id=low if failure_first else high)
+
+    assert world.failures() == {}
+
+
+def test_of_two_failures_at_the_same_moment_the_larger_task_id_is_the_newest(
+    world: _World,
+) -> None:
+    """Equal times and equal endings: the larger task id decides, so the answer is stable."""
+    world.task("dev", "silver.a", TaskStatus.FAILED, 1, task_id=uuid.UUID(int=1))
+    named = world.task("dev", "silver.a", TaskStatus.FAILED, 1, "crm-db", task_id=uuid.UUID(int=2))
+
+    assert world.failures() == {
+        "dev": LastRunFailure(named.run_id, "silver.a", _T0 + timedelta(minutes=1))
     }
 
 

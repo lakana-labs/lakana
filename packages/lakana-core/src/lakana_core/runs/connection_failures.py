@@ -22,7 +22,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session, aliased
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
@@ -104,7 +104,9 @@ def last_run_failures(
     -------
     dict
         Each connection's id to its `LastRunFailure`; a connection with none is absent. Equal
-        times go to the larger task id, also when deciding which ending of an asset is newest.
+        times go to the larger task id; when deciding which ending of an asset is newest, a
+        success at the same moment as a failure is the later one, and between equal endings the
+        larger task id is.
     """
     if not connections:
         return {}
@@ -122,7 +124,12 @@ def last_run_failures(
             later_run.environment_id == Run.environment_id,
             later_run.repository_id == Run.repository_id,
         )
-        .order_by(later_task.finished_at.desc(), later_task.id.desc())
+        .order_by(
+            later_task.finished_at.desc(),
+            # At the same moment a success is the later ending: it hides the failure.
+            case((later_task.status == TaskStatus.SUCCEEDED, 0), else_=1),
+            later_task.id.desc(),
+        )
         .limit(1)
         .correlate(TaskRun, Run)
         .scalar_subquery()

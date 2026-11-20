@@ -345,7 +345,8 @@ connection shows the newest task that failed on it when all of these hold:
   change, whether given with `lakana connection update --password-stdin` (or `--values-stdin`)
   or with `lakana secret rotate`;
 - it is still the asset's newest ending: a later run of the same asset (same repository and
-  environment) that succeeded, or failed for another reason, hides it;
+  environment) that succeeded, or failed for another reason, hides it, and so does a success that
+  ended at the same moment;
 - you may read the environment's runs (`RUN` or `READ_ENVIRONMENT`, as for the run's own page).
 
 ### Add a connection
