@@ -299,6 +299,100 @@ Answer fields: `SignInOut`
 | `offer_passkey` | true or false | yes |  |
 | `csrf_token` | text | yes |  |
 
+## `GET /api/v1/sign-in/oidc`
+
+Say whether people sign in through an identity provider, and its name
+
+Needs no credential: the sign-in page asks before anyone is signed in, to show "Sign in with &lt;provider&gt;". Without `LAKANA_OIDC__ISSUER` the answer is `enabled: false` and the interface does not mention OIDC.
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `OidcInfoOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+
+Answer fields: `OidcInfoOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | true or false | yes |  |
+| `display_name` | text or null | yes |  |
+
+## `GET /api/v1/sign-in/oidc/callback`
+
+Come back from the identity provider
+
+The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow is called back once.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `code` | query | no | text or null | The authorization code the provider issued. |
+| `state` | query | no | text or null | The flow's state, as the provider sends it back. |
+| `error` | query | no | text or null | The provider's error, when it refused. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `303` | Always to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`. | none |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+## `POST /api/v1/sign-in/oidc/start`
+
+Start signing in through the identity provider
+
+Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.
+
+Request body (application/json, required): `OidcStartIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `return_to` | text or null | no |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `OidcStartOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `413` | The request body is larger than the server accepts. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `OidcStartOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `authorization_url` | text | yes |  |
+
+## `POST /api/v1/sign-in/oidc/finish`
+
+Finish signing in through the identity provider, after the callback
+
+Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended), its cookie, and a provider sign-in that counts as a passkey touch for 15 minutes of step-up actions. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes). A flow is finished once, whatever the answer.
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `OidcSignInOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `413` | The request body is larger than the server accepts. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+
+Answer fields: `OidcSignInOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | text | yes |  |
+| `csrf_token` | text | yes |  |
+| `return_to` | text | yes |  |
+
 ## `GET /api/v1/sign-in/notices`
 
 List your sign-in notices that you have not dismissed, newest first
