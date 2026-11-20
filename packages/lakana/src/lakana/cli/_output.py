@@ -107,8 +107,9 @@ def print_json(value: Any) -> None:  # ruff: ignore[any-type]
     value
         Anything `to_jsonable` accepts.
     """
-    text = json.dumps(to_jsonable(value), indent=2, ensure_ascii=False, allow_nan=False)
-    sys.stdout.write(_JSON_CANDIDATE.sub(_json_escape, text) + "\n")
+    dumped = json.dumps(to_jsonable(value), indent=2, ensure_ascii=False, allow_nan=False)
+    text = _JSON_CANDIDATE.sub(_json_escape, dumped)
+    sys.stdout.write(text + "\n")
 
 
 def _console(stderr: bool = False) -> Console:
