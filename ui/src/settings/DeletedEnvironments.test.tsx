@@ -165,6 +165,48 @@ describe("DeletedEnvironments", () => {
     ]);
   });
 
+  it("a later deletion of the same name is not due because an earlier one's files were", async () => {
+    fakeWebAuthn();
+    const deleted = [DEV_OLD, HDFS_OLD];
+    const live: EnvironmentOut[] = [];
+    const { user } = renderShell(
+      "/settings/environments",
+      asAdmin({
+        ...lists(live, deleted),
+        "DELETE /api/v1/environments/hdfs-old": () => {
+          deleted[1] = { ...HDFS_OLD, purge_after: new Date(Date.now() + 60_000).toISOString() };
+          return { status: 200, body: deleted[1] };
+        },
+        "POST /api/v1/environments/dev-old/restore": () => {
+          // Meanwhile, elsewhere, hdfs-old's rows were removed and the name was created and
+          // deleted again: a new deletion, restorable for a week.
+          deleted.splice(0, 2, { ...HDFS_OLD, deleted_at: "2026-11-19T10:00:00Z" });
+          live.push({ ...DEV_OLD, deleted_at: null, purge_after: null });
+          return { status: 200, body: live[0] };
+        },
+      }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Delete the files of hdfs-old now" }),
+    );
+    const purge = await screen.findByRole("dialog");
+    await user.type(
+      within(purge).getByRole("textbox", { name: "Type hdfs-old to delete its files" }),
+      "hdfs-old",
+    );
+    await user.click(within(purge).getByRole("button", { name: "Delete the files" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Restore hdfs-old" })).not.toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Restore dev-old" }));
+    const restore = await screen.findByRole("dialog", { name: "Restore dev-old?" });
+    await user.click(within(restore).getByRole("button", { name: "Restore" }));
+
+    expect(await screen.findByRole("link", { name: "dev-old" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Restore hdfs-old" })).toBeInTheDocument();
+  });
+
   it("offers Remove from the catalog only for storage Lakana cannot reach", async () => {
     const deleted = [DEV_OLD, HDFS_OLD];
     const { server, user } = renderShell(

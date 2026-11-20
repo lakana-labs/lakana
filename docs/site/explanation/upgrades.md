@@ -742,6 +742,13 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   index build blocks writes to the table while it runs. Nothing has to be done: the upgrade runs
   with the others.
 
+### Bootstrap recovery audits each personal token it revokes
+
+- When start-up restores the first administrator, every earlier personal token of the bootstrap
+  principal is revoked with its own `PAT_REVOKED` event, whose detail has `source`
+  `bootstrap_recovery`. Before, the revocation was not recorded. Earlier recoveries stay as they
+  were in the audit log. Nothing has to be done.
+
 ### A task token ends with the personal token that minted it (breaking)
 
 - A task token minted with `lakana task-token mint` now works only while the personal token it
