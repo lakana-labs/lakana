@@ -10,6 +10,7 @@ import {
   aListedRun,
   aPage,
   aRun,
+  aListedSavedQuery,
   aSavedQuery,
   queryRoutes,
   RUN_ID,
@@ -328,8 +329,11 @@ describe("the Queries screen's work", () => {
         "GET /api/v1/saved-queries": ({ path }) => ({
           status: 200,
           body: path.includes("cursor=c-2")
-            ? { items: [aSavedQuery({ id: "b2", name: "Station ranking" })], next_cursor: null }
-            : { items: [aSavedQuery()], next_cursor: "c-2" },
+            ? {
+                items: [aListedSavedQuery({ id: "b2", name: "Station ranking" })],
+                next_cursor: null,
+              }
+            : { items: [aListedSavedQuery()], next_cursor: "c-2" },
         }),
       }),
     });
@@ -836,7 +840,7 @@ describe("the Queries screen's work", () => {
 
   it("after save as the address is the saved query's and the Saved list shows it", async () => {
     const created = aSavedQuery({ id: "7b8c9d0e", environment: "dev", name: "Late trains" });
-    let listed = [aSavedQuery()];
+    let listed = [aListedSavedQuery()];
     const shell = renderShell("/queries", {
       routes: routes({
         "GET /api/v1/saved-queries": () => ({
@@ -844,7 +848,7 @@ describe("the Queries screen's work", () => {
           body: { items: listed, next_cursor: null },
         }),
         "POST /api/v1/environments/dev/saved-queries": () => {
-          listed = [aSavedQuery(), created];
+          listed = [aListedSavedQuery(), aListedSavedQuery(created)];
           return { status: 201, body: created };
         },
         "GET /api/v1/environments/dev/saved-queries/7b8c9d0e": { status: 200, body: created },

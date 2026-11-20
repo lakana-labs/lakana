@@ -7,6 +7,8 @@ page size. A list reads no SQL text and runs as many statements for many saved q
 
 from __future__ import annotations
 
+import base64
+import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -17,13 +19,14 @@ from saved_query_test_helpers import LIMITS, LISTS, build_world, new_pages, old_
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from lakana_core.auth import Action, AllowAllAuthorization
+from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
 from lakana_core.catalog.saved_queries import SavedQueryService
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
 from lakana_core.errors import ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
+from lakana_core.models import SavedQuery
 from lakana_core.pagination import BAD_CURSOR, encode_tuple_cursor
 from lakana_core.storage.resolver import StorageResolver
 
@@ -160,3 +163,73 @@ def test_a_cursor_whose_key_is_no_saved_querys_is_refused(
         service.list_page(callers[0].ref, cursor=encode_tuple_cursor("all-saved-queries", key))
 
     assert str(refused.value) == BAD_CURSOR
+
+
+def _queries(
+    session: Session, tmp_path: Path, *names: str
+) -> tuple[SavedQueryService, PrincipalRef]:
+    """Save private queries of one querier in `dev`, by name.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    tmp_path
+        Holds the environment's storage root.
+    names
+        The names, saved in this order.
+
+    Returns
+    -------
+    tuple of (SavedQueryService, PrincipalRef)
+        A service with the grants' authorization, and the querier.
+    """
+    maker = person(session, "maker")
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    catalog.create_environment(
+        maker,
+        name="dev",
+        storage=StorageConfig(scheme="file", root=f"file://{tmp_path / 'dev'}", options={}),
+    )
+    bob = person(session, "bob")
+    grant(session, bob, action=Action.SUBMIT_QUERY, environment_name="dev")
+    service = SavedQueryService(session, GrantAuthorization(session))
+    for name in names:
+        service.create(bob, "dev", name=name, sql="SELECT 1")
+    return service, bob
+
+
+def test_a_cursor_written_as_main_issued_it_resumes_after_its_item(
+    session: Session, tmp_path: Path
+) -> None:
+    """The cursor format is pinned by hand, as `page_in_order` wrote it before #692."""
+    service, bob = _queries(session, tmp_path, "gamma", "Beta", "alpha")
+    first = service.list_page(bob, limit=2)
+    beta = first.items[1]
+    assert [v.name for v in first.items] == ["alpha", "Beta"]
+    # base64url, unpadded, of the UTF-8 JSON {"k": kind, "n": JSON array of the key}.
+    body = '{"k": "all-saved-queries", "n": "[\\"beta\\", \\"dev\\", \\"' + str(beta.id) + '\\"]"}'
+    written = base64.urlsafe_b64encode(body.encode()).rstrip(b"=").decode()
+
+    assert first.next_cursor == written
+    after = service.list_page(bob, limit=2, cursor=written)
+    assert [v.name for v in after.items] == ["gamma"]
+    assert after.next_cursor is None
+    # A cursor of an item since deleted still resumes after where it was.
+    gone = body.replace(str(beta.id), str(uuid.UUID(int=0)))
+    stale = base64.urlsafe_b64encode(gone.encode()).rstrip(b"=").decode()
+    assert [v.name for v in service.list_page(bob, cursor=stale).items] == ["Beta", "gamma"]
+
+
+def test_a_rename_moves_the_query_in_the_list_order(session: Session, tmp_path: Path) -> None:
+    service, bob = _queries(session, tmp_path, "zeta", "Beta")
+    zeta = service.list_page(bob).items[1]
+
+    service.update(bob, "dev", zeta.id, name="STRAẞE", sql="SELECT 1", visibility="private")
+    service.update(bob, "dev", zeta.id, name="Alpha", sql="SELECT 1", visibility="private")
+
+    row = session.get(SavedQuery, zeta.id)
+    assert row is not None and row.name_key == "alpha"
+    assert [v.name for v in service.list_page(bob).items] == ["Alpha", "Beta"]
+    one = service.list_page(bob, environment="dev", limit=1)
+    assert one.next_cursor == encode_tuple_cursor("saved-queries", ("alpha", "dev", str(zeta.id)))

@@ -10,7 +10,7 @@ import {
   type SavedQueryVisibility,
 } from "./savedQueries";
 
-import { aSavedQuery, queryRoutes } from "../test/queries";
+import { aListedSavedQuery, aSavedQuery, queryRoutes } from "../test/queries";
 import { fakeServer } from "../test/server";
 
 const SAVED = aSavedQuery();
@@ -21,7 +21,10 @@ describe("saved queries api", () => {
   it("lists across environments with the filter and cursor", async () => {
     const server = fakeServer(queryRoutes());
 
-    expect(await listSavedQueries(null, null)).toEqual({ items: [SAVED], nextCursor: null });
+    expect(await listSavedQueries(null, null)).toEqual({
+      items: [aListedSavedQuery()],
+      nextCursor: null,
+    });
     await listSavedQueries("pro d", "c1");
 
     expect(server.sent[0]?.path).toBe("/api/v1/saved-queries?limit=50");

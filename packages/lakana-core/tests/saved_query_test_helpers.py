@@ -163,6 +163,10 @@ def build_world(session: Session, tmp_path: Path) -> list[Caller]:
     ):
         for environment in environments:
             _owner_saves(saves, who, environment, step)
+    # Renames keep `name_key` in step: one to a name that folds away from where it sorted.
+    for who in (bob, svc):
+        mine = next(v for v in saves.list_page(who, environment="dev").items if v.owner == who.name)
+        saves.update(who, "dev", mine.id, name="ÉCOLE", sql="SELECT 2", visibility=mine.visibility)
     # Frank's principal goes: his private queries with it, his shared ones stay as former owner's.
     session.execute(delete(Grant).where(Grant.principal_id == frank.id))
     session.execute(delete(Principal).where(Principal.id == frank.id))
