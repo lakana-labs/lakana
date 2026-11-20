@@ -85,7 +85,8 @@ def list_principals(
     """
     state = state_of(ctx)
     page = state.client().principals.list_page(search=search, limit=limit, cursor=cursor)
-    _output.emit(state, page.items)
+    # The link to the identity provider is a record of its own: `principal get` shows it.
+    _output.emit(state, page.items, columns=("name", "type", "is_active", "held_admin"))
     more_results(
         state,
         ["lakana", "principal", "list"],
