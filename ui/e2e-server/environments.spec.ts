@@ -73,6 +73,17 @@ test("an environment's life", async ({ browser, browserName, request }) => {
   );
   await skipTheWelcome(page);
   const errors = consoleErrors(page);
+  // A slow usage read is still in flight when Delete is sent: the page must cancel it, or the
+  // server answers it with a 404 that the browser logs.
+  const slowReads: Promise<void>[] = [];
+  await page.route(/\/api\/v1\/environments\/[^/]+\/usage$/, (route) => {
+    slowReads.push(
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000))
+        .then(() => route.fetch())
+        .then((answer) => route.fulfill({ response: answer }))
+        .catch(() => undefined),
+    );
+  });
 
   // An old touch: creating asks for the passkey again before the request is sent.
   ageThePasskeyTouch(name);
@@ -114,6 +125,8 @@ test("an environment's life", async ({ browser, browserName, request }) => {
   await expect(
     page.getByText(`Deleted ${environment}. Its files are deleted at the next clean-up.`),
   ).toBeVisible();
+  // The held reads are answered now: the browser has logged any 404 among them.
+  await Promise.all(slowReads);
   expect(errors).toEqual([]);
   await page.context().close();
 });

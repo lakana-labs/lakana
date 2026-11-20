@@ -280,11 +280,13 @@ export async function purgeEnvironmentRows(name: string): Promise<void> {
  * Reads how much storage an environment uses; a background read, since nobody asked for it.
  *
  * @param name - Its name.
+ * @param signal - Aborted when the read is no longer wanted.
  * @returns The usage.
  */
-export async function getUsage(name: string): Promise<EnvironmentUsageOut> {
+export async function getUsage(name: string, signal?: AbortSignal): Promise<EnvironmentUsageOut> {
   return api.request<EnvironmentUsageOut>("GET", `${environmentApiPath(name)}/usage`, undefined, {
     background: true,
+    signal,
   });
 }
 

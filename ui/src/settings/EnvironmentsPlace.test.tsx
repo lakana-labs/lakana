@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { EnvironmentOut } from "../api/environments";
@@ -171,6 +171,29 @@ describe("EnvironmentsPlace", () => {
       }),
     );
     expect(await screen.findByText("at least 1.2 GB")).toBeInTheDocument();
+  });
+
+  it("stops the usage reads still in flight when the list is left", async () => {
+    // One answered after the environment is deleted is a 404 the browser logs.
+    let usage: AbortSignal | undefined;
+    const { server, user } = renderShell(
+      "/settings/environments",
+      asMara({
+        ...lists([DEV]),
+        "GET /api/v1/environments/dev/usage": (request) => {
+          usage = request.signal;
+          return new Promise<never>(() => undefined);
+        },
+      }),
+    );
+    await waitFor(() => {
+      expect(server.sent.some((request) => request.path.endsWith("/dev/usage"))).toBe(true);
+    });
+    expect(usage?.aborted).toBe(false);
+
+    await user.click(await screen.findByRole("link", { name: "dev" }));
+
+    expect(usage?.aborted).toBe(true);
   });
 
   it("a failed usage read does not fail the list", async () => {

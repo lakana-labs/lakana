@@ -190,3 +190,54 @@ describe("Delete environment", () => {
     });
   });
 });
+
+describe("Delete environment and the reads of the page", () => {
+  it("stops the usage read still in flight before it sends the delete", async () => {
+    // A 404 from a read the deletion overtook is logged by the browser, so the read must be
+    // cancelled before the delete goes out.
+    let usage: AbortSignal | undefined;
+    let abortedAtDelete: boolean | undefined;
+    const shell = await openDelete({
+      "GET /api/v1/environments/dev/usage": (request) => {
+        usage = request.signal;
+        return new Promise<never>(() => undefined);
+      },
+      "DELETE /api/v1/environments/dev": () => {
+        abortedAtDelete = usage?.aborted;
+        return { status: 200, body: gone(false) };
+      },
+    });
+    const { dialog, user } = shell;
+
+    await user.type(within(dialog).getByRole("textbox", { name: "Type dev to delete it" }), "dev");
+    await user.click(within(dialog).getByRole("button", { name: "Delete environment" }));
+
+    expect(await screen.findByText(/Deleted dev\. It can be restored until/)).toBeInTheDocument();
+    expect(abortedAtDelete).toBe(true);
+  });
+
+  it("reads the usage again when the deletion is refused", async () => {
+    let reads = 0;
+    const shell = await openDelete({
+      "GET /api/v1/environments/dev/usage": () => {
+        reads += 1;
+        return { status: 500, body: { detail: "down" } };
+      },
+      "DELETE /api/v1/environments/dev": {
+        status: 409,
+        body: { detail: "A repository is still deployed." },
+      },
+    });
+    const { dialog, user } = shell;
+    await waitFor(() => {
+      expect(reads).toBe(1);
+    });
+
+    await user.type(within(dialog).getByRole("textbox", { name: "Type dev to delete it" }), "dev");
+    await user.click(within(dialog).getByRole("button", { name: "Delete environment" }));
+
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+  });
+});

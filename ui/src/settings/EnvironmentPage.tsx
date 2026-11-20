@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { Button } from "react-aria-components";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
@@ -369,6 +370,7 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
   const { target: protectButton, arm: armProtect } = useFocusAfter<HTMLButtonElement>(read.data);
   const { target: storageButton, arm: armStorage } = useFocusAfter<HTMLButtonElement>(read.data);
   const [open, setOpen] = useState<Open | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const close = (): void => {
     setOpen(null);
   };
@@ -420,7 +422,7 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
               retentionButton={retentionButton}
               protectButton={protectButton}
             />
-            {manages && <EnvironmentUsage name={environment.name} />}
+            {manages && <EnvironmentUsage name={environment.name} paused={deleting} />}
             {creates && (
               <StoragePanel
                 environment={environment}
@@ -465,6 +467,12 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
                   environment={environment}
                   onClose={close}
                   onLeave={leave}
+                  onDeleting={(now) => {
+                    // At once: the deletion is sent right after, and the read must be gone first.
+                    flushSync(() => {
+                      setDeleting(now);
+                    });
+                  }}
                 />
               </Suspense>
             )}
