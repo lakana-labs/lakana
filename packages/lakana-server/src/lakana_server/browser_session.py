@@ -140,7 +140,7 @@ def set_flow_cookie(response: Response, origin: PublicOrigin, value: str) -> Non
     origin
         The public address, which decides the name and `Secure`.
     value
-        The flow's browser secret.
+        The flow cookie's value (`OpenedFlow.cookie_value`): random, stored only as its hash.
     """
     response.set_cookie(
         flow_cookie_name(origin),

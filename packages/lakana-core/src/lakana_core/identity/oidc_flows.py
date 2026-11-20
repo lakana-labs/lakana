@@ -1,13 +1,13 @@
 """The OIDC sign-in's flow state: opened by ``start``, called back once, finished once.
 
-- A flow is bound to one browser by a secret in a short-lived cookie (``browser_secret``) and to
+- A flow is bound to one browser by a random value in a short-lived cookie (``cookie_value``) and to
   one authorization request by ``state``. The callback matches both, so a ``state`` from another
   browser's flow, or a callback without the flow cookie, matches nothing (login CSRF).
 - ``called_back`` and ``finish`` are each one conditional ``UPDATE``: of two requests at once,
   exactly one wins, and a flow is used at most once. A flow expires `FLOW_LIFETIME` after it was
   opened, called back or not.
-- Only the SHA-256 of ``state`` and of the browser secret are stored. The ``nonce`` and the PKCE
-  ``code_verifier`` are stored as they are: the server sends them to the provider.
+- Only the SHA-256 of ``state`` and of the flow cookie's value are stored. The ``nonce`` and the
+  PKCE ``code_verifier`` are stored as they are: the server sends them to the provider.
 - ``return_to`` is kept only when it is a path inside the app (`safe_return_to`); a redirect
   never carries it.
 
@@ -63,7 +63,7 @@ class OpenedFlow:
 
     Parameters
     ----------
-    browser_secret
+    cookie_value
         The flow cookie's value: 32 random bytes, URL-safe.
     state
         The ``state`` parameter of the authorization request.
@@ -73,7 +73,7 @@ class OpenedFlow:
         The PKCE verifier; its S256 challenge goes into the authorization request.
     """
 
-    browser_secret: str = field(repr=False)
+    cookie_value: str = field(repr=False)
     state: str = field(repr=False)
     nonce: str = field(repr=False)
     code_verifier: str = field(repr=False)
@@ -271,7 +271,7 @@ class OidcFlowStore:
         now = self._clock()
         self.purge(now)
         opened = OpenedFlow(
-            browser_secret=secrets.token_urlsafe(32),
+            cookie_value=secrets.token_urlsafe(32),
             state=secrets.token_urlsafe(32),
             nonce=secrets.token_urlsafe(32),
             code_verifier=secrets.token_urlsafe(64),
@@ -280,7 +280,7 @@ class OidcFlowStore:
             OidcFlow(
                 id=uuid.uuid4(),
                 state_hash=hash_secret(opened.state),
-                browser_hash=hash_secret(opened.browser_secret),
+                browser_hash=hash_secret(opened.cookie_value),
                 nonce=opened.nonce,
                 code_verifier=opened.code_verifier,
                 purpose=purpose,
@@ -321,14 +321,14 @@ class OidcFlowStore:
             return None
         return self._session.get(OidcFlow, claimed)
 
-    def called_back(self, state: str, browser_secret: str) -> OidcFlow | None:
+    def called_back(self, state: str, cookie_value: str) -> OidcFlow | None:
         """Take the flow a callback names, once.
 
         Parameters
         ----------
         state
             The callback's ``state``.
-        browser_secret
+        cookie_value
             The flow cookie the browser presented.
 
         Returns
@@ -337,12 +337,12 @@ class OidcFlowStore:
             The flow, now marked called back; `None` when no open, unexpired flow matches both,
             or it was called back before.
         """
-        if not state or not browser_secret:
+        if not state or not cookie_value:
             return None
         return self._claim(
             [
                 OidcFlow.state_hash == hash_secret(state),
-                OidcFlow.browser_hash == hash_secret(browser_secret),
+                OidcFlow.browser_hash == hash_secret(cookie_value),
                 OidcFlow.called_back_at.is_(None),
                 OidcFlow.finished_at.is_(None),
             ],
@@ -366,12 +366,12 @@ class OidcFlowStore:
             .execution_options(synchronize_session="fetch")
         )
 
-    def _waiting(self, browser_secret: str) -> list[ColumnElement[bool]]:
+    def _waiting(self, cookie_value: str) -> list[ColumnElement[bool]]:
         """Name this browser's flow that was called back and not finished.
 
         Parameters
         ----------
-        browser_secret
+        cookie_value
             The flow cookie the browser presented.
 
         Returns
@@ -380,17 +380,17 @@ class OidcFlowStore:
             The conditions on `OidcFlow`.
         """
         return [
-            OidcFlow.browser_hash == hash_secret(browser_secret),
+            OidcFlow.browser_hash == hash_secret(cookie_value),
             OidcFlow.called_back_at.is_not(None),
             OidcFlow.finished_at.is_(None),
         ]
 
-    def pending_purpose(self, browser_secret: str) -> str | None:
+    def pending_purpose(self, cookie_value: str) -> str | None:
         """Read the purpose of this browser's flow waiting to be finished, without taking it.
 
         Parameters
         ----------
-        browser_secret
+        cookie_value
             The flow cookie the browser presented.
 
         Returns
@@ -398,22 +398,22 @@ class OidcFlowStore:
         str or None
             The purpose; `None` when there is no such unexpired flow.
         """
-        if not browser_secret:
+        if not cookie_value:
             return None
         return self._session.execute(
             select(OidcFlow.purpose).where(
-                *self._waiting(browser_secret), OidcFlow.expires_at > self._clock()
+                *self._waiting(cookie_value), OidcFlow.expires_at > self._clock()
             )
         ).scalar_one_or_none()
 
     def finish(
-        self, browser_secret: str, *, purposes: frozenset[str] = SIGN_IN_PURPOSES
+        self, cookie_value: str, *, purposes: frozenset[str] = SIGN_IN_PURPOSES
     ) -> OidcFlow | None:
         """Take the flow of this browser that was called back, once.
 
         Parameters
         ----------
-        browser_secret
+        cookie_value
             The flow cookie the browser presented.
         purposes
             The purposes the caller finishes; a flow of another purpose is left alone.
@@ -424,10 +424,10 @@ class OidcFlowStore:
             The flow, now marked finished, with its outcome; `None` when this browser has no
             called-back, unfinished, unexpired flow of those purposes.
         """
-        if not browser_secret:
+        if not cookie_value:
             return None
         return self._claim(
-            [*self._waiting(browser_secret), OidcFlow.purpose.in_(purposes)], "finished_at"
+            [*self._waiting(cookie_value), OidcFlow.purpose.in_(purposes)], "finished_at"
         )
 
     def purge(self, now: datetime) -> int:

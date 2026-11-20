@@ -282,7 +282,7 @@ def _open_flow(
         code_verifier=opened.code_verifier,
         extra=extra,
     )
-    set_flow_cookie(response, origin, opened.browser_secret)
+    set_flow_cookie(response, origin, opened.cookie_value)
     return OidcStartOut(authorization_url=url)
 
 

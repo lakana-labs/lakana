@@ -6962,11 +6962,11 @@ in; linking, the token window and `lakana login` are the next pull requests of #
   (`test_sign_in_rules_refuse_an_access_token`, `test_azp_must_be_ours_when_present`,
   `test_two_audiences_need_azp`, `test_nonce_must_match`, `test_token_confusion_is_token_invalid`).
 - **The flow** (R5, R6, `lakana_core.identity.oidc_flows`): `start` stores the SHA-256 of `state`
-  and of a browser secret, the nonce and the PKCE verifier in `oidc_flows`; the flow expires after
-  10 minutes. The callback takes the flow only when `state` and the browser's flow cookie name it
-  together, in one conditional `UPDATE`, committed before anything else, so a `state` from another
-  browser's flow or a callback without the cookie signs nobody in and a replayed callback finds
-  nothing (`test_callback_with_another_browsers_state_is_refused`,
+  and of the flow cookie's random value, the nonce and the PKCE verifier in `oidc_flows`; the flow
+  expires after 10 minutes. The callback takes the flow only when `state` and the browser's flow
+  cookie name it together, in one conditional `UPDATE`, committed before anything else, so a `state`
+  from another browser's flow or a callback without the cookie signs nobody in and a replayed
+  callback finds nothing (`test_callback_with_another_browsers_state_is_refused`,
   `test_a_replayed_callback_is_refused`). The callback never starts a session: it writes the outcome
   on the flow and always answers 303 to `<public_url>/sign-in/oidc`. That page calls `finish`, a
   same-origin POST (the guard's `Origin` rule applies), which takes the flow once, starts the
