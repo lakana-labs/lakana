@@ -145,6 +145,59 @@ describe("Change storage", () => {
     expect(screen.queryByRole("button", { name: "Change storage of dev" })).not.toBeInTheDocument();
   });
 
+  it("an environment created in this visit offers its secrets and keeps Change storage", async () => {
+    let staging: EnvironmentOut | null = null;
+    const { user } = renderShell("/settings/environments", {
+      routes: {
+        // whoami names an environment once it exists.
+        "GET /api/v1/whoami": () => ({
+          status: 200,
+          body: whoami("admin", true, true, true, staging === null ? ["dev"] : ["dev", "staging"]),
+        }),
+        "GET /api/v1/environments": { status: 200, body: [DEV] },
+        "POST /api/v1/environments": () => {
+          staging = { ...DEV, name: "staging", storage_root: "s3://corp-lake/staging" };
+          return { status: 201, body: staging };
+        },
+        "GET /api/v1/environments/staging": () => ({ status: 200, body: staging }),
+        "GET /api/v1/environments/staging/usage": { status: 500, body: { detail: "down" } },
+        "GET /api/v1/environments/staging/storage": {
+          status: 200,
+          body: { ...STORAGE, root: "s3://corp-lake/staging" },
+        },
+        "GET /api/v1/environments/staging/secrets": {
+          status: 200,
+          body: [aSecret({ name: "corp-s3" })],
+        },
+        "PATCH /api/v1/environments/staging/storage": () => {
+          staging = { ...(staging as EnvironmentOut), storage_secret_ref: "corp-s3" };
+          return { status: 200, body: staging };
+        },
+        "GET /api/v1/sign-in/session": freshSession(),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Create environment" }));
+    const create = await screen.findByRole("dialog");
+    await user.type(within(create).getByRole("textbox", { name: "Name" }), "staging");
+    await user.click(within(create).getByRole("radio", { name: "Amazon S3 or compatible" }));
+    await user.type(
+      within(create).getByRole("textbox", { name: "Root" }),
+      "s3://corp-lake/staging",
+    );
+    await user.click(within(create).getByRole("button", { name: "Create environment" }));
+
+    await user.click(await screen.findByRole("button", { name: "Change storage of staging" }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(await within(dialog).findByRole("button", { name: /Storage secret/ }));
+    await user.click(screen.getByRole("option", { name: "corp-s3" }));
+    await user.click(within(dialog).getByRole("button", { name: "Change storage" }));
+
+    expect(await screen.findByText("corp-s3", { selector: "dd" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Change storage of staging" })).toHaveFocus();
+    });
+  });
+
   it("keeps the options unless told to replace them", async () => {
     const shell = await openStorage();
     const { dialog, user } = shell;

@@ -65,7 +65,9 @@ describe("RunRow", () => {
       aJobRun({ status: "queued", started_at: null, finished_at: null, trigger: "api" }),
     );
     expect(queued).toHaveTextContent("API");
-    expect(queued.querySelector("td.number")).toBeEmptyDOMElement();
+    const duration = queued.querySelector("td.number") as HTMLElement;
+    expect(within(duration).getByText("–")).toHaveAttribute("aria-hidden", "true");
+    expect(within(duration).getByText("Not started yet")).toHaveClass("visually-hidden");
   });
 
   it("names a run of no job by its repository and says by hand", () => {

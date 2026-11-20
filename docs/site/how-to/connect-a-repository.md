@@ -64,10 +64,14 @@ on the instance, or `READ_ENVIRONMENT` in any environment. Each row names the UR
 page. The page shows the URL (with **Open in your git host ›** for GitHub, GitLab and
 Bitbucket), the credential: an HTTPS repository's secret and username, an SSH repository's
 trusted host keys by type and fingerprint (a certificate authority's key says so, and
-revoked keys are listed apart, since ssh refuses them) and its public deploy keys of the environments you
-read, each with **Copy public key**. Someone who only reads sees this read-only, as the
-command line answers them (`lakana repo show NAME`); no private key and no secret's value is
-ever shown.
+revoked keys are listed apart, since ssh refuses them) and its public deploy keys of the
+environments you read, each with **Copy public key**. The host keys are the ones ssh reads
+from the repository's known_hosts, each listed once, with the fingerprint `ssh-keygen -l`
+prints (a certificate's is that of the key it certifies); a line ssh would skip, such as a
+damaged key, is not listed, and neither is a certificate on a line without a marker, which
+ssh never trusts a host through. Someone who only reads sees this read-only, as the command
+line answers them (`lakana repo show NAME`); no private key and no secret's value is ever
+shown.
 
 Whoever has `MANAGE_REPOSITORY` also sees **Connect a repository** above the list, and on each
 page:

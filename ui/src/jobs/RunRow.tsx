@@ -10,9 +10,9 @@ import { Link } from "react-router";
 
 import type { RunOut } from "../api/jobs";
 import { useWhen } from "../shell/useWhen";
-import { formatDuration, secondsBetween } from "./format";
 import { jobRunPath } from "./paths";
 import { RunCells } from "./RunCells";
+import { RunDuration } from "./RunDuration";
 import "./runStrings";
 import { isActive } from "./status";
 
@@ -108,7 +108,6 @@ function Tasks({ run }: RunRowProps): JSX.Element {
  * @returns The row.
  */
 export function RunRow({ run }: RunRowProps): JSX.Element {
-  const { t } = useTranslation();
   const when = useWhen();
   return (
     <tr>
@@ -120,8 +119,7 @@ export function RunRow({ run }: RunRowProps): JSX.Element {
         <time dateTime={run.created_at}>{when(run.created_at)}</time>
       </td>
       <td className="number">
-        {run.started_at !== null &&
-          formatDuration(secondsBetween(run.started_at, run.finished_at ?? undefined), t)}
+        <RunDuration run={run} />
       </td>
       <td>
         <Tasks run={run} />

@@ -1,7 +1,7 @@
 /**
- * The work of the Queries screen: the library of saved and recent queries, the toolbar (the
- * query's name, Save…, Delete…, Format, the environment and Run, which becomes Cancel while the
- * run is active), the SQL editor, what went wrong, and the result.
+ * The work of the Queries screen: the library of saved and recent queries beside the editor bar
+ * ({@link QueryToolbar}), the saved query's facts, the SQL editor, and the run under it
+ * ({@link RunResult}).
  *
  * @packageDocumentation
  */
@@ -22,33 +22,29 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { listQueryEnvironments, type QueryEnvironmentOut } from "../api/queries";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
-import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { Loaded } from "../shell/Loaded";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
-import { PendingButton } from "../shell/PendingButton";
-import { shortcutLabel } from "../shell/shortcut";
 import { useFolded } from "../shell/useFolded";
 import { useResource } from "../shell/useResource";
-import { markedText, VisibleText } from "../shell/VisibleText";
-import { problemText } from "../sign-in/messages";
-import type { StatusKind } from "../status/status";
-import { StatusLabel } from "../status/StatusLabel";
+import { markedText } from "../shell/VisibleText";
 import { DeleteSavedDialog } from "./DeleteSavedDialog";
 import { catalogCache } from "./editor/catalog";
 import type { SqlEditorHandle } from "./editor/SqlEditor";
 import { Library } from "./Library";
 import { LibraryFold } from "./LibraryFold";
 import { savedPath } from "./paths";
-import { endedMessage, QueryError } from "./QueryError";
+import { endedMessage } from "./QueryError";
 import { QueryNote } from "./QueryNote";
+import { QueryToolbar } from "./QueryToolbar";
 import { readEnvironment, readFilter, writeEnvironment } from "./remember";
-import { ResultPanel } from "./ResultPanel";
+import { RunResult } from "./RunResult";
 import { savedWho } from "./SavedList";
 import { SaveQueryDialog } from "./SaveQueryDialog";
 import { useAfter } from "./useAfter";
-import { type QueriesAddress, type QueriesState, useOpenedSaved } from "./useOpenedSaved";
-import { type QueryRunState, useQueryRun } from "./useQueryRun";
+import { type QueriesAddress, useOpenedSaved } from "./useOpenedSaved";
+import { useQueryNote } from "./useQueryNote";
+import { useQueryRun } from "./useQueryRun";
 import "./queries.css";
 import "./queryStrings";
 
@@ -73,61 +69,6 @@ export function EditorSkeleton(): JSX.Element {
   );
 }
 
-/**
- * Why a queued run waits, in the server's words, once it has waited a second.
- *
- * @param props - The sentence.
- * @param props.message - The server's sentence.
- * @returns The sentence, or nothing in the first second.
- */
-function WaitingFor({ message }: { readonly message: string }): JSX.Element | null {
-  const slow = useAfter();
-  return slow ? <VisibleText text={message} /> : null;
-}
-
-/** Properties of {@link RunLine}. */
-interface RunLineProps {
-  /** The run's state. */
-  readonly state: QueryRunState;
-}
-
-/**
- * The run's state in words: submitting, starting, queued (with the server's reason after a
- * second) or running with its glyph, reading the rows, or how it ended when it did not succeed.
- * A run that succeeded says its rows in the result's own line.
- *
- * @param props - The state.
- * @param props.state - The run's state.
- * @returns The line, a live region that is always there.
- */
-export function RunLine({ state }: RunLineProps): JSX.Element {
-  const { t } = useTranslation();
-  const { phase, run } = state;
-  let words: JSX.Element | string | null = null;
-  if (phase === "submitting") {
-    words = t("queries.state.submitting");
-  } else if (phase === "loading_page") {
-    words = t("queries.state.reading");
-  } else if (run === null) {
-    words = phase === "waiting" ? t("queries.state.starting") : null;
-  } else if (phase === "waiting" || (phase === "done" && run.status !== "SUCCEEDED")) {
-    words = (
-      <>
-        {/* The five states of a run are five of the glyphs' kinds, in lower case. */}
-        <StatusLabel kind={run.status.toLowerCase() as StatusKind} />
-        {run.status === "QUEUED" && run.waiting_for !== null && (
-          <WaitingFor message={run.waiting_for.message} />
-        )}
-      </>
-    );
-  }
-  return (
-    <p role="status" className="queries-run-line">
-      {words}
-    </p>
-  );
-}
-
 /** Properties of {@link Work}. */
 interface WorkProps {
   /** The environments where the person may run a query; at least one. */
@@ -136,11 +77,13 @@ interface WorkProps {
   readonly address: QueriesAddress | null;
   /** The Queries ▾ button of a narrow screen, first in the toolbar; null beside the library. */
   readonly fold: ReactNode;
+  /** Called after a save or a delete, so Saved is read again; the same function on every render. */
+  readonly onSavedChange: () => void;
   /**
-   * Called after a save or a delete, a submit taken or a followed run's end, so the library reads
-   * its lists again; the same function on every render.
+   * Called after a submit taken or a followed run's end, so Recent is read again; the same
+   * function on every render.
    */
-  readonly onLibraryChange: () => void;
+  readonly onRecentChange: () => void;
 }
 
 /**
@@ -148,21 +91,28 @@ interface WorkProps {
  * no run (a new query, a saved one) shows no run: entering it stops following the old one
  * (without a cancel) and keeps the editor's text.
  *
- * @param props - The environments, the address, the fold and the library's reload.
+ * @param props - The environments, the address, the fold and the library's reloads.
  * @param props.environments - The environments where the person may run a query.
  * @param props.address - The run or saved query the address names, or null.
  * @param props.fold - The Queries ▾ button, or null.
- * @param props.onLibraryChange - Called when the library's lists changed.
+ * @param props.onSavedChange - Called when Saved changed.
+ * @param props.onRecentChange - Called when Recent changed.
  * @returns The work column.
  */
-function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.Element {
+function Work({
+  environments,
+  address,
+  fold,
+  onSavedChange,
+  onRecentChange,
+}: WorkProps): JSX.Element {
   const { t } = useTranslation();
   const me = useMe();
   const navigate = useNavigate();
   const location = useLocation();
-  const state = location.state as QueriesState | null;
   const query = useQueryRun();
   const saved = useOpenedSaved(address);
+  const note = useQueryNote();
   const { opened, error: savedError } = saved;
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
@@ -212,9 +162,9 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
   const { listed } = query;
   useEffect(() => {
     if (listed > 0) {
-      onLibraryChange();
+      onRecentChange();
     }
-  }, [listed, onLibraryChange]);
+  }, [listed, onRecentChange]);
 
   const { open, reset } = query;
   const runAddress = address?.kind === "run" ? address : null;
@@ -263,77 +213,42 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
   };
   return (
     <div className="queries-work">
-      <div className="queries-toolbar">
-        {fold}
-        <p className="queries-name">
-          <VisibleText text={name} />
-        </p>
-        <Button
-          className="button"
-          isDisabled={readOnly}
-          onPress={() => {
-            setDialog("save");
-          }}
-        >
-          {t("queries.save.open")}
-        </Button>
-        {opened?.actions.includes("delete") === true && (
-          <Button
-            className="button"
-            onPress={() => {
-              setDialog("delete");
-            }}
-          >
-            {t("queries.delete.open")}
-          </Button>
-        )}
-        <Button
-          className="button"
-          isDisabled={readOnly}
-          onPress={() => {
-            void editor.current?.format().then(
-              (formatted) => {
-                setFormatLine(formatted ? null : "unreadable");
-              },
-              () => {
-                setFormatLine("unloaded");
-              },
-            );
-          }}
-        >
-          {t("queries.format")}
-        </Button>
-        <EnvironmentPicker
-          environments={environments}
-          value={environment}
-          onChange={(chosen) => {
-            setPicked({ at, environment: chosen });
-            writeEnvironment(chosen);
-          }}
-        />
-        {/* One button that is Run, or Cancel while the run is active, so the focus stays on it. */}
-        <PendingButton
-          ref={runButton}
-          className={active ? "button queries-run" : "button button-primary queries-run"}
-          pending={query.phase === "submitting" || query.cancelling}
-          isDisabled={readOnly || (!active && !allowed)}
-          onPress={active ? query.cancel : run}
-        >
-          {active
-            ? t(query.cancelling ? "queries.cancelling" : "queries.cancel")
-            : t("queries.run")}
-        </PendingButton>
-        {/* Beside Run, not in it: text inside a button belongs in its name (WCAG 2.5.3). */}
-        {!active && (
-          <kbd className="queries-run-keys" aria-hidden="true">
-            {t(`queries.runKeys.${shortcutLabel(navigator)}`)}
-          </kbd>
-        )}
-      </div>
+      <QueryToolbar
+        fold={fold}
+        name={name}
+        readOnly={readOnly}
+        deletable={opened?.actions.includes("delete") === true}
+        environments={environments}
+        environment={environment}
+        allowed={allowed}
+        query={query}
+        runButton={runButton}
+        onSave={() => {
+          setDialog("save");
+        }}
+        onDelete={() => {
+          setDialog("delete");
+        }}
+        onFormat={() => {
+          void editor.current?.format().then(
+            (formatted) => {
+              setFormatLine(formatted ? null : "unreadable");
+            },
+            () => {
+              setFormatLine("unloaded");
+            },
+          );
+        }}
+        onEnvironment={(chosen) => {
+          setPicked({ at, environment: chosen });
+          writeEnvironment(chosen);
+        }}
+        onRun={run}
+      />
       {!allowed && (
         <p className="queries-saved-facts">{t("queries.notAllowed", { environment })}</p>
       )}
-      {state?.note !== undefined && <QueryNote note={state.note} />}
+      {note !== null && <QueryNote note={note} />}
       {savedError !== null && (
         // The server's cause, then the next step: Try again when another read may help, and a
         // new query in every case.
@@ -380,34 +295,14 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           {t(formatLine === "unreadable" ? "queries.formatUnreadable" : "queries.formatUnloaded")}
         </p>
       )}
-      {query.cancelRefusal !== null && (
-        <p role="alert" className="step-error queries-alert">
-          {t("queries.cancelRefused", { problem: problemText(t, query.cancelRefusal) })}
-        </p>
-      )}
-      <RunLine state={query} />
-      <QueryError
-        state={query}
-        onGoTo={(line, column) => {
-          editor.current?.focusAt(line, column);
-        }}
-        onRetry={() => {
-          // Try again goes with the alert it is in: the focus moves to Run, which is Cancel
-          // while the run is followed again.
-          query.retry();
-          runButton.current?.focus();
-        }}
+      <RunResult
+        query={query}
+        editor={editor}
+        runButton={runButton}
+        environment={runEnvironment ?? environment}
+        name={name}
+        saved={opened?.name ?? null}
       />
-      {query.phase === "done" && query.run?.status === "SUCCEEDED" && (
-        <ResultPanel
-          environment={runEnvironment ?? environment}
-          run={query.run}
-          page={query.page}
-          name={name}
-          saved={opened?.name ?? null}
-          onMore={query.more}
-        />
-      )}
       {dialog === "save" && (
         <SaveQueryDialog
           environment={environment}
@@ -415,7 +310,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           opened={opened}
           onSaved={(saved, created) => {
             close();
-            onLibraryChange();
+            onSavedChange();
             // A new saved query moves to its address; one saved again stays where it is (its
             // own address, or the run's), and its history entry carries it as it is now.
             void navigate(created ? savedPath(saved.environment, saved.id) : location.pathname, {
@@ -431,7 +326,7 @@ function Work({ environments, address, fold, onLibraryChange }: WorkProps): JSX.
           saved={opened}
           onDone={() => {
             close();
-            onLibraryChange();
+            onSavedChange();
             // The SQL stays in the editor; the note takes the focus from the gone Delete….
             void navigate("/queries", {
               state: { keepFocus: true, note: { kind: "deleted", name: opened.name } },
@@ -469,9 +364,14 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
   const folded = useFolded();
   const environments = useResource(listQueryEnvironments);
   const [filter, setFilter] = useState(readFilter);
-  const [reloadKey, setReloadKey] = useState(0);
-  const reloadLibrary = useCallback(() => {
-    setReloadKey((key) => key + 1);
+  // Each list is read again on its own, so one's reload keeps the other's pages (Show more).
+  const [savedKey, setSavedKey] = useState(0);
+  const [recentKey, setRecentKey] = useState(0);
+  const reloadSaved = useCallback(() => {
+    setSavedKey((key) => key + 1);
+  }, []);
+  const reloadRecent = useCallback(() => {
+    setRecentKey((key) => key + 1);
   }, []);
   const address =
     mode === "new" ? null : { kind: mode, environment: String(params.env), id: String(params.id) };
@@ -495,7 +395,8 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
                 environments: listed,
                 filter,
                 onFilter: setFilter,
-                reloadKey,
+                savedKey,
+                recentKey,
               };
               return (
                 <>
@@ -508,7 +409,8 @@ export function QueryWork({ mode }: QueryWorkProps): JSX.Element {
                     environments={listed}
                     address={address}
                     fold={folded ? <LibraryFold {...library} /> : null}
-                    onLibraryChange={reloadLibrary}
+                    onSavedChange={reloadSaved}
+                    onRecentChange={reloadRecent}
                   />
                 </>
               );
