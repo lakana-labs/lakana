@@ -50,6 +50,7 @@ from lakana_core.models import (
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, UiConfig
 from tests.conftest import _TEST_MASTER_KEY, AUTH_HEADER, PUBLIC, write_ui_dist
+from tests.oidc_fake import ISSUER, FakeProvider
 from tests.server_test_helpers import (
     create_environment,
     create_namespace,
@@ -1185,7 +1186,82 @@ def client(
             )
             _deployment(c, "dev", "analytics")
             cast(FastAPI, c.app).state.step_up_root = root
+            _linked_administrator(c)
             yield c
+
+
+LINKED_ADMIN = "linked-admin"
+"""An administrator linked to the identity provider, who steps up only there (#32, PR 2)."""
+
+ONLY_A_PASSKEY_OWNER: dict[tuple[str, str], str] = {
+    ("POST", "/api/v1/principals/{name}/passkeys/options"): (
+        "adds a passkey to the caller's own account, which a linked person cannot do at all "
+        "(ProviderSignInRequired, test_linked_person_cannot_add_a_passkey)"
+    ),
+}
+"""Step-up operations a linked person never reaches, with why."""
+
+
+def _linked_administrator(client: TestClient) -> None:
+    """Create `LINKED_ADMIN` with ADMIN, linked, and give the app a fake identity provider.
+
+    Parameters
+    ----------
+    client
+        The client.
+    """
+    _ok(
+        client.post(
+            "/api/v1/principals", headers=AUTH_HEADER, json={"name": LINKED_ADMIN, "type": "USER"}
+        )
+    )
+    grant = {"principal": LINKED_ADMIN, "role": "ADMIN", "kind": "INSTANCE"}
+    _ok(client.post("/api/v1/grants", headers=AUTH_HEADER, json=grant))
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        row = session.execute(select(Principal).where(Principal.name == LINKED_ADMIN)).scalar_one()
+        row.oidc_issuer, row.oidc_subject = ISSUER, LINKED_ADMIN
+        row.last_provider_sign_in_at = datetime.now(UTC)
+        session.commit()
+    fake = FakeProvider()
+    app.state.fake_provider = fake
+    app.state.oidc_provider = fake.provider()
+
+
+def _provider_step_up(client: TestClient, cookie: str, value: str, csrf: str) -> None:
+    """Confirm a linked person's session at the provider, through the routes.
+
+    Parameters
+    ----------
+    client
+        The client.
+    cookie
+        The session cookie's name.
+    value
+        The session cookie's value.
+    csrf
+        The session's CSRF token.
+    """
+    fake: FakeProvider = cast(FastAPI, client.app).state.fake_provider
+    client.cookies.set(cookie, value)
+    try:
+        headers = {"X-Lakana-CSRF": csrf}
+        started = _ok(
+            client.post("/api/v1/sign-in/oidc/step-up/start", headers=headers, json={}), 200
+        )
+        code, state = fake.authorize(
+            started["authorization_url"],
+            sub=LINKED_ADMIN,
+            auth_time=int(datetime.now(UTC).timestamp()),
+        )
+        client.get(
+            "/api/v1/sign-in/oidc/callback",
+            params={"code": code, "state": state},
+            follow_redirects=False,
+        )
+        _ok(client.post("/api/v1/sign-in/oidc/finish-in-session", headers=headers, json={}), 200)
+    finally:
+        client.cookies.clear()
 
 
 def _send(client: TestClient, method: str, request: Request, headers: dict[str, str]) -> Any:  # ruff: ignore[any-type]
@@ -1246,6 +1322,31 @@ def test_a_stale_session_is_asked_for_a_touch_and_a_token_never(
     assert done.status_code == case.ok, done.text
     by_token = _send(client, method, case.build(client), AUTH_HEADER)
     assert by_token.status_code == (case.token or case.ok), by_token.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [operation for operation in STEP_UP_ROUTES if operation not in ONLY_A_PASSKEY_OWNER],
+)
+def test_a_linked_administrator_steps_up_through_the_provider(
+    client: TestClient, method: str, path: str
+) -> None:
+    """A linked person has no passkey way in: a provider step-up completes each action (#32)."""
+    case = STEP_UP_ROUTES[method, path]
+    stale = datetime.now(UTC) - timedelta(minutes=16)
+    name, value, csrf = signed_in(client, LINKED_ADMIN, touched_at=stale, via="oidc")
+    headers = session_headers(name, value, csrf)
+    request = case.build(client)
+    refused = _send(client, method, request, headers)
+    assert (refused.status_code, refused.json()["type"]) == (403, "StepUpRequired"), refused.text
+    _provider_step_up(client, name, value, csrf)
+    done = _send(client, method, request, headers)
+    assert done.status_code == case.ok, done.text
+
+
+def test_every_passkey_only_entry_is_a_step_up_route() -> None:
+    """A stale entry cannot hide a route from the linked administrator's test."""
+    assert set(ONLY_A_PASSKEY_OWNER) <= set(STEP_UP_ROUTES)
 
 
 def test_a_stale_session_deletes_an_environment_without_purge(client: TestClient) -> None:
