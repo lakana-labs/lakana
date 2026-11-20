@@ -192,6 +192,80 @@ def test_the_server_does_not_start_with_issuers_and_no_audience(
         Settings()
 
 
+def test_oidc_off_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Without `LAKANA_OIDC__ISSUER` OIDC sign-in is off and needs nothing else."""
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/p.db")
+    settings = Settings()
+    assert not settings.oidc.enabled
+    assert settings.oidc.scopes == ["openid", "profile", "email"]
+
+
+def _oidc_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Set everything OIDC sign-in needs.
+
+    Parameters
+    ----------
+    monkeypatch
+        The test's environment.
+    tmp_path
+        A directory for the database file.
+    """
+    monkeypatch.setenv("LAKANA_DATABASE__URL", f"sqlite:///{tmp_path}/p.db")
+    monkeypatch.setenv("LAKANA_OIDC__ISSUER", "https://idp.example.com/realms/lakana")
+    monkeypatch.setenv("LAKANA_OIDC__CLIENT_ID", "lakana")
+    monkeypatch.setenv("LAKANA_OIDC__CLIENT_SECRET", "s3cr3t-sentinel")
+    monkeypatch.setenv("LAKANA_UI__ENABLED", "true")
+    monkeypatch.setenv("LAKANA_UI__PUBLIC_URL", "https://lakana.example.com")
+
+
+def test_oidc_reads_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Every `LAKANA_OIDC__*` variable reaches the settings; the secret stays out of `repr`."""
+    _oidc_environment(monkeypatch, tmp_path)
+    monkeypatch.setenv("LAKANA_OIDC__SCOPES", "openid email")
+    monkeypatch.setenv("LAKANA_OIDC__DISPLAY_NAME", "Contoso")
+    monkeypatch.setenv("LAKANA_OIDC__ALLOW_HOSTS", "idp.example.com")
+    settings = Settings()
+    config = settings.oidc
+    assert config.enabled
+    assert config.client_secret is not None
+    assert config.client_secret.get_secret_value() == "s3cr3t-sentinel"
+    assert (config.scopes, config.shown_name, config.allow_hosts) == (
+        ["openid", "email"],
+        "Contoso",
+        ["idp.example.com"],
+    )
+    assert "s3cr3t-sentinel" not in repr(settings) + str(settings)
+
+
+@pytest.mark.parametrize("missing", ["LAKANA_OIDC__CLIENT_ID", "LAKANA_OIDC__CLIENT_SECRET"])
+def test_oidc_needs_client_id_and_secret(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing: str
+) -> None:
+    """The message names the variable that is missing."""
+    _oidc_environment(monkeypatch, tmp_path)
+    monkeypatch.delenv(missing)
+    with pytest.raises(pydantic.ValidationError, match=f"{missing} is required") as info:
+        Settings()
+    assert "s3cr3t-sentinel" not in str(info.value)
+
+
+@pytest.mark.parametrize(
+    ("missing", "named"),
+    [
+        ("LAKANA_UI__ENABLED", "LAKANA_UI__ENABLED=true"),
+        ("LAKANA_UI__PUBLIC_URL", "LAKANA_UI__PUBLIC_URL"),
+    ],
+)
+def test_oidc_needs_the_interface_and_a_public_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, missing: str, named: str
+) -> None:
+    """Each message names the variable; the redirect address comes from the public URL."""
+    _oidc_environment(monkeypatch, tmp_path)
+    monkeypatch.delenv(missing)
+    with pytest.raises(pydantic.ValidationError, match=named):
+        Settings()
+
+
 def test_a_main_language_that_is_not_a_tag_stops_the_start(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

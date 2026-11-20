@@ -60,6 +60,11 @@ _PICTURE = (
     "person's face"
 )
 
+_OIDC = (
+    "OIDC sign-in runs in the browser, through the provider's page, and starts a browser "
+    "session; lakana login gets its token another way (#32, PR 3)"
+)
+
 BROWSER_ONLY: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/sign-in/links/describe"): (
         "the sign-in page reads the link's fragment, which only the browser that opened it has"
@@ -69,6 +74,10 @@ BROWSER_ONLY: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/v1/sign-in/passkey/options"): _WEBAUTHN,
     ("POST", "/api/v1/sign-in/passkey"): _WEBAUTHN,
+    ("GET", "/api/v1/sign-in/oidc"): "the sign-in page asks whether to show the provider's button",
+    ("POST", "/api/v1/sign-in/oidc/start"): _OIDC,
+    ("GET", "/api/v1/sign-in/oidc/callback"): _OIDC,
+    ("POST", "/api/v1/sign-in/oidc/finish"): _OIDC,
     ("POST", "/api/v1/sign-in/step-up/options"): _WEBAUTHN,
     ("POST", "/api/v1/sign-in/step-up"): _WEBAUTHN,
     ("POST", "/api/v1/principals/{name}/passkeys/options"): _WEBAUTHN,

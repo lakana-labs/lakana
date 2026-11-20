@@ -23854,6 +23854,260 @@
         }
       }
     },
+    "/api/v1/sign-in/oidc": {
+      "get": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Say whether people sign in through an identity provider, and its name",
+        "description": "Needs no credential: the sign-in page asks before anyone is signed in, to show \"Sign in with <provider>\". Without `LAKANA_OIDC__ISSUER` the answer is `enabled: false` and the interface does not mention OIDC.",
+        "operationId": "get_oidc_info_api_v1_sign_in_oidc_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcInfoOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/callback": {
+      "get": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Come back from the identity provider",
+        "description": "The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow is called back once.",
+        "operationId": "oidc_callback_api_v1_sign_in_oidc_callback_get",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            },
+            "description": "The authorization code the provider issued."
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            },
+            "description": "The flow's state, as the provider sends it back."
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            },
+            "description": "The provider's error, when it refused."
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "Always to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`."
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/start": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Start signing in through the identity provider",
+        "description": "Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.",
+        "operationId": "start_oidc_sign_in_api_v1_sign_in_oidc_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcStartIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcStartOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/finish": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Finish signing in through the identity provider, after the callback",
+        "description": "Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended) and its cookie. A provider sign-in is no passkey touch: an action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes). A flow is finished once, whatever the answer.",
+        "operationId": "finish_oidc_sign_in_api_v1_sign_in_oidc_finish_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcSignInOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sign-in/notices": {
       "get": {
         "tags": [
@@ -27679,6 +27933,8 @@
           "SIGN_IN_LINK_ISSUED",
           "SIGN_IN_LINK_WITHDRAWN",
           "SIGN_IN_LINK_USED",
+          "SIGN_IN_OIDC",
+          "SIGN_IN_OIDC_REFUSED",
           "PASSKEY_ADDED",
           "PASSKEY_REMOVED",
           "PASSKEY_DISABLED",
@@ -27928,6 +28184,8 @@
           "SIGN_IN_LINK_ISSUED",
           "SIGN_IN_LINK_WITHDRAWN",
           "SIGN_IN_LINK_USED",
+          "SIGN_IN_OIDC",
+          "SIGN_IN_OIDC_REFUSED",
           "PASSKEY_ADDED",
           "PASSKEY_REMOVED",
           "PASSKEY_DISABLED",
@@ -33346,6 +33604,90 @@
         "title": "NotifyTestOut",
         "description": "The test of a webhook, queued.\n\nParameters\n----------\ndelivery_id\n    The delivery to read with ``GET /environments/{env}/notifications/{delivery_id}``."
       },
+      "OidcInfoOut": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "display_name"
+        ],
+        "title": "OidcInfoOut",
+        "description": "Response body of `GET /api/v1/sign-in/oidc`: whether people sign in through a provider.\n\nParameters\n----------\nenabled\n    Whether OIDC sign-in is on (`LAKANA_OIDC__ISSUER` is set).\ndisplay_name\n    The provider's name for the sign-in button (`LAKANA_OIDC__DISPLAY_NAME`, else the\n    issuer's host name); `null` while OIDC sign-in is off."
+      },
+      "OidcSignInOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "csrf_token": {
+            "type": "string",
+            "title": "Csrf Token"
+          },
+          "return_to": {
+            "type": "string",
+            "title": "Return To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "csrf_token",
+          "return_to"
+        ],
+        "title": "OidcSignInOut",
+        "description": "Response body of `POST /api/v1/sign-in/oidc/finish`; the session comes as a cookie.\n\nParameters\n----------\nname\n    The principal name now signed in.\ncsrf_token\n    The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every\n    request that carries the session cookie, reads too. Keep it in the page's own storage;\n    the server keeps only its hash and never returns it again.\nreturn_to\n    The page to open now: the path `start` was given, checked, or ``/``."
+      },
+      "OidcStartIn": {
+        "properties": {
+          "return_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "OidcStartIn",
+        "description": "Request body of `POST /api/v1/sign-in/oidc/start`.\n\nParameters\n----------\nreturn_to\n    The page of the interface to open after signing in, as a path such as\n    ``/catalog/prod``. Anything that is not a path inside the interface (another site, a\n    sign-in page, more than 2048 characters) is replaced by ``/``."
+      },
+      "OidcStartOut": {
+        "properties": {
+          "authorization_url": {
+            "type": "string",
+            "title": "Authorization Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authorization_url"
+        ],
+        "title": "OidcStartOut",
+        "description": "Response body of `POST /api/v1/sign-in/oidc/start`.\n\nParameters\n----------\nauthorization_url\n    The identity provider's sign-in page for this flow: send the browser there."
+      },
       "OnDemandTriggerOut": {
         "properties": {
           "kind": {
@@ -36881,7 +37223,7 @@
           "absolute_expires_at"
         ],
         "title": "SessionOut",
-        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie, nor the CSRF token, nor any hash of them.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active."
+        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie, nor the CSRF token, nor any hash of them.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or\n    ``oidc`` (the organisation's identity provider).\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active."
       },
       "SignInBoundsOut": {
         "properties": {

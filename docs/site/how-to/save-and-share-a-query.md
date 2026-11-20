@@ -65,7 +65,8 @@ Who sees a saved query:
 | anyone else | nothing: it is answered as a saved query that does not exist |
 
 A saved query of an environment that has been deleted is hidden with it, and is back, unchanged,
-when the environment is restored.
+when the environment is restored. Purging the environment, or the end of its undo period, deletes
+its saved queries for good.
 
 ## Find and open your saved queries
 
@@ -91,7 +92,10 @@ lakana query saved show "$id" --env dev --sql | lakana sql - --env dev
 
 The query runs as a query of yours, with your rights, and is in your list of queries like any other.
 If the SQL holds a control or invisible character (CRLF line endings are not one and print as stored), `--sql` prints nothing and exits with status 1,
-since the escaped text it could print would be another query; read it with `--output json`.
+since the escaped text it could print would be another query; read it with `--output json`. With
+`--output json`, `--sql` prints only `{"sql": "..."}`: parsed, it is the text exactly as stored, and
+every control, bidirectional or zero-width character in it is written as an escape such as
+`\u202e`, so you see where it is.
 
 ## Change and delete
 
@@ -160,10 +164,10 @@ for item in client.saved_queries.iter():  # every environment
 shown = client.saved_queries.get("dev", saved.id)
 if shown.sql is not None:  # None when you may not read it
     run = client.queries.submit(shown.sql, environment="dev")
-
-client.saved_queries.update(
-    "dev", saved.id, name="Orders by state", sql=shown.sql, visibility="private"
-)
+    # update replaces every field, the SQL included, so it needs the SQL you read.
+    client.saved_queries.update(
+        "dev", saved.id, name="Orders by state", sql=shown.sql, visibility="private"
+    )
 client.saved_queries.delete("dev", saved.id)
 ```
 

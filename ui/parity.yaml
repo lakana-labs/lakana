@@ -470,6 +470,10 @@
   { class: read, part: 8, done: true, note: "Settings › Configuration" }
 "GET /api/v1/settings/sign-in": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
+"GET /api/v1/sign-in/oidc":
+  { class: ui, part: 1, note: "OIDC sign-in (#32): the sign-in page's button" }
+"GET /api/v1/sign-in/oidc/callback":
+  { class: ui, part: 1, note: "OIDC sign-in (#32): the provider sends the browser here" }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/status": { class: read, part: 2, done: true }
 "GET /api/v1/tables": { class: read, part: 3, done: true }
@@ -602,6 +606,9 @@
 "POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
 "POST /api/v1/sign-in/local-link":
   { class: git, reason: "local tooling: server start --local signs the browser in" }
+"POST /api/v1/sign-in/oidc/finish":
+  { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc" }
+"POST /api/v1/sign-in/oidc/start": { class: ui, part: 1, note: "OIDC sign-in (#32)" }
 "POST /api/v1/sign-in/passkey": { class: ui, part: 1 }
 "POST /api/v1/sign-in/passkey/options": { class: ui, part: 1 }
 "POST /api/v1/sign-in/setup-link":
