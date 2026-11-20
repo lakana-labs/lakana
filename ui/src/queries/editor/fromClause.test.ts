@@ -132,6 +132,13 @@ describe("tablesRead", () => {
       "gold.b=gold.b",
     ]);
     expect(inScope("select * from gold.a as where |")).toEqual(["gold.a=gold.a"]);
+    expect(inScope("select * from gold.a as like gold.b b on true where |")).toEqual([
+      "gold.a=gold.a",
+    ]);
+    expect(inScope("select * from gold.a as glob, gold.b b where |")).toEqual([
+      "gold.a=gold.a",
+      "b=gold.b",
+    ]);
   });
 
   it("keeps taking at, asof and other words after AS for the alias", () => {
