@@ -30,6 +30,7 @@ from lakana_core.errors import (
 )
 from lakana_core.grants.admin import authorize_admin_only, holds_instance_admin
 from lakana_core.identifiers import NamespacePath, TableRef
+from lakana_core.identity.sessions import within_token_window
 from lakana_core.identity.tokens import generate_token, verify_secret
 from lakana_core.models import (
     LIVE_ENVIRONMENT,
@@ -413,7 +414,9 @@ def _minting_pat_works(session: Session, pat_id: uuid.UUID, now: datetime) -> bo
     Returns
     -------
     bool
-        `False` if the PAT is gone, revoked or expired, or its owner is missing or inactive.
+        `False` if the PAT is gone, revoked or expired, its owner is missing or inactive, or
+        its owner is linked to the identity provider and outside the token window
+        (`lakana_core.identity.sessions.within_token_window`).
     """
     pat = session.get(PersonalAccessToken, pat_id)
     if pat is None or pat.revoked_at is not None:
@@ -421,7 +424,7 @@ def _minting_pat_works(session: Session, pat_id: uuid.UUID, now: datetime) -> bo
     if pat.expires_at is not None and pat.expires_at <= now:
         return False
     owner = session.get(Principal, pat.principal_id)
-    return owner is not None and owner.is_active
+    return owner is not None and owner.is_active and within_token_window(session, pat, now)
 
 
 def resolve_task_token_scope(

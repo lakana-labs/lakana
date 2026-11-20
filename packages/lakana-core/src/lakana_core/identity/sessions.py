@@ -332,6 +332,34 @@ def token_window_ends_at(
     return signed_in + window
 
 
+def within_token_window(session: Session, pat: PersonalAccessToken, now: datetime) -> bool:
+    """Say whether a personal token's owner is within the token window, if they have one.
+
+    What `lakana_core.identity.pats.PatService.verify` asks, for the credentials made from a
+    personal token: a task token minted with it and a session a local link started with it.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    pat
+        The token.
+    now
+        The time to check at.
+
+    Returns
+    -------
+    bool
+        `False` only when its owner is linked to the identity provider and `now` is at or past
+        the end of their window (`token_window_ends_at`).
+    """
+    owner = session.get(Principal, pat.principal_id)
+    if owner is None:
+        return True
+    ends = token_window_ends_at(session, owner)
+    return ends is None or now < ends
+
+
 def check_token_window(days: int) -> None:
     """Refuse a token window outside `TOKEN_WINDOW_BOUNDS`, naming the bound.
 
@@ -747,10 +775,16 @@ class SessionService:
         now = self._clock()
         if source_pat_id is not None:
             pat = self._session.get(PersonalAccessToken, source_pat_id)
-            if pat is None or pat.principal_id != principal.id or not _pat_valid(pat, now):
+            if (
+                pat is None
+                or pat.principal_id != principal.id
+                or not _pat_valid(pat, now)
+                or not within_token_window(self._session, pat, now)
+            ):
                 raise PermissionDenied(
                     "This token cannot start a session for this account: it belongs to another "
-                    "account, or it was revoked or expired."
+                    "account, it was revoked or expired, or its owner has not signed in through "
+                    "the identity provider within the token window."
                 )
         if replacing:
             presented = self._find(replacing)
@@ -837,8 +871,8 @@ class SessionService:
             reason = "idle"
         elif principal is None or not principal.is_active:
             reason = "deactivated"
-        elif not self._source_valid(row, now):
-            reason = "token_revoked"
+        else:
+            reason = self._source_problem(row, now)
         if reason is not None:
             self._end_rows(BrowserSession.id == row.id, reason)
             self._session.commit()
@@ -1080,11 +1114,11 @@ class SessionService:
             r
             for r in rows
             if now < r.last_seen_at + timedelta(seconds=r.idle_seconds)
-            and self._source_valid(r, now)
+            and self._source_problem(r, now) is None
         ]
 
-    def _source_valid(self, row: BrowserSession, now: datetime) -> bool:
-        """Say whether the token a session was created through still works.
+    def _source_problem(self, row: BrowserSession, now: datetime) -> str | None:
+        """Say why the token a session was created through no longer works, if it does not.
 
         Parameters
         ----------
@@ -1095,14 +1129,20 @@ class SessionService:
 
         Returns
         -------
-        bool
-            `True` for a session made without a token, or one whose token is neither revoked
-            nor expired.
+        str or None
+            `None` for a session made without a token, or one whose token works;
+            ``token_revoked`` for a token revoked, expired or gone; ``token_window`` when its
+            person is linked to the identity provider and outside the token window
+            (`within_token_window`), as `lakana_core.identity.pats.PatService.verify` refuses.
         """
         if row.source_pat_id is None:
-            return True
+            return None
         pat = self._session.get(PersonalAccessToken, row.source_pat_id)
-        return pat is not None and _pat_valid(pat, now)
+        if pat is None or not _pat_valid(pat, now):
+            return "token_revoked"
+        if not within_token_window(self._session, pat, now):
+            return "token_window"
+        return None
 
 
 def _pat_valid(pat: PersonalAccessToken, now: datetime) -> bool:

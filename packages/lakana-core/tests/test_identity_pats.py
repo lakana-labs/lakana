@@ -871,7 +871,7 @@ def test_a_linked_person_who_never_signed_in_there_is_outside(session: Session) 
         PatService(session, AllowAllAuthorization()).verify(key_id, secret)
 
 
-def test_task_and_ci_tokens_ignore_the_window(session: Session) -> None:
+def test_a_task_token_an_administrator_minted_ignores_the_window(session: Session) -> None:
     from lakana_core.bootstrap import ensure_bootstrap_admin_grant
     from lakana_core.identity.task_tokens import TaskTokenService
 
