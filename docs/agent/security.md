@@ -4437,12 +4437,15 @@ own process opens no DuckDB connection and imports no `duckdb`.
   (`http_retries`) still repeat the handshake inside the one attempt.
 - **What allow-list mode still leaves open** (reachable only past the guard; the guard is the
   first layer, credential scoping the structural one):
-  - **The whole store host:port, not just the prefix**, for SQL that spells a literal URL: a
-    `..` or `%2e%2e` segment passes DuckDB's string check (the HTTP client normalises `..` and
-    asks for the other path). Without a signature the store answers 403, so what remains is what
-    it serves without authentication on that port: anonymous-readable buckets or objects, and
-    unauthenticated endpoints on the S3 port. AWS virtual-host style confines this to the
-    bucket's host. Pinned by `test_known_residual_a_literal_dotdot_reaches_the_same_server`.
+  - **Closed by DuckDB 2.0.1: the whole store host:port, not just the prefix**, for SQL that
+    spells a literal URL. On 2.0.0 a `..` or `%2e%2e` segment passed DuckDB's string check (the
+    HTTP client normalised `..` and asked for the other path; without a signature the store
+    answers 403, so the reach was what it serves without authentication on that port). 2.0.1
+    refuses such a URL (`..`, `./..`, `%2e%2e`, `%2E%2E`) with a `Permission Error` before any
+    request, reported as `invalid` with the fixed text, and the worker requires
+    `duckdb>=2.0.1` for it. Pinned by `test_a_literal_dotdot_is_refused_and_reaches_no_server`
+    (red on 2.0.0; it replaced `test_known_residual_a_literal_dotdot_reaches_the_same_server`).
+    Not in DuckDB's release notes; found when the pinned residual failed on 2.0.1.
   - **Unsigned requests to the allowed prefixes**: objects of a table nested in another's
     location; the same 403 limit.
   - **Redirects are followed.** httpfs follows a 3xx from an allowed URL to another host
@@ -4576,7 +4579,9 @@ the lock and refused after it, like `lambda_syntax` on 2.0.0; `logging_storage` 
 `logging_sink` (both names locked); new `http_retry_quota_throttled`,
 `http_retry_throttled_wait_ms`, `parquet_can_have_nan`, `parquet_use_page_index` and
 `s3_use_global_endpoint` (all refused after the lock); `allow_extension_repositories` changed as
-described above. What DuckDB enforces did not change: with external access off,
+described above. What DuckDB enforces changed once, for the better: a literal URL with a dot
+segment is refused (see "Closed by DuckDB 2.0.1" under "What allow-list mode still leaves open").
+Otherwise as on 2.0.0: with external access off,
 `parquet_page_index` of a file outside the allowed paths is a `Permission Error`, `LOAD` of
 `glue` or `legacy_parser` (new default extensions in 2.0.1) is refused, and `CREATE SECRET (TYPE
 http, HTTP_PROXY …)` still succeeds on 2.0.1 (DuckDB reverted a change that would have refused it
