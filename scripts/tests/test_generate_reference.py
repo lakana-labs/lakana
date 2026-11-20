@@ -601,6 +601,11 @@ def test_every_route_that_needs_a_caller_documents_the_refusal_of_a_missing_one(
         "POST /api/v1/sign-in/links/describe",
         "POST /api/v1/sign-in/links/redeem",
         "POST /api/v1/sign-in/passkey/options",
+        # OIDC sign-in: the flow cookie and the provider's checked answer are the proof (#32)
+        "GET /api/v1/sign-in/oidc",
+        "POST /api/v1/sign-in/oidc/start",
+        "GET /api/v1/sign-in/oidc/callback",
+        "POST /api/v1/sign-in/oidc/finish",
     }
     missing = [
         f"{method} {path}"

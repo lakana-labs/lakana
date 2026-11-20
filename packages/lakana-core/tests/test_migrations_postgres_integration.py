@@ -4204,3 +4204,87 @@ def test_0086_on_postgres() -> None:
         with engine.connect() as conn:
             assert conn.execute(query).all() == []
         engine.dispose()
+
+
+def test_0087_on_postgres() -> None:
+    """0087 adds the provider identity to principals, unique per pair, and `oidc_flows`."""
+    revision_0086 = "4d96fb277743"
+    revision_0087 = "431d39830234"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0086)
+        engine = sqlalchemy.create_engine(url)
+        tables = sqlalchemy.text(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'oidc_flows'"
+        )
+        insert = sqlalchemy.text(
+            "INSERT INTO principals (id, type, name, is_active, held_admin, created_at,"
+            " updated_at, oidc_issuer, oidc_subject) VALUES (:id, 'USER', :name, true, false,"
+            " now(), now(), 'https://idp.example', '248289761001')"
+        )
+        with engine.connect() as conn:
+            assert conn.execute(tables).scalar_one() == 0
+        migrate.upgrade(url, revision_0087)
+        assert _alembic_version(engine) == revision_0087
+        with engine.begin() as conn:
+            assert conn.execute(tables).scalar_one() == 1
+            conn.execute(insert, {"id": uuid.uuid4(), "name": "ada"})
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(insert, {"id": uuid.uuid4(), "name": "bob"})
+        migrate.downgrade(url, revision_0086)
+        assert _alembic_version(engine) == revision_0086
+        with engine.connect() as conn:
+            assert conn.execute(tables).scalar_one() == 0
+            names = conn.execute(sqlalchemy.text("SELECT name FROM principals"))
+            assert "ada" in names.scalars().all()
+        engine.dispose()
+
+
+def test_0088_on_postgres() -> None:
+    """0088 adds the nullable columns of what a failure concerns and two indexes; undone down."""
+    revision_0087 = "431d39830234"
+    revision_0088 = "95737c487bf3"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0087)
+        engine = sqlalchemy.create_engine(url)
+        columns = sqlalchemy.text(
+            "SELECT table_name, column_name, is_nullable, character_maximum_length"
+            " FROM information_schema.columns"
+            " WHERE column_name IN ('error_type', 'failure_connection')"
+            " ORDER BY table_name, column_name"
+        )
+        indexes = sqlalchemy.text(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'task_runs'"
+            " AND indexname IN ('ix_task_runs_failure_connection',"
+            " 'ix_task_runs_asset_finished_at') ORDER BY indexname"
+        )
+        with engine.connect() as conn:
+            assert conn.execute(columns).all() == []
+            assert conn.execute(indexes).all() == []
+        migrate.upgrade(url, revision_0088)
+        assert _alembic_version(engine) == revision_0088
+        with engine.connect() as conn:
+            assert [tuple(row) for row in conn.execute(columns)] == [
+                ("task_attempts", "error_type", "YES", 100),
+                ("task_attempts", "failure_connection", "YES", 63),
+                ("task_runs", "error_type", "YES", 100),
+                ("task_runs", "failure_connection", "YES", 63),
+            ]
+            assert conn.execute(indexes).scalars().all() == [
+                "ix_task_runs_asset_finished_at",
+                "ix_task_runs_failure_connection",
+            ]
+            partial = conn.execute(
+                sqlalchemy.text(
+                    "SELECT indexdef FROM pg_indexes"
+                    " WHERE indexname = 'ix_task_runs_failure_connection'"
+                )
+            ).scalar_one()
+            assert partial.endswith("WHERE (failure_connection IS NOT NULL)")
+        migrate.downgrade(url, revision_0087)
+        assert _alembic_version(engine) == revision_0087
+        with engine.connect() as conn:
+            assert conn.execute(columns).all() == []
+            assert conn.execute(indexes).all() == []
+        engine.dispose()

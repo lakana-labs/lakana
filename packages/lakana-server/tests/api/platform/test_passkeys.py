@@ -447,6 +447,10 @@ _OPEN_OPERATIONS = {
     ("POST", "/api/v1/sign-in/links/redeem"),
     ("POST", "/api/v1/sign-in/passkey/options"),
     ("POST", "/api/v1/sign-in/passkey"),
+    ("GET", "/api/v1/sign-in/oidc"),
+    ("POST", "/api/v1/sign-in/oidc/start"),
+    ("GET", "/api/v1/sign-in/oidc/callback"),
+    ("POST", "/api/v1/sign-in/oidc/finish"),
 }
 """Operations that take no credential, so the session plays no part."""
 

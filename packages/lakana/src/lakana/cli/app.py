@@ -376,7 +376,14 @@ def _root(
     ] = None,
     output: Annotated[
         OutputFormat,
-        typer.Option("--output", envvar="LAKANA_OUTPUT", help="Output format."),
+        typer.Option(
+            "--output",
+            envvar="LAKANA_OUTPUT",
+            help=(
+                "Output format. JSON writes control, bidirectional and zero-width characters "
+                "as escapes, such as \\u202e."
+            ),
+        ),
     ] = OutputFormat.table,
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Show tracebacks for unexpected errors.")

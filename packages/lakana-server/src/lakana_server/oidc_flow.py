@@ -1,0 +1,398 @@
+"""The OIDC sign-in's protocol steps: the authorization URL, the code exchange, the callback.
+
+Authlib builds the protocol messages, and only here (an import contract keeps it out of every
+other package): the authorization URL with its PKCE challenge (S256), and the body of the token
+request. Its HTTP client is never used: the token request goes through the provider client's
+guarded POST (`lakana_core.oidc.provider.OidcProvider.post`, over
+`lakana_core.net.https_json.post_form_json`), like discovery and the keys.
+
+The callback runs every check, in order, and writes what it found on the flow; it never starts a
+session (that is `finish`, a same-origin POST that can return the CSRF token):
+
+1. the flow: the ``state`` and the browser's flow cookie must name one open, unexpired flow that
+   was not called back (`lakana_core.identity.oidc_flows.OidcFlowStore.called_back`); it is
+   marked called back and committed at once, so a replayed callback finds nothing;
+2. the provider's ``error``, if it sent one;
+3. the code exchange, with the client secret (``client_secret_basic`` unless the provider lists
+   only ``client_secret_post``) and the PKCE verifier;
+4. the ID token, by the shared verifier with the sign-in's rules
+   (`lakana_core.oidc.provider.OidcProvider.verify`): signature, ``iss``, ``aud``, ``azp``,
+   ``exp``, ``iat``, ``nonce`` and ``typ``. Only the ``id_token`` member is ever read.
+
+Each refusal is audited (`lakana_server.deps.record_refused_oidc`, rate limited) with its reason.
+No step logs the code, a token, the state or the client secret.
+"""
+
+from __future__ import annotations
+
+import base64
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Any
+from urllib.parse import parse_qsl, quote_plus
+
+from authlib.oauth2.rfc6749.parameters import prepare_grant_uri, prepare_token_request
+from authlib.oauth2.rfc7636 import create_s256_code_challenge
+from fastapi import Request
+from sqlalchemy.orm import Session
+
+from lakana_core.errors import OidcRefusal, OidcSignInRefused
+from lakana_core.identity.oidc_flows import OidcFlowStore
+from lakana_core.net.https_json import FetchFailed
+from lakana_core.oidc.config import OidcSignInConfig
+from lakana_core.oidc.errors import IdTokenRefused
+from lakana_core.oidc.provider import OidcProvider, ProviderMetadata, ProviderUnavailable
+from lakana_server.browser_session import flow_cookie_name
+from lakana_server.deps import get_clock, record_refused_oidc
+from lakana_server.settings import PublicOrigin
+
+CALLBACK_PATH = "/api/v1/sign-in/oidc/callback"
+"""Where the provider sends the browser back; registered with the provider as the redirect URI."""
+
+LANDING_PATH = "/sign-in/oidc"
+"""The interface's page that finishes a sign-in; every callback redirects there."""
+
+MAX_PARAMETER = 4096
+"""The longest ``code``, ``state`` or ``error`` the callback reads; a longer one is absent."""
+
+TOKEN_UNREACHABLE = (  # nosec B105 -- a sentence for an operator, not a credential
+    "the identity provider's token endpoint could not be reached; check the server's outbound "
+    "https access to it and the server's log"
+)
+
+
+def redirect_uri(origin: PublicOrigin) -> str:
+    """Name the redirect URI registered with the provider.
+
+    Parameters
+    ----------
+    origin
+        The public address (`LAKANA_UI__PUBLIC_URL`).
+
+    Returns
+    -------
+    str
+        ``<public_url>/api/v1/sign-in/oidc/callback``.
+    """
+    return origin.origin + CALLBACK_PATH
+
+
+def landing_url(origin: PublicOrigin) -> str:
+    """Name the interface's page every callback redirects to.
+
+    Parameters
+    ----------
+    origin
+        The public address.
+
+    Returns
+    -------
+    str
+        ``<public_url>/sign-in/oidc``, never anything the request named.
+    """
+    return origin.origin + LANDING_PATH
+
+
+def authorization_url(
+    meta: ProviderMetadata,
+    *,
+    client_id: str,
+    redirect_uri: str,
+    scopes: list[str],
+    state: str,
+    nonce: str,
+    code_verifier: str,
+    extra: Mapping[str, str] | None = None,
+) -> str:
+    """Build the provider's sign-in URL for one flow (authorization-code flow with PKCE).
+
+    Parameters
+    ----------
+    meta
+        The provider's checked metadata.
+    client_id
+        The client id.
+    redirect_uri
+        The registered redirect URI.
+    scopes
+        The scopes to ask for.
+    state
+        The flow's state.
+    nonce
+        The flow's nonce.
+    code_verifier
+        The flow's PKCE verifier; only its S256 challenge goes into the URL.
+    extra
+        Further parameters, such as ``prompt`` and ``max_age``.
+
+    Returns
+    -------
+    str
+        The authorization endpoint with ``response_type=code``, the client id, the redirect URI,
+        the scopes, the state, the nonce and the challenge.
+    """
+    url: str = prepare_grant_uri(
+        meta.authorization_endpoint,
+        client_id,
+        "code",
+        redirect_uri=redirect_uri,
+        scope=" ".join(scopes),
+        state=state,
+        nonce=nonce,
+        code_challenge=create_s256_code_challenge(code_verifier),
+        code_challenge_method="S256",
+        **dict(extra or {}),
+    )
+    return url
+
+
+def _basic(client_id: str, client_secret: str) -> str:
+    """Encode the client's credentials for ``client_secret_basic`` (RFC 6749, 2.3.1).
+
+    Parameters
+    ----------
+    client_id
+        The client id.
+    client_secret
+        The client secret.
+
+    Returns
+    -------
+    str
+        ``Basic <base64(urlencoded id ":" urlencoded secret)>``.
+    """
+    pair = f"{quote_plus(client_id)}:{quote_plus(client_secret)}"
+    return "Basic " + base64.b64encode(pair.encode("utf-8")).decode("ascii")
+
+
+def exchange_code(
+    provider: OidcProvider,
+    config: OidcSignInConfig,
+    *,
+    code: str,
+    code_verifier: str,
+    redirect_uri: str,
+) -> str:
+    """Exchange an authorization code for the ID token, at the provider's token endpoint.
+
+    Parameters
+    ----------
+    provider
+        The provider client.
+    config
+        The sign-in settings, for the client id and secret.
+    code
+        The callback's code.
+    code_verifier
+        The flow's PKCE verifier.
+    redirect_uri
+        The registered redirect URI, sent again as the token request requires.
+
+    Returns
+    -------
+    str
+        The answer's ``id_token``; nothing else of the answer is read.
+
+    Raises
+    ------
+    ProviderUnavailable
+        If the metadata cannot be read or the token endpoint cannot be reached or answers
+        anything but 200 or a 4xx.
+    OidcSignInRefused
+        ``provider_refused``, if the token endpoint refuses the code (4xx) or answers no ID
+        token.
+    """
+    meta = provider.metadata()
+    body = prepare_token_request(
+        "authorization_code", code=code, redirect_uri=redirect_uri, code_verifier=code_verifier
+    )
+    form = dict(parse_qsl(body, keep_blank_values=True))
+    headers: dict[str, str] = {}
+    client_id = config.client_id or ""
+    secret = config.client_secret.get_secret_value() if config.client_secret else ""
+    if meta.token_auth == "client_secret_basic":  # nosec B105 -- a method name, not a secret
+        headers["Authorization"] = _basic(client_id, secret)
+    else:
+        form.update({"client_id": client_id, "client_secret": secret})
+    answer: object = None
+    status: int | None = None
+    failed = False
+    try:
+        answer = provider.post(meta.token_endpoint, form, headers)
+    except FetchFailed as error:
+        failed, status = True, error.status
+    if failed and status is not None and 400 <= status < 500:
+        raise OidcSignInRefused("provider_refused")
+    if failed:
+        raise ProviderUnavailable(TOKEN_UNREACHABLE)
+    id_token = answer.get("id_token") if isinstance(answer, dict) else None
+    if not isinstance(id_token, str) or not id_token:
+        raise OidcSignInRefused("provider_refused")
+    return id_token
+
+
+def _parameter(value: str | None) -> str:
+    """Read one callback parameter, bounded.
+
+    Parameters
+    ----------
+    value
+        The query parameter, or `None`.
+
+    Returns
+    -------
+    str
+        The value, or empty when it is missing or longer than `MAX_PARAMETER`.
+    """
+    if value is None or len(value) > MAX_PARAMETER:
+        return ""
+    return value
+
+
+def _shown(claims: Mapping[str, object], name: str, limit: int) -> str | None:
+    """Read a claim kept for showing only.
+
+    Parameters
+    ----------
+    claims
+        The verified claims.
+    name
+        ``email`` or ``name``.
+    limit
+        The column's length.
+
+    Returns
+    -------
+    str or None
+        The text, cut to `limit`; `None` when it is not a text.
+    """
+    value = claims.get(name)
+    return value[:limit] if isinstance(value, str) and value else None
+
+
+def _auth_time(claims: Mapping[str, object]) -> int | None:
+    """Read ``auth_time``, when the provider sent one.
+
+    Parameters
+    ----------
+    claims
+        The verified claims.
+
+    Returns
+    -------
+    int or None
+        Seconds since the epoch, or `None`.
+    """
+    value = claims.get("auth_time")
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _verified_outcome(
+    provider: OidcProvider,
+    *,
+    code: str,
+    code_verifier: str,
+    nonce: str,
+    redirect: str,
+    now: datetime,
+) -> dict[str, Any]:
+    """Exchange the code and verify the ID token; say what was found.
+
+    Parameters
+    ----------
+    provider
+        The provider client.
+    code
+        The callback's code.
+    code_verifier
+        The flow's PKCE verifier.
+    nonce
+        The flow's nonce.
+    redirect
+        The registered redirect URI.
+    now
+        The time of the check.
+
+    Returns
+    -------
+    dict
+        ``{"ok": true, "iss", "sub", "email", "name", "auth_time"}``, or ``{"ok": false,
+        "reason"}`` with ``provider_unreachable``, ``provider_refused`` or ``token_invalid``.
+    """
+    reason: OidcRefusal = "token_invalid"
+    verified = None
+    try:
+        id_token = exchange_code(
+            provider, provider.config, code=code, code_verifier=code_verifier, redirect_uri=redirect
+        )
+        verified = provider.verify(id_token, nonce=nonce, now=now)
+    except ProviderUnavailable:
+        reason = "provider_unreachable"
+    except OidcSignInRefused as refused:
+        reason = refused.reason
+    except IdTokenRefused:
+        reason = "token_invalid"
+    if verified is None:
+        return {"ok": False, "reason": reason}
+    claims = verified.claims
+    return {
+        "ok": True,
+        "iss": verified.issuer,
+        "sub": verified.subject,
+        "email": _shown(claims, "email", 320),
+        "name": _shown(claims, "name", 255),
+        "auth_time": _auth_time(claims),
+    }
+
+
+def complete_callback(
+    request: Request,
+    session: Session,
+    *,
+    code: str | None,
+    state: str | None,
+    error: str | None,
+) -> None:
+    """Run the callback's checks and write the outcome on the flow.
+
+    Parameters
+    ----------
+    request
+        The callback request: its flow cookie, the provider client and the clock.
+    session
+        The request's database session; committed here.
+    code
+        The ``code`` parameter.
+    state
+        The ``state`` parameter.
+    error
+        The ``error`` parameter, when the provider refused.
+    """
+    provider: OidcProvider | None = request.app.state.oidc_provider
+    if provider is None:
+        return
+    origin = request.app.state.settings.public_origin()
+    clock = get_clock(request)
+    store = OidcFlowStore(session, clock=clock)
+    browser = request.cookies.get(flow_cookie_name(origin)) or ""
+    flow = store.called_back(_parameter(state), browser[:MAX_PARAMETER])
+    if flow is None:
+        record_refused_oidc(request, session, "flow_expired")
+        return
+    session.commit()
+    given = _parameter(code)
+    if _parameter(error) or not given:
+        outcome: dict[str, Any] = {"ok": False, "reason": "provider_refused"}
+    else:
+        outcome = _verified_outcome(
+            provider,
+            code=given,
+            code_verifier=flow.code_verifier,
+            nonce=flow.nonce,
+            redirect=redirect_uri(origin),
+            now=clock(),
+        )
+    store.record(flow.id, outcome)
+    session.commit()
+    if not outcome["ok"]:
+        record_refused_oidc(request, session, outcome["reason"])

@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { Fragment, type JSX, useCallback } from "react";
+import { Fragment, type JSX, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { type EnvironmentUsageOut, getUsage } from "../api/environments";
@@ -23,6 +23,11 @@ const PARTS = ["tables", "dropped_tables", "artifacts", "code_archives"] as cons
 export interface EnvironmentUsageProps {
   /** The environment's name. */
   readonly name: string;
+  /**
+   * Whether the environment is being deleted: the read in flight is cancelled, so a 404 for an
+   * environment that is gone is never logged, and it is read again once the deletion is refused.
+   */
+  readonly paused?: boolean;
 }
 
 /**
@@ -31,19 +36,34 @@ export interface EnvironmentUsageProps {
  *
  * @param props - The environment.
  * @param props.name - The environment's name.
+ * @param props.paused - Whether the environment is being deleted.
  * @returns The panel.
  */
-export function EnvironmentUsage({ name }: EnvironmentUsageProps): JSX.Element {
+export function EnvironmentUsage({ name, paused = false }: EnvironmentUsageProps): JSX.Element {
   const { t, i18n } = useTranslation();
-  const load = useCallback(() => getUsage(name), [name]);
+  const reading = useRef<AbortController | null>(null);
+  const load = useCallback(() => {
+    reading.current = new AbortController();
+    return getUsage(name, reading.current.signal);
+  }, [name]);
   const read = useResource<EnvironmentUsageOut>(load);
+  const wasPaused = useRef(false);
+  const { reload } = read;
+  useEffect(() => {
+    if (paused) {
+      reading.current?.abort();
+    } else if (wasPaused.current) {
+      reload();
+    }
+    wasPaused.current = paused;
+  }, [paused, reload]);
   const usage = read.data;
   const size = (bytes: number): string => formatBytes(bytes, i18n.language);
   return (
     <section className="flat-panel settings-panel">
       <h2>{t(`${P}.usage`)}</h2>
       {usage === undefined ? (
-        read.error === null ? (
+        read.error === null || paused ? (
           <p className="step-status" role="status">
             {t(`${P}.usageReading`)}
           </p>

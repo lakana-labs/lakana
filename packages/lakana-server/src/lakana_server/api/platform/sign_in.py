@@ -122,6 +122,12 @@ class OpenSignInRoute(AuthenticateFirstRoute):
     (`LAKANA_REQUEST_BODY__MAX_BYTES`) has already bounded what was buffered.
     """
 
+    too_large = (
+        f"A passkey sign-in request is at most {OPEN_BODY_LIMIT} bytes; send only "
+        "ceremony_id and the browser's credential."
+    )
+    """The 413 detail, saying what to send instead."""
+
     def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
         """Wrap the handler in the body check.
 
@@ -151,10 +157,7 @@ class OpenSignInRoute(AuthenticateFirstRoute):
                 Mapped to 413, when the body is over `OPEN_BODY_LIMIT`.
             """
             if len(await request.body()) > OPEN_BODY_LIMIT:
-                raise PayloadTooLargeError(
-                    f"A passkey sign-in request is at most {OPEN_BODY_LIMIT} bytes; send only "
-                    "ceremony_id and the browser's credential."
-                )
+                raise PayloadTooLargeError(self.too_large)
             return await original(request)
 
         return limited

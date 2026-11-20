@@ -14,6 +14,7 @@ is always set.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -30,6 +31,7 @@ from lakana_server.api.platform.schemas import (
     ConnectionPage,
     ConnectionQueuedTestOut,
     ConnectionQueuedTestPage,
+    ConnectionRunFailureOut,
     ConnectionTestOut,
     ConnectionUpdate,
     DeclaringAssetOut,
@@ -113,6 +115,11 @@ def _to_out(view: ConnectionView) -> ConnectionOut:
         environment=view.environment,
         last_test=last_test,
         actions=list(view.actions),
+        last_run_failure=(
+            None
+            if view.last_run_failure is None
+            else ConnectionRunFailureOut(**dataclasses.asdict(view.last_run_failure))
+        ),
     )
 
 

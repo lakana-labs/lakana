@@ -24,6 +24,7 @@ from sdk_tls_fixture import Authority, make_authority, serving
 from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
+    ConnectionSetupError,
     IngestError,
     SourceError,
     SourceRefused,
@@ -235,6 +236,7 @@ def test_an_unreadable_trust_bundle_names_the_setting(
 def test_a_missing_secret_names_the_command_that_binds_one() -> None:
     with pytest.raises(IngestError) as caught:
         _stores.store_for(_connection("s3", _S3, {"access_key_id": "AKID"}))
+    assert isinstance(caught.value, ConnectionSetupError)
     assert str(caught.value).startswith(
         "`src` has no secret with `secret_access_key`; give it one: `lakana connection update src"
     )
@@ -293,6 +295,7 @@ def test_a_secret_that_is_no_service_account_key_is_refused_without_showing_it()
                 _connection("gcs", {"bucket": "landing"}, {}, {"service_account_json": value})
             )
         assert "is not a service-account key" in str(caught.value)
+        assert isinstance(caught.value, ConnectionSetupError)
         assert value not in str(caught.value)
 
 

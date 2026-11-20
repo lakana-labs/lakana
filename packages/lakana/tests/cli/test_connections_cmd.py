@@ -401,7 +401,7 @@ def test_show_prints_the_connection(tmp_path: Path) -> None:
     assert "Settings:    user=reader tls=verify-full" in lines
     assert "Secret:      crm-db-connection" in lines
     assert "Declared by: analytics: customers" in lines
-    assert json.loads(as_json.stdout) == _CONNECTION
+    assert json.loads(as_json.stdout) == {**_CONNECTION, "last_run_failure": None}
 
 
 def test_list_prints_one_row_per_connection(tmp_path: Path) -> None:
@@ -944,6 +944,29 @@ def test_show_prints_a_readers_last_test_with_the_next_step_on_stderr(tmp_path: 
     never = _show(tmp_path, _CONNECTION)
     assert "Last test:   never tested" in never.stdout.splitlines()
     assert never.stderr == ""
+
+
+def test_show_prints_the_newest_run_that_failed_on_it(tmp_path: Path) -> None:
+    failed = {
+        **_CONNECTION,
+        "last_run_failure": {
+            "run_id": "0b6f1c1e-5b0e-4a49-9c1e-6a2f1d3c4b5a",
+            "asset": "silver.customers",
+            "finished_at": "2026-11-18T09:30:00Z",
+        },
+    }
+
+    result = _show(tmp_path, failed)
+
+    assert result.exit_code == 0, result.output
+    lines = result.stdout.splitlines()
+    assert lines[lines.index("Last test:   never tested") + 1] == (
+        "Last run:    failed on it at 2026-11-18T09:30:00+00:00: silver.customers in run "
+        "0b6f1c1e-5b0e-4a49-9c1e-6a2f1d3c4b5a (lakana runs show "
+        "0b6f1c1e-5b0e-4a49-9c1e-6a2f1d3c4b5a --env prod)"
+    )
+    plain = _show(tmp_path, _CONNECTION)
+    assert not any(line.startswith("Last run:") for line in plain.stdout.splitlines())
 
 
 def test_an_older_server_that_sends_no_last_test_is_not_read_as_never_tested(

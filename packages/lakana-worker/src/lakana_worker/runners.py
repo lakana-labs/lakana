@@ -86,6 +86,8 @@ FILES_READ_FILE = "files-read.json"
 
 _MAX_RESULT_BYTES = 64 * 1024
 _MAX_ERROR_TYPE_CHARS = 100
+_MAX_CONNECTION_NAME_CHARS = 63
+"""The longest connection name (`lakana_core.connections.kinds.NAME`)."""
 _MAX_INT64 = 2**63 - 1
 _STDIN_CHUNK = 65536
 _MAX_UNPACK_MESSAGE = 500
@@ -325,7 +327,12 @@ class RunOutcome:
     timed_out
         Whether it was stopped for its timeout.
     error_type
-        The harness's exception class name, sanitised; display text only.
+        The harness's exception class name, only when it is one (a dotted Python identifier of
+        at most 100 characters); display text only.
+    failure_connection
+        The connection the harness's ``failure_connection`` names, sanitised: what the asset's
+        code says the failure concerns. The worker keeps it only for a connection the asset
+        declares.
     retryable
         `False` when the harness says a retry cannot help.
     conflict
@@ -347,6 +354,7 @@ class RunOutcome:
     killed: bool = False
     timed_out: bool = False
     error_type: str | None = None
+    failure_connection: str | None = None
     retryable: bool = True
     conflict: bool = False
     failure_code: FailureCode | None = None
@@ -629,6 +637,31 @@ def _redacted(data: bytes, secrets_to_hide: list[str]) -> bytes:
     return b"".join(redacted)
 
 
+def _class_name(value: object, secrets_to_hide: list[str]) -> str | None:
+    """Keep the record's ``error_type`` only when it is a class name.
+
+    Parameters
+    ----------
+    value
+        The record's ``error_type``.
+    secrets_to_hide
+        The values to mask; a name that holds one is no class name once masked.
+
+    Returns
+    -------
+    str or None
+        A dotted Python identifier of at most `_MAX_ERROR_TYPE_CHARS` characters
+        (``SourceRefused``, ``lakana.ingest.SourceRefused``); `None` for anything else, which is
+        never cut or repaired into one.
+    """
+    if not isinstance(value, str) or len(value) > _MAX_ERROR_TYPE_CHARS:
+        return None
+    cleaned = _clean(value, secrets_to_hide, _MAX_ERROR_TYPE_CHARS)
+    if cleaned != value or not all(part.isidentifier() for part in value.split(".")):
+        return None
+    return value
+
+
 def _leader_exited(process: subprocess.Popen[bytes]) -> bool:
     """Say whether the process has exited, without reaping it.
 
@@ -739,14 +772,15 @@ def _outcome_from(
             failure_code=_STOP_CODES.get(stop.reason, FailureCode.INTERNAL),
         )
     if record is not None and record["status"] == "failed":
-        kind = record.get("error_type")
+        kind, connection = record.get("error_type"), record.get("failure_connection")
         message = _clean(str(record["message"]), secrets_to_hide, MAX_ERROR_MESSAGE_CHARS)
         return RunOutcome(
             succeeded=False,
             error_message=message or "the task failed without a message",
-            error_type=(
-                _clean(kind, secrets_to_hide, _MAX_ERROR_TYPE_CHARS)
-                if isinstance(kind, str)
+            error_type=_class_name(kind, secrets_to_hide),
+            failure_connection=(
+                _clean(connection, secrets_to_hide, _MAX_CONNECTION_NAME_CHARS)
+                if isinstance(connection, str)
                 else None
             ),
             retryable=record.get("retryable") is not False,

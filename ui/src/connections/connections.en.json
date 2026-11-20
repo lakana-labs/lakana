@@ -188,5 +188,9 @@
     "noSecret": "It has no secret.",
     "confirm": "Delete",
     "close": "Close"
+  },
+  "runFailure": {
+    "line": "last run failed on it · {{when}}",
+    "task": "{{asset}} failed reading it; open the task to read why."
   }
 }
