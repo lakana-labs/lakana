@@ -193,6 +193,30 @@ class RouterHost {
   }
 }
 
+/**
+ * The confirmation pages of `lakana login`, behind the gate and outside the shell: a
+ * signed-out browser signs in first and comes back with the link's query. Loaded on demand,
+ * as one chunk.
+ */
+const CLI_SIGN_IN_ROUTES: RouteObject[] = [
+  {
+    path: "/sign-in/cli",
+    hydrateFallbackElement: <></>,
+    lazy: async () => {
+      const { CliSignInPage } = await import("./CliSignIn");
+      return { element: <CliSignInPage /> };
+    },
+  },
+  {
+    path: "/sign-in/device",
+    hydrateFallbackElement: <></>,
+    lazy: async () => {
+      const { CliDevicePage } = await import("./CliSignIn");
+      return { element: <CliDevicePage /> };
+    },
+  },
+];
+
 /** Properties of {@link Routed}. */
 interface RoutedProps {
   /** Makes the router. */
@@ -224,11 +248,10 @@ function Routed({ createRouter, pages, link, onLinkDone }: RoutedProps): JSX.Ele
       { path: "/sign-in", element: <SignInRoute link={link} onLinkDone={onLinkDone} /> },
       {
         element: <Gate ready={access !== null} />,
-        children: appRoutes(
-          areasFor(access?.noAccessYet === true),
-          pages,
-          access ?? noKnownRights(""),
-        ),
+        children: [
+          ...CLI_SIGN_IN_ROUTES,
+          ...appRoutes(areasFor(access?.noAccessYet === true), pages, access ?? noKnownRights("")),
+        ],
       },
     ],
     [access, pages, link, onLinkDone],

@@ -617,13 +617,13 @@
 "POST /api/v1/sign-in/local-link":
   { class: git, reason: "local tooling: server start --local signs the browser in" }
 "POST /api/v1/sign-in/cli/approvals":
-  { class: ui, part: 1, note: "lakana login (#32): /sign-in/cli confirms it" }
+  { class: ui, part: 1, done: true, note: "lakana login (#32): /sign-in/cli confirms it" }
 "POST /api/v1/sign-in/cli/device/approve":
-  { class: ui, part: 1, note: "lakana login --device (#32): /sign-in/device" }
+  { class: ui, part: 1, done: true, note: "lakana login --device (#32): /sign-in/device" }
 "POST /api/v1/sign-in/cli/device/deny":
-  { class: ui, part: 1, note: "lakana login --device (#32): /sign-in/device" }
+  { class: ui, part: 1, done: true, note: "lakana login --device (#32): /sign-in/device" }
 "POST /api/v1/sign-in/cli/device/describe":
-  { class: ui, part: 1, note: "lakana login --device (#32): /sign-in/device" }
+  { class: ui, part: 1, done: true, note: "lakana login --device (#32): /sign-in/device" }
 "POST /api/v1/sign-in/oidc/finish":
   { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc" }
 "POST /api/v1/sign-in/oidc/finish-in-session":
