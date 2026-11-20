@@ -25,7 +25,7 @@ import {
   signOut as endSession,
   signOutEverywhere as endEverySession,
 } from "../api";
-import { endSession as endSessionHere, forgetSessionData } from "../api/client";
+import { endSessionOf, forgetSessionData, sessionToken } from "../api/client";
 import { browserStorage } from "../preferences/preferences";
 import { endedReason } from "./messages";
 
@@ -143,6 +143,8 @@ export function SessionProvider({
   // The session the page shows, while signed in: a read compares the person it answers with
   // it, and a failed read knows what it would undo and when the session ends at the latest.
   const shown = useRef<SessionOut | undefined>(undefined);
+  // The CSRF token the shown session's read was sent with.
+  const shownToken = useRef<string | null>(null);
   const retry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const failures = useRef(0);
   const mounted = useRef(true);
@@ -166,6 +168,7 @@ export function SessionProvider({
     (background: boolean): void => {
       clearTimeout(retry.current);
       retry.current = undefined;
+      const sent = sessionToken();
       void getSession(background ? { background: true } : {}).then(
         (session) => {
           failures.current = 0;
@@ -179,6 +182,7 @@ export function SessionProvider({
             forgetSessionData();
           }
           shown.current = session;
+          shownToken.current = sent;
           setKnown({ state: "signed-in", session });
           settle();
         },
@@ -199,7 +203,8 @@ export function SessionProvider({
             if (left <= 0) {
               failures.current = 0;
               shown.current = undefined;
-              endSessionHere();
+              // Only this session's token goes: another tab may have signed in since.
+              endSessionOf(shownToken.current);
               setKnown({ state: "signed-out", reason: t("session.ended.lifetime") });
               settle();
               return;

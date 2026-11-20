@@ -329,9 +329,9 @@ describe("SessionProvider", () => {
       const server = fakeServer({
         "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
       });
+      setCsrfToken("csrf-1");
       const user = renderProbe();
       await screen.findByText("state: signed-in");
-      setCsrfToken("csrf-1");
       vi.setSystemTime(new Date(Date.parse(ADMIN_SESSION.absolute_expires_at) - beforeTheEnd));
       server.route({ "GET /api/v1/sign-in/session": BUSY });
 
@@ -355,6 +355,31 @@ describe("SessionProvider", () => {
       stop();
     },
   );
+
+  it("at the absolute end keeps a newer token another tab stored", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const end = Date.parse(ADMIN_SESSION.absolute_expires_at);
+    vi.setSystemTime(new Date(end - 60_000));
+    setCsrfToken("csrf-1");
+    const ended = vi.fn();
+    const stop = onSessionEnd(ended);
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+    });
+    const user = renderProbe();
+    await screen.findByText("state: signed-in");
+    vi.setSystemTime(new Date(end));
+    // Another tab signed someone in meanwhile: its token is the live one.
+    localStorage.setItem(CSRF_STORAGE_KEY, "csrf-2");
+    server.route({ "GET /api/v1/sign-in/session": BUSY });
+
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+
+    expect(await screen.findByText("state: signed-out")).toBeInTheDocument();
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBe("csrf-2");
+    stop();
+  });
 
   it("a person-started read ends when the provider goes away", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });

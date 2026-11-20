@@ -464,8 +464,8 @@ def test_purging_an_environment_removes_its_saved_queries(
     _env(catalog, principal, tmp_path, "prod")
     bob = _querier(session, "bob", dev, "prod")
     service = _service(session)
-    private = service.create(bob, dev, name="Draft", sql="SELECT 1")
-    shared = service.create(bob, dev, name="Revenue", sql="SELECT 2", visibility="everyone")
+    service.create(bob, dev, name="Draft", sql="SELECT 1")
+    service.create(bob, dev, name="Revenue", sql="SELECT 2", visibility="everyone")
     elsewhere = service.create(bob, "prod", name="Revenue", sql="SELECT 3")
 
     deleted = catalog.delete_environment(principal, dev, purge=True)

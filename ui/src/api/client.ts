@@ -208,6 +208,28 @@ export function forgetSessionData(): void {
   sessionEnded();
 }
 
+/**
+ * The CSRF token requests carry now, for a caller that may later end the session it belongs to
+ * ({@link endSessionOf}); it is never shown or sent anywhere else.
+ *
+ * @returns The token, or null.
+ */
+export function sessionToken(): string | null {
+  return csrfToken();
+}
+
+/**
+ * Ends a session in this tab that the page knows has ended (its absolute end passed): forgets
+ * its CSRF token unless another tab has stored a newer one meanwhile, as a 401 does, and tells
+ * {@link onSessionEnd}.
+ *
+ * @param sent - The token the session's requests carried.
+ */
+export function endSessionOf(sent: string | null): void {
+  forgetToken(sent);
+  sessionEnded();
+}
+
 /** Ends the session in this tab: forgets the CSRF token and tells {@link onSessionEnd}. */
 export function endSession(): void {
   setCsrfToken(null);
