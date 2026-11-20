@@ -140,7 +140,10 @@ const NAMED_LIMITS = [
   // Measured 9.85 kB (2026-11-17) with the editor's catalog cache (queries/editor/catalog.ts),
   // which the screen now hands to the editor, so that the editor's chunk reaches no API module
   // (see the first load below); the limit holds.
-  { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
+  // Raised to the measured 10.13 kB (2026-11-20) + 10 %: the catalog cache hands a catalog an
+  // editor still holds after a session ended to the next person's, and Try again on a saved query
+  // moves the focus to Run once it opens and forgets that after a failed read (#753).
+  { name: "Queries", prefix: "QueriesScreen-", limit: "11.14 kB" },
   // Measured 1.1 kB (2026-11-17) + 10 %: the Jobs area's screen, for now its routes (a job, a run and
   // a task, each a page of its own below), the area's page at /jobs and the screen's strings. The
   // lists, facts and logs come in the next changes.
