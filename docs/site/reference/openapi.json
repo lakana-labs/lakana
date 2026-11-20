@@ -24804,7 +24804,7 @@
           "sign-in"
         ],
         "summary": "Refuse a sign-in of `lakana login --device`: its command line is told so and stops",
-        "description": "Needs a browser session; a token is refused (403). 404 and 429 as `/device/describe`.",
+        "description": "Needs a browser session; a token is refused (403). A refusal needs no touch: it gives no access. 404 and 429 as `/device/describe`.",
         "operationId": "deny_cli_device_api_v1_sign_in_cli_device_deny_post",
         "parameters": [
           {

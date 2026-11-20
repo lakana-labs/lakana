@@ -605,7 +605,7 @@ Answers:
 
 Refuse a sign-in of `lakana login --device`: its command line is told so and stops
 
-Needs a browser session; a token is refused (403). 404 and 429 as `/device/describe`.
+Needs a browser session; a token is refused (403). A refusal needs no touch: it gives no access. 404 and 429 as `/device/describe`.
 
 Parameters:
 
