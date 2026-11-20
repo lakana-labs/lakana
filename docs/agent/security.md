@@ -5478,8 +5478,9 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   `getenv` are not safe against each other), and a value another thread writes then is
   replaced by the earlier one. Only the task's own code can do any of this, and it is trusted
   (one instance, one trust domain). obstore's refusal of a value (a bad RSA key, a non-base64
-  account key) is a `UsageError` that names the connection and never echoes the value; a
-  bundle with no certificate that parses is refused before obstore sees it, naming
+  account key) is a `ConnectionSetupError` (a `UsageError`) that names the connection and never
+  echoes the value; a bundle with no certificate that parses is refused before obstore sees it,
+  naming
   `LAKANA_RUN__CA_BUNDLE`. The error class comes from obstore's structure only: its exception
   type, or its dump of the cause with every string literal (key, reply body) blanked first
   (`files._structure`). obstore's client

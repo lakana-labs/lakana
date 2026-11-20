@@ -334,9 +334,11 @@ connection shows the newest task that failed on it when all of these hold:
   `files.read`, `files.list`, `rest.read`, `sql.read`) called with this connection. Each such
   error carries the connection in `IngestError.connection`, and the run records it. An error of
   your own client (after `connections.get`, [Anything else: your own client](../how-to/load-data-from-a-source.md#anything-else-your-own-client))
-  names no connection, and neither does `ConnectionNotDeclared` nor a `UsageError` (a mistake in
-  the asset's code, such as an empty query, a connection of the wrong kind or a missing secret
-  key: the source did nothing wrong, so the connection is not marked);
+  names no connection, and neither does `ConnectionNotDeclared` nor a `UsageError` for a mistake
+  in the asset's code (an empty query, a `params=` or `paginate=` that does not fit). A
+  `ConnectionSetupError` does name it: a connection of the wrong kind for the helper, a missing
+  secret key, a token endpoint or CA certificate that does not work, where fixing the connection
+  is the fix ([the errors](ingest.md));
 - the asset declares the connection: the worker keeps only a declared name;
 - the task failed after the connection's last change: a change may be the fix, and a connection
   deleted and made again under the same name is a new one. New values for its secret count as a
