@@ -10,10 +10,10 @@ import { api } from "./client";
 import { guarded } from "./stepUpFirst";
 
 /** The lowest port the command line may listen on. */
-export const MIN_PORT = 1024;
+const MIN_PORT = 1024;
 
 /** The highest port. */
-export const MAX_PORT = 65535;
+const MAX_PORT = 65535;
 
 /** What `POST /api/v1/sign-in/cli/approvals` answers. */
 export interface CliApprovalOut {

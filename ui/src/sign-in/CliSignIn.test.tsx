@@ -23,13 +23,18 @@ const STALE = { status: 200, body: { ...ADMIN_SESSION, name: "kim", step_up_unti
  *
  * @param element - The page.
  * @param at - The address.
+ * @param session - The session value; kim, signed in, by default.
  * @returns A user-event session.
  */
-function renderAt(element: ReactNode, at: string): ReturnType<typeof userEvent.setup> {
+function renderAt(
+  element: ReactNode,
+  at: string,
+  session = signedIn({ session: { ...ADMIN_SESSION, name: "kim" } }),
+): ReturnType<typeof userEvent.setup> {
   const router = createMemoryRouter([{ path: "*", element }], { initialEntries: [at] });
   const user = userEvent.setup();
   render(
-    <SessionContext value={signedIn({ session: { ...ADMIN_SESSION, name: "kim" } })}>
+    <SessionContext value={session}>
       <RouterProvider router={router} />
     </SessionContext>,
   );
@@ -201,6 +206,43 @@ describe("CliSignInPage", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "This sign-in link does not work" }),
     ).toBeInTheDocument();
+  });
+
+  it("names the person by their display name", () => {
+    server();
+    renderAt(
+      <CliSignInPage navigate={vi.fn()} />,
+      link(),
+      signedIn({ session: { ...ADMIN_SESSION, name: "kim", display_name: "Kim Lee" } }),
+    );
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/for Kim Lee\?$/);
+  });
+
+  it("names nobody while the session is not read", () => {
+    server();
+    renderAt(<CliSignInPage navigate={vi.fn()} />, link(), signedIn({ session: undefined }));
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/” for \?$/);
+  });
+
+  it("refuses a link without a query", () => {
+    renderAt(<CliSignInPage navigate={vi.fn()} />, "/sign-in/cli");
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "This sign-in link does not work" }),
+    ).toBeInTheDocument();
+  });
+
+  it("sends the browser itself by default", async () => {
+    server();
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    const user = renderAt(<CliSignInPage />, link());
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(assign).toHaveBeenCalledWith("http://127.0.0.1:49152/?error=access_denied&state=st-1");
   });
 
   it("marks hidden characters in the host", () => {

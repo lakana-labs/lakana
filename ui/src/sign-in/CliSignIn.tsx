@@ -41,7 +41,7 @@ const STATE = /^[A-Za-z0-9_-]{1,512}$/;
 const MAX_HOST = 256;
 
 /** Sends the browser to another address; `window.location.assign` in the browser. */
-export type Navigate = (url: string) => void;
+type Navigate = (url: string) => void;
 
 /**
  * Sends the browser to an address.
