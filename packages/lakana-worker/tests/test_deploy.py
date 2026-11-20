@@ -2983,6 +2983,55 @@ def test_a_deploy_refuses_a_job_whose_selection_matches_no_asset(
     assert session.query(JobVersion).count() == 0
 
 
+_SPACED_JOB_YAML = 'repo: analytics\njobs:\n  "daily ":\n    select: ["silver.*"]\n'
+
+
+def _deploy_with_a_job_stored_as_spaced(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """Deploy `daily`, then make the stored version name it `daily ` as an earlier release did."""
+    commit(world.repo_path, {"lakana.yaml": _JOBS_YAML})
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.SUCCEEDED
+    version = session.get(JobVersion, run.job_version_id)
+    assert version is not None
+    manifest = dict(version.manifest_json)
+    manifest["jobs"] = {"daily ": manifest["jobs"]["daily"]}
+    version.manifest_json = manifest
+    session.commit()
+
+
+def test_a_deploy_refuses_a_new_job_name_with_an_outer_space(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    commit(world.repo_path, {"lakana.yaml": _SPACED_JOB_YAML})
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert run.error_message.startswith("lakana.yaml:3: Job name 'daily ' ends with a space")
+    assert session.query(JobVersion).count() == 0
+
+
+def test_a_deploy_keeps_a_job_the_environment_deployed_with_an_outer_space(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    _deploy_with_a_job_stored_as_spaced(session, principal, world)
+    commit(world.repo_path, {"lakana.yaml": _SPACED_JOB_YAML})
+    run = _submit_and_run(session, principal, world)
+    assert (run.status, run.error_message) == (DeployStatus.SUCCEEDED, None)
+
+
+def test_a_deploy_refuses_a_renamed_job_with_an_outer_space(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    _deploy_with_a_job_stored_as_spaced(session, principal, world)
+    commit(world.repo_path, {"lakana.yaml": _SPACED_JOB_YAML.replace("daily ", " weekly")})
+    run = _submit_and_run(session, principal, world)
+    assert run.status is DeployStatus.FAILED
+    assert run.error_message is not None
+    assert "Job name ' weekly' starts with a space" in run.error_message
+
+
 def test_a_deploy_refuses_an_override_that_leaves_a_schedule_without_cron(
     session: Session, principal: PrincipalRef, world: World
 ) -> None:
