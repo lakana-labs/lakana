@@ -22,6 +22,8 @@ interface SentRequest {
   readonly cache?: RequestCache;
   /** Whether the request outlives the page, when set. */
   readonly keepalive?: boolean;
+  /** The signal that cancels the request, when set. */
+  readonly signal?: AbortSignal;
 }
 
 /** What a route answers: a status and an optional JSON body, or a file. */
@@ -146,6 +148,7 @@ export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
       ...(init?.body instanceof Blob ? { raw: init.body } : {}),
       ...(init?.cache === undefined ? {} : { cache: init.cache }),
       ...(init?.keepalive === undefined ? {} : { keepalive: init.keepalive }),
+      ...(init?.signal == null ? {} : { signal: init.signal }),
     };
     sent.push(request);
     const handler = table.get(`${request.method} ${decodeURIComponent(url.pathname)}`);

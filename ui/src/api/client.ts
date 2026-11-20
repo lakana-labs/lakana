@@ -44,6 +44,8 @@ export interface RequestOptions {
    * sent on `pagehide`.
    */
   readonly keepalive?: boolean;
+  /** Cancels the request when aborted, as a read the page no longer wants. */
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** A download whose body stream broke before it ended, such as a connection cut in the middle. */
@@ -388,6 +390,7 @@ async function exchangeWith(
       ...(exchange.body === undefined ? {} : { body: exchange.body }),
       ...(exchange.cache === undefined ? {} : { cache: exchange.cache }),
       ...(options.keepalive === true ? { keepalive: true } : {}),
+      signal: options.signal ?? null,
     });
   } catch {
     throw new ApiError(0, "NetworkError", "The server could not be reached.");
