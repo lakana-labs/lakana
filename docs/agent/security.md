@@ -6096,15 +6096,41 @@ fuller text of each part where it already lives.
     `test_whoami_flags.py`, `test_admin_only_call_sites.py` (`_EXEMPT`).
   - **Host keys are trusted only by ticking fetched keys.** Edit never offers a text field for
     `ssh_known_hosts`: **Fetch host keys again** runs a worker's `host_keys` check and only the
-    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` lists every key the text
-    names with its line's type word, its fingerprint and its marker (`@cert-authority`, which
-    trusts every host certificate it signed, or `@revoked`, which ssh refuses), so the browser
-    hashes nothing; the page lists revoked keys apart and never as trusted. `known_host_keys`
-    skips the lines OpenSSH skips: an unknown marker, a key that names an empty type, or a type
-    word the key contradicts (`rsa-sha2-256` and `rsa-sha2-512` name an `ssh-rsa` key). The
-    audit log's fingerprints (`known_hosts_fingerprints`) read the same lines but count every
-    base64 key. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
-    ticked, never typed`), `test_repositories.py`, `test_repository_probes.py`.
+    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` lists every key ssh reads
+    from the text, once, with its type as OpenSSH names it, its fingerprint as `ssh-keygen -l`
+    prints it and its marker (`@cert-authority`, which trusts every host certificate it
+    signed, or `@revoked`, which ssh refuses), so the browser hashes nothing; the page lists
+    revoked keys apart and never as trusted. `known_host_keys` reads each line as OpenSSH 10
+    does and skips what it skips: an unknown marker, base64 it cannot decode (unpadded, or a
+    bit set past the last byte), a type word that names another type than the key, and a key
+    it refuses (`ssh_keys.read_key`: the full wire format of each type, every length checked,
+    no byte left over; an RSA modulus under 1,024 bits; an ECDSA point that is compressed, off
+    the curve or that `sshkey_ec_validate_public` refuses; a certificate whose fields are
+    malformed or whose authority's signature does not verify). `rsa-sha2-256` and
+    `rsa-sha2-512` (and their certificate words) name an `ssh-rsa` key, listed once as
+    `ssh-rsa`. A certificate's fingerprint is its certified key's, so a `@revoked` certificate
+    revokes that key on the page as in ssh. Where the list differs from what ssh reads, it never
+    shows as trusted a key ssh refuses: a certificate on a line without a marker is left out,
+    since ssh never trusts a host through it (`sshkey_equal` compares types), so "No host key
+    is trusted yet" shows when it is the only line; a certificate on a `@revoked` line is
+    listed without its signature checked, so a revocation ssh applies always shows, even one
+    signed by a security key (`sk-`) or by an RSA key `cryptography` refuses (an exponent under
+    3 or even), whose signatures Lakana cannot check, and a revocation with a bad signature,
+    which ssh skips, is shown too (it can only make ssh stricter); a certificate on a
+    `@cert-authority` line is listed only when its signature verifies, so one signed by those
+    keys is left out; and `ssh-dss` is skipped, which OpenSSH 10 no longer reads either. The
+    reference is portable OpenSSH (8.9 to 10.2, OpenSSL). Apple's build (LibreSSL), which a
+    worker on macOS runs, differs on two crafted keys only: it trusts an ECDSA point that
+    `sshkey_ec_validate_public` refuses (left out here), and it skips a revocation signed by an
+    RSA key with exponent 1 (listed here). A
+    character base64 has no place for (non-ASCII, or a no-break space before a comment) skips
+    the line, never fails the answer. Each distinct line is read once. The audit log's
+    fingerprints (`known_hosts_fingerprints`) read the same lines but count every base64 key,
+    hashed as written. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
+    ticked, never typed`), `test_repositories.py` (`a line with a non-ASCII character still
+    lists`), `test_known_host_keys.py` (each case also
+    against `ssh-keygen -l -F` when it is installed), with keys ssh-keygen made
+    (`packages/lakana-core/tests/host_keys/make.sh`).
   - **A replaced deploy key's private half never leaves the server.** Replace key and Make the
     missing keys call `POST /api/v1/repositories/{name}/deploy-key` through `guarded` (step-up
     before the call), and the answer carries only public keys and fingerprints. Delete asks for

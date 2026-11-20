@@ -16,7 +16,7 @@ import { PlaceList } from "./PlaceList";
 import type { SettingsViewer } from "./places";
 import "./settings.css";
 import "./settingsStrings";
-import { SettingsViewerContext } from "./viewer";
+import { ReloadViewerContext, SettingsViewerContext } from "./viewer";
 
 /** Nothing: what a failed read of the facts gives, so no place is offered on a guess. */
 const NONE: SettingsFacts = {
@@ -35,7 +35,8 @@ const NONE: SettingsFacts = {
  * It reads, once per visit to Settings, where the person manages secrets, whether they manage
  * row filters and masks, whether they read an environment, what they may do on the instance and
  * which environments they manage (`GET /api/v1/whoami`), and provides the viewer the rules read;
- * until the answer comes, the places that need it are neither listed nor refused.
+ * until the answer comes, the places that need it are neither listed nor refused. A place may
+ * have it read again (`useReloadViewer`); the old answer holds until the new one comes.
  * @returns The layout.
  */
 export function SettingsLayout(): JSX.Element {
@@ -57,17 +58,19 @@ export function SettingsLayout(): JSX.Element {
   const folded = useFolded();
   return (
     <SettingsViewerContext value={viewer}>
-      <div className="settings">
-        {!folded && (
-          <div className="settings-places">
-            <PlaceList />
+      <ReloadViewerContext value={read.reload}>
+        <div className="settings">
+          {!folded && (
+            <div className="settings-places">
+              <PlaceList />
+            </div>
+          )}
+          <div className="settings-place">
+            {folded && <PlaceFold />}
+            <Outlet />
           </div>
-        )}
-        <div className="settings-place">
-          {folded && <PlaceFold />}
-          <Outlet />
         </div>
-      </div>
+      </ReloadViewerContext>
     </SettingsViewerContext>
   );
 }
