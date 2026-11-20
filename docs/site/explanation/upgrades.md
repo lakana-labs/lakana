@@ -781,9 +781,13 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   connection](../reference/connections.md#a-run-that-failed-on-a-connection)). The Connections
   screen and `lakana connection show` show it, `lakana runs show` names the connection.
 - The SDK: every error of `lakana.ingest` has `connection`, set by the helper (`None` for
-  `ConnectionNotDeclared` and for an error your code raises). The task harness writes it into its
+  `ConnectionNotDeclared`, for a `UsageError`, which is a mistake in the asset's code, and for an
+  error your code raises). The task harness writes it into its
   result as `failure_connection`. A task image with an older `lakana` records no connection; a
   worker older than the server ignores the field.
+- New values for a connection's secret now change its `updated_at` (`lakana connection update
+  --password-stdin`, `--values-stdin`, and `lakana secret rotate` of the secret it uses), so its
+  last test reads "tested before the last change" afterwards, as for any other change.
 
 ### Row filters and column masks are listed in pages (breaking)
 

@@ -698,7 +698,9 @@ queueing (M5c3) and cron (M5d) plug into the tick.
   `error_type` (`String(100)`) and `failure_connection` (`String(63)`, migration `0087`), stored
   by `record_attempt` with the code and only for a failure (a success, a release and a cancel
   store none); the scheduler's text (`store._apply_task`) clears both. The SDK's helpers set
-  `IngestError.connection` (`lakana.ingest._errors.names_connection`), the harness writes it as
+  `IngestError.connection` (`lakana.ingest._errors.names_connection`; never for
+  `ConnectionNotDeclared` or `UsageError`, a mistake of the asset's code), the worker keeps
+  `error_type` only as a dotted Python identifier (`runners._class_name`), the harness writes it as
   the result record's `failure_connection`, and the worker keeps it only for a connection the
   asset declares (`python_tasks`), since the record is the asset's own word. `failure` shows both;
   `ConnectionOut.last_run_failure` is the newest failed task naming the connection after its

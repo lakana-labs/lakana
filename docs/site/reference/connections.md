@@ -334,10 +334,14 @@ connection shows the newest task that failed on it when all of these hold:
   `files.read`, `files.list`, `rest.read`, `sql.read`) called with this connection. Each such
   error carries the connection in `IngestError.connection`, and the run records it. An error of
   your own client (after `connections.get`, [Anything else: your own client](../how-to/load-data-from-a-source.md#anything-else-your-own-client))
-  names no connection, and neither does `ConnectionNotDeclared`;
+  names no connection, and neither does `ConnectionNotDeclared` nor a `UsageError` (a mistake in
+  the asset's code, such as an empty query, a connection of the wrong kind or a missing secret
+  key: the source did nothing wrong, so the connection is not marked);
 - the asset declares the connection: the worker keeps only a declared name;
 - the task failed after the connection's last change: a change may be the fix, and a connection
-  deleted and made again under the same name is a new one;
+  deleted and made again under the same name is a new one. New values for its secret count as a
+  change, whether given with `lakana connection update --password-stdin` (or `--values-stdin`)
+  or with `lakana secret rotate`;
 - it is still the asset's newest ending: a later run of the same asset (same repository and
   environment) that succeeded, or failed for another reason, hides it;
 - you may read the environment's runs (`RUN` or `READ_ENVIRONMENT`, as for the run's own page).
