@@ -32,8 +32,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import AuthorizationService, PrincipalRef, SessionContext
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, SessionContext
 from lakana_core.errors import ConflictError, NotFoundError, OidcSignInRefused
+from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.break_glass import breaks, unlinked_admin_ids
 from lakana_core.grants.service import active_instance_admin_ids
@@ -42,7 +43,6 @@ from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
 from lakana_core.identity.sessions import (
     SessionService,
     principal_named,
-    require_principal_admin,
     require_step_up,
     token_window_ends_at,
     utc_now,
@@ -390,7 +390,8 @@ class OidcLinkService:
         Raises
         ------
         PermissionDenied
-            If `p` is not an instance administrator.
+            If `p` is not an instance administrator (`MANAGE_TOKEN` works only with the ADMIN
+            role).
         StepUpRequired
             Without a fresh step-up in a browser session.
         NotFoundError
@@ -398,9 +399,8 @@ class OidcLinkService:
         ConflictError
             For oneself (use a recovery link instead) and for a person who is not linked.
         """
-        require_principal_admin(
-            self._session, self._authz, p, doing="unlink a person from the identity provider"
-        )
+        # Unlinking revokes the person's tokens: administering tokens, an administrator's alone.
+        authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         require_step_up(p, now=self._clock())
         target = principal_named(self._session, name)
         if target.id == p.id:
