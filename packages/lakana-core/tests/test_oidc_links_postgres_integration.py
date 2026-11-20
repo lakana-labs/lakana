@@ -92,8 +92,10 @@ def actor(engine: Engine) -> PrincipalRef:
     return ref
 
 
-def _person(session: Session, actor: PrincipalRef, *, admin: bool) -> Principal:
-    """Create a person with a working passkey, optionally an administrator; committed.
+def _person(
+    session: Session, actor: PrincipalRef, *, admin: bool, passkey: bool = True
+) -> Principal:
+    """Create a person, with a working passkey by default, optionally an administrator.
 
     Parameters
     ----------
@@ -103,11 +105,13 @@ def _person(session: Session, actor: PrincipalRef, *, admin: bool) -> Principal:
         The acting principal.
     admin
         Whether to grant ADMIN on the instance.
+    passkey
+        Whether to give them a working passkey.
 
     Returns
     -------
     Principal
-        The person.
+        The person; committed.
     """
     allow = AllowAllAuthorization()
     name = f"p-{uuid.uuid4().hex[:8]}"
@@ -118,6 +122,9 @@ def _person(session: Session, actor: PrincipalRef, *, admin: bool) -> Principal:
         GrantService(session, allow).grant(
             actor, principal=name, role=Role.ADMIN, kind=SecurableKind.INSTANCE
         )
+    if not passkey:
+        session.commit()
+        return row
     session.add(
         Passkey(
             id=uuid.uuid4(),
@@ -369,3 +376,70 @@ def test_two_accounts_linking_one_identity_concurrently(
         session.commit()
     assert racing.finish() == "identity_taken"
     assert _linked_subjects(engine, subject) == [alice_name]
+
+
+def test_a_grant_to_a_linked_person_and_a_deactivation_of_the_last_unlinked_admin_at_once(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: the last unlinked administrator goes while a linked person gains ADMIN.
+
+    Each alone keeps the rule. The grant must wait for the deactivation and count again, or the
+    instance ends with only linked administrators.
+    """
+    allow = AllowAllAuthorization()
+    with Session(engine) as session:
+        una = _person(session, actor, admin=True)
+        _person(session, actor, admin=True, passkey=False)
+        lin = _person(session, actor, admin=False)
+        una_name, lin_id, lin_name = una.name, lin.id, lin.name
+        OidcLinkService(session, allow, bootstrap_name="admin").link(
+            lin_id, _identity(f"lin-{lin_id.hex}"), via="profile"
+        )
+        session.commit()
+    assert _unlinked(engine) == 1
+    with Session(engine) as session:
+        PrincipalService(session, allow).deactivate_principal(actor, una_name, commit=False)
+
+        def grant(other: Session) -> None:
+            """Grant ADMIN to the linked person in `other` without committing.
+
+            Parameters
+            ----------
+            other
+                The change's own session.
+            """
+            GrantService(other, allow).grant(
+                actor,
+                principal=lin_name,
+                role=Role.ADMIN,
+                kind=SecurableKind.INSTANCE,
+                commit=False,
+            )
+
+        racing = _Second(engine, grant)
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == LAST_UNLINKED_ADMIN_MESSAGE
+    with Session(engine) as session:
+        assert session.get(Principal, lin_id) is not None
+        held = session.execute(
+            select(Grant.id).where(Grant.principal_id == lin_id, Grant.revoked_at.is_(None))
+        ).all()
+    assert held == []
+
+
+def test_two_finishes_linking_one_person_at_once(engine: Engine, actor: PrincipalRef) -> None:
+    """Review of #780: two links of one person, two identities; the second overwrites nothing."""
+    with Session(engine) as session:
+        alice = _person(session, actor, admin=False)
+        alice_id = alice.id
+    first, second = f"a-{alice_id.hex}", f"b-{alice_id.hex}"
+    with Session(engine) as session:
+        _linking(alice_id, first)(session)
+        racing = _Second(engine, _linking(alice_id, second))
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == "already_linked"
+    with Session(engine) as session:
+        row = session.get(Principal, alice_id)
+        assert row is not None and row.oidc_subject == first

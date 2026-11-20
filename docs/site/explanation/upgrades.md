@@ -791,9 +791,12 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   settings --token-window-days`, 1 to 365). Unlinking someone, by an administrator or by the
   server operator's recovery link, revokes their personal tokens. Nothing changes for anyone who
   is not linked.
-- While anyone is linked, at least one administrator who signs in with a passkey must remain:
-  linking the last one, deactivating them, taking their ADMIN role away or deleting their last
-  passkey answers 409 and says so.
+- While any administrator is linked, at least one administrator who signs in with a passkey at
+  this address must remain: linking the last one, deactivating them, taking their ADMIN role away
+  or deleting their last passkey answers 409 and says so, and so does giving the ADMIN role to a
+  linked person (directly, through a group or in an access file) when no such administrator is
+  left. A task token minted with a linked person's own token, and a local sign-in's session, end
+  with that person's token window.
 - `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
   from now on.
 

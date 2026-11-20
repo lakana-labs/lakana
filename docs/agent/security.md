@@ -7023,7 +7023,10 @@ token window. Threat model: "OIDC sign-in (#32)".
   link is checked without being used (`LinkService.check_open`, a wrong secret answers like an
   unknown link, `test_start_with_a_wrong_secret_is_like_unknown`) and the flow keeps only its row
   id; the secret is never stored, logged or audited
-  (`test_invite_through_the_provider_signs_in_and_links`). The finish uses the link by id with
+  (`test_invite_through_the_provider_signs_in_and_links`). Every flow that links (`invite`,
+  `recovery`, `link`) sends `prompt=login`, so the person sees the identity they bind, never one a
+  shared browser's provider session answers silently
+  (`test_every_link_flow_asks_the_provider_for_a_fresh_sign_in`). The finish uses the link by id with
   `redeem`'s conditional update, in the transaction that links and starts the session, so a link
   withdrawn or used meanwhile is `link_unusable` and creates nobody
   (`test_invite_withdrawn_after_start_creates_nobody`, `test_invite_used_twice_one_wins`). `link`
@@ -7039,37 +7042,52 @@ token window. Threat model: "OIDC sign-in (#32)".
   `last_unlinked_admin`, `cannot_link_operator` (the bootstrap principal and service accounts,
   `test_bootstrap_principal_can_never_be_linked`), `already_linked`, `auth_too_old`. Each is a 403
   `OidcSignInRefused` with one rate-limited `SIGN_IN_OIDC_REFUSED` row carrying `iss` and `sub`.
-- **One identity per account.** `OidcLinkService.link` looks the identity up and refuses
+- **One identity per account.** `OidcLinkService.link` updates the row only while it is unlinked
+  (`oidc_subject IS NULL`), so a second finish for one person never overwrites a link made
+  meanwhile and is refused `already_linked` (`test_a_link_made_meanwhile_is_not_overwritten`, on
+  Postgres `test_two_finishes_linking_one_person_at_once`). It looks the identity up and refuses
   `identity_taken`; the unique constraint on `(oidc_issuer, oidc_subject)` decides a race, in a
   nested transaction, and the loser gets the refusal, never a 500
   (`test_two_accounts_linking_one_identity_one_wins`, and on Postgres
   `test_two_accounts_linking_one_identity_concurrently`).
-- **L3, break-glass** (`lakana_core.grants.break_glass`). An unlinked administrator is active,
-  holds ADMIN directly or through a group, is not linked and has a passkey that is not disabled
-  (`test_admin_through_a_group_counts`, `test_admin_without_a_working_passkey_does_not_count`). The
-  count is taken under `lock_admin_count`, not with row locks: the lock already serialises every
-  change that lowers the administrator count, in the documented order (the access lock first). The
-  rule refuses a change that takes the count from one or more to none while a linked administrator
-  remains: linking the last one (`last_unlinked_admin`, `test_last_unlinked_admin_is_refused`), and
-  with `LAST_UNLINKED_ADMIN_MESSAGE` (409) deactivating them, revoking their ADMIN, removing them
-  from the group that holds it and deleting their last working passkey
+- **L3, break-glass** (`lakana_core.grants.break_glass`), an invariant: whenever at least one
+  active administrator is linked, at least one *unlinked administrator* remains, an active principal
+  who holds ADMIN directly or through a group, is not linked and has a passkey that is not disabled,
+  for the relying party the server records at start-up (`sign_in.rp_id`): a passkey of an earlier
+  public address is no way in (`test_admin_through_a_group_counts`,
+  `test_admin_without_a_working_passkey_does_not_count`, `test_only_passkeys_of_this_address_count`).
+  Every change that can break it is refused when it would, under `lock_admin_count` (not row
+  locks), after the access lock where one is taken. On the lowering side: linking the last one
+  (`last_unlinked_admin`, `test_last_unlinked_admin_is_refused`), and with
+  `LAST_UNLINKED_ADMIN_MESSAGE` (409) deactivating them, revoking their ADMIN, removing them from
+  the group that holds it and deleting their last working passkey
   (`test_deactivating_the_last_unlinked_admin_is_refused`,
   `test_revoking_the_last_unlinked_admins_role_is_refused`,
   `test_removing_the_last_unlinked_admin_from_the_admins_group_is_refused`,
-  `test_deleting_the_last_unlinked_admins_last_passkey_is_refused`). An instance that links nobody
-  keeps today's rules, and a count already at zero blocks nothing
+  `test_deleting_the_last_unlinked_admins_last_passkey_is_refused`). On the raising side
+  (`assert_break_glass_on_raise`, review of #780): granting instance ADMIN to a linked person or to
+  a group with a linked member, and adding a linked person to a group that holds it, so the order
+  of two changes does not matter (`test_the_reviewers_counterexample_deactivate_then_grant`,
+  `test_the_reviewers_counterexample_grant_then_deactivate`,
+  `test_adding_a_linked_person_to_the_admins_group_is_refused`,
+  `test_granting_admin_to_a_group_with_a_linked_member_is_refused`). An access apply checks the
+  rule once, on the state it leaves (`test_an_apply_that_leaves_only_linked_administrators_is_refused`).
+  Only the bootstrap principal is ever reactivated, and it is never linked. A change is refused
+  only when the rule held before it: an instance that links nobody keeps today's rules, and one
+  where it is already broken (a copy disabled) is not frozen
   (`test_lowering_the_count_is_allowed_while_no_administrator_is_linked`,
-  `test_a_count_already_at_zero_blocks_nothing`). On Postgres,
-  `test_oidc_links_postgres_integration.py` links the last two at once and a link against a
-  deactivation of the other; the second waits on the lock and is refused, and one unlinked
-  administrator is left.
+  `test_a_rule_already_broken_blocks_nothing`). On Postgres,
+  `test_oidc_links_postgres_integration.py` races the last two linking at once, a link against a
+  deactivation of the other, and a grant of ADMIN to a linked person against the deactivation of
+  the last unlinked administrator; the second waits on the lock and is refused.
 - **L4, linking keeps passkeys stored and ends no session**
   (`test_link_from_profile_links_and_keeps_passkeys_stored`).
 - **L5, recovery links.** An administrator's recovery link of a linked person answers 403
   `ProviderSignInRequired` at `/links/redeem`, stays usable, and works through the provider only as
   the same identity (`test_admin_recovery_link_for_linked_person_needs_the_provider`,
   `test_recovery_of_a_linked_person_needs_the_same_identity`); `/links/describe` says
-  `provider_only`. Of an unlinked person it may link them (`test_recovery_of_an_unlinked_person_may_link`).
+  `provider_only`. Of an unlinked person it may link them
+  (`test_recovery_of_an_unlinked_person_may_link`).
   A recovery through the provider ends the sessions and notifies as a passkey recovery does, and
   deletes no passkey. The operator's recovery link of a linked administrator unlinks them on the
   passkey path (`PRINCIPAL_OIDC_UNLINKED`, reason `operator_recovery`, an `oidc_unlinked` notice to
@@ -7078,8 +7096,9 @@ token window. Threat model: "OIDC sign-in (#32)".
   tokens as L6 does (`PAT_REVOKED`, `source: operator_recovery`, attributed to the operator), so no
   token outside the window works again once its person is unlinked
   (`test_operator_recovery_revokes_the_linked_persons_tokens`).
-- **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN and
-  step-up) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
+- **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN through
+  `authorize_admin_only` with `MANAGE_TOKEN`, as it revokes tokens, and step-up; `OidcLinkService`
+  is in the admin-only call-site check) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
   oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`) and
   clears the identity, in one transaction (`test_unlink_deletes_passkeys_revokes_tokens_ends_sessions`,
   `test_unlink_needs_step_up_and_admin`). Unlinking oneself is 409 (`test_unlinking_oneself_is_refused`).
@@ -7089,7 +7108,12 @@ token window. Threat model: "OIDC sign-in (#32)".
   with the next step, and the token is not revoked
   (`test_token_outside_the_window_is_401_and_not_revoked`, `test_a_provider_sign_in_reopens_the_window`,
   `test_window_change_applies_at_once`). Task and CI tokens are not personal tokens and are untouched
-  (`test_task_and_ci_tokens_ignore_the_window`); the bootstrap principal is never linked.
+  (`test_a_task_token_an_administrator_minted_ignores_the_window`,
+  `test_ci_trust_tokens_ignore_the_window`); the bootstrap principal is never linked. What a linked
+  person's own personal token made stops with the window too (review of #780): a task token minted
+  with it, and a session a local link started with it, which ends as `token_window`
+  (`within_token_window`; `test_a_task_token_minted_with_a_linked_persons_token_ends_with_the_window`,
+  `test_a_local_link_session_ends_with_the_window`).
 - **L8, one way in.** A passkey sign-in of a linked person verifies and then answers 403
   `ProviderSignInRequired`, audited through the refusal limiter (an unknown passkey still reads as
   today's 401); registering a passkey is refused the same way, also with a challenge issued before
@@ -7108,7 +7132,7 @@ token window. Threat model: "OIDC sign-in (#32)".
 - **Residuals:** a passkey disabled as a copy can take the last unlinked administrator (a security
   response, never refused); the operator's recovery is then the way in. A local sign-in link
   (`lakana server start --local`) still signs a linked person in, but only with their own personal
-  token, which the window limits.
+  token, within the window, and its session ends with it.
 
 ## Git fetch hardening (M5b)
 

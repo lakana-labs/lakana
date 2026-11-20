@@ -690,10 +690,13 @@ their tokens only within the token window. `lakana login` follows.
   Their personal tokens work only within the token window (30 days by default) after their last
   provider sign-in; outside it they answer 401, unrevoked, so someone disabled at the provider loses
   token access within the window.
-- **Lock-out.** At least one administrator who signs in with a passkey stays while anyone is
-  linked: linking the last one, and deactivating them, revoking their ADMIN, removing them from the
-  admins group or deleting their last passkey, is refused, under the administrator-count lock, so
-  two such changes at once take turns. The operator's recovery link unlinks a linked administrator
+- **Lock-out.** An invariant: whenever at least one active administrator is linked, at least one
+  active administrator remains who is not linked and has a working passkey for this address. Every
+  change that would break it is refused, under the administrator-count lock, so two at once take
+  turns: linking the last such administrator, deactivating them, revoking their ADMIN, removing
+  them from the admins group or deleting their last passkey, and as well granting ADMIN to a linked
+  person (directly or through a group), adding one to the admins group, or an access apply that
+  does either. A change is refused only when the invariant held before it. The operator's recovery link unlinks a linked administrator
   whatever the provider says, and revokes their personal tokens, so none outside the window comes
   back to life.
 - **Session fixation.** The session starts in `finish`, a same-origin POST, with a fresh id; a
@@ -718,7 +721,9 @@ their tokens only within the token window. `lakana login` follows.
 
 1. **A token works until the window ends.** Someone disabled at the provider keeps their
    personal tokens for up to the window (30 days by default; an administrator may shorten it to
-   one day, or unlink or deactivate the person at once). Task and CI tokens are not under it.
+   one day, or unlink or deactivate the person at once). What their own token made (a task token,
+   a local sign-in's session) stops with it; task tokens an administrator minted and CI tokens act
+   for a run or a service account and are not under it.
 2. **Signing out at the provider does not end a Lakana session** (a non-goal of #32).
 3. **The audit row's per-client bucket trusts `request.client.host`**, as for the other refused
    sign-ins.
