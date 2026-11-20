@@ -30,6 +30,7 @@ from lakana_core.grants.admin import (
     credential_acts_as_admin,
 )
 from lakana_core.grants.admin_lock import lock_admin_count
+from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, leaves_no_unlinked_admin
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
@@ -1224,6 +1225,10 @@ def assert_admin_headroom(
     the group holds any active grant at all, so it can never reach a group
     that still holds a live admin grant for this to protect against.
 
+    The same lock covers the break-glass count (`lakana_core.grants.break_glass`): while an
+    administrator signs in through the identity provider, the change must leave at least one
+    administrator who can sign in with a passkey.
+
     Parameters
     ----------
     session
@@ -1245,7 +1250,8 @@ def assert_admin_headroom(
     ------
     ConflictError
         If no active principal would hold an active instance-scoped
-        `admin` grant after the exclusion.
+        `admin` grant after the exclusion (`LAST_ADMIN_MESSAGE`), or the change would take the
+        last unlinked administrator while a linked one remains (`LAST_UNLINKED_ADMIN_MESSAGE`).
     """
     lock_admin_count(session)
     # Only refuse when *this* exclusion is what would empty the set. An
@@ -1253,7 +1259,8 @@ def assert_admin_headroom(
     # admin grant has ever been made) is a pre-existing condition this guard
     # does not need to protect — and must not block unrelated principal
     # changes over, or every deactivate/revoke call would fail forever.
-    if not active_instance_admin_ids(session):
+    current_ids = active_instance_admin_ids(session)
+    if not current_ids:
         return
     remaining_ids = active_instance_admin_ids(
         session,
@@ -1263,3 +1270,5 @@ def assert_admin_headroom(
     remaining_ids.discard(excluding_principal_id)
     if not remaining_ids:
         raise ConflictError(LAST_ADMIN_MESSAGE)
+    if leaves_no_unlinked_admin(session, before=current_ids, after=remaining_ids):
+        raise ConflictError(LAST_UNLINKED_ADMIN_MESSAGE)

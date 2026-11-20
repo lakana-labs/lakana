@@ -1,0 +1,384 @@
+"""Linking a person to the organisation's identity provider, and undoing it (#32, PR 2).
+
+The sign-in design's "Linking" and "Break-glass":
+
+- Only a person Lakana knows is linked, by the provider's ``iss`` and ``sub``; nobody is created
+  by the provider's say-so, and e-mail addresses and names are shown, never matched.
+- One identity per account and one account per identity: the unique constraint on
+  ``(oidc_issuer, oidc_subject)`` decides between two links at once, and the loser is refused
+  ``identity_taken``, in a sentence that names neither account.
+- The server operator's account (the bootstrap principal) and service accounts are never linked.
+- The last administrator who can sign in with a passkey is never linked
+  (`lakana_core.grants.break_glass`); the count is taken under the administrator-count lock
+  (`lakana_core.grants.admin_lock.lock_admin_count`), so two links of the last two take turns
+  and the second sees the first's commit.
+- Linking keeps the person's passkeys stored (they no longer sign in) and ends no session.
+- An administrator's unlink (`OidcLinkService.unlink`, step-up) deletes the person's passkeys,
+  revokes their personal tokens and ends their sessions: they come back with a recovery link.
+- The operator's recovery link of a linked administrator unlinks them
+  (`OidcLinkService.unlink_for_operator_recovery`) and tells every administrator.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable
+from datetime import datetime
+from typing import Literal
+
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from lakana_core.audit.service import AuditService
+from lakana_core.auth import AuthorizationService, PrincipalRef
+from lakana_core.errors import ConflictError, NotFoundError, OidcSignInRefused
+from lakana_core.grants.admin_lock import lock_admin_count
+from lakana_core.grants.break_glass import leaves_no_unlinked_admin, unlinked_admin_ids
+from lakana_core.grants.service import active_instance_admin_ids
+from lakana_core.identity.notices import NoticeService
+from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
+from lakana_core.identity.sessions import (
+    SessionService,
+    principal_named,
+    require_principal_admin,
+    require_step_up,
+    utc_now,
+)
+from lakana_core.identity.task_tokens import revoke_task_tokens_of_pat
+from lakana_core.models import (
+    AuditEventType,
+    Passkey,
+    PersonalAccessToken,
+    Principal,
+    PrincipalType,
+)
+
+LinkVia = Literal["invite", "profile", "recovery"]
+"""How a person came to link: an invite, their profile, or a recovery link."""
+
+
+def is_linked(principal: Principal) -> bool:
+    """Say whether a person signs in through the identity provider.
+
+    Parameters
+    ----------
+    principal
+        The person.
+
+    Returns
+    -------
+    bool
+        Whether a provider identity is stored on them.
+    """
+    return principal.oidc_subject is not None
+
+
+def linked_count(session: Session) -> int:
+    """Count the active people linked to the identity provider.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    int
+        How many there are.
+    """
+    return int(
+        session.execute(
+            select(func.count())
+            .select_from(Principal)
+            .where(Principal.oidc_subject.is_not(None), Principal.is_active.is_(True))
+        ).scalar_one()
+    )
+
+
+def unlinked_admin_count(session: Session) -> int:
+    """Count the administrators who can sign in without the identity provider.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    int
+        Active instance administrators, not linked, with a passkey that is not disabled.
+    """
+    return len(unlinked_admin_ids(session, active_instance_admin_ids(session)))
+
+
+def linking_refusal(principal: Principal, *, bootstrap_name: str) -> OidcSignInRefused | None:
+    """Say why a person cannot be linked at all, before anyone goes to the provider.
+
+    Parameters
+    ----------
+    principal
+        The person.
+    bootstrap_name
+        The bootstrap principal's name (`LAKANA_BOOTSTRAP_ADMIN`).
+
+    Returns
+    -------
+    OidcSignInRefused or None
+        ``cannot_link_operator`` for the bootstrap principal or a service account,
+        ``already_linked`` for a linked person; `None` otherwise.
+    """
+    if principal.type is not PrincipalType.USER or principal.name == bootstrap_name:
+        return OidcSignInRefused("cannot_link_operator")
+    if is_linked(principal):
+        return OidcSignInRefused("already_linked")
+    return None
+
+
+class OidcLinkService:
+    """Link people to the identity provider and unlink them.
+
+    Parameters
+    ----------
+    session
+        Database session. `link` and `unlink_for_operator_recovery` leave their changes for the
+        caller's commit; `unlink` commits.
+    authz
+        Authorization service, asked before an administrator unlinks someone.
+    clock
+        The clock; `utc_now` by default.
+    bootstrap_name
+        The bootstrap principal's name (`LAKANA_BOOTSTRAP_ADMIN`): never linked.
+    """
+
+    def __init__(
+        self,
+        session: Session,
+        authz: AuthorizationService,
+        *,
+        clock: Callable[[], datetime] = utc_now,
+        bootstrap_name: str,
+    ) -> None:
+        self._session = session
+        self._authz = authz
+        self._clock = clock
+        self._bootstrap_name = bootstrap_name
+
+    def link(
+        self, principal_id: uuid.UUID, identity: ProviderIdentity, *, via: LinkVia
+    ) -> Principal:
+        """Link a person to a verified provider identity; the caller commits.
+
+        Also records the provider sign-in that proved it (`last_provider_sign_in_at`, the shown
+        e-mail address and name), which opens the person's token window.
+
+        Parameters
+        ----------
+        principal_id
+            The person.
+        identity
+            The identity the provider just verified.
+        via
+            ``invite``, ``profile`` or ``recovery``, for the audit event.
+
+        Returns
+        -------
+        Principal
+            The person, now linked.
+
+        Raises
+        ------
+        NotFoundError
+            If no principal has the id.
+        OidcSignInRefused
+            ``cannot_link_operator`` (the bootstrap principal, a service account),
+            ``already_linked``, ``identity_taken`` (another account holds the identity) or
+            ``last_unlinked_admin`` (the last administrator who signs in with a passkey).
+        """
+        principal = self._session.get(Principal, principal_id)
+        if principal is None:
+            raise NotFoundError("No such principal.")
+        refusal = linking_refusal(principal, bootstrap_name=self._bootstrap_name)
+        if refusal is not None:
+            raise refusal
+        # The count must see every other link and removal that committed before it.
+        lock_admin_count(self._session)
+        holder = principal_for(self._session, identity)
+        if holder is not None and holder.id != principal.id:
+            raise OidcSignInRefused("identity_taken")
+        admins = active_instance_admin_ids(self._session)
+        if principal.id in admins and leaves_no_unlinked_admin(
+            self._session, before=admins, after=admins, linking=principal.id
+        ):
+            raise OidcSignInRefused("last_unlinked_admin")
+        try:
+            with self._session.begin_nested():
+                self._session.execute(
+                    update(Principal)
+                    .where(Principal.id == principal.id)
+                    .values(
+                        oidc_issuer=identity.issuer,
+                        oidc_subject=identity.subject,
+                        oidc_email=identity.email,
+                        oidc_name=identity.name,
+                        last_provider_sign_in_at=self._clock(),
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+        except IntegrityError:
+            raise OidcSignInRefused("identity_taken") from None
+        self._session.refresh(principal)
+        AuditService(self._session).record(
+            principal.id,
+            AuditEventType.PRINCIPAL_OIDC_LINKED,
+            detail={
+                "principal": principal.name,
+                "iss": identity.issuer,
+                "sub": identity.subject,
+                "via": via,
+            },
+        )
+        return principal
+
+    def _clear(self, principal: Principal) -> tuple[str | None, str | None]:
+        """Remove a person's provider identity; the caller audits and commits.
+
+        Parameters
+        ----------
+        principal
+            The person.
+
+        Returns
+        -------
+        tuple of (str or None, str or None)
+            The issuer and subject they were linked to.
+        """
+        before = (principal.oidc_issuer, principal.oidc_subject)
+        principal.oidc_issuer = None
+        principal.oidc_subject = None
+        principal.oidc_email = None
+        principal.oidc_name = None
+        principal.last_provider_sign_in_at = None
+        return before
+
+    def unlink(self, p: PrincipalRef, name: str) -> None:
+        """Unlink a person from the identity provider, as an administrator; commits.
+
+        In one transaction: the person's passkeys are deleted, every personal API token of theirs
+        is revoked (with the task tokens minted from it), every session of theirs ends
+        (``oidc_unlinked``) and the provider identity is cleared. They come back with a recovery
+        link. To offboard someone, deactivate them instead.
+
+        Parameters
+        ----------
+        p
+            The acting administrator, with a fresh step-up in a browser session.
+        name
+            The person to unlink.
+
+        Raises
+        ------
+        PermissionDenied
+            If `p` is not an instance administrator.
+        StepUpRequired
+            Without a fresh step-up in a browser session.
+        NotFoundError
+            If no principal has the name.
+        ConflictError
+            For oneself (use a recovery link instead) and for a person who is not linked.
+        """
+        require_principal_admin(
+            self._session, self._authz, p, doing="unlink a person from the identity provider"
+        )
+        require_step_up(p, now=self._clock())
+        target = principal_named(self._session, name)
+        if target.id == p.id:
+            raise ConflictError(
+                "You cannot unlink yourself: you would lose every way in at once. Ask another "
+                "administrator, or ask the server operator for a recovery link."
+            )
+        if not is_linked(target):
+            raise ConflictError(
+                f"{name!r} is not linked to the identity provider, so there is nothing to unlink."
+            )
+        passkeys = self._session.execute(
+            delete(Passkey)
+            .where(Passkey.principal_id == target.id)
+            .returning(Passkey.id)
+            .execution_options(synchronize_session="fetch")
+        ).all()
+        now = self._clock()
+        audit = AuditService(self._session)
+        tokens = list(
+            self._session.execute(
+                select(PersonalAccessToken)
+                .where(
+                    PersonalAccessToken.principal_id == target.id,
+                    PersonalAccessToken.revoked_at.is_(None),
+                )
+                .order_by(PersonalAccessToken.created_at, PersonalAccessToken.id)
+            ).scalars()
+        )
+        for token in tokens:
+            token.revoked_at = now
+            # As `PatService.revoke` records it, marked as coming from the unlink.
+            audit.record(
+                p.id,
+                AuditEventType.PAT_REVOKED,
+                detail={
+                    "actor": p.name,
+                    "subject": target.name,
+                    "key_id": token.key_id,
+                    "source": "oidc_unlinked",
+                },
+            )
+            revoke_task_tokens_of_pat(self._session, p, token)
+        ended = SessionService(self._session, self._authz, clock=self._clock).end_for_principal(
+            target.id, "oidc_unlinked", commit=False
+        )
+        issuer, subject = self._clear(target)
+        audit.record(
+            p.id,
+            AuditEventType.PRINCIPAL_OIDC_UNLINKED,
+            detail={
+                "principal": target.name,
+                "iss": issuer,
+                "sub": subject,
+                "reason": "administrator",
+                "actor": p.name,
+                "passkeys_deleted": len(passkeys),
+                "tokens_revoked": len(tokens),
+                "sessions_ended": ended,
+            },
+        )
+        self._session.commit()
+
+    def unlink_for_operator_recovery(self, principal: Principal, link_id: uuid.UUID) -> None:
+        """Unlink an administrator whose operator recovery link is being used; the caller commits.
+
+        The break-glass path: it works whatever the provider says. Every administrator, and the
+        person, gets the notice ``oidc_unlinked``.
+
+        Parameters
+        ----------
+        principal
+            The person recovered.
+        link_id
+            The recovery link.
+        """
+        issuer, subject = self._clear(principal)
+        AuditService(self._session).record(
+            principal.id,
+            AuditEventType.PRINCIPAL_OIDC_UNLINKED,
+            detail={
+                "principal": principal.name,
+                "iss": issuer,
+                "sub": subject,
+                "reason": "operator_recovery",
+                "link_id": str(link_id),
+            },
+        )
+        notices = NoticeService(self._session, clock=self._clock)
+        detail = {"name": principal.name, "link_id": str(link_id)}
+        for recipient in sorted({principal.id, *active_instance_admin_ids(self._session)}, key=str):
+            notices.add(recipient, "oidc_unlinked", principal.id, detail)

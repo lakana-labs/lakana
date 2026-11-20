@@ -77,6 +77,8 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
+from lakana_core.grants.admin_lock import lock_admin_count
+from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, leaves_no_unlinked_admin
 from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.links import has_passkey
 from lakana_core.identity.notices import NoticeService
@@ -1124,7 +1126,10 @@ class PasskeyService:
         NotFoundError
             If the person has no passkey with that id.
         ConflictError
-            If it is the caller's own last passkey that works at this address.
+            If it is the caller's own last passkey that works at this address, or it would
+            leave no administrator who signs in with a passkey while one signs in through the
+            identity provider (`lakana_core.grants.break_glass`, counted under the
+            administrator-count lock).
         """
         if principal_name != p.name:
             self._require_admin(p)
@@ -1154,6 +1159,13 @@ class PasskeyService:
                     "This is your last passkey, and without it you could not sign in. Add "
                     "another passkey first, or ask an administrator for a recovery link."
                 )
+        # A removal can take the last administrator who signs in without the identity provider.
+        lock_admin_count(self._session)
+        admins = active_instance_admin_ids(self._session)
+        if target.id in admins and leaves_no_unlinked_admin(
+            self._session, before=admins, after=admins, excluding_passkey_id=row.id
+        ):
+            raise ConflictError(LAST_UNLINKED_ADMIN_MESSAGE)
         self._session.delete(row)
         AuditService(self._session).record(
             p.id,

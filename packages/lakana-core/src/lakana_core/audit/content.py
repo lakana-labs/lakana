@@ -161,6 +161,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "owner",
         # a passkey's id (`lakana_core.identity.passkeys`), never its key or credential id
         "passkey_id",
+        # how many passkeys an unlink from the identity provider deleted (#32)
+        "passkeys_deleted",
         # the personal token a task token was minted with: its public key id, never a secret
         "pat_key_id",
         "path",
@@ -324,6 +326,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "tables_without_tombstone",
         "tags_removed",
         "tasks",
+        # how many personal tokens an unlink from the identity provider revoked (#32)
+        "tokens_revoked",
         "versions",
         "versions_closed",
         "versions_opened",
