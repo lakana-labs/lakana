@@ -1016,7 +1016,10 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     (
         "POST",
         "/api/v1/environments/{env}/saved-queries",
-    ): "keeps text; it runs nothing and grants nothing",
+    ): (
+        "keeps the caller's own text, and may share it with everyone at once; the text runs "
+        "with each runner's own rights and grants nothing, and a session can read it"
+    ),
     (
         "PUT",
         "/api/v1/environments/{env}/saved-queries/{saved_query_id}",

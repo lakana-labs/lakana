@@ -12,6 +12,7 @@ from lakana._models import (
     Connection,
     ConnectionEnvironment,
     ConnectionPage,
+    ConnectionRunFailure,
     ConnectionTest,
     DeclaringAsset,
     LastConnectionTest,
@@ -98,11 +99,41 @@ def _last_test_from_json(data: object) -> LastConnectionTest | None:
     )
 
 
+def _run_failure_from_json(data: object) -> ConnectionRunFailure | None:
+    """Build a `ConnectionRunFailure` from the `last_run_failure` of a `ConnectionOut` body.
+
+    Parameters
+    ----------
+    data
+        The decoded `last_run_failure`; `None` for none, or from a server that does not send it.
+
+    Returns
+    -------
+    ConnectionRunFailure or None
+        The run, or `None`.
+
+    Raises
+    ------
+    AssertionError, KeyError, TypeError, ValueError
+        If `data` is not an object with a run, an asset and a time; `_connection_from_json` turns
+        each into `InvalidResponse`.
+    """
+    if data is None:
+        return None
+    assert isinstance(data, dict)  # nosec B101 -- an untrusted answer; the caller catches it
+    return ConnectionRunFailure(
+        run_id=str(data["run_id"]),
+        asset=str(data["asset"]),
+        finished_at=datetime.fromisoformat(data["finished_at"]),
+    )
+
+
 def _connection_from_json(data: object) -> Connection:
     """Build a `Connection` from a `ConnectionOut` body.
 
-    A field this SDK does not know is ignored; `environment`, `last_test` and `actions`, which
-    an older server does not send, are read as `None`, `None` and no actions when missing.
+    A field this SDK does not know is ignored; `environment`, `last_test`, `actions` and
+    `last_run_failure`, which an older server does not send, are read as `None`, `None`, no
+    actions and `None` when missing.
 
     Parameters
     ----------
@@ -142,6 +173,7 @@ def _connection_from_json(data: object) -> Connection:
             environment=data.get("environment"),
             last_test=_last_test_from_json(data.get("last_test")),
             actions=tuple(str(action) for action in actions),
+            last_run_failure=_run_failure_from_json(data.get("last_run_failure")),
         )
     except (AssertionError, KeyError, TypeError, ValueError):
         raise InvalidResponse(_ODD_ANSWER.format(what="a connection")) from None

@@ -2086,6 +2086,75 @@ def test_a_failure_whose_write_committed_stores_no_code(
     assert _codes(session, claimed.task_run_id) == (None, None)
 
 
+def _concerns(session: Session, task_run_id: uuid.UUID) -> tuple[object, ...]:
+    """Read what the task run and its latest attempt say their failure concerned.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    task_run_id
+        The task run.
+
+    Returns
+    -------
+    tuple
+        The task run's `error_type` and `failure_connection`, then the latest attempt's.
+    """
+    task, attempt = _task(session, task_run_id), _attempts(session, task_run_id)[-1]
+    return task.error_type, task.failure_connection, attempt.error_type, attempt.failure_connection
+
+
+def test_a_failure_stores_what_it_concerns_on_the_task_and_on_the_attempt(
+    session: Session, run_id: uuid.UUID
+) -> None:
+    """The exception's class and the connection are stored with the code, on both rows."""
+    claimed = _claimed(session)
+    record_attempt(
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=FailureKind.PERMANENT,
+        rand=half_jitter,
+        error_message="SourceRefused: `crm-db`: refused",
+        failure_code=FailureCode.BUILD_FAILED,
+        error_type="SourceRefused",
+        failure_connection="crm-db",
+    )
+
+    assert _concerns(session, claimed.task_run_id) == (
+        "SourceRefused",
+        "crm-db",
+        "SourceRefused",
+        "crm-db",
+    )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [None, FailureKind.CANCELLED, FailureKind.RELEASED],
+    ids=["success", "cancel", "release"],
+)
+def test_an_ending_that_is_no_failure_of_the_code_stores_nothing_it_concerns(
+    session: Session, run_id: uuid.UUID, kind: FailureKind | None
+) -> None:
+    """A success, a cancel and a release concern no connection, whatever the caller passed."""
+    claimed = _claimed(session)
+    record_attempt(
+        session,
+        claimed.task_run_id,
+        "w1",
+        claimed.claim,
+        kind=kind,
+        rand=half_jitter,
+        error_type="SourceRefused",
+        failure_connection="crm-db",
+    )
+
+    assert _concerns(session, claimed.task_run_id) == (None, None, None, None)
+
+
 def test_a_drained_set_back_claim_keeps_the_code_the_task_was_handed_back_with(
     session: Session, run_id: uuid.UUID
 ) -> None:
@@ -2101,6 +2170,12 @@ def test_a_drained_set_back_claim_keeps_the_code_the_task_was_handed_back_with(
         claimed.claim,
         kind=FailureKind.RELEASED,
         rand=half_jitter,
+        error_type="Drained",
+        failure_connection="other",
     )
 
     assert _reload(session, task.id).failure_code == "memory"
+    assert (_reload(session, task.id).error_type, _reload(session, task.id).failure_connection) == (
+        None,
+        None,
+    )

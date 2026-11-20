@@ -180,6 +180,7 @@ export type {
   ConnectionLastTestOut,
   ConnectionOut,
   ConnectionQueuedTestOut,
+  ConnectionRunFailureOut,
   ConnectionTestOutcome,
   ConnectionUpdateIn,
 } from "./connections";

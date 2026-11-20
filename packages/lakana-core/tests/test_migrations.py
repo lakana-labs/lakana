@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import sqlalchemy as sa
@@ -6917,13 +6917,64 @@ def test_0087_links_principals_to_a_provider_and_keeps_flows(migrated_db: Migrat
         engine.dispose()
 
 
-_REVISION_0088 = "7c1e5a9d3f20"
+_REVISION_0088 = "95737c487bf3"
 
 
-def test_0088_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
+def test_0088_adds_what_a_failure_concerns(migrated_db: MigratedDb) -> None:
+    """Revision `0088`: nullable `error_type` and `failure_connection`, and two indexes.
+
+    Both columns are on `task_runs` and `task_attempts`; the downgrade drops all of it.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0087)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def columns(table: str) -> dict[str, Any]:
+        return {c["name"]: c for c in inspect(engine).get_columns(table)}
+
+    def indexes() -> set[str]:
+        return {str(i["name"]) for i in inspect(engine).get_indexes("task_runs")}
+
+    added = {"ix_task_runs_failure_connection", "ix_task_runs_asset_finished_at"}
+    try:
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
+        command.upgrade(config, _REVISION_0088)
+        for table in ("task_runs", "task_attempts"):
+            found = columns(table)
+            assert found["error_type"]["nullable"]
+            assert getattr(found["error_type"]["type"], "length", None) == 100
+            assert found["failure_connection"]["nullable"]
+            assert getattr(found["failure_connection"]["type"], "length", None) == 63
+        assert added <= indexes()
+        with engine.connect() as connection:
+            partial = connection.execute(
+                sa.text(
+                    "SELECT sql FROM sqlite_master WHERE name = 'ix_task_runs_failure_connection'"
+                )
+            ).scalar_one()
+        assert partial.endswith("WHERE failure_connection IS NOT NULL")
+        command.downgrade(config, _REVISION_0087)
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
+    finally:
+        engine.dispose()
+
+
+_REVISION_0089 = "7c1e5a9d3f20"
+
+
+def test_0089_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
     migrated_db: MigratedDb,
 ) -> None:
-    """Revision `0088`: `saved_queries.name_key`, each existing name's `str.casefold`, required.
+    """Revision `0089`: `saved_queries.name_key`, each existing name's `str.casefold`, required.
 
     The index `ix_saved_queries_environment_visibility_name_key` is added. The downgrade drops
     both and keeps the rows.
@@ -6933,7 +6984,7 @@ def test_0088_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
     migrated_db
         Copies the file migrated to the revision the test starts from.
     """
-    db_path = migrated_db(_REVISION_0087)
+    db_path = migrated_db(_REVISION_0088)
     config = Config(str(ALEMBIC_INI))
     engine = create_engine(f"sqlite:///{db_path}")
     index = "ix_saved_queries_environment_visibility_name_key"
@@ -6964,14 +7015,14 @@ def test_0088_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
                     },
                 )
         assert "name_key" not in columns()
-        command.upgrade(config, _REVISION_0088)
+        command.upgrade(config, _REVISION_0089)
         assert columns()["name_key"] is False
         assert indexes()[index] == ["environment_id", "visibility", "name_key"]
         with engine.connect() as connection:
             rows = connection.execute(sa.text("SELECT name, name_key FROM saved_queries")).all()
         assert sorted(tuple(r) for r in rows) == sorted((n, n.casefold()) for n in names)
         assert ("Straße", "strasse") in {tuple(r) for r in rows}
-        command.downgrade(config, _REVISION_0087)
+        command.downgrade(config, _REVISION_0088)
         assert "name_key" not in columns()
         assert index not in indexes()
         with engine.connect() as connection:

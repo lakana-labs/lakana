@@ -8,7 +8,7 @@ key from their name here. The index `ix_saved_queries_environment_visibility_nam
 shared queries of the environments a caller may query, in that order.
 
 Revision ID: 7c1e5a9d3f20
-Revises: 431d39830234
+Revises: 95737c487bf3
 Create Date: 2026-11-20 12:00:00.000000
 
 """
@@ -20,7 +20,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "7c1e5a9d3f20"
-down_revision: str | Sequence[str] | None = "431d39830234"
+down_revision: str | Sequence[str] | None = "95737c487bf3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
