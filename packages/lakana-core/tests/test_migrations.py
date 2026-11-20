@@ -6915,3 +6915,42 @@ def test_0087_links_principals_to_a_provider_and_keeps_flows(migrated_db: Migrat
             assert names.scalars().all() == ["ada", "bob", "cy"]
     finally:
         engine.dispose()
+
+
+_REVISION_0088 = "7c3e91a0b5d2"
+
+
+def test_0088_keeps_the_grants_of_lakana_login(migrated_db: MigratedDb) -> None:
+    """Revision `0088`: the `cli_sign_in_grants` table, its unique code hashes and its drop.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0087)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def insert(connection: sa.Connection, code_hash: str) -> None:
+        connection.execute(
+            sa.text(
+                "INSERT INTO cli_sign_in_grants (id, kind, host, code_hash, created_at,"
+                " expires_at) VALUES (:id, 'loopback', 'laptop', :code_hash,"
+                " '2026-11-20 00:00:00', '2026-11-20 00:02:00')"
+            ),
+            {"id": uuid.uuid4().hex, "code_hash": code_hash},
+        )
+
+    try:
+        assert "cli_sign_in_grants" not in inspect(engine).get_table_names()
+        command.upgrade(config, _REVISION_0088)
+        assert "cli_sign_in_grants" in inspect(engine).get_table_names()
+        with engine.begin() as connection:
+            insert(connection, "a" * 64)
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            insert(connection, "a" * 64)
+        command.downgrade(config, _REVISION_0087)
+        assert "cli_sign_in_grants" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()

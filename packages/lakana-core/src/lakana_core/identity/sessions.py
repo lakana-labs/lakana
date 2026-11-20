@@ -826,6 +826,56 @@ class SessionService:
         row = self._find(cookie_value)
         if row is None:
             raise AuthenticationError("This session is not known. Sign in again.")
+        return self._checked(row, extend=extend)
+
+    def verify_by_id(self, session_id: uuid.UUID) -> PrincipalRef:
+        """Resolve a session by its row id, as `verify` resolves a cookie, without extending it.
+
+        For a grant a browser session approved (`lakana_core.identity.cli_grants`): what it
+        hands out works only while that session lasts.
+
+        Parameters
+        ----------
+        session_id
+            The session's row id.
+
+        Returns
+        -------
+        PrincipalRef
+            The principal, with ``credential="session"`` and the session's context.
+
+        Raises
+        ------
+        AuthenticationError
+            If no session has this id.
+        SessionEndedError
+            If the session has ended, or ends now, as for `verify`.
+        """
+        row = self._session.get(BrowserSession, session_id)
+        if row is None:
+            raise AuthenticationError("This session is not known. Sign in again.")
+        return self._checked(row, extend=False)
+
+    def _checked(self, row: BrowserSession, *, extend: bool) -> PrincipalRef:
+        """Check that a session still works, ending it when it ends now.
+
+        Parameters
+        ----------
+        row
+            The session.
+        extend
+            Whether the request extends the idle timeout.
+
+        Returns
+        -------
+        PrincipalRef
+            The principal, with ``credential="session"`` and the session's context.
+
+        Raises
+        ------
+        SessionEndedError
+            If the session has ended, or ends now.
+        """
         if row.ended_at is not None:
             raise SessionEndedError(row.end_reason or "ended")
         now = self._clock()
