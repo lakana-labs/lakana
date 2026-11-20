@@ -507,6 +507,7 @@ refused until the job is renamed. To find the jobs, run this in the project; it 
 Python 3 and prints the line and name of every key written as `"name":`, `'name':` or bare that
 starts or ends with a space, no-break spaces included:
 
+<!-- source: docs/examples/find-outer-space-job-names.sh#find -->
 ```bash
 python3 - <<'PY'
 import re
