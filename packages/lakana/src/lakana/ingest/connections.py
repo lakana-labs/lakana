@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 
 from lakana import context
 from lakana.ingest._connections import Endpoint, fetch
+from lakana.ingest._errors import names_connection
 
 _PROXY_KINDS = frozenset({"http", "s3", "gcs", "azure"})
 """Kinds an isolated task reaches through the egress proxy (`LAKANA_EGRESS_PROXY`)."""
@@ -136,6 +137,7 @@ class Connection:
     root_path: str | None = None
 
 
+@names_connection
 def get(name: str) -> Connection:
     """Return a connection the asset declares, fetching it on the attempt's first call.
 

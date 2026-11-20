@@ -22,7 +22,12 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import urlsplit
 
 from lakana import context
-from lakana.ingest._errors import UsageError, missing_secret, task_environment
+from lakana.ingest._errors import (
+    ConnectionSetupError,
+    UsageError,
+    missing_secret,
+    task_environment,
+)
 
 if TYPE_CHECKING:
     from obstore.store import AzureStore, ClientConfig, GCSStore, S3Store
@@ -175,7 +180,7 @@ def _build(conn: Connection, make: Callable[[], _Store], fix: str) -> _Store:
 
     Raises
     ------
-    UsageError
+    ConnectionSetupError
         When obstore refuses the values (a key that is no RSA key, an account key that is not
         base64); the message never shows them.
     """
@@ -185,7 +190,7 @@ def _build(conn: Connection, make: Callable[[], _Store], fix: str) -> _Store:
         try:
             return make()
         except (obstore.exceptions.BaseError, ValueError, TypeError):
-            raise UsageError(
+            raise ConnectionSetupError(
                 f"obstore cannot use the secret of `{conn.name}` ({fix}); store the right one "
                 f"with `lakana connection update {conn.name} --env {task_environment()} "
                 "--values-stdin`"
@@ -234,7 +239,7 @@ def _gcs_key(conn: Connection) -> str:
 
     Raises
     ------
-    UsageError
+    ConnectionSetupError
         When the secret is not a service-account key; the message never shows the key.
     """
     try:
@@ -246,7 +251,7 @@ def _gcs_key(conn: Connection) -> str:
         or key.get("type") != "service_account"
         or not all(isinstance(key.get(f), str) and key.get(f) for f in _GCS_KEY_FIELDS)
     ):
-        raise UsageError(
+        raise ConnectionSetupError(
             f"the secret of `{conn.name}` is not a service-account key: it must be the JSON "
             "Google gives you, with type service_account, private_key, private_key_id and "
             "client_email; store it with `lakana connection update "
@@ -296,8 +301,10 @@ def store_for(conn: Connection) -> S3Store | GCSStore | AzureStore:
 
     Raises
     ------
+    ConnectionSetupError
+        For a missing secret, or for a kind without a store.
     UsageError
-        Without the assets extra, for a missing secret, or for a kind without a store.
+        Without the assets extra.
     """
     try:
         from obstore.store import AzureStore, GCSStore, S3Store
@@ -344,4 +351,4 @@ def store_for(conn: Connection) -> S3Store | GCSStore | AzureStore:
             **_azure_credential(conn),
         }
         return _build(conn, lambda: AzureStore(**azure), "its account key or SAS token")
-    raise UsageError(f"`{conn.name}` is {conn.kind}, which has no object store")
+    raise ConnectionSetupError(f"`{conn.name}` is {conn.kind}, which has no object store")
