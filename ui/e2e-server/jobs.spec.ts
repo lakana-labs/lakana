@@ -135,8 +135,10 @@ test("Pause schedule and Resume schedule change the job's facts", async ({ brows
 
 test("a reader of the environment sees the job with no control and no secret's name", async ({
   browser,
+  browserName,
   request,
 }) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
   const { environment, address } = await deployed(request);
   const { page } = await invitedPerson(browser, request, (name) =>
     grantOn(request, name, "READ_ENVIRONMENT", environment),
@@ -272,8 +274,10 @@ test("an administrator lists the job in two environments, filters to one across 
 
 test("a reader of one environment sees only its jobs on the list, with no control", async ({
   browser,
+  browserName,
   request,
 }) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
   const { tag, first, second } = await deployedTwice(request);
   const { page } = await invitedPerson(browser, request, (name) =>
     grantOn(request, name, "READ_ENVIRONMENT", first),
@@ -370,8 +374,10 @@ function rollBackButton(page: Page, repository: string): ReturnType<Page["getByR
 
 test("a reader of the environment sees its deploys with no rollback", async ({
   browser,
+  browserName,
   request,
 }) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
   const { environment, repository } = await deployedTwiceOver(request);
   const { page } = await invitedPerson(browser, request, (name) =>
     grantOn(request, name, "READ_ENVIRONMENT", environment),
