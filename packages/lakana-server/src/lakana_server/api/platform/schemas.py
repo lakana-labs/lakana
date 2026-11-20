@@ -7059,7 +7059,8 @@ class SessionOut(BaseModel):
     type
         The principal type (always ``USER``: service accounts cannot sign in).
     via
-        How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.
+        How the session began: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or
+        ``oidc`` (the organisation's identity provider).
     step_up_until
         Until when actions that need a fresh passkey touch are allowed without another touch;
         `null` when the session has no touch.

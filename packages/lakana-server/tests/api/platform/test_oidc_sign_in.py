@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import logging
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import parse_qs, unquote_plus, urlsplit
@@ -20,14 +21,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import lakana_server.ui
-from lakana_core.models import AuditEvent, AuditEventType, OidcFlow
+from lakana_core.models import AuditEvent, AuditEventType, OidcFlow, Principal
 from lakana_core.net.https_json import FetchFailed
 from lakana_core.oidc.provider import OidcProvider
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.browser_session import flow_cookie_name, set_flow_cookie
 from lakana_server.settings import PublicOrigin, Settings, UiConfig
-from tests.conftest import PUBLIC, write_ui_dist
+from tests.conftest import AUTH_HEADER, PUBLIC, SettableClock, write_ui_dist
 from tests.oidc_fake import (
     AUTHORIZE,
     CLIENT_ID,
@@ -38,10 +39,12 @@ from tests.oidc_fake import (
     FakeProvider,
     config,
 )
+from tests.server_test_helpers import session_headers, signed_in
 
 INFO = "/api/v1/sign-in/oidc"
 START = "/api/v1/sign-in/oidc/start"
 CALLBACK = "/api/v1/sign-in/oidc/callback"
+FINISH = "/api/v1/sign-in/oidc/finish"
 LANDING = f"{PUBLIC}/sign-in/oidc"
 FLOW_COOKIE = "lakana_oidc_8000"
 
@@ -495,7 +498,7 @@ def test_the_client_secret_is_posted_when_basic_is_not_offered(
 
 def test_routes_answer_409_while_the_interface_is_off(settings: Settings) -> None:
     with TestClient(create_app(settings)) as off:
-        for method, path in [("GET", INFO), ("POST", START), ("GET", CALLBACK)]:
+        for method, path in [("GET", INFO), ("POST", START), ("GET", CALLBACK), ("POST", FINISH)]:
             r = off.request(method, path, json={} if method == "POST" else None)
             assert r.status_code == 409, path
             assert "LAKANA_UI__ENABLED" in r.json()["detail"]
@@ -523,3 +526,244 @@ def test_the_flow_cookie_over_https() -> None:
     attributes = {part.strip().lower() for part in cookie.split(";")[1:]}
     assert {"secure", "httponly", "path=/", "samesite=lax", "max-age=600"} <= attributes
     assert not flow_cookie_name(origin).lower().startswith(("lakana_session", "__host-lakana_s"))
+
+
+# -- finish -----------------------------------------------------------------------------------
+
+
+def _link(
+    client: TestClient, name: str, *, subject: str = "248289761001", **fields: object
+) -> None:
+    """Create a person and link them to a provider identity.
+
+    Parameters
+    ----------
+    client
+        The client of the app.
+    name
+        The person's name.
+    subject
+        The provider's ``sub``; empty leaves the person unlinked.
+    **fields
+        Further columns to set.
+    """
+    r = client.post("/api/v1/principals", headers=AUTH_HEADER, json={"name": name, "type": "USER"})
+    assert r.status_code == 201, r.text
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        person = session.execute(select(Principal).where(Principal.name == name)).scalar_one()
+        if subject:
+            person.oidc_issuer, person.oidc_subject = ISSUER, subject
+        for column, value in fields.items():
+            setattr(person, column, value)
+        session.commit()
+
+
+def _person(client: TestClient, name: str) -> Principal:
+    """Read a person's row.
+
+    Parameters
+    ----------
+    client
+        The client of the app.
+    name
+        The name.
+
+    Returns
+    -------
+    Principal
+        The row, detached.
+    """
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine, expire_on_commit=False) as session:
+        return session.execute(select(Principal).where(Principal.name == name)).scalar_one()
+
+
+def _refused(r: Any, reason: str) -> None:  # ruff: ignore[any-type]
+    """Check a finish was refused with a reason and set no session.
+
+    Parameters
+    ----------
+    r
+        The response.
+    reason
+        The expected reason.
+    """
+    assert r.status_code == 403, r.text
+    assert (r.json()["type"], r.json()["reason"]) == ("OidcSignInRefused", reason)
+    assert "lakana_session" not in r.headers.get("set-cookie", "")
+
+
+@pytest.fixture
+def clock(client: TestClient) -> SettableClock:
+    """Install a settable clock on the app.
+
+    Parameters
+    ----------
+    client
+        The client of the app.
+
+    Returns
+    -------
+    SettableClock
+        The clock, at the current time.
+    """
+    settable = SettableClock(datetime.now(UTC))
+    cast(FastAPI, client.app).state.clock = settable
+    return settable
+
+
+def test_linked_person_is_signed_in(
+    client: TestClient, fake: FakeProvider, clock: SettableClock
+) -> None:
+    _link(client, "alice")
+    code, state = fake.authorize(_start(client, "/catalog/prod?x=1"), auth_time=1_700_000_000)
+    _callback(client, code=code, state=state)
+    r = client.post(FINISH, json={})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert (body["name"], body["return_to"]) == ("alice", "/catalog/prod?x=1")
+    cookies = r.headers.get_list("set-cookie")
+    session_cookie = next(c for c in cookies if c.startswith("lakana_session_8000="))
+    value = session_cookie.split(";")[0].split("=", 1)[1]
+    assert any(
+        c.startswith(f'{FLOW_COOKIE}=""') or "Max-Age=0" in c for c in cookies if FLOW_COOKIE in c
+    )
+    headers = session_headers("lakana_session_8000", value, body["csrf_token"])
+    r = client.get("/api/v1/sign-in/session", headers=headers)
+    assert r.status_code == 200, r.text
+    current = r.json()
+    assert (current["name"], current["via"]) == ("alice", "oidc")
+    step_up = datetime.fromisoformat(current["step_up_until"])
+    assert abs(step_up - (clock.now + timedelta(minutes=15))) < timedelta(seconds=2)
+    person = _person(client, "alice")
+    assert person.last_provider_sign_in_at == clock.now
+    assert (person.oidc_email, person.oidc_name) == ("alice@example.com", "Alice Example")
+    [event] = _events(client, AuditEventType.SIGN_IN_OIDC)
+    assert (event["iss"], event["sub"]) == (ISSUER, "248289761001")
+    assert event["key_id"] and event["peer"]
+    assert body["csrf_token"] not in repr(event)
+
+
+def test_unlinked_identity_is_not_linked(client: TestClient, fake: FakeProvider) -> None:
+    _link(client, "alice", subject="someone-else")
+    _signed_in_at_provider(client, fake)
+    r = client.post(FINISH, json={})
+    _refused(r, "not_linked")
+    assert "invite" in r.json()["detail"]
+    [event] = _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)
+    assert event == {
+        "reason": "not_linked",
+        "iss": ISSUER,
+        "sub": "248289761001",
+        "peer": "testclient",
+    }
+    assert _events(client, AuditEventType.SESSION_STARTED) == []
+
+
+def test_same_email_on_another_account_does_not_match(
+    client: TestClient, fake: FakeProvider
+) -> None:
+    _link(client, "mallory", subject="", oidc_email="alice@example.com", oidc_name="Alice Example")
+    _signed_in_at_provider(client, fake)
+    _refused(client.post(FINISH, json={}), "not_linked")
+    assert _events(client, AuditEventType.SESSION_STARTED) == []
+
+
+def test_deactivated_person_is_refused(client: TestClient, fake: FakeProvider) -> None:
+    _link(client, "alice", is_active=False)
+    _signed_in_at_provider(client, fake)
+    _refused(client.post(FINISH, json={}), "deactivated")
+    assert [e["reason"] for e in _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)] == [
+        "deactivated"
+    ]
+
+
+def test_finish_without_the_flow_cookie_is_refused(client: TestClient, fake: FakeProvider) -> None:
+    _link(client, "alice")
+    _signed_in_at_provider(client, fake)
+    client.cookies.clear()
+    _refused(client.post(FINISH, json={}), "flow_expired")
+    assert [e["reason"] for e in _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)] == [
+        "flow_expired"
+    ]
+
+
+def test_finish_before_the_callback_is_refused(client: TestClient) -> None:
+    _start(client)
+    _refused(client.post(FINISH, json={}), "flow_expired")
+
+
+def test_finish_works_once(client: TestClient, fake: FakeProvider) -> None:
+    _link(client, "alice")
+    _signed_in_at_provider(client, fake)
+    flow_cookie = client.cookies.get(FLOW_COOKIE)
+    assert client.post(FINISH, json={}).status_code == 200
+    client.cookies.clear()
+    client.cookies.set(FLOW_COOKIE, flow_cookie or "")
+    _refused(client.post(FINISH, json={}), "flow_expired")
+    assert len(_events(client, AuditEventType.SIGN_IN_OIDC)) == 1
+
+
+def test_a_finish_after_ten_minutes_is_refused(
+    client: TestClient, fake: FakeProvider, clock: SettableClock
+) -> None:
+    _link(client, "alice")
+    _signed_in_at_provider(client, fake)
+    clock.advance(timedelta(minutes=10, seconds=1))
+    _refused(client.post(FINISH, json={}), "flow_expired")
+
+
+def test_a_refusal_the_callback_found_is_answered_once_and_not_audited_twice(
+    client: TestClient, fake: FakeProvider
+) -> None:
+    _signed_in_at_provider(client, fake, nonce="wrong")
+    _refused(client.post(FINISH, json={}), "token_invalid")
+    _refused(client.post(FINISH, json={}), "flow_expired")
+    reasons = [e["reason"] for e in _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)]
+    assert reasons == ["token_invalid", "flow_expired"]
+
+
+def test_finish_replaces_the_presented_session(client: TestClient, fake: FakeProvider) -> None:
+    _link(client, "alice")
+    name, old_value, _ = signed_in(client, "alice")
+    old_key = old_value.split("_")[0]
+    client.cookies.set(name, old_value)
+    _signed_in_at_provider(client, fake)
+    r = client.post(FINISH, json={})
+    assert r.status_code == 200, r.text
+    [event] = _events(client, AuditEventType.SIGN_IN_OIDC)
+    assert event["key_id"] != old_key
+    ended = [e for e in _events(client, AuditEventType.SESSION_ENDED) if e["key_id"] == old_key]
+    assert [e["reason"] for e in ended] == ["replaced"]
+    flows = _flows(client)
+    assert flows[-1].finished_at is not None
+
+
+def test_refusal_rows_are_rate_limited(client: TestClient) -> None:
+    seconds = [0.0]
+    limiter = AuthAuditLimiter(10, clock=lambda: seconds[0])
+    cast(FastAPI, client.app).state.auth_audit_limiter = limiter
+    for _ in range(11):
+        _refused(client.post(FINISH, json={}), "flow_expired")
+    events = _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)
+    assert len(events) == 10
+    assert all("suppressed" not in event for event in events)
+    seconds[0] += 6.0
+    _refused(client.post(FINISH, json={}), "flow_expired")
+    assert _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)[-1]["suppressed"] == 1
+
+
+def test_a_session_answers_like_the_persons_token(client: TestClient, fake: FakeProvider) -> None:
+    _link(client, "alice")
+    _signed_in_at_provider(client, fake)
+    body = client.post(FINISH, json={}).json()
+    value = client.cookies.get("lakana_session_8000") or ""
+    client.cookies.clear()
+    by_session = session_headers("lakana_session_8000", value, body["csrf_token"])
+    r = client.post("/api/v1/principals/alice/tokens", headers=by_session, json={"name": "laptop"})
+    assert r.status_code == 201, r.text
+    by_token = {"Authorization": f"Bearer {r.json()['token']}"}
+    for path in ("/api/v1/whoami", "/api/v1/principals/alice", "/api/v1/environments"):
+        a, b = client.get(path, headers=by_session), client.get(path, headers=by_token)
+        assert (a.status_code, a.json()) == (b.status_code, b.json()), path

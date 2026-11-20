@@ -20,18 +20,19 @@ from __future__ import annotations
 import secrets
 import unicodedata
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from urllib.parse import unquote
 
-from sqlalchemy import ColumnElement, delete, update
+from sqlalchemy import ColumnElement, delete, select, update
 from sqlalchemy.orm import Session
 
+from lakana_core.errors import OidcRefusal
 from lakana_core.identity.sessions import utc_now
 from lakana_core.identity.tokens import hash_secret
-from lakana_core.models import OidcFlow
+from lakana_core.models import OidcFlow, Principal, PrincipalType
 
 FLOW_LIFETIME = timedelta(minutes=10)
 """How long a flow may be called back and finished after it was opened."""
@@ -66,6 +67,120 @@ class OpenedFlow:
     state: str = field(repr=False)
     nonce: str = field(repr=False)
     code_verifier: str = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ProviderIdentity:
+    """Who the provider says signed in: a verified ID token's issuer and subject.
+
+    Parameters
+    ----------
+    issuer
+        The ``iss``, exactly as configured.
+    subject
+        The ``sub``.
+    email
+        The ``email``, for showing only; `None` when the token had none.
+    name
+        The ``name``, for showing only; `None` when the token had none.
+    auth_time
+        When the person authenticated at the provider (``auth_time``), or `None`.
+    """
+
+    issuer: str
+    subject: str
+    email: str | None
+    name: str | None
+    auth_time: datetime | None
+
+
+_REASONS: frozenset[str] = frozenset(
+    {"not_linked", "deactivated", "token_invalid", "provider_unreachable", "provider_refused"}
+)
+
+
+def _text(outcome: Mapping[str, Any], key: str) -> str | None:
+    """Read an optional text of an outcome.
+
+    Parameters
+    ----------
+    outcome
+        The outcome.
+    key
+        The member.
+
+    Returns
+    -------
+    str or None
+        The text, or `None` when it is missing or not a text.
+    """
+    value = outcome.get(key)
+    return value if isinstance(value, str) else None
+
+
+def sign_in_outcome(outcome: Mapping[str, Any] | None) -> ProviderIdentity | OidcRefusal:
+    """Read what the callback wrote on a flow.
+
+    Parameters
+    ----------
+    outcome
+        The flow's `outcome`, or `None` when the callback wrote none.
+
+    Returns
+    -------
+    ProviderIdentity or str
+        The identity of a verified ID token; else the refusal's reason, ``flow_expired`` when
+        there is no usable outcome.
+    """
+    if not outcome:
+        return "flow_expired"
+    if outcome.get("ok") is not True:
+        reason = outcome.get("reason")
+        if reason in _REASONS:
+            return reason
+        return "flow_expired"
+    issuer, subject = _text(outcome, "iss"), _text(outcome, "sub")
+    if not issuer or not subject:
+        return "flow_expired"
+    auth_time = outcome.get("auth_time")
+    return ProviderIdentity(
+        issuer=issuer,
+        subject=subject,
+        email=_text(outcome, "email"),
+        name=_text(outcome, "name"),
+        auth_time=(
+            datetime.fromtimestamp(auth_time, UTC)
+            if isinstance(auth_time, int) and not isinstance(auth_time, bool)
+            else None
+        ),
+    )
+
+
+def principal_for(session: Session, identity: ProviderIdentity) -> Principal | None:
+    """Find the person linked to a provider identity.
+
+    By ``(oidc_issuer, oidc_subject)`` only: never by e-mail address or name, which a provider
+    may let people change.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    identity
+        The verified identity.
+
+    Returns
+    -------
+    Principal or None
+        The linked person (active or not); `None` when nobody is linked to it.
+    """
+    return session.execute(
+        select(Principal).where(
+            Principal.oidc_issuer == identity.issuer,
+            Principal.oidc_subject == identity.subject,
+            Principal.type == PrincipalType.USER,
+        )
+    ).scalar_one_or_none()
 
 
 def safe_return_to(value: str | None) -> str:

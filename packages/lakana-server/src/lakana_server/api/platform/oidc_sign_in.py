@@ -27,11 +27,25 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
-from lakana_core.errors import OidcOff, OidcSignInRefused
-from lakana_core.identity.oidc_flows import OidcFlowStore, safe_return_to
+from lakana_core.audit.service import AuditService
+from lakana_core.errors import OidcOff, OidcRefusal, OidcSignInRefused
+from lakana_core.identity.oidc_flows import (
+    OidcFlowStore,
+    ProviderIdentity,
+    principal_for,
+    safe_return_to,
+    sign_in_outcome,
+)
 from lakana_core.identity.passkeys import OPEN_BODY_LIMIT
+from lakana_core.identity.sessions import SessionService
+from lakana_core.models import AuditEventType
 from lakana_core.oidc.provider import OidcProvider, ProviderUnavailable
-from lakana_server.api.platform.schemas import OidcInfoOut, OidcStartIn, OidcStartOut
+from lakana_server.api.platform.schemas import (
+    OidcInfoOut,
+    OidcSignInOut,
+    OidcStartIn,
+    OidcStartOut,
+)
 from lakana_server.api.platform.sign_in import (
     TOO_MANY_ATTEMPTS,
     OpenSignInRoute,
@@ -40,10 +54,18 @@ from lakana_server.api.platform.sign_in import (
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
-from lakana_server.browser_session import require_interface, set_flow_cookie
-from lakana_server.deps import get_clock, get_session, record_refused_oidc
+from lakana_server.browser_session import (
+    clear_flow_cookie,
+    cookie_name,
+    flow_cookie_name,
+    require_interface,
+    set_flow_cookie,
+    set_session_cookie,
+)
+from lakana_server.deps import get_clock, get_session, get_session_service, record_refused_oidc
 from lakana_server.errors import TooManyAttemptsError
 from lakana_server.oidc_flow import (
+    MAX_PARAMETER,
     authorization_url,
     complete_callback,
     landing_url,
@@ -246,3 +268,90 @@ def oidc_callback(
     complete_callback(request, session, code=code, state=state, error=error)
     origin = request.app.state.settings.public_origin()
     return RedirectResponse(landing_url(origin), status_code=303)
+
+
+@open_router.post("/finish", response_model=OidcSignInOut, responses=errors(403))
+def finish_oidc_sign_in(
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+    sessions: SessionService = Depends(get_session_service),
+) -> OidcSignInOut:
+    """Finish signing in through the identity provider, after the callback.
+
+    Needs no credential: the browser's flow cookie and the callback's checks are the proof. The
+    interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is
+    linked to their account gets a browser session exactly as a passkey sign-in gives one: a
+    fresh session id (a session the browser had is ended), its cookie, and a provider sign-in
+    that counts as a passkey touch for 15 minutes of step-up actions. Otherwise 403
+    `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite),
+    `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or
+    `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10
+    minutes). A flow is finished once, whatever the answer.
+
+    Parameters
+    ----------
+    request
+        The request, for the cookies, the client's address and the `User-Agent`.
+    response
+        The response, to set the session cookie and clear the flow cookie on.
+    session
+        The request's database session.
+    sessions
+        The session service.
+
+    Returns
+    -------
+    OidcSignInOut
+        Who is signed in, the session's CSRF token and the page to open.
+
+    Raises
+    ------
+    OidcSignInRefused
+        403 with the reason, when nobody is signed in.
+    """
+    _provider(request)
+    origin = request.app.state.settings.public_origin()
+    clock = get_clock(request)
+    browser = request.cookies.get(flow_cookie_name(origin)) or ""
+    flow = OidcFlowStore(session, clock=clock).finish(browser[:MAX_PARAMETER])
+    found = sign_in_outcome(flow.outcome if flow is not None else None)
+    session.commit()
+    if not isinstance(found, ProviderIdentity):
+        # A refusal the callback found is audited there already.
+        if flow is None or flow.outcome is None:
+            record_refused_oidc(request, session, found)
+        raise OidcSignInRefused(found)
+    principal = principal_for(session, found)
+    if principal is None or not principal.is_active:
+        reason: OidcRefusal = "not_linked" if principal is None else "deactivated"
+        record_refused_oidc(request, session, reason, iss=found.issuer, sub=found.subject)
+        raise OidcSignInRefused(reason)
+    peer = request.client.host if request.client else "unknown"
+    started = sessions.start(
+        principal.id,
+        via="oidc",
+        replacing=request.cookies.get(cookie_name(origin)) or None,
+        peer=peer,
+        user_agent=request.headers.get("user-agent", ""),
+        touched=True,
+    )
+    now = clock()
+    principal.last_provider_sign_in_at = now
+    principal.oidc_email, principal.oidc_name = found.email, found.name
+    AuditService(session).record(
+        principal.id,
+        AuditEventType.SIGN_IN_OIDC,
+        detail={"iss": found.issuer, "sub": found.subject, "key_id": started.key_id, "peer": peer},
+    )
+    session.commit()
+    lifetime = started.absolute_expires_at - now
+    set_session_cookie(
+        response, origin, started.cookie_value, max(int(lifetime.total_seconds()), 0)
+    )
+    clear_flow_cookie(response, origin)
+    return OidcSignInOut(
+        name=started.principal.name,
+        csrf_token=started.csrf_token,
+        return_to=flow.return_to if flow is not None else "/",
+    )

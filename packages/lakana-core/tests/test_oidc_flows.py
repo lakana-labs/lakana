@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from lakana_core.identity.oidc_flows import (
     FLOW_LIFETIME,
     OidcFlowStore,
+    ProviderIdentity,
+    principal_for,
     safe_return_to,
+    sign_in_outcome,
 )
 from lakana_core.identity.sessions import VIAS
 from lakana_core.identity.tokens import hash_secret
@@ -239,3 +242,68 @@ def test_the_oidc_names_exist() -> None:
     assert "oidc" in VIAS
     assert AuditEventType.SIGN_IN_OIDC == "SIGN_IN_OIDC"
     assert AuditEventType.SIGN_IN_OIDC_REFUSED == "SIGN_IN_OIDC_REFUSED"
+
+
+@pytest.mark.parametrize(
+    ("outcome", "found"),
+    [
+        (None, "flow_expired"),
+        ({}, "flow_expired"),
+        ({"ok": False, "reason": "not_linked"}, "not_linked"),
+        ({"ok": False, "reason": "token_invalid"}, "token_invalid"),
+        ({"ok": False, "reason": "something-else"}, "flow_expired"),
+        ({"ok": "yes", "iss": "i", "sub": "s"}, "flow_expired"),
+        ({"ok": True, "iss": "https://idp.example"}, "flow_expired"),
+        ({"ok": True, "iss": "https://idp.example", "sub": 7}, "flow_expired"),
+    ],
+)
+def test_an_unusable_outcome_is_a_refusal(outcome: dict[str, object] | None, found: str) -> None:
+    assert sign_in_outcome(outcome) == found
+
+
+def test_a_verified_outcome_is_the_providers_identity() -> None:
+    outcome = {
+        "ok": True,
+        "iss": "https://idp.example",
+        "sub": "248289761001",
+        "email": "ada@example.com",
+        "name": None,
+        "auth_time": 1_763_629_200,
+    }
+    assert sign_in_outcome(outcome) == ProviderIdentity(
+        issuer="https://idp.example",
+        subject="248289761001",
+        email="ada@example.com",
+        name=None,
+        auth_time=datetime.fromtimestamp(1_763_629_200, UTC),
+    )
+    outcome["auth_time"] = True
+    found = sign_in_outcome(outcome)
+    assert isinstance(found, ProviderIdentity) and found.auth_time is None
+
+
+def test_a_person_is_found_by_issuer_and_subject_only(session: Session) -> None:
+    ada = _person(session, "ada")
+    ada.oidc_issuer, ada.oidc_subject = "https://idp.example", "248289761001"
+    ada.oidc_email = "ada@example.com"
+    service = Principal(
+        id=uuid.uuid4(),
+        type=PrincipalType.SERVICE_ACCOUNT,
+        name="robot",
+        is_active=True,
+        oidc_issuer="https://idp.example",
+        oidc_subject="robot-sub",
+    )
+    session.add(service)
+    session.commit()
+
+    def identity(issuer: str, subject: str) -> ProviderIdentity:
+        return ProviderIdentity(
+            issuer=issuer, subject=subject, email="ada@example.com", name="Ada", auth_time=None
+        )
+
+    found = principal_for(session, identity("https://idp.example", "248289761001"))
+    assert found is not None and found.name == "ada"
+    assert principal_for(session, identity("https://other.example", "248289761001")) is None
+    assert principal_for(session, identity("https://idp.example", "someone-else")) is None
+    assert principal_for(session, identity("https://idp.example", "robot-sub")) is None
