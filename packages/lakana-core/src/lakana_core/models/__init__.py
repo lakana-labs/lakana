@@ -63,6 +63,7 @@ from lakana_core.models.ci_oidc import CiOidcJti, CiToken, CiTrustRule
 from lakana_core.models.check_result import CheckOutcome, CheckResult, RollbackOutcome
 from lakana_core.models.job import JobFire, JobSchedule
 from lakana_core.models.notification import NotificationDelivery, NotificationState
+from lakana_core.models.oidc_flow import OidcFlow
 from lakana_core.models.worker import Worker
 from lakana_core.models.interface_state import InterfaceState, RecentOpen
 from lakana_core.models.profile_picture import ProfilePicture
@@ -142,6 +143,7 @@ __all__ = [
     "Namespace",
     "NotificationDelivery",
     "NotificationState",
+    "OidcFlow",
     "PackageIndex",
     "Passkey",
     "PersonalAccessToken",

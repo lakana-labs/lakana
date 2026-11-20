@@ -57,6 +57,11 @@ raw-options = { root = "../.." }
 # comments in this table (rather than hard-coding them into hatch_build.py)
 # keeps them visible and editable as ordinary TOML.
 dependencies = [
+    # The OIDC sign-in's protocol steps (`lakana_server.oidc_flow`): the authorization URL, the
+    # PKCE challenge and the token request's body. Its HTTP client is never used; every request
+    # goes through lakana_core.net.https_json. BSD-3-Clause from 1.0 (earlier releases were
+    # LGPL), so the lower bound matters.
+    "authlib>=1.6,<2",
     "fastapi>=0.141,<1",
     # Decodes a caller-submitted Arrow IPC stream for the governed append
     # route (lakana_server.api.platform.tables.append_table_data). Already
