@@ -18,6 +18,7 @@ from pydantic_settings import NoDecode
 
 from lakana_core.config import ProxyAndCaBundleChecks
 from lakana_core.net.egress import EgressRefused, is_ip_literal, parse_url
+from lakana_core.oidc.id_token import SUPPORTED_ALGORITHMS
 
 GITHUB_ISSUER = "https://token.actions.githubusercontent.com"
 """The issuer of GitHub Actions' ID tokens (the preset ``github``)."""
@@ -27,8 +28,7 @@ GITLAB_ISSUER = "https://gitlab.com"
 
 PRESETS = {"github": GITHUB_ISSUER, "gitlab": GITLAB_ISSUER}
 
-SUPPORTED_ALGORITHMS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512")
-"""The signature algorithms an operator may allow: RSA only, as GitHub and GitLab sign with it."""
+__all__ = ["GITHUB_ISSUER", "GITLAB_ISSUER", "PRESETS", "SUPPORTED_ALGORITHMS", "CiOidcConfig"]
 
 _MAX_ISSUER = 255
 _MAX_AUDIENCE = 255
