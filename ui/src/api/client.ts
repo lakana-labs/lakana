@@ -146,6 +146,25 @@ function forgetToken(sent: string | null): void {
 const unauthorizedListeners = new Set<(error: ApiError) => void>();
 
 /**
+ * Calls each listener in turn. One that throws is reported to the browser (as an uncaught error
+ * would be) and the rest still run, so it neither stops the others nor replaces the error the
+ * caller is about to throw.
+ *
+ * @template A - What the listeners are called with.
+ * @param listeners - The listeners.
+ * @param argument - What they are called with.
+ */
+function tellEach<A>(listeners: ReadonlySet<(argument: A) => void>, argument: A): void {
+  for (const listener of [...listeners]) {
+    try {
+      listener(argument);
+    } catch (error) {
+      reportError(error);
+    }
+  }
+}
+
+/**
  * Listens for answers of 401: the session ended or the person is not signed in.
  *
  * @param listener - Called with the refusal.
@@ -177,9 +196,7 @@ export function onSessionEnd(listener: () => void): () => void {
 
 /** Tells the listeners of {@link onSessionEnd} that the session ended. */
 function sessionEnded(): void {
-  for (const listener of sessionEndListeners) {
-    listener();
-  }
+  tellEach(sessionEndListeners, undefined);
 }
 
 /** Ends the session in this tab: forgets the CSRF token and tells {@link onSessionEnd}. */
@@ -348,9 +365,7 @@ async function exchangeWith(
     const error = await refusal(response);
     if (error.status === 401) {
       forgetToken(token);
-      for (const listener of unauthorizedListeners) {
-        listener(error);
-      }
+      tellEach(unauthorizedListeners, error);
       sessionEnded();
     }
     throw error;

@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, PrincipalRef, Securable, TaskScope
+from lakana_core.catalog.location_sweep import sweep_table_locations
 from lakana_core.catalog.saved_queries import (
     SAVED_QUERY_LIST_DEFAULT,
     SAVED_QUERY_LIST_MAX,
@@ -39,6 +40,7 @@ from lakana_core.models import (
     SavedQuery,
     SavedQueryVisibility,
 )
+from lakana_core.storage.resolver import StorageResolver
 
 _SAVED_EVENTS = (
     AuditEventType.SAVED_QUERY_CREATED,
@@ -449,6 +451,34 @@ def test_a_deleted_environment_hides_its_saved_queries_until_restored(
     catalog.restore_environment(principal, dev)
     assert service.get(bob, dev, mine.id) == mine
     assert [i.id for i in service.list_page(bob).items] == [mine.id]
+
+
+def test_purging_an_environment_removes_its_saved_queries(
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path, dev: str
+) -> None:
+    """A purge removes an environment's saved queries for good, and no other environment's.
+
+    The removal of the environment row cascades to them; SQLite enforces the cascade only with
+    `PRAGMA foreign_keys=ON`, which every Lakana engine sets.
+    """
+    _env(catalog, principal, tmp_path, "prod")
+    bob = _querier(session, "bob", dev, "prod")
+    service = _service(session)
+    private = service.create(bob, dev, name="Draft", sql="SELECT 1")
+    shared = service.create(bob, dev, name="Revenue", sql="SELECT 2", visibility="everyone")
+    elsewhere = service.create(bob, "prod", name="Revenue", sql="SELECT 3")
+
+    deleted = catalog.delete_environment(principal, dev, purge=True)
+    assert deleted.purge_after is not None
+    sweep_table_locations(
+        session, StorageResolver(session), now=deleted.purge_after, grace_hours=24
+    )
+    session.expire_all()
+
+    left = session.execute(select(SavedQuery.id)).scalars().all()
+    assert left == [elsewhere.id]
+    assert {private.id, shared.id}.isdisjoint(left)
+    assert [i.id for i in service.list_page(bob).items] == [elsewhere.id]
 
 
 @pytest.mark.parametrize(

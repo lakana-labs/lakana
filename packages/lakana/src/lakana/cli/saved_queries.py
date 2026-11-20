@@ -214,8 +214,9 @@ def show(
     With --sql only the SQL is printed, so 'lakana query saved show ID --sql | lakana sql -'
     runs it. If the SQL holds control or invisible characters (a CRLF line ending is not
     one), --sql prints nothing and exits 1, as printing it escaped would run another query;
-    read it with --output json. An administrator may not read the SQL of someone else's
-    private query without READ_QUERY_TEXT; the command then says so.
+    read it with --output json, where --sql prints only {"sql": ...}. An administrator may
+    not read the SQL of someone else's private query without READ_QUERY_TEXT; the command
+    then says so.
 
     Parameters
     ----------
@@ -239,6 +240,10 @@ def show(
     if sql:
         if saved.sql is None:
             raise CliError(_NO_SQL, exit_code=1, kind="PermissionDenied")
+        if state.output == "json":
+            # JSON escapes every control character, so the text goes out exactly as stored.
+            _output.print_json({"sql": saved.sql})
+            return
         plain = saved.sql.replace("\r\n", "\n")  # a CR in a CRLF pair is ordinary text
         if _output.safe_source(plain) != plain:
             raise CliError(_HIDDEN_IN_SQL, exit_code=1, kind="ValidationError")

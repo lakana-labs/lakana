@@ -1005,6 +1005,28 @@ describe("the Queries screen's work", () => {
       expect(screen.queryByRole("alert")).toBeNull();
     });
     expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
+    // The alert went with the focus; it moves to Run, as the run's own Try again does.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run" })).toHaveFocus();
+    });
+  });
+
+  it("a saved query's Try again that fails again leaves the focus on Try again", async () => {
+    const answers: FakeAnswer[] = [
+      { status: 503, body: { type: "Unavailable", detail: "The server is busy." } },
+      { status: 503, body: { type: "Unavailable", detail: "Still busy." } },
+    ];
+    const { user } = renderShell(SAVED_PATH, {
+      routes: routes({ [`GET ${SAVED_ONE}`]: () => answers.shift() as FakeAnswer }),
+    });
+    const alert = await screen.findByRole("alert");
+
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Still busy.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }),
+    ).toHaveFocus();
   });
 
   it("back at a new query no run shows, and the remembered environment is read again", async () => {

@@ -346,3 +346,48 @@ def test_a_server_refusal_prints_its_sentence(tmp_path: Path) -> None:
 
     assert result.exit_code != 0
     assert sentence in " ".join(result.stderr.split())
+
+
+def test_show_sql_as_json_prints_only_the_sql_as_json(tmp_path: Path) -> None:
+    stored = "SELECT 1\r\n-- ‮\x1b[2J\n"  # JSON escapes what a terminal would act on
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item(sql=stored))
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "query",
+        "saved",
+        "show",
+        _ID,
+        "--env",
+        "dev",
+        "--sql",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(result.stdout) == {"sql": stored}
+    assert "\x1b" not in result.stdout
+
+
+def test_show_sql_as_json_without_readable_sql_exits_1(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.on("GET", f"{_BASE}/{_ID}", json=_item(sql=..., actions=["delete"]))
+
+    result = invoke(
+        make_state(tmp_path, api),
+        "--output",
+        "json",
+        "query",
+        "saved",
+        "show",
+        _ID,
+        "--env",
+        "dev",
+        "--sql",
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert json.loads(result.stderr)["error"]["type"] == "PermissionDenied"

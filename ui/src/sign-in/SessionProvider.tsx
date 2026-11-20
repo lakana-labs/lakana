@@ -12,6 +12,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -52,6 +53,23 @@ export interface SessionValue {
 
 /** The session value; tests may provide one directly. */
 export const SessionContext = createContext<SessionValue | null>(null);
+
+/** How long the provider waits before it reads the session again after a failed read, at first. */
+export const SESSION_RETRY_FIRST_MS = 2_000;
+
+/** The longest wait between two reads of the session after failures, in milliseconds. */
+const SESSION_RETRY_MAX_MS = 60_000;
+
+/**
+ * Whether the server said the session is gone: only a 401 says so. Any other failure (an
+ * unreachable server, a 503) says nothing about the session.
+ *
+ * @param error - What reading the session threw.
+ * @returns True for a 401.
+ */
+function sessionGone(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
+}
 
 /** The storage key of the session whose passkey offer the person skipped. */
 const SKIPPED_KEY = "lakana.passkey-offer-skipped";
@@ -101,7 +119,10 @@ export interface SessionProviderProps {
 /**
  * Reads the session when the interface starts and keeps it. A 401 from any request signs the
  * browser out with the reason the server gave, so the interface shows the sign-in page instead
- * of an error.
+ * of an error; the client tells `onSessionEnd` at the same time, so what the page kept for the
+ * person goes with it. The page shows a person signed out only then or after a sign-out: when
+ * reading the session fails otherwise while someone is signed in, they stay signed in and the
+ * session is read again, in the background, until the server answers.
  *
  * @param props - The interface and the storage.
  * @param props.children - The interface.
@@ -116,28 +137,82 @@ export function SessionProvider({
   const [known, setKnown] = useState<Known>({ state: "loading" });
   const [skipped, setSkipped] = useState(() => readSkipped(storage));
 
-  const refresh = useCallback(
-    () =>
-      getSession().then(
+  // Whether the page shows someone signed in, for a failed read to know what it would undo.
+  const signedIn = useRef(false);
+  const retry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const failures = useRef(0);
+  const mounted = useRef(true);
+  const [again, setAgain] = useState(0);
+
+  useEffect(() => {
+    signedIn.current = known.state === "signed-in";
+  }, [known.state]);
+
+  const read = useCallback(
+    (background: boolean): Promise<void> => {
+      clearTimeout(retry.current);
+      retry.current = undefined;
+      return getSession(background ? { background: true } : {}).then(
         (session) => {
-          setKnown({ state: "signed-in", session });
+          failures.current = 0;
+          if (mounted.current) {
+            setKnown({ state: "signed-in", session });
+          }
         },
         (error: unknown) => {
+          if (!mounted.current) {
+            return;
+          }
+          if (signedIn.current && !sessionGone(error)) {
+            // Only a 401 ends a session, and a 401 tells onSessionEnd, which forgets what the
+            // page kept for the person. Showing them signed out on anything else would keep
+            // their data in the tab for the next person, and clearing it on one network blip
+            // would sign them out for nothing: so they stay signed in, and the page reads
+            // again in the background (which does not keep an idle session alive), waiting
+            // longer after each failure.
+            const wait = Math.min(
+              SESSION_RETRY_FIRST_MS * 2 ** failures.current,
+              SESSION_RETRY_MAX_MS,
+            );
+            failures.current += 1;
+            retry.current = setTimeout(() => {
+              setAgain((previous) => previous + 1);
+            }, wait);
+            return;
+          }
+          failures.current = 0;
           setKnown({ state: "signed-out", reason: endedReason(t, error) });
         },
-      ),
+      );
+    },
     [t],
   );
 
+  const refresh = useCallback(() => read(false), [read]);
+
+  // Each read again after a failure is one more round; the first round is the start's read.
   useEffect(() => {
+    if (again > 0) {
+      void read(true);
+    }
+  }, [again, read]);
+
+  useEffect(() => {
+    mounted.current = true;
     void refresh();
-    return onUnauthorized((error) => {
+    const stop = onUnauthorized((error) => {
       setKnown((previous) =>
         previous.state === "signed-in"
           ? { state: "signed-out", reason: endedReason(t, error) }
           : previous,
       );
     });
+    return () => {
+      mounted.current = false;
+      clearTimeout(retry.current);
+      retry.current = undefined;
+      stop();
+    };
   }, [refresh, t]);
 
   const end = useCallback(async (ending: () => Promise<void>, reason: string) => {

@@ -279,6 +279,40 @@ describe("send", () => {
     endSession();
     expect(listener).toHaveBeenCalledTimes(2);
   });
+
+  it("tells every listener even when one throws, and keeps the refusal it ends with", async () => {
+    fakeServer({ "GET /api/v1/things": { status: 401, body: { detail: "Sign in.", type: "y" } } });
+    const reported = vi.spyOn(window, "reportError").mockImplementation(() => undefined);
+    const broken = new Error("listener broke");
+    const throwing = (): void => {
+      throw broken;
+    };
+    const after = vi.fn();
+    const afterUnauthorized = vi.fn();
+    const stops = [
+      onUnauthorized(throwing),
+      onUnauthorized(afterUnauthorized),
+      onSessionEnd(throwing),
+      onSessionEnd(after),
+    ];
+
+    const refused = await send("GET", "/api/v1/things").catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(ApiError);
+    expect((refused as ApiError).detail).toBe("Sign in.");
+    expect(afterUnauthorized).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+
+    expect(() => {
+      endSession();
+    }).not.toThrow();
+    expect(after).toHaveBeenCalledTimes(2);
+    expect(reported).toHaveBeenCalledTimes(3);
+    expect(reported).toHaveBeenCalledWith(broken);
+    for (const stop of stops) {
+      stop();
+    }
+    reported.mockRestore();
+  });
 });
 
 describe("api.upload and api.blob", () => {
