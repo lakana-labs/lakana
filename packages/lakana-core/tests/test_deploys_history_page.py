@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from core_test_helpers import _prepared_catalog
 from home_test_helpers import deployed_job, environment, grant, person
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 from test_projects_deploys import _principal, _repo
 
@@ -17,7 +18,13 @@ from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
 from lakana_core.errors import NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
-from lakana_core.models import DeployKind, DeployRun, DeployStatus, Environment, Principal
+from lakana_core.models import (
+    DeployKind,
+    DeployRun,
+    DeployStatus,
+    Environment,
+    Principal,
+)
 from lakana_core.pagination import encode_cursor
 from lakana_core.projects.deploys import DeployService
 
@@ -350,3 +357,65 @@ def test_all_deploys_asks_the_environments_in_one_batch(
     page, _ = DeployService(session, Spy(session)).list_all_deploys_page(admin)
     assert len(page) == 7
     assert batches == [3]
+
+
+def _statements(session: Session, call: Callable[[], object]) -> int:
+    """Count the SQL statements a call runs.
+
+    Parameters
+    ----------
+    session
+        A session on the engine watched.
+    call
+        What to run.
+
+    Returns
+    -------
+    int
+        The number of statements.
+    """
+    seen: list[str] = []
+    engine = session.get_bind()
+
+    def record(_conn: object, _cur: object, statement: str, *_: object) -> None:
+        seen.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        call()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    return len(seen)
+
+
+def test_a_page_costs_the_same_statements_whatever_its_size(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repos = [_repo(session, f"repo{i}") for i in range(3)]
+    service = _service(session)
+    for minute in range(3):
+        _deploy(session, env, repos[minute % 3].id, minute)
+    session.expire_all()
+    small = _statements(session, lambda: service.history_page(principal, "dev", limit=3))
+    for minute in range(3, 30):
+        _deploy(session, env, repos[minute % 3].id, minute)
+    session.expire_all()
+    large = _statements(session, lambda: service.history_page(principal, "dev", limit=30))
+    assert large == small
+    session.expire_all()
+    everywhere = _statements(session, lambda: service.list_all_deploys_page(principal, limit=30))
+    assert everywhere == small
+
+
+def test_the_names_of_a_page_are_those_of_each_run(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repos = [_repo(session, f"repo{i}") for i in range(3)]
+    runs = [_deploy(session, env, repos[i % 3].id, i) for i in range(9)]
+    session.expire_all()
+    page, _ = _service(session).history_page(principal, "dev", limit=9)
+    by_id = {r.id: i for i, r in enumerate(runs)}
+    assert [(v.environment, v.repository) for v in page] == [
+        ("dev", f"repo{by_id[v.id] % 3}") for v in page
+    ]
+    assert len(page) == 9
