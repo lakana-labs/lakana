@@ -18,6 +18,9 @@ refused everything. Each change is audited in its own transaction, never with th
 administrator's read that shows someone else's private saved query is recorded as
 `ACTIVITY_VIEWED` (`View.SAVED_QUERIES`, the environment as scope) before it is returned, once
 per window, and refused if it cannot be (`record_view`).
+
+The lists show no SQL: a list's statement selects every column but the text, and keeps, orders,
+resumes and cuts the page in the database (`list_page`). Reading one saved query shows its SQL.
 """
 
 from __future__ import annotations
@@ -47,7 +50,16 @@ from lakana_core.models import (
     SavedQuery,
     SavedQueryVisibility,
 )
-from lakana_core.pagination import Page, page_in_order
+from lakana_core.pagination import (
+    BAD_CURSOR,
+    Page,
+    SortedPosition,
+    after_sorted,
+    check_list_limit,
+    decode_tuple_cursor,
+    encode_tuple_cursor,
+    sorted_order,
+)
 
 SAVED_QUERY_NAME_MAX = 200
 """The most characters of a saved query's name, after stripping."""
@@ -89,6 +101,73 @@ _DELETE_ONLY = ("delete",)
 
 
 @dataclass(frozen=True)
+class _Fields:
+    """What deciding whether and how a caller sees a saved query reads of it: all but the SQL.
+
+    Parameters
+    ----------
+    id
+        The saved query's id.
+    environment_id
+        Its environment.
+    name
+        Its name.
+    visibility
+        ``private`` or ``everyone``.
+    owner_id
+        Its owner, `None` once the owner's principal is deleted.
+    created_at
+        When it was created.
+    updated_at
+        When it was last changed.
+    """
+
+    id: uuid.UUID
+    environment_id: uuid.UUID
+    name: str
+    visibility: str
+    owner_id: uuid.UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def of(cls, row: SavedQuery) -> _Fields:
+        """Take the fields of a loaded saved query.
+
+        Parameters
+        ----------
+        row
+            The saved query.
+
+        Returns
+        -------
+        _Fields
+            Its fields.
+        """
+        return cls(
+            row.id,
+            row.environment_id,
+            row.name,
+            row.visibility,
+            row.owner_id,
+            row.created_at,
+            row.updated_at,
+        )
+
+
+_LISTED = (
+    SavedQuery.id,
+    SavedQuery.environment_id,
+    SavedQuery.name,
+    SavedQuery.visibility,
+    SavedQuery.owner_id,
+    SavedQuery.created_at,
+    SavedQuery.updated_at,
+)
+"""The columns a list selects, in the order of `_Fields`: never `sql_text`."""
+
+
+@dataclass(frozen=True)
 class SavedQueryView:
     """A saved query as one caller sees it.
 
@@ -101,8 +180,8 @@ class SavedQueryView:
     name
         Its name.
     sql
-        Its SQL, or `None` when the caller may not read it: an administrator's view of someone
-        else's private query without `READ_QUERY_TEXT`.
+        Its SQL; `None` in a list, and when the caller may not read it: an administrator's view
+        of someone else's private query without `READ_QUERY_TEXT`.
     visibility
         ``private`` or ``everyone``.
     owner
@@ -180,7 +259,7 @@ class _Reader:
             ),
         )
 
-    def sees(self, row: SavedQuery) -> bool:
+    def sees(self, row: _Fields) -> bool:
         """Say whether the caller sees one saved query: `visible` for a single row.
 
         Parameters
@@ -202,7 +281,7 @@ class _Reader:
             )
         )
 
-    def others_private(self, row: SavedQuery) -> bool:
+    def others_private(self, row: _Fields) -> bool:
         """Say whether a saved query is someone else's private one, seen only as administrator.
 
         Parameters
@@ -217,7 +296,9 @@ class _Reader:
         """
         return row.owner_id != self.p.id and row.visibility == SavedQueryVisibility.PRIVATE
 
-    def view(self, row: SavedQuery, environment: str, owner: str | None) -> SavedQueryView:
+    def view(
+        self, row: _Fields, environment: str, owner: str | None, sql: str | None
+    ) -> SavedQueryView:
         """Show a saved query the caller sees.
 
         Parameters
@@ -228,6 +309,8 @@ class _Reader:
             Its environment's name.
         owner
             Its owner's name, or `None` once the owner's principal is deleted.
+        sql
+            Its SQL, or `None` for a list, which shows none.
 
         Returns
         -------
@@ -236,7 +319,7 @@ class _Reader:
             someone else's private query.
         """
         own = row.owner_id == self.p.id
-        shows_sql = (
+        shows_sql = sql is not None and (
             own
             or row.visibility == SavedQueryVisibility.EVERYONE
             or (self.admin and self._text_right())
@@ -249,7 +332,7 @@ class _Reader:
             id=row.id,
             environment=environment,
             name=row.name,
-            sql=row.sql_text if shows_sql else None,
+            sql=sql if shows_sql else None,
             visibility=row.visibility,
             owner=owner,
             former_owner=row.owner_id is None,
@@ -334,6 +417,37 @@ def _checked_fields(name: str, sql: str, visibility: str) -> tuple[str, SavedQue
             f"visibility is 'private' or 'everyone', not {visibility!r}."
         ) from None
     return stripped, chosen
+
+
+def _position(kind: str, cursor: str) -> SortedPosition:
+    """Read where the previous page of a list ended from its cursor.
+
+    Parameters
+    ----------
+    kind
+        The list being read.
+    cursor
+        The `next_cursor` the client sent back: the folded name, the environment's name and the
+        id of the page's last saved query.
+
+    Returns
+    -------
+    SortedPosition
+        The folded name and the environment's name, and the id.
+
+    Raises
+    ------
+    ValidationError
+        If `cursor` is not one this server could have issued, or belongs to the other list.
+    """
+    key = decode_tuple_cursor(kind, cursor)
+    if len(key) != 3:
+        raise ValidationError(BAD_CURSOR)
+    try:
+        row_id = uuid.UUID(key[2])
+    except ValueError:
+        raise ValidationError(BAD_CURSOR) from None
+    return SortedPosition((key[0], key[1]), row_id)
 
 
 def _refuse_task_token(p: PrincipalRef) -> None:
@@ -458,8 +572,9 @@ class SavedQueryService:
         _refuse_task_token(p)
         env = self._environment(environment)
         row, owner, reader = self._seen(p, env, saved_query_id)
-        view = reader.view(row, env.name, owner)
-        if reader.others_private(row):
+        fields = _Fields.of(row)
+        view = reader.view(fields, env.name, owner, row.sql_text)
+        if reader.others_private(fields):
             self._audit_view(p, env.name, [view], {view.id: row.owner_id}, limit=None)
         return view
 
@@ -558,14 +673,16 @@ class SavedQueryService:
         limit: int = SAVED_QUERY_LIST_DEFAULT,
         cursor: str | None = None,
     ) -> Page[SavedQueryView]:
-        """List the saved queries the caller sees, by name, one page at a time.
+        """List the saved queries the caller sees, by name, one page at a time, without their SQL.
 
         With an `environment`, the saved queries of that environment; the caller needs
         `SUBMIT_QUERY` there unless they own one there or are an administrator. Without one,
         those of every live environment, the caller's `SUBMIT_QUERY` on each asked in one
-        `permits_each` batch. Either way the rows are read with one statement whose condition
-        holds what the caller sees. The order is the name in any letter case, then the
-        environment, then the id; the two lists have their own cursors.
+        `permits_each` batch. Either way the page is read with one statement whose condition
+        holds what the caller sees and where the previous page ended, ordered and cut in the
+        database; it selects no SQL text. The order is the name in any letter case
+        (`SavedQuery.name_key`), then the environment, then the id, each by code point; the two
+        lists have their own cursors.
 
         Parameters
         ----------
@@ -581,7 +698,8 @@ class SavedQueryService:
         Returns
         -------
         Page of SavedQueryView
-            This page's saved queries and the cursor of the next page, `None` on the last.
+            This page's saved queries, each with `sql` `None`, and the cursor of the next page,
+            `None` on the last.
 
         Raises
         ------
@@ -603,28 +721,36 @@ class SavedQueryService:
                 select(Environment.id, Environment.name).where(LIVE_ENVIRONMENT)
             ).all()
             reader = self._reader(p, {env_id: name for env_id, name in live})
-            kind = _EVERY_ENVIRONMENT
         else:
             env = self._environment(environment)
             reader = self._reader(p, {env.id: env.name})
             if not (reader.queryable or reader.admin or self._owns_one(p, env)):
                 self._authz.authorize(p, Action.SUBMIT_QUERY, Securable.environment_scope(env.name))
             conditions.append(SavedQuery.environment_id == env.id)
-            kind = _ONE_ENVIRONMENT
+        check_list_limit(limit)
+        kind = _EVERY_ENVIRONMENT if environment is None else _ONE_ENVIRONMENT
+        at = None if cursor is None else _position(kind, cursor)
+        keys = [SavedQuery.name_key.expression, self._by_code_point(Environment.name.expression)]
+        row_id = SavedQuery.id.expression
         rows = self._session.execute(
-            select(SavedQuery, Environment.name, Principal.name)
+            select(*_LISTED, SavedQuery.name_key, Environment.name, Principal.name)
             .join(Environment, Environment.id == SavedQuery.environment_id)
             .outerjoin(Principal, Principal.id == SavedQuery.owner_id)
-            .where(*conditions, reader.visible())
+            .where(*conditions, reader.visible(), after_sorted(keys, row_id, False, at))
+            .order_by(*sorted_order(keys, row_id, False))
+            .limit(limit + 1)
         ).all()
-        others_private = {row.id: row.owner_id for row, _, _ in rows if reader.others_private(row)}
-        page = page_in_order(
-            [reader.view(row, env_name, owner) for row, env_name, owner in rows],
-            kind=kind,
-            key_of=lambda v: (v.name.casefold(), v.environment, str(v.id)),
-            limit=limit,
-            cursor=cursor,
+        shown = [(_Fields(*row[: len(_LISTED)]), row[-2], row[-1]) for row in rows[:limit]]
+        next_cursor = None
+        if len(rows) > limit:
+            # The cursor holds the last item's sort keys as stored, which the next page compares.
+            last = rows[limit - 1]
+            next_cursor = encode_tuple_cursor(kind, (last[-3], last[-2], str(last[0])))
+        page = Page(
+            [reader.view(fields, env_name, owner, None) for fields, env_name, owner in shown],
+            next_cursor,
         )
+        others_private = {f.id: f.owner_id for f, _, _ in shown if reader.others_private(f)}
         if others_private:
             for env_name in sorted({v.environment for v in page.items}):
                 self._audit_view(
@@ -635,6 +761,26 @@ class SavedQueryService:
                     limit=limit,
                 )
         return page
+
+    def _by_code_point(self, column: ColumnElement[str]) -> ColumnElement[str]:
+        """Compare a text column by code point, as Python does and the lists' cursors hold.
+
+        SQLite compares text by its UTF-8 bytes already, which is code-point order; Postgres
+        compares under the database's collation unless told ``"C"``.
+
+        Parameters
+        ----------
+        column
+            The column.
+
+        Returns
+        -------
+        ColumnElement
+            It, collated ``"C"`` on Postgres.
+        """
+        if self._session.get_bind().dialect.name == "postgresql":
+            return column.collate("C")
+        return column
 
     def _audit_view(
         self,
@@ -782,7 +928,7 @@ class SavedQueryService:
         if found is not None:
             row, owner = found
             reader = self._reader(p, {env.id: env.name})
-            if reader.sees(row):
+            if reader.sees(_Fields.of(row)):
                 return row, owner, reader
         raise NotFoundError(f"No saved query {saved_query_id} in {env.name!r}.")
 
@@ -888,6 +1034,7 @@ class SavedQueryService:
         """
         keeps_name = None if event is AuditEventType.SAVED_QUERY_CREATED else row.id
         row.name = name
+        row.name_key = name.casefold()
         row.sql_text = sql
         row.visibility = visibility.value
         row.private_owner_id = p.id if visibility is SavedQueryVisibility.PRIVATE else None
@@ -903,7 +1050,7 @@ class SavedQueryService:
         # The owner's own view: their SQL and, having just been authorized, both actions.
         view = _Reader(
             p, admin=False, queryable=frozenset({env.id}), reads_text=lambda: False
-        ).view(row, env.name, p.name)
+        ).view(_Fields.of(row), env.name, p.name, row.sql_text)
         self._session.commit()
         return view
 

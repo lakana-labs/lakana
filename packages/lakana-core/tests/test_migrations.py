@@ -6915,3 +6915,67 @@ def test_0087_links_principals_to_a_provider_and_keeps_flows(migrated_db: Migrat
             assert names.scalars().all() == ["ada", "bob", "cy"]
     finally:
         engine.dispose()
+
+
+_REVISION_0088 = "7c1e5a9d3f20"
+
+
+def test_0088_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0088`: `saved_queries.name_key`, each existing name's `str.casefold`, required.
+
+    The index `ix_saved_queries_environment_visibility_name_key` is added. The downgrade drops
+    both and keeps the rows.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0087)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    index = "ix_saved_queries_environment_visibility_name_key"
+    owner = uuid.uuid4().hex
+    names = ("Straße", "REVENUE", "Ω alpha")
+
+    def columns() -> dict[str, bool]:
+        return {c["name"]: c["nullable"] for c in inspect(engine).get_columns("saved_queries")}
+
+    def indexes() -> dict[str | None, list[str | None]]:
+        return {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("saved_queries")}
+
+    try:
+        with engine.begin() as connection:
+            for name in names:
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO saved_queries (id, environment_id, name, sql_text, visibility,"
+                        " owner_id, private_owner_id, created_at, updated_at) VALUES (:id, :env,"
+                        " :name, 'SELECT 1', 'private', :owner, :owner, :now, :now)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "env": uuid.uuid4().hex,
+                        "name": name,
+                        "owner": owner,
+                        "now": _utc_text(),
+                    },
+                )
+        assert "name_key" not in columns()
+        command.upgrade(config, _REVISION_0088)
+        assert columns()["name_key"] is False
+        assert indexes()[index] == ["environment_id", "visibility", "name_key"]
+        with engine.connect() as connection:
+            rows = connection.execute(sa.text("SELECT name, name_key FROM saved_queries")).all()
+        assert sorted(tuple(r) for r in rows) == sorted((n, n.casefold()) for n in names)
+        assert ("Straße", "strasse") in {tuple(r) for r in rows}
+        command.downgrade(config, _REVISION_0087)
+        assert "name_key" not in columns()
+        assert index not in indexes()
+        with engine.connect() as connection:
+            kept = connection.execute(sa.text("SELECT name FROM saved_queries")).scalars().all()
+        assert sorted(kept) == sorted(names)
+    finally:
+        engine.dispose()

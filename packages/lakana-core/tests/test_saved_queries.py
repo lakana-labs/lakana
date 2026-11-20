@@ -248,7 +248,8 @@ def test_an_admin_with_read_query_text_sees_the_sql(session: Session, dev: str) 
     mine = service.create(bob, dev, name="Revenue", sql="SELECT 1")
 
     assert service.get(root, dev, mine.id).sql == "SELECT 1"
-    assert [i.sql for i in service.list_page(root).items] == ["SELECT 1"]
+    # A list shows no SQL to anyone; reading the saved query does.
+    assert [i.sql for i in service.list_page(root).items] == [None]
 
 
 def test_an_admins_read_of_someone_elses_private_query_is_audited_without_sql(
