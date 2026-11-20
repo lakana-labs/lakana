@@ -3994,6 +3994,28 @@ class ConnectionLastTestOut(BaseModel):
     requested_by: str | None = None
 
 
+class ConnectionRunFailureOut(BaseModel):
+    """The newest run that failed on a connection, while it is its asset's newest ending.
+
+    A task's failure names a connection when the asset's code ended with an error of
+    ``lakana.ingest`` that names one the asset declares. Only failures after the connection's
+    last change count, and a later success or failure of the same asset hides it.
+
+    Parameters
+    ----------
+    run_id
+        The run; ``GET /api/v1/environments/{env}/runs/{run_id}`` shows it.
+    asset
+        The task that failed.
+    finished_at
+        When it failed.
+    """
+
+    run_id: uuid.UUID
+    asset: str
+    finished_at: datetime
+
+
 class ConnectionOut(BaseModel):
     """Response body for a connection. Carries its secret's name, never a value.
 
@@ -4031,6 +4053,9 @@ class ConnectionOut(BaseModel):
         `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound
         to it, or a change that could send its secret somewhere new without new values) with
         `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again.
+    last_run_failure
+        The newest run that failed on it (`ConnectionRunFailureOut`), for a caller who may read
+        the environment's runs; `null` when there is none, or the caller may not read it.
     """
 
     name: str
@@ -4045,6 +4070,7 @@ class ConnectionOut(BaseModel):
     environment: str
     last_test: ConnectionLastTestOut | None
     actions: list[Literal["test", "update", "delete", "name_secret"]]
+    last_run_failure: ConnectionRunFailureOut | None = None
 
 
 class ConnectionPage(BaseModel):
@@ -4998,11 +5024,19 @@ class FailureOut(BaseModel):
         One sentence: what happened. The sentences may be reworded; the codes do not change.
     next_step
         One sentence: what to do about it.
+    connection
+        The connection the failure concerns: the task's code ended with an error of
+        ``lakana.ingest`` that names one the asset declares. `null` when it names none.
+    error_type
+        The class name of the exception a Python task's code ended with (``SourceRefused``,
+        ``KeyError``); `null` for any other failure and for one recorded before it was stored.
     """
 
     code: str
     cause: str
     next_step: str
+    connection: str | None = None
+    error_type: str | None = None
 
 
 class PolicyWarningOut(BaseModel):

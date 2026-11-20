@@ -151,6 +151,35 @@ describe("ConnectionList", () => {
     ).toHaveClass("test-status-muted");
   });
 
+  it("shows under the status the newest run that failed on a connection, linked to its task", async () => {
+    fakeServer(
+      connectionRoutes(
+        [
+          aConnection({
+            last_run_failure: {
+              run_id: "0b6f1c1e-5b0e-4a49-9c1e-6a2f1d3c4b5a",
+              asset: "silver.customers",
+              finished_at: "2026-11-02T08:00:00Z",
+            },
+          }),
+          aConnection({ name: "files", environment: "dev", last_run_failure: null }),
+        ],
+        MANAGER,
+      ),
+    );
+    renderList();
+
+    const rows = await screen.findAllByRole("row");
+    const link = within(rows[1] as HTMLElement).getByRole("link", {
+      name: /^last run failed on it · .* ago$/,
+    });
+    expect(link).toHaveAttribute(
+      "href",
+      "/jobs/prod/runs/0b6f1c1e-5b0e-4a49-9c1e-6a2f1d3c4b5a/tasks/silver.customers",
+    );
+    expect(within(rows[2] as HTMLElement).queryByText(/last run failed/)).not.toBeInTheDocument();
+  });
+
   it("marks a protected environment in the filter, its list and the rows, never by colour alone", async () => {
     const user = userEvent.setup();
     fakeServer(

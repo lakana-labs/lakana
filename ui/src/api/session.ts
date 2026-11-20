@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { api, endSession } from "./client";
+import { api, endSession, type RequestOptions } from "./client";
 
 /** The browser session, as `GET /api/v1/sign-in/session` answers it. */
 export interface SessionOut {
@@ -77,12 +77,13 @@ interface WhoamiOut {
 /**
  * Reads the browser's session. It never carries the CSRF token: only a sign-in answers that.
  *
+ * @param options - Whether the read is a background one, which does not keep the session alive.
  * @returns The session.
  * @throws {ApiError} 401 when the browser is not signed in (no session, or no CSRF token in
  * this origin's storage), with `reason` when a session ended.
  */
-export async function getSession(): Promise<SessionOut> {
-  return api.request<SessionOut>("GET", "/api/v1/sign-in/session");
+export async function getSession(options: RequestOptions = {}): Promise<SessionOut> {
+  return api.request<SessionOut>("GET", "/api/v1/sign-in/session", undefined, options);
 }
 
 /**

@@ -58,6 +58,20 @@ export interface ConnectionLastTestOut {
   readonly requested_by?: string | null;
 }
 
+/**
+ * The newest run that failed on a connection: its code ended with an error of `lakana.ingest`
+ * that names the connection. Only failures after the connection's last change count, and a
+ * later run of the same asset hides it.
+ */
+export interface ConnectionRunFailureOut {
+  /** The run's id. */
+  readonly run_id: string;
+  /** The task that failed. */
+  readonly asset: string;
+  /** When it failed. */
+  readonly finished_at: string;
+}
+
 /** A connection, as the server answers it. It carries its secret's name, never a value. */
 export interface ConnectionOut {
   /** The connection's name. */
@@ -84,6 +98,11 @@ export interface ConnectionOut {
   readonly last_test: ConnectionLastTestOut | null;
   /** What the caller's rights allow on it. */
   readonly actions: readonly ConnectionAction[];
+  /**
+   * The newest run that failed on it, for a reader of the environment's runs; null when there
+   * is none, absent from a server older than the field.
+   */
+  readonly last_run_failure?: ConnectionRunFailureOut | null;
 }
 
 /** An environment whose connections the caller may read, and what they may do there. */
