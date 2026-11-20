@@ -102,6 +102,76 @@ def clear_session_cookie(response: Response, origin: PublicOrigin) -> None:
     )
 
 
+FLOW_COOKIE_SECONDS = 600
+"""How long the browser keeps the OIDC flow cookie: the flow's own lifetime."""
+
+
+def flow_cookie_name(origin: PublicOrigin) -> str:
+    """Name the OIDC sign-in's flow cookie for the interface's public address.
+
+    It never starts with ``lakana_session``, so neither the guard nor `get_principal` takes it
+    for a session.
+
+    Parameters
+    ----------
+    origin
+        The public address (`Settings.public_origin`).
+
+    Returns
+    -------
+    str
+        `__Host-lakana_oidc` over HTTPS; `lakana_oidc_<port>` over plain HTTP.
+    """
+    if origin.scheme == "https":
+        return "__Host-lakana_oidc"
+    return f"lakana_oidc_{origin.port}"
+
+
+def set_flow_cookie(response: Response, origin: PublicOrigin, value: str) -> None:
+    """Bind an OIDC flow to this browser.
+
+    `SameSite=Lax`, not `Strict`: the provider sends the browser back with a cross-site
+    top-level GET, which a `Strict` cookie would not go with.
+
+    Parameters
+    ----------
+    response
+        The response of `start`.
+    origin
+        The public address, which decides the name and `Secure`.
+    value
+        The flow's browser secret.
+    """
+    response.set_cookie(
+        flow_cookie_name(origin),
+        value,
+        max_age=FLOW_COOKIE_SECONDS,
+        path="/",
+        secure=origin.scheme == "https",
+        httponly=True,
+        samesite="lax",
+    )
+
+
+def clear_flow_cookie(response: Response, origin: PublicOrigin) -> None:
+    """Tell the browser to drop its OIDC flow cookie.
+
+    Parameters
+    ----------
+    response
+        The response of `finish`.
+    origin
+        The public address.
+    """
+    response.delete_cookie(
+        flow_cookie_name(origin),
+        path="/",
+        secure=origin.scheme == "https",
+        httponly=True,
+        samesite="lax",
+    )
+
+
 def _app_path(request: Request) -> str:
     """Read the request path below the server's path prefix.
 

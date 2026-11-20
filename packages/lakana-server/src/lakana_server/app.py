@@ -53,6 +53,8 @@ from lakana_server.api.platform.interface_state import router as interface_state
 from lakana_server.api.platform.invites import router as invites_router
 from lakana_server.api.platform.jobs import router as jobs_router
 from lakana_server.api.platform.namespaces import router as namespaces_router
+from lakana_server.api.platform.oidc_sign_in import open_router as oidc_sign_in_open_router
+from lakana_server.api.platform.oidc_sign_in import router as oidc_sign_in_router
 from lakana_server.api.platform.package_indexes import router as package_indexes_router
 from lakana_server.api.platform.passkeys import router as passkeys_router
 from lakana_server.api.platform.pictures import PICTURE_DECODE_SLOTS
@@ -161,6 +163,8 @@ ROUTERS = (
     sign_in_router,
     sign_in_links_router,
     passkey_sign_in_router,
+    oidc_sign_in_router,
+    oidc_sign_in_open_router,
     sign_in_notices_router,
     invites_router,
     recovery_link_router,
@@ -245,6 +249,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             resolved_settings.ui.passkey_options_per_ip_per_minute
         )
         app.state.passkey_options_network_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_network_per_minute
+        )
+        # And the OIDC sign-in's start, with the same rates, in buckets of its own.
+        app.state.oidc_start_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_ip_per_minute
+        )
+        app.state.oidc_start_network_limiter = AuthAuditLimiter(
             resolved_settings.ui.passkey_options_per_network_per_minute
         )
         # One verifier per process: it holds the issuers' key cache.

@@ -83,3 +83,26 @@ def test_an_access_record_that_cannot_be_formatted_still_prints_a_line(
     out = capsys.readouterr().out
     assert out.startswith("INFO")
     assert "could not be formatted" in out
+
+
+def test_callback_query_is_not_in_the_access_log(capsys: pytest.CaptureFixture[str]) -> None:
+    """The OIDC callback's code and state never reach the access log; other queries do."""
+    uvicorn.Config(_app, log_config=uvicorn_log_config(), log_level="info")
+    access = logging.getLogger("uvicorn.access")
+    access.info(
+        '%s - "%s %s HTTP/%s" %d',
+        "1.2.3.4:5",
+        "GET",
+        "/api/v1/sign-in/oidc/callback?code=c0de-sentinel&state=st4te-sentinel",
+        "1.1",
+        303,
+    )
+    access.info('%s - "%s %s HTTP/%s" %d', "1.2.3.4:5", "GET", "/api/v1/tables?q=x", "1.1", 200)
+    access.info(
+        '%s - "%s %s HTTP/%s" %d', "1.2.3.4:5", "GET", "/api/v1/sign-in/oidc/callback", "1.1", 303
+    )
+    out = capsys.readouterr().out
+    assert "sentinel" not in out
+    assert '"GET /api/v1/sign-in/oidc/callback?… HTTP/1.1" 303' in out
+    assert "/api/v1/tables?q=x" in out
+    assert '"GET /api/v1/sign-in/oidc/callback HTTP/1.1" 303' in out

@@ -950,6 +950,7 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/sign-in/notices/{notice_id}"): "dismissing one's own notice",
     ("POST", "/api/v1/sign-in/passkey/options"): "signing in: the passkey is the proof",
     ("POST", "/api/v1/sign-in/passkey"): "signing in: the passkey is the proof",
+    ("POST", "/api/v1/sign-in/oidc/start"): "starts signing in through the identity provider",
     ("POST", "/api/v1/sign-in/step-up/options"): "the step-up ceremony itself",
     ("POST", "/api/v1/sign-in/step-up"): "the step-up ceremony itself",
     ("POST", "/api/v1/sign-in/links/describe"): "reads a link without using it",

@@ -219,6 +219,59 @@ class LinkUnusableError(LakanaError):
         super().__init__(_LINK_UNUSABLE[state])
 
 
+class OidcOff(ConflictError):
+    """OIDC sign-in was asked for while it is off (no `LAKANA_OIDC__ISSUER`); mapped to 409."""
+
+
+OidcRefusal = Literal[
+    "not_linked",
+    "deactivated",
+    "token_invalid",
+    "provider_unreachable",
+    "provider_refused",
+    "flow_expired",
+]
+"""Why an OIDC sign-in was refused; the values are stable."""
+
+_OIDC_REFUSED: dict[str, str] = {
+    "not_linked": (
+        "Your account at the identity provider is not linked to anyone in Lakana. Ask an "
+        "administrator for an invite."
+    ),
+    "deactivated": ("Your Lakana account is deactivated. Ask an administrator to reactivate it."),
+    "token_invalid": (
+        "Lakana could not verify the identity provider's answer, so nobody was signed in. Try "
+        "again; if it keeps happening, tell your administrator."
+    ),
+    "provider_unreachable": (
+        "Lakana could not reach the identity provider. Try again in a moment; if it keeps "
+        "happening, tell your administrator."
+    ),
+    "provider_refused": (
+        "The identity provider did not sign you in. Try again, or sign in at the identity "
+        "provider first."
+    ),
+    "flow_expired": (
+        "This sign-in was already used or took longer than 10 minutes. Start the sign-in again."
+    ),
+}
+
+
+class OidcSignInRefused(PermissionDenied):
+    """An OIDC sign-in was refused; mapped to 403 with `reason`.
+
+    Parameters
+    ----------
+    reason
+        ``not_linked``, ``deactivated``, ``token_invalid``, ``provider_unreachable``,
+        ``provider_refused`` or ``flow_expired``.
+    """
+
+    def __init__(self, reason: OidcRefusal) -> None:
+        self.reason = reason
+        super().__init__(_OIDC_REFUSED[reason])
+
+
 class StorageUnavailableError(LakanaError):
     """Storage could not be written or read right now (a full disk, an unreachable bucket).
 

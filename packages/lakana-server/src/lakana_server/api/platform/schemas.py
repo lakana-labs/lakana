@@ -7258,6 +7258,70 @@ class SignInOut(BaseModel):
     csrf_token: str
 
 
+class OidcInfoOut(BaseModel):
+    """Response body of `GET /api/v1/sign-in/oidc`: whether people sign in through a provider.
+
+    Parameters
+    ----------
+    enabled
+        Whether OIDC sign-in is on (`LAKANA_OIDC__ISSUER` is set).
+    display_name
+        The provider's name for the sign-in button (`LAKANA_OIDC__DISPLAY_NAME`, else the
+        issuer's host name); `null` while OIDC sign-in is off.
+    """
+
+    enabled: bool
+    display_name: str | None
+
+
+class OidcStartIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/oidc/start`.
+
+    Parameters
+    ----------
+    return_to
+        The page of the interface to open after signing in, as a path such as
+        ``/catalog/prod``. Anything that is not a path inside the interface (another site, a
+        sign-in page, more than 2048 characters) is replaced by ``/``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    return_to: str | None = Field(default=None, max_length=4096)
+
+
+class OidcStartOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/oidc/start`.
+
+    Parameters
+    ----------
+    authorization_url
+        The identity provider's sign-in page for this flow: send the browser there.
+    """
+
+    authorization_url: str
+
+
+class OidcSignInOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/oidc/finish`; the session comes as a cookie.
+
+    Parameters
+    ----------
+    name
+        The principal name now signed in.
+    csrf_token
+        The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every
+        request that carries the session cookie, reads too. Keep it in the page's own storage;
+        the server keeps only its hash and never returns it again.
+    return_to
+        The page to open now: the path `start` was given, checked, or ``/``.
+    """
+
+    name: str
+    csrf_token: str
+    return_to: str
+
+
 class IssuedLinkOut(BaseModel):
     """Response body of `POST /api/v1/sign-in/setup-link` and `/local-link`.
 
