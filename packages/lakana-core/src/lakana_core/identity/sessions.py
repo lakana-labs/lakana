@@ -118,6 +118,22 @@ IDLE_KEY = "sign_in.idle_seconds"
 ABSOLUTE_KEY = "sign_in.absolute_seconds"
 """The instance setting that holds the absolute lifetime, in seconds."""
 
+TOKEN_WINDOW_KEY = "sign_in.token_provider_window_days"
+"""The instance setting that holds the token window of linked people, in days (#32)."""
+
+TOKEN_WINDOW_DEFAULT_DAYS = 30
+"""The token window of an instance whose administrator changed none."""
+
+TOKEN_WINDOW_BOUNDS = (1, 365)
+"""The shortest and the longest token window an administrator may choose, in days."""
+
+TOKEN_WINDOW_MESSAGE = (  # nosec B105 -- a sentence for a person, not a credential
+    "This token belongs to an account that signs in through your organisation's identity "
+    "provider, and nobody has signed in there as you in the last {days} days. Sign in to Lakana "
+    "in the browser once, then the token works again."
+)
+"""The 401 detail of a linked person's personal token outside the window; it is not revoked."""
+
 VIAS = frozenset({"setup", "invite", "recovery", "local", "passkey", "oidc"})
 """How a session may begin."""
 
@@ -266,6 +282,80 @@ def require_step_up(p: PrincipalRef, *, now: datetime | None = None) -> None:
     current = now if now is not None else p.session.verified_at
     if touched is None or current - touched > STEP_UP_WINDOW:
         raise StepUpRequired(STEP_UP_MESSAGE)
+
+
+def token_window_days(session: Session) -> int:
+    """Read the token window of linked people.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    int
+        The stored number of days; `TOKEN_WINDOW_DEFAULT_DAYS` when none was set.
+    """
+    row = session.get(InstanceSetting, TOKEN_WINDOW_KEY)
+    value = row.value if row is not None else None
+    return value if isinstance(value, int) else TOKEN_WINDOW_DEFAULT_DAYS
+
+
+def token_window_ends_at(
+    session: Session, principal: Principal, *, days: int | None = None
+) -> datetime | None:
+    """Say until when a person's personal tokens work, when the identity provider limits them.
+
+    A person linked to the provider (#32) uses their tokens only within the window after their
+    last provider sign-in; anyone else has no window.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The person.
+    days
+        The window, when the caller has read it already (`token_window_days`).
+
+    Returns
+    -------
+    datetime or None
+        The end, or `None` for a person who is not linked. A linked person who never signed
+        in there has a window that ended at the epoch.
+    """
+    if principal.oidc_subject is None:
+        return None
+    window = timedelta(days=days if days is not None else token_window_days(session))
+    signed_in = principal.last_provider_sign_in_at or datetime.fromtimestamp(0, UTC)
+    return signed_in + window
+
+
+def check_token_window(days: int) -> None:
+    """Refuse a token window outside `TOKEN_WINDOW_BOUNDS`, naming the bound.
+
+    Parameters
+    ----------
+    days
+        The window.
+
+    Raises
+    ------
+    ValidationError
+        Below 1 or above 365 days.
+    """
+    low, high = TOKEN_WINDOW_BOUNDS
+    if days < low:
+        raise ValidationError(
+            f"The token window is at least {low} day (got {days}): a linked person's tokens "
+            "need a provider sign-in within it."
+        )
+    if days > high:
+        raise ValidationError(
+            f"The token window is at most {high} days (got {days}), so that someone the "
+            "identity provider disabled loses token access within a year."
+        )
 
 
 def _seconds(value: timedelta) -> int:
@@ -465,10 +555,27 @@ class SessionService:
             ),
         )
 
+    def get_token_window(self) -> int:
+        """Read the token window of linked people.
+
+        Returns
+        -------
+        int
+            Days (`token_window_days`).
+        """
+        return token_window_days(self._session)
+
     def set_limits(
-        self, p: PrincipalRef, *, idle: timedelta | None, absolute: timedelta | None
+        self,
+        p: PrincipalRef,
+        *,
+        idle: timedelta | None,
+        absolute: timedelta | None,
+        token_window_days: int | None = None,
     ) -> SessionLimits:
-        """Change the session limits; sessions already started keep theirs.
+        """Change the session limits and the token window; sessions already started keep theirs.
+
+        A new token window applies to the next request with a token (`token_window_ends_at`).
 
         Parameters
         ----------
@@ -479,6 +586,8 @@ class SessionService:
             The new idle timeout; `None` keeps the current one.
         absolute
             The new absolute lifetime; `None` keeps the current one.
+        token_window_days
+            The new token window of linked people, in days; `None` keeps the current one.
 
         Returns
         -------
@@ -492,7 +601,8 @@ class SessionService:
         StepUpRequired
             If `p`'s session needs a fresh passkey touch.
         ValidationError
-            If a limit lies outside `SESSION_BOUNDS` (the message names the bound).
+            If a limit lies outside `SESSION_BOUNDS` or the window outside
+            `TOKEN_WINDOW_BOUNDS` (the message names the bound).
         """
         self._require_admin(p)
         require_step_up(p, now=self._clock())
@@ -502,13 +612,22 @@ class SessionService:
             absolute=absolute if absolute is not None else before.absolute,
         )
         check_limits(after)
+        window_before = self.get_token_window()
+        window_after = token_window_days if token_window_days is not None else window_before
+        check_token_window(window_after)
         now = self._clock()
-        for key, value in ((IDLE_KEY, after.idle), (ABSOLUTE_KEY, after.absolute)):
+        values: list[tuple[str, int]] = [
+            (IDLE_KEY, _seconds(after.idle)),
+            (ABSOLUTE_KEY, _seconds(after.absolute)),
+        ]
+        if token_window_days is not None:
+            values.append((TOKEN_WINDOW_KEY, window_after))
+        for key, value in values:
             row = self._session.get(InstanceSetting, key)
             if row is None:
                 row = InstanceSetting(key=key)
                 self._session.add(row)
-            row.value = _seconds(value)
+            row.value = value
             row.updated_at = now
             row.updated_by = p.id
         AuditService(self._session).record(
@@ -519,10 +638,12 @@ class SessionService:
                 "before": {
                     "idle_seconds": _seconds(before.idle),
                     "absolute_seconds": _seconds(before.absolute),
+                    "token_provider_window_days": window_before,
                 },
                 "after": {
                     "idle_seconds": _seconds(after.idle),
                     "absolute_seconds": _seconds(after.absolute),
+                    "token_provider_window_days": window_after,
                 },
             },
         )

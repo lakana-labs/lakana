@@ -49,6 +49,7 @@ Answer fields: `PrincipalOut`
 | `is_active` | true or false | yes |  |
 | `picture` | text or null | no |  |
 | `held_admin` | true or false or null | no |  |
+| `provider_link` | `ProviderLinkOut` or null | no |  |
 
 ## `GET /api/v1/principals`
 
@@ -106,6 +107,7 @@ Answer fields: `PrincipalOut`
 | `is_active` | true or false | yes |  |
 | `picture` | text or null | no |  |
 | `held_admin` | true or false or null | no |  |
+| `provider_link` | `ProviderLinkOut` or null | no |  |
 
 ## `DELETE /api/v1/principals/{name}`
 

@@ -38,6 +38,7 @@ Answer fields: `SessionOut`
 | `needs_passkey` | true or false | yes |  |
 | `offer_passkey` | true or false | yes |  |
 | `absolute_expires_at` | text (date-time) | yes |  |
+| `provider_linked` | true or false | no |  |
 
 ## `DELETE /api/v1/sign-in/session`
 

@@ -32,6 +32,8 @@ from lakana_core.identity.sessions import (
     SESSION_BOUNDS,
     SESSION_DEFAULTS,
     STEP_UP_WINDOW,
+    TOKEN_WINDOW_BOUNDS,
+    TOKEN_WINDOW_DEFAULT_DAYS,
     SessionService,
     StartedSession,
     require_step_up,
@@ -354,8 +356,16 @@ def test_changed_limits_apply_to_new_sessions_only(
         .all()
     )
     assert event.detail == {
-        "before": {"idle_seconds": 43200, "absolute_seconds": 604800},
-        "after": {"idle_seconds": 3600, "absolute_seconds": 172800},
+        "before": {
+            "idle_seconds": 43200,
+            "absolute_seconds": 604800,
+            "token_provider_window_days": 30,
+        },
+        "after": {
+            "idle_seconds": 3600,
+            "absolute_seconds": 172800,
+            "token_provider_window_days": 30,
+        },
     }
 
 
@@ -839,3 +849,55 @@ def test_step_up_measures_against_the_clock_the_session_was_verified_with(
     clock.now = START + STEP_UP_WINDOW + timedelta(seconds=1)
     with pytest.raises(StepUpRequired):
         require_step_up(svc.verify(started.cookie_value, extend=False))
+
+
+# -- the token window of linked people (#32, PR 2) ----------------------------------------------
+
+
+def test_the_token_window_defaults_to_30_days(svc: SessionService) -> None:
+    assert svc.get_token_window() == TOKEN_WINDOW_DEFAULT_DAYS == 30
+    assert TOKEN_WINDOW_BOUNDS == (1, 365)
+
+
+def test_window_change_is_audited(svc: SessionService, session: Session) -> None:
+    admin = _principal(session, "root")
+    svc.set_limits(_ref(admin), idle=None, absolute=None, token_window_days=7)
+    assert svc.get_token_window() == 7
+    [event] = session.execute(
+        select(AuditEvent.detail).where(
+            AuditEvent.event_type == AuditEventType.SIGN_IN_SETTINGS_CHANGED
+        )
+    ).scalars()
+    assert (
+        event["before"]["token_provider_window_days"],
+        event["after"]["token_provider_window_days"],
+    ) == (30, 7)
+    svc.set_limits(_ref(admin), idle=None, absolute=None, token_window_days=8)
+    assert svc.get_token_window() == 8
+
+
+@pytest.mark.parametrize(("days", "named"), [(0, "at least 1 day"), (366, "at most 365 days")])
+def test_window_bounds_are_1_and_365(
+    svc: SessionService, session: Session, days: int, named: str
+) -> None:
+    admin = _principal(session, "root")
+    with pytest.raises(ValidationError, match=named):
+        svc.set_limits(_ref(admin), idle=None, absolute=None, token_window_days=days)
+    assert svc.get_token_window() == 30
+
+
+def test_window_change_needs_admin_and_step_up(session: Session, clock: _Clock) -> None:
+    admin = _principal(session, "root")
+    bob = _principal(session, "bob")
+    ensure_bootstrap_admin_grant(
+        session,
+        PrincipalRef(id=admin.id, name=admin.name, type=admin.type),
+        AllowAllAuthorization(),
+    )
+    svc = SessionService(session, GrantAuthorization(session), clock=clock)
+    with pytest.raises(PermissionDenied):
+        svc.set_limits(_ref(bob), idle=None, absolute=None, token_window_days=7)
+    as_admin = svc.verify(_start(svc, admin, touched=False).cookie_value, extend=True)
+    with pytest.raises(StepUpRequired):
+        svc.set_limits(as_admin, idle=None, absolute=None, token_window_days=7)
+    assert svc.get_token_window() == 30

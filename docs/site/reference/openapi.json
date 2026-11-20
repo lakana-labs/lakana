@@ -22977,7 +22977,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), `instance_actions` the actions it may take on the instance with it, and `managed_environments` the environments it may manage with it (deleted ones too, until their files are deleted): the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, the instance-wide actions of Settings and each environment's own, from these eight. `picture` is the etag of your profile picture, or `null` without one.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), `instance_actions` the actions it may take on the instance with it, and `managed_environments` the environments it may manage with it (deleted ones too, until their files are deleted): the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, the instance-wide actions of Settings and each environment's own, from these eight. `picture` is the etag of your profile picture, or `null` without one. `token_window_ends_at` is, for a person linked to the identity provider, until when their personal tokens work without another sign-in there.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -25701,7 +25701,7 @@
           "settings"
         ],
         "summary": "Show how long browser sessions last",
-        "description": "The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days, 10080 minutes), in minutes, with the bounds an administrator may choose between. Anyone signed in may read them.",
+        "description": "The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days, 10080 minutes), in minutes, with the bounds an administrator may choose between, and the token window of people linked to the identity provider (default 30 days). Anyone signed in may read them. An administrator also gets `provider`, while OIDC sign-in is on: its name and issuer, how many people are linked and how many administrators can sign in without it.",
         "operationId": "get_sign_in_settings_api_v1_settings_sign_in_get",
         "parameters": [
           {
@@ -25761,7 +25761,7 @@
           "settings"
         ],
         "summary": "Change how long browser sessions last",
-        "description": "Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; a value outside answers 422 naming the bound. Sessions already open keep their lengths. Recorded in the audit log.",
+        "description": "Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; the token window of people linked to the identity provider 1 to 365 days. A value outside answers 422 naming the bound. Sessions already open keep their lengths; a new token window applies to the next request with a token. Recorded in the audit log.",
         "operationId": "set_sign_in_settings_api_v1_settings_sign_in_patch",
         "parameters": [
           {
@@ -34848,6 +34848,16 @@
               }
             ],
             "title": "Held Admin"
+          },
+          "provider_link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderLinkOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -34857,7 +34867,7 @@
           "is_active"
         ],
         "title": "PrincipalOut",
-        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance)."
+        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance).\nprovider_link\n    The person's link to the identity provider; `null` when they are not linked, or for a\n    caller who is neither an administrator nor the person."
       },
       "ProfileIn": {
         "properties": {
@@ -34944,6 +34954,70 @@
         ],
         "title": "ProjectVersionOut",
         "description": "A project version with its manifest filtered for the caller.\n\nParameters\n----------\nid\n    The project version's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\ncommit_sha\n    The commit.\ncode_uri\n    Code tarball location.\ncode_sha256\n    Its digest.\ndeployed_by\n    Who first deployed it.\ncreated_at\n    When.\nmanifest\n    Assets, DAG edges, external inputs, resolved config; SQL withheld\n    where the caller cannot read every referenced table."
+      },
+      "ProviderLinkOut": {
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "last_sign_in_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sign In At"
+          },
+          "token_window_ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Window Ends At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issuer",
+          "email",
+          "name",
+          "last_sign_in_at",
+          "token_window_ends_at"
+        ],
+        "title": "ProviderLinkOut",
+        "description": "A person's link to the organisation's identity provider (#32).\n\nParameters\n----------\nissuer\n    The provider's issuer the person is linked to.\nemail\n    The e-mail address of their last provider sign-in, for showing only: Lakana never\n    matches by it.\nname\n    The name of their last provider sign-in, for showing only.\nlast_sign_in_at\n    When they last signed in through the provider.\ntoken_window_ends_at\n    Until when their personal API tokens work without another provider sign-in."
       },
       "QueryEnvironmentOut": {
         "properties": {
@@ -37592,6 +37666,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Absolute Expires At"
+          },
+          "provider_linked": {
+            "type": "boolean",
+            "title": "Provider Linked",
+            "default": false
           }
         },
         "type": "object",
@@ -37606,7 +37685,7 @@
           "absolute_expires_at"
         ],
         "title": "SessionOut",
-        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie, nor the CSRF token, nor any hash of them.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or\n    ``oidc`` (the organisation's identity provider).\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active."
+        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie, nor the CSRF token, nor any hash of them.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or\n    ``oidc`` (the organisation's identity provider).\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active.\nprovider_linked\n    Whether the person signs in through the identity provider: their step-up is a fresh\n    sign-in there (`POST /api/v1/sign-in/oidc/step-up/start`), not a passkey touch."
       },
       "SignInBoundsOut": {
         "properties": {
@@ -37625,6 +37704,16 @@
           "absolute_lifetime_minutes_max": {
             "type": "integer",
             "title": "Absolute Lifetime Minutes Max"
+          },
+          "token_provider_window_days_min": {
+            "type": "integer",
+            "title": "Token Provider Window Days Min",
+            "default": 1
+          },
+          "token_provider_window_days_max": {
+            "type": "integer",
+            "title": "Token Provider Window Days Max",
+            "default": 365
           }
         },
         "type": "object",
@@ -37635,7 +37724,7 @@
           "absolute_lifetime_minutes_max"
         ],
         "title": "SignInBoundsOut",
-        "description": "The limits an administrator may choose the session lengths between.\n\nParameters\n----------\nidle_timeout_minutes_min\n    The shortest idle timeout, in minutes.\nidle_timeout_minutes_max\n    The longest idle timeout, in minutes.\nabsolute_lifetime_minutes_min\n    The shortest absolute lifetime, in minutes.\nabsolute_lifetime_minutes_max\n    The longest absolute lifetime, in minutes."
+        "description": "The limits an administrator may choose the session lengths between.\n\nParameters\n----------\nidle_timeout_minutes_min\n    The shortest idle timeout, in minutes.\nidle_timeout_minutes_max\n    The longest idle timeout, in minutes.\nabsolute_lifetime_minutes_min\n    The shortest absolute lifetime, in minutes.\nabsolute_lifetime_minutes_max\n    The longest absolute lifetime, in minutes.\ntoken_provider_window_days_min\n    The shortest token window, in days.\ntoken_provider_window_days_max\n    The longest token window, in days."
       },
       "SignInNoticeOut": {
         "properties": {
@@ -37704,6 +37793,35 @@
         "title": "SignInOut",
         "description": "Response body of `POST /api/v1/sign-in/links/redeem`; the session comes as a cookie.\n\nParameters\n----------\nname\n    The principal name now signed in.\nneeds_passkey\n    Whether the person must register a passkey now (setup, invite and recovery links on an\n    account without one).\noffer_passkey\n    Whether the interface offers, never forces, a passkey (a local link on an account\n    without one).\ncsrf_token\n    The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every\n    request that carries the session cookie, reads too. Keep it in the page's own storage;\n    the server keeps only its hash and never returns it again."
       },
+      "SignInProviderOut": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "linked_people": {
+            "type": "integer",
+            "title": "Linked People"
+          },
+          "unlinked_admins": {
+            "type": "integer",
+            "title": "Unlinked Admins"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "issuer",
+          "linked_people",
+          "unlinked_admins"
+        ],
+        "title": "SignInProviderOut",
+        "description": "The identity provider people sign in through, in the sign-in settings (administrators only).\n\nParameters\n----------\ndisplay_name\n    The name on the sign-in button.\nissuer\n    The provider's issuer (`LAKANA_OIDC__ISSUER`).\nlinked_people\n    How many active people are linked to it.\nunlinked_admins\n    How many administrators can sign in without it (not linked, with a working passkey):\n    the way in when the provider is down. At 1, the last of them cannot be linked."
+      },
       "SignInSettingsIn": {
         "properties": {
           "idle_timeout_minutes": {
@@ -37731,12 +37849,25 @@
               }
             ],
             "title": "Absolute Lifetime Minutes"
+          },
+          "token_provider_window_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Provider Window Days"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "SignInSettingsIn",
-        "description": "Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.\n\nA change applies to sessions that begin afterwards; open sessions keep their lengths.\n\nParameters\n----------\nidle_timeout_minutes\n    The new idle timeout, in minutes (15 to 1440).\nabsolute_lifetime_minutes\n    The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than\n    the idle timeout."
+        "description": "Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.\n\nA change applies to sessions that begin afterwards; open sessions keep their lengths.\n\nParameters\n----------\nidle_timeout_minutes\n    The new idle timeout, in minutes (15 to 1440).\nabsolute_lifetime_minutes\n    The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than\n    the idle timeout.\ntoken_provider_window_days\n    The new token window of people linked to the identity provider, in days (1 to 365). It\n    applies to the next request with a token."
       },
       "SignInSettingsOut": {
         "properties": {
@@ -37750,6 +37881,21 @@
           },
           "bounds": {
             "$ref": "#/components/schemas/SignInBoundsOut"
+          },
+          "token_provider_window_days": {
+            "type": "integer",
+            "title": "Token Provider Window Days",
+            "default": 30
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignInProviderOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -37759,7 +37905,7 @@
           "bounds"
         ],
         "title": "SignInSettingsOut",
-        "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits both may be chosen between."
+        "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits each may be chosen between.\ntoken_provider_window_days\n    How long a linked person's personal API tokens work after their last sign-in through\n    the identity provider, in days (default 30).\nprovider\n    The identity provider and its counts, for an administrator while OIDC sign-in is on;\n    `null` otherwise."
       },
       "StatusDetailOut": {
         "properties": {
@@ -40765,6 +40911,18 @@
               }
             ],
             "title": "Picture"
+          },
+          "token_window_ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Window Ends At"
           }
         },
         "type": "object",
@@ -40774,7 +40932,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\nreads_environments\n    Whether you may read environments with this credential (`READ_ENVIRONMENT` on the\n    instance or on at least one environment that is not deleted, directly, through a role or\n    a group), which lets you read the repositories. The web interface lists Settings,\n    Repositories from it.\ninstance_actions\n    The actions you may take on the instance with this credential (such as\n    `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the\n    order of the action list; empty for a task or CI token. It describes you only.\nmanaged_environments\n    The environments, by name and sorted, that you may manage with this credential\n    (`MANAGE_ENVIRONMENT` on the environment, directly, through a role or a group),\n    including deleted ones whose files are not deleted yet; empty for a task or CI token.\n    The web interface offers an environment's usage, retention, deletion and restore for\n    exactly these. It describes you only.\npicture\n    The etag of your profile picture, or `null` without one."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\nreads_environments\n    Whether you may read environments with this credential (`READ_ENVIRONMENT` on the\n    instance or on at least one environment that is not deleted, directly, through a role or\n    a group), which lets you read the repositories. The web interface lists Settings,\n    Repositories from it.\ninstance_actions\n    The actions you may take on the instance with this credential (such as\n    `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the\n    order of the action list; empty for a task or CI token. It describes you only.\nmanaged_environments\n    The environments, by name and sorted, that you may manage with this credential\n    (`MANAGE_ENVIRONMENT` on the environment, directly, through a role or a group),\n    including deleted ones whose files are not deleted yet; empty for a task or CI token.\n    The web interface offers an environment's usage, retention, deletion and restore for\n    exactly these. It describes you only.\npicture\n    The etag of your profile picture, or `null` without one.\ntoken_window_ends_at\n    For a person linked to the identity provider: until when your personal API tokens work\n    without another sign-in there (the token window, `token_provider_window_days` after your\n    last provider sign-in). `null` when your tokens have no such window."
       },
       "WorkEnvironmentOut": {
         "properties": {

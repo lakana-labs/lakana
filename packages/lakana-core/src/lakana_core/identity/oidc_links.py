@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
@@ -43,6 +44,7 @@ from lakana_core.identity.sessions import (
     principal_named,
     require_principal_admin,
     require_step_up,
+    token_window_ends_at,
     utc_now,
 )
 from lakana_core.identity.task_tokens import revoke_task_tokens_of_pat
@@ -140,6 +142,59 @@ def unlinked_admin_count(session: Session) -> int:
         Active instance administrators, not linked, with a passkey that is not disabled.
     """
     return len(unlinked_admin_ids(session, active_instance_admin_ids(session)))
+
+
+@dataclass(frozen=True)
+class ProviderLink:
+    """What an administrator, or the person, sees of a person's link to the identity provider.
+
+    Parameters
+    ----------
+    issuer
+        The provider's issuer.
+    email
+        The e-mail address of the last provider sign-in, for showing only.
+    name
+        The name of the last provider sign-in, for showing only.
+    last_sign_in_at
+        When the person last signed in there.
+    token_window_ends_at
+        Until when the person's personal tokens work without another provider sign-in.
+    """
+
+    issuer: str
+    email: str | None
+    name: str | None
+    last_sign_in_at: datetime | None
+    token_window_ends_at: datetime | None
+
+
+def provider_link_of(session: Session, principal: Principal, *, days: int) -> ProviderLink | None:
+    """Describe a person's link to the identity provider.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal
+        The person.
+    days
+        The token window (`lakana_core.identity.sessions.token_window_days`).
+
+    Returns
+    -------
+    ProviderLink or None
+        The link; `None` for a person who is not linked.
+    """
+    if principal.oidc_issuer is None or not is_linked(principal):
+        return None
+    return ProviderLink(
+        issuer=principal.oidc_issuer,
+        email=principal.oidc_email,
+        name=principal.oidc_name,
+        last_sign_in_at=principal.last_provider_sign_in_at,
+        token_window_ends_at=token_window_ends_at(session, principal, days=days),
+    )
 
 
 def linking_refusal(principal: Principal, *, bootstrap_name: str) -> OidcSignInRefused | None:

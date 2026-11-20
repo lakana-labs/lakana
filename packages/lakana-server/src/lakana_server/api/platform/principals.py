@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.grants.admin import ineffective_note
 from lakana_core.grants.service import GrantService, scope_filter
+from lakana_core.identity.oidc_links import ProviderLink
 from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import Principal, PrincipalType
@@ -20,6 +21,7 @@ from lakana_server.api.platform.schemas import (
     PermissionsOut,
     PrincipalCreate,
     PrincipalOut,
+    ProviderLinkOut,
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -56,7 +58,8 @@ def principals_out(
     service
         The principal service, asked which of them hold or have held ADMIN.
     principal
-        The caller: `held_admin` is filled in only for an administrator.
+        The caller: `held_admin` is filled in only for an administrator, `provider_link` for an
+        administrator or the person.
 
     Returns
     -------
@@ -66,15 +69,41 @@ def principals_out(
     found = list(rows)
     etags = pictures.etags_of(row.id for row in found)
     held = service.held_admin_of(principal, found)
+    links = service.provider_links_of(principal, found)
     return [
         PrincipalOut.model_validate(row).model_copy(
             update={
                 "picture": etags.get(row.id),
                 "held_admin": None if held is None else held[row.id],
+                "provider_link": _link_out(links[row.id]),
             }
         )
         for row in found
     ]
+
+
+def _link_out(link: ProviderLink | None) -> ProviderLinkOut | None:
+    """Describe a person's link to the identity provider.
+
+    Parameters
+    ----------
+    link
+        The link, or `None`.
+
+    Returns
+    -------
+    ProviderLinkOut or None
+        Its body.
+    """
+    if link is None:
+        return None
+    return ProviderLinkOut(
+        issuer=link.issuer,
+        email=link.email,
+        name=link.name,
+        last_sign_in_at=link.last_sign_in_at,
+        token_window_ends_at=link.token_window_ends_at,
+    )
 
 
 @router.post("", response_model=PrincipalOut, status_code=201, responses=errors(403, 409))

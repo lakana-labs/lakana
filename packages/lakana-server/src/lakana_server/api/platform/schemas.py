@@ -2235,6 +2235,31 @@ class PrincipalCreate(BaseModel):
     type: Literal["USER", "SERVICE_ACCOUNT"]
 
 
+class ProviderLinkOut(BaseModel):
+    """A person's link to the organisation's identity provider (#32).
+
+    Parameters
+    ----------
+    issuer
+        The provider's issuer the person is linked to.
+    email
+        The e-mail address of their last provider sign-in, for showing only: Lakana never
+        matches by it.
+    name
+        The name of their last provider sign-in, for showing only.
+    last_sign_in_at
+        When they last signed in through the provider.
+    token_window_ends_at
+        Until when their personal API tokens work without another provider sign-in.
+    """
+
+    issuer: str
+    email: str | None
+    name: str | None
+    last_sign_in_at: datetime | None
+    token_window_ends_at: datetime | None
+
+
 class PrincipalOut(BaseModel):
     """Response body for a principal.
 
@@ -2253,6 +2278,9 @@ class PrincipalOut(BaseModel):
         Whether the principal holds or has ever held the `ADMIN` role on the instance, directly
         or through a group. Such a person is recovered only by the server operator. `null`
         unless the caller is an administrator (the `ADMIN` role on the instance).
+    provider_link
+        The person's link to the identity provider; `null` when they are not linked, or for a
+        caller who is neither an administrator nor the person.
     """
 
     name: str
@@ -2260,6 +2288,7 @@ class PrincipalOut(BaseModel):
     is_active: bool
     picture: str | None = None
     held_admin: bool | None = None
+    provider_link: ProviderLinkOut | None = None
 
     model_config = {"from_attributes": True}
 
@@ -3187,6 +3216,10 @@ class WhoamiOut(BaseModel):
         exactly these. It describes you only.
     picture
         The etag of your profile picture, or `null` without one.
+    token_window_ends_at
+        For a person linked to the identity provider: until when your personal API tokens work
+        without another sign-in there (the token window, `token_provider_window_days` after your
+        last provider sign-in). `null` when your tokens have no such window.
     """
 
     name: str
@@ -3203,6 +3236,7 @@ class WhoamiOut(BaseModel):
     instance_actions: list[str] = []
     managed_environments: list[str] = []
     picture: str | None = None
+    token_window_ends_at: datetime | None = None
 
 
 class ProfileIn(BaseModel):
@@ -7072,6 +7106,9 @@ class SessionOut(BaseModel):
         on an account without one).
     absolute_expires_at
         When the session ends at the latest, however active.
+    provider_linked
+        Whether the person signs in through the identity provider: their step-up is a fresh
+        sign-in there (`POST /api/v1/sign-in/oidc/step-up/start`), not a passkey touch.
     """
 
     name: str
@@ -7082,6 +7119,7 @@ class SessionOut(BaseModel):
     needs_passkey: bool
     offer_passkey: bool
     absolute_expires_at: datetime
+    provider_linked: bool = False
 
 
 class BrowserSessionOut(BaseModel):
@@ -7136,12 +7174,40 @@ class SignInBoundsOut(BaseModel):
         The shortest absolute lifetime, in minutes.
     absolute_lifetime_minutes_max
         The longest absolute lifetime, in minutes.
+    token_provider_window_days_min
+        The shortest token window, in days.
+    token_provider_window_days_max
+        The longest token window, in days.
     """
 
     idle_timeout_minutes_min: int
     idle_timeout_minutes_max: int
     absolute_lifetime_minutes_min: int
     absolute_lifetime_minutes_max: int
+    token_provider_window_days_min: int = 1
+    token_provider_window_days_max: int = 365
+
+
+class SignInProviderOut(BaseModel):
+    """The identity provider people sign in through, in the sign-in settings (administrators only).
+
+    Parameters
+    ----------
+    display_name
+        The name on the sign-in button.
+    issuer
+        The provider's issuer (`LAKANA_OIDC__ISSUER`).
+    linked_people
+        How many active people are linked to it.
+    unlinked_admins
+        How many administrators can sign in without it (not linked, with a working passkey):
+        the way in when the provider is down. At 1, the last of them cannot be linked.
+    """
+
+    display_name: str
+    issuer: str
+    linked_people: int
+    unlinked_admins: int
 
 
 class SignInSettingsOut(BaseModel):
@@ -7154,12 +7220,20 @@ class SignInSettingsOut(BaseModel):
     absolute_lifetime_minutes
         How long a session lasts at most, in minutes.
     bounds
-        The limits both may be chosen between.
+        The limits each may be chosen between.
+    token_provider_window_days
+        How long a linked person's personal API tokens work after their last sign-in through
+        the identity provider, in days (default 30).
+    provider
+        The identity provider and its counts, for an administrator while OIDC sign-in is on;
+        `null` otherwise.
     """
 
     idle_timeout_minutes: int
     absolute_lifetime_minutes: int
     bounds: SignInBoundsOut
+    token_provider_window_days: int = 30
+    provider: SignInProviderOut | None = None
 
 
 class SignInSettingsIn(BaseModel):
@@ -7174,12 +7248,16 @@ class SignInSettingsIn(BaseModel):
     absolute_lifetime_minutes
         The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than
         the idle timeout.
+    token_provider_window_days
+        The new token window of people linked to the identity provider, in days (1 to 365). It
+        applies to the next request with a token.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     idle_timeout_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
     absolute_lifetime_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
+    token_provider_window_days: int | None = Field(default=None, ge=0, le=10_000_000)
 
 
 class LinkIdIn(BaseModel):

@@ -209,7 +209,11 @@ def test_every_signed_in_person_reads_the_sign_in_settings(client: TestClient) -
             "idle_timeout_minutes_max": 1440,
             "absolute_lifetime_minutes_min": 60,
             "absolute_lifetime_minutes_max": 43200,
+            "token_provider_window_days_min": 1,
+            "token_provider_window_days_max": 365,
         },
+        "token_provider_window_days": 30,
+        "provider": None,
     }
 
 
