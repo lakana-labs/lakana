@@ -188,6 +188,11 @@ the personal token revokes its task tokens too (each gets a `TASK_TOKEN_REVOKED`
 tokens get `401` and are no longer listed. A task token minted before this rule was added lasts
 until its own `expires_at`.
 
+When the first administrator is restored at start-up (bootstrap recovery), each earlier personal
+token of the bootstrap principal that it revokes gets a `PAT_REVOKED` event, with `source`
+`bootstrap_recovery` in its detail, recorded before the `TASK_TOKEN_REVOKED` events of that
+token's task tokens.
+
 ## Refusals
 
 | Cause | Answer |

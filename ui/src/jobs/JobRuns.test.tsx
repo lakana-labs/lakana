@@ -129,7 +129,7 @@ describe("JobRuns", () => {
     expect(onRows).toHaveBeenLastCalledWith([failed, done]);
   });
 
-  it("writes each trigger in words, and the duration only of a run that ended", async () => {
+  it("writes each trigger in words, and a running run's elapsed time", async () => {
     renderRuns({
       status: 200,
       body: [
@@ -151,7 +151,30 @@ describe("JobRuns", () => {
       "After a deploy",
       "Ad hoc",
     ]);
-    expect(within(rows[2] as HTMLElement).getAllByRole("cell")[2]).toHaveTextContent(/^$/);
+    // The run that is running shows its elapsed time.
+    expect(within(rows[2] as HTMLElement).getAllByRole("cell")[2]).toHaveTextContent(/\d/u);
+  });
+
+  it("dashes the duration of a queued run and of one cancelled before it started", async () => {
+    renderRuns({
+      status: 200,
+      body: [
+        aJobRun({ id: "q", status: "queued", started_at: null, finished_at: null }),
+        aJobRun({
+          id: "x",
+          status: "cancelled",
+          started_at: null,
+          finished_at: "2026-11-17T03:00:00Z",
+        }),
+      ],
+    });
+
+    const rows = (await screen.findAllByRole("row")).slice(1);
+    const queued = within(rows[0] as HTMLElement).getAllByRole("cell")[2] as HTMLElement;
+    expect(within(queued).getByText("Not started yet")).toHaveClass("visually-hidden");
+    const cancelled = within(rows[1] as HTMLElement).getAllByRole("cell")[2] as HTMLElement;
+    expect(within(cancelled).getByText("Not measured")).toHaveClass("visually-hidden");
+    expect(cancelled).not.toHaveTextContent("Not finished yet");
   });
 
   it("says when no run is in the period", async () => {
