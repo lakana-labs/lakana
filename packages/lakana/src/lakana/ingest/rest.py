@@ -39,6 +39,7 @@ from lakana.ingest._errors import (
     SourceError,
     SourceRefused,
     UsageError,
+    names_connection,
     safe_name,
     task_environment,
 )
@@ -777,6 +778,7 @@ def _next_link(
     return url
 
 
+@names_connection
 def read(
     connection: str,
     path: str,

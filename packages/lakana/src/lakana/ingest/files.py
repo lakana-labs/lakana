@@ -41,6 +41,7 @@ from lakana.ingest._errors import (
     SourceError,
     SourceRefused,
     UsageError,
+    names_connection,
     safe_name,
 )
 
@@ -981,6 +982,7 @@ def _empty(schema: Mapping[str, Any] | None, with_since: bool) -> pa.Table:
     return pl.DataFrame(schema=columns).to_arrow()
 
 
+@names_connection
 def read(
     connection: str,
     pattern: str,
@@ -1244,6 +1246,7 @@ def read(
         source.close()
 
 
+@names_connection
 def list(connection: str, pattern: str, *, max_files: int = 10_000) -> pa.Table:
     """List the files of a connection that match a pattern, without reading them.
 

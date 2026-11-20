@@ -368,6 +368,7 @@ def test_the_retries_end_naming_the_attempts_and_the_time(
             rest.read("api", "items", params={"q": "x"}, retries=3)
 
     assert type(caught.value) is SourceError
+    assert caught.value.connection == "api"
     assert str(caught.value) == (
         f"`api`: GET {server.base}/items?q=…&key=… answered 503 after 4 attempts in 2 s; the API "
         "is unavailable — try again later, or raise retries= or retry_budget_seconds="

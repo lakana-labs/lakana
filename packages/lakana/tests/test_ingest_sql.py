@@ -424,8 +424,9 @@ def test_parameters_are_bound_and_checked_before_any_connection(driver: _Driver)
     _postgres(relay=False)
 
     sql.read("crm-db", "SELECT id FROM t WHERE u > :since", params={"since": 5})
-    with pytest.raises(UsageError, match="placeholder :x has no value"):
+    with pytest.raises(UsageError, match="placeholder :x has no value") as caught:
         sql.read("crm-db", "SELECT :x")
+    assert caught.value.connection == "crm-db"
 
     assert driver.cursor.executed == [("SELECT id FROM t WHERE u > $1", [5])]
     assert len(driver.seen) == 1
@@ -435,10 +436,11 @@ def test_a_none_parameter_is_refused_before_the_query_runs(driver: _Driver) -> N
     """Review Focus 1, end to end: the first run's watermark is `None`."""
     _postgres(relay=False)
 
-    with pytest.raises(UsageError, match=r"ctx\.watermark\(default=\.\.\.\)"):
+    with pytest.raises(UsageError, match=r"ctx\.watermark\(default=\.\.\.\)") as caught:
         sql.read("crm-db", "SELECT * FROM t WHERE u > :since", params={"since": None})
 
     assert driver.seen == []
+    assert caught.value.connection == "crm-db"
 
 
 @pytest.mark.parametrize(
@@ -468,6 +470,7 @@ def test_a_relay_reset_points_to_the_relay_line(driver: _Driver) -> None:
     with pytest.raises(SourceError) as caught:
         sql.read("crm-db", "SELECT 1")
 
+    assert caught.value.connection == "crm-db"
     assert str(caught.value) == (
         "`crm-db`: the connection through the task's relay closed before PostgreSQL answered; "
         "the task's log has a `lakana-relay:` line that says why (an address inside the Lakana "

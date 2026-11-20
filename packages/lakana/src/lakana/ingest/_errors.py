@@ -7,17 +7,29 @@ it to the harness's own rule (a function's error is retried).
 
 from __future__ import annotations
 
+import functools
 import re
-from typing import ClassVar
+from collections.abc import Callable
+from typing import ClassVar, ParamSpec, TypeVar
 
 from lakana import context
 
 
 class IngestError(Exception):
-    """An error of a `lakana.ingest` helper; the message names the connection, never a secret."""
+    """An error of a `lakana.ingest` helper; the message names the connection, never a secret.
+
+    Every helper (`connections.get`, `files.read`, `files.list`, `rest.read`, `sql.read`) sets
+    `connection` to the connection it was called with, for every error it raises but
+    `ConnectionNotDeclared`. A run that fails with such an error records the connection, and the
+    connection's page shows the run. An error the asset raises itself names none, unless the
+    asset sets it.
+    """
 
     retryable: ClassVar[bool | None] = None
     """Whether another attempt could end differently; `None` leaves it to the harness."""
+
+    connection: str | None = None
+    """The connection the error concerns, set by the helper; `None` when it concerns none."""
 
 
 class ConnectionNotDeclared(IngestError):
@@ -73,6 +85,44 @@ class CapExceeded(IngestError):
     """A read went past one of its limits; the same read would again."""
 
     retryable: ClassVar[bool | None] = False
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def names_connection(helper: Callable[_P, _R]) -> Callable[_P, _R]:
+    """Make a helper name its connection on every `IngestError` it raises.
+
+    The helper's first parameter is the connection. An error that names one already keeps it,
+    and `ConnectionNotDeclared` names none: the name is no connection of the asset.
+
+    Parameters
+    ----------
+    helper
+        A helper whose first parameter is ``connection`` (or ``name``).
+
+    Returns
+    -------
+    Callable
+        The helper, with the same signature.
+    """
+
+    @functools.wraps(helper)
+    def named(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        try:
+            return helper(*args, **kwargs)
+        except IngestError as exc:
+            name = args[0] if args else kwargs.get("connection", kwargs.get("name"))
+            if (
+                exc.connection is None
+                and isinstance(name, str)
+                and not isinstance(exc, ConnectionNotDeclared)
+            ):
+                exc.connection = name
+            raise
+
+    return named
 
 
 _UNSAFE = re.compile(

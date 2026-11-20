@@ -52,6 +52,7 @@ from lakana.ingest._errors import (
     SourceRefused,
     UsageError,
     missing_secret,
+    names_connection,
     safe_name,
     task_environment,
 )
@@ -1099,6 +1100,7 @@ def _read_mariadb(
             database.close()
 
 
+@names_connection
 def read(
     connection: str,
     query: str,
