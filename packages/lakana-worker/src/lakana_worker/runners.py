@@ -327,7 +327,8 @@ class RunOutcome:
     timed_out
         Whether it was stopped for its timeout.
     error_type
-        The harness's exception class name, sanitised; display text only.
+        The harness's exception class name, only when it is one (a dotted Python identifier of
+        at most 100 characters); display text only.
     failure_connection
         The connection the harness's ``failure_connection`` names, sanitised: what the asset's
         code says the failure concerns. The worker keeps it only for a connection the asset
@@ -636,6 +637,31 @@ def _redacted(data: bytes, secrets_to_hide: list[str]) -> bytes:
     return b"".join(redacted)
 
 
+def _class_name(value: object, secrets_to_hide: list[str]) -> str | None:
+    """Keep the record's ``error_type`` only when it is a class name.
+
+    Parameters
+    ----------
+    value
+        The record's ``error_type``.
+    secrets_to_hide
+        The values to mask; a name that holds one is no class name once masked.
+
+    Returns
+    -------
+    str or None
+        A dotted Python identifier of at most `_MAX_ERROR_TYPE_CHARS` characters
+        (``SourceRefused``, ``lakana.ingest.SourceRefused``); `None` for anything else, which is
+        never cut or repaired into one.
+    """
+    if not isinstance(value, str) or len(value) > _MAX_ERROR_TYPE_CHARS:
+        return None
+    cleaned = _clean(value, secrets_to_hide, _MAX_ERROR_TYPE_CHARS)
+    if cleaned != value or not all(part.isidentifier() for part in value.split(".")):
+        return None
+    return value
+
+
 def _leader_exited(process: subprocess.Popen[bytes]) -> bool:
     """Say whether the process has exited, without reaping it.
 
@@ -751,11 +777,7 @@ def _outcome_from(
         return RunOutcome(
             succeeded=False,
             error_message=message or "the task failed without a message",
-            error_type=(
-                _clean(kind, secrets_to_hide, _MAX_ERROR_TYPE_CHARS)
-                if isinstance(kind, str)
-                else None
-            ),
+            error_type=_class_name(kind, secrets_to_hide),
             failure_connection=(
                 _clean(connection, secrets_to_hide, _MAX_CONNECTION_NAME_CHARS)
                 if isinstance(connection, str)
