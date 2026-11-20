@@ -1,13 +1,14 @@
 """Browser sessions: the web interface's credential, their limits, and step-up.
 
-A session is started by a sign-in (a link or a passkey) and sent to the browser as an
-HttpOnly cookie ``<key_id>_<secret>``. Only the secret's SHA-256 digest is stored, and the
-presented secret is compared in constant time (`lakana_core.identity.tokens.verify_secret`).
-The CSRF token is a second, random secret of the session, unrelated to the cookie: the
-sign-in that starts the session returns it once, the page keeps it in its origin's storage,
-and every cookie request, reads too, carries it (`check_csrf`, against `csrf_hash`, in constant
-time). Whoever holds only the cookie, such as another program on another `localhost` port
-(cookies do not separate ports), therefore cannot act as the person.
+A session is started by a sign-in (a link, a passkey or the identity provider) and sent to the
+browser as an HttpOnly cookie ``<key_id>_<secret>``. Only the secret's SHA-256 digest is stored,
+and the presented secret is compared in constant time
+(`lakana_core.identity.tokens.verify_secret`). The CSRF token is a second, random secret of the
+session, unrelated to the cookie: the sign-in that starts the session returns it once, the page
+keeps it in its origin's storage, and every cookie request, reads too, carries it
+(`check_csrf`, against `csrf_hash`, in constant time). Whoever holds only the cookie, such as
+another program on another `localhost` port (cookies do not separate ports), therefore cannot
+act as the person.
 
 The row is read on every request (`SessionService.verify`), so ending a session takes effect
 at once. A session ends when it is signed out, ended by an administrator, idle for longer than
@@ -117,7 +118,7 @@ IDLE_KEY = "sign_in.idle_seconds"
 ABSOLUTE_KEY = "sign_in.absolute_seconds"
 """The instance setting that holds the absolute lifetime, in seconds."""
 
-VIAS = frozenset({"setup", "invite", "recovery", "local", "passkey"})
+VIAS = frozenset({"setup", "invite", "recovery", "local", "passkey", "oidc"})
 """How a session may begin."""
 
 STEP_UP_MESSAGE = (
@@ -575,7 +576,8 @@ class SessionService:
         principal_id
             The person signing in.
         via
-            How: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.
+            How: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or ``oidc`` (the
+            organisation's identity provider).
         link_id
             The link used, if any.
         source_pat_id
@@ -588,7 +590,8 @@ class SessionService:
         user_agent
             The browser's `User-Agent`, cut to 255 characters.
         touched
-            Whether the sign-in included a passkey touch (it then counts for step-up).
+            Whether the sign-in included a passkey touch or a provider sign-in (it then counts
+            for step-up).
 
         Returns
         -------

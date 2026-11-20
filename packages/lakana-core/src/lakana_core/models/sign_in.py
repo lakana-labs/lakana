@@ -91,7 +91,7 @@ class BrowserSession(Base):
         ForeignKey("principals.id", ondelete="CASCADE"), index=True
     )
     via: Mapped[str] = mapped_column(String(16))
-    """``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``."""
+    """``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or ``oidc``."""
     link_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("sign_in_links.id", ondelete="SET NULL"), nullable=True
     )

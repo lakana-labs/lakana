@@ -4204,3 +4204,37 @@ def test_0086_on_postgres() -> None:
         with engine.connect() as conn:
             assert conn.execute(query).all() == []
         engine.dispose()
+
+
+def test_0087_on_postgres() -> None:
+    """0087 adds the provider identity to principals, unique per pair, and `oidc_flows`."""
+    revision_0086 = "4d96fb277743"
+    revision_0087 = "431d39830234"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0086)
+        engine = sqlalchemy.create_engine(url)
+        tables = sqlalchemy.text(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'oidc_flows'"
+        )
+        insert = sqlalchemy.text(
+            "INSERT INTO principals (id, type, name, is_active, held_admin, created_at,"
+            " updated_at, oidc_issuer, oidc_subject) VALUES (:id, 'USER', :name, true, false,"
+            " now(), now(), 'https://idp.example', '248289761001')"
+        )
+        with engine.connect() as conn:
+            assert conn.execute(tables).scalar_one() == 0
+        migrate.upgrade(url, revision_0087)
+        assert _alembic_version(engine) == revision_0087
+        with engine.begin() as conn:
+            assert conn.execute(tables).scalar_one() == 1
+            conn.execute(insert, {"id": uuid.uuid4(), "name": "ada"})
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(insert, {"id": uuid.uuid4(), "name": "bob"})
+        migrate.downgrade(url, revision_0086)
+        assert _alembic_version(engine) == revision_0086
+        with engine.connect() as conn:
+            assert conn.execute(tables).scalar_one() == 0
+            names = conn.execute(sqlalchemy.text("SELECT name FROM principals"))
+            assert "ada" in names.scalars().all()
+        engine.dispose()
