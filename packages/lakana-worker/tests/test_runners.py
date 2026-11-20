@@ -1135,9 +1135,60 @@ def test_record_text_is_sanitised_before_it_is_stored(harness: Harness) -> None:
         )
     )
     assert outcome.error_message == "a?b?[31mc?d?e\tf\ng ***"
-    assert outcome.error_type is not None
-    assert outcome.error_type.startswith("Ty?pe?TTT")
-    assert len(outcome.error_type) == 100
+    # Not a class name, so nothing is kept of it.
+    assert outcome.error_type is None
+
+
+@pytest.mark.parametrize(
+    ("written", "kept"),
+    [
+        ("SourceRefused", "SourceRefused"),
+        ("lakana.ingest.SourceRefused", "lakana.ingest.SourceRefused"),
+        ("Ärger", "Ärger"),
+        ("_Private2", "_Private2"),
+        ("Two words", None),
+        ("a..b", None),
+        (".Leading", None),
+        ("9Lives", None),
+        ("Bad\u202eName", None),
+        ("", None),
+        ("lakana_task_k1abc_s3cr3t_part-x", None),
+        ("E" * 101, None),
+        ("E" * 100, "E" * 100),
+    ],
+    ids=[
+        "name",
+        "dotted",
+        "unicode",
+        "underscore",
+        "space",
+        "empty-part",
+        "leading-dot",
+        "digit",
+        "bidi",
+        "empty",
+        "secret",
+        "too-long",
+        "longest",
+    ],
+)
+def test_the_exception_type_is_kept_only_as_a_class_name(
+    harness: Harness, written: str, kept: str | None
+) -> None:
+    """A dotted Python identifier of at most 100 characters, or nothing."""
+    assert harness.run(_failed(error_type=written)).error_type == kept
+
+
+def test_the_connection_a_failure_concerns_is_read_and_sanitised(harness: Harness) -> None:
+    """The harness's `failure_connection` is kept as text, cleaned and cut to a name's length."""
+    named = harness.run(_failed(failure_connection="crm-db"))
+    assert named.failure_connection == "crm-db"
+    dirty = harness.run(_failed(failure_connection="crm\x00db" + "x" * 100))
+    assert dirty.failure_connection is not None
+    assert dirty.failure_connection.startswith("crm?dbxx")
+    assert len(dirty.failure_connection) == 63
+    assert harness.run(_failed(failure_connection=7)).failure_connection is None
+    assert harness.run(_failed()).failure_connection is None
 
 
 def test_cleaning_never_joins_a_split_secret(harness: Harness) -> None:

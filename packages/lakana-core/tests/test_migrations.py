@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import sqlalchemy as sa
@@ -6913,5 +6913,56 @@ def test_0087_links_principals_to_a_provider_and_keeps_flows(migrated_db: Migrat
         with engine.connect() as connection:
             names = connection.execute(sa.text("SELECT name FROM principals ORDER BY name"))
             assert names.scalars().all() == ["ada", "bob", "cy"]
+    finally:
+        engine.dispose()
+
+
+_REVISION_0088 = "95737c487bf3"
+
+
+def test_0088_adds_what_a_failure_concerns(migrated_db: MigratedDb) -> None:
+    """Revision `0088`: nullable `error_type` and `failure_connection`, and two indexes.
+
+    Both columns are on `task_runs` and `task_attempts`; the downgrade drops all of it.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0087)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def columns(table: str) -> dict[str, Any]:
+        return {c["name"]: c for c in inspect(engine).get_columns(table)}
+
+    def indexes() -> set[str]:
+        return {str(i["name"]) for i in inspect(engine).get_indexes("task_runs")}
+
+    added = {"ix_task_runs_failure_connection", "ix_task_runs_asset_finished_at"}
+    try:
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
+        command.upgrade(config, _REVISION_0088)
+        for table in ("task_runs", "task_attempts"):
+            found = columns(table)
+            assert found["error_type"]["nullable"]
+            assert getattr(found["error_type"]["type"], "length", None) == 100
+            assert found["failure_connection"]["nullable"]
+            assert getattr(found["failure_connection"]["type"], "length", None) == 63
+        assert added <= indexes()
+        with engine.connect() as connection:
+            partial = connection.execute(
+                sa.text(
+                    "SELECT sql FROM sqlite_master WHERE name = 'ix_task_runs_failure_connection'"
+                )
+            ).scalar_one()
+        assert partial.endswith("WHERE failure_connection IS NOT NULL")
+        command.downgrade(config, _REVISION_0087)
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
     finally:
         engine.dispose()

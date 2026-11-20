@@ -19,6 +19,17 @@
   gap: var(--space-2);
 }
 
+/* The newest run that failed on a connection, under its last test. Its link sits above the row's
+   own link, so the pointer reaches it. */
+.run-failure-line {
+  display: block;
+  margin-top: var(--space-1);
+}
+
+.run-failure a {
+  position: relative;
+}
+
 /* Never tested, or tested before the last change: nothing current to claim. */
 .test-status-muted {
   color: var(--color-text-muted);
