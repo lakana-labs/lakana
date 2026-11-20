@@ -8,12 +8,14 @@ committed rows and locks none, so two such changes at once could each see the ot
 administrator, both commit, and leave the instance with none. `lock_admin_count` makes them take
 turns: the second waits for the first's commit and then counts what it left.
 
-The lock comes before any read that decides whether to count at all. `GroupService.remove_member`
-asks whether the group holds ADMIN only after taking it, and takes it for every group: a grant to
-the group may commit right after that question, and a count that relies on the member must then
-wait for the removal's commit. Changes that raise the count (a grant, a new member, a
-reactivation) take no lock: a count never sees them before they commit, so they can only make a
-check refuse, never let one through.
+The lock comes before any read of something another change may alter that decides whether to count
+at all (a grant's role and kind never change, and an early return lowers nothing).
+`GroupService.remove_member` asks whether the group holds ADMIN only after taking it, and takes it
+for every group: a grant to the group may commit right after that question, and a count that relies
+on the member must then wait for the removal's commit. Changes that raise the count (a grant, a new
+member, a reactivation) take no lock: a count never sees them before they commit, so on an instance
+with an administrator they can only make a check refuse, never let one through. On an instance with
+none, `assert_admin_headroom` lets every change through anyway.
 
 Any later rule of the same kind, a count a change may lower and must never bring to zero, counts
 under this lock too, so that every such check sees the others' commits.
