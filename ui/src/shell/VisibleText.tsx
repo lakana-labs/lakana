@@ -9,12 +9,17 @@ import type { JSX, ReactNode } from "react";
 /**
  * The characters shown as a mark instead of themselves: C0 controls except tab and line feed,
  * DEL and C1, the line and paragraph separators, and every format character (`Cf`), which holds
- * the bidi controls U+202A to U+202E and U+2066 to U+2069 and the zero-width characters. It is
- * the set the CLI escapes. Use it with `matchAll` or `replace`, which do not keep `lastIndex`.
+ * the bidi controls U+202A to U+202E and U+2066 to U+2069 and the zero-width characters (the set
+ * the CLI escapes); and, since a new name may not hold them either (#609), every character
+ * Unicode says is drawn as nothing (`Default_Ignorable_Code_Point`: the combining grapheme
+ * joiner, the variation selectors, the Hangul fillers), the braille blank U+2800, and every
+ * space but the plain U+0020 (the no-break and wide spaces of `Zs`). Use it with `matchAll` or
+ * `replace`, which do not keep `lastIndex`.
  */
-// Matching control characters is the point of this pattern.
-// eslint-disable-next-line no-control-regex
-export const INVISIBLE = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}]/gu;
+export const INVISIBLE =
+  // Matching control characters is the point of this pattern.
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\p{Cf}\p{Default_Ignorable_Code_Point}\u2800\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/gu;
 
 /** Properties of {@link VisibleText}. */
 export interface VisibleTextProps {

@@ -515,11 +515,16 @@ contain `.`, `/`, a NUL byte, or the unit separator (`validate_path_component`).
 namespace name must not contain `%` either (`refuse_percent_in_new_name`: a storage may decode `%41`
 to `A`, so two names would share a directory), nor a character of `HIDDEN_CHARACTER_CATEGORIES`
 (`Cc`, `Cf`, `Cs`, `Zl`, `Zp`; `refuse_hidden_characters`, #593), which could make one name look like
-another. Both run through `check_new_name`, which is called only where a table or namespace
+another, nor start or end with a space (`refuse_outer_whitespace`, #652), and it must be in NFC and
+hold only letters, decimal digits, `NAME_SYMBOLS` (`_`, `-`, the plain space) and combining marks
+after a letter, never a character drawn as nothing (`refuse_look_alike_characters`, #609; the
+decision and its reasons are in `docs/agent/security.md`, "New names that could look like
+another"). All of them run through `check_new_name`, which is called only where a table or namespace
 name is created (`create_namespace` for each new component, `ResolvedStorage.table_location`,
 `create_external_table`, new views, the `rename_table` destination and the `undrop_table` new
 name), never in parsing, discovery, matching or a lookup, and never for job, check, repository,
-package-index or artifact names. A new column name meets `refuse_hidden_characters` too: in
+package-index or artifact names. A new column name meets the same three
+(`check_new_column_name`): in
 `catalog.metadata` (`build_table_metadata` for a new table, `apply_updates` for each added schema,
 which skips a name one of the table's schemas already holds), in `create_or_replace_view` (which
 skips a column the replaced view already had) and in `create_external_table` (the names inferred

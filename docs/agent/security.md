@@ -183,6 +183,52 @@ sequence, so it can forge a log record or recolour a terminal.
   human-readable `message` of `done` without a result object is the same sentence as in table mode,
   so its names are escaped.
 
+## New names that could look like another (#593, #609)
+
+A new namespace, table, view or column name is shown in every list, breadcrumb, grant and query,
+so two that look alike but differ let one person's table pass for another's. The decision (#609,
+option A) is an allowlist, not a growing list of refused characters. Every place that creates such
+a name (`identifiers.check_new_name` for namespaces, tables, views, rename and undrop targets;
+`identifiers.check_new_column_name` for the columns of `catalog.metadata`,
+`create_or_replace_view` and `create_external_table`) runs, in order:
+
+1. `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp`.
+2. `refuse_outer_whitespace` (#652): no space at either end.
+3. `refuse_look_alike_characters` (#609): each character is a letter (`L*`), a decimal digit
+   (`Nd`), one of `NAME_SYMBOLS` (`_`, `-` U+002D, and the plain space U+0020 inside the name),
+   or a combining mark (`M*`) right after a letter or another such mark. Refused even when the
+   category would pass: Unicode's default-ignorable code points, which a font draws as nothing
+   (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F and
+   U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
+   U+3164, U+FFA0, which are `Lo`), U+2800 BRAILLE PATTERN BLANK, and every `Zs` but U+0020.
+   Then the name must be in Unicode NFC (`unicodedata.is_normalized`), and the message names the
+   NFC form to use. The characters are checked first, so the suggested form never holds one
+   that is refused.
+
+Why marks are allowed: NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
+Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
+`M*` would refuse those scripts. A mark NFC leaves is therefore allowed only on a letter; a mark
+with nothing before it, on a digit (a keycap U+20E3) or on a symbol is refused, and the marks
+drawn as nothing are refused by the list above whatever comes before them.
+
+Why U+0020 stays: #652 decided that a space inside a name stays allowed, and CSV headers such as
+`Order ID` are common column names; once every other space is refused, a plain space cannot pass
+for another character. `-` is kept for names such as `daily-orders`; U+2010 HYPHEN and U+2212
+MINUS SIGN, which look like it, are refused (`Pd`, `Sm`). Nothing else is allowed: `$`, `#`,
+`(`, `²`, `Ⅻ` and every other symbol or punctuation mark are refused, so a query's unaliased
+expression (`count(*)`) needs an alias to become a column.
+
+Not covered, accepted: letters of different scripts that look alike (Latin `o` and Cyrillic `о`)
+and compatibility forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so
+such twins are two names; the web interface does not mark them.
+
+Existing names are never judged: lookups, listings, `NamespacePath.parse`, renames away and drops
+take any stored name, and a child namespace may be created under a stored one (pins in
+`test_look_alike_characters_in_names.py`). The web interface marks every character of the list
+above, and every `Cf`, control and separator, as `U+XXXX` (`ui/src/shell/VisibleText.tsx`,
+`INVISIBLE`), so a stored name holding one shows it. The CLI escapes only the #593 set. Other
+names (repositories, groups, tokens, secrets, package indexes, artifacts) keep rules 1 and 2.
+
 ## Request bodies: a JSON limit, authentication first, a limit per streamed route
 
 Every body is one of two kinds.

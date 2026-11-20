@@ -43,6 +43,31 @@ describe("VisibleText", () => {
     }
   });
 
+  it("marks the characters drawn as nothing and every space but the plain one", () => {
+    // Combining grapheme joiner, variation selectors, Mongolian and Khmer ones, the Hangul
+    // fillers, the braille blank (#609), then the no-break and wide spaces.
+    const codes = [
+      0x034f, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef, 0x180b, 0x17b4, 0x115f, 0x1160, 0x3164, 0xffa0,
+      0x2800, 0x00a0, 0x1680, 0x2000, 0x2007, 0x200a, 0x202f, 0x205f, 0x3000,
+    ];
+    const text = `${codes.map((code) => `a${String.fromCodePoint(code)}`).join("")} z`;
+
+    const { container } = render(<VisibleText text={text} />);
+
+    const marks = [...container.querySelectorAll(".char-mark")].map((mark) => mark.textContent);
+    expect(marks).toEqual(codes.map(markOf));
+    expect(container.textContent.endsWith(" z")).toBe(true);
+  });
+
+  it("leaves a combining mark on a letter as it is", () => {
+    const text = "cafe\u0301 \u0939\u093F\u0928\u094D\u0926\u0940";
+
+    const { container } = render(<VisibleText text={text} />);
+
+    expect(container.textContent).toBe(text);
+    expect(container.querySelector(".char-mark")).toBeNull();
+  });
+
   it("marks characters side by side, at the start and at the end", () => {
     const { container } = render(<VisibleText text={"\u202E\u2066ab\u0007"} />);
 
@@ -65,7 +90,7 @@ describe("VisibleText", () => {
   });
 
   it("leaves letters of every script, accents and emoji as they are", () => {
-    const text = "Café 東京 שלום مرحبا 😀 a b";
+    const text = "Café 東京 שלום مرحبا 😀 a b";
 
     const { container } = render(<VisibleText text={text} />);
 

@@ -240,8 +240,8 @@ def refuse_percent_in_new_name(component: str, *, what: str) -> None:
     if "%" in component:
         raise ValidationError(
             f"{what} '{shown(component)}' must not contain '%': a storage may read '%41' as 'A', "
-            "so two names would share one directory. Every other visible character is allowed "
-            "except '.' and '/'."
+            "so two names would share one directory. A new name may hold only letters, decimal "
+            "digits, '_', '-' and the plain space."
         )
 
 
@@ -346,6 +346,155 @@ def refuse_outer_whitespace(name: str, *, what: str) -> None:
     )
 
 
+NAME_SYMBOLS: Final[frozenset[str]] = frozenset({"_", "-", " "})
+"""The only characters other than letters, decimal digits and their combining marks a new
+namespace, table or column name may hold (`refuse_look_alike_characters`): ``_``, ``-``
+(U+002D) and the plain space U+0020, which a name may hold inside it but not at either end
+(`refuse_outer_whitespace`)."""
+
+_DRAWN_AS_NOTHING: Final[tuple[tuple[int, int], ...]] = (
+    (0x00AD, 0x00AD),
+    (0x034F, 0x034F),
+    (0x061C, 0x061C),
+    (0x115F, 0x1160),
+    (0x17B4, 0x17B5),
+    (0x180B, 0x180F),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x206F),
+    (0x2800, 0x2800),
+    (0x3164, 0x3164),
+    (0xFE00, 0xFE0F),
+    (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0),
+    (0xFFF0, 0xFFF8),
+    (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+"""Unicode's default-ignorable code points (`DerivedCoreProperties.txt`, Unicode 16), which a
+font draws as nothing whatever their category: the combining grapheme joiner U+034F, the
+variation selectors, the Mongolian free variation selectors, the Hangul fillers U+115F, U+1160,
+U+3164 and U+FFA0 (letters, ``Lo``) and the format characters. U+2800 BRAILLE PATTERN BLANK, a
+symbol, is drawn as nothing too and added here. NFC keeps every one of them."""
+
+
+def _drawn_as_nothing(character: str) -> bool:
+    """Say whether a character is one of `_DRAWN_AS_NOTHING`.
+
+    Parameters
+    ----------
+    character
+        One character.
+
+    Returns
+    -------
+    bool
+        `True` when a font draws it as nothing.
+    """
+    code = ord(character)
+    return any(low <= code <= high for low, high in _DRAWN_AS_NOTHING)
+
+
+def look_alike_character(name: str) -> tuple[int, str, str] | None:
+    """Find the first character that keeps a name from meeting the rule for new names.
+
+    A name in Unicode NFC may hold letters (``L*``), decimal digits (``Nd``), `NAME_SYMBOLS`,
+    and a combining mark (``M*``) right after a letter or after another such mark: NFC composes
+    what it can (``e`` and U+0301 become ``é``), and the marks it leaves belong to letters of
+    scripts such as Devanagari or Arabic. A character `_DRAWN_AS_NOTHING` is refused even when
+    its category would pass (the Hangul fillers are letters, the variation selectors marks), and
+    so is every space but U+0020.
+
+    Parameters
+    ----------
+    name
+        The name.
+
+    Returns
+    -------
+    tuple of (int, str, str) or None
+        The character's 1-based position, the character and the words for what it is; `None`
+        when every character is allowed.
+    """
+    after_letter = False
+    for position, character in enumerate(name, start=1):
+        category = unicodedata.category(character)
+        if _drawn_as_nothing(character):
+            problem: str | None = "a character drawn as nothing"
+        elif category == "Zs" and character != " ":
+            problem = "a space other than the plain space"
+        elif category.startswith("M"):
+            problem = None if after_letter else "a combining mark with no letter before it"
+        elif category.startswith("L") or category == "Nd" or character in NAME_SYMBOLS:
+            problem = None
+        else:
+            problem = "a character that is neither a letter nor a decimal digit"
+        if problem is not None:
+            return position, character, problem
+        after_letter = category.startswith(("L", "M"))
+    return None
+
+
+def refuse_look_alike_characters(name: str, *, what: str) -> None:
+    """Refuse a new namespace, table or column name that could look like another one (#609).
+
+    The name must be in Unicode NFC, since an NFD spelling looks the same but compares unequal,
+    and hold only what `look_alike_character` allows. `check_new_name` and
+    `check_new_column_name` call this after `refuse_hidden_characters` and
+    `refuse_outer_whitespace`, so those keep their own messages. A stored name is never judged.
+
+    Parameters
+    ----------
+    name
+        The new name.
+    what
+        Noun describing it, such as ``"Table name"`` or ``"Column name"``.
+
+    Raises
+    ------
+    ValidationError
+        If `look_alike_character` finds a character (the message names it as ``U+XXXX`` with
+        its position) or, failing that, the name is not in NFC (the message names its NFC
+        form).
+    """
+    found = look_alike_character(name)
+    if found is not None:
+        position, character, problem = found
+        raise ValidationError(
+            f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, "
+            f"{problem}, so the name could look like another one. A new name may hold only "
+            "letters, decimal digits, '_', '-' and the plain space, and a combining mark only "
+            "after a letter."
+        )
+    # Checked second, so the composed spelling it suggests holds only allowed characters.
+    if not unicodedata.is_normalized("NFC", name):
+        composed = unicodedata.normalize("NFC", name)
+        raise ValidationError(
+            f"{what} '{shown(name)}' is not in Unicode NFC, the composed spelling, so it looks "
+            f"like '{shown(composed)}' but is a different name. Use '{shown(composed)}' instead."
+        )
+
+
+def check_new_column_name(name: str) -> None:
+    """Apply the rules a column name that is being created must meet.
+
+    Parameters
+    ----------
+    name
+        The new column name.
+
+    Raises
+    ------
+    ValidationError
+        From `refuse_hidden_characters`, `refuse_outer_whitespace` or
+        `refuse_look_alike_characters`.
+    """
+    refuse_hidden_characters(name, what="Column name")
+    refuse_outer_whitespace(name, what="Column name")
+    refuse_look_alike_characters(name, what="Column name")
+
+
 def check_new_name(component: str, *, what: str) -> None:
     """Apply the rules only a namespace or table name that is being created must meet.
 
@@ -359,12 +508,13 @@ def check_new_name(component: str, *, what: str) -> None:
     Raises
     ------
     ValidationError
-        From `refuse_percent_in_new_name`, `refuse_hidden_characters` or
-        `refuse_outer_whitespace`.
+        From `refuse_percent_in_new_name`, `refuse_hidden_characters`,
+        `refuse_outer_whitespace` or `refuse_look_alike_characters`.
     """
     refuse_percent_in_new_name(component, what=what)
     refuse_hidden_characters(component, what=what)
     refuse_outer_whitespace(component, what=what)
+    refuse_look_alike_characters(component, what=what)
 
 
 @dataclass(frozen=True)
