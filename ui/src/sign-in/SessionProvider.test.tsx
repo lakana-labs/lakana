@@ -1,9 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { onSessionEnd } from "../api/client";
+import { CSRF_STORAGE_KEY, onSessionEnd, setCsrfToken } from "../api/client";
 import { SESSION_RETRY_FIRST_MS, SessionProvider, useSession } from "./SessionProvider";
 
 import { ADMIN_SESSION, fakeServer } from "../test/server";
@@ -43,7 +43,15 @@ function Probe(): JSX.Element {
       <button type="button" onClick={session.skipPasskey}>
         skip
       </button>
-      <button type="button" onClick={() => void session.refresh()}>
+      <button
+        type="button"
+        onClick={() => {
+          document.title = "reading";
+          void session.refresh().then(() => {
+            document.title = "read";
+          });
+        }}
+      >
         refresh
       </button>
     </div>
@@ -69,6 +77,9 @@ function renderProbe(
 }
 
 const BUSY = { status: 503, body: { detail: "Busy.", type: "Busy" } };
+
+/** An hour before {@link ADMIN_SESSION} reaches its absolute end. */
+const BEFORE_THE_END = new Date("2026-11-15T09:00:00Z");
 
 /**
  * Lets the fake timers run on by some milliseconds, and React settle.
@@ -96,6 +107,7 @@ describe("SessionProvider", () => {
 
   it("stays signed in and reads again, in the background, when a read fails without a 401", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BEFORE_THE_END);
     const ended = vi.fn();
     const stop = onSessionEnd(ended);
     const server = fakeServer({
@@ -143,6 +155,7 @@ describe("SessionProvider", () => {
 
   it("signs out and forgets what the page kept when a read again gets a 401", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BEFORE_THE_END);
     const ended = vi.fn();
     const stop = onSessionEnd(ended);
     const server = fakeServer({
@@ -173,6 +186,7 @@ describe("SessionProvider", () => {
     ["fails", BUSY],
   ])("changes nothing when a read that %s answers after it went away", async (_, answer) => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BEFORE_THE_END);
     const server = fakeServer({
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
     });
@@ -200,8 +214,174 @@ describe("SessionProvider", () => {
     expect(server.sent).toHaveLength(sent);
   });
 
+  it("a person-started read waits through the reads again, until one lands", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BEFORE_THE_END);
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+    });
+    const user = renderProbe();
+    await screen.findByText("state: signed-in");
+    server.route({ "GET /api/v1/sign-in/session": BUSY });
+
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+    await wait(0);
+    expect(document.title).toBe("reading");
+    await wait(SESSION_RETRY_FIRST_MS);
+    expect(document.title).toBe("reading");
+
+    server.route({ "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION } });
+    await wait(2 * SESSION_RETRY_FIRST_MS);
+    expect(document.title).toBe("read");
+  });
+
+  it("a person-started read ends when a read again gets a 401", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BEFORE_THE_END);
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+    });
+    const user = renderProbe();
+    await screen.findByText("state: signed-in");
+    server.route({ "GET /api/v1/sign-in/session": BUSY });
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+    await wait(0);
+
+    server.route({ "GET /api/v1/sign-in/session": SIGNED_OUT });
+    await wait(SESSION_RETRY_FIRST_MS);
+
+    expect(await screen.findByText("state: signed-out")).toBeInTheDocument();
+    expect(document.title).toBe("read");
+  });
+
+  it.each([
+    ["a read again after a failure (another tab signed someone else in)", true],
+    ["a read the person started (a sign-in link of someone else)", false],
+  ])(
+    "forgets what the page kept before it shows another person, after %s",
+    async (_, failFirst) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(BEFORE_THE_END);
+      const shownAtTheEnd: string[] = [];
+      const stop = onSessionEnd(() => {
+        shownAtTheEnd.push(screen.getByText(/^name: /).textContent);
+      });
+      const server = fakeServer({
+        "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+      });
+      const user = renderProbe();
+      await screen.findByText("name: admin");
+      setCsrfToken("csrf-of-bob");
+      const bob = { ...ADMIN_SESSION, name: "bob" };
+      server.route({
+        "GET /api/v1/sign-in/session": failFirst ? BUSY : { status: 200, body: bob },
+      });
+
+      await user.click(screen.getByRole("button", { name: "refresh" }));
+      if (failFirst) {
+        await wait(0);
+        server.route({ "GET /api/v1/sign-in/session": { status: 200, body: bob } });
+        await wait(SESSION_RETRY_FIRST_MS);
+      }
+
+      expect(await screen.findByText("name: bob")).toBeInTheDocument();
+      expect(shownAtTheEnd).toEqual(["name: admin"]);
+      // Bob's session is the live one: its token stays.
+      expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBe("csrf-of-bob");
+      stop();
+    },
+  );
+
+  it("keeps what the page kept for a new session of the same person", async () => {
+    const ended = vi.fn();
+    const stop = onSessionEnd(ended);
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+    });
+    const user = renderProbe();
+    await screen.findByText("name: admin");
+    server.route({
+      "GET /api/v1/sign-in/session": {
+        status: 200,
+        body: { ...ADMIN_SESSION, absolute_expires_at: "2026-11-16T10:00:00Z" },
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+    await waitFor(() => {
+      expect(document.title).toBe("read");
+    });
+
+    expect(ended).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it.each([
+    ["when the first read fails after the end", 0],
+    ["at the end, while the reads again fail", SESSION_RETRY_FIRST_MS],
+  ])(
+    "ends the session here at its absolute end while the server cannot answer, %s",
+    async (_, beforeTheEnd) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      vi.setSystemTime(new Date(Date.parse(ADMIN_SESSION.absolute_expires_at) - 60_000));
+      const ended = vi.fn();
+      const stop = onSessionEnd(ended);
+      const server = fakeServer({
+        "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+      });
+      const user = renderProbe();
+      await screen.findByText("state: signed-in");
+      setCsrfToken("csrf-1");
+      vi.setSystemTime(new Date(Date.parse(ADMIN_SESSION.absolute_expires_at) - beforeTheEnd));
+      server.route({ "GET /api/v1/sign-in/session": BUSY });
+
+      await user.click(screen.getByRole("button", { name: "refresh" }));
+      if (beforeTheEnd > 0) {
+        await wait(0);
+        expect(screen.getByText("state: signed-in")).toBeInTheDocument();
+        // The next read waits no longer than the end.
+        await wait(beforeTheEnd);
+      }
+
+      expect(await screen.findByText("state: signed-out")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "reason: Your session reached its maximum length and ended. Sign in again.",
+        ),
+      ).toBeInTheDocument();
+      expect(ended).toHaveBeenCalledTimes(1);
+      expect(localStorage.getItem(CSRF_STORAGE_KEY)).toBeNull();
+      expect(document.title).toBe("read");
+      stop();
+    },
+  );
+
+  it("a person-started read ends when the provider goes away", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BEFORE_THE_END);
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+    });
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <SessionProvider storage={null}>
+        <Probe />
+      </SessionProvider>,
+    );
+    await screen.findByText("state: signed-in");
+    server.route({ "GET /api/v1/sign-in/session": BUSY });
+    await user.click(screen.getByRole("button", { name: "refresh" }));
+    await wait(0);
+
+    unmount();
+    await wait(0);
+
+    expect(document.title).toBe("read");
+  });
+
   it("stops reading again when it goes away", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(BEFORE_THE_END);
     const server = fakeServer({
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
     });

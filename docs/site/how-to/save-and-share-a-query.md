@@ -93,7 +93,9 @@ lakana query saved show "$id" --env dev --sql | lakana sql - --env dev
 The query runs as a query of yours, with your rights, and is in your list of queries like any other.
 If the SQL holds a control or invisible character (CRLF line endings are not one and print as stored), `--sql` prints nothing and exits with status 1,
 since the escaped text it could print would be another query; read it with `--output json`. With
-`--output json`, `--sql` prints only `{"sql": "..."}`, the text exactly as stored.
+`--output json`, `--sql` prints only `{"sql": "..."}`: parsed, it is the text exactly as stored, and
+every control, bidirectional or zero-width character in it is written as an escape such as
+`\u202e`, so you see where it is.
 
 ## Change and delete
 

@@ -167,6 +167,13 @@ function Work({
       runButton.current?.focus();
     }
   }, [opened, at]);
+  // A read again that fails keeps the alert, and the focus on its Try again: nothing to move.
+  const { failure: savedFailure } = saved;
+  useEffect(() => {
+    if (savedFailure !== null) {
+      focusRunAt.current = null;
+    }
+  }, [savedFailure]);
 
   // Recent lists a run once its submit is taken, and its new state once it ends.
   const { listed } = query;

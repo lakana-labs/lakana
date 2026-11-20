@@ -477,7 +477,6 @@ def test_purging_an_environment_removes_its_saved_queries(
 
     left = session.execute(select(SavedQuery.id)).scalars().all()
     assert left == [elsewhere.id]
-    assert {private.id, shared.id}.isdisjoint(left)
     assert [i.id for i in service.list_page(bob).items] == [elsewhere.id]
 
 

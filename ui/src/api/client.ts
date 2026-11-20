@@ -199,6 +199,15 @@ function sessionEnded(): void {
   tellEach(sessionEndListeners, undefined);
 }
 
+/**
+ * Forgets what the page kept for the person who was signed in, and keeps the CSRF token: for a
+ * read of the session that answers another person (another tab signed them in, or a sign-in
+ * link), whose token is the live one.
+ */
+export function forgetSessionData(): void {
+  sessionEnded();
+}
+
 /** Ends the session in this tab: forgets the CSRF token and tells {@link onSessionEnd}. */
 export function endSession(): void {
   setCsrfToken(null);

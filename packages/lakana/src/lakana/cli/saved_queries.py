@@ -241,7 +241,8 @@ def show(
         if saved.sql is None:
             raise CliError(_NO_SQL, exit_code=1, kind="PermissionDenied")
         if state.output == "json":
-            # JSON escapes every control character, so the text goes out exactly as stored.
+            # print_json writes every control, bidirectional and zero-width character as a JSON
+            # escape, so the parsed value is the text exactly as stored.
             _output.print_json({"sql": saved.sql})
             return
         plain = saved.sql.replace("\r\n", "\n")  # a CR in a CRLF pair is ordinary text

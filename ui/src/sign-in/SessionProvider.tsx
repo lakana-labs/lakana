@@ -25,6 +25,7 @@ import {
   signOut as endSession,
   signOutEverywhere as endEverySession,
 } from "../api";
+import { endSession as endSessionHere, forgetSessionData } from "../api/client";
 import { browserStorage } from "../preferences/preferences";
 import { endedReason } from "./messages";
 
@@ -122,7 +123,9 @@ export interface SessionProviderProps {
  * of an error; the client tells `onSessionEnd` at the same time, so what the page kept for the
  * person goes with it. The page shows a person signed out only then or after a sign-out: when
  * reading the session fails otherwise while someone is signed in, they stay signed in and the
- * session is read again, in the background, until the server answers.
+ * session is read again, in the background, until the server answers or the session reaches
+ * its absolute end. A read that answers another person forgets what the page kept for the
+ * person shown before it shows the next.
  *
  * @param props - The interface and the storage.
  * @param props.children - The interface.
@@ -137,42 +140,74 @@ export function SessionProvider({
   const [known, setKnown] = useState<Known>({ state: "loading" });
   const [skipped, setSkipped] = useState(() => readSkipped(storage));
 
-  // Whether the page shows someone signed in, for a failed read to know what it would undo.
-  const signedIn = useRef(false);
+  // The session the page shows, while signed in: a read compares the person it answers with
+  // it, and a failed read knows what it would undo and when the session ends at the latest.
+  const shown = useRef<SessionOut | undefined>(undefined);
   const retry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const failures = useRef(0);
   const mounted = useRef(true);
+  // The reads the person started (refresh) that wait for a read to land.
+  const waiting = useRef<(() => void)[]>([]);
   const [again, setAgain] = useState(0);
 
   useEffect(() => {
-    signedIn.current = known.state === "signed-in";
-  }, [known.state]);
+    shown.current = known.state === "signed-in" ? known.session : undefined;
+  }, [known]);
+
+  const settle = useCallback(() => {
+    const done = waiting.current;
+    waiting.current = [];
+    for (const resolve of done) {
+      resolve();
+    }
+  }, []);
 
   const read = useCallback(
-    (background: boolean): Promise<void> => {
+    (background: boolean): void => {
       clearTimeout(retry.current);
       retry.current = undefined;
-      return getSession(background ? { background: true } : {}).then(
+      void getSession(background ? { background: true } : {}).then(
         (session) => {
           failures.current = 0;
-          if (mounted.current) {
-            setKnown({ state: "signed-in", session });
+          if (!mounted.current) {
+            return;
           }
+          if (shown.current !== undefined && shown.current.name !== session.name) {
+            // Another person: another tab signed them in, or a sign-in link of theirs was
+            // used. What the page kept for the person shown goes before the next one shows;
+            // the token is the new person's and stays.
+            forgetSessionData();
+          }
+          shown.current = session;
+          setKnown({ state: "signed-in", session });
+          settle();
         },
         (error: unknown) => {
           if (!mounted.current) {
             return;
           }
-          if (signedIn.current && !sessionGone(error)) {
+          const showing = shown.current;
+          if (showing !== undefined && !sessionGone(error)) {
             // Only a 401 ends a session, and a 401 tells onSessionEnd, which forgets what the
             // page kept for the person. Showing them signed out on anything else would keep
             // their data in the tab for the next person, and clearing it on one network blip
             // would sign them out for nothing: so they stay signed in, and the page reads
             // again in the background (which does not keep an idle session alive), waiting
-            // longer after each failure.
+            // longer after each failure, but never past the session's absolute end, which
+            // the page knows without the server: there the session ends here too.
+            const left = Date.parse(showing.absolute_expires_at) - Date.now();
+            if (left <= 0) {
+              failures.current = 0;
+              shown.current = undefined;
+              endSessionHere();
+              setKnown({ state: "signed-out", reason: t("session.ended.lifetime") });
+              settle();
+              return;
+            }
             const wait = Math.min(
               SESSION_RETRY_FIRST_MS * 2 ** failures.current,
               SESSION_RETRY_MAX_MS,
+              left,
             );
             failures.current += 1;
             retry.current = setTimeout(() => {
@@ -181,19 +216,30 @@ export function SessionProvider({
             return;
           }
           failures.current = 0;
+          shown.current = undefined;
           setKnown({ state: "signed-out", reason: endedReason(t, error) });
+          settle();
         },
       );
     },
-    [t],
+    [t, settle],
   );
 
-  const refresh = useCallback(() => read(false), [read]);
+  // A read the person started settles once a read lands: the session, or signed out. While
+  // the reads again fail it waits, so a screen that waits for it (Add a passkey) stays busy.
+  const refresh = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        waiting.current.push(resolve);
+        read(false);
+      }),
+    [read],
+  );
 
   // Each read again after a failure is one more round; the first round is the start's read.
   useEffect(() => {
     if (again > 0) {
-      void read(true);
+      read(true);
     }
   }, [again, read]);
 
@@ -201,6 +247,11 @@ export function SessionProvider({
     mounted.current = true;
     void refresh();
     const stop = onUnauthorized((error) => {
+      // The session ended: no read again, and the reads that wait for one are done.
+      shown.current = undefined;
+      clearTimeout(retry.current);
+      retry.current = undefined;
+      settle();
       setKnown((previous) =>
         previous.state === "signed-in"
           ? { state: "signed-out", reason: endedReason(t, error) }
@@ -212,8 +263,9 @@ export function SessionProvider({
       clearTimeout(retry.current);
       retry.current = undefined;
       stop();
+      settle();
     };
-  }, [refresh, t]);
+  }, [refresh, settle, t]);
 
   const end = useCallback(async (ending: () => Promise<void>, reason: string) => {
     try {

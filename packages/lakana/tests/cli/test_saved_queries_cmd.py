@@ -349,7 +349,7 @@ def test_a_server_refusal_prints_its_sentence(tmp_path: Path) -> None:
 
 
 def test_show_sql_as_json_prints_only_the_sql_as_json(tmp_path: Path) -> None:
-    stored = "SELECT 1\r\n-- ‮\x1b[2J\n"  # JSON escapes what a terminal would act on
+    stored = "SELECT 1\r\n-- \u202e\x1b[2J\n"  # JSON escapes what a terminal would act on
     api = FakeApi()
     api.on("GET", f"{_BASE}/{_ID}", json=_item(sql=stored))
 
@@ -369,6 +369,8 @@ def test_show_sql_as_json_prints_only_the_sql_as_json(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stderr
     assert json.loads(result.stdout) == {"sql": stored}
     assert "\x1b" not in result.stdout
+    assert "\u202e" not in result.stdout
+    assert "\\u202e" in result.stdout
 
 
 def test_show_sql_as_json_without_readable_sql_exits_1(tmp_path: Path) -> None:

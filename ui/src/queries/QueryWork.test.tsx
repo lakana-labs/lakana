@@ -1029,6 +1029,28 @@ describe("the Queries screen's work", () => {
     ).toHaveFocus();
   });
 
+  it("a saved query's failed Try again moves no focus when the query opens later", async () => {
+    const answers: FakeAnswer[] = [
+      { status: 503, body: { type: "Unavailable", detail: "The server is busy." } },
+      { status: 503, body: { type: "Unavailable", detail: "Still busy." } },
+      { status: 200, body: aSavedQuery() },
+    ];
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`GET ${SAVED_ONE}`]: () => answers.shift() as FakeAnswer }),
+    });
+    const alert = await screen.findByRole("alert");
+    await shell.user.click(within(alert).getByRole("button", { name: "Try again" }));
+    await screen.findByText("Still busy.");
+
+    await act(() => shell.router.navigate("/queries"));
+    await act(() => shell.router.navigate(SAVED_PATH));
+
+    await waitFor(() => {
+      expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
+    });
+    expect(screen.getByRole("button", { name: "Run" })).not.toHaveFocus();
+  });
+
   it("back at a new query no run shows, and the remembered environment is read again", async () => {
     const shell = renderShell(RUN_PATH, { routes: routes() });
     await screen.findByRole("grid");
