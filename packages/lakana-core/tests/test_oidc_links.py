@@ -375,11 +375,11 @@ def test_the_count_is_taken_under_the_admin_lock(
     from lakana_core.identity import oidc_links
 
     calls: list[str] = []
-    real = oidc_links.leaves_no_unlinked_admin
+    real = oidc_links.breaks
     monkeypatch.setattr(oidc_links, "lock_admin_count", lambda s: calls.append("lock"))
     monkeypatch.setattr(
         oidc_links,
-        "leaves_no_unlinked_admin",
+        "breaks",
         lambda *a, **k: calls.append("count") or real(*a, **k),
     )
     world.person("bob", admin=True)
@@ -600,9 +600,12 @@ def test_lowering_the_count_is_allowed_while_no_administrator_is_linked(world: W
     assert unlinked_admin_count(world.session) == 0
 
 
-def test_a_count_already_at_zero_blocks_nothing(world: World) -> None:
+def test_a_rule_already_broken_blocks_nothing(world: World) -> None:
+    # Broken before any check could refuse it (a passkey disabled as a copy, say): refusing
+    # unrelated changes would help nobody.
     lin = world.person("lin", admin=True, passkey=False)
-    world.link(lin)
+    lin.oidc_issuer, lin.oidc_subject = ISSUER, "lin"
+    world.session.commit()
     world.person("other", admin=True, passkey=False)
     assert unlinked_admin_count(world.session) == 0
     PrincipalService(world.session, world.authz).deactivate_principal(world.ref(lin), "other")
@@ -618,9 +621,181 @@ def test_lowering_the_count_from_two_is_allowed(world: World) -> None:
 
 
 def test_the_count_of_nobody_reads_nothing(world: World) -> None:
-    from lakana_core.grants.break_glass import leaves_no_unlinked_admin, unlinked_admin_ids
+    from lakana_core.grants.break_glass import breaks, unlinked_admin_ids
 
     una = world.person("una", admin=True)
     assert unlinked_admin_ids(world.session, []) == set()
     # Everybody gone: no linked administrator remains to be locked out.
-    assert not leaves_no_unlinked_admin(world.session, before=[una.id], after=[])
+    assert not breaks(world.session, before=[una.id], after=[])
+
+
+# -- the rule is an invariant: raising the linked side is checked too (review of #780) ----------
+
+
+def _operator(world: World) -> PrincipalRef:
+    """Refer to the bootstrap principal.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+
+    Returns
+    -------
+    PrincipalRef
+        The operator's principal.
+    """
+    return world.ref(
+        world.session.execute(select(Principal).where(Principal.name == "admin")).scalar_one()
+    )
+
+
+def _linked_non_admin(world: World) -> Principal:
+    """Make a linked person who is no administrator.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+
+    Returns
+    -------
+    Principal
+        The person.
+    """
+    lin = world.person("lin")
+    world.link(lin)
+    return lin
+
+
+def test_the_reviewers_counterexample_deactivate_then_grant(world: World) -> None:
+    """The only unlinked administrator goes first, then a linked person becomes one: refused."""
+    world.person("una", admin=True)
+    _linked_non_admin(world)
+    operator = _operator(world)
+    # No administrator is linked yet, so the rule holds without Una.
+    PrincipalService(world.session, world.authz).deactivate_principal(operator, "una")
+    with pytest.raises(ConflictError) as refused:
+        GrantService(world.session, world.authz).grant(
+            operator, principal="lin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+        )
+    assert str(refused.value) == LAST_UNLINKED_ADMIN_MESSAGE
+    world.session.rollback()
+    assert not world.session.execute(
+        select(Grant).where(Grant.principal_id == world.ref(_named(world, "lin")).id)
+    ).first()
+
+
+def test_the_reviewers_counterexample_grant_then_deactivate(world: World) -> None:
+    """The other order: the grant goes through, the deactivation is refused."""
+    world.person("una", admin=True)
+    _linked_non_admin(world)
+    operator = _operator(world)
+    GrantService(world.session, world.authz).grant(
+        operator, principal="lin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    with pytest.raises(ConflictError, match="only administrators who sign in through"):
+        PrincipalService(world.session, world.authz).deactivate_principal(operator, "una")
+
+
+def test_adding_a_linked_person_to_the_admins_group_is_refused(world: World) -> None:
+    _linked_non_admin(world)
+    operator = _operator(world)
+    groups = GroupService(world.session, AllowAllAuthorization())
+    groups.create_group(operator, name="admins")
+    GrantService(world.session, AllowAllAuthorization()).grant(
+        operator, group="admins", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    with pytest.raises(ConflictError, match="only administrators who sign in through"):
+        GroupService(world.session, world.authz).add_member(operator, "admins", "lin")
+    # A group without ADMIN takes anyone.
+    groups.create_group(operator, name="readers")
+    GroupService(world.session, world.authz).add_member(operator, "readers", "lin")
+
+
+def test_granting_admin_to_a_group_with_a_linked_member_is_refused(world: World) -> None:
+    _linked_non_admin(world)
+    operator = _operator(world)
+    groups = GroupService(world.session, AllowAllAuthorization())
+    groups.create_group(operator, name="admins")
+    groups.add_member(operator, "admins", "lin")
+    with pytest.raises(ConflictError, match="only administrators who sign in through"):
+        GrantService(world.session, world.authz).grant(
+            operator, group="admins", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+        )
+
+
+def test_a_linked_administrator_may_join_while_an_unlinked_one_remains(world: World) -> None:
+    world.person("una", admin=True)
+    _linked_non_admin(world)
+    GrantService(world.session, world.authz).grant(
+        _operator(world), principal="lin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+    assert unlinked_admin_count(world.session) == 1
+
+
+def test_a_deactivated_linked_person_may_be_granted_admin(world: World) -> None:
+    lin = _linked_non_admin(world)
+    lin.is_active = False
+    world.session.commit()
+    GrantService(world.session, world.authz).grant(
+        _operator(world), principal="lin", role=Role.ADMIN, kind=SecurableKind.INSTANCE
+    )
+
+
+def test_only_passkeys_of_this_address_count(world: World) -> None:
+    """A passkey of an earlier public address signs nobody in, so it is no way in."""
+    from lakana_core.grants.break_glass import current_rp_id, record_rp_id
+
+    assert current_rp_id(world.session) is None
+    una = world.person("una", admin=True)
+    assert unlinked_admin_count(world.session) == 1
+    record_rp_id(world.session, "lakana.example.org")
+    world.session.commit()
+    assert current_rp_id(world.session) == "lakana.example.org"
+    assert unlinked_admin_count(world.session) == 0
+    record_rp_id(world.session, RP_ID)
+    record_rp_id(world.session, RP_ID)
+    world.session.commit()
+    assert unlinked_admin_count(world.session) == 1
+    assert una.is_active
+
+
+def test_a_link_made_meanwhile_is_not_overwritten(world: World) -> None:
+    """Two finishes for one person: the second finds the person linked and is refused."""
+    from sqlalchemy import update
+
+    alice = world.person("alice")
+    world.session.get(Principal, alice.id)
+    # Another transaction links Alice after this session read her row.
+    world.session.execute(
+        update(Principal)
+        .where(Principal.id == alice.id)
+        .values(oidc_issuer=ISSUER, oidc_subject="first")
+        .execution_options(synchronize_session=False)
+    )
+    with pytest.raises(OidcSignInRefused) as refused:
+        world.links.link(alice.id, identity("second"), via="recovery")
+    assert refused.value.reason == "already_linked"
+    subject = world.session.execute(
+        select(Principal.oidc_subject).where(Principal.id == alice.id)
+    ).scalar_one()
+    assert subject == "first"
+
+
+def _named(world: World, name: str) -> Principal:
+    """Read a principal by name.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+    name
+        The name.
+
+    Returns
+    -------
+    Principal
+        The row.
+    """
+    return world.session.execute(select(Principal).where(Principal.name == name)).scalar_one()

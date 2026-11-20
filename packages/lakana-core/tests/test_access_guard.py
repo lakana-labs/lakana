@@ -657,4 +657,33 @@ def test_an_apply_locks_the_admin_count_before_its_last_count(
 
     monkeypatch.setattr(access_service_module, "active_instance_admin_ids", count)
     _apply(session, world, f"version: 1\nmanages: [instance]\n{_ADMIN_KEPT}")
-    assert calls == ["lock", "count"]
+    # Once at the start, for the break-glass rule before the changes (#32), once for the last
+    # count: each count comes after a lock.
+    assert calls == ["lock", "count", "lock", "count"]
+
+
+def test_an_apply_that_leaves_only_linked_administrators_is_refused(session: Session) -> None:
+    """#32: making a linked person an administrator with no unlinked one left is refused."""
+    from lakana_core.errors import ConflictError
+    from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE
+    from lakana_core.models import Principal, PrincipalType
+
+    world = access_world(session)
+    session.add(
+        Principal(
+            id=uuid.uuid4(),
+            type=PrincipalType.USER,
+            name="lin",
+            is_active=True,
+            oidc_issuer="https://idp.example.com",
+            oidc_subject="lin",
+        )
+    )
+    session.commit()
+    text = (
+        "version: 1\nmanages: [instance]\n"
+        f"{_ADMIN_KEPT}  - {{to: user:lin, role: ADMIN, on: instance}}\n"
+    )
+    with pytest.raises(ConflictError) as refused:
+        _apply(session, world, text)
+    assert str(refused.value) == LAST_UNLINKED_ADMIN_MESSAGE

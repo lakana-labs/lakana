@@ -21,6 +21,7 @@ from lakana_core.ci_oidc.verification import IdTokenVerifier
 from lakana_core.config import warn_about_tokens_in_url_paths
 from lakana_core.db import create_engine
 from lakana_core.grants.admin import ineffective_grants_warning
+from lakana_core.grants.break_glass import record_rp_id
 from lakana_core.identity.sessions import utc_now
 from lakana_core.oidc.provider import OidcProvider
 from lakana_core.readiness import probe_storage, read_database
@@ -319,6 +320,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                     token_file=resolved_settings.bootstrap_token_file,
                 )
+                if resolved_settings.ui.enabled:
+                    # The break-glass count counts only passkeys that sign in at this address.
+                    record_rp_id(session, resolved_settings.public_origin().host)
+                    session.commit()
             if token is not None:
                 configured_key_id = resolved_settings.bootstrap_pat_key_id
                 if configured_key_id is not None and (bootstrap_secret is not None):

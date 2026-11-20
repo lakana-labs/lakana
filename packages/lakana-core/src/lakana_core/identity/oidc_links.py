@@ -35,7 +35,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import AuthorizationService, PrincipalRef, SessionContext
 from lakana_core.errors import ConflictError, NotFoundError, OidcSignInRefused
 from lakana_core.grants.admin_lock import lock_admin_count
-from lakana_core.grants.break_glass import leaves_no_unlinked_admin, unlinked_admin_ids
+from lakana_core.grants.break_glass import breaks, unlinked_admin_ids
 from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
@@ -293,9 +293,11 @@ class OidcLinkService:
             raise OidcSignInRefused("identity_taken")
         try:
             with self._session.begin_nested():
-                self._session.execute(
+                # Only while still unlinked: a link another finish committed meanwhile (this
+                # session may have read the row before it) is never overwritten.
+                linked = self._session.execute(
                     update(Principal)
-                    .where(Principal.id == principal.id)
+                    .where(Principal.id == principal.id, Principal.oidc_subject.is_(None))
                     .values(
                         oidc_issuer=identity.issuer,
                         oidc_subject=identity.subject,
@@ -304,9 +306,11 @@ class OidcLinkService:
                         last_provider_sign_in_at=self._clock(),
                     )
                     .execution_options(synchronize_session=False)
-                )
+                ).rowcount  # ty: ignore[missing-attribute]
         except IntegrityError:
             raise OidcSignInRefused("identity_taken") from None
+        if linked != 1:
+            raise OidcSignInRefused("already_linked")
         self._session.refresh(principal)
         AuditService(self._session).record(
             principal.id,
@@ -341,7 +345,7 @@ class OidcLinkService:
         if refusal is not None:
             return refusal
         admins = active_instance_admin_ids(self._session)
-        if principal.id in admins and leaves_no_unlinked_admin(
+        if principal.id in admins and breaks(
             self._session, before=admins, after=admins, linking=principal.id
         ):
             return OidcSignInRefused("last_unlinked_admin")

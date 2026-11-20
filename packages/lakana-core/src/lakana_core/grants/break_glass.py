@@ -1,24 +1,35 @@
-"""The break-glass count: administrators who can sign in without the identity provider (#32).
+"""The break-glass rule: administrators who can sign in without the identity provider (#32).
 
 An *unlinked administrator* is an active principal who holds ADMIN on the instance (directly or
 through a group), is not linked to the identity provider, and has at least one passkey that is
-not disabled. While some administrator signs in through the provider, at least one unlinked
-administrator must remain, so that an outage at the provider, or a provider that refuses
-everyone, cannot lock the instance out (the sign-in design, "Break-glass").
+not disabled and is registered for the current relying party (`current_rp_id`): a passkey of an
+earlier public address signs nobody in.
 
-Every change that can lower the count asks `leaves_no_unlinked_admin` under the
-administrator-count lock (`lakana_core.grants.admin_lock.lock_admin_count`), in the order that
-lock documents: linking a person (`lakana_core.identity.oidc_links.OidcLinkService.link`),
-deleting a passkey (`lakana_core.identity.passkeys.PasskeyService.remove`), and every change
-`lakana_core.grants.service.assert_admin_headroom` guards (revoking ADMIN, removing a member of a
-group that holds it, deactivating, an access apply). A passkey disabled as a copy and the server
-operator's recovery are not refused: the first is a security response, the second is the
-break-glass path itself.
+The rule is an invariant (`holds`): whenever at least one active administrator is linked, at
+least one unlinked administrator remains, so that an outage at the provider, or a provider that
+refuses everyone, cannot lock the instance out (the sign-in design, "Break-glass").
 
-The rule refuses only a change that takes the count from one or more to none while a linked
-administrator remains. An instance that links nobody keeps today's rules, and a count already at
-zero blocks nothing, as `assert_admin_headroom` lets every change through on an instance without
-administrators.
+Every change that can break it is refused when it would (`breaks`), under the
+administrator-count lock (`lakana_core.grants.admin_lock.lock_admin_count`), taken after the
+access lock in the order that lock documents. That is both sides:
+
+- changes that lower the unlinked side: deactivating, revoking ADMIN, removing a member from a
+  group that holds it (all through `lakana_core.grants.service.assert_admin_headroom`), deleting a
+  passkey (`lakana_core.identity.passkeys.PasskeyService.remove`), linking an administrator
+  (`lakana_core.identity.oidc_links.OidcLinkService.link`);
+- changes that raise the linked side: granting instance ADMIN to a linked person or to a group
+  with a linked member, and adding a linked person to a group that holds it
+  (`lakana_core.grants.service.assert_break_glass_on_raise`).
+
+An access apply makes many such changes in one transaction; it checks the rule once, on the
+state it leaves (`lakana_core.access.service.AccessService._recheck_lockout`), so the order of
+its changes does not matter. Only the bootstrap principal is ever reactivated, and it is never
+linked. A passkey disabled as a copy and the server operator's recovery are not refused: the
+first is a security response, the second is the break-glass path itself.
+
+A change is refused only when the rule held before it: on an instance where it is already broken
+(a copy was disabled), refusing every unrelated change would help nobody, and the changes that
+mend it (a passkey, an unlink) raise the unlinked side.
 
 The functions take the administrator ids from their caller, so this module needs nothing of
 `lakana_core.grants.service` and both may use it.
@@ -28,19 +39,61 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Collection
+from datetime import UTC, datetime
 
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
-from lakana_core.models import Passkey, Principal
+from lakana_core.models import InstanceSetting, Passkey, Principal
+
+RP_ID_KEY = "sign_in.rp_id"
+"""The instance setting that holds the relying-party id passkeys sign in with: the host of the
+public address, recorded by the server at start-up (`record_rp_id`)."""
 
 LAST_UNLINKED_ADMIN_MESSAGE = (
-    "This would leave no administrator who can sign in with a passkey: every other "
-    "administrator signs in through the identity provider, and an outage there would lock "
-    "everyone out. Add a passkey for another administrator who is not linked first, or unlink "
-    "one."
+    "This would leave only administrators who sign in through the identity provider, so an "
+    "outage there would lock everyone out. Keep at least one administrator who is not linked "
+    "and has a passkey at this address: add a passkey for one, or unlink one, first."
 )
-"""The 409 detail of a change that would take the last unlinked administrator away."""
+"""The 409 detail of a change that would break the break-glass rule."""
+
+
+def record_rp_id(session: Session, rp_id: str) -> None:
+    """Record the relying-party id passkeys sign in with; the caller commits.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    rp_id
+        The host of the public address (`Settings.public_origin().host`).
+    """
+    row = session.get(InstanceSetting, RP_ID_KEY)
+    if row is not None and row.value == rp_id:
+        return
+    if row is None:
+        row = InstanceSetting(key=RP_ID_KEY)
+        session.add(row)
+    row.value = rp_id
+    row.updated_at = datetime.now(UTC)
+
+
+def current_rp_id(session: Session) -> str | None:
+    """Read the relying-party id passkeys sign in with.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    str or None
+        The recorded id; `None` before a server with the web interface started, when every
+        passkey that is not disabled counts.
+    """
+    row = session.get(InstanceSetting, RP_ID_KEY)
+    return row.value if row is not None and isinstance(row.value, str) else None
 
 
 def unlinked_admin_ids(
@@ -64,13 +117,17 @@ def unlinked_admin_ids(
     Returns
     -------
     set of uuid.UUID
-        Those of `admin_ids` who are not linked and have a passkey that is not disabled.
+        Those of `admin_ids` who are not linked and have a passkey that is not disabled, for the
+        current relying party (`current_rp_id`).
     """
     if not admin_ids:
         return set()
     working = select(Passkey.id).where(
         Passkey.principal_id == Principal.id, Passkey.disabled_at.is_(None)
     )
+    rp_id = current_rp_id(session)
+    if rp_id is not None:
+        working = working.where(Passkey.rp_id == rp_id)
     if excluding_passkey_id is not None:
         working = working.where(Passkey.id != excluding_passkey_id)
     return set(
@@ -108,7 +165,43 @@ def _linked_ids(session: Session, ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
     )
 
 
-def leaves_no_unlinked_admin(
+def holds(
+    session: Session,
+    admin_ids: Collection[uuid.UUID],
+    *,
+    linking: uuid.UUID | None = None,
+    excluding_passkey_id: uuid.UUID | None = None,
+) -> bool:
+    """Say whether a set of administrators keeps the break-glass rule.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    admin_ids
+        The active instance administrators.
+    linking
+        A person to treat as linked, for a link not yet made.
+    excluding_passkey_id
+        A passkey to treat as deleted, for a removal not yet made.
+
+    Returns
+    -------
+    bool
+        Whether no administrator is linked, or at least one unlinked administrator remains.
+    """
+    linked = _linked_ids(session, admin_ids)
+    if linking is not None and linking in admin_ids:
+        linked.add(linking)
+    if not linked:
+        return True
+    remaining = unlinked_admin_ids(session, admin_ids, excluding_passkey_id=excluding_passkey_id)
+    if linking is not None:
+        remaining.discard(linking)
+    return bool(remaining)
+
+
+def breaks(
     session: Session,
     *,
     before: Collection[uuid.UUID],
@@ -116,7 +209,7 @@ def leaves_no_unlinked_admin(
     linking: uuid.UUID | None = None,
     excluding_passkey_id: uuid.UUID | None = None,
 ) -> bool:
-    """Say whether a change would take the last unlinked administrator while a linked one remains.
+    """Say whether a change breaks the break-glass rule that held before it.
 
     Call it under `lakana_core.grants.admin_lock.lock_admin_count`.
 
@@ -136,14 +229,8 @@ def leaves_no_unlinked_admin(
     Returns
     -------
     bool
-        Whether there is at least one unlinked administrator now, none would remain, and an
-        administrator linked to the provider would.
+        Whether the rule holds now (`holds`) and would not after the change.
     """
-    if not unlinked_admin_ids(session, before):
-        return False
-    remaining = unlinked_admin_ids(session, after, excluding_passkey_id=excluding_passkey_id)
-    linked = _linked_ids(session, after)
-    if linking is not None:
-        remaining.discard(linking)
-        linked.add(linking)
-    return not remaining and bool(linked)
+    return holds(session, before) and not holds(
+        session, after, linking=linking, excluding_passkey_id=excluding_passkey_id
+    )

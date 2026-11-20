@@ -244,3 +244,13 @@ def test_unlink_route_404_for_unknown_and_409_for_not_linked(client: TestClient)
     dave = _person(client, "erin")
     r = client.delete("/api/v1/principals/dave/oidc-link", headers=_bearer(dave))
     assert r.status_code == 403, r.text
+
+
+def test_the_server_records_the_relying_party_for_the_break_glass_count(
+    client: TestClient,
+) -> None:
+    from lakana_core.grants.break_glass import current_rp_id
+
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        assert current_rp_id(session) == "localhost"
