@@ -251,20 +251,27 @@ def test_a_like_wildcard_in_a_name_does_not_widen_the_listing(
 
 
 def test_a_backslash_in_a_name_does_not_widen_the_listing(
-    catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
+    session: Session, catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
 ) -> None:
-    r"""The escape character itself is a legal namespace character.
+    r"""The escape character itself may be in a stored namespace name.
 
-    `validate_path_component` permits a backslash, and the prefix is
-    interpolated into a `LIKE` pattern that uses `\` as its escape
-    character. Left undoubled, the `\b` in `a\b` is read as an escaped `b`
-    -- a literal `b` -- so the pattern silently becomes `ab...` and the
-    listing returns another namespace's children. This is the test that
-    fails if `escape_like` drops its backslash clause.
+    A new name may not hold a backslash (#609), but one an older release stored may, and the
+    prefix is interpolated into a `LIKE` pattern that uses `\` as its escape character. Left
+    undoubled, the `\b` in `a\b` is read as an escaped `b` -- a literal `b` -- so the pattern
+    silently becomes `ab...` and the listing returns another namespace's children. This is the
+    test that fails if `escape_like` drops its backslash clause.
     """
-    catalog.create_environment(principal, name="dev", storage=_config(tmp_path))
+    env = catalog.create_environment(principal, name="dev", storage=_config(tmp_path))
     for parts in ([r"a\b"], [r"a\b", "child"], ["ab"], ["ab", "intruder"]):
-        catalog.create_namespace(principal, "dev", NamespacePath.from_parts(parts))
+        session.add(
+            Namespace(
+                id=uuid.uuid4(),
+                environment_id=env.id,
+                path=NamespacePath.from_parts(parts).joined(),
+                properties={},
+            )
+        )
+    session.commit()
 
     listed = catalog.list_namespaces(principal, "dev", NamespacePath.from_parts([r"a\b"]))
 

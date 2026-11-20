@@ -23,7 +23,7 @@ from core_test_helpers import (
     deploy_assets,
     store_version,
 )
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import (
@@ -368,13 +368,35 @@ def test_a_read_granted_on_the_table_itself_names_the_file(
     assert result.path == path
 
 
+def _stored_starred(session: Session, catalog: CatalogService, principal: PrincipalRef) -> TableRef:
+    """Create `silver.c*` as an older release stored it: a new name may not hold `*` (#609).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog
+        The catalog.
+    principal
+        The acting principal.
+
+    Returns
+    -------
+    TableRef
+        The stored table.
+    """
+    catalog.create_table(principal, TableRef("dev", _SILVER, "cstar"), schema=_minimal_schema())
+    session.execute(update(Table).where(Table.name == "cstar").values(name="c*"))
+    session.commit()
+    return TableRef("dev", _SILVER, "c*")
+
+
 def test_a_name_with_a_glob_character_queues_only_its_own_asset(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:
     """`silver.c*` is matched as itself, never as a pattern that also takes `silver.clean`."""
     catalog = _catalog(session, tmp_path)
-    starred = TableRef("dev", _SILVER, "c*")
-    catalog.create_table(principal, starred, schema=_minimal_schema())
+    starred = _stored_starred(session, catalog, principal)
     _managed(catalog, principal)
     deploy_assets(session, "dev", "analytics", {"silver.c*": {}, "silver.clean": {}})
 
@@ -389,8 +411,8 @@ def test_a_selection_of_more_than_its_asset_drops_nothing(
 ) -> None:
     """Without the escape, `silver.c*` would take `silver.clean` too: refused before any write."""
     catalog = _catalog(session, tmp_path)
-    starred = TableRef("dev", _SILVER, "c*")
-    starred_id = catalog.create_table(principal, starred, schema=_minimal_schema()).uuid
+    starred = _stored_starred(session, catalog, principal)
+    starred_id = catalog.load_table(principal, starred).uuid
     _managed(catalog, principal)
     deploy_assets(session, "dev", "analytics", {"silver.c*": {}, "silver.clean": {}})
 
