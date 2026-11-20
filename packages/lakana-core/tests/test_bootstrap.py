@@ -809,10 +809,19 @@ def test_recovery_audits_each_pat_it_revokes_before_its_task_tokens(
     recorded: list[tuple[AuditEventType, object]] = []
     real_record = AuditService.record
 
-    def spy(self: AuditService, principal_id, event_type, **kwargs):  # type: ignore[no-untyped-def]
-        detail = kwargs.get("detail") or {}
-        recorded.append((event_type, detail.get("key_id")))
-        return real_record(self, principal_id, event_type, **kwargs)
+    def spy(
+        self: AuditService,
+        principal_id: uuid.UUID | None,
+        event_type: AuditEventType,
+        *,
+        securable: Securable | None = None,
+        detail: dict | None = None,
+        commit: bool = False,
+    ) -> AuditEvent:
+        recorded.append((event_type, (detail or {}).get("key_id")))
+        return real_record(
+            self, principal_id, event_type, securable=securable, detail=detail, commit=commit
+        )
 
     monkeypatch.setattr(AuditService, "record", spy)
 
