@@ -356,6 +356,9 @@ class Whoami:
     language
         Your preferred language for catalog texts; `None` when you set none (or the server is
         older than this field).
+    token_window_ends_at
+        For a person linked to the organisation's identity provider: until when your personal
+        tokens work without another sign-in there; `None` when your tokens have no such window.
     """
 
     name: str
@@ -363,6 +366,7 @@ class Whoami:
     task_token: TaskTokenScope | None
     ci_token: CiTokenScope | None = None
     language: str | None = None
+    token_window_ends_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -1864,17 +1868,45 @@ class SignInBounds:
         The shortest absolute lifetime.
     absolute_lifetime_minutes_max
         The longest absolute lifetime.
+    token_provider_window_days_min
+        The shortest token window, in days.
+    token_provider_window_days_max
+        The longest token window, in days.
     """
 
     idle_timeout_minutes_min: int
     idle_timeout_minutes_max: int
     absolute_lifetime_minutes_min: int
     absolute_lifetime_minutes_max: int
+    token_provider_window_days_min: int = 1
+    token_provider_window_days_max: int = 365
+
+
+@dataclass(frozen=True)
+class SignInProvider:
+    """The identity provider people sign in through, as an administrator sees it.
+
+    Parameters
+    ----------
+    display_name
+        The name on the sign-in button.
+    issuer
+        The provider's issuer.
+    linked_people
+        How many active people are linked to it.
+    unlinked_admins
+        How many administrators can sign in without it (with a passkey).
+    """
+
+    display_name: str
+    issuer: str
+    linked_people: int
+    unlinked_admins: int
 
 
 @dataclass(frozen=True)
 class SignInSettings:
-    """How long browser sessions last, in minutes.
+    """How long browser sessions last, in minutes, and the token window of linked people.
 
     Parameters
     ----------
@@ -1883,12 +1915,19 @@ class SignInSettings:
     absolute_lifetime_minutes
         How long a session lasts at most.
     bounds
-        The limits both may be set between.
+        The limits each may be set between.
+    token_provider_window_days
+        How long a linked person's personal tokens work after their last sign-in through the
+        identity provider, in days.
+    provider
+        The identity provider and its counts, for an administrator while OIDC sign-in is on.
     """
 
     idle_timeout_minutes: int
     absolute_lifetime_minutes: int
     bounds: SignInBounds
+    token_provider_window_days: int = 30
+    provider: SignInProvider | None = None
 
 
 @dataclass(frozen=True)

@@ -121,6 +121,28 @@ def _principal(client: TestClient, kind: str = "USER") -> str:
     return name
 
 
+def _linked_person(client: TestClient) -> str:
+    """Create a person linked to the identity provider.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    str
+        Their name.
+    """
+    name = _principal(client)
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        row = session.execute(select(Principal).where(Principal.name == name)).scalar_one()
+        row.oidc_issuer, row.oidc_subject = "https://idp.example.com", name
+        session.commit()
+    return name
+
+
 def _group(client: TestClient) -> str:
     """Create an empty group.
 
@@ -758,6 +780,9 @@ STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
     ),
     ("DELETE", "/api/v1/principals/{name}"): Case(
         lambda c: (f"/api/v1/principals/{_principal(c)}", None), 204
+    ),
+    ("DELETE", "/api/v1/principals/{name}/oidc-link"): Case(
+        lambda c: (f"/api/v1/principals/{_linked_person(c)}/oidc-link", None), 204
     ),
     ("POST", "/api/v1/grants"): Case(lambda c: ("/api/v1/grants", _grant(c)), 201),
     ("DELETE", "/api/v1/grants/{grant_id}"): Case(_granted, 204),

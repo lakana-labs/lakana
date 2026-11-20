@@ -21,11 +21,12 @@ Run it as the server operator, with the profile 'lakana bundle init' saved (it h
 
 Usage: `lakana sign-in settings [OPTIONS]`
 
-Show or change how long browser sessions last, in minutes.
+Show or change how long browser sessions last, and the token window of linked people.
 
-Without options it shows the idle timeout and the absolute lifetime with their bounds. Changing them needs the ADMIN role and applies to new sessions; open sessions keep their lengths.
+Without options it shows the idle timeout and the absolute lifetime in minutes and the token window in days, with their bounds, and to an administrator the identity provider with its counts. Changing them needs the ADMIN role; new lengths apply to new sessions (open ones keep theirs), a new token window to the next request with a token.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--idle-timeout` | whole number, 1 or more | none | End a session after this many minutes without use (15 to 1440). |
 | `--absolute-lifetime` | whole number, 1 or more | none | End a session this many minutes after sign-in at the latest (60 to 43200). |
+| `--token-window-days` | whole number, 1 or more | none | Let a person linked to the identity provider use their personal tokens this many days after their last sign-in there (1 to 365). |

@@ -139,6 +139,35 @@ def deactivate(
     _output.done(state, f"Deactivated principal {_output.inline(name)}")
 
 
+@principal_app.command("unlink-provider")
+def unlink_provider(
+    ctx: typer.Context,
+    name: str,
+    yes: Annotated[bool, typer.Option("--yes", help="Don't ask for confirmation.")] = False,
+) -> None:
+    """Unlink person NAME from the identity provider; they come back with a recovery link.
+
+    Parameters
+    ----------
+    ctx
+        The Typer context.
+    name
+        The principal name.
+    yes
+        Skip the confirmation prompt.
+    """
+    state = state_of(ctx)
+    confirm(
+        state,
+        f"Unlink {name!r} from the identity provider? Their passkeys are deleted, their personal "
+        "API tokens revoked and their sessions ended; they come back with a recovery link.",
+        yes,
+    )
+    state.client().principals.unlink_provider(name)
+    _output.done(state, f"Unlinked {_output.inline(name)} from the identity provider")
+    _output.next_step(state, f"Send them a recovery link: lakana recovery create {name}")
+
+
 def register(app: typer.Typer) -> None:
     """Add the `principal` group to the root app.
 

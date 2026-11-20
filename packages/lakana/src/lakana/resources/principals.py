@@ -371,3 +371,24 @@ class Principals:
             params=override_params(override_reason),
             path_params={"name": name},
         )
+
+    def unlink_provider(self, name: str) -> None:
+        """Unlink a person from the organisation's identity provider.
+
+        Deletes their stored passkeys, revokes all their personal API tokens and ends their
+        sessions; they come back with a recovery link. Needs the `ADMIN` role on the instance.
+        To offboard someone, deactivate them instead.
+
+        Parameters
+        ----------
+        name
+            The person's principal name.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If no principal of this name exists.
+        lakana.errors.Conflict
+            For yourself, or a person who is not linked.
+        """
+        self._transport.request(ROUTES["principals.unlink_provider"], path_params={"name": name})

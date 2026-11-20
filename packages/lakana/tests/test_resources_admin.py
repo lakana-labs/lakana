@@ -146,6 +146,20 @@ def test_principals_deactivate_sends_a_delete() -> None:
     assert seen["path"] == "/api/v1/principals/bob"
 
 
+def test_sdk_unlink_provider() -> None:
+    """`principals.unlink_provider` DELETEs `/api/v1/principals/{name}/oidc-link`."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        return httpx.Response(204)
+
+    Principals(_transport(handler)).unlink_provider("carol")
+
+    assert (seen["method"], seen["path"]) == ("DELETE", "/api/v1/principals/carol/oidc-link")
+
+
 # --- Groups --------------------------------------------------------------
 
 

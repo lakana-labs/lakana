@@ -312,3 +312,19 @@ def test_a_group_name_with_an_escape_and_a_line_break_is_shown_escaped(tmp_path:
     result = invoke(make_state(tmp_path, api), "group", "create", name)
     assert result.exit_code == 0, result.stderr
     assert result.stdout == "Created group ops\\x1b[2J\\nforged line\n"
+
+
+def test_cli_unlink_provider_asks_then_unlinks(tmp_path: Path) -> None:
+    """The prompt names what goes; `--yes` skips it and the DELETE is sent."""
+    api = FakeApi()
+    api.on("DELETE", "/api/v1/principals/carol/oidc-link", status=204)
+    asked = invoke(make_state(tmp_path, api), "principal", "unlink-provider", "carol")
+    assert asked.exit_code == 2
+    prompt = " ".join(asked.stderr.split())
+    assert all(word in prompt for word in ("passkeys", "tokens", "sessions", "recovery link"))
+    assert api.requests == []
+    done = invoke(make_state(tmp_path, api), "principal", "unlink-provider", "carol", "--yes")
+    assert done.exit_code == 0, done.stderr
+    assert [(r.method, r.url.path) for r in api.requests] == [
+        ("DELETE", "/api/v1/principals/carol/oidc-link")
+    ]

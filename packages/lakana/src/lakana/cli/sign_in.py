@@ -89,15 +89,26 @@ def _settings_text(settings: SignInSettings) -> str:
     Returns
     -------
     str
-        Two lines.
+        Three lines, and a fourth with the identity provider for an administrator.
     """
     bounds = settings.bounds
-    return (
+    text = (
         f"Idle timeout: {settings.idle_timeout_minutes} minutes "
         f"({bounds.idle_timeout_minutes_min} to {bounds.idle_timeout_minutes_max})\n"
         f"Absolute lifetime: {settings.absolute_lifetime_minutes} minutes "
-        f"({bounds.absolute_lifetime_minutes_min} to {bounds.absolute_lifetime_minutes_max})"
+        f"({bounds.absolute_lifetime_minutes_min} to {bounds.absolute_lifetime_minutes_max})\n"
+        f"Token window: {settings.token_provider_window_days} days "
+        f"({bounds.token_provider_window_days_min} to {bounds.token_provider_window_days_max})"
     )
+    provider = settings.provider
+    if provider is not None:
+        admins = "administrator" if provider.unlinked_admins == 1 else "administrators"
+        text += (
+            f"\nIdentity provider: {_output.inline(provider.display_name)} "
+            f"({_output.inline(provider.issuer)}): {provider.linked_people} linked people, "
+            f"{provider.unlinked_admins} {admins} who signs in with a passkey"
+        )
+    return text
 
 
 @sign_in_app.command("settings")
@@ -121,12 +132,25 @@ def settings(
             help="End a session this many minutes after sign-in at the latest (60 to 43200).",
         ),
     ] = None,
+    token_window: Annotated[
+        int | None,
+        typer.Option(
+            "--token-window-days",
+            min=1,
+            metavar="DAYS",
+            help=(
+                "Let a person linked to the identity provider use their personal tokens this "
+                "many days after their last sign-in there (1 to 365)."
+            ),
+        ),
+    ] = None,
 ) -> None:
-    """Show or change how long browser sessions last, in minutes.
+    """Show or change how long browser sessions last, and the token window of linked people.
 
-    Without options it shows the idle timeout and the absolute lifetime with their bounds.
-    Changing them needs the ADMIN role and applies to new sessions; open sessions keep their
-    lengths.
+    Without options it shows the idle timeout and the absolute lifetime in minutes and the
+    token window in days, with their bounds, and to an administrator the identity provider with
+    its counts. Changing them needs the ADMIN role; new lengths apply to new sessions (open ones
+    keep theirs), a new token window to the next request with a token.
 
     Parameters
     ----------
@@ -136,13 +160,18 @@ def settings(
         `--idle-timeout`: the new idle timeout in minutes.
     absolute_lifetime
         `--absolute-lifetime`: the new absolute lifetime in minutes.
+    token_window
+        `--token-window-days`: the new token window in days.
     """
     state = state_of(ctx)
     resource = state.client().sign_in_settings
-    changing = idle_timeout is not None or absolute_lifetime is not None
+    lengths = idle_timeout is not None or absolute_lifetime is not None
+    changing = lengths or token_window is not None
     if changing:
         current = resource.update(
-            idle_timeout_minutes=idle_timeout, absolute_lifetime_minutes=absolute_lifetime
+            idle_timeout_minutes=idle_timeout,
+            absolute_lifetime_minutes=absolute_lifetime,
+            token_provider_window_days=token_window,
         )
     else:
         current = resource.get()
@@ -150,8 +179,10 @@ def settings(
         _output.print_json(current)
     else:
         sys.stdout.write(_settings_text(current) + "\n")
-    if changing:
+    if lengths:
         _output.next_step(state, "The new lengths apply to new sessions; open ones keep theirs.")
+    if token_window is not None:
+        _output.next_step(state, "The new token window applies to the next request with a token.")
 
 
 def register(app: typer.Typer) -> None:

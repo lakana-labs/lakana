@@ -219,3 +219,28 @@ def test_person_page_shows_the_link_to_admins_only(client: TestClient) -> None:
     assert (r.status_code, r.json()["provider_link"]) == (200, None), r.text
     listed = client.get("/api/v1/principals", headers=AUTH_HEADER).json()
     assert {p["name"]: p["provider_link"] is not None for p in listed}["carol"] is True
+
+
+# -- an administrator unlinks a person (#32, PR 2) ----------------------------------------------
+
+
+def test_unlink_route_unlinks(client: TestClient) -> None:
+    token = _person(client, "carol", linked_ago=timedelta(days=1))
+    r = client.delete("/api/v1/principals/carol/oidc-link", headers=AUTH_HEADER)
+    assert r.status_code == 204, r.text
+    assert (
+        client.get("/api/v1/principals/carol", headers=AUTH_HEADER).json()["provider_link"] is None
+    )
+    # Unlinking revokes every personal token: the person comes back with a recovery link.
+    assert client.get("/api/v1/whoami", headers=_bearer(token)).status_code == 401
+
+
+def test_unlink_route_404_for_unknown_and_409_for_not_linked(client: TestClient) -> None:
+    r = client.delete("/api/v1/principals/nobody/oidc-link", headers=AUTH_HEADER)
+    assert r.status_code == 404, r.text
+    _person(client, "dave")
+    r = client.delete("/api/v1/principals/dave/oidc-link", headers=AUTH_HEADER)
+    assert r.status_code == 409, r.text
+    dave = _person(client, "erin")
+    r = client.delete("/api/v1/principals/dave/oidc-link", headers=_bearer(dave))
+    assert r.status_code == 403, r.text

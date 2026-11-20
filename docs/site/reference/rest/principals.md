@@ -198,6 +198,30 @@ Answers:
 | `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
+## `DELETE /api/v1/principals/{name}/oidc-link`
+
+Unlink a person from the identity provider
+
+Deletes the person's stored passkeys, revokes all their personal API tokens and ends their sessions, in one step; they come back with a recovery link (`lakana recovery create`), and then sign in with a passkey again until they link once more. To offboard someone, deactivate them instead. Needs the ADMIN role on the instance and, from the web interface, a passkey touch (or provider step-up) within the last 15 minutes (403 `StepUpRequired`). Answers 404 for an unknown name and 409 for yourself or a person who is not linked.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `name` | path | yes | text | The person's principal name. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `204` | Successful Response | none |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
 ## `GET /api/v1/principals/{name}/sessions`
 
 List a person's open browser sessions
