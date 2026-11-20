@@ -118,7 +118,7 @@ IDLE_KEY = "sign_in.idle_seconds"
 ABSOLUTE_KEY = "sign_in.absolute_seconds"
 """The instance setting that holds the absolute lifetime, in seconds."""
 
-TOKEN_WINDOW_KEY = "sign_in.token_provider_window_days"
+TOKEN_WINDOW_KEY = "sign_in.token_provider_window_days"  # nosec B105 -- a setting name, not a secret
 """The instance setting that holds the token window of linked people, in days (#32)."""
 
 TOKEN_WINDOW_DEFAULT_DAYS = 30
