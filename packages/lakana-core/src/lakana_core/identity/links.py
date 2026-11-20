@@ -1180,19 +1180,10 @@ class LinkService:
             state = _state(row, now)
             # Open again only while another use is in flight; that one wins.
             raise LinkUnusableError("used" if state == "open" else state)
-        try:
-            redeemed = self._complete(
-                row, now, replacing=replacing, peer=peer, user_agent=user_agent
-            )
-            self._session.commit()
-        except _CloseLink as close:
-            self._session.rollback()
-            self._close(row.id, row.kind, close.reason)
-            raise close.error from None
-        except BaseException:
-            self._session.rollback()
-            raise
-        return redeemed
+        return self._commit_use(
+            row,
+            lambda: self._complete(row, now, replacing=replacing, peer=peer, user_agent=user_agent),
+        )
 
     def _linked_needs_provider(self, row: SignInLink) -> bool:
         """Say whether a link's passkey path is closed because its person is linked.
@@ -1309,10 +1300,36 @@ class LinkService:
         ):
             self._session.rollback()
             raise OidcSignInRefused("link_unusable")
-        try:
-            redeemed = self._complete_for_provider(
+        return self._commit_use(
+            row,
+            lambda: self._complete_for_provider(
                 row, identity, now, replacing=replacing, peer=peer, user_agent=user_agent
-            )
+            ),
+        )
+
+    def _commit_use(self, row: SignInLink, complete: Callable[[], Redeemed]) -> Redeemed:
+        """Do what a claimed link does and commit; close it when a rule no longer holds.
+
+        Parameters
+        ----------
+        row
+            The link, claimed by this transaction.
+        complete
+            Does what the link does, in the claiming transaction.
+
+        Returns
+        -------
+        Redeemed
+            What `complete` started.
+
+        Raises
+        ------
+        Exception
+            The `_CloseLink`'s carried error, after the link is withdrawn; anything else
+            `complete` raises, after a rollback.
+        """
+        try:
+            redeemed = complete()
             self._session.commit()
         except _CloseLink as close:
             self._session.rollback()
