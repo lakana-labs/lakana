@@ -43,8 +43,9 @@ PURGE_AFTER = timedelta(days=1)
 MAX_RETURN_TO = 2048
 """The longest app path kept."""
 
-FlowPurpose = Literal["sign_in"]
-"""What a flow is for."""
+FlowPurpose = Literal["sign_in", "invite", "recovery", "link", "step_up"]
+"""What a flow is for: signing in; using an invite or a recovery link through the provider;
+linking a signed-in person (their profile); confirming a linked person's session (step-up)."""
 
 
 @dataclass(frozen=True)
