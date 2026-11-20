@@ -695,7 +695,7 @@ queueing (M5c3) and cron (M5d) plug into the tick.
   task with a code of its own (`task_checks._set_back_code`: the stored memory stop's, else
   `worker_lost`, else `cancelled`).
 - **What a Python task's failure concerned (#705).** `task_runs` and `task_attempts` also hold
-  `error_type` (`String(100)`) and `failure_connection` (`String(63)`, migration `0087`), stored
+  `error_type` (`String(100)`) and `failure_connection` (`String(63)`, migration `0088`), stored
   by `record_attempt` with the code and only for a failure (a success, a release and a cancel
   store none); the scheduler's text (`store._apply_task`) clears both. The SDK's helpers set
   `IngestError.connection` (`lakana.ingest._errors.names_connection`; never for

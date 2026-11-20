@@ -261,11 +261,11 @@ class TaskRun(Base):
     (shown as ``unknown``)."""
     error_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     """The class name of the exception a Python task's code ended with, stored with
-    `failure_code` (migration ``0087``); null for any other ending and for older rows."""
+    `failure_code` (migration ``0088``); null for any other ending and for older rows."""
     failure_connection: Mapped[str | None] = mapped_column(String(63), nullable=True)
     """The connection the failure concerns: one the asset declares, named by an error of
     `lakana.ingest` (``IngestError.connection``), stored with `failure_code` (migration
-    ``0087``); null when the failure names none, for any other ending and for older rows."""
+    ``0088``); null when the failure names none, for any other ending and for older rows."""
     check_message_state: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     """What `error_message` was built from besides the check results, when the check phase built
     it (`lakana_core.runs.check_message.CheckMessageState`); null for any other message."""

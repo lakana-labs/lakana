@@ -130,6 +130,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # the SHA256 fingerprints of the SSH host keys a repository trusts, never a key
         "host_key_fingerprints",
         "id",
+        # an OIDC sign-in's verified provider identity (``SIGN_IN_OIDC``, ``SIGN_IN_OIDC_REFUSED``):
+        # the issuer and the provider's subject id, never a code, a token or the client secret
+        "iss",
         "issuer",
         "job",
         "jti_sha256",
@@ -188,6 +191,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # a CI trust rule's opt-in to starting the `on_deploy` jobs of its deploys (#102)
         "start_on_deploy_jobs",
         "storage_root",
+        "sub",
         "subject",
         "submitted_by",
         "table",
@@ -204,7 +208,7 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # the column a history write took each version's start from, or "run" for the run clock
         "valid_from",
         "version",
-        # how a browser session began: setup, invite, recovery, local or passkey
+        # how a browser session began: setup, invite, recovery, local, passkey or oidc
         "via",
         # a saved query's visibility: private or everyone
         "visibility",
@@ -245,6 +249,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # grants a restore left revoked because an identical one is live, each with that one's
         # id (#673)
         "skipped_grants",
+        # where a `PAT_REVOKED` came from when not a person: `bootstrap_recovery`
+        "source",
         "state",
         "status",
         "stopped",

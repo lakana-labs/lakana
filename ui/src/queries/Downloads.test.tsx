@@ -8,12 +8,16 @@ import { api, DownloadCut } from "../api/client";
 import { saveBlob } from "../shell/saveFile";
 import { aRun, RUN_ID } from "../test/queries";
 import { fakeServer } from "../test/server";
+import { pinTimeZone } from "../test/timeZone";
 import { Downloads } from "./Downloads";
 
 vi.mock("../shell/saveFile", async (original) => ({
   ...(await original<typeof import("../shell/saveFile")>()),
   saveBlob: vi.fn(),
 }));
+
+// The file names carry the local date of the run's end, which the expected names fix.
+pinTimeZone("Europe/Berlin");
 
 const RESULT = `GET /api/v1/environments/prod/queries/${RUN_ID}/result`;
 

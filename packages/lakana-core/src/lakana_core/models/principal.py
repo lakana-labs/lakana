@@ -4,7 +4,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, LargeBinary, String, Uuid, false
+from sqlalchemy import Boolean, Enum, LargeBinary, String, UniqueConstraint, Uuid, false
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, TimestampMixin, UTCDateTime
@@ -26,6 +26,10 @@ class Principal(Base, TimestampMixin):
     """
 
     __tablename__ = "principals"
+    __table_args__ = (
+        # One identity per account and one account per identity (#32).
+        UniqueConstraint("oidc_issuer", "oidc_subject", name="uq_principals_oidc_identity"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     type: Mapped[PrincipalType] = mapped_column(Enum(PrincipalType, native_enum=False))
@@ -54,3 +58,17 @@ class Principal(Base, TimestampMixin):
     theirs, never cleared: an administrator's account is recovered only by the server operator
     (`lakana_core.identity.links.LinkService.issue_recovery`), and revoking ADMIN first must not
     get around that."""
+    oidc_issuer: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    """The identity provider's issuer this person is linked to, with `oidc_subject`; `None` while
+    unlinked. A provider sign-in finds the person by this pair only."""
+    oidc_subject: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    """The provider's ``sub`` of this person; `None` while unlinked."""
+    oidc_email: Mapped[str | None] = mapped_column(String(320), nullable=True, default=None)
+    """The ``email`` of the person's last provider sign-in, for showing only: never used to look
+    a person up, as a provider may let people change it."""
+    oidc_name: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    """The ``name`` of the person's last provider sign-in, for showing only."""
+    last_provider_sign_in_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime, nullable=True, default=None
+    )
+    """When the person last signed in through the provider; `None` if never."""

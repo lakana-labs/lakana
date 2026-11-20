@@ -28,6 +28,7 @@ from lakana_core.config import (
     validate_repo_roots,
 )
 from lakana_core.languages import DEFAULT_MAIN_LANGUAGE, language_problem
+from lakana_core.oidc.config import OidcSignInConfig
 
 
 class AppendConfig(BaseModel):
@@ -495,6 +496,9 @@ class Settings(BaseSettings):
     ci_oidc
         Which CI providers' OIDC ID tokens the server verifies, for which audience, and how it
         reaches their keys (`LAKANA_CI_OIDC__*`). Off by default.
+    oidc
+        Sign-in for people through the organisation's identity provider (`LAKANA_OIDC__*`,
+        `OidcSignInConfig`). Off by default; it needs the web interface and its public address.
     readiness
         How `/readyz` checks the database, the storages and the workers
         (`LAKANA_READINESS__TIMEOUT_SECONDS`, `LAKANA_READINESS__CACHE_SECONDS`,
@@ -553,6 +557,7 @@ class Settings(BaseSettings):
     run: RunConfig = RunConfig()
     log: LogConfig = LogConfig()
     ci_oidc: CiOidcConfig = CiOidcConfig()
+    oidc: OidcSignInConfig = OidcSignInConfig()
     readiness: ReadinessConfig = ReadinessConfig()
     ui: UiConfig = UiConfig()
     host: str = "127.0.0.1"
@@ -658,6 +663,38 @@ class Settings(BaseSettings):
                 "LAKANA_UI__LOCAL_SIGN_IN is only for one person's own machine: it needs "
                 "LAKANA_HOST on a loopback address and the public address on localhost. It is "
                 "set by `lakana server start --local`; on a team server leave it unset."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _oidc_has_the_interface(self) -> Self:
+        """Refuse OIDC sign-in without the web interface and its public address.
+
+        The provider sends the browser back to `<LAKANA_UI__PUBLIC_URL>/api/v1/sign-in/oidc/
+        callback`, and the session it starts is the interface's.
+
+        Returns
+        -------
+        Settings
+            These settings, unchanged.
+
+        Raises
+        ------
+        ValueError
+            Naming `LAKANA_UI__ENABLED` or `LAKANA_UI__PUBLIC_URL`.
+        """
+        if not self.oidc.enabled:
+            return self
+        if not self.ui.enabled:
+            raise ValueError(
+                "LAKANA_OIDC__ISSUER needs the web interface: set LAKANA_UI__ENABLED=true, or "
+                "unset LAKANA_OIDC__ISSUER"
+            )
+        if self.ui.public_url is None:
+            raise ValueError(
+                "LAKANA_OIDC__ISSUER needs LAKANA_UI__PUBLIC_URL, the address people open "
+                "Lakana at, such as https://lakana.example.com: the identity provider sends "
+                "them back to <LAKANA_UI__PUBLIC_URL>/api/v1/sign-in/oidc/callback"
             )
         return self
 

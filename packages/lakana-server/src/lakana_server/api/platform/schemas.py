@@ -3591,9 +3591,12 @@ class TrustedHostKeyOut(BaseModel):
     Parameters
     ----------
     type
-        The key type its key names, such as ``ssh-ed25519``.
+        The key's type as OpenSSH names it, such as ``ssh-ed25519`` or
+        ``ssh-ed25519-cert-v01@openssh.com``; a line's ``rsa-sha2-256`` or ``rsa-sha2-512`` word
+        names an ``ssh-rsa`` key, which is listed once as ``ssh-rsa``.
     fingerprint
-        Its fingerprint as `ssh-keygen -l` prints it, ``SHA256:`` and the digest.
+        Its fingerprint as `ssh-keygen -l` prints it, ``SHA256:`` and the digest; a
+        certificate's is that of the key it certifies.
     marker
         ``cert-authority`` for a key that signs the hosts' certificates (ssh trusts every host
         certificate it signed), ``revoked`` for a key ssh refuses; `null` for a plain host key.
@@ -3635,8 +3638,10 @@ class RepositoryOut(BaseModel):
         The public deploy keys Lakana made for it, one per environment you may read, to add at
         the git host; empty when it names no such key. Never a private key.
     host_keys
-        The keys `ssh_known_hosts` names, each with its `SHA256:` fingerprint and its marker
-        (a certificate authority, or a revoked key ssh refuses); empty when it names none.
+        The keys `ssh_known_hosts` names that ssh reads, each once with its `SHA256:`
+        fingerprint and its marker (a certificate authority, or a revoked key ssh refuses);
+        a certificate on a line without a marker, which ssh never trusts a host through, is
+        left out. Empty when it names none.
     """
 
     id: uuid.UUID
@@ -7088,7 +7093,8 @@ class SessionOut(BaseModel):
     type
         The principal type (always ``USER``: service accounts cannot sign in).
     via
-        How the session began: ``setup``, ``invite``, ``recovery``, ``local`` or ``passkey``.
+        How the session began: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or
+        ``oidc`` (the organisation's identity provider).
     step_up_until
         Until when actions that need a fresh passkey touch are allowed without another touch;
         `null` when the session has no touch.
@@ -7285,6 +7291,70 @@ class SignInOut(BaseModel):
     needs_passkey: bool
     offer_passkey: bool
     csrf_token: str
+
+
+class OidcInfoOut(BaseModel):
+    """Response body of `GET /api/v1/sign-in/oidc`: whether people sign in through a provider.
+
+    Parameters
+    ----------
+    enabled
+        Whether OIDC sign-in is on (`LAKANA_OIDC__ISSUER` is set).
+    display_name
+        The provider's name for the sign-in button (`LAKANA_OIDC__DISPLAY_NAME`, else the
+        issuer's host name); `null` while OIDC sign-in is off.
+    """
+
+    enabled: bool
+    display_name: str | None
+
+
+class OidcStartIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/oidc/start`.
+
+    Parameters
+    ----------
+    return_to
+        The page of the interface to open after signing in, as a path such as
+        ``/catalog/prod``. Anything that is not a path inside the interface (another site, a
+        sign-in page, more than 2048 characters) is replaced by ``/``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    return_to: str | None = Field(default=None, max_length=4096)
+
+
+class OidcStartOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/oidc/start`.
+
+    Parameters
+    ----------
+    authorization_url
+        The identity provider's sign-in page for this flow: send the browser there.
+    """
+
+    authorization_url: str
+
+
+class OidcSignInOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/oidc/finish`; the session comes as a cookie.
+
+    Parameters
+    ----------
+    name
+        The principal name now signed in.
+    csrf_token
+        The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every
+        request that carries the session cookie, reads too. Keep it in the page's own storage;
+        the server keeps only its hash and never returns it again.
+    return_to
+        The page to open now: the path `start` was given, checked, or ``/``.
+    """
+
+    name: str
+    csrf_token: str
+    return_to: str
 
 
 class IssuedLinkOut(BaseModel):

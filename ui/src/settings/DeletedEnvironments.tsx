@@ -51,7 +51,7 @@ export interface DeletedEnvironmentsProps {
   /** The deleted environments' read. */
   readonly read: Resource<readonly DeletedRow[]>;
   /** Called once an action is done, so the place reads both lists again. */
-  readonly onChanged: (action: DeletedAction, name: string) => void;
+  readonly onChanged: (action: DeletedAction, environment: EnvironmentOut) => void;
 }
 
 /**
@@ -156,7 +156,7 @@ export function DeletedEnvironments({
             environment={open.environment}
             onDone={() => {
               setOpen(null);
-              onChanged(open.action, open.environment.name);
+              onChanged(open.action, open.environment);
             }}
             onClose={() => {
               setOpen(null);

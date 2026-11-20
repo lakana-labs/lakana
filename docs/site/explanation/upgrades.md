@@ -742,6 +742,13 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   index build blocks writes to the table while it runs. Nothing has to be done: the upgrade runs
   with the others.
 
+### Bootstrap recovery audits each personal token it revokes
+
+- When start-up restores the first administrator, every earlier personal token of the bootstrap
+  principal is revoked with its own `PAT_REVOKED` event, whose detail has `source`
+  `bootstrap_recovery`. Before, the revocation was not recorded. Earlier recoveries stay as they
+  were in the audit log. Nothing has to be done.
+
 ### A task token ends with the personal token that minted it (breaking)
 
 - A task token minted with `lakana task-token mint` now works only while the personal token it
@@ -768,9 +775,19 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   log's `SECRET_ROTATED` events remain the record of those. Nothing has to be done: the upgrade
   runs with the others.
 
+### Sign-in through an identity provider can be configured
+
+- Migration `0087` adds the columns `oidc_issuer`, `oidc_subject`, `oidc_email`, `oidc_name` and
+  `last_provider_sign_in_at` to `principals`, and the table `oidc_flows`. Every existing person
+  starts unlinked, and sign-in works as before. OIDC sign-in stays off until `LAKANA_OIDC__ISSUER`
+  is set. Nothing has to be done: the upgrade runs with the others.
+- Going back drops the columns: **every person linked to the identity provider is unlinked**, and
+  after a new upgrade each of them has to be linked again. Sign-in flows open during the
+  downgrade are lost; their people start the sign-in again.
+
 ### A run records the connection it failed on
 
-- Migration `0087` adds `failure_connection` and `error_type` to `task_runs` and
+- Migration `0088` adds `failure_connection` and `error_type` to `task_runs` and
   `task_attempts`, and two indexes on `task_runs`. A Python task that fails with an error of a
   `lakana.ingest` helper stores the connection the helper was called with (only one the asset
   declares) and the exception's class name. Runs from before the upgrade keep both empty: nothing

@@ -9,7 +9,7 @@ connection), finds the failures that name it, and `ix_task_runs_asset_finished_a
 runs of the same asset. Existing rows stay null: nothing recorded what they concerned.
 
 Revision ID: 95737c487bf3
-Revises: 4d96fb277743
+Revises: 431d39830234
 Create Date: 2026-11-19 12:00:00.000000
 
 """
@@ -21,7 +21,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "95737c487bf3"
-down_revision: str | Sequence[str] | None = "4d96fb277743"
+down_revision: str | Sequence[str] | None = "431d39830234"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

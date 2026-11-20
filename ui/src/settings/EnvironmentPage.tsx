@@ -16,6 +16,7 @@ import {
   type RefObject,
   Suspense,
   useCallback,
+  useEffect,
   useRef,
   useState,
 } from "react";
@@ -47,7 +48,7 @@ import { managesEnvironment, mayCreateEnvironments } from "./places";
 import "./settingsStrings";
 import { storageSummary } from "./storageSummary";
 import { useLeave } from "./useLeave";
-import { useSettingsViewer } from "./viewer";
+import { useReloadViewer, useSettingsViewer } from "./viewer";
 
 const P = "settings.environmentPage";
 
@@ -165,6 +166,12 @@ function StoragePanel({ environment, onOpen, button }: StoragePanelProps): JSX.E
   const managesSecrets = (useSettingsViewer().secretEnvironments as readonly string[]).includes(
     environment.name,
   );
+  // The viewer is read once per visit to Settings, so it does not name an environment created
+  // since: read it again once, which Change storage's secret choice reads too.
+  const reloadViewer = useReloadViewer();
+  useEffect(() => {
+    if (!managesSecrets) reloadViewer();
+  }, [managesSecrets, reloadViewer]);
   return (
     <section className="flat-panel settings-panel">
       <h2>{t(`${P}.storageTitle`)}</h2>

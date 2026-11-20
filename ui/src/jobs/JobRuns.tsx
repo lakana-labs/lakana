@@ -15,9 +15,9 @@ import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { settingParam, useAddressParams } from "../shell/useAddressParams";
 import { useWhen } from "../shell/useWhen";
 import { StatusLabel } from "../status/StatusLabel";
-import { formatDuration, secondsBetween } from "./format";
 import "./jobStrings";
 import { DEFAULT_PERIOD, type Period, PERIOD_CHOICES, readPeriod, sinceOf } from "./period";
+import { RunDuration } from "./RunDuration";
 import { runStatusKind } from "./status";
 import { useRunPages } from "./useRunPages";
 
@@ -189,9 +189,7 @@ export function JobRuns({
               </Link>
             </td>
             <td className="number">
-              {run.started_at !== null &&
-                run.finished_at !== null &&
-                formatDuration(secondsBetween(run.started_at, run.finished_at), t)}
+              <RunDuration run={run} />
             </td>
             <td>{t(`jobs.trigger.${run.trigger ?? "none"}`)}</td>
             <td>

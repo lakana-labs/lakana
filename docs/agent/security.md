@@ -4135,6 +4135,30 @@ is the only way to change access there, so that what was reviewed in git is what
   waits for a running apply and cannot slip between its plan and its commit; guarded changes do
   not wait for one another. Inside an apply (`ACCESS_APPLY_KEY` in `session.info`) the guard
   returns at once: the apply already holds the exclusive lock and is the file.
+- **The administrator count has a lock of its own (#724).** Guarded changes share the access lock,
+  so it does not serialise two of them. Every change that can lower the number of active
+  administrators therefore takes `lock_admin_count` (`lakana_core.grants.admin_lock`,
+  `pg_advisory_xact_lock(ADMIN_COUNT_LOCK_KEY)`, exclusive, until the transaction ends) before it
+  counts, and before any read of something another change may alter that decides whether to count (a
+  grant's role and kind never change, and an early return lowers nothing). That covers revoking an
+  instance ADMIN grant, held directly or through a group; deactivating a principal (both through
+  `assert_admin_headroom`, also inside an apply); removing any member from any group, which takes
+  the lock before it asks whether the group holds ADMIN (a grant to the group may commit right after
+  that question, and a count that relies on the member must then wait for the removal); and an
+  apply's own last check (`AccessService._recheck_lockout`). Under READ COMMITTED the second change
+  waits for the first's commit, counts what it left and is refused with `LAST_ADMIN_MESSAGE`.
+  Changes that raise the count (a grant, a new member, a reactivation) take no lock: a count never
+  sees them before they commit, so on an instance with an administrator they can only make a check
+  refuse, never let one through. (On an instance with no administrator at all,
+  `assert_admin_headroom` lets every change through anyway.) Deleting a group needs no lock, since
+  it is refused while the group holds any active grant. Removing a passkey does not count
+  administrators today. The order is the access lock first, then this one: an apply holds the access
+  lock alone and takes this one inside it. A later rule of the same kind (the unlinked
+  administrators of OIDC sign-in) counts under this lock too. On SQLite nothing is taken, as with
+  the access lock. `packages/lakana-core/tests/test_admin_count_postgres_integration.py` races two
+  removals per pair on a real Postgres, and a grant to a group against the removal of its member and
+  the revoke of the other administrator; each test commits the first change only once
+  `pg_stat_activity` shows the second waiting on the lock, or finished.
 - **The override needs ADMIN.** `?override_managed=true&override_reason=...` (the server's
   `get_managed_write_principal`; one without the other is 422) sets
   `PrincipalRef.managed_override_reason`. The guard then asks `holds_instance_admin` itself, even
@@ -6108,15 +6132,41 @@ fuller text of each part where it already lives.
     `test_whoami_flags.py`, `test_admin_only_call_sites.py` (`_EXEMPT`).
   - **Host keys are trusted only by ticking fetched keys.** Edit never offers a text field for
     `ssh_known_hosts`: **Fetch host keys again** runs a worker's `host_keys` check and only the
-    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` lists every key the text
-    names with its line's type word, its fingerprint and its marker (`@cert-authority`, which
-    trusts every host certificate it signed, or `@revoked`, which ssh refuses), so the browser
-    hashes nothing; the page lists revoked keys apart and never as trusted. `known_host_keys`
-    skips the lines OpenSSH skips: an unknown marker, a key that names an empty type, or a type
-    word the key contradicts (`rsa-sha2-256` and `rsa-sha2-512` name an `ssh-rsa` key). The
-    audit log's fingerprints (`known_hosts_fingerprints`) read the same lines but count every
-    base64 key. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
-    ticked, never typed`), `test_repositories.py`, `test_repository_probes.py`.
+    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` lists every key ssh reads
+    from the text, once, with its type as OpenSSH names it, its fingerprint as `ssh-keygen -l`
+    prints it and its marker (`@cert-authority`, which trusts every host certificate it
+    signed, or `@revoked`, which ssh refuses), so the browser hashes nothing; the page lists
+    revoked keys apart and never as trusted. `known_host_keys` reads each line as OpenSSH 10
+    does and skips what it skips: an unknown marker, base64 it cannot decode (unpadded, or a
+    bit set past the last byte), a type word that names another type than the key, and a key
+    it refuses (`ssh_keys.read_key`: the full wire format of each type, every length checked,
+    no byte left over; an RSA modulus under 1,024 bits; an ECDSA point that is compressed, off
+    the curve or that `sshkey_ec_validate_public` refuses; a certificate whose fields are
+    malformed or whose authority's signature does not verify). `rsa-sha2-256` and
+    `rsa-sha2-512` (and their certificate words) name an `ssh-rsa` key, listed once as
+    `ssh-rsa`. A certificate's fingerprint is its certified key's, so a `@revoked` certificate
+    revokes that key on the page as in ssh. Where the list differs from what ssh reads, it never
+    shows as trusted a key ssh refuses: a certificate on a line without a marker is left out,
+    since ssh never trusts a host through it (`sshkey_equal` compares types), so "No host key
+    is trusted yet" shows when it is the only line; a certificate on a `@revoked` line is
+    listed without its signature checked, so a revocation ssh applies always shows, even one
+    signed by a security key (`sk-`) or by an RSA key `cryptography` refuses (an exponent under
+    3 or even), whose signatures Lakana cannot check, and a revocation with a bad signature,
+    which ssh skips, is shown too (it can only make ssh stricter); a certificate on a
+    `@cert-authority` line is listed only when its signature verifies, so one signed by those
+    keys is left out; and `ssh-dss` is skipped, which OpenSSH 10 no longer reads either. The
+    reference is portable OpenSSH (8.9 to 10.2, OpenSSL). Apple's build (LibreSSL), which a
+    worker on macOS runs, differs on two crafted keys only: it trusts an ECDSA point that
+    `sshkey_ec_validate_public` refuses (left out here), and it skips a revocation signed by an
+    RSA key with exponent 1 (listed here). A
+    character base64 has no place for (non-ASCII, or a no-break space before a comment) skips
+    the line, never fails the answer. Each distinct line is read once. The audit log's
+    fingerprints (`known_hosts_fingerprints`) read the same lines but count every base64 key,
+    hashed as written. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
+    ticked, never typed`), `test_repositories.py` (`a line with a non-ASCII character still
+    lists`), `test_known_host_keys.py` (each case also
+    against `ssh-keygen -l -F` when it is installed), with keys ssh-keygen made
+    (`packages/lakana-core/tests/host_keys/make.sh`).
   - **A replaced deploy key's private half never leaves the server.** Replace key and Make the
     missing keys call `POST /api/v1/repositories/{name}/deploy-key` through `guarded` (step-up
     before the call), and the answer carries only public keys and fingerprints. Delete asks for
@@ -6882,6 +6932,97 @@ User documentation: `docs/site/reference/ci-trust-rules.md`. Threat model: "CI O
   stays refused for a CI scope unless it is `DEPLOY`; nothing logs or records a JWT or a
   `lakana_ci_` token; a refusal after verification keeps the one text.
 
+## OIDC sign-in (#32, PR 1)
+
+People sign in to the web interface through the organisation's identity provider: the
+authorization-code flow with PKCE against the one provider of `LAKANA_OIDC__ISSUER`. Off without an
+issuer; with one, the server does not start without `LAKANA_OIDC__CLIENT_ID`,
+`LAKANA_OIDC__CLIENT_SECRET`, `LAKANA_UI__ENABLED=true` and `LAKANA_UI__PUBLIC_URL`
+(`test_settings.py`). Only a person whose provider identity is already linked to their account signs
+in; linking, the token window and `lakana login` are the next pull requests of #32. Threat model:
+"OIDC sign-in (#32)".
+
+- **One verification path with CI.** `lakana_core.oidc` holds the ID-token checks and the key cache
+  that CI OIDC used (above); `lakana_core.ci_oidc.jwks` and `.verification` are bindings with the
+  same names, signatures, codes and messages, and no `test_ci_oidc*` file changed. CI still requires
+  a `jti` and checks no `azp`, `nonce` or `typ`; its `RefusalCode` keeps its 18 values, and a
+  refusal of the shared code is turned into CI's by its value.
+- **The provider's address** (R2). The issuer is checked like CI's, without presets: `https`, a host
+  name, no credentials, query, fragment or trailing slash, at most 255 characters
+  (`test_issuer_is_checked_like_ci`). It may name a port (maintainer decision of 2026-11-20): the
+  fetcher then allows 443 and that port for every request to the provider (`KeySource.ports`,
+  `check(..., ports=)`); loopback, link-local and metadata addresses stay refused on every port
+  (`test_the_issuers_port_never_opens_loopback_or_metadata`). Discovery's `authorization_endpoint`,
+  `token_endpoint` and `jwks_uri` must each be `https`, without userinfo, on the issuer's host or a
+  host of `LAKANA_OIDC__ALLOW_HOSTS` (`test_token_endpoint_on_a_foreign_host_is_refused`,
+  `test_authorization_endpoint_must_be_https`). Every request to the provider, the token endpoint's
+  too, goes through `lakana_core.net.https_json`: `post_form_json` has `fetch_json`'s checks (pinned
+  address, no redirect, `trust_env=False`, 200 only, 64 KiB, 10 s per request), and its
+  `FetchFailed` never contains the form or a header (`test_post_reason_never_contains_the_secret`,
+  `test_post_refuses_a_redirect_and_a_large_answer`, `test_post_refuses_a_metadata_address`).
+  Authlib (BSD-3-Clause, `>=1.6`; an import contract keeps it in `lakana_server`) builds the
+  authorization URL, the S256 challenge and the token request's body; its HTTP client is never used.
+- **The ID token** (R4, `OidcProvider.rules`): the shared order, then `typ`, when present, is `ID`
+  (Keycloak marks access tokens `Bearer`), and the header's `typ` is not `at+jwt` (an RFC 9068
+  access token, `test_an_rfc_9068_access_token_is_refused_by_its_header`); `aud` contains the client
+  id; `azp`, when present, is the client id, and is required when `aud` has more than one member;
+  `iat` at most 600 s old and a lifetime of at most a day; `nonce` equals the flow's (compared in
+  constant time); `sub` present and at most 255 characters; no `jti` required (Entra ID sends none).
+  The algorithms are discovery's `id_token_signing_alg_values_supported` that Lakana supports (RSA
+  only), `RS256` when it lists none. Only the `id_token` member of the token answer is read
+  (`test_sign_in_rules_refuse_an_access_token`, `test_azp_must_be_ours_when_present`,
+  `test_two_audiences_need_azp`, `test_nonce_must_match`, `test_token_confusion_is_token_invalid`).
+- **The flow** (R5, R6, `lakana_core.identity.oidc_flows`): `start` stores the SHA-256 of `state`
+  and of the flow cookie's random value, the nonce and the PKCE verifier in `oidc_flows`; the flow
+  expires after 10 minutes. The callback takes the flow only when `state` and the browser's flow
+  cookie name it together, in one conditional `UPDATE`, committed before anything else, so a `state`
+  from another browser's flow or a callback without the cookie signs nobody in and a replayed
+  callback finds nothing (`test_callback_with_another_browsers_state_is_refused`,
+  `test_a_replayed_callback_is_refused`). The callback never starts a session: it writes the outcome
+  on the flow and always answers 303 to `<public_url>/sign-in/oidc`. That page calls `finish`, a
+  same-origin POST (the guard's `Origin` rule applies), which takes the flow once, starts the
+  session with a fresh id (a presented session ends as `replaced`) and returns the CSRF token in its
+  body, as every sign-in does (`test_finish_replaces_the_presented_session`,
+  `test_finish_without_the_flow_cookie_is_refused`, `test_finish_works_once`). The person is found
+  by `(oidc_issuer, oidc_subject)` only, unique together; `email` and `name` are shown, never
+  matched (`test_same_email_on_another_account_does_not_match`, `test_one_identity_per_account`).
+- **The flow cookie** (R7): `__Host-lakana_oidc` over HTTPS, `lakana_oidc_<port>` on localhost;
+  `HttpOnly`, `Path=/`, `Max-Age=600`, `Secure` over HTTPS, `SameSite=Lax` (a `Strict` cookie is not
+  sent on the provider's cross-site redirect); 32 random bytes; it does not start with
+  `lakana_session`, so neither the guard nor `get_principal` takes it for a session
+  (`test_the_flow_cookie_over_https`,
+  `test_start_sets_the_flow_cookie_and_answers_the_authorization_url`).
+- **The return path** (R13, `safe_return_to`): `return_to` comes in `start`'s body and stays on the
+  server; it is kept only as a path with one leading `/`, no `//` or `\` (also percent-encoded), no
+  control or format character, at most 2048 characters, not a sign-in page, and is otherwise `/`.
+  `finish` returns it and the page navigates inside the app; no redirect carries it
+  (`test_return_to_is_kept_only_when_it_is_an_app_path`,
+  `test_callback_always_redirects_to_the_public_url`).
+- **The client secret** is a `SecretStr`, masked in Settings › Configuration, sent only to the token
+  endpoint (`client_secret_basic`, form-urlencoded per RFC 6749 2.3.1, unless the provider lists
+  only `client_secret_post`), and is in no answer, log line or audit row
+  (`test_the_client_secret_is_sent_basic_and_never_logged`, `test_secrets_are_hidden_in_errors`).
+  The access log writes the callback's query (the code and the state) as `?…`
+  (`test_callback_query_is_not_in_the_access_log`).
+- **Refusals and limits.** `start` has two limiters of its own with the passkey options' rates
+  (`test_start_is_rate_limited`). Every refusal is a 403 `OidcSignInRefused` with a `reason`
+  (`not_linked`, `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`,
+  `flow_expired`) and one `SIGN_IN_OIDC_REFUSED` row, written only when `auth_audit_limiter` admits
+  the client (`test_refusal_rows_are_rate_limited`); a provider that answers badly (another issuer
+  in discovery, a foreign token endpoint, a 302, 500 or 70 KiB answer, a metadata address) is a
+  reason, never a 500 (`test_unreachable_provider_is_a_reason_not_an_error`). Each request to the
+  provider has its own 10 s deadline; a callback with a cold cache makes up to three in a row
+  (discovery, keys, token endpoint), so it answers within about 30 s at worst. A success is
+  `SIGN_IN_OIDC` with `iss`, `sub`, the session's key id and the peer, and sets
+  `last_provider_sign_in_at`; the session is `via="oidc"` and is **no** step-up touch: a provider
+  may answer silently from its own session (an unlocked browser, a days-old IdP cookie), so a
+  provider sign-in proves no fresh presence. Provider step-up, with `prompt=login`, `max_age` and a
+  required `auth_time` (maintainer decision 5), is PR 2's; until then a linked person confirms
+  step-up with a passkey (`test_linked_person_is_signed_in`,
+  `test_a_provider_sign_in_is_no_step_up_touch`).
+- **Residuals:** a person's passkeys still sign them in after a provider sign-in (one way in per
+  linked person is PR 2); provider-initiated logout does not end a Lakana session (a non-goal).
+
 ## Git fetch hardening (M5b)
 
 `lakana_worker.git.fetch_commit` and `check_access` (one shared setup, `_prepared`) are the only
@@ -7471,7 +7612,8 @@ expected exception, and nothing else. `_fail_closed` turns any exception but its
 refusal, which would hide a bug, so the harness calls the functions under it. Its refusals are
 narrower than that list (`GUARD_REFUSALS`): `LakanaError`, `ParseError` and `TokenError`; a
 `RecursionError` only when parsing the text alone raises it too (the parser's nesting limit, not a
-walker's), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
+walker's; that parse runs `PARSE_HEADROOM` frames short of the limit, since the target's own parses
+sit a few frames deeper and a text at the edge once read as a crash, #733), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
 (`scripts/tests/test_fuzz.py`) reads `_fail_closed`'s list from its source and compares it with
 `FAIL_CLOSED_PASSES`, and runs every seed on every pull request. The guard's seeds are the statements of its own tests
 that earlier guard-fuzzing runs collected, one per sequence of token types

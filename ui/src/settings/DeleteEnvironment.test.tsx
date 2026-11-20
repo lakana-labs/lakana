@@ -122,6 +122,30 @@ describe("Delete environment", () => {
     ]);
   });
 
+  it("deleting with the files marks its row due, whatever the browser's clock says", async () => {
+    fakeWebAuthn();
+    // The server's clock is a minute behind the browser's.
+    const deleted = { ...gone(true), purge_after: new Date(Date.now() + 60_000).toISOString() };
+    const { dialog, user } = await openDelete({
+      "GET /api/v1/sign-in/session": STALE_SESSION,
+      ...STEP_UP_ROUTES,
+      "DELETE /api/v1/environments/dev": { status: 200, body: deleted },
+      "GET /api/v1/environments": (request) => ({
+        status: 200,
+        body: request.path.endsWith("?deleted=true") ? [deleted] : [],
+      }),
+    });
+
+    await user.click(within(dialog).getByRole("radio", { name: /Delete the files at the next/ }));
+    await user.type(within(dialog).getByRole("textbox", { name: "Type dev to delete it" }), "dev");
+    await user.click(within(dialog).getByRole("button", { name: "Delete environment" }));
+
+    expect(
+      await screen.findByText("Its files are deleted at the next clean-up."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore dev" })).not.toBeInTheDocument();
+  });
+
   it("a cancelled touch deletes nothing", async () => {
     const webauthn = fakeWebAuthn();
     webauthn.get.mockRejectedValue(new DOMException("Cancelled.", "NotAllowedError"));
