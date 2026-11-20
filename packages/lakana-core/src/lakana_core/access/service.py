@@ -50,6 +50,7 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.ci_oidc.rules import CiTrustRuleService
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.service import GrantService, active_instance_admin_ids
 from lakana_core.identifiers import TableRef, environment_name_problem
 from lakana_core.identity.sessions import require_step_up
@@ -768,6 +769,7 @@ class AccessService:
             for change in plan.creates
             if isinstance(change.entry, ServiceAccountEntry)
         }
+        lock_admin_count(self._session)
         names = self._names(set(active_instance_admin_ids(self._session)))
         problems = lockout_problems(
             file_name=plan.file_name,

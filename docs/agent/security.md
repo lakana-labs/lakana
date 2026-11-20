@@ -4135,6 +4135,30 @@ is the only way to change access there, so that what was reviewed in git is what
   waits for a running apply and cannot slip between its plan and its commit; guarded changes do
   not wait for one another. Inside an apply (`ACCESS_APPLY_KEY` in `session.info`) the guard
   returns at once: the apply already holds the exclusive lock and is the file.
+- **The administrator count has a lock of its own (#724).** Guarded changes share the access lock,
+  so it does not serialise two of them. Every change that can lower the number of active
+  administrators therefore takes `lock_admin_count` (`lakana_core.grants.admin_lock`,
+  `pg_advisory_xact_lock(ADMIN_COUNT_LOCK_KEY)`, exclusive, until the transaction ends) before it
+  counts, and before any read of something another change may alter that decides whether to count (a
+  grant's role and kind never change, and an early return lowers nothing). That covers revoking an
+  instance ADMIN grant, held directly or through a group; deactivating a principal (both through
+  `assert_admin_headroom`, also inside an apply); removing any member from any group, which takes
+  the lock before it asks whether the group holds ADMIN (a grant to the group may commit right after
+  that question, and a count that relies on the member must then wait for the removal); and an
+  apply's own last check (`AccessService._recheck_lockout`). Under READ COMMITTED the second change
+  waits for the first's commit, counts what it left and is refused with `LAST_ADMIN_MESSAGE`.
+  Changes that raise the count (a grant, a new member, a reactivation) take no lock: a count never
+  sees them before they commit, so on an instance with an administrator they can only make a check
+  refuse, never let one through. (On an instance with no administrator at all,
+  `assert_admin_headroom` lets every change through anyway.) Deleting a group needs no lock, since
+  it is refused while the group holds any active grant. Removing a passkey does not count
+  administrators today. The order is the access lock first, then this one: an apply holds the access
+  lock alone and takes this one inside it. A later rule of the same kind (the unlinked
+  administrators of OIDC sign-in) counts under this lock too. On SQLite nothing is taken, as with
+  the access lock. `packages/lakana-core/tests/test_admin_count_postgres_integration.py` races two
+  removals per pair on a real Postgres, and a grant to a group against the removal of its member and
+  the revoke of the other administrator; each test commits the first change only once
+  `pg_stat_activity` shows the second waiting on the lock, or finished.
 - **The override needs ADMIN.** `?override_managed=true&override_reason=...` (the server's
   `get_managed_write_principal`; one without the other is 422) sets
   `PrincipalRef.managed_override_reason`. The guard then asks `holds_instance_admin` itself, even
