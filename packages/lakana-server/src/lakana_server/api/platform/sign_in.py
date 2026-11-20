@@ -192,7 +192,9 @@ def describe_link(
     Needs no credential and never uses the link: the sign-in page shows "Sign in as X" (or
     "Join as X") from this, so a link preview or a mail scanner opening the page cannot use
     it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired,
-    withdrawn or unknown link answers 410 with `state` and what to do next.
+    withdrawn or unknown link answers 410 with `state` and what to do next. With OIDC sign-in
+    on, `offers_provider` says to offer "Sign in with <provider>" for an invite or a recovery
+    link, and `provider_only` that a recovery link of a linked person works only that way.
 
     Parameters
     ----------
@@ -227,6 +229,10 @@ def describe_link(
         name=described.name,
         display_name=described.display_name,
         state=described.state,
+        provider_only=described.provider_only,
+        offers_provider=(
+            request.app.state.oidc_provider is not None and described.kind in ("invite", "recovery")
+        ),
     )
 
 

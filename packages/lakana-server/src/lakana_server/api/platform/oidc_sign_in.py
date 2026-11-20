@@ -23,13 +23,28 @@ refused sign-ins. The access log drops the callback's query (`lakana_server.log_
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Mapping
+
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.errors import OidcOff, OidcRefusal, OidcSignInRefused
+from lakana_core.errors import (
+    ConflictError,
+    LinkUnusableError,
+    OidcOff,
+    OidcRefusal,
+    OidcSignInRefused,
+    ValidationError,
+)
+from lakana_core.identity.links import LinkService
 from lakana_core.identity.oidc_flows import (
+    IN_SESSION_PURPOSES,
+    LINK_PURPOSES,
+    SIGN_IN_PURPOSES,
+    FlowPurpose,
     OidcFlowStore,
     ProviderIdentity,
     principal_for,
@@ -37,8 +52,8 @@ from lakana_core.identity.oidc_flows import (
     sign_in_outcome,
 )
 from lakana_core.identity.passkeys import OPEN_BODY_LIMIT
-from lakana_core.identity.sessions import SessionService
-from lakana_core.models import AuditEventType
+from lakana_core.identity.sessions import SessionService, StartedSession
+from lakana_core.models import AuditEventType, SignInLink
 from lakana_core.oidc.provider import OidcProvider, ProviderUnavailable
 from lakana_server.api.platform.schemas import (
     OidcInfoOut,
@@ -62,7 +77,14 @@ from lakana_server.browser_session import (
     set_flow_cookie,
     set_session_cookie,
 )
-from lakana_server.deps import get_clock, get_session, get_session_service, record_refused_oidc
+from lakana_server.deps import (
+    get_clock,
+    get_link_service,
+    get_session,
+    get_session_service,
+    record_failed_link,
+    record_refused_oidc,
+)
 from lakana_server.errors import TooManyAttemptsError
 from lakana_server.oidc_flow import (
     MAX_PARAMETER,
@@ -78,6 +100,12 @@ OIDC_OFF = (
     "Sign in with a passkey instead."
 )
 """The 409 detail of `start` while OIDC sign-in is off."""
+
+IN_SESSION_FLOW = (
+    "This flow links or confirms a signed-in person, so it finishes in that person's session: "
+    "POST /api/v1/sign-in/oidc/finish-in-session."
+)
+"""The 409 detail of `finish` for a flow of `IN_SESSION_PURPOSES`."""
 
 
 class OidcOpenRoute(OpenSignInRoute):
@@ -152,33 +180,40 @@ def get_oidc_info(request: Request) -> OidcInfoOut:
     return OidcInfoOut(enabled=True, display_name=provider.config.shown_name)
 
 
-@open_router.post("/start", response_model=OidcStartOut, responses=errors(403, 429))
-def start_oidc_sign_in(
-    body: OidcStartIn,
+def _open_flow(
     request: Request,
     response: Response,
-    session: Session = Depends(get_session),
+    session: Session,
+    purpose: FlowPurpose,
+    return_to: str | None,
+    *,
+    principal_id: uuid.UUID | None = None,
+    session_id: uuid.UUID | None = None,
+    link_id: uuid.UUID | None = None,
+    extra: Mapping[str, str] | None = None,
 ) -> OidcStartOut:
-    """Start signing in through the identity provider.
-
-    Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser
-    with a cookie, and answers the provider's sign-in page: send the browser there. The page to
-    open afterwards (`return_to`) stays on the server; anything but a path inside the
-    interface becomes `/`. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused`
-    (`reason: provider_unreachable`) when the provider cannot be reached, and 429 past
-    `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or
-    `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.
+    """Open a flow, bind it to the browser and build the provider's authorization URL.
 
     Parameters
     ----------
-    body
-        ``{"return_to"}``, optional.
     request
-        The request, for the client's address and the provider client.
+        The request, for the provider client, the settings and the clock.
     response
         The response, to set the flow cookie on.
     session
-        The request's database session.
+        The request's database session; committed here.
+    purpose
+        What the flow is for.
+    return_to
+        The page to come back to; anything but a path inside the interface becomes ``/``.
+    principal_id
+        The person the flow is for, when known.
+    session_id
+        The browser session the flow belongs to, for a link or a step-up.
+    link_id
+        The sign-in link's row id, for an invite or a recovery link.
+    extra
+        Further authorization parameters (``prompt``, ``max_age``).
 
     Returns
     -------
@@ -187,19 +222,10 @@ def start_oidc_sign_in(
 
     Raises
     ------
-    TooManyAttemptsError
-        429 past either rate.
     OidcSignInRefused
         403 ``provider_unreachable`` when the provider's metadata cannot be read.
     """
     provider = _provider(request)
-    client = request.client.host if request.client else "unknown"
-    admitted, _ = request.app.state.oidc_start_limiter.admit(client_bucket(client))
-    if admitted:
-        network = request.app.state.oidc_start_network_limiter
-        admitted, _ = network.admit(network_bucket(client))
-    if not admitted:
-        raise TooManyAttemptsError(TOO_MANY_ATTEMPTS)
     meta = None
     try:
         meta = provider.metadata()
@@ -209,7 +235,11 @@ def start_oidc_sign_in(
         raise OidcSignInRefused("provider_unreachable")
     origin = request.app.state.settings.public_origin()
     opened = OidcFlowStore(session, clock=get_clock(request)).open(
-        "sign_in", safe_return_to(body.return_to)
+        purpose,
+        safe_return_to(return_to),
+        principal_id=principal_id,
+        session_id=session_id,
+        link_id=link_id,
     )
     session.commit()
     config = provider.config
@@ -221,9 +251,123 @@ def start_oidc_sign_in(
         state=opened.state,
         nonce=opened.nonce,
         code_verifier=opened.code_verifier,
+        extra=extra,
     )
     set_flow_cookie(response, origin, opened.browser_secret)
     return OidcStartOut(authorization_url=url)
+
+
+def _checked_link(
+    request: Request, session: Session, links: LinkService, body: OidcStartIn
+) -> SignInLink:
+    """Check the invite or recovery link a start names, without using it.
+
+    Parameters
+    ----------
+    request
+        The request, for the audit limiter.
+    session
+        The request's database session.
+    links
+        The link service.
+    body
+        The start's body, with `purpose` ``invite`` or ``recovery``.
+
+    Returns
+    -------
+    SignInLink
+        The open link.
+
+    Raises
+    ------
+    ValidationError
+        422 without both halves of the link, or for a link of another kind than `purpose`.
+    LinkUnusableError
+        410 as `/links/redeem` answers: ``unknown`` for an unknown link or a wrong secret.
+    """
+    if not body.link_id or not body.secret:
+        raise ValidationError(
+            f"purpose {body.purpose} needs the link's link_id and secret (the l= and s= halves "
+            "after the # of the link)."
+        )
+    try:
+        row = links.check_open(body.link_id, body.secret)
+    except LinkUnusableError:
+        record_failed_link(request, session, body.link_id)
+        raise
+    if row.kind != body.purpose:
+        raise ValidationError(
+            f"This is no {body.purpose} link: only an invite (purpose invite) or a recovery "
+            "link (purpose recovery) can be used through the identity provider."
+        )
+    return row
+
+
+@open_router.post("/start", response_model=OidcStartOut, responses=errors(403, 410, 429))
+def start_oidc_sign_in(
+    body: OidcStartIn,
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_session),
+    links: LinkService = Depends(get_link_service),
+) -> OidcStartOut:
+    """Start signing in through the identity provider.
+
+    Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser
+    with a cookie, and answers the provider's sign-in page: send the browser there. The page to
+    open afterwards (`return_to`) stays on the server; anything but a path inside the
+    interface becomes `/`. With `purpose` ``invite`` or ``recovery`` and the link's
+    `link_id` and `secret`, the flow accepts that invite or uses that recovery link: the link
+    is checked here (410 with `state` as `/links/redeem` answers, a wrong secret like an
+    unknown link) and used only at the finish. Answers 409 while OIDC sign-in is off, 403
+    `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached,
+    422 for a link of another kind, and 429 past
+    `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or
+    `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.
+
+    Parameters
+    ----------
+    body
+        ``{"return_to", "purpose", "link_id", "secret"}``, each optional.
+    request
+        The request, for the client's address and the provider client.
+    response
+        The response, to set the flow cookie on.
+    session
+        The request's database session.
+    links
+        The link service, to check an invite or a recovery link.
+
+    Returns
+    -------
+    OidcStartOut
+        The provider's authorization URL for this flow.
+
+    Raises
+    ------
+    TooManyAttemptsError
+        429 past either rate.
+    """
+    _provider(request)
+    client = request.client.host if request.client else "unknown"
+    admitted, _ = request.app.state.oidc_start_limiter.admit(client_bucket(client))
+    if admitted:
+        network = request.app.state.oidc_start_network_limiter
+        admitted, _ = network.admit(network_bucket(client))
+    if not admitted:
+        raise TooManyAttemptsError(TOO_MANY_ATTEMPTS)
+    if body.purpose == "sign_in":
+        return _open_flow(request, response, session, "sign_in", body.return_to)
+    row = _checked_link(request, session, links, body)
+    return _open_flow(
+        request,
+        response,
+        session,
+        body.purpose,
+        body.return_to,
+        principal_id=row.principal_id,
+        link_id=row.id,
+    )
 
 
 @router.get(
@@ -276,18 +420,25 @@ def finish_oidc_sign_in(
     response: Response,
     session: Session = Depends(get_session),
     sessions: SessionService = Depends(get_session_service),
+    links: LinkService = Depends(get_link_service),
 ) -> OidcSignInOut:
     """Finish signing in through the identity provider, after the callback.
 
     Needs no credential: the browser's flow cookie and the callback's checks are the proof. The
     interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is
     linked to their account gets a browser session exactly as a passkey sign-in gives one: a
-    fresh session id (a session the browser had is ended) and its cookie. A provider sign-in is
-    no passkey touch: an action that needs step-up asks for one. Otherwise 403
-    `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite),
-    `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or
-    `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10
-    minutes). A flow is finished once, whatever the answer.
+    fresh session id (a session the browser had is ended) and its cookie. A flow started with
+    an invite creates the account and links it; one started with a recovery link signs its
+    person in (a linked person only as the same identity, `identity_mismatch` otherwise) and
+    links an unlinked one. The link is used here, so one withdrawn or used since the start
+    answers `link_unusable` and changes nothing. A provider sign-in is no passkey touch: an
+    action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`:
+    `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`,
+    `provider_unreachable`, `provider_refused`, `flow_expired` (no flow cookie, or a flow that
+    was used, never called back or older than 10 minutes), or when linking `identity_taken`,
+    `last_unlinked_admin` or `link_unusable`. A flow is finished once, whatever the answer. 409
+    for a flow that links or confirms a signed-in person: that one finishes at
+    `/finish-in-session`.
 
     Parameters
     ----------
@@ -299,6 +450,8 @@ def finish_oidc_sign_in(
         The request's database session.
     sessions
         The session service.
+    links
+        The link service, for an invite or a recovery link.
 
     Returns
     -------
@@ -309,12 +462,17 @@ def finish_oidc_sign_in(
     ------
     OidcSignInRefused
         403 with the reason, when nobody is signed in.
+    ConflictError
+        409 for a flow that finishes in a session (`IN_SESSION_FLOW`); it stays usable there.
     """
     _provider(request)
     origin = request.app.state.settings.public_origin()
     clock = get_clock(request)
-    browser = request.cookies.get(flow_cookie_name(origin)) or ""
-    flow = OidcFlowStore(session, clock=clock).finish(browser[:MAX_PARAMETER])
+    browser = (request.cookies.get(flow_cookie_name(origin)) or "")[:MAX_PARAMETER]
+    store = OidcFlowStore(session, clock=clock)
+    if store.pending_purpose(browser) in IN_SESSION_PURPOSES:
+        raise ConflictError(IN_SESSION_FLOW)
+    flow = store.finish(browser, purposes=SIGN_IN_PURPOSES)
     found = sign_in_outcome(flow.outcome if flow is not None else None)
     session.commit()
     if not isinstance(found, ProviderIdentity):
@@ -322,31 +480,32 @@ def finish_oidc_sign_in(
         if flow is None or flow.outcome is None:
             record_refused_oidc(request, session, found)
         raise OidcSignInRefused(found)
-    principal = principal_for(session, found)
-    if principal is None or not principal.is_active:
-        reason: OidcRefusal = "not_linked" if principal is None else "deactivated"
-        record_refused_oidc(request, session, reason, iss=found.issuer, sub=found.subject)
-        raise OidcSignInRefused(reason)
+    assert flow is not None  # nosec B101 -- an identity comes only from a flow's outcome
     peer = request.client.host if request.client else "unknown"
-    started = sessions.start(
-        principal.id,
-        via="oidc",
-        replacing=request.cookies.get(cookie_name(origin)) or None,
-        peer=peer,
-        user_agent=request.headers.get("user-agent", ""),
-        # A provider can answer silently from its own session, so a provider sign-in proves
-        # no fresh presence and is no step-up touch; provider step-up (prompt=login, max_age,
-        # auth_time) is PR 2's.
-        touched=False,
-    )
+    replacing = request.cookies.get(cookie_name(origin)) or None
+    user_agent = request.headers.get("user-agent", "")
+    if flow.purpose in LINK_PURPOSES:
+        try:
+            started = links.claim_for_provider(
+                flow.link_id, found, replacing=replacing, peer=peer, user_agent=user_agent
+            ).started
+        except OidcSignInRefused as refused:
+            record_refused_oidc(
+                request, session, refused.reason, iss=found.issuer, sub=found.subject
+            )
+            raise
+    else:
+        started = _sign_in(request, session, sessions, found, replacing=replacing, peer=peer)
     now = clock()
-    principal.last_provider_sign_in_at = now
-    principal.oidc_email, principal.oidc_name = found.email, found.name
-    AuditService(session).record(
-        principal.id,
-        AuditEventType.SIGN_IN_OIDC,
-        detail={"iss": found.issuer, "sub": found.subject, "key_id": started.key_id, "peer": peer},
-    )
+    detail: dict[str, str] = {
+        "iss": found.issuer,
+        "sub": found.subject,
+        "key_id": started.key_id,
+        "peer": peer,
+    }
+    if flow.link_id is not None:
+        detail["link_id"] = str(flow.link_id)
+    AuditService(session).record(started.principal.id, AuditEventType.SIGN_IN_OIDC, detail=detail)
     session.commit()
     lifetime = started.absolute_expires_at - now
     set_session_cookie(
@@ -354,7 +513,62 @@ def finish_oidc_sign_in(
     )
     clear_flow_cookie(response, origin)
     return OidcSignInOut(
-        name=started.principal.name,
-        csrf_token=started.csrf_token,
-        return_to=flow.return_to if flow is not None else "/",
+        name=started.principal.name, csrf_token=started.csrf_token, return_to=flow.return_to
     )
+
+
+def _sign_in(
+    request: Request,
+    session: Session,
+    sessions: SessionService,
+    found: ProviderIdentity,
+    *,
+    replacing: str | None,
+    peer: str,
+) -> StartedSession:
+    """Start the session of the person linked to a verified identity; the caller commits.
+
+    Parameters
+    ----------
+    request
+        The request, for the audit limiter and the `User-Agent`.
+    session
+        The request's database session.
+    sessions
+        The session service.
+    found
+        The identity the provider verified.
+    replacing
+        The session cookie the browser presented, if any.
+    peer
+        The client's address.
+
+    Returns
+    -------
+    StartedSession
+        The new session.
+
+    Raises
+    ------
+    OidcSignInRefused
+        ``not_linked`` or ``deactivated``, audited.
+    """
+    principal = principal_for(session, found)
+    if principal is None or not principal.is_active:
+        reason: OidcRefusal = "not_linked" if principal is None else "deactivated"
+        record_refused_oidc(request, session, reason, iss=found.issuer, sub=found.subject)
+        raise OidcSignInRefused(reason)
+    started = sessions.start(
+        principal.id,
+        via="oidc",
+        replacing=replacing,
+        peer=peer,
+        user_agent=request.headers.get("user-agent", ""),
+        # A provider can answer silently from its own session, so a provider sign-in proves
+        # no fresh presence and is no step-up touch; that is the provider step-up's
+        # (prompt=login, max_age, auth_time).
+        touched=False,
+    )
+    principal.last_provider_sign_in_at = get_clock(request)()
+    principal.oidc_email, principal.oidc_name = found.email, found.name
+    return started

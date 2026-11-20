@@ -12,6 +12,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
+from oidc_link_test_helpers import ISSUER, RP_ID, identity, store_passkey
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -30,7 +31,6 @@ from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.notices import NoticeService
-from lakana_core.identity.oidc_flows import ProviderIdentity
 from lakana_core.identity.oidc_links import (
     OidcLinkService,
     is_linked,
@@ -54,8 +54,6 @@ from lakana_core.models import (
 )
 
 START = datetime(2026, 11, 20, 9, 0, tzinfo=UTC)
-ISSUER = "https://idp.example.com/realms/lakana"
-RP_ID = "localhost"
 
 
 class _Clock:
@@ -74,24 +72,6 @@ class _Clock:
             The time set.
         """
         return self.now
-
-
-def identity(subject: str = "sub-1") -> ProviderIdentity:
-    """Build a verified provider identity.
-
-    Parameters
-    ----------
-    subject
-        The ``sub``.
-
-    Returns
-    -------
-    ProviderIdentity
-        With the test issuer, an e-mail address and a name.
-    """
-    return ProviderIdentity(
-        issuer=ISSUER, subject=subject, email=f"{subject}@example.com", name=subject, auth_time=None
-    )
 
 
 class World:
@@ -161,22 +141,7 @@ class World:
         Passkey
             The row.
         """
-        key = Passkey(
-            id=uuid.uuid4(),
-            principal_id=row.id,
-            credential_id=uuid.uuid4().hex,
-            public_key=b"k",
-            sign_count=0,
-            rp_id=RP_ID,
-            name="Passkey",
-            backup_eligible=False,
-            created_at=self.clock(),
-            created_user_agent="pytest",
-            disabled_at=self.clock() if disabled else None,
-        )
-        self.session.add(key)
-        self.session.commit()
-        return key
+        return store_passkey(self.session, row, self.clock(), disabled=disabled)
 
     @staticmethod
     def ref(row: Principal) -> PrincipalRef:

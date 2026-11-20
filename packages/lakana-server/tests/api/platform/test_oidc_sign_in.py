@@ -787,3 +787,186 @@ def test_a_provider_sign_in_is_no_step_up_touch(
     # Minting a token needs step-up: the provider sign-in did not grant it.
     r = client.post("/api/v1/principals/alice/tokens", headers=headers, json={"name": "t"})
     assert (r.status_code, r.json()["type"]) == (403, "StepUpRequired"), r.text
+
+
+# -- invites and recovery links through the provider (#32, PR 2) -------------------------------
+
+DESCRIBE = "/api/v1/sign-in/links/describe"
+
+
+def _halves(url: str) -> tuple[str, str]:
+    """Split a sign-in link into its public id and secret.
+
+    Parameters
+    ----------
+    url
+        The link.
+
+    Returns
+    -------
+    tuple of (str, str)
+        The ``l=`` and ``s=`` halves after the ``#``.
+    """
+    values = dict(item.split("=", 1) for item in url.split("#", 1)[1].split("&"))
+    return values["l"], values["s"]
+
+
+def _invite(client: TestClient, name: str = "carol") -> tuple[str, str, str]:
+    """Issue an invite as the operator.
+
+    Parameters
+    ----------
+    client
+        The browser.
+    name
+        The invited name.
+
+    Returns
+    -------
+    tuple of (str, str, str)
+        The invite's row id, public id and secret.
+    """
+    r = client.post("/api/v1/invites", headers=AUTH_HEADER, json={"name": name})
+    assert r.status_code == 201, r.text
+    public_id, secret = _halves(r.json()["url"])
+    return r.json()["id"], public_id, secret
+
+
+def _start_with_link(client: TestClient, purpose: str, public_id: str, secret: str) -> Any:  # ruff: ignore[any-type]
+    """Start a flow with an invite or a recovery link.
+
+    Parameters
+    ----------
+    client
+        The browser.
+    purpose
+        ``invite`` or ``recovery``.
+    public_id
+        The link's public id.
+    secret
+        The link's secret.
+
+    Returns
+    -------
+    Any
+        The response.
+    """
+    return client.post(
+        START,
+        json={"purpose": purpose, "link_id": public_id, "secret": secret, "return_to": "/x"},
+    )
+
+
+def test_invite_through_the_provider_signs_in_and_links(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    _, public_id, secret = _invite(client)
+    r = _start_with_link(client, "invite", public_id, secret)
+    assert r.status_code == 200, r.text
+    [flow] = _flows(client)
+    assert (flow.purpose, flow.link_id is not None, flow.return_to) == ("invite", True, "/x")
+    code, state = fake.authorize(r.json()["authorization_url"])
+    _callback(client, code=code, state=state)
+    r = client.post(FINISH, json={})
+    assert r.status_code == 200, r.text
+    assert (r.json()["name"], r.json()["return_to"]) == ("carol", "/x")
+    value = client.cookies.get("lakana_session_8000") or ""
+    session = client.get(
+        "/api/v1/sign-in/session",
+        headers=session_headers("lakana_session_8000", value, r.json()["csrf_token"]),
+    ).json()
+    assert (session["via"], session["needs_passkey"], session["step_up_until"]) == (
+        "oidc",
+        False,
+        None,
+    )
+    assert _person(client, "carol").oidc_subject == "248289761001"
+    [event] = _events(client, AuditEventType.SIGN_IN_OIDC)
+    assert event["link_id"] == str(flow.link_id)
+    # The link's secret is never stored with the flow, audited or logged.
+    stored = repr([getattr(flow, c.key) for c in OidcFlow.__table__.columns])
+    assert secret not in stored
+    assert all(secret not in repr(e) for e in _events(client, AuditEventType.SIGN_IN_LINK_USED))
+    assert secret not in caplog.text
+
+
+def test_start_with_a_wrong_secret_is_like_unknown(client: TestClient) -> None:
+    _, public_id, _ = _invite(client)
+    r = _start_with_link(client, "invite", public_id, "wrong")
+    assert (r.status_code, r.json()["state"]) == (410, "unknown")
+    r = _start_with_link(client, "invite", "nope", "wrong")
+    assert (r.status_code, r.json()["state"]) == (410, "unknown")
+    assert _flows(client) == []
+    assert len(_events(client, AuditEventType.AUTHENTICATION_FAILED)) == 2
+
+
+def test_start_with_a_link_needs_both_halves_and_its_kind(client: TestClient) -> None:
+    _, public_id, secret = _invite(client)
+    r = client.post(START, json={"purpose": "invite", "link_id": public_id})
+    assert r.status_code == 422, r.text
+    assert "secret" in r.json()["detail"]
+    r = _start_with_link(client, "recovery", public_id, secret)
+    assert r.status_code == 422, r.text
+    assert "invite" in r.json()["detail"]
+    assert _flows(client) == []
+
+
+def test_invite_withdrawn_after_start_creates_nobody(
+    client: TestClient, fake: FakeProvider
+) -> None:
+    invite_id, public_id, secret = _invite(client)
+    r = _start_with_link(client, "invite", public_id, secret)
+    code, state = fake.authorize(r.json()["authorization_url"])
+    _callback(client, code=code, state=state)
+    assert client.delete(f"/api/v1/invites/{invite_id}", headers=AUTH_HEADER).status_code == 204
+    _refused(client.post(FINISH, json={}), "link_unusable")
+    names = {p.name for p in _all_people(client)}
+    assert "carol" not in names
+    [event] = _events(client, AuditEventType.SIGN_IN_OIDC_REFUSED)
+    assert (event["reason"], event["sub"]) == ("link_unusable", "248289761001")
+
+
+def test_recovery_of_a_linked_person_through_the_provider(
+    client: TestClient, fake: FakeProvider
+) -> None:
+    _link(client, "alice")
+    r = client.post("/api/v1/principals/alice/recovery-link", headers=AUTH_HEADER)
+    assert r.status_code == 201, r.text
+    public_id, secret = _halves(r.json()["url"])
+    r = _start_with_link(client, "recovery", public_id, secret)
+    code, state = fake.authorize(r.json()["authorization_url"], sub="someone-else")
+    _callback(client, code=code, state=state)
+    _refused(client.post(FINISH, json={}), "identity_mismatch")
+    r = _start_with_link(client, "recovery", public_id, secret)
+    code, state = fake.authorize(r.json()["authorization_url"])
+    _callback(client, code=code, state=state)
+    r = client.post(FINISH, json={})
+    assert (r.status_code, r.json()["name"]) == (200, "alice"), r.text
+
+
+def test_describe_offers_the_provider(client: TestClient) -> None:
+    _, public_id, _ = _invite(client)
+    r = client.post(DESCRIBE, json={"link_id": public_id})
+    assert (r.json()["offers_provider"], r.json()["provider_only"]) == (True, False)
+    cast(FastAPI, client.app).state.oidc_provider = None
+    r = client.post(DESCRIBE, json={"link_id": public_id})
+    assert (r.json()["offers_provider"], r.json()["provider_only"]) == (False, False)
+
+
+def _all_people(client: TestClient) -> list[Principal]:
+    """Read every principal.
+
+    Parameters
+    ----------
+    client
+        The client of the app.
+
+    Returns
+    -------
+    list of Principal
+        The rows, detached.
+    """
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine, expire_on_commit=False) as session:
+        return list(session.execute(select(Principal)).scalars())

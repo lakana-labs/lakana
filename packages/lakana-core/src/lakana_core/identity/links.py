@@ -55,6 +55,7 @@ from lakana_core.errors import (
     ConflictError,
     LinkUnusableError,
     NotFoundError,
+    OidcSignInRefused,
     PermissionDenied,
     ValidationError,
 )
@@ -67,6 +68,8 @@ from lakana_core.grants.service import (
 )
 from lakana_core.identifiers import HIDDEN_CHARACTER_CATEGORIES
 from lakana_core.identity.notices import NoticeService
+from lakana_core.identity.oidc_flows import ProviderIdentity
+from lakana_core.identity.oidc_links import OidcLinkService, is_linked
 from lakana_core.identity.sessions import (
     SessionService,
     StartedSession,
@@ -232,12 +235,16 @@ class LinkDescription:
         The person's display name, if one is known.
     state
         ``open``, ``used``, ``expired`` or ``withdrawn``.
+    provider_only
+        Whether the link can be used only through the identity provider: an administrator's
+        recovery link of a person who is linked to it (#32).
     """
 
     kind: str
     name: str
     display_name: str | None
     state: LinkState
+    provider_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -1041,8 +1048,64 @@ class LinkService:
             name = principal.name if principal is not None else ""
             display_name = principal.display_name if principal is not None else None
         return LinkDescription(
-            kind=row.kind, name=name, display_name=display_name, state=_state(row, self._clock())
+            kind=row.kind,
+            name=name,
+            display_name=display_name,
+            state=_state(row, self._clock()),
+            provider_only=self._provider_only(row, principal),
         )
+
+    def _provider_only(self, row: SignInLink, principal: Principal | None) -> bool:
+        """Say whether a link can be used only through the identity provider.
+
+        Parameters
+        ----------
+        row
+            The link.
+        principal
+            Its person, if it has one.
+
+        Returns
+        -------
+        bool
+            Whether it is a recovery link of a linked person that the server operator did not
+            issue: recovery cannot bring a passkey back for someone the provider manages.
+        """
+        return (
+            row.kind == "recovery"
+            and principal is not None
+            and is_linked(principal)
+            and not self._issued_by_operator(row)
+        )
+
+    def check_open(self, public_id: str, secret: str) -> SignInLink:
+        """Check a link before a provider flow starts with it, without using it.
+
+        Parameters
+        ----------
+        public_id
+            The link's public id.
+        secret
+            The link's secret; never stored with the flow.
+
+        Returns
+        -------
+        SignInLink
+            The open link.
+
+        Raises
+        ------
+        LinkUnusableError
+            Exactly as `redeem` would: ``unknown`` for an unknown public id or a wrong secret
+            (alike), else ``used``, ``expired`` or ``withdrawn``.
+        """
+        row = self._by_public_id(public_id)
+        if row is None or not verify_secret(secret, row.secret_hash):
+            raise LinkUnusableError("unknown")
+        state = _state(row, self._clock())
+        if state != "open":
+            raise LinkUnusableError(state)
+        return row
 
     def redeem(
         self,
@@ -1097,24 +1160,7 @@ class LinkService:
                 "Keep working as you are, or sign out first and open the link again."
             )
         now = self._clock()
-        claimed = self._session.execute(
-            update(SignInLink)
-            .where(
-                SignInLink.id == row.id,
-                SignInLink.used_at.is_(None),
-                SignInLink.withdrawn_at.is_(None),
-                SignInLink.expires_at > now,
-            )
-            .values(
-                used_at=now,
-                reserved_name=None,
-                used_peer=peer[:64],
-                used_user_agent=user_agent[:255],
-            )
-            .returning(SignInLink.id)
-            .execution_options(synchronize_session=False)
-        ).all()
-        if not claimed:
+        if not self._claim(row.id, now, peer=peer, user_agent=user_agent):
             self._session.rollback()
             self._session.refresh(row)
             state = _state(row, now)
@@ -1133,6 +1179,259 @@ class LinkService:
             self._session.rollback()
             raise
         return redeemed
+
+    def _linked_needs_provider(self, row: SignInLink) -> bool:
+        """Say whether a link's passkey path is closed because its person is linked.
+
+        Parameters
+        ----------
+        row
+            The link.
+
+        Returns
+        -------
+        bool
+            For a recovery link of a linked person that the operator did not issue.
+        """
+        if row.kind != "recovery" or row.principal_id is None:
+            return False
+        return self._provider_only(row, self._session.get(Principal, row.principal_id))
+
+    def _claim(self, link_id: uuid.UUID, now: datetime, *, peer: str, user_agent: str) -> bool:
+        """Use a link with one conditional update; the caller commits or rolls back.
+
+        Parameters
+        ----------
+        link_id
+            The link.
+        now
+            The time of use.
+        peer
+            The client's address.
+        user_agent
+            The browser's `User-Agent`.
+
+        Returns
+        -------
+        bool
+            Whether this call used it: it was unused, not withdrawn and not expired.
+        """
+        claimed = self._session.execute(
+            update(SignInLink)
+            .where(
+                SignInLink.id == link_id,
+                SignInLink.used_at.is_(None),
+                SignInLink.withdrawn_at.is_(None),
+                SignInLink.expires_at > now,
+            )
+            .values(
+                used_at=now,
+                reserved_name=None,
+                used_peer=peer[:64],
+                used_user_agent=user_agent[:255],
+            )
+            .returning(SignInLink.id)
+            .execution_options(synchronize_session=False)
+        ).all()
+        return bool(claimed)
+
+    def claim_for_provider(
+        self,
+        link_id: uuid.UUID | None,
+        identity: ProviderIdentity,
+        *,
+        replacing: str | None,
+        peer: str,
+        user_agent: str,
+    ) -> Redeemed:
+        """Use an invite or a recovery link through the identity provider, after its finish.
+
+        The link was checked at the flow's start (`check_open`) and is used here by its row id,
+        with `redeem`'s conditional update, in the transaction that links the person and starts
+        the session; one commit. An invite creates the account and links it, with no passkey.
+        A recovery link of a linked person needs that same identity at the provider; of an
+        unlinked person it links them. Either recovery ends the person's sessions and tells
+        them and every administrator, as `redeem` does, and deletes no passkey. The session
+        begins ``via="oidc"`` without a step-up touch (a provider sign-in may be silent).
+
+        Parameters
+        ----------
+        link_id
+            The link's row id, as the flow kept it (`None` for none).
+        identity
+            The identity the provider verified.
+        replacing
+            The session cookie the browser presented, if any; it is ended as ``replaced``.
+        peer
+            The client's address.
+        user_agent
+            The browser's `User-Agent`.
+
+        Returns
+        -------
+        Redeemed
+            The new session; a passkey is never needed after a provider sign-in.
+
+        Raises
+        ------
+        OidcSignInRefused
+            ``link_unusable`` when the link was used, withdrawn or expired since the start (or
+            is gone, or is no invite or recovery link); ``identity_mismatch`` for another
+            identity than a linked person's; or a refusal of
+            `lakana_core.identity.oidc_links.OidcLinkService.link`. Nothing is changed, and the
+            link stays usable unless it was used up.
+        PermissionDenied
+            When the link's issuer lapsed, or its person became an administrator and the
+            operator did not issue it: the link is closed, as `redeem` closes it.
+        ConflictError
+            For an invite whose name was taken meanwhile; the link is closed.
+        """
+        row = self._session.get(SignInLink, link_id) if link_id is not None else None
+        now = self._clock()
+        if (
+            row is None
+            or row.kind not in ISSUED_BY_ADMINS
+            or not self._claim(row.id, now, peer=peer, user_agent=user_agent)
+        ):
+            self._session.rollback()
+            raise OidcSignInRefused("link_unusable")
+        try:
+            redeemed = self._complete_for_provider(
+                row, identity, now, replacing=replacing, peer=peer, user_agent=user_agent
+            )
+            self._session.commit()
+        except _CloseLink as close:
+            self._session.rollback()
+            self._close(row.id, row.kind, close.reason)
+            raise close.error from None
+        except BaseException:
+            self._session.rollback()
+            raise
+        return redeemed
+
+    def _complete_for_provider(
+        self,
+        row: SignInLink,
+        identity: ProviderIdentity,
+        now: datetime,
+        *,
+        replacing: str | None,
+        peer: str,
+        user_agent: str,
+    ) -> Redeemed:
+        """Do what a claimed invite or recovery link does through the provider; the caller commits.
+
+        Parameters
+        ----------
+        row
+            The link, claimed by this transaction.
+        identity
+            The identity the provider verified.
+        now
+            The time of use.
+        replacing
+            The session cookie the browser presented, if any.
+        peer
+            The client's address.
+        user_agent
+            The browser's `User-Agent`.
+
+        Returns
+        -------
+        Redeemed
+            The new session.
+
+        Raises
+        ------
+        _CloseLink
+            As `_complete`: a lapsed issuer, an invite's name taken, a person who became an
+            administrator.
+        OidcSignInRefused
+            ``identity_mismatch``, or a refusal of linking.
+        """
+        self._check_issuer(row)
+        oidc = OidcLinkService(
+            self._session, self._authz, clock=self._clock, bootstrap_name=self._bootstrap_name
+        )
+        if row.kind == "invite":
+            principal = oidc.link(self._create_invitee(row), identity, via="invite")
+        else:
+            assert row.principal_id is not None  # nosec B101 -- only invites have none
+            principal = self._session.get(Principal, row.principal_id)
+            assert principal is not None  # nosec B101 -- a link's principal cascades with it
+            if self._is_or_was_admin(principal) and not self._issued_by_operator(row):
+                raise _CloseLink(
+                    PermissionDenied(
+                        f"{not_operator_recovery(principal.name)} This link was closed."
+                    ),
+                    "became_admin",
+                )
+            if not is_linked(principal):
+                oidc.link(principal.id, identity, via="recovery")
+            elif (principal.oidc_issuer, principal.oidc_subject) != (
+                identity.issuer,
+                identity.subject,
+            ):
+                raise OidcSignInRefused("identity_mismatch")
+            else:
+                principal.last_provider_sign_in_at = now
+                principal.oidc_email, principal.oidc_name = identity.email, identity.name
+            self._recover(principal, row, delete_passkeys=False)
+        started = self._sessions.start(
+            principal.id,
+            via="oidc",
+            link_id=row.id,
+            replacing=replacing,
+            peer=peer,
+            user_agent=user_agent,
+            touched=False,
+        )
+        self._record_use(row, principal, started, peer=peer, user_agent=user_agent)
+        return Redeemed(started=started, needs_passkey=False, offer_passkey=False, kind=row.kind)
+
+    def _record_use(
+        self,
+        row: SignInLink,
+        principal: Principal,
+        started: StartedSession,
+        *,
+        peer: str,
+        user_agent: str,
+    ) -> None:
+        """Bind a used link to its person and session, and audit the use; the caller commits.
+
+        Parameters
+        ----------
+        row
+            The link.
+        principal
+            Its person.
+        started
+            The session it started.
+        peer
+            The client's address.
+        user_agent
+            The browser's `User-Agent`.
+        """
+        context = started.principal.session
+        assert context is not None  # nosec B101 -- a started session always has its context
+        self._session.execute(
+            update(SignInLink)
+            .where(SignInLink.id == row.id)
+            .values(principal_id=principal.id, session_id=context.session_id)
+            .execution_options(synchronize_session=False)
+        )
+        AuditService(self._session).record(
+            principal.id,
+            AuditEventType.SIGN_IN_LINK_USED,
+            detail={
+                "kind": row.kind,
+                "link_id": str(row.id),
+                "principal": principal.name,
+                "peer": peer[:64],
+                "user_agent": user_agent[:255],
+            },
+        )
 
     def _withdraw_if_open(self, link_id: uuid.UUID) -> bool:
         """Withdraw a link unless it was used or withdrawn already; the caller audits and commits.
@@ -1361,25 +1660,7 @@ class LinkService:
             user_agent=user_agent,
             touched=False,
         )
-        context = started.principal.session
-        assert context is not None  # nosec B101 -- a started session always has its context
-        self._session.execute(
-            update(SignInLink)
-            .where(SignInLink.id == row.id)
-            .values(principal_id=principal_id, session_id=context.session_id)
-            .execution_options(synchronize_session=False)
-        )
-        AuditService(self._session).record(
-            principal_id,
-            AuditEventType.SIGN_IN_LINK_USED,
-            detail={
-                "kind": kind,
-                "link_id": str(row.id),
-                "principal": principal.name,
-                "peer": peer[:64],
-                "user_agent": user_agent[:255],
-            },
-        )
+        self._record_use(row, principal, started, peer=peer, user_agent=user_agent)
         usable = has_passkey(
             self._session, principal_id, rp_id=urlsplit(self._origin).hostname or ""
         )
@@ -1437,7 +1718,9 @@ class LinkService:
         )
         return principal.id
 
-    def _recover(self, principal: Principal, row: SignInLink) -> None:
+    def _recover(
+        self, principal: Principal, row: SignInLink, *, delete_passkeys: bool = True
+    ) -> None:
         """Remove a person's passkeys, end their sessions and tell them and every administrator.
 
         Parameters
@@ -1446,8 +1729,12 @@ class LinkService:
             The person recovered.
         row
             The recovery link.
+        delete_passkeys
+            Whether the passkeys go: not for a recovery through the identity provider, which
+            brings no passkey back.
         """
-        self._session.execute(delete(Passkey).where(Passkey.principal_id == principal.id))
+        if delete_passkeys:
+            self._session.execute(delete(Passkey).where(Passkey.principal_id == principal.id))
         self._sessions.end_for_principal(principal.id, "recovery", commit=False)
         notices = NoticeService(self._session, clock=self._clock)
         detail = {"name": principal.name, "link_id": str(row.id)}

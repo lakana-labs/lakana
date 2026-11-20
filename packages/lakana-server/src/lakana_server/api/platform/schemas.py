@@ -7226,12 +7226,22 @@ class LinkDescriptionOut(BaseModel):
         The person's display name, if one is known.
     state
         Always ``open`` here; a link that cannot be used answers 410 with its state.
+    provider_only
+        Whether this link can be used only through the identity provider: an administrator's
+        recovery link for a person linked to it. `/links/redeem` then answers 403
+        `ProviderSignInRequired`; start the provider's sign-in with the link instead
+        (`POST /api/v1/sign-in/oidc/start`, `purpose: recovery`).
+    offers_provider
+        Whether the sign-in page offers "Sign in with <provider>" for this link: an invite or a
+        recovery link while OIDC sign-in is on.
     """
 
     kind: str
     name: str
     display_name: str | None
     state: str
+    provider_only: bool = False
+    offers_provider: bool = False
 
 
 class SignInOut(BaseModel):
@@ -7284,11 +7294,24 @@ class OidcStartIn(BaseModel):
         The page of the interface to open after signing in, as a path such as
         ``/catalog/prod``. Anything that is not a path inside the interface (another site, a
         sign-in page, more than 2048 characters) is replaced by ``/``.
+    purpose
+        ``sign_in`` (the default) for a person already linked; ``invite`` to accept an invite,
+        or ``recovery`` to use a recovery link, through the provider: both need `link_id` and
+        `secret`.
+    link_id
+        The link's public id (``l=`` after the ``#``), with `purpose` ``invite`` or
+        ``recovery``.
+    secret
+        The link's secret (``s=``), with `link_id`. Checked here and never stored, logged or
+        audited: the flow keeps only the link's row id, and the link is used at the finish.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     return_to: str | None = Field(default=None, max_length=4096)
+    purpose: Literal["sign_in", "invite", "recovery"] = "sign_in"
+    link_id: str | None = Field(default=None, min_length=1, max_length=64)
+    secret: str | None = Field(default=None, min_length=1, max_length=128, repr=False)
 
 
 class OidcStartOut(BaseModel):
