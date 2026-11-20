@@ -1787,7 +1787,8 @@ class BrowserSession:
     id
         The session's id.
     via
-        How it began: `setup`, `invite`, `recovery`, `local` or `passkey`.
+        How it began: `setup`, `invite`, `recovery`, `local`, `passkey` or `oidc` (the
+        organisation's identity provider).
     created_at
         When it began.
     last_seen_at
