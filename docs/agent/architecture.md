@@ -694,6 +694,16 @@ queueing (M5c3) and cron (M5d) plug into the tick.
   for a set-back clears the code with the text, and the worker that sets the table back ends the
   task with a code of its own (`task_checks._set_back_code`: the stored memory stop's, else
   `worker_lost`, else `cancelled`).
+- **What a Python task's failure concerned (#705).** `task_runs` and `task_attempts` also hold
+  `error_type` (`String(100)`) and `failure_connection` (`String(63)`, migration `0087`), stored
+  by `record_attempt` with the code and only for a failure (a success, a release and a cancel
+  store none); the scheduler's text (`store._apply_task`) clears both. The SDK's helpers set
+  `IngestError.connection` (`lakana.ingest._errors.names_connection`), the harness writes it as
+  the result record's `failure_connection`, and the worker keeps it only for a connection the
+  asset declares (`python_tasks`), since the record is the asset's own word. `failure` shows both;
+  `ConnectionOut.last_run_failure` is the newest failed task naming the connection after its
+  `updated_at`, while it is its asset's newest ending, for callers who may read the runs
+  (`lakana_core.runs.connection_failures`).
 - **The worker names the code where it names the kind.** `TaskFailure(kind, message, code)` takes
   the code as a required argument, a failing `TaskOutcome` carries `failure_code`, and a
   `RunOutcome(succeeded=False)` of the Python runner does too;

@@ -274,6 +274,10 @@ stands alone:
 | a word · 1 day ago | The test found something. The word is the outcome: host name, refused, timeout, TLS, not allowed, root missing, not found, credentials or failed ([the outcomes](#test-a-connection)). An outcome a newer server adds reads "failed". |
 | tested before the last change · 3 days ago | The connection was changed after its last test, so the result says nothing about it now. It has no glyph and is shown in a muted colour. |
 
+Under the status, a connection that a run failed on says "✗ last run failed on it · 2 hours ago";
+the words open that task in its run, whose page says why. See [A run that failed on a
+connection](#a-run-that-failed-on-a-connection) for when it shows.
+
 With no connection yet, the list says "No connections yet." (or "No connections in ENV yet.") and
 shows the command that creates one, and **Add connection** where you may.
 
@@ -313,11 +317,30 @@ Open a connection by its name. The page shows:
   [the outcome table](#test-a-connection), in the screen's words ("Give the secret again: Edit the
   connection and enter new values."); for those who hold `MANAGE_CONNECTION` also the worker's
   message and "by NAME"; "Tested before the last change; test it again." when the test is older
-  than the connection; and the `lakana connection test` command to copy.
+  than the connection; the run that failed on it, if any, with its full date, linked to the task,
+  and "silver.customers failed reading it; open the task to read why."; and the
+  `lakana connection test` command to copy.
 
 **Test**, **Edit** and **Delete…** are at the top, each only where you may use it, and **Test**
 is the primary action. An address that names no connection shows "This page does not exist"
 and a link back to the list.
+
+### A run that failed on a connection
+
+A test says whether a worker can reach the source; a run says whether the asset could read it. A
+connection shows the newest task that failed on it when all of these hold:
+
+- the asset's code ended with an error of a `lakana.ingest` helper (`connections.get`,
+  `files.read`, `files.list`, `rest.read`, `sql.read`) called with this connection. Each such
+  error carries the connection in `IngestError.connection`, and the run records it. An error of
+  your own client (after `connections.get`, [Anything else: your own client](../how-to/load-data-from-a-source.md#anything-else-your-own-client))
+  names no connection, and neither does `ConnectionNotDeclared`;
+- the asset declares the connection: the worker keeps only a declared name;
+- the task failed after the connection's last change: a change may be the fix, and a connection
+  deleted and made again under the same name is a new one;
+- it is still the asset's newest ending: a later run of the same asset (same repository and
+  environment) that succeeded, or failed for another reason, hides it;
+- you may read the environment's runs (`RUN` or `READ_ENVIRONMENT`, as for the run's own page).
 
 ### Add a connection
 
@@ -513,7 +536,10 @@ lakana audit list --kind connection --env dev
 `list` has a `last_test` column and `show` a `Last test:` line: `never tested`, `queued`,
 `running`, or the outcome and when it finished, followed by `(before the last change)` when the
 connection changed after it; `(server does not say)` from a server older than this CLI, which sends
-no last test. With `MANAGE_CONNECTION`, an open test also says when it was
+no last test. When a run failed on the connection ([A run that failed on a
+connection](#a-run-that-failed-on-a-connection)), `show` adds a line under it:
+`Last run:    failed on it at 2026-11-18T09:30:00+00:00: silver.customers in run RUN_ID (lakana
+runs show RUN_ID --env prod)`. With `MANAGE_CONNECTION`, an open test also says when it was
 requested (`queued at 2026-11-17T08:00:00+00:00`), and `show` adds who ran a test and its message
 (`by dana: password authentication failed ...`), and for an open test its id
 (`queued at ... (--id ID)`), which `lakana connection test NAME --id ID` shows. For an outcome other than `ok`, `show` prints
@@ -560,7 +586,8 @@ removed), `secret`, `secret_values`, and `clear`, a list of `secret` and setting
 The record, in every answer: `name`, `kind`, `address` and `settings` (with defaults filled in,
 `ca_certificate` as its fingerprint), `secret` (the secret's name, or `null`), `declared_by` (a
 list of `{"repository": ..., "asset": ...}`), `created_by` (a principal's name), `created_at`,
-`updated_at`, `environment` (its environment's name), `last_test` and `actions`. No answer of
+`updated_at`, `environment` (its environment's name), `last_test`, `actions` and
+`last_run_failure`. No answer of
 these routes holds a secret's value; only the task route above does, for the running task itself.
 
 `last_test` is the connection's newest test of any state, or `null` if it was never tested:
@@ -574,6 +601,11 @@ these routes holds a secret's value; only the task route above does, for the run
 
 A change keeps `last_test`: when its `finished_at` is before `updated_at`, it tested the connection
 as it was before the change.
+
+`last_run_failure` is `{"run_id", "asset", "finished_at"}`: the newest task that failed on the
+connection, under the rules of [A run that failed on a
+connection](#a-run-that-failed-on-a-connection), or `null`. A caller who may not read the
+environment's runs gets `null`.
 
 `actions` says what your rights allow on the connection, in this order: `test`, `update` and
 `delete` with `MANAGE_CONNECTION` on the environment, and `name_secret` with `MANAGE_SECRET` there
@@ -613,7 +645,8 @@ every environment you may read, as `GET /api/v1/connections` does; `client.conne
 returns those environments as `ConnectionEnvironment`s with `name` and `actions`.
 A `Connection` also has `environment`, `last_test` (a `LastConnectionTest` with `state`,
 `outcome` and `finished_at`, and `id`, `created_at`, `message` and `requested_by`, which are
-`None` without `MANAGE_CONNECTION`) and `actions`, a tuple of the words of `actions` above.
+`None` without `MANAGE_CONNECTION`), `actions`, a tuple of the words of `actions` above, and
+`last_run_failure` (a `ConnectionRunFailure` with `run_id`, `asset` and `finished_at`, or `None`).
 
 `client.connections.test("prod", "crm-db")` queues a test and polls it (0.5 s, growing to 2 s) until
 it is done or `timeout` (120 s) passes, and returns a `ConnectionTest` with `id`, `state`,

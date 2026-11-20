@@ -5365,6 +5365,17 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   `reason: secret_unreadable` (`decrypt_secret_row` logs why, without a value). The S1 binding
   rules above decide which secret that can be; their tests are in `test_connection_service.py`,
   and `test_connection_fetch.py` pins that a moved or revoked secret is never sent.
+- **A run that failed on a connection (#705).** `ConnectionOut.last_run_failure` names a run, a
+  task and a time, nothing of the run's message. `ConnectionService._run_failures` asks the runs'
+  own rule (`run_readers`: `RUN` or `READ_ENVIRONMENT`, `authorize_run_read`'s rule, in one
+  `permits_each` batch that audits nothing) and leaves it `null` for an environment whose runs the
+  caller may not read, so a connection never shows a run its reader cannot open; today every
+  connection reader holds `READ_ENVIRONMENT`, so the two agree, and the check keeps them so if
+  either rule changes. The failures are matched by environment and name through the connection
+  row (`runs.connection_failures`), so another environment's connection of the same name never
+  lends its runs. The name comes from the task's result record, which the asset's code writes:
+  the worker keeps it only for a connection the asset declares, so an asset can mark at most its
+  own connections, which its code reads anyway.
 - **What a reader sees of a test.** `last_test` on a connection answer (`ConnectionOut`, every
   route that answers one, and `GET /api/v1/connections`) carries `state`, `outcome` and
   `finished_at` for anyone with `READ_ENVIRONMENT`. Its `message`, `id`, time requested

@@ -768,6 +768,23 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   log's `SECRET_ROTATED` events remain the record of those. Nothing has to be done: the upgrade
   runs with the others.
 
+### A run records the connection it failed on
+
+- Migration `0087` adds `failure_connection` and `error_type` to `task_runs` and
+  `task_attempts`, and two indexes on `task_runs`. A Python task that fails with an error of a
+  `lakana.ingest` helper stores the connection the helper was called with (only one the asset
+  declares) and the exception's class name. Runs from before the upgrade keep both empty: nothing
+  recorded what they concerned. Nothing has to be done: the upgrade runs with the others. Going
+  back drops the columns and the indexes.
+- `failure` on tasks, attempts and failed runs gains `connection` and `error_type`; a connection
+  gains `last_run_failure`, the newest run that failed on it ([A run that failed on a
+  connection](../reference/connections.md#a-run-that-failed-on-a-connection)). The Connections
+  screen and `lakana connection show` show it, `lakana runs show` names the connection.
+- The SDK: every error of `lakana.ingest` has `connection`, set by the helper (`None` for
+  `ConnectionNotDeclared` and for an error your code raises). The task harness writes it into its
+  result as `failure_connection`. A task image with an older `lakana` records no connection; a
+  worker older than the server ignores the field.
+
 ### Row filters and column masks are listed in pages (breaking)
 
 - `GET /api/v1/row-filters` and `GET /api/v1/column-masks` take every filter as optional now, and
