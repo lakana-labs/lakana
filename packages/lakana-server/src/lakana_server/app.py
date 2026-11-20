@@ -22,6 +22,7 @@ from lakana_core.config import warn_about_tokens_in_url_paths
 from lakana_core.db import create_engine
 from lakana_core.grants.admin import ineffective_grants_warning
 from lakana_core.identity.sessions import utc_now
+from lakana_core.oidc.provider import OidcProvider
 from lakana_core.readiness import probe_storage, read_database
 from lakana_core.secrets.crypto import ACCEPT_FORMAT_1_WARNING
 from lakana_core.secrets.keys import EnvKeyProvider
@@ -248,6 +249,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         # One verifier per process: it holds the issuers' key cache.
         app.state.ci_oidc_verifier = IdTokenVerifier(resolved_settings.ci_oidc)
+        # One provider client per process, for the same reason; `None` while OIDC sign-in is off.
+        app.state.oidc_provider = (
+            OidcProvider(resolved_settings.oidc) if resolved_settings.oidc.enabled else None
+        )
         app.state.sign_in_audit_limiter = SignInAuditLimiter(
             resolved_settings.audit.sign_in_window_minutes * 60.0
         )
