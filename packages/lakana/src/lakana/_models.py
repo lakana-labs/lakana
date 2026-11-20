@@ -2627,9 +2627,11 @@ class HostKeyFingerprint:
     Parameters
     ----------
     type
-        The key type, such as ``ssh-ed25519``.
+        The key type, such as ``ssh-ed25519``; a certificate's ends in
+        ``-cert-v01@openssh.com``.
     fingerprint
-        Its ``SHA256:`` fingerprint, to compare with the one your git host publishes.
+        Its ``SHA256:`` fingerprint as ``ssh-keygen -l`` prints it (a certificate's is its key's),
+        to compare with the one your git host publishes.
     marker
         ``cert-authority`` for a key that signs the hosts' certificates, ``revoked`` for a key
         ssh refuses; `None` for a plain host key, and from a server that does not say.

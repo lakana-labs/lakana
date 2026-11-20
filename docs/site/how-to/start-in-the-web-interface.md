@@ -94,7 +94,9 @@ grid under the editor, with **Download CSV** and **Download spreadsheet**
 says why; when the server knows where in the SQL, the editor underlines the place, marks its line,
 and **Go to line …, column …** puts the cursor there. The names of namespaces, tables and columns
 complete as you type, pointing at a column shows its type and description, and **Format** lays the
-SQL out. Leaving the screen lets the query run on; **Recent**, beside the editor, opens it again,
+SQL out. A column completes after its table and a dot (`t.avg`) or on its own (`WHERE avg`) from
+the tables the query reads; a name that several of them have is offered once for each, named by
+its table, and goes in with it (`t.station_id`). Leaving the screen lets the query run on; **Recent**, beside the editor, opens it again,
 and **Saved** holds the queries you keep ([Save and share a query](save-and-share-a-query.md#in-the-web-interface)).
 Someone who may not run queries anywhere yet sees why, and the command to use meanwhile.
 

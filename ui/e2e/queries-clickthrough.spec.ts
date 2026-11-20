@@ -64,6 +64,35 @@ async function writeSql(page: Page, editor: Locator, sql: string): Promise<void>
 }
 
 /**
+ * Points at the column's name in the editor and requires the hover to show its type and its
+ * description.
+ *
+ * @param page - The page.
+ */
+async function expectExplained(page: Page): Promise<void> {
+  const spot = await page.evaluate((name) => {
+    const content = document.querySelector(".sql-editor")?.shadowRoot?.querySelector(".cm-content");
+    const walker = document.createTreeWalker(content ?? document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const at = (node.textContent ?? "").indexOf(name);
+      if (at >= 0) {
+        const range = document.createRange();
+        range.setStart(node, at + 2);
+        range.setEnd(node, at + 3);
+        const rect = range.getBoundingClientRect();
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      }
+    }
+    return null;
+  }, COLUMN.name);
+  expect(spot).not.toBeNull();
+  await page.mouse.move(spot?.x ?? 0, spot?.y ?? 0);
+  const hover = page.locator(".cm-tooltip-hover");
+  await expect(hover).toContainText(`${COLUMN.name} · ${COLUMN.type}`);
+  await expect(hover).toContainText(COLUMN.description);
+}
+
+/**
  * The element that holds the focus, through the editor's shadow root, as `tag.class`.
  *
  * @param page - The page.
@@ -283,42 +312,25 @@ test.describe("the Queries screen, checked by clicking through", () => {
     );
 
     // Pointing at the column's name shows its type and its description.
-    const spot = await page.evaluate((name) => {
-      const content = document
-        .querySelector(".sql-editor")
-        ?.shadowRoot?.querySelector(".cm-content");
-      const walker = document.createTreeWalker(content ?? document.body, NodeFilter.SHOW_TEXT);
-      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-        const at = (node.textContent ?? "").indexOf(name);
-        if (at >= 0) {
-          const range = document.createRange();
-          range.setStart(node, at + 2);
-          range.setEnd(node, at + 3);
-          const rect = range.getBoundingClientRect();
-          return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-        }
-      }
-      return null;
-    }, COLUMN.name);
-    expect(spot).not.toBeNull();
-    await page.mouse.move(spot?.x ?? 0, spot?.y ?? 0);
-    const hover = page.locator(".cm-tooltip-hover");
-    await expect(hover).toContainText(`${COLUMN.name} · ${COLUMN.type}`);
-    await expect(hover).toContainText(COLUMN.description);
+    await expectExplained(page);
   });
 
   test("a column's name without its table offers and explains the column too", async ({ page }) => {
-    test.skip(
-      true,
-      "The editor completes and explains a column only after its table or alias and a dot: https://github.com/lakana-labs/lakana/issues/737",
-    );
     const editor = await openQueries(page);
     await choose(page, "dev");
     await writeSql(page, editor, `SELECT * FROM silver.${TABLE.name} WHERE `);
     await page.keyboard.type("avg");
-    await expect(
-      page.locator(".cm-tooltip-autocomplete").getByRole("option", { name: COLUMN.name }),
-    ).toBeVisible();
+    // Taken with a click once selected, as above (CodeMirror's interactionDelay).
+    const column = page
+      .locator(".cm-tooltip-autocomplete")
+      .getByRole("option", { name: new RegExp(COLUMN.name, "u") });
+    await expect(column).toHaveAttribute("aria-selected", "true");
+    await column.click();
+    await expect(page.locator(".cm-content")).toHaveText(
+      `SELECT * FROM silver.${TABLE.name} WHERE ${COLUMN.name}`,
+    );
+
+    await expectExplained(page);
   });
 
   test("the arrow keys move between cells and the Value panel shows the cell's whole value", async ({
