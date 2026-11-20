@@ -39,9 +39,7 @@ const NAMED_LIMITS = [
   // reads an environment and what they may do on the instance (Repositories' rule and its
   // Connect, Edit and Delete), and the frame's stylesheet gains the panels of Status and a
   // repository's page; Status and Repositories themselves load on demand.
-  // Raised to 4.96 kB (2026-11-20): a request can be cancelled (the signal of fetch), which moved
-  // a few bytes of the shared request code into this chunk; it was 6 B over the old limit.
-  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "4.96 kB" },
+  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "4.94 kB" },
   // Measured 3.27 kB (2026-11-19) + 10 %: a repository's page (its overview, credential, host
   // keys and deploy keys, Test access with the environment picker, and the loaders of its
   // dialogs, which load when one is opened: RepositoryDialogs-, on the shared limit).
