@@ -1700,17 +1700,21 @@ def test_a_drain_during_a_query_poll_takes_no_query_queued_after_it(
 
     The main thread has seen no drain and entered its query-only poll; only then does the
     script set the drain and queue its query. The poll reads that query (it is committed
-    after the drain was set) and must leave it queued. The window is held open here; on CI
-    it opened by chance (macOS, run 42602069971).
+    after the drain was set) and must leave it queued. The window is driven by two events,
+    not by timing: the script waits until the poll has entered, and the poll waits until the
+    script has set the drain and queued its query. On CI the window used to open by chance
+    (macOS, run 42602069971), and on a slow runner the drain won before the poll ran.
     """
     world = py.world
     drain = threading.Event()
+    entered = threading.Event()
     submitted = threading.Event()
     queued: list[uuid.UUID] = []
     real_poll = poller_module.poll_iteration
     held: list[bool] = []
 
     def late(*args: object, **kwargs: object) -> bool:
+        entered.set()
         assert submitted.wait(_WAIT), "the script never queued its query"
         held.append(True)
         return real_poll(*args, **kwargs)  # ty: ignore[invalid-argument-type]
@@ -1718,6 +1722,8 @@ def test_a_drain_during_a_query_poll_takes_no_query_queued_after_it(
     monkeypatch.setattr(poller_module, "poll_iteration", late)
 
     def script(task: PythonTask, on_log: Callable[[bytes], None], stop: StopSignal) -> RunOutcome:
+        # The drain is set only once the query poll is inside its read, never before.
+        assert entered.wait(_WAIT), "the query poll never started"
         drain.set()
         with world.session() as session:
             queued.append(
