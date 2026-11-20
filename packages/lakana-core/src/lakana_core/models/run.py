@@ -169,6 +169,11 @@ class Run(Base):
     downtime or a wait one run covers them all."""
 
 
+_NAMES_A_CONNECTION = text("failure_connection IS NOT NULL")
+"""The task runs `ix_task_runs_failure_connection` holds: only a failure that names a connection,
+a few among all the task runs."""
+
+
 class TaskRun(Base):
     """One asset of one run.
 
@@ -179,7 +184,12 @@ class TaskRun(Base):
     __tablename__ = "task_runs"
     __table_args__ = (
         UniqueConstraint("run_id", "asset"),
-        Index("ix_task_runs_failure_connection", "failure_connection"),
+        Index(
+            "ix_task_runs_failure_connection",
+            "failure_connection",
+            sqlite_where=_NAMES_A_CONNECTION,
+            postgresql_where=_NAMES_A_CONNECTION,
+        ),
         Index("ix_task_runs_asset_finished_at", "asset", "finished_at"),
     )
 

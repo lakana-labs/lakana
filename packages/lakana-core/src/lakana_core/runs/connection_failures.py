@@ -22,7 +22,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import and_, exists, func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, aliased
 
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
@@ -104,21 +104,28 @@ def last_run_failures(
     -------
     dict
         Each connection's id to its `LastRunFailure`; a connection with none is absent. Equal
-        times go to the larger task id.
+        times go to the larger task id, also when deciding which ending of an asset is newest.
     """
     if not connections:
         return {}
     later_task, later_run = aliased(TaskRun), aliased(Run)
-    superseded = exists(
+    # The asset's newest ending in the failure's own environment and repository, found by walking
+    # `ix_task_runs_asset_finished_at` from the newest end: the first row that is of that
+    # environment and repository answers it, so the cost does not grow with older runs.
+    newest_ending = (
         select(later_task.id)
         .join(later_run, later_run.id == later_task.run_id)
         .where(
             later_task.asset == TaskRun.asset,
             later_task.status.in_(_ENDINGS),
-            later_task.finished_at > TaskRun.finished_at,
+            later_task.finished_at.is_not(None),
             later_run.environment_id == Run.environment_id,
             later_run.repository_id == Run.repository_id,
         )
+        .order_by(later_task.finished_at.desc(), later_task.id.desc())
+        .limit(1)
+        .correlate(TaskRun, Run)
+        .scalar_subquery()
     )
     ranked = (
         select(
@@ -143,9 +150,11 @@ def last_run_failures(
         )
         .where(
             Connection.id.in_([c.id for c in connections]),
+            # Spelled out so that the partial `ix_task_runs_failure_connection` serves the read.
+            TaskRun.failure_connection.is_not(None),
             TaskRun.status == TaskStatus.FAILED,
             TaskRun.finished_at >= Connection.updated_at,
-            ~superseded,
+            newest_ending == TaskRun.id,
         )
         .subquery()
     )

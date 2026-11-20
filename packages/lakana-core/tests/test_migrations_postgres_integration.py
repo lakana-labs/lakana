@@ -4241,6 +4241,13 @@ def test_0087_on_postgres() -> None:
                 "ix_task_runs_asset_finished_at",
                 "ix_task_runs_failure_connection",
             ]
+            partial = conn.execute(
+                sqlalchemy.text(
+                    "SELECT indexdef FROM pg_indexes"
+                    " WHERE indexname = 'ix_task_runs_failure_connection'"
+                )
+            ).scalar_one()
+            assert partial.endswith("WHERE (failure_connection IS NOT NULL)")
         migrate.downgrade(url, revision_0086)
         assert _alembic_version(engine) == revision_0086
         with engine.connect() as conn:

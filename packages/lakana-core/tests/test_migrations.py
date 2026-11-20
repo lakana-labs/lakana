@@ -6874,6 +6874,13 @@ def test_0087_adds_what_a_failure_concerns(migrated_db: MigratedDb) -> None:
             assert found["failure_connection"]["nullable"]
             assert getattr(found["failure_connection"]["type"], "length", None) == 63
         assert added <= indexes()
+        with engine.connect() as connection:
+            partial = connection.execute(
+                sa.text(
+                    "SELECT sql FROM sqlite_master WHERE name = 'ix_task_runs_failure_connection'"
+                )
+            ).scalar_one()
+        assert partial.endswith("WHERE failure_connection IS NOT NULL")
         command.downgrade(config, _REVISION_0086)
         for table in ("task_runs", "task_attempts"):
             assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
