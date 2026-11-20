@@ -12,6 +12,7 @@ from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, SecurableKind
 from lakana_core.errors import AlreadyExistsError, ConflictError, NotFoundError
 from lakana_core.grants.admin import authorize_admin_only
+from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import (
     assert_admin_headroom,
@@ -418,6 +419,9 @@ class GroupService:
         guard_change(
             self._session, p, environment=None, change=f"remove {principal_name} from {group_name}"
         )
+        # Lock before asking whether the group holds ADMIN: a grant to it may commit right
+        # after the question, and a count that relies on this member must then wait for us.
+        lock_admin_count(self._session)
         admin_group = self._grants_instance_admin(group.id)
         if admin_group:
             assert_admin_headroom(self._session, excluding_membership=(group.id, principal.id))

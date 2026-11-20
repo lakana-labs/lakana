@@ -1,22 +1,23 @@
-"""Two removals of administrators at once on a real PostgreSQL: one is refused (#724).
+"""Removals of administrators at once on a real PostgreSQL: none leaves the instance without one.
 
-Each removal runs in its own session and thread and waits, before its commit, at a barrier for
-the other. Without one lock around the count both see two administrators, both pass the barrier
-and both commit, which leaves none. With the lock the second waits for the first's commit, so
-the first times out at the barrier and commits, and the second counts again and is refused.
+The first removal runs in the test's thread and stays uncommitted after its count. The second
+runs in a thread of its own. Without the administrator-count lock it counts the first one's
+administrator as still there and commits, which leaves none. With the lock it waits for the
+first's transaction; the test sees it waiting in `pg_stat_activity` (``wait_event = 'advisory'``),
+commits the first, and the second counts again and is refused. Neither outcome depends on timing.
 """
 
 from __future__ import annotations
 
-import contextlib
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
@@ -34,9 +35,9 @@ from lakana_core.models import Grant, Principal, PrincipalType
 
 pytestmark = pytest.mark.integration
 
-_BARRIER_WAIT = 2.0
-"""Seconds a removal waits before its commit for the other to reach the same point."""
 _DONE = "done"
+_WAIT_LIMIT = 30.0
+"""Seconds the test waits at most for the second change to block or finish."""
 
 
 @pytest.fixture(scope="module")
@@ -178,55 +179,101 @@ def _removal(kind: str, admin: _Admin, actor: PrincipalRef) -> Callable[[Session
     return run
 
 
-def _race(engine: Engine, removals: list[Callable[[Session], None]]) -> list[str]:
-    """Run two removals at once, each waiting for the other before it commits.
+class _Second:
+    """A change run in a thread of its own, which commits as soon as it is through.
+
+    Parameters
+    ----------
+    engine
+        The engine; the change gets a session of its own.
+    change
+        The change, run in that session without committing.
+    """
+
+    def __init__(self, engine: Engine, change: Callable[[Session], None]) -> None:
+        """Start the change.
+
+        Parameters
+        ----------
+        engine
+            The engine.
+        change
+            The change.
+        """
+        self.outcome = ""
+        self._engine = engine
+        self._change = change
+        self._thread = threading.Thread(target=self._run)
+        self._thread.start()
+
+    def _run(self) -> None:
+        """Run the change and commit it, recording ``done`` or what it raised."""
+        with Session(self._engine) as session:
+            try:
+                self._change(session)
+                session.commit()
+            except ConflictError as refused:
+                session.rollback()
+                self.outcome = str(refused)
+                return
+            except Exception as failed:  # reported through the outcome
+                session.rollback()
+                self.outcome = repr(failed)
+                return
+            self.outcome = _DONE
+
+    def blocked_or_done(self) -> None:
+        """Wait until the change waits on an advisory lock, or has finished.
+
+        Raises
+        ------
+        AssertionError
+            When neither happens within `_WAIT_LIMIT` seconds.
+        """
+        deadline = time.monotonic() + _WAIT_LIMIT
+        while time.monotonic() < deadline:
+            if not self._thread.is_alive():
+                return
+            with self._engine.connect() as connection:
+                waiting = connection.execute(
+                    text(
+                        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
+                        " AND wait_event_type = 'Lock' AND wait_event = 'advisory'"
+                    )
+                ).scalar_one()
+            if waiting:
+                return
+            time.sleep(0.02)
+        raise AssertionError("the second change neither waited on the lock nor finished")
+
+    def finish(self) -> str:
+        """Wait for the change to end.
+
+        Returns
+        -------
+        str
+            ``done``, or the message of what it raised.
+        """
+        self._thread.join(timeout=_WAIT_LIMIT)
+        assert not self._thread.is_alive()
+        return self.outcome
+
+
+def _admin_count(engine: Engine) -> int:
+    """Count the active administrators as committed.
 
     Parameters
     ----------
     engine
         The engine.
-    removals
-        The two removals.
 
     Returns
     -------
-    list of str
-        Per removal: ``done`` when it committed, else the message of what it raised.
+    int
+        How many there are.
     """
-    barrier = threading.Barrier(len(removals))
-    outcomes = [""] * len(removals)
-
-    def run(index: int) -> None:
-        """Run one removal and record its outcome.
-
-        Parameters
-        ----------
-        index
-            Which removal.
-        """
-        with Session(engine) as session:
-            try:
-                removals[index](session)
-            except ConflictError as refused:
-                session.rollback()
-                outcomes[index] = str(refused)
-                return
-            except Exception as failed:  # reported through the outcome
-                session.rollback()
-                outcomes[index] = repr(failed)
-                return
-            with contextlib.suppress(threading.BrokenBarrierError):
-                barrier.wait(timeout=_BARRIER_WAIT)
-            session.commit()
-            outcomes[index] = _DONE
-
-    threads = [threading.Thread(target=run, args=(index,)) for index in range(len(removals))]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=60)
-    assert not any(thread.is_alive() for thread in threads)
-    return outcomes
+    with Session(engine) as session:
+        return len(active_instance_admin_ids(session))
 
 
 @pytest.mark.parametrize(
@@ -249,13 +296,54 @@ def _race(engine: Engine, removals: list[Callable[[Session], None]]) -> list[str
 def test_one_of_two_concurrent_removals_is_refused(
     engine: Engine, actor: PrincipalRef, via: tuple[str, str], kinds: tuple[str, str]
 ) -> None:
-    """Of two administrators each losing ADMIN at once, one stays: the other change is refused."""
+    """Of two administrators each losing ADMIN at once, one stays: the second change is refused."""
     with Session(engine) as session:
         admins = [_make_admin(session, actor, via=way) for way in via]
         session.commit()
-        assert len(active_instance_admin_ids(session)) == 2
-    removals = [_removal(kind, admin, actor) for kind, admin in zip(kinds, admins, strict=True)]
-    outcomes = _race(engine, removals)
-    assert sorted(outcomes) == sorted([_DONE, LAST_ADMIN_MESSAGE])
+    assert _admin_count(engine) == 2
+    first, second = (
+        _removal(kind, admin, actor) for kind, admin in zip(kinds, admins, strict=True)
+    )
     with Session(engine) as session:
-        assert len(active_instance_admin_ids(session)) == 1
+        first(session)
+        racing = _Second(engine, second)
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == LAST_ADMIN_MESSAGE
+    assert _admin_count(engine) == 1
+
+
+def test_a_member_removal_decides_under_the_lock_while_its_group_gains_admin(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #760: grant ADMIN to a group, remove its one member, revoke the other admin.
+
+    A holds ADMIN directly; group G has no grant and one member, X. T1 grants ADMIN to G. T2
+    removes X from G while T1 is uncommitted, so it sees no ADMIN on G. T1 commits. T3 revokes
+    A's grant while T2 is uncommitted and would count X through G. T3 must wait for T2 and be
+    refused, or the instance ends with no administrator.
+    """
+    allow = AllowAllAuthorization()
+    suffix = uuid.uuid4().hex[:8]
+    group, member = f"g-{suffix}", f"x-{suffix}"
+    with Session(engine) as session:
+        direct = _make_admin(session, actor, via="direct")
+        PrincipalService(session, allow).create_principal(
+            actor, name=member, type=PrincipalType.USER
+        )
+        groups = GroupService(session, allow)
+        groups.create_group(actor, name=group)
+        groups.add_member(actor, group, member)
+        session.commit()
+    assert _admin_count(engine) == 1
+    with Session(engine) as granting, Session(engine) as removing:
+        GrantService(granting, allow).grant(
+            actor, group=group, role=Role.ADMIN, kind=SecurableKind.INSTANCE, commit=False
+        )
+        GroupService(removing, allow).remove_member(actor, group, member, commit=False)
+        granting.commit()
+        racing = _Second(engine, _removal("revoke", direct, actor))
+        racing.blocked_or_done()
+        removing.commit()
+    assert racing.finish() == LAST_ADMIN_MESSAGE
+    assert _admin_count(engine) == 1
