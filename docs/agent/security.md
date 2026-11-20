@@ -187,47 +187,55 @@ sequence, so it can forge a log record or recolour a terminal.
 
 A new namespace, table, view or column name is shown in every list, breadcrumb, grant and query,
 so two that look alike but differ let one person's table pass for another's. The decision (#609,
-option A) is an allowlist, not a growing list of refused characters. Every place that creates such
-a name (`identifiers.check_new_name` for namespaces, tables, views, rename and undrop targets;
-`identifiers.check_new_column_name` for the columns of `catalog.metadata`,
-`create_or_replace_view` and `create_external_table`) runs, in order:
+option A, refined on #789): every new name gets the look-alike protection, and namespace, table
+and view names also an allowlist; a column name keeps its visible symbols. In order:
 
-1. `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp`.
-2. `refuse_outer_whitespace` (#652): no space at either end.
-3. `refuse_look_alike_characters` (#609): each character is a letter (`L*`), a decimal digit
-   (`Nd`), one of `NAME_SYMBOLS` (`_`, `-` U+002D, and the plain space U+0020 inside the name),
-   or a combining mark (`M*`) right after a letter or another such mark. Refused even when the
-   category would pass: Unicode's default-ignorable code points, which a font draws as nothing
-   (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F and
-   U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
-   U+3164, U+FFA0, which are `Lo`), U+2800 BRAILLE PATTERN BLANK, and every `Zs` but U+0020.
-   Then the name must be in Unicode NFC (`unicodedata.is_normalized`), and the message names the
-   NFC form to use. The characters are checked first, so the suggested form never holds one
-   that is refused.
+| Check | `check_new_name` (namespaces, tables, views, rename and undrop targets) | `check_new_column_name` (columns of `catalog.metadata`, `create_or_replace_view`, `create_external_table`) |
+|---|---|---|
+| `refuse_percent_in_new_name`: no `%` | yes | no |
+| `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
+| `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
+| `refuse_look_alike_characters` (#609): no character drawn as nothing, no space but U+0020, no combining mark without a letter before it; then NFC | yes | yes |
 
-Why marks are allowed: NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
+**Drawn as nothing** (`_DRAWN_AS_NOTHING`): Unicode's default-ignorable code points, refused
+whatever their category (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F
+and U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
+U+3164, U+FFA0, which are `Lo`), and U+2800 BRAILLE PATTERN BLANK. NFC keeps all of them. The
+allowlist leaves these and the spaces to the look-alike check, which names them more exactly.
+
+**NFC** (`unicodedata.is_normalized`): the message names the NFC form to use. It is checked
+last, after every character check, so the suggested form never holds a character a check refuses
+(U+2000 EN QUAD normalises to U+2002, which is refused as a space).
+
+**Why marks are allowed:** NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
 Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
-`M*` would refuse those scripts. A mark NFC leaves is therefore allowed only on a letter; a mark
-with nothing before it, on a digit (a keycap U+20E3) or on a symbol is refused, and the marks
-drawn as nothing are refused by the list above whatever comes before them.
+`M*` would refuse those scripts. A mark NFC leaves is therefore allowed only on a letter or after
+another such mark; a mark with nothing before it, on a digit (a keycap U+20E3) or on a symbol is
+refused, and the marks drawn as nothing are refused whatever comes before them.
 
-Why U+0020 stays: #652 decided that a space inside a name stays allowed, and CSV headers such as
-`Order ID` are common column names; once every other space is refused, a plain space cannot pass
-for another character. `-` is kept for names such as `daily-orders`; U+2010 HYPHEN and U+2212
-MINUS SIGN, which look like it, are refused (`Pd`, `Sm`). Nothing else is allowed: `$`, `#`,
-`(`, `²`, `Ⅻ` and every other symbol or punctuation mark are refused, so a query's unaliased
-expression (`count(*)`) needs an alias to become a column.
+**Why U+0020 stays:** #652 decided that a space inside a name stays allowed, and CSV headers such
+as `Order ID` are common column names; once every other space is refused, a plain space cannot
+pass for another character. `-` is kept for names such as `daily-orders`; in a table name
+U+2010 HYPHEN and U+2212 MINUS SIGN, which look like it, are refused (`Pd`, `Sm`), as are `$`,
+`#`, `(`, `²`, `Ⅻ` and every other symbol or punctuation mark.
 
-Not covered, accepted: letters of different scripts that look alike (Latin `o` and Cyrillic `о`)
-and compatibility forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so
-such twins are two names; the web interface does not mark them.
+**Why columns keep their symbols:** a column name comes from a query's unaliased expression
+(`count(*)`) or a file's header (`price ($)`) as often as from a person, it is shown only inside
+its table, and visible symbols do not hide or impersonate anything. So a column may hold `(`,
+`*`, `$`, `#`, `\`, `%`, U+2212 and the like; only the look-alike check applies.
+
+**Not covered, accepted:** letters of different scripts that look alike (Latin `o` and Cyrillic
+`о`) and compatibility forms (fullwidth `ｏ`): both are letters in NFC. Names are compared
+exactly, so such twins are two names; the web interface does not mark them.
 
 Existing names are never judged: lookups, listings, `NamespacePath.parse`, renames away and drops
 take any stored name, and a child namespace may be created under a stored one (pins in
-`test_look_alike_characters_in_names.py`). The web interface marks every character of the list
-above, and every `Cf`, control and separator, as `U+XXXX` (`ui/src/shell/VisibleText.tsx`,
-`INVISIBLE`), so a stored name holding one shows it. The CLI escapes only the #593 set. Other
-names (repositories, groups, tokens, secrets, package indexes, artifacts) keep rules 1 and 2.
+`test_look_alike_characters_in_names.py`). The web interface marks every character drawn as
+nothing, every space but U+0020, and every `Cf`, control and separator as `U+XXXX`
+(`ui/src/shell/VisibleText.tsx`, `INVISIBLE`), so a stored name holding one shows it. The CLI
+escapes only the #593 set. Other names (repositories, groups, tokens, secrets, package indexes,
+artifacts) keep the #593 and #652 checks only.
 
 ## Request bodies: a JSON limit, authentication first, a limit per streamed route
 

@@ -2,13 +2,16 @@
 
 Two Unicode spellings of one name (NFC and NFD) compare unequal but look the same; a combining
 grapheme joiner, a variation selector, a Hangul filler or the braille blank is drawn as nothing;
-a no-break or other wide space looks like a plain one. So a new name must be in Unicode NFC and
-may hold only letters, decimal digits, ``_``, ``-`` and the plain space, and a combining mark
-only after a letter (#609). Only a name being created is judged; a stored one keeps working.
+a no-break or other wide space looks like a plain one. So a new name, a column's included, must
+be in Unicode NFC, hold none of those, and put a combining mark only after a letter. A new
+namespace, table or view name may moreover hold only letters, decimal digits, ``_``, ``-`` and
+the plain space; a column name may hold visible symbols, such as ``count(*)`` (#609). Only a
+name being created is judged; a stored one keeps working.
 """
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from pathlib import Path
 
@@ -33,8 +36,11 @@ from lakana_core.identifiers import (
     NAME_SYMBOLS,
     NamespacePath,
     TableRef,
+    character_outside_name_allowlist,
+    check_new_column_name,
     check_new_name,
     look_alike_character,
+    refuse_characters_outside_name_allowlist,
     refuse_look_alike_characters,
 )
 from lakana_core.models import Namespace, Table, WriteMode
@@ -85,7 +91,9 @@ def test_names_of_letters_digits_and_the_allowed_symbols_are_accepted(name: str)
     """Any script's letters and decimal digits, with the marks NFC leaves, ``_``, ``-``, space."""
     assert unicodedata.is_normalized("NFC", name)
     assert look_alike_character(name) is None
-    refuse_look_alike_characters(name, what="Table name")
+    assert character_outside_name_allowlist(name) is None
+    check_new_name(name, what="Table name")
+    check_new_column_name(name)
 
 
 def test_the_allowed_symbols_are_the_documented_three() -> None:
@@ -191,15 +199,30 @@ def test_a_combining_mark_without_a_letter_before_it_is_refused(
         ("\u2212", "U+2212"),  # minus sign
     ],
 )
-def test_any_other_character_is_refused_and_the_allowed_ones_named(
+def test_any_other_character_is_refused_in_a_table_name_and_the_allowed_ones_named(
     character: str, code: str
 ) -> None:
-    """The message names the character and every character a name may hold."""
+    """The message names the character and every character such a name may hold."""
     with pytest.raises(ValidationError) as refused:
-        refuse_look_alike_characters(f"a{character}b", what="Table name")
+        refuse_characters_outside_name_allowlist(f"a{character}b", what="Table name")
     message = str(refused.value)
     assert f"holds {code} at character 2" in message
-    assert "letters, decimal digits, '_', '-' and the plain space" in message
+    assert (
+        "A new namespace, table or view name may hold only letters, decimal digits, '_', '-' "
+        "and the plain space."
+    ) in message
+    with pytest.raises(ValidationError, match=re.escape(f"holds {code}")):
+        check_new_name(f"a{character}b", what="Table name")
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["count(*)", "price ($)", "#", "a\\b", "x%", "50 \u2212 10", "area_m\xb2", "\u2160"],
+)
+def test_a_column_name_may_hold_visible_symbols(name: str) -> None:
+    """A query's unaliased expression or a file's header keeps working as a column name."""
+    assert look_alike_character(name) is None
+    check_new_column_name(name)
 
 
 def test_check_new_name_applies_the_rule_after_the_earlier_ones() -> None:
@@ -210,6 +233,14 @@ def test_check_new_name_applies_the_rule_after_the_earlier_ones() -> None:
         check_new_name("orders\xa0", what="Table name")
     with pytest.raises(ValidationError, match="NFC"):
         check_new_name(_NFD_CAFE, what="Table name")
+    # A symbol is named before the NFC form, so the suggested spelling is one that is allowed.
+    with pytest.raises(ValidationError, match="U\\+0024"):
+        check_new_name("$cafe\u0301", what="Table name")
+    # The braille blank is a symbol, but its look-alike message says more.
+    with pytest.raises(ValidationError, match="drawn as nothing"):
+        check_new_name("a\u2800", what="Table name")
+    with pytest.raises(ValidationError, match="space other than the plain space"):
+        check_new_name("a\xa0b", what="Table name")
 
 
 def test_every_way_of_creating_a_name_refuses_a_look_alike(
@@ -272,6 +303,14 @@ def test_a_new_column_with_a_look_alike_is_refused_everywhere(
     catalog: CatalogService, principal: PrincipalRef, tmp_path: Path
 ) -> None:
     """A new table's column, a write's new column, a view's and an external table's."""
+    catalog.create_table(
+        principal,
+        _ref("gold.symbols"),
+        schema=Schema(
+            NestedField(1, "count(*)", LongType(), required=False),
+            NestedField(2, "price ($)", LongType(), required=False),
+        ),
+    )
     with pytest.raises(ValidationError, match=r"Column name 'id\\u034f' holds U\+034F"):
         catalog.create_table(
             principal,

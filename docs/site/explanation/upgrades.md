@@ -449,35 +449,28 @@ namespace's path and an undrop's new name without their outer spaces; it now sen
 so it and the CLI create the same names and refuse the same ones with the same sentence. Existing
 names are not touched: they stay readable and writable, and can be renamed or dropped.
 
-### New names hold only letters, digits, `_`, `-` and spaces (breaking)
+### New table names hold only letters, digits, `_`, `-` and spaces (breaking)
 
-A new namespace, table, view or column name may now hold only letters of any script, decimal
-digits, `_`, `-` and the plain space (inside the name, as before), and a combining mark only right
-after a letter, such as the vowel signs of Hindi or Arabic. It must also be in Unicode NFC, the
-composed spelling: `cafe` followed by U+0301 COMBINING ACUTE ACCENT looks like `café` but is
-another name. Some characters are refused even though they are letters or marks, because they are
-drawn as nothing: the combining grapheme joiner U+034F, the variation selectors (U+FE00 to
-U+FE0F, U+E0100 to U+E01EF), the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0) and the braille
-blank U+2800. Every space but the plain one is refused too, such as the no-break space U+00A0 or
-the ideographic space U+3000. A name made of such characters looks empty, or like another
-table's.
+A new namespace, table or view name may now hold only letters of any script, decimal digits, `_`,
+`-` and the plain space (inside the name, as before), with the accents and vowel signs that belong
+to its letters. A symbol or punctuation mark such as `$`, `#` or `(` is refused, for example
+`Table name 'price$' holds U+0024 at character 6, which is neither a letter nor a decimal digit. A
+new namespace, table or view name may hold only letters, decimal digits, '_', '-' and the plain
+space.` Column names keep their symbols: `count(*)` and `price ($)` work as before.
 
-The rule applies wherever the invisible characters above are refused. The refusal names the
-character, or the NFC spelling to use, for example `Column name 'price $' holds U+0024 at
-character 7, a character that is neither a letter nor a decimal digit, so the name could look like
-another one. A new name may hold only letters, decimal digits, '_', '-' and the plain space, and a
-combining mark only after a letter.` or `Table name 'cafe\u0301' is not in Unicode NFC, the
-composed spelling, so it looks like 'caf\xe9' but is a different name. Use 'caf\xe9' instead.`
+Every new name, a column's included, must also be in Unicode NFC, the composed spelling: `cafe`
+followed by U+0301 COMBINING ACUTE ACCENT looks like `café` but is another name, and the refusal
+names the spelling to use (`… Use 'caf\xe9' instead.`). Characters drawn as nothing (the
+combining grapheme joiner U+034F, the variation selectors, the Hangul fillers U+3164 and others,
+the braille blank U+2800), a space other than the plain one (such as the no-break space U+00A0)
+and an accent with no letter before it are refused in every new name too.
 
 Earlier releases accepted such names (422 from the REST API now, a refused commit from an Iceberg
-client, a failed task for a deploy or load). Most often this hits a column: a query's expression
-without an alias (`count(*)`, `sum(amount)`), or a file's header such as `amount ($)` or `#`. To
-migrate, give the column an alias (`count(*) AS orders`), or clean the header of the file an
-external table reads. Existing names are not touched: they stay readable and writable, a schema
-change or redeploy may keep a column it already has, and they can be renamed or dropped. The web
-interface now marks the characters drawn as nothing and the spaces other than the plain one as
-`U+XXXX` too, wherever it already marked invisible characters. Repository, group, token, secret,
-package index and artifact names keep the rules above and are not judged by this one.
+client, a failed task for a deploy or load). To migrate, rename the asset file or choose another
+name. Existing names are not touched: they stay readable and writable and can be renamed or
+dropped. The web interface now marks the characters drawn as nothing and the spaces other than
+the plain one as `U+XXXX`, wherever it already marked invisible characters. Repository, group,
+token, secret, package index and artifact names are not judged by this rule.
 
 ### The same name rules for repositories, groups, tokens, secrets, package indexes, principals and passkeys (breaking)
 

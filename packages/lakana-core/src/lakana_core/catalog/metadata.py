@@ -136,8 +136,8 @@ def refuse_hidden_column_names(schema: Schema, *, stored: frozenset[str] = froze
     Raises
     ------
     LakanaValidationError
-        From `check_new_column_name` (an invisible character, a space at either end, a name
-        not in NFC or a character other than a letter, digit or allowed symbol), for the first
+        From `check_new_column_name` (an invisible character, a space at either end, a
+        character drawn as nothing or another look-alike, or a name not in NFC), for the first
         new name that breaks a rule.
     """
     for name in _field_names(schema.fields):

@@ -240,8 +240,8 @@ def refuse_percent_in_new_name(component: str, *, what: str) -> None:
     if "%" in component:
         raise ValidationError(
             f"{what} '{shown(component)}' must not contain '%': a storage may read '%41' as 'A', "
-            "so two names would share one directory. A new name may hold only letters, decimal "
-            "digits, '_', '-' and the plain space."
+            "so two names would share one directory. A new namespace, table or view name may hold "
+            "only letters, decimal digits, '_', '-' and the plain space."
         )
 
 
@@ -347,10 +347,10 @@ def refuse_outer_whitespace(name: str, *, what: str) -> None:
 
 
 NAME_SYMBOLS: Final[frozenset[str]] = frozenset({"_", "-", " "})
-"""The only characters other than letters, decimal digits and their combining marks a new
-namespace, table or column name may hold (`refuse_look_alike_characters`): ``_``, ``-``
+"""The only characters other than letters, decimal digits and combining marks a new namespace,
+table or view name may hold (`refuse_characters_outside_name_allowlist`): ``_``, ``-``
 (U+002D) and the plain space U+0020, which a name may hold inside it but not at either end
-(`refuse_outer_whitespace`)."""
+(`refuse_outer_whitespace`). A column name is not held to this list."""
 
 _DRAWN_AS_NOTHING: Final[tuple[tuple[int, int], ...]] = (
     (0x00AD, 0x00AD),
@@ -397,14 +397,14 @@ def _drawn_as_nothing(character: str) -> bool:
 
 
 def look_alike_character(name: str) -> tuple[int, str, str] | None:
-    """Find the first character that keeps a name from meeting the rule for new names.
+    """Find the first character that is drawn as nothing or passes for another one.
 
-    A name in Unicode NFC may hold letters (``L*``), decimal digits (``Nd``), `NAME_SYMBOLS`,
-    and a combining mark (``M*``) right after a letter or after another such mark: NFC composes
-    what it can (``e`` and U+0301 become ``é``), and the marks it leaves belong to letters of
-    scripts such as Devanagari or Arabic. A character `_DRAWN_AS_NOTHING` is refused even when
-    its category would pass (the Hangul fillers are letters, the variation selectors marks), and
-    so is every space but U+0020.
+    Refused: a character `_DRAWN_AS_NOTHING`, whatever its category (the Hangul fillers are
+    letters, the variation selectors marks); every space but U+0020; and a combining mark
+    (``M*``) that does not follow a letter or another such mark. NFC composes what it can
+    (``e`` and U+0301 become ``é``), and the marks it leaves belong to letters of scripts such
+    as Devanagari or Arabic, so a mark on a letter is allowed. Every other character, a visible
+    symbol such as ``(`` or ``$`` included, passes.
 
     Parameters
     ----------
@@ -415,7 +415,7 @@ def look_alike_character(name: str) -> tuple[int, str, str] | None:
     -------
     tuple of (int, str, str) or None
         The character's 1-based position, the character and the words for what it is; `None`
-        when every character is allowed.
+        when there is none.
     """
     after_letter = False
     for position, character in enumerate(name, start=1):
@@ -424,12 +424,10 @@ def look_alike_character(name: str) -> tuple[int, str, str] | None:
             problem: str | None = "a character drawn as nothing"
         elif category == "Zs" and character != " ":
             problem = "a space other than the plain space"
-        elif category.startswith("M"):
-            problem = None if after_letter else "a combining mark with no letter before it"
-        elif category.startswith("L") or category == "Nd" or character in NAME_SYMBOLS:
-            problem = None
+        elif category.startswith("M") and not after_letter:
+            problem = "a combining mark with no letter before it"
         else:
-            problem = "a character that is neither a letter nor a decimal digit"
+            problem = None
         if problem is not None:
             return position, character, problem
         after_letter = category.startswith(("L", "M"))
@@ -437,12 +435,12 @@ def look_alike_character(name: str) -> tuple[int, str, str] | None:
 
 
 def refuse_look_alike_characters(name: str, *, what: str) -> None:
-    """Refuse a new namespace, table or column name that could look like another one (#609).
+    """Refuse a new namespace, table, view or column name that could look like another (#609).
 
-    The name must be in Unicode NFC, since an NFD spelling looks the same but compares unequal,
-    and hold only what `look_alike_character` allows. `check_new_name` and
-    `check_new_column_name` call this after `refuse_hidden_characters` and
-    `refuse_outer_whitespace`, so those keep their own messages. A stored name is never judged.
+    The name may hold no character `look_alike_character` finds, and must be in Unicode NFC,
+    since an NFD spelling looks the same but compares unequal. `check_new_name` and
+    `check_new_column_name` call this last, so the earlier checks keep their own messages and
+    the NFC spelling it suggests holds no character they refuse. A stored name is never judged.
 
     Parameters
     ----------
@@ -463,9 +461,8 @@ def refuse_look_alike_characters(name: str, *, what: str) -> None:
         position, character, problem = found
         raise ValidationError(
             f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, "
-            f"{problem}, so the name could look like another one. A new name may hold only "
-            "letters, decimal digits, '_', '-' and the plain space, and a combining mark only "
-            "after a letter."
+            f"{problem}, so the name could look like another one. Choose a name without it: "
+            "retype the name, and put a combining mark only after a letter."
         )
     # Checked second, so the composed spelling it suggests holds only allowed characters.
     if not unicodedata.is_normalized("NFC", name):
@@ -476,8 +473,71 @@ def refuse_look_alike_characters(name: str, *, what: str) -> None:
         )
 
 
+def character_outside_name_allowlist(name: str) -> tuple[int, str] | None:
+    """Find the first character a new namespace, table or view name may not hold.
+
+    Such a name may hold letters (``L*``), combining marks (``M*``), decimal digits (``Nd``)
+    and `NAME_SYMBOLS`. A character drawn as nothing and a space are left to
+    `look_alike_character`, which names them more exactly.
+
+    Parameters
+    ----------
+    name
+        The name.
+
+    Returns
+    -------
+    tuple of (int, str) or None
+        The character's 1-based position and the character; `None` when there is none.
+    """
+    for position, character in enumerate(name, start=1):
+        category = unicodedata.category(character)
+        if (
+            category.startswith(("L", "M"))
+            or category in ("Nd", "Zs")
+            or character in NAME_SYMBOLS
+            or _drawn_as_nothing(character)
+        ):
+            continue
+        return position, character
+    return None
+
+
+def refuse_characters_outside_name_allowlist(name: str, *, what: str) -> None:
+    """Refuse a new namespace, table or view name with a symbol or punctuation mark (#609).
+
+    Only `check_new_name` calls this; a column name may hold visible symbols, such as the
+    ``count(*)`` of an unaliased query column. A stored name is never judged.
+
+    Parameters
+    ----------
+    name
+        The new name.
+    what
+        Noun describing it, such as ``"Table name"``.
+
+    Raises
+    ------
+    ValidationError
+        If `character_outside_name_allowlist` finds a character; the message names it as
+        ``U+XXXX`` with its position and every character that is allowed.
+    """
+    found = character_outside_name_allowlist(name)
+    if found is None:
+        return
+    position, character = found
+    raise ValidationError(
+        f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, which is "
+        "neither a letter nor a decimal digit. A new namespace, table or view name may hold only "
+        "letters, decimal digits, '_', '-' and the plain space."
+    )
+
+
 def check_new_column_name(name: str) -> None:
     """Apply the rules a column name that is being created must meet.
+
+    A column name may hold visible symbols (`refuse_characters_outside_name_allowlist` is not
+    applied), but nothing invisible, no outer space and no look-alike.
 
     Parameters
     ----------
@@ -509,11 +569,13 @@ def check_new_name(component: str, *, what: str) -> None:
     ------
     ValidationError
         From `refuse_percent_in_new_name`, `refuse_hidden_characters`,
-        `refuse_outer_whitespace` or `refuse_look_alike_characters`.
+        `refuse_outer_whitespace`, `refuse_characters_outside_name_allowlist` or
+        `refuse_look_alike_characters`.
     """
     refuse_percent_in_new_name(component, what=what)
     refuse_hidden_characters(component, what=what)
     refuse_outer_whitespace(component, what=what)
+    refuse_characters_outside_name_allowlist(component, what=what)
     refuse_look_alike_characters(component, what=what)
 
 

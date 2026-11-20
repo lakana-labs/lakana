@@ -3595,8 +3595,8 @@ class CatalogService:
             active external table's claim in this environment, if it
             escapes the environment's storage root, if `format` is
             unsupported, or if a column name of the sample file holds an invisible or
-            line-breaking character, starts or ends with a space, is not in NFC or holds a
-            character other than a letter, digit or allowed symbol (`check_new_column_name`).
+            line-breaking character, starts or ends with a space, holds a look-alike character
+            or is not in NFC (`check_new_column_name`).
         ConflictError
             If a deployed project declares the name, whatever it declares there
             (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); checked before any storage
