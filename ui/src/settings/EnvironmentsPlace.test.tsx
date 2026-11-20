@@ -196,6 +196,54 @@ describe("EnvironmentsPlace", () => {
     expect(usage?.aborted).toBe(true);
   });
 
+  it("asks for no more usage once the list is left", async () => {
+    // More environments than reads at once: the ones still waiting are never asked for after the
+    // person opens one.
+    const names = ["e1", "e2", "e3", "e4", "e5", "e6"];
+    const many = names.map((name) => ({ ...DEV, name }));
+    const base = asMara(lists(many));
+    const { server, user } = renderShell("/settings/environments", {
+      ...base,
+      routes: {
+        ...base?.routes,
+        "GET /api/v1/whoami": {
+          status: 200,
+          body: whoami("mara", false, true, false, [], false, {
+            readsEnvironments: true,
+            managedEnvironments: names,
+          }),
+        },
+        ...Object.fromEntries(
+          names.map((name) => [
+            `GET /api/v1/environments/${name}/usage`,
+            (request: { readonly signal?: AbortSignal }): Promise<never> =>
+              new Promise<never>((_, reject) => {
+                request.signal?.addEventListener("abort", () => {
+                  reject(new Error("aborted"));
+                });
+              }),
+          ]),
+        ),
+      },
+    });
+    const asked = (): string[] =>
+      server.sent
+        .filter((request) => request.path.endsWith("/usage"))
+        .map((request) => request.path);
+    await waitFor(() => {
+      expect(asked()).toHaveLength(4);
+    });
+
+    await user.click(await screen.findByRole("link", { name: "e1" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Environments" })).not.toBeInTheDocument();
+    });
+    expect(asked().filter((path) => !path.startsWith("/api/v1/environments/e1/"))).toHaveLength(3);
+    expect(asked()).not.toContain("/api/v1/environments/e5/usage");
+    expect(asked()).not.toContain("/api/v1/environments/e6/usage");
+  });
+
   it("a failed usage read does not fail the list", async () => {
     renderShell(
       "/settings/environments",
