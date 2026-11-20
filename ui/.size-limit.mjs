@@ -39,7 +39,10 @@ const NAMED_LIMITS = [
   // reads an environment and what they may do on the instance (Repositories' rule and its
   // Connect, Edit and Delete), and the frame's stylesheet gains the panels of Status and a
   // repository's page; Status and Repositories themselves load on demand.
-  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "4.94 kB" },
+  // Raised 2026-11-20 to the measured 4.95 kB + 10 %: the Settings PRs left it at its limit, and
+  // any change that renames a lazy chunk the frame preloads (its import map grows a few bytes) put
+  // it over by 2–8 B on unrelated pull requests (#761, #762).
+  { name: "the Settings frame", prefix: "SettingsScreen-", limit: "5.45 kB" },
   // Measured 3.27 kB (2026-11-19) + 10 %: a repository's page (its overview, credential, host
   // keys and deploy keys, Test access with the environment picker, and the loaders of its
   // dialogs, which load when one is opened: RepositoryDialogs-, on the shared limit).
