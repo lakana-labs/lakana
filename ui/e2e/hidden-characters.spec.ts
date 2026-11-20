@@ -599,6 +599,27 @@ walk("an invite link marks hidden characters in the name it signs in as", async 
   expectOnlyStubbed(paths, ["/api/v1/sign-in/session", "/api/v1/sign-in/links/describe"]);
 });
 
+walk("lakana login's confirmations mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  const stub = poisoned(page);
+  await signInAsAdmin(stub);
+  await stub.route("**/api/v1/sign-in/cli/device/describe", (route) =>
+    route.fulfill({ json: { host: "build-box" } }),
+  );
+  const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+  await visit(
+    page,
+    `/sign-in/cli?port=49152&state=s-1&challenge=${challenge}&host=${n("laptop")}`,
+    ["laptop", "admin"],
+  );
+  await page.goto("/sign-in/device");
+  await page.getByRole("textbox", { name: "Code" }).fill("BCDF-GHJK");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Create token" })).toBeVisible();
+  await expectMarked(page, "the device confirmation", ["build-box", "admin"]);
+  expectOnlyStubbed(paths, [...STUBBED, "/api/v1/sign-in/cli/device/describe"]);
+});
+
 walk("Connect a repository marks hidden characters in every step", async ({ page }) => {
   const paths = apiPaths(page);
   await signInAsAdmin(poisoned(page));

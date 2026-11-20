@@ -359,23 +359,24 @@ def deny_cli_device(
 ) -> Response:
     """Refuse a sign-in of `lakana login --device`: its command line is told so and stops.
 
-    Needs a browser session; a token is refused (403). 404 and 429 as `/device/describe`.
+    Needs a browser session; a token is refused (403). A refusal needs no touch: it gives no
+    access. 404 and 429 as `/device/describe`.
 
     Parameters
     ----------
     body
-        ``{"user_code"}``.
+        The code of the sign-in to refuse.
     request
-        The request, for the wrong-code limit.
+        The request; a code that opens nothing counts against its person.
     principal
-        The caller.
+        The person refusing.
     grants
-        The grant service.
+        Refuses the grant.
 
     Returns
     -------
     Response
-        204.
+        204, once the command line will be told at its next poll.
     """
     _counted(request, principal, lambda: grants.deny_device(principal, body.user_code))
     return Response(status_code=204)

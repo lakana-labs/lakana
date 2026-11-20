@@ -7110,6 +7110,79 @@ token window. Threat model: "OIDC sign-in (#32)".
   (`lakana server start --local`) still signs a linked person in, but only with their own personal
   token, which the window limits.
 
+## OIDC sign-in (#32, PR 3)
+
+`lakana login` gets its token through a browser: Lakana's own loopback and device grants over the
+browser session (`lakana_core.identity.cli_grants`, `api/platform/cli_sign_in.py`), not the
+provider's, so they work with every provider and with a passkey session. Threat model: "OIDC
+sign-in (#32)".
+
+- **C1, when the browser is used.** `lakana login` reads `GET /api/v1/sign-in/oidc` with no
+  credential and opens the browser only when it says `enabled`; 404 (an older server), 409 (the
+  interface off) and 421 (an address the server does not answer browsers at) keep the token prompt,
+  byte for byte (`test_without_oidc_login_prompts_as_today`,
+  `test_older_server_without_the_info_route_prompts`). `--token-stdin` sends nothing new
+  (`test_token_stdin_is_unchanged`); `--paste` keeps the prompt on an OIDC instance, `--browser` and
+  `--device` work on any instance with the interface on.
+- **C2, two sets of routes.** The browser's routes (`/api/v1/sign-in/cli/approvals`,
+  `/device/describe`, `/device/approve`, `/device/deny`) need a browser session with its CSRF
+  token; any token is 403 and a service account is refused (`test_approval_with_a_token_is_refused`,
+  `test_automation_cannot_approve`). Approving needs step-up, a passkey or provider touch from the
+  last 15 minutes (`test_approval_needs_step_up`, and both routes in `STEP_UP_ROUTES`). The command
+  line's routes (`/api/v1/auth/cli/token`, `/device`, `/device/token`) take no credential and sit
+  outside `/api/v1/sign-in`, because a program sends no `Origin` and the browser guard would refuse
+  it; they take no cookie either, so a cross-site page gains nothing by calling them. They read at
+  most 16 KiB and share one per-address and one per-network rate (the passkey options' values,
+  `test_exchange_is_rate_limited`, `test_device_start_is_rate_limited`). Every route is 409 while
+  the interface is off.
+- **C3, the loopback grant.** The CLI listens on `127.0.0.1` only, on a port the system picks
+  (`test_loopback_binds_only_127_0_0_1`), and opens `<url>/sign-in/cli?port&state&challenge&host`:
+  none of them a secret. The confirmation answers a code of 32 random bytes, stored as its SHA-256,
+  for 2 minutes, used by the first exchange right or wrong
+  (`test_code_without_the_right_verifier_is_refused_and_burnt`, `test_code_works_once`,
+  `test_code_expires_after_two_minutes`). The exchange needs the PKCE verifier (S256, compared in
+  constant time), which only the CLI process holds: another program that reaches the port first
+  gets a code it cannot use. The page sends the browser only to `http://127.0.0.1:<port>/`, with a
+  port it checked to be 1024 to 65535 and the one the server stored and answered
+  (`loopbackUrl`, `refuses a port outside 1024 to 65535`); nothing a link names becomes an
+  address. The listener answers GET `/` only, refuses another `Host` and any `state` but its own
+  (`hmac.compare_digest`), keeps waiting after a wrong one so no other program can end or answer
+  the sign-in (`test_wrong_state_is_refused_and_the_wait_goes_on`), sends `Cache-Control:
+  no-store` and `Referrer-Policy: no-referrer`, gives a silent connection 5 seconds, writes no log
+  line (`test_the_listener_writes_no_log_line`), and gives up after 10 minutes with a sentence
+  naming `--device` and `--paste`.
+- **C4, the device grant.** `POST /api/v1/auth/cli/device` answers a device code (32 random
+  bytes) and a user code of 8 letters from `BCDFGHJKLMNPQRSTVWXZ` (20^8 values, no vowels, no
+  0/O, 1/I), both stored only as their SHA-256, for 10 minutes; the user code is compared without
+  its dash and case (`test_user_code_matches_without_dash_and_case`), and a taken one is drawn
+  again (unique index). The person types it in a signed-in browser, sees the computer and the
+  token's name, and approves with step-up or denies. A person's device routes answer 429 past 5
+  codes that open nothing in 10 minutes, counted per person so more sessions buy no more guesses
+  (`test_wrong_user_codes_are_limited`; in process memory, so each server process counts on its
+  own). The poll answers `pending`, `approved` with the token once, `denied` or `expired`, and 429
+  `slow_down` sooner than 5 seconds (1 second of jitter allowed) after the last poll
+  (`test_poll_slow_down_is_429`, `test_denied_grant_never_yields_a_token`).
+- **C5, the token.** Issued at the exchange or the approved poll through `PatService.issue`, for the
+  person who approved, with their browser session as the actor: the session is read again
+  (`SessionService.verify_by_id`), so a session that ended, idled out or whose person was
+  deactivated since gives no token (`test_no_token_once_the_approving_session_ended`); the touch is
+  measured at the approval. Named `lakana login on <host>`, the host stripped of control, format
+  and line-separator characters, cut to 64 characters, `?` when empty
+  (`test_host_label_is_cleaned`); a name the person already uses for a live token gets ` (2)`,
+  ` (3)` (`test_taken_name_gets_a_number`). It works for 90 days (maintainer, 2026-11-20,
+  `test_token_lives_ninety_days`); a new `lakana login` makes a new token and revokes none. A linked
+  person's token stays bound by the token window (PR 2). Audited as `SIGN_IN_CLI_APPROVED` and
+  `SIGN_IN_CLI_TOKEN_ISSUED` (`id`, `kind`, `host`, `key_id`) beside `PAT_ISSUED`; no code,
+  verifier or token reaches a log, an audit row or the terminal
+  (`test_routes_never_log_the_code_or_verifier`, `test_the_token_is_never_printed`).
+- **C6, the confirmation page** names the token and the person ("Create the API token “lakana
+  login on laptop-7” for kim?") as text, with hidden characters of the host marked
+  (`marks hidden characters in the host`, and the walk of `hidden-characters.spec.ts`), and says
+  that the command line can then do everything the person can. Create token asks for the touch
+  before the POST and a cancelled touch sends nothing (`asks for the touch before creating`,
+  `a cancelled touch sends nothing`). A signed-out visitor signs in first and comes back with the
+  link's query.
+
 ## Git fetch hardening (M5b)
 
 `lakana_worker.git.fetch_commit` and `check_access` (one shared setup, `_prepared`) are the only

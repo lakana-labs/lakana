@@ -23,6 +23,12 @@ export interface CliApprovalOut {
   readonly port: number;
 }
 
+/** What `POST /api/v1/sign-in/cli/device/describe` answers. */
+export interface CliDeviceHostOut {
+  /** The computer the code would sign in, as it named itself. */
+  readonly host: string;
+}
+
 /**
  * Says whether a number is a port the command line may listen on.
  *
@@ -79,8 +85,8 @@ export async function approveCli(
  * @returns The computer's name.
  * @throws {ApiError} 404 when no sign-in waits for the code; 429 past too many wrong codes.
  */
-export async function describeDevice(userCode: string): Promise<{ readonly host: string }> {
-  return api.request<{ readonly host: string }>("POST", "/api/v1/sign-in/cli/device/describe", {
+export async function describeDevice(userCode: string): Promise<CliDeviceHostOut> {
+  return api.request<CliDeviceHostOut>("POST", "/api/v1/sign-in/cli/device/describe", {
     user_code: userCode,
   });
 }
