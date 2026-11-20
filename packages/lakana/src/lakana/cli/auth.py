@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 from dataclasses import dataclass
 from typing import Annotated
+from urllib.parse import urlencode
 
 import typer
 
 import lakana
 from lakana._models import Whoami
+from lakana._pkce import s256
 from lakana.cli import _output, _profiles
+from lakana.cli._loopback import LoopbackServer
 from lakana.cli._state import CliError, CliState, state_of
+from lakana.errors import LakanaError
 
 
 @dataclass(frozen=True)
@@ -95,6 +100,144 @@ def _choose_environment(state: CliState, client: lakana.Client, who: Whoami) -> 
     return choice
 
 
+LOGIN_TIMEOUT_HINT = (
+    "No answer came from the browser within 10 minutes. Run lakana login again; on a computer "
+    "without a browser use lakana login --device, or paste a token with lakana login --paste."
+)
+"""The error of a loopback sign-in that timed out."""
+
+_NO_BROWSER_FLOW = frozenset({404, 409, 421})
+"""The answers of the OIDC info route that keep today's token prompt: an older server (404),
+the interface off (409), an address the server does not answer browsers at (421)."""
+
+
+def _uses_oidc(state: CliState, base_url: str) -> bool:
+    """Say whether the server signs people in through an identity provider.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    base_url
+        The server.
+
+    Returns
+    -------
+    bool
+        `True` when it says so; `False` when it says not, or answers 404, 409 or 421.
+
+    Raises
+    ------
+    lakana.errors.LakanaError
+        For any other refusal.
+    """
+    with state.login_client_factory(base_url, "") as client:
+        try:
+            return client.sign_in.oidc_info().enabled
+        except LakanaError as exc:
+            if exc.status in _NO_BROWSER_FLOW:
+                return False
+            raise
+
+
+def _browser_login(state: CliState, base_url: str) -> str:
+    """Sign in through the browser and a loopback redirect, and exchange the code.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    base_url
+        The server.
+
+    Returns
+    -------
+    str
+        The new token.
+
+    Raises
+    ------
+    CliError
+        When the sign-in was cancelled in the browser, or no answer came in time (exit 1).
+    """
+    verifier = secrets.token_urlsafe(64)
+    expected = secrets.token_urlsafe(32)
+    with LoopbackServer(expected) as server:
+        query = urlencode(
+            {
+                "port": server.port,
+                "state": expected,
+                "challenge": s256(verifier),
+                "host": state.hostname(),
+            }
+        )
+        page = f"{base_url.rstrip('/')}/sign-in/cli?{query}"
+        sys.stderr.write(
+            f"Opening your browser to sign in to {_output.inline(base_url)}…\n{page}\n"
+        )
+        state.browser_opener(page)
+        answer = server.wait(state.login_timeout)
+    if answer is None:
+        raise CliError(LOGIN_TIMEOUT_HINT, exit_code=1, kind="LoginTimeout")
+    if answer.code is None:
+        raise CliError(
+            "The sign-in was cancelled in the browser, so no token was created.",
+            exit_code=1,
+            kind="LoginCancelled",
+        )
+    with state.login_client_factory(base_url, "") as client:
+        return client.sign_in.exchange_code(answer.code, verifier).token
+
+
+def _device_login(state: CliState, base_url: str) -> str:
+    """Sign in by a code confirmed in a browser elsewhere, and wait for the token.
+
+    Parameters
+    ----------
+    state
+        The CLI state.
+    base_url
+        The server.
+
+    Returns
+    -------
+    str
+        The new token.
+
+    Raises
+    ------
+    CliError
+        When the sign-in was refused in the browser or the code expired (exit 1).
+    """
+    with state.login_client_factory(base_url, "") as client:
+        started = client.sign_in.start_device(state.hostname())
+        sys.stderr.write(
+            f"To sign in, open {_output.inline(started.verification_url)} in a browser and enter "
+            f"the code {_output.inline(started.user_code)}\n"
+            "Waiting for you to confirm… (Ctrl+C to stop)\n"
+        )
+        interval = float(started.interval)
+        while True:
+            state.sleep(interval)
+            polled = client.sign_in.poll_device(started.device_code)
+            if polled.state == "slow_down":
+                interval += 5.0
+            elif polled.state == "approved" and polled.token is not None:
+                return polled.token.token
+            elif polled.state == "denied":
+                raise CliError(
+                    "The sign-in was refused in the browser, so no token was created.",
+                    exit_code=1,
+                    kind="LoginCancelled",
+                )
+            elif polled.state != "pending":
+                raise CliError(
+                    "The code expired before it was confirmed. Run lakana login --device again.",
+                    exit_code=1,
+                    kind="LoginTimeout",
+                )
+
+
 def login(
     ctx: typer.Context,
     profile: Annotated[str | None, typer.Option("--profile", help="Profile name to write.")] = None,
@@ -103,8 +246,28 @@ def login(
         bool, typer.Option("--token-stdin", help="Read the token from stdin (for CI).")
     ] = False,
     env: Annotated[str | None, typer.Option("--env", help="Default environment.")] = None,
+    device: Annotated[
+        bool,
+        typer.Option(
+            "--device", help="Sign in by a code confirmed in a browser on another computer."
+        ),
+    ] = False,
+    browser: Annotated[
+        bool,
+        typer.Option(
+            "--browser", help="Sign in through this computer's browser, with or without OIDC."
+        ),
+    ] = False,
+    paste: Annotated[
+        bool, typer.Option("--paste", help="Paste a token at a hidden prompt.")
+    ] = False,
 ) -> None:
-    """Verify a credential and save it as a profile.
+    """Sign in and save the credential as a profile.
+
+    Against a server whose people sign in through an identity provider, opens the browser: you
+    confirm there, and a new personal token named `lakana login on HOST`, HOST being this
+    computer's name, is created for 90 days and saved. Anywhere else, asks for a token, as
+    `--paste` does. The token is never printed.
 
     Parameters
     ----------
@@ -119,13 +282,24 @@ def login(
         Read the token from stdin instead of a hidden prompt.
     env
         The profile's default environment; chosen interactively when omitted.
+    device
+        Sign in by a code to confirm in a browser elsewhere, for a computer without one.
+    browser
+        Sign in through this computer's browser, also on a server without an identity
+        provider.
+    paste
+        Ask for a token at a hidden prompt, also on a server with an identity provider.
 
     Raises
     ------
     CliError
-        For `--token-stdin` without `--url`, or an empty token (exit 2).
+        For more than one of `--token-stdin`, `--paste`, `--device` and `--browser`,
+        `--token-stdin` without `--url`, or an empty token (exit 2); a sign-in cancelled,
+        refused or timed out in the browser (exit 1).
     """
     state = state_of(ctx)
+    if sum((token_stdin, paste, device, browser)) > 1:
+        raise CliError("Choose one of --token-stdin, --paste, --device and --browser.")
     name = profile or state.profile or os.environ.get("LAKANA_PROFILE") or "default"
     base_url = url or state.url
     if token_stdin:
@@ -135,7 +309,12 @@ def login(
     else:
         if not base_url:
             base_url = typer.prompt("Lakana URL", err=True).strip()
-        token = typer.prompt("Token", hide_input=True, err=True).strip()
+        if device:
+            token = _device_login(state, base_url)
+        elif browser or (not paste and _uses_oidc(state, base_url)):
+            token = _browser_login(state, base_url)
+        else:
+            token = typer.prompt("Token", hide_input=True, err=True).strip()
     if not token:
         raise CliError("No token given.")
     with state.login_client_factory(base_url, token) as client:

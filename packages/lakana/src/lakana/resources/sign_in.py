@@ -1,7 +1,10 @@
 """The sign-in resources: links, invites, recovery links, sessions, passkeys and settings.
 
 `Client.sign_in` issues the setup link (the server operator's bootstrap token only) and a local
-sign-in link (your own token, on a server started with `lakana server start --local`).
+sign-in link (your own token, on a server started with `lakana server start --local`), and
+carries what `lakana login` asks before it has a token: whether the server signs people in
+through an identity provider, and the exchanges of a sign-in confirmed in a browser. Those send
+no credential, so a client built with an empty token can call them.
 `Client.invites` and `Client.recovery_links` issue, list and withdraw the links an administrator
 sends to people. `Client.sessions` and `Client.passkeys` list and end a person's browser
 sessions and passkeys. `Client.sign_in_settings` reads and changes how long sessions last, in
@@ -19,8 +22,12 @@ from typing import Any
 from lakana._http import HttpTransport
 from lakana._models import (
     BrowserSession,
+    DeviceSignIn,
+    DeviceSignInPoll,
     Invite,
     IssuedLink,
+    IssuedToken,
+    OidcInfo,
     OpenInvite,
     OpenRecoveryLink,
     Passkey,
@@ -30,6 +37,7 @@ from lakana._models import (
     SignInSettings,
 )
 from lakana._routes import ROUTES
+from lakana.errors import LakanaError
 
 
 def _when(value: str) -> datetime:
@@ -117,6 +125,122 @@ class SignIn:
             If the credential is not a person's own personal access token.
         """
         return _issued_link(self._transport.request(ROUTES["sign_in.local_link"]).json())
+
+    def oidc_info(self) -> OidcInfo:
+        """Say whether the server signs people in through an identity provider.
+
+        Sends no credential.
+
+        Returns
+        -------
+        OidcInfo
+            Whether it is on, and the provider's name.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            From a server older than sign-in through a provider.
+        lakana.errors.Conflict
+            If the server's web interface is off.
+        """
+        data = self._transport.request(ROUTES["sign_in.oidc_info"], authenticated=False).json()
+        return OidcInfo(enabled=data["enabled"], display_name=data["display_name"])
+
+    def exchange_code(self, code: str, code_verifier: str) -> IssuedToken:
+        """Exchange the one-time code of a sign-in confirmed in a browser for a new token.
+
+        Sends no credential: the code and the PKCE verifier it was confirmed for are the proof.
+        The code works once, for 2 minutes; a wrong verifier uses it up too.
+
+        Parameters
+        ----------
+        code
+            The code the browser brought back to the command line.
+        code_verifier
+            The PKCE verifier whose S256 challenge the browser confirmed.
+
+        Returns
+        -------
+        IssuedToken
+            The confirming person's new token, named ``lakana login on <host>``, for 90 days.
+
+        Raises
+        ------
+        lakana.errors.LakanaError
+            With status 400 for an unknown, used, expired or wrong code or verifier; the
+            message says to sign in again.
+        """
+        data = self._transport.request(
+            ROUTES["sign_in.exchange_code"],
+            json={"code": code, "code_verifier": code_verifier},
+            authenticated=False,
+        ).json()
+        return IssuedToken(key_id=data["key_id"], name=data["name"], token=data["token"])
+
+    def start_device(self, host: str) -> DeviceSignIn:
+        """Start a sign-in of the command line to confirm in a browser elsewhere.
+
+        Sends no credential. Show `DeviceSignIn.user_code` and `DeviceSignIn.verification_url`
+        to the person, then call `poll_device` every `DeviceSignIn.interval` seconds.
+
+        Parameters
+        ----------
+        host
+            This computer's name, for the confirmation and the token's name.
+
+        Returns
+        -------
+        DeviceSignIn
+            The codes, the page and the interval.
+        """
+        data = self._transport.request(
+            ROUTES["sign_in.start_device"], json={"host": host}, authenticated=False
+        ).json()
+        return DeviceSignIn(
+            device_code=data["device_code"],
+            user_code=data["user_code"],
+            verification_url=data["verification_url"],
+            expires_in=data["expires_in"],
+            interval=data["interval"],
+        )
+
+    def poll_device(self, device_code: str) -> DeviceSignInPoll:
+        """Ask whether a device sign-in was confirmed; an approved one answers its token once.
+
+        Sends no credential.
+
+        Parameters
+        ----------
+        device_code
+            `DeviceSignIn.device_code`.
+
+        Returns
+        -------
+        DeviceSignInPoll
+            The state, with the token once approved; ``slow_down`` when asked too soon.
+
+        Raises
+        ------
+        lakana.errors.LakanaError
+            With status 400 for a device code the server does not know.
+        """
+        try:
+            data = self._transport.request(
+                ROUTES["sign_in.poll_device"],
+                json={"device_code": device_code},
+                authenticated=False,
+            ).json()
+        except LakanaError as exc:
+            if exc.error_type == "CliPollTooFast":
+                return DeviceSignInPoll(state="slow_down")
+            raise
+        token = data["token"]
+        return DeviceSignInPoll(
+            state=data["state"],
+            token=None
+            if token is None
+            else IssuedToken(key_id=token["key_id"], name=token["name"], token=token["token"]),
+        )
 
 
 _OpenInvites = list[OpenInvite]

@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import http.client
 import json
+import threading
 import tomllib
+import webbrowser
 from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlsplit
 
+import httpx
+import pytest
 from conftest import TOKEN, FakeApi, invoke, make_state
 
 from lakana._config import resolve_config
+from lakana._pkce import s256
+from lakana.cli._state import CliState
 
 _WHOAMI = {
     "name": "alice",
@@ -480,3 +488,370 @@ def test_cli_whoami_shows_the_window(tmp_path: Path) -> None:
     result = invoke(make_state(tmp_path, api), "whoami")
     assert result.exit_code == 0, result.stderr
     assert "token_window_ends_at" in result.stdout and "2026-12-20" in result.stdout
+
+
+# -- through the browser (#32, PR 3) ------------------------------------------------------------
+
+_ISSUED = {"key_id": "k2", "name": "lakana login on laptop-7", "token": TOKEN}
+_TODAY = "Logged in as alice (USER) at http://p; saved profile 'default'\n"
+"""`lakana login --token-stdin`'s output before the browser sign-in, copied from `origin/main`."""
+_TODAY_PROMPTED = (" \n" + _TODAY, "Token:")
+"""Its output and error output after the hidden prompt, copied from `origin/main`."""
+
+
+def _oidc_api(*, enabled: bool = True) -> FakeApi:
+    """Build a fake API with the OIDC info route and the exchange.
+
+    Parameters
+    ----------
+    enabled
+        What the info route says.
+
+    Returns
+    -------
+    FakeApi
+        The fake.
+    """
+    api = _api()
+    info = {"enabled": enabled, "display_name": "Keycloak" if enabled else None}
+    api.on("GET", "/api/v1/sign-in/oidc", json=info)
+    api.on("POST", "/api/v1/auth/cli/token", json=_ISSUED)
+    return api
+
+
+def _send(port: int, query: dict[str, str]) -> None:
+    """Send the browser's request to the listener.
+
+    Parameters
+    ----------
+    port
+        The listener's port.
+    query
+        The query parameters.
+    """
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    connection.request("GET", "/?" + urlencode(query))
+    connection.getresponse().read()
+    connection.close()
+
+
+class _Browser:
+    """A browser that answers the loopback listener from a thread.
+
+    Parameters
+    ----------
+    answer
+        The query to send back besides ``state``; `None` sends nothing.
+    state
+        The ``state`` to send; the one in the URL by default.
+    """
+
+    def __init__(self, answer: dict[str, str] | None, *, state: str | None = None) -> None:
+        self.answer = answer
+        self.state = state
+        self.opened: list[str] = []
+        self.threads: list[threading.Thread] = []
+
+    def __call__(self, url: str) -> bool:
+        """Open a URL.
+
+        Parameters
+        ----------
+        url
+            The page.
+
+        Returns
+        -------
+        bool
+            `True`.
+        """
+        self.opened.append(url)
+        query = {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
+        if self.answer is not None:
+            sent = {**self.answer, "state": self.state or query["state"]}
+            thread = threading.Thread(target=_send, args=(int(query["port"]), sent))
+            thread.start()
+            self.threads.append(thread)
+        return True
+
+    def query(self) -> dict[str, str]:
+        """Read the query of the page opened.
+
+        Returns
+        -------
+        dict of str to str
+            Its parameters.
+        """
+        for thread in self.threads:
+            thread.join()
+        return {k: v[0] for k, v in parse_qs(urlsplit(self.opened[0]).query).items()}
+
+
+def _browser_state(tmp_path: Path, api: FakeApi, browser: _Browser) -> CliState:
+    """Build a state whose browser is `browser` and whose computer is `laptop-7`.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    api
+        The fake API.
+    browser
+        The fake browser.
+
+    Returns
+    -------
+    CliState
+        The state.
+    """
+    state = make_state(tmp_path, api)
+    state.browser_opener = browser
+    state.hostname = lambda: "laptop-7"
+    state.login_timeout = 5.0
+    return state
+
+
+def test_with_oidc_login_opens_the_browser_and_saves_the_profile(tmp_path: Path) -> None:
+    api = _oidc_api()
+    browser = _Browser({"code": "c0de"})
+    state = _browser_state(tmp_path, api, browser)
+
+    result = invoke(state, "login", "--url", "http://p")
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == _TODAY
+    query = browser.query()
+    assert browser.opened[0].startswith("http://p/sign-in/cli?")
+    assert query["host"] == "laptop-7"
+    assert f"Opening your browser to sign in to http://p…\n{browser.opened[0]}\n" in result.stderr
+    exchange = next(r for r in api.requests if r.url.path == "/api/v1/auth/cli/token")
+    sent = json.loads(exchange.content)
+    assert sent["code"] == "c0de"
+    assert s256(sent["code_verifier"]) == query["challenge"]
+    assert "authorization" not in exchange.headers
+    profile = tomllib.loads(state.profile_path().read_text())["profiles"]["default"]
+    assert profile == {"url": "http://p", "token": TOKEN}
+
+
+def test_browser_flag_opens_the_browser_without_oidc(tmp_path: Path) -> None:
+    api = _oidc_api(enabled=False)
+    browser = _Browser({"code": "c0de"})
+
+    result = invoke(
+        _browser_state(tmp_path, api, browser), "login", "--url", "http://p", "--browser"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert len(browser.opened) == 1
+
+
+def test_without_oidc_login_prompts_as_today(tmp_path: Path) -> None:
+    browser = _Browser(None)
+    state = _browser_state(tmp_path, _oidc_api(enabled=False), browser)
+
+    result = invoke(state, "login", "--url", "http://p", input=f"{TOKEN}\n")
+
+    assert result.exit_code == 0, result.stderr
+    assert (result.stdout, result.stderr) == _TODAY_PROMPTED
+    assert browser.opened == []
+
+
+@pytest.mark.parametrize("status", [404, 409, 421])
+def test_older_server_without_the_info_route_prompts(tmp_path: Path, status: int) -> None:
+    api = _api()
+    api.on("GET", "/api/v1/sign-in/oidc", status=status, json={"detail": "no"})
+    browser = _Browser(None)
+
+    result = invoke(
+        _browser_state(tmp_path, api, browser), "login", "--url", "http://p", input=f"{TOKEN}\n"
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert (result.stdout, result.stderr) == _TODAY_PROMPTED
+    assert browser.opened == []
+
+
+def test_another_refusal_of_the_info_route_is_an_error(tmp_path: Path) -> None:
+    api = _api()
+    api.on("GET", "/api/v1/sign-in/oidc", status=500, json={"detail": "broken"})
+
+    result = invoke(make_state(tmp_path, api), "login", "--url", "http://p", input=f"{TOKEN}\n")
+
+    assert result.exit_code != 0
+    assert "broken" in result.stderr
+
+
+def test_token_stdin_is_unchanged(tmp_path: Path) -> None:
+    api = _oidc_api()
+    browser = _Browser(None)
+
+    result = invoke(
+        _browser_state(tmp_path, api, browser),
+        "login",
+        "--url",
+        "http://p",
+        "--token-stdin",
+        input=TOKEN + "\n",
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == _TODAY
+    assert browser.opened == []
+    assert all(r.url.path != "/api/v1/sign-in/oidc" for r in api.requests)
+
+
+def test_paste_prompts_on_an_oidc_instance(tmp_path: Path) -> None:
+    browser = _Browser(None)
+    state = _browser_state(tmp_path, _oidc_api(), browser)
+
+    result = invoke(state, "login", "--url", "http://p", "--paste", input=f"{TOKEN}\n")
+
+    assert result.exit_code == 0, result.stderr
+    assert (result.stdout, result.stderr) == _TODAY_PROMPTED
+    assert browser.opened == []
+
+
+def test_the_sign_in_flags_exclude_each_other(tmp_path: Path) -> None:
+    result = invoke(
+        make_state(tmp_path, _api()), "login", "--url", "http://p", "--paste", "--device"
+    )
+
+    assert result.exit_code == 2
+    assert "Choose one of --token-stdin, --paste, --device and --browser" in result.stderr
+
+
+def test_cancel_in_the_browser_exits_1_with_a_sentence(tmp_path: Path) -> None:
+    state = _browser_state(tmp_path, _oidc_api(), _Browser({"error": "access_denied"}))
+
+    result = invoke(state, "login", "--url", "http://p")
+
+    assert result.exit_code == 1
+    assert "The sign-in was cancelled in the browser, so no token was created." in result.stderr
+    assert not state.profile_path().exists()
+
+
+def test_wrong_state_is_refused(tmp_path: Path) -> None:
+    browser = _Browser({"code": "evil"}, state="not-this-one")
+    state = _browser_state(tmp_path, _oidc_api(), browser)
+    state.login_timeout = 0.3
+
+    result = invoke(state, "login", "--url", "http://p")
+
+    browser.query()
+    assert result.exit_code == 1
+    assert not state.profile_path().exists()
+
+
+def test_loopback_timeout_names_device_and_paste(tmp_path: Path) -> None:
+    state = _browser_state(tmp_path, _oidc_api(), _Browser(None))
+    state.login_timeout = 0.05
+
+    result = invoke(state, "login", "--url", "http://p")
+
+    assert result.exit_code == 1
+    assert "lakana login --device" in result.stderr
+    assert "lakana login --paste" in result.stderr
+
+
+def _device_api(*polls: dict[str, object] | int) -> FakeApi:
+    """Build a fake API for `login --device` whose polls answer in turn.
+
+    Parameters
+    ----------
+    *polls
+        Each poll's body, or 429 for ``slow_down``.
+
+    Returns
+    -------
+    FakeApi
+        The fake.
+    """
+    api = _api()
+    api.on(
+        "POST",
+        "/api/v1/auth/cli/device",
+        json={
+            "device_code": "dev1ce",
+            "user_code": "BCDF-GHJK",
+            "verification_url": "http://p/sign-in/device",
+            "expires_in": 600,
+            "interval": 5,
+        },
+    )
+    answers = iter(polls)
+
+    def poll(request: httpx.Request) -> httpx.Response:
+        answer = next(answers)
+        if answer == 429:
+            return httpx.Response(
+                429, json={"detail": "slow", "type": "CliPollTooFast", "error": "slow_down"}
+            )
+        return httpx.Response(200, json=answer)
+
+    api.routes["POST", "/api/v1/auth/cli/device/token"] = poll
+    return api
+
+
+def test_device_prints_url_and_code_and_saves_the_profile(tmp_path: Path) -> None:
+    api = _device_api(
+        {"state": "pending", "token": None}, 429, {"state": "approved", "token": _ISSUED}
+    )
+    state = _browser_state(tmp_path, api, _Browser(None))
+    waits: list[float] = []
+    state.sleep = waits.append
+
+    result = invoke(state, "login", "--url", "http://p", "--device")
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == _TODAY
+    assert "open http://p/sign-in/device in a browser and enter the code BCDF-GHJK" in result.stderr
+    assert "Waiting for you to confirm… (Ctrl+C to stop)" in result.stderr
+    assert waits == [5.0, 5.0, 10.0]
+    start = next(r for r in api.requests if r.url.path == "/api/v1/auth/cli/device")
+    assert json.loads(start.content) == {"host": "laptop-7"}
+    assert "dev1ce" not in result.stderr + result.stdout
+
+
+@pytest.mark.parametrize(
+    ("state_name", "sentence"),
+    [
+        ("denied", "The sign-in was refused in the browser"),
+        ("expired", "The code expired before it was confirmed"),
+    ],
+)
+def test_device_ends_on_a_refusal_or_expiry(tmp_path: Path, state_name: str, sentence: str) -> None:
+    state = _browser_state(
+        tmp_path, _device_api({"state": state_name, "token": None}), _Browser(None)
+    )
+    state.sleep = lambda seconds: None
+
+    result = invoke(state, "login", "--url", "http://p", "--device")
+
+    assert result.exit_code == 1
+    assert sentence in result.stderr
+
+
+def test_the_token_is_never_printed(tmp_path: Path) -> None:
+    for output in ("table", "json"):
+        state = _browser_state(tmp_path / output, _oidc_api(), _Browser({"code": "c0de"}))
+        result = invoke(state, "--output", output, "login", "--url", "http://p")
+        assert result.exit_code == 0, result.stderr
+        assert "supersecret" not in result.stdout + result.stderr
+        assert "c0de" not in result.stdout + result.stderr
+    device = _browser_state(
+        tmp_path / "device", _device_api({"state": "approved", "token": _ISSUED}), _Browser(None)
+    )
+    device.sleep = lambda seconds: None
+    result = invoke(device, "--output", "json", "login", "--url", "http://p", "--device")
+    assert result.exit_code == 0, result.stderr
+    assert "supersecret" not in result.stdout + result.stderr
+
+
+def test_the_default_browser_opener_is_the_webbrowser_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[str] = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+
+    assert CliState().browser_opener("http://p/sign-in/cli") is True
+    assert opened == ["http://p/sign-in/cli"]

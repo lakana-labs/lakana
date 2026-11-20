@@ -518,6 +518,12 @@
     class: git,
     reason: "Say what applying an access file would change, and every problem that stops it",
   }
+"POST /api/v1/auth/cli/device":
+  { class: git, reason: "lakana login --device starts it (local tooling, no person at a page)" }
+"POST /api/v1/auth/cli/device/token":
+  { class: git, reason: "lakana login --device polls it (local tooling)" }
+"POST /api/v1/auth/cli/token":
+  { class: git, reason: "lakana login exchanges its one-time code (local tooling)" }
 "POST /api/v1/auth/oidc/token":
   { class: git, reason: "CI ID-token exchange (machine; CI workflow in Git)" }
 "POST /api/v1/ci-trust-rules": { class: ui, part: 7 }
@@ -610,6 +616,14 @@
 "POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
 "POST /api/v1/sign-in/local-link":
   { class: git, reason: "local tooling: server start --local signs the browser in" }
+"POST /api/v1/sign-in/cli/approvals":
+  { class: ui, part: 1, note: "lakana login (#32): /sign-in/cli confirms it" }
+"POST /api/v1/sign-in/cli/device/approve":
+  { class: ui, part: 1, note: "lakana login --device (#32): /sign-in/device" }
+"POST /api/v1/sign-in/cli/device/deny":
+  { class: ui, part: 1, note: "lakana login --device (#32): /sign-in/device" }
+"POST /api/v1/sign-in/cli/device/describe":
+  { class: ui, part: 1, note: "lakana login --device (#32): /sign-in/device" }
 "POST /api/v1/sign-in/oidc/finish":
   { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc" }
 "POST /api/v1/sign-in/oidc/finish-in-session":

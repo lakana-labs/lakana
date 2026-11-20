@@ -24489,6 +24489,666 @@
         }
       }
     },
+    "/api/v1/sign-in/cli/approvals": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Confirm signing `lakana login` in on a computer, and answer its one-time code",
+        "description": "The interface's page `/sign-in/cli` calls this after the person pressed Create token. Needs a browser session with a passkey or provider touch from the last 15 minutes (403 `StepUpRequired`); a token is refused (403): it needs no command-line sign-in. The code works once, for 2 minutes, and only with the PKCE verifier of `code_challenge`: send the browser to `http://127.0.0.1:<port>/?code=<code>&state=<state>`, with the answer's port.",
+        "operationId": "approve_cli_sign_in_api_v1_sign_in_cli_approvals_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliApprovalIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliApprovalOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/cli/device/describe": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Name the computer a code from `lakana login --device` would sign in",
+        "description": "Needs a browser session; a token is refused (403). 404 when no sign-in waits for the code (it expired, or was used, approved or denied); 429 past 5 such codes in 10 minutes for one person.",
+        "operationId": "describe_cli_device_api_v1_sign_in_cli_device_describe_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliUserCodeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliDeviceHostOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/cli/device/approve": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Approve a sign-in of `lakana login --device`: its command line receives the token",
+        "description": "Needs a browser session with a passkey or provider touch from the last 15 minutes (403 `StepUpRequired`); a token is refused (403). 404 and 429 as `/device/describe`.",
+        "operationId": "approve_cli_device_api_v1_sign_in_cli_device_approve_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliUserCodeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/cli/device/deny": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Refuse a sign-in of `lakana login --device`: its command line is told so and stops",
+        "description": "Needs a browser session; a token is refused (403). 404 and 429 as `/device/describe`.",
+        "operationId": "deny_cli_device_api_v1_sign_in_cli_device_deny_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliUserCodeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cli/token": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Exchange the one-time code of `lakana login` and its PKCE verifier for the new token",
+        "description": "Needs no credential: the code and the verifier are the proof. The code is used up by the first exchange, right or wrong (400, the same sentence for an unknown, used, expired or wrong one, or when the browser session that confirmed it has ended). The token is the confirming person's, named `lakana login on <host>`, and works for 90 days. 429 past the rate.",
+        "operationId": "exchange_cli_code_api_v1_auth_cli_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliTokenIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenIssueOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The client closed the connection before the request body arrived in full.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cli/device": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start a sign-in of `lakana login --device`, for a computer without a browser",
+        "description": "Needs no credential. Show `user_code` and `verification_url` to the person, who confirms in a browser where they are signed in; poll `POST /api/v1/auth/cli/device/token` every `interval` seconds. The codes work for 10 minutes. 429 past the rate.",
+        "operationId": "start_cli_device_api_v1_auth_cli_device_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliDeviceIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliDeviceOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The client closed the connection before the request body arrived in full.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/cli/device/token": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Ask whether a sign-in of `lakana login --device` was approved",
+        "description": "Needs no credential: the device code is the proof. Answers ``pending`` until someone decides, then ``approved`` with the token once, or ``denied``; ``expired`` after 10 minutes and after the token was handed out. 429 with ``error: slow_down`` when asked again sooner than 5 seconds; 400 for an unknown device code.",
+        "operationId": "poll_cli_device_api_v1_auth_cli_device_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliDevicePollIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliDevicePollOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The client closed the connection before the request body arrived in full.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The request body is larger than the server accepts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sign-in/notices": {
       "get": {
         "tags": [
@@ -28318,6 +28978,8 @@
           "SIGN_IN_LINK_USED",
           "SIGN_IN_OIDC",
           "SIGN_IN_OIDC_REFUSED",
+          "SIGN_IN_CLI_APPROVED",
+          "SIGN_IN_CLI_TOKEN_ISSUED",
           "PASSKEY_ADDED",
           "PASSKEY_REMOVED",
           "PASSKEY_DISABLED",
@@ -28571,6 +29233,8 @@
           "SIGN_IN_LINK_USED",
           "SIGN_IN_OIDC",
           "SIGN_IN_OIDC_REFUSED",
+          "SIGN_IN_CLI_APPROVED",
+          "SIGN_IN_CLI_TOKEN_ISSUED",
           "PASSKEY_ADDED",
           "PASSKEY_REMOVED",
           "PASSKEY_DISABLED",
@@ -29391,6 +30055,204 @@
         "type": "object",
         "title": "CiTrustRuleUpdate",
         "description": "Request body for changing a CI trust rule; omitted fields stay.\n\nEvery change ends the tokens issued under the rule before it.\n\nParameters\n----------\nprincipal\n    A new service account.\nkinds\n    New kinds.\nconditions\n    New conditions, replacing all of the old ones.\nstart_on_deploy_jobs\n    Whether a deploy under the rule starts the project's `on_deploy` jobs."
+      },
+      "CliApprovalIn": {
+        "properties": {
+          "port": {
+            "type": "integer",
+            "maximum": 65535.0,
+            "minimum": 1024.0,
+            "title": "Port"
+          },
+          "code_challenge": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "title": "Code Challenge"
+          },
+          "host": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Host"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "port",
+          "code_challenge",
+          "host"
+        ],
+        "title": "CliApprovalIn",
+        "description": "Request body of `POST /api/v1/sign-in/cli/approvals`: the confirmation of `lakana login`.\n\nParameters\n----------\nport\n    The port `lakana login` listens on at ``127.0.0.1``, 1024 to 65535.\ncode_challenge\n    The S256 challenge of its PKCE verifier: 43 characters of ``A-Z a-z 0-9 - _``.\nhost\n    Its computer's name, as `lakana login` sent it; the server keeps at most 64 visible\n    characters of it for the token's name."
+      },
+      "CliApprovalOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "port": {
+            "type": "integer",
+            "title": "Port"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "port"
+        ],
+        "title": "CliApprovalOut",
+        "description": "Response body of `POST /api/v1/sign-in/cli/approvals`.\n\nParameters\n----------\ncode\n    The one-time code for `lakana login`: it works once, for 2 minutes, and only with the\n    PKCE verifier of the challenge it was approved for.\nport\n    The port to send the browser back to, at ``http://127.0.0.1:<port>/``."
+      },
+      "CliDeviceHostOut": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "title": "Host"
+          }
+        },
+        "type": "object",
+        "required": [
+          "host"
+        ],
+        "title": "CliDeviceHostOut",
+        "description": "Response body of `POST /api/v1/sign-in/cli/device/describe`.\n\nParameters\n----------\nhost\n    The computer the code would sign in, for the confirmation."
+      },
+      "CliDeviceIn": {
+        "properties": {
+          "host": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Host"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "host"
+        ],
+        "title": "CliDeviceIn",
+        "description": "Request body of `POST /api/v1/auth/cli/device`.\n\nParameters\n----------\nhost\n    The command line's computer name; at most 64 visible characters of it are kept."
+      },
+      "CliDeviceOut": {
+        "properties": {
+          "device_code": {
+            "type": "string",
+            "title": "Device Code"
+          },
+          "user_code": {
+            "type": "string",
+            "title": "User Code"
+          },
+          "verification_url": {
+            "type": "string",
+            "title": "Verification Url"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "interval": {
+            "type": "integer",
+            "title": "Interval"
+          }
+        },
+        "type": "object",
+        "required": [
+          "device_code",
+          "user_code",
+          "verification_url",
+          "expires_in",
+          "interval"
+        ],
+        "title": "CliDeviceOut",
+        "description": "Response body of `POST /api/v1/auth/cli/device` (the shapes of RFC 8628).\n\nParameters\n----------\ndevice_code\n    What the command line polls with; keep it to itself.\nuser_code\n    What the person types in the browser, as ``XXXX-XXXX``.\nverification_url\n    Where the person types it: ``<LAKANA_UI__PUBLIC_URL>/sign-in/device``.\nexpires_in\n    Seconds the codes work: 600.\ninterval\n    Seconds to wait between two polls: 5."
+      },
+      "CliDevicePollIn": {
+        "properties": {
+          "device_code": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Device Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "device_code"
+        ],
+        "title": "CliDevicePollIn",
+        "description": "Request body of `POST /api/v1/auth/cli/device/token`.\n\nParameters\n----------\ndevice_code\n    The device code `POST /api/v1/auth/cli/device` answered."
+      },
+      "CliDevicePollOut": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "denied",
+              "expired"
+            ],
+            "title": "State"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenIssueOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "token"
+        ],
+        "title": "CliDevicePollOut",
+        "description": "Response body of `POST /api/v1/auth/cli/device/token`.\n\nParameters\n----------\nstate\n    ``pending`` while nobody decided, ``approved`` with the token, ``denied``, or\n    ``expired`` (past 10 minutes, or once the token was handed out).\ntoken\n    The new token, only with ``approved``: shown this once."
+      },
+      "CliTokenIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "maxLength": 256,
+            "title": "Code"
+          },
+          "code_verifier": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 43,
+            "title": "Code Verifier"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "code",
+          "code_verifier"
+        ],
+        "title": "CliTokenIn",
+        "description": "Request body of `POST /api/v1/auth/cli/token`: a loopback code and its verifier.\n\nParameters\n----------\ncode\n    The code the browser brought to `lakana login`'s port.\ncode_verifier\n    The PKCE verifier, 43 to 128 characters."
+      },
+      "CliUserCodeIn": {
+        "properties": {
+          "user_code": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "User Code"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "user_code"
+        ],
+        "title": "CliUserCodeIn",
+        "description": "Request body naming a device grant by the code a person typed.\n\nParameters\n----------\nuser_code\n    The code, in any letter case, with or without its dash."
       },
       "ColumnIn": {
         "properties": {

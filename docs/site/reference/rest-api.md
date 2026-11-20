@@ -161,9 +161,9 @@ route with its parameters, its request body and its answers.
 - [Audit](rest/audit.md): 1 route
 - [CI trust rules](rest/ci-trust-rules.md): 8 routes
 - [Access](rest/access.md): 5 routes
-- [Auth](rest/auth.md): 1 route
+- [Auth](rest/auth.md): 4 routes
 - [Whoami](rest/whoami.md): 2 routes
-- [Sign in](rest/sign-in.md): 25 routes
+- [Sign in](rest/sign-in.md): 29 routes
 - [Settings](rest/settings.md): 3 routes
 - [Info](rest/info.md): 1 route
 - [Status](rest/status.md): 1 route

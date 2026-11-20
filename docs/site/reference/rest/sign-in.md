@@ -498,6 +498,139 @@ Answer fields: `OidcSignInOut`
 | `csrf_token` | text | yes |  |
 | `return_to` | text | yes |  |
 
+## `POST /api/v1/sign-in/cli/approvals`
+
+Confirm signing `lakana login` in on a computer, and answer its one-time code
+
+The interface's page `/sign-in/cli` calls this after the person pressed Create token. Needs a browser session with a passkey or provider touch from the last 15 minutes (403 `StepUpRequired`); a token is refused (403): it needs no command-line sign-in. The code works once, for 2 minutes, and only with the PKCE verifier of `code_challenge`: send the browser to `http://127.0.0.1:<port>/?code=<code>&state=<state>`, with the answer's port.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Request body (application/json, required): `CliApprovalIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `port` | whole number | yes |  |
+| `code_challenge` | text | yes |  |
+| `host` | text | yes |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `CliApprovalOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `CliApprovalOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `code` | text | yes |  |
+| `port` | whole number | yes |  |
+
+## `POST /api/v1/sign-in/cli/device/describe`
+
+Name the computer a code from `lakana login --device` would sign in
+
+Needs a browser session; a token is refused (403). 404 when no sign-in waits for the code (it expired, or was used, approved or denied); 429 past 5 such codes in 10 minutes for one person.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Request body (application/json, required): `CliUserCodeIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `user_code` | text | yes |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `CliDeviceHostOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `CliDeviceHostOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `host` | text | yes |  |
+
+## `POST /api/v1/sign-in/cli/device/approve`
+
+Approve a sign-in of `lakana login --device`: its command line receives the token
+
+Needs a browser session with a passkey or provider touch from the last 15 minutes (403 `StepUpRequired`); a token is refused (403). 404 and 429 as `/device/describe`.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Request body (application/json, required): `CliUserCodeIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `user_code` | text | yes |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `204` | Successful Response | none |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+## `POST /api/v1/sign-in/cli/device/deny`
+
+Refuse a sign-in of `lakana login --device`: its command line is told so and stops
+
+Needs a browser session; a token is refused (403). 404 and 429 as `/device/describe`.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Request body (application/json, required): `CliUserCodeIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `user_code` | text | yes |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `204` | Successful Response | none |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
 ## `GET /api/v1/sign-in/notices`
 
 List your sign-in notices that you have not dismissed, newest first

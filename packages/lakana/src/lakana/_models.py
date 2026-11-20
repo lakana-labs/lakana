@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field, fields
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
@@ -1909,6 +1909,64 @@ class SignInBounds:
     absolute_lifetime_minutes_max: int
     token_provider_window_days_min: int = 1
     token_provider_window_days_max: int = 365
+
+
+@dataclass(frozen=True)
+class OidcInfo:
+    """Whether people sign in to a server through an identity provider.
+
+    Parameters
+    ----------
+    enabled
+        Whether sign-in through the provider is on (the server's `LAKANA_OIDC__ISSUER` is set).
+    display_name
+        The provider's name, as the sign-in page shows it; `None` while it is off.
+    """
+
+    enabled: bool
+    display_name: str | None
+
+
+@dataclass(frozen=True)
+class DeviceSignIn:
+    """A sign-in of the command line to confirm in a browser elsewhere (`lakana login --device`).
+
+    Parameters
+    ----------
+    device_code
+        What `SignIn.poll_device` asks with; never shown. `repr=False`.
+    user_code
+        What the person types in the browser, as ``XXXX-XXXX``.
+    verification_url
+        The page where they type it.
+    expires_in
+        Seconds the codes work.
+    interval
+        Seconds to wait between two polls.
+    """
+
+    device_code: str = field(repr=False)
+    user_code: str
+    verification_url: str
+    expires_in: int
+    interval: int
+
+
+@dataclass(frozen=True)
+class DeviceSignInPoll:
+    """What a poll of a device sign-in answered.
+
+    Parameters
+    ----------
+    state
+        ``pending`` while nobody decided, ``approved`` with the token, ``denied``, ``expired``,
+        or ``slow_down`` when asked sooner than the interval (wait 5 seconds longer).
+    token
+        The new token, only with ``approved``.
+    """
+
+    state: Literal["pending", "approved", "denied", "expired", "slow_down"]
+    token: IssuedToken | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

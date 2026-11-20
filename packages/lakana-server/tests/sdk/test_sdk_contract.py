@@ -78,7 +78,6 @@ BROWSER_ONLY: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/v1/sign-in/passkey/options"): _WEBAUTHN,
     ("POST", "/api/v1/sign-in/passkey"): _WEBAUTHN,
-    ("GET", "/api/v1/sign-in/oidc"): "the sign-in page asks whether to show the provider's button",
     ("POST", "/api/v1/sign-in/oidc/start"): _OIDC,
     ("GET", "/api/v1/sign-in/oidc/callback"): _OIDC,
     ("POST", "/api/v1/sign-in/oidc/finish"): _OIDC,

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import socket
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -285,6 +287,24 @@ def _login_client(url: str, token: str) -> lakana.Client:
     return lakana.Client(url=url, token=token)
 
 
+def _open_browser(url: str) -> bool:
+    """Open a URL in the person's browser, importing `webbrowser` only when it is needed.
+
+    Parameters
+    ----------
+    url
+        The page.
+
+    Returns
+    -------
+    bool
+        Whether a browser was started.
+    """
+    import webbrowser
+
+    return webbrowser.open(url)
+
+
 def _stdin_is_tty() -> bool:
     """Report whether stdin is an interactive terminal.
 
@@ -318,6 +338,14 @@ class CliState:
         Builds a client from explicit credentials, for `login`.
     is_interactive
         Whether prompts may be shown.
+    browser_opener
+        Opens a URL in the person's browser, for `login` (`webbrowser.open`).
+    sleep
+        Waits between two polls of `login --device`; `time.sleep` by default.
+    hostname
+        Names this computer, for the token `login` creates; `socket.gethostname` by default.
+    login_timeout
+        Seconds `login` waits for the browser's answer: 10 minutes.
     config_path
         The profile file; `None` means the SDK's default location.
     timeout
@@ -334,6 +362,10 @@ class CliState:
     ci_client_factory: Callable[[CliState, str, str], lakana.Client] = default_ci_client_factory
     login_client_factory: Callable[[str, str], lakana.Client] = _login_client
     is_interactive: Callable[[], bool] = _stdin_is_tty
+    browser_opener: Callable[[str], bool] = _open_browser
+    sleep: Callable[[float], None] = time.sleep
+    hostname: Callable[[], str] = socket.gethostname
+    login_timeout: float = 600.0
     config_path: Path | None = None
     timeout: float = 30.0
     version_deadline: float = 3.0
