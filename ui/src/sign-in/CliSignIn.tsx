@@ -17,6 +17,7 @@ import { Link, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import {
   approveCli,
+  type CliDeviceHostOut,
   approveDevice,
   denyDevice,
   describeDevice,
@@ -84,6 +85,57 @@ function TokenQuestion({ host }: TokenQuestionProps): JSX.Element {
         person: <VisibleText text={person} />,
       }}
     />
+  );
+}
+
+/**
+ * What the token allows and for how long: 90 days, and for a linked person only while they keep
+ * signing in through the provider (the token window).
+ *
+ * @returns The sentence.
+ */
+function TokenEffect(): JSX.Element {
+  const { t } = useTranslation();
+  const session = useSession();
+  return (
+    <p>
+      {session.session?.provider_linked === true
+        ? t("cliSignIn.effectLinked")
+        : t("cliSignIn.effect")}
+    </p>
+  );
+}
+
+/** Properties of {@link Requested}. */
+interface RequestedProps {
+  /** The address that started the sign-in. */
+  readonly from: string;
+  /** When, as the server answered it. */
+  readonly at: string;
+}
+
+/**
+ * "Requested from <address>, <n> minutes ago.", so the person can tell their own request from
+ * someone else's.
+ *
+ * @param props - The address and the time.
+ * @param props.from - The address that started the sign-in.
+ * @param props.at - When.
+ * @returns The line.
+ */
+function Requested({ from, at }: RequestedProps): JSX.Element {
+  const { t } = useTranslation();
+  const [now] = useState(() => Date.now());
+  const minutes = Math.floor((now - Date.parse(at)) / 60_000);
+  const address = { address: <VisibleText text={from} /> };
+  return (
+    <p className="step-who">
+      {minutes >= 1 ? (
+        <Trans t={t} i18nKey="cliSignIn.device.requested" count={minutes} components={address} />
+      ) : (
+        <Trans t={t} i18nKey="cliSignIn.device.requestedNow" components={address} />
+      )}
+    </p>
   );
 }
 
@@ -163,7 +215,8 @@ export function CliSignInPage({ navigate = assign }: CliSignInProps): JSX.Elemen
   };
   return (
     <Step title={t("cliSignIn.title")} heading={<TokenQuestion host={request.host} />}>
-      <p>{t("cliSignIn.effect")}</p>
+      <TokenEffect />
+      <p className="step-warning">{t("cliSignIn.warning")}</p>
       {sent ? (
         <p className="step-status" role="status">
           {t("cliSignIn.sent")}
@@ -192,7 +245,7 @@ export function CliSignInPage({ navigate = assign }: CliSignInProps): JSX.Elemen
 /** Where the device page is. */
 type DevicePhase =
   | { readonly kind: "enter" }
-  | { readonly kind: "confirm"; readonly code: string; readonly host: string }
+  | { readonly kind: "confirm"; readonly code: string; readonly found: CliDeviceHostOut }
   | { readonly kind: "approved" }
   | { readonly kind: "denied" };
 
@@ -231,8 +284,10 @@ export function CliDevicePage(): JSX.Element {
       });
     };
     return (
-      <Step title={t("cliSignIn.title")} heading={<TokenQuestion host={phase.host} />}>
-        <p>{t("cliSignIn.effect")}</p>
+      <Step title={t("cliSignIn.title")} heading={<TokenQuestion host={phase.found.host} />}>
+        <Requested from={phase.found.requested_from} at={phase.found.requested_at} />
+        <TokenEffect />
+        <p className="step-warning">{t("cliSignIn.device.warning")}</p>
         <div className="step-actions">
           <PendingButton
             className="button button-primary"
@@ -262,8 +317,8 @@ export function CliDevicePage(): JSX.Element {
     setCodeError(null);
     attempt.run(
       async () => {
-        const { host } = await describeDevice(typed);
-        setPhase({ kind: "confirm", code: typed, host });
+        const found = await describeDevice(typed);
+        setPhase({ kind: "confirm", code: typed, found });
       },
       (error) => {
         const text =
@@ -279,6 +334,7 @@ export function CliDevicePage(): JSX.Element {
   return (
     <Step title={t("cliSignIn.device.title")}>
       <p>{t("cliSignIn.device.intro")}</p>
+      <p className="step-warning">{t("cliSignIn.device.warning")}</p>
       <Form
         onSubmit={(event) => {
           event.preventDefault();

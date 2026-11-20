@@ -181,9 +181,12 @@ def test_login_with_a_device_code_saves_a_working_token(client: TestClient, tmp_
         if waiting is None:
             code = {"user_code": started[0].user_code}
             browser = _kim(client)
-            assert client.post(
-                "/api/v1/sign-in/cli/device/describe", headers=browser, json=code
-            ).json() == {"host": "laptop-7"}
+            assert (
+                client.post(
+                    "/api/v1/sign-in/cli/device/describe", headers=browser, json=code
+                ).json()["host"]
+                == "laptop-7"
+            )
             approved = client.post("/api/v1/sign-in/cli/device/approve", headers=browser, json=code)
             assert approved.status_code == 204, approved.text
 

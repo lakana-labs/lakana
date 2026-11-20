@@ -103,10 +103,14 @@ PEOPLE_ONLY = "A command-line sign-in is for people: a service account cannot co
 """The refusal of a service account."""
 
 EXCHANGE_REFUSED = (
-    "This sign-in code is not valid: it was used, it took longer than 2 minutes, or it came "
-    "without the command line's proof. Run lakana login again."
+    "This sign-in code is not valid: it was used, it took longer than 2 minutes, it came "
+    "without the command line's proof, or the browser session that confirmed it has ended. Run "
+    "lakana login again."
 )
 """The refusal of a loopback exchange, the same for every reason."""
+
+PEER_LENGTH = 64
+"""The longest requesting address kept."""
 
 DEVICE_REFUSED = (
     "This device code is not known: it was used or has expired. Run lakana login --device again."
@@ -149,6 +153,25 @@ class DeviceStart:
     device_code: str = field(repr=False)
     user_code: str = field(repr=False)
     expires_at: datetime
+
+
+@dataclass(frozen=True)
+class DeviceDescription:
+    """What the confirmation of a device grant shows.
+
+    Parameters
+    ----------
+    host
+        The name the command line gave its computer, cleaned.
+    requested_from
+        The client address that started the grant, as the server saw it.
+    requested_at
+        When it was started.
+    """
+
+    host: str
+    requested_from: str
+    requested_at: datetime
 
 
 @dataclass(frozen=True)
@@ -331,19 +354,21 @@ class CliGrantService:
             return None
         return self._session.get(CliGrant, claimed)
 
-    def _audit(self, p_id: uuid.UUID, kind: AuditEventType, grant: CliGrant, **extra: str) -> None:
+    def _audit(
+        self, p_id: uuid.UUID | None, kind: AuditEventType, grant: CliGrant, **extra: str
+    ) -> None:
         """Record an event about a grant, without any of its secrets.
 
         Parameters
         ----------
         p_id
-            The person.
+            The person; `None` for a refused exchange of a grant nobody approved.
         kind
             The event's type.
         grant
             The grant.
         **extra
-            Further fields (``key_id``).
+            Further fields (``key_id``, ``reason``).
         """
         AuditService(self._session).record(
             p_id,
@@ -467,12 +492,51 @@ class CliGrantService:
                 ],
                 {"used_at": self._clock()},
             )
+        if claimed is None:
+            self._refused_code(code)
+            self._session.commit()
+            raise CliGrantRefused(EXCHANGE_REFUSED)
         self._session.commit()
-        if claimed is None or not hmac.compare_digest(
+        if not hmac.compare_digest(
             s256(code_verifier).encode("ascii"), (claimed.code_challenge or "").encode("ascii")
         ):
+            self._audit_refusal(claimed, "wrong_verifier")
             raise CliGrantRefused(EXCHANGE_REFUSED)
-        return self._issue(claimed)
+        return self._issue(claimed, refusal=EXCHANGE_REFUSED)
+
+    def _audit_refusal(self, grant: CliGrant, reason: str) -> None:
+        """Record a refused exchange of a grant that exists, and commit.
+
+        Parameters
+        ----------
+        grant
+            The grant.
+        reason
+            ``wrong_verifier``, ``used``, ``expired`` or ``session_ended``.
+        """
+        principal = grant.principal_id
+        self._audit(principal, AuditEventType.SIGN_IN_CLI_REFUSED, grant, reason=reason)
+        self._session.commit()
+
+    def _refused_code(self, code: str) -> None:
+        """Record why a code that names a grant could not be exchanged; an unknown one is not.
+
+        Only someone who holds a real code reaches a grant, so these rows cannot be flooded.
+
+        Parameters
+        ----------
+        code
+            The code presented.
+        """
+        if not code:
+            return
+        grant = self._session.execute(
+            select(CliGrant).where(
+                CliGrant.kind == "loopback", CliGrant.code_hash == hash_secret(code)
+            )
+        ).scalar_one_or_none()
+        if grant is not None:
+            self._audit_refusal(grant, "used" if grant.used_at is not None else "expired")
 
     def _name_taken(self, principal_id: uuid.UUID, name: str) -> bool:
         """Say whether a person has a working token of a name.
@@ -503,13 +567,38 @@ class CliGrantService:
             is not None
         )
 
-    def _issue(self, grant: CliGrant) -> IssuedPat:
+    def _approving(self, grant: CliGrant) -> PrincipalRef | None:
+        """Read the browser session that approved a grant again, as a request would.
+
+        Parameters
+        ----------
+        grant
+            The grant.
+
+        Returns
+        -------
+        PrincipalRef or None
+            The person in that session; `None` when it has ended, idled out, its person was
+            deactivated, or it is gone.
+        """
+        if grant.session_id is None:
+            return None
+        try:
+            return SessionService(self._session, self._authz, clock=self._clock).verify_by_id(
+                grant.session_id
+            )
+        except AuthenticationError:
+            return None
+
+    def _issue(self, grant: CliGrant, *, refusal: str = SESSION_ENDED) -> IssuedPat:
         """Issue the token of a grant just used, as the person in the session that approved it.
 
         Parameters
         ----------
         grant
             The grant, approved and now used.
+        refusal
+            The sentence of the refusal when the approving session has ended.
 
         Returns
         -------
@@ -519,17 +608,14 @@ class CliGrantService:
         Raises
         ------
         CliGrantRefused
-            When the approving session has ended (`SESSION_ENDED`).
+            When the approving session has ended, with `refusal`; audited as
+            ``session_ended``.
         """
         approved_at = grant.approved_at
-        if grant.session_id is None or approved_at is None:
-            raise CliGrantRefused(SESSION_ENDED)
-        try:
-            ref = SessionService(self._session, self._authz, clock=self._clock).verify_by_id(
-                grant.session_id
-            )
-        except AuthenticationError as exc:
-            raise CliGrantRefused(SESSION_ENDED) from exc
+        ref = self._approving(grant)
+        if ref is None or approved_at is None:
+            self._audit_refusal(grant, "session_ended")
+            raise CliGrantRefused(refusal)
         assert ref.session is not None  # nosec B101 -- a verified session's reference has it
         # The touch was checked at the approval: measure it there, not minutes later.
         ref = replace(ref, session=replace(ref.session, verified_at=approved_at))
@@ -544,13 +630,16 @@ class CliGrantService:
         self._session.commit()
         return issued
 
-    def start_device(self, host: str) -> DeviceStart:
+    def start_device(self, host: str, *, peer: str) -> DeviceStart:
         """Start a device grant for a command line without a browser.
 
         Parameters
         ----------
         host
             The command line's host name; cleaned here (`clean_host`).
+        peer
+            The client address that asks, as the server sees it; kept for the confirmation, cut
+            to `PEER_LENGTH` characters.
 
         Returns
         -------
@@ -574,6 +663,7 @@ class CliGrantService:
                     host=clean_host(host),
                     device_code_hash=hash_secret(device_code),
                     user_code_hash=hash_secret(user_code),
+                    requested_from=peer[:PEER_LENGTH],
                     created_at=now,
                     expires_at=now + DEVICE_LIFETIME,
                 )
@@ -610,8 +700,8 @@ class CliGrantService:
             CliGrant.denied_at.is_(None),
         ]
 
-    def describe_device(self, p: PrincipalRef, user_code: str) -> str:
-        """Name the computer a user code would sign in, for the confirmation.
+    def describe_device(self, p: PrincipalRef, user_code: str) -> DeviceDescription:
+        """Describe the sign-in a user code would approve, for the confirmation.
 
         Parameters
         ----------
@@ -622,8 +712,8 @@ class CliGrantService:
 
         Returns
         -------
-        str
-            The command line's host name.
+        DeviceDescription
+            The command line's host name, the address it asked from and when.
 
         Raises
         ------
@@ -633,14 +723,16 @@ class CliGrantService:
             When no unexpired grant waits for this code (`WRONG_USER_CODE`).
         """
         self._approver(p)
-        host = self._session.execute(
-            select(CliGrant.host).where(
-                *self._waiting(user_code), CliGrant.expires_at > self._clock()
-            )
+        grant = self._session.execute(
+            select(CliGrant).where(*self._waiting(user_code), CliGrant.expires_at > self._clock())
         ).scalar_one_or_none()
-        if host is None:
+        if grant is None:
             raise NotFoundError(WRONG_USER_CODE)
-        return host
+        return DeviceDescription(
+            host=grant.host,
+            requested_from=grant.requested_from or "?",
+            requested_at=grant.created_at,
+        )
 
     def approve_device(self, p: PrincipalRef, user_code: str) -> None:
         """Approve a device grant: its command line receives the token at its next poll.
@@ -696,9 +788,11 @@ class CliGrantService:
         """
         self._approver(p)
         grant = self._claim(self._waiting(user_code), {"denied_at": self._clock()})
-        self._session.commit()
         if grant is None:
+            self._session.commit()
             raise NotFoundError(WRONG_USER_CODE)
+        self._audit(p.id, AuditEventType.SIGN_IN_CLI_DENIED, grant)
+        self._session.commit()
 
     def poll_device(self, device_code: str) -> DevicePoll:
         """Ask about a device grant; an approved one answers its token, once.

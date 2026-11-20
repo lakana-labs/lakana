@@ -36,6 +36,7 @@ from lakana_core.identity.cli_grants import (
     TOKEN_LIFETIME,
     USER_CODE_ALPHABET,
     CliGrantService,
+    DeviceDescription,
     DevicePoll,
     DeviceStart,
     clean_host,
@@ -405,7 +406,7 @@ def test_a_revoked_or_expired_name_is_free_again(world: World) -> None:
 
 def test_only_hashes_are_stored(world: World) -> None:
     code = _approve(world, world.signed_in(world.person("kim")))
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
 
     rows = world.session.execute(select(CliGrant).order_by(CliGrant.kind)).scalars().all()
     stored = " ".join(str(getattr(row, c.name)) for row in rows for c in CliGrant.__table__.c)
@@ -431,7 +432,7 @@ def test_old_grants_are_purged(world: World) -> None:
     _approve(world, kim)
     world.clock.now = START + timedelta(days=2)
 
-    world.grants.start_device("box")
+    world.grants.start_device("box", peer="203.0.113.7")
 
     kinds = world.session.execute(select(CliGrant.kind)).scalars().all()
     assert kinds == ["device"]
@@ -463,12 +464,14 @@ def _poll(world: World, device_code: str) -> DevicePoll:
 def test_device_grant_pending_then_approved_then_used(world: World) -> None:
     kim_row = world.person("kim")
     kim = world.signed_in(kim_row)
-    started = world.grants.start_device("build-box")
+    started = world.grants.start_device("build-box", peer="203.0.113.7")
 
     assert isinstance(started, DeviceStart)
     assert started.expires_at == START + DEVICE_LIFETIME
     assert _poll(world, started.device_code) == DevicePoll(state="pending")
-    assert world.grants.describe_device(kim, started.user_code) == "build-box"
+    assert world.grants.describe_device(kim, started.user_code) == DeviceDescription(
+        host="build-box", requested_from="203.0.113.7", requested_at=START
+    )
     world.grants.approve_device(kim, started.user_code)
     approved = _poll(world, started.device_code)
 
@@ -482,7 +485,7 @@ def test_device_grant_pending_then_approved_then_used(world: World) -> None:
 
 
 def test_user_code_is_eight_letters_shown_with_a_dash(world: World) -> None:
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
 
     assert len(started.user_code) == 9
     assert started.user_code[4] == "-"
@@ -491,17 +494,17 @@ def test_user_code_is_eight_letters_shown_with_a_dash(world: World) -> None:
 
 def test_user_code_matches_without_dash_and_case(world: World) -> None:
     kim = world.signed_in(world.person("kim"))
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
     typed = f" {normalize_user_code(started.user_code).lower()} "
 
-    assert world.grants.describe_device(kim, typed) == "box"
+    assert world.grants.describe_device(kim, typed).host == "box"
     world.grants.approve_device(kim, typed)
     assert _poll(world, started.device_code).state == "approved"
 
 
 def test_approve_device_needs_step_up(world: World) -> None:
     kim = world.signed_in(world.person("kim"), touched=False)
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
 
     with pytest.raises(StepUpRequired):
         world.grants.approve_device(kim, started.user_code)
@@ -509,7 +512,7 @@ def test_approve_device_needs_step_up(world: World) -> None:
 
 
 def test_polling_faster_than_the_interval_is_slow_down(world: World) -> None:
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
     world.grants.poll_device(started.device_code)
     world.clock.now += timedelta(seconds=2)
 
@@ -522,7 +525,7 @@ def test_polling_faster_than_the_interval_is_slow_down(world: World) -> None:
 def test_denied_grant_never_yields_a_token(world: World) -> None:
     kim_row = world.person("kim")
     kim = world.signed_in(kim_row)
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
     world.grants.deny_device(kim, started.user_code)
 
     assert _poll(world, started.device_code) == DevicePoll(state="denied")
@@ -534,7 +537,7 @@ def test_denied_grant_never_yields_a_token(world: World) -> None:
 
 def test_device_grant_expires_after_ten_minutes(world: World) -> None:
     kim = world.signed_in(world.person("kim"))
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
     world.clock.now = START + DEVICE_LIFETIME
 
     with pytest.raises(NotFoundError):
@@ -548,7 +551,7 @@ def test_device_grant_expires_after_ten_minutes(world: World) -> None:
 
 def test_an_approved_grant_expires_unpolled(world: World) -> None:
     kim = world.signed_in(world.person("kim"))
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
     world.grants.approve_device(kim, started.user_code)
     world.clock.now = START + DEVICE_LIFETIME
 
@@ -557,7 +560,7 @@ def test_an_approved_grant_expires_unpolled(world: World) -> None:
 
 def test_wrong_user_code_says_so(world: World) -> None:
     kim = world.signed_in(world.person("kim"))
-    world.grants.start_device("box")
+    world.grants.start_device("box", peer="203.0.113.7")
 
     with pytest.raises(NotFoundError, match="No sign-in is waiting for this code"):
         world.grants.describe_device(kim, "BBBB-BBBB")
@@ -574,7 +577,7 @@ def test_a_poll_that_loses_the_race_gets_no_token(
     world: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     kim = world.signed_in(world.person("kim"))
-    started = world.grants.start_device("box")
+    started = world.grants.start_device("box", peer="203.0.113.7")
     world.grants.approve_device(kim, started.user_code)
     world.session.execute(update(CliGrant).values(used_at=START))  # another poll won
     world.session.commit()
@@ -586,21 +589,132 @@ def test_a_poll_that_loses_the_race_gets_no_token(
 def test_a_taken_user_code_is_drawn_again(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
     codes = iter(["BBBBBBBB", "BBBBBBBB", "CCCCCCCC"])
     monkeypatch.setattr(cli_grants, "_new_user_code", lambda: next(codes))
-    first = world.grants.start_device("one")
+    first = world.grants.start_device("one", peer="203.0.113.7")
 
-    second = world.grants.start_device("two")
+    second = world.grants.start_device("two", peer="203.0.113.7")
 
     assert (first.user_code, second.user_code) == ("BBBB-BBBB", "CCCC-CCCC")
 
 
 def test_three_taken_user_codes_give_up(world: World, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli_grants, "_new_user_code", lambda: "BBBBBBBB")
-    world.grants.start_device("one")
+    world.grants.start_device("one", peer="203.0.113.7")
 
     with pytest.raises(ConflictError, match="free device code"):
-        world.grants.start_device("two")
+        world.grants.start_device("two", peer="203.0.113.7")
 
 
 def test_a_session_id_that_names_no_session_is_not_known(world: World) -> None:
     with pytest.raises(AuthenticationError, match="not known"):
         world.sessions.verify_by_id(uuid.uuid4())
+
+
+# -- the pre-review's findings (#32, PR 3) ------------------------------------------------------
+
+
+def test_the_requesting_address_is_kept_and_cut(world: World) -> None:
+    kim = world.signed_in(world.person("kim"))
+    started = world.grants.start_device("box", peer="2001:db8::" + "f" * 80)
+
+    described = world.grants.describe_device(kim, started.user_code)
+
+    assert len(described.requested_from) == 64
+
+
+def test_a_denied_device_sign_in_is_audited(world: World) -> None:
+    kim = world.signed_in(world.person("kim"))
+    started = world.grants.start_device("box", peer="203.0.113.7")
+
+    world.grants.deny_device(kim, started.user_code)
+
+    grant = world.session.execute(select(CliGrant)).scalar_one()
+    assert world.events(AuditEventType.SIGN_IN_CLI_DENIED) == [
+        {"id": str(grant.id), "kind": "device", "host": "box"}
+    ]
+
+
+@pytest.mark.parametrize("reason", ["wrong_verifier", "used", "expired"])
+def test_a_refused_exchange_is_audited_without_secrets(world: World, reason: str) -> None:
+    code = _approve(world, world.signed_in(world.person("kim")))
+    if reason == "used":
+        world.grants.exchange_loopback(code, VERIFIER)
+    if reason == "expired":
+        world.clock.now = START + CODE_LIFETIME
+
+    with pytest.raises(CliGrantRefused):
+        world.grants.exchange_loopback(code, "w" * 43 if reason == "wrong_verifier" else VERIFIER)
+
+    grant = world.session.execute(select(CliGrant)).scalar_one()
+    refused = world.events(AuditEventType.SIGN_IN_CLI_REFUSED)
+    assert refused == [
+        {"id": str(grant.id), "kind": "loopback", "host": "laptop-7", "reason": reason}
+    ]
+    assert code not in str(refused)
+
+
+def test_an_unknown_code_is_refused_without_an_event(world: World) -> None:
+    with pytest.raises(CliGrantRefused):
+        world.grants.exchange_loopback("nothing", VERIFIER)
+
+    assert world.events(AuditEventType.SIGN_IN_CLI_REFUSED) == []
+
+
+def test_every_exchange_refusal_says_the_same_sentence(world: World) -> None:
+    kim = world.signed_in(world.person("kim"))
+    ended = _approve(world, kim)
+    assert kim.session is not None
+    world.sessions.end(kim, kim.session.key_id)
+    sentences = set()
+    for code, verifier in (("nothing", VERIFIER), (ended, VERIFIER)):
+        with pytest.raises(CliGrantRefused) as refused:
+            world.grants.exchange_loopback(code, verifier)
+        sentences.add(str(refused.value))
+
+    assert sentences == {cli_grants.EXCHANGE_REFUSED}
+    assert world.events(AuditEventType.SIGN_IN_CLI_REFUSED)[0]["reason"] == "session_ended"
+
+
+def test_no_token_once_the_person_was_deactivated_after_the_loopback_approval(
+    world: World,
+) -> None:
+    kim_row = world.person("kim")
+    code = _approve(world, world.signed_in(kim_row))
+    kim_row.is_active = False
+    world.session.commit()
+
+    with pytest.raises(CliGrantRefused):
+        world.grants.exchange_loopback(code, VERIFIER)
+    assert world.tokens(kim_row) == []
+
+
+def test_no_token_once_the_person_was_deactivated_after_the_device_approval(
+    world: World,
+) -> None:
+    kim_row = world.person("kim")
+    started = world.grants.start_device("box", peer="203.0.113.7")
+    world.grants.approve_device(world.signed_in(kim_row), started.user_code)
+    kim_row.is_active = False
+    world.session.commit()
+
+    with pytest.raises(CliGrantRefused, match="has ended"):
+        world.grants.poll_device(started.device_code)
+    assert world.tokens(kim_row) == []
+
+
+def test_a_loopback_exchange_that_loses_the_race_gets_no_token(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kim_row = world.person("kim")
+    code = _approve(world, world.signed_in(kim_row))
+    claim = CliGrantService._claim
+
+    def raced(self: CliGrantService, conditions: list, values: dict) -> CliGrant | None:
+        # Another exchange of the same code commits between this one's read and its update.
+        world.session.execute(update(CliGrant).values(used_at=START))
+        return claim(self, conditions, values)
+
+    monkeypatch.setattr(CliGrantService, "_claim", raced)
+
+    with pytest.raises(CliGrantRefused):
+        world.grants.exchange_loopback(code, VERIFIER)
+    assert world.tokens(kim_row) == []

@@ -668,7 +668,9 @@ People sign in to the web interface through the organisation's identity provider
 `LAKANA_OIDC__ISSUER`). The details and the tests that pin them are in `docs/agent/security.md`,
 "OIDC sign-in (#32, PR 1)" and "(#32, PR 2)". People Lakana knows link their identity (an invite, their
 profile or a recovery link); a linked person signs in and steps up only through the provider and uses
-their tokens only within the token window. `lakana login` follows.
+their tokens only within the token window. `lakana login` signs the command line in through a
+browser: see "`lakana login` through a browser" below and `docs/agent/security.md`, "OIDC
+sign-in (#32, PR 3)".
 
 ### What is defended
 
@@ -726,6 +728,51 @@ their tokens only within the token window. `lakana login` follows.
    code and the state); Lakana's access log writes it as `?…`.
 5. **A passkey disabled as a copy** can take the last administrator who signs in with a passkey;
    that is never refused, and the operator's recovery link is then the way in.
+
+### `lakana login` through a browser
+
+`lakana login` gets a personal token through one of Lakana's own grants over the browser session
+(not the provider's): a loopback grant (the browser brings a one-time code back to
+`http://127.0.0.1:<port>/`, exchanged with a PKCE verifier) or, with `--device`, a device grant
+(a short code typed in a browser elsewhere). Either issues a token named `lakana login on <host>`
+for 90 days, for the person who confirmed, while their browser session lasts.
+
+What is defended:
+
+- **A code taken from the loopback port.** It is worth nothing without the verifier that only the
+  command line holds, works once for 2 minutes, and a wrong verifier uses it up (and is audited
+  as `SIGN_IN_CLI_REFUSED`).
+- **An open redirect from a crafted link.** The page only ever sends the browser to
+  `http://127.0.0.1:<port>/`, with a port it checked to be 1024 to 65535; nothing else a link
+  names becomes an address.
+- **A confirmation without the person.** Only a browser session with its CSRF token confirms, after
+  a fresh passkey or provider touch; tokens and service accounts are refused. A session that ended
+  or a person deactivated between the confirmation and the exchange gives no token.
+- **Device-code phishing** (RFC 8628, 5.4). Anyone may start a device grant with a computer name
+  of their choosing and send the person the page and the code, posing as their IT. The
+  confirmation shows the address the sign-in was started from and how long ago, and says plainly
+  to continue only for a sign-in the person started a moment ago and never to enter a code
+  someone sent them. A wrong code is answered as such; 5 of them in 10 minutes block the person's
+  device routes.
+- **Guessing a user code.** 8 letters of 20 (about 2.6·10¹⁰ values), 10 minutes, stored only as a
+  hash; starting and polling are rate limited per address and network.
+- **The token in a log, the audit log, the terminal or the shell history.** It is never printed,
+  never on a command line and never in a URL; only hashes of the codes are stored.
+
+Residuals, stated as such:
+
+1. **Phishing still works on someone who ignores the warning.** The address and the time help a
+   person who looks; a person who confirms a code someone sent them gives that someone a 90-day
+   token that acts as them. Revoking it (`lakana token revoke`) or deactivating the person ends it.
+2. **The loopback `state` is no secret on a shared computer.** It is on the terminal and on the
+   browser launcher's command line, which other local users can read (`/proc/<pid>/cmdline`
+   without `hidepid`). One of them can confirm the same challenge in their own session and race
+   the browser to the port; the command line then saves *their* token and says whose ("Logged in
+   as ..."). Nobody gains access to the person's account this way.
+3. **The wrong-code counter lives in each server process's memory**, as the other sign-in limits
+   do; several replicas each count on their own.
+4. **The confirmation page's address is the one the person gave `lakana login`.** It should be
+   the public address, where passkeys work.
 
 ## Explicitly not defended
 

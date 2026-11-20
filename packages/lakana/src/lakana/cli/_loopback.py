@@ -2,11 +2,16 @@
 
 `LoopbackServer` listens on ``127.0.0.1`` only, on a port the system picks, and answers GET
 requests of ``/`` alone (404 for any other path, 400 for another `Host`). A request whose
-``state`` is not this sign-in's (compared in constant time) is answered 400 and ignored, so
-another program on the machine can neither end the wait nor slip in a code of its own; the first
+``state`` is not this sign-in's (compared in constant time) is answered 400 and ignored: a
+program that does not know the ``state`` can neither end the wait nor answer it. The first
 request with the right ``state`` is answered with a page saying the tab may be closed, and ends
 the wait. The listener writes no log line: a request line holds the code. A code is worth
 nothing without the PKCE verifier only this process holds.
+
+The ``state`` is no secret from other users of the same computer: it is on the terminal and on
+the command line of the browser launcher (``/proc/<pid>/cmdline``). One who reads it can approve
+the same challenge in their own browser session and race the browser to the port with their own
+code; the command line then saves a token of theirs, and says whose (``Logged in as ...``).
 """
 
 from __future__ import annotations

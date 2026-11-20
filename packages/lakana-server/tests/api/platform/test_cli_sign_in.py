@@ -364,7 +364,10 @@ def test_device_flow_end_to_end(client: TestClient, program: TestClient) -> None
     polled = program.post(POLL, json={"device_code": started["device_code"]})
 
     assert pending.json() == {"state": "pending", "token": None}
-    assert described.json() == {"host": "build-box"}
+    assert described.json()["host"] == "build-box"
+    assert described.json()["requested_from"] == "testclient"
+    requested = datetime.fromisoformat(described.json()["requested_at"])
+    assert abs(datetime.now(UTC) - requested) < timedelta(minutes=1)
     assert approved.status_code == 204, approved.text
     assert polled.json()["state"] == "approved"
     assert polled.json()["token"]["name"] == "lakana login on build-box"
@@ -483,3 +486,43 @@ def test_the_oldest_person_is_forgotten_past_the_key_limit(
     limit.miss("bob")
 
     limit.check("kim")
+
+
+def test_polls_have_buckets_of_their_own(client: TestClient, program: TestClient) -> None:
+    app = cast(FastAPI, client.app)
+    app.state.cli_sign_in_limiter = AuthAuditLimiter(1)
+    app.state.cli_poll_limiter = AuthAuditLimiter(1)
+    started = _start(program)
+
+    polled = program.post(POLL, json={"device_code": started["device_code"]})
+    _rewind_poll(client)
+    limited = program.post(POLL, json={"device_code": started["device_code"]})
+
+    assert polled.status_code == 200, polled.text
+    assert limited.status_code == 429
+    assert limited.headers["Retry-After"] == "60"
+
+
+def test_the_polls_network_rate_counts_too(client: TestClient, program: TestClient) -> None:
+    app = cast(FastAPI, client.app)
+    app.state.cli_poll_network_limiter = AuthAuditLimiter(1)
+    started = _start(program)
+    program.post(POLL, json={"device_code": started["device_code"]})
+    _rewind_poll(client)
+
+    assert program.post(POLL, json={"device_code": started["device_code"]}).status_code == 429
+
+
+def test_a_denied_sign_in_and_a_refused_exchange_are_audited(
+    client: TestClient, program: TestClient
+) -> None:
+    browser = _browser(client)
+    started = _start(program)
+    client.post(DENY, headers=browser, json={"user_code": started["user_code"]})
+    code = _approve(client, browser)
+    program.post(TOKEN, json={"code": code, "code_verifier": "w" * 43})
+
+    assert _events(client, AuditEventType.SIGN_IN_CLI_DENIED)[0]["host"] == "build-box"
+    refused = _events(client, AuditEventType.SIGN_IN_CLI_REFUSED)
+    assert [event["reason"] for event in refused] == ["wrong_verifier"]
+    assert code not in str(refused)

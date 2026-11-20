@@ -2,7 +2,7 @@
   "title": "Sign in the command line",
   "question": "Create the API token “<token/>” for <person/>?",
   "tokenName": "lakana login on <host/>",
-  "effect": "The command line on that computer can then do everything you can.",
+  "effect": "The command line on that computer can then do everything you can, for 90 days.",
   "create": "Create token",
   "cancel": "Cancel",
   "creating": "Creating the token…",
@@ -21,6 +21,12 @@
     "unknown": "No sign-in is waiting for this code. Check it on the other computer; it works for 10 minutes.",
     "approved": "Done. Go back to the terminal: lakana login finishes there.",
     "denied": "Refused. The command line on that computer was told, and no token was created.",
-    "doneTitle": "Command-line sign-in"
-  }
+    "doneTitle": "Command-line sign-in",
+    "warning": "Continue only if you started lakana login --device yourself, a moment ago. Never enter a code someone sent you or read out to you: whoever started this sign-in would get a token that acts as you.",
+    "requested_one": "Requested from <address/>, {{count}} minute ago.",
+    "requested_other": "Requested from <address/>, {{count}} minutes ago.",
+    "requestedNow": "Requested from <address/>, less than a minute ago."
+  },
+  "effectLinked": "The command line on that computer can then do everything you can, for 90 days, and only while you keep signing in to Lakana through your identity provider.",
+  "warning": "Continue only if you ran lakana login on this computer yourself, a moment ago. If a link or a message brought you here, close this tab."
 }

@@ -45,7 +45,7 @@ Answer fields: `CiTokenOut`
 
 Exchange the one-time code of `lakana login` and its PKCE verifier for the new token
 
-Needs no credential: the code and the verifier are the proof. The code is used up by the first exchange, right or wrong (400, the same sentence for an unknown, used, expired or wrong one, or when the browser session that confirmed it has ended). The token is the confirming person's, named `lakana login on <host>`, and works for 90 days. 429 past the rate.
+Needs no credential: the code and the verifier are the proof. The code is used up by the first exchange, right or wrong (400, one sentence for an unknown, used, expired or wrong one, or when the browser session that confirmed it has ended; each but the unknown one is audited as `SIGN_IN_CLI_REFUSED`). The token is the confirming person's, named `lakana login on <host>`, and works for 90 days. 429 past the rate.
 
 Request body (application/json, required): `CliTokenIn`
 

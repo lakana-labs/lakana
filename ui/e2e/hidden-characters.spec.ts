@@ -604,7 +604,9 @@ walk("lakana login's confirmations mark hidden characters", async ({ page }) => 
   const stub = poisoned(page);
   await signInAsAdmin(stub);
   await stub.route("**/api/v1/sign-in/cli/device/describe", (route) =>
-    route.fulfill({ json: { host: "build-box" } }),
+    route.fulfill({
+      json: { host: "build-box", requested_from: "203.0.113.7", requested_at: AT },
+    }),
   );
   const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
   await visit(
@@ -616,7 +618,7 @@ walk("lakana login's confirmations mark hidden characters", async ({ page }) => 
   await page.getByRole("textbox", { name: "Code" }).fill("BCDF-GHJK");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Create token" })).toBeVisible();
-  await expectMarked(page, "the device confirmation", ["build-box", "admin"]);
+  await expectMarked(page, "the device confirmation", ["build-box", "admin", "203.0.113.7"]);
   expectOnlyStubbed(paths, [...STUBBED, "/api/v1/sign-in/cli/device/describe"]);
 });
 

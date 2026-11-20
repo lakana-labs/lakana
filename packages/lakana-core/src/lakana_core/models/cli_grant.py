@@ -46,6 +46,8 @@ class CliGrant(Base):
         ForeignKey("browser_sessions.id", ondelete="SET NULL"), nullable=True, index=True
     )
     """The browser session that approved; the token is issued only while it lasts."""
+    requested_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    """The client address that started a device grant, shown on its confirmation."""
     created_at: Mapped[datetime] = mapped_column(UTCDateTime)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime, index=True)
     approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

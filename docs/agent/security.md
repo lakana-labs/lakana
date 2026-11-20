@@ -7117,13 +7117,17 @@ browser session (`lakana_core.identity.cli_grants`, `api/platform/cli_sign_in.py
 provider's, so they work with every provider and with a passkey session. Threat model: "OIDC
 sign-in (#32)".
 
-- **C1, when the browser is used.** `lakana login` reads `GET /api/v1/sign-in/oidc` with no
-  credential and opens the browser only when it says `enabled`; 404 (an older server), 409 (the
-  interface off) and 421 (an address the server does not answer browsers at) keep the token prompt,
-  byte for byte (`test_without_oidc_login_prompts_as_today`,
-  `test_older_server_without_the_info_route_prompts`). `--token-stdin` sends nothing new
-  (`test_token_stdin_is_unchanged`); `--paste` keeps the prompt on an OIDC instance, `--browser` and
-  `--device` work on any instance with the interface on.
+- **C1, when the browser is used.** Only when stdin is a terminal does `lakana login` read
+  `GET /api/v1/sign-in/oidc` (with no credential), and it opens the browser only when the answer
+  says `enabled`. Any other answer, an unreachable server included, keeps the token prompt
+  (`test_any_other_answer_of_the_info_route_prompts`, `test_an_unreachable_info_route_prompts`).
+  Without a terminal nothing new is sent and the output is byte for byte today's
+  (`test_without_a_terminal_an_oidc_instance_reads_the_token_as_today`); `--token-stdin` sends
+  nothing new either (`test_token_stdin_is_unchanged`). `--paste` keeps the prompt on an OIDC
+  instance; `--browser` and `--device` work on any instance with the interface on. When the
+  browser does not start (`webbrowser.open` answers false or raises), the address stays on the
+  screen and the next line names `--device`
+  (`test_without_a_browser_the_url_and_device_are_named_at_once`).
 - **C2, two sets of routes.** The browser's routes (`/api/v1/sign-in/cli/approvals`,
   `/device/describe`, `/device/approve`, `/device/deny`) need a browser session with its CSRF
   token; any token is 403 and a service account is refused (`test_approval_with_a_token_is_refused`,
@@ -7147,12 +7151,20 @@ sign-in (#32)".
   (`loopbackUrl`, `refuses a port outside 1024 to 65535`); nothing a link names becomes an
   address. The listener answers GET `/` only, refuses another `Host` and any `state` but its own
   (`hmac.compare_digest`), keeps waiting after a wrong one so no other program can end or answer
-  the sign-in (`test_wrong_state_is_refused_and_the_wait_goes_on`), sends `Cache-Control:
+  the sign-in for a program that does not know the `state`
+  (`test_wrong_state_is_refused_and_the_wait_goes_on`). The `state` is no secret from other users
+  of the same computer (the terminal, the launcher's command line in `/proc`): such a user can race
+  the browser with a code of their own session, and the CLI then saves their token and says whose
+  (a residual in the threat model). It sends `Cache-Control:
   no-store` and `Referrer-Policy: no-referrer`, gives a silent connection 5 seconds, writes no log
   line (`test_the_listener_writes_no_log_line`), and gives up after 10 minutes with a sentence
   naming `--device` and `--paste`.
-- **C4, the device grant.** `POST /api/v1/auth/cli/device` answers a device code (32 random
-  bytes) and a user code of 8 letters from `BCDFGHJKLMNPQRSTVWXZ` (20^8 values, no vowels, no
+- **C4, the device grant.** `POST /api/v1/auth/cli/device` keeps the requesting client address
+  (cut to 64 characters) and the start time; `/device/describe` answers both, and the page shows
+  "Requested from <address>, <n> minutes ago." beside a warning to continue only for a sign-in one
+  started a moment ago and never to enter a code someone sent (device-code phishing, RFC 8628 5.4;
+  `test_the_requesting_address_is_kept_and_cut`, `device: names the address and the age`). It
+  answers a device code (32 random bytes) and a user code of 8 letters from `BCDFGHJKLMNPQRSTVWXZ` (20^8 values, no vowels, no
   0/O, 1/I), both stored only as their SHA-256, for 10 minutes; the user code is compared without
   its dash and case (`test_user_code_matches_without_dash_and_case`), and a taken one is drawn
   again (unique index). The person types it in a signed-in browser, sees the computer and the
@@ -7161,24 +7173,39 @@ sign-in (#32)".
   (`test_wrong_user_codes_are_limited`; in process memory, so each server process counts on its
   own). The poll answers `pending`, `approved` with the token once, `denied` or `expired`, and 429
   `slow_down` sooner than 5 seconds (1 second of jitter allowed) after the last poll
-  (`test_poll_slow_down_is_429`, `test_denied_grant_never_yields_a_token`).
+  (`test_poll_slow_down_is_429`, `test_denied_grant_never_yields_a_token`). Polls have buckets of
+  their own at 12 times the start rate (`test_polls_have_buckets_of_their_own`), and the SDK reads
+  any 429 as `slow_down`, the CLI waiting 5 seconds more and at least `Retry-After`. A denial is
+  audited as `SIGN_IN_CLI_DENIED`.
 - **C5, the token.** Issued at the exchange or the approved poll through `PatService.issue`, for the
   person who approved, with their browser session as the actor: the session is read again
   (`SessionService.verify_by_id`), so a session that ended, idled out or whose person was
-  deactivated since gives no token (`test_no_token_once_the_approving_session_ended`); the touch is
-  measured at the approval. Named `lakana login on <host>`, the host stripped of control, format
+  deactivated since gives no token (`test_no_token_once_the_approving_session_ended`,
+  `test_no_token_once_the_person_was_deactivated_after_the_loopback_approval`, the same after the
+  device approval); the touch is measured at the approval. Two exchanges of one code at once give
+  one token (`test_two_exchanges_of_one_code_at_once_issue_one_token` on Postgres,
+  `test_a_loopback_exchange_that_loses_the_race_gets_no_token`). Every refused exchange answers one
+  sentence (`test_every_exchange_refusal_says_the_same_sentence`); one of a grant that exists is
+  audited as `SIGN_IN_CLI_REFUSED` with `reason` `wrong_verifier`, `used`, `expired` or
+  `session_ended`, an unknown code not (only a holder of a real code reaches a grant, so the rows
+  cannot be flooded). Named `lakana login on <host>`, the host stripped of control, format
   and line-separator characters, cut to 64 characters, `?` when empty
   (`test_host_label_is_cleaned`); a name the person already uses for a live token gets ` (2)`,
   ` (3)` (`test_taken_name_gets_a_number`). It works for 90 days (maintainer, 2026-11-20,
   `test_token_lives_ninety_days`); a new `lakana login` makes a new token and revokes none. A linked
   person's token stays bound by the token window (PR 2). Audited as `SIGN_IN_CLI_APPROVED` and
-  `SIGN_IN_CLI_TOKEN_ISSUED` (`id`, `kind`, `host`, `key_id`) beside `PAT_ISSUED`; no code,
+  `SIGN_IN_CLI_TOKEN_ISSUED` (`id`, `kind`, `host`, `key_id`) beside `PAT_ISSUED`, with
+  `SIGN_IN_CLI_DENIED` and `SIGN_IN_CLI_REFUSED` (`reason`); no code,
   verifier or token reaches a log, an audit row or the terminal
   (`test_routes_never_log_the_code_or_verifier`, `test_the_token_is_never_printed`).
 - **C6, the confirmation page** names the token and the person ("Create the API token “lakana
   login on laptop-7” for kim?") as text, with hidden characters of the host marked
-  (`marks hidden characters in the host`, and the walk of `hidden-characters.spec.ts`), and says
-  that the command line can then do everything the person can. Create token asks for the touch
+  (`marks hidden characters in the host`, and the walk of `hidden-characters.spec.ts`), says that
+  the command line can then do everything the person can for 90 days (and for a linked person only
+  while they keep signing in through the provider), and warns to continue only for a sign-in the
+  person started a moment ago. The loopback page shows no requesting address: the browser itself
+  brought the link, no request reached the server before the confirmation, and its code goes only
+  to this computer's `127.0.0.1`. Create token asks for the touch
   before the POST and a cancelled touch sends nothing (`asks for the touch before creating`,
   `a cancelled touch sends nothing`). A signed-out visitor signs in first and comes back with the
   link's query.

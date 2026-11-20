@@ -24,6 +24,11 @@ export interface SessionOut {
   readonly offer_passkey: boolean;
   /** When the session ends at the latest. */
   readonly absolute_expires_at: string;
+  /**
+   * True when the person signs in through the identity provider; their tokens then work only
+   * within the token window. Absent from a server older than #32's PR 2.
+   */
+  readonly provider_linked?: boolean;
 }
 
 /** What a person may use, as far as the interface's areas go. */

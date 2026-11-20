@@ -456,6 +456,24 @@ def test_poll_device_too_soon_is_slow_down() -> None:
     assert polled == DeviceSignInPoll(state="slow_down")
 
 
+@pytest.mark.parametrize(
+    ("retry_after", "seconds"), [("60", 60.0), ("Wed, 21 Oct 2026 07:28:00 GMT", None)]
+)
+def test_poll_device_past_the_rate_is_slow_down_with_the_wait(
+    retry_after: str, seconds: float | None
+) -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"detail": "Too many.", "type": "TooManyAttemptsError"},
+            headers={"Retry-After": retry_after},
+        )
+
+    polled = SignIn(_transport(answer)).poll_device("d")
+
+    assert polled == DeviceSignInPoll(state="slow_down", retry_after=seconds)
+
+
 def test_poll_device_raises_any_other_refusal() -> None:
     body = {"detail": "This device code is not known", "type": "CliGrantRefused"}
 

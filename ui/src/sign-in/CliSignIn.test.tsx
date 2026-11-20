@@ -95,8 +95,13 @@ describe("CliSignInPage", () => {
       }),
     ).toHaveFocus();
     expect(
-      screen.getByText("The command line on that computer can then do everything you can."),
+      screen.getByText(
+        "The command line on that computer can then do everything you can, for 90 days.",
+      ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(/^Continue only if you ran lakana login on this computer yourself/),
+    ).toHaveClass("step-warning");
     expect(document.title).toContain("Sign in the command line");
   });
 
@@ -245,6 +250,21 @@ describe("CliSignInPage", () => {
     expect(assign).toHaveBeenCalledWith("http://127.0.0.1:49152/?error=access_denied&state=st-1");
   });
 
+  it("says a linked person's token lasts only while they sign in through the provider", () => {
+    server();
+    renderAt(
+      <CliSignInPage navigate={vi.fn()} />,
+      link(),
+      signedIn({ session: { ...ADMIN_SESSION, name: "kim", provider_linked: true } }),
+    );
+
+    expect(
+      screen.getByText(
+        /only while you keep signing in to Lakana through your identity provider\.$/,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("marks hidden characters in the host", () => {
     server();
     renderAt(<CliSignInPage navigate={vi.fn()} />, link({ host: "lap\u202etop\u200b7" }));
@@ -266,7 +286,14 @@ describe("CliDevicePage", () => {
   const deviceServer = (extra: Record<string, FakeRoute> = {}) =>
     fakeServer({
       "GET /api/v1/sign-in/session": FRESH,
-      "POST /api/v1/sign-in/cli/device/describe": { status: 200, body: { host: "build-box" } },
+      "POST /api/v1/sign-in/cli/device/describe": {
+        status: 200,
+        body: {
+          host: "build-box",
+          requested_from: "203.0.113.7",
+          requested_at: new Date(Date.now() - 3 * 60_000).toISOString(),
+        },
+      },
       "POST /api/v1/sign-in/cli/device/approve": { status: 204 },
       "POST /api/v1/sign-in/cli/device/deny": { status: 204 },
       ...extra,
@@ -308,6 +335,7 @@ describe("CliDevicePage", () => {
     const fake = deviceServer();
     const user = renderAt(<CliDevicePage />, "/sign-in/device");
 
+    expect(screen.getByText(/Never enter a code someone sent you/)).toHaveClass("step-warning");
     await user.type(screen.getByRole("textbox", { name: "Code" }), " bcdf-ghjk {Enter}");
     expect(
       await screen.findByRole("heading", {
@@ -315,6 +343,10 @@ describe("CliDevicePage", () => {
         name: "Create the API token “lakana login on build-box” for kim?",
       }),
     ).toHaveFocus();
+    expect(screen.getByText(/^Requested from/)).toHaveTextContent(
+      "Requested from 203.0.113.7, 3 minutes ago.",
+    );
+    expect(screen.getByText(/^Continue only if you started lakana login --device/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Create token" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
@@ -324,6 +356,27 @@ describe("CliDevicePage", () => {
       path: "/api/v1/sign-in/cli/device/approve",
       body: { user_code: "bcdf-ghjk" },
     });
+  });
+
+  it.each([
+    [30_000, "Requested from 203.0.113.7, less than a minute ago."],
+    [90_000, "Requested from 203.0.113.7, 1 minute ago."],
+  ])("device: names the address and the age (%s ms)", async (age, line) => {
+    deviceServer({
+      "POST /api/v1/sign-in/cli/device/describe": {
+        status: 200,
+        body: {
+          host: "build-box",
+          requested_from: "203.0.113.7",
+          requested_at: new Date(Date.now() - age).toISOString(),
+        },
+      },
+    });
+    const user = renderAt(<CliDevicePage />, "/sign-in/device");
+
+    await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
+
+    expect(await screen.findByText(/^Requested from/)).toHaveTextContent(line);
   });
 
   it("device: cancel refuses the sign-in", async () => {

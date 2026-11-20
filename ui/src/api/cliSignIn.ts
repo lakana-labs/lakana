@@ -27,6 +27,10 @@ export interface CliApprovalOut {
 export interface CliDeviceHostOut {
   /** The computer the code would sign in, as it named itself. */
   readonly host: string;
+  /** The client address that started the sign-in, as the server saw it. */
+  readonly requested_from: string;
+  /** When it was started. */
+  readonly requested_at: string;
 }
 
 /**
@@ -79,10 +83,10 @@ export async function approveCli(
 }
 
 /**
- * Names the computer a device code would sign in.
+ * Describes the sign-in a device code would approve.
  *
  * @param userCode - The code as the person typed it.
- * @returns The computer's name.
+ * @returns The computer's name, the address that asked and when.
  * @throws {ApiError} 404 when no sign-in waits for the code; 429 past too many wrong codes.
  */
 export async function describeDevice(userCode: string): Promise<CliDeviceHostOut> {

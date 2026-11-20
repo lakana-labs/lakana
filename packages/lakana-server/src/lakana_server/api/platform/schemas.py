@@ -7815,10 +7815,17 @@ class CliDeviceHostOut(BaseModel):
     Parameters
     ----------
     host
-        The computer the code would sign in, for the confirmation.
+        The name the command line gave its computer, for the confirmation.
+    requested_from
+        The client address that started the sign-in, as the server saw it, so the person can
+        tell their own request from someone else's.
+    requested_at
+        When it was started.
     """
 
     host: str
+    requested_from: str
+    requested_at: datetime
 
 
 class CliDevicePollIn(BaseModel):

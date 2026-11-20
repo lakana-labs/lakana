@@ -99,7 +99,7 @@ Sends no credential.
 |---|---|---|---|
 | `device_code` | `str` | required | `DeviceSignIn.device_code`. |
 
-Returns: `DeviceSignInPoll`. The state, with the token once approved; ``slow_down`` when asked too soon.
+Returns: `DeviceSignInPoll`. The state, with the token once approved; ``slow_down`` for any 429: asked too soon, or past the server's rate.
 
 | Error | When |
 |---|---|

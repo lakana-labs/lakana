@@ -1960,13 +1960,18 @@ class DeviceSignInPoll:
     ----------
     state
         ``pending`` while nobody decided, ``approved`` with the token, ``denied``, ``expired``,
-        or ``slow_down`` when asked sooner than the interval (wait 5 seconds longer).
+        or ``slow_down`` when asked too soon or too often (wait longer: 5 seconds more, and at
+        least `retry_after`).
     token
         The new token, only with ``approved``.
+    retry_after
+        With ``slow_down``, the seconds the server asked to wait (its `Retry-After`), when it
+        named them.
     """
 
     state: Literal["pending", "approved", "denied", "expired", "slow_down"]
     token: IssuedToken | None = field(default=None, repr=False)
+    retry_after: float | None = None
 
 
 @dataclass(frozen=True)

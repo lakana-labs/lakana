@@ -56,6 +56,25 @@ def _when(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _seconds(value: str | None) -> float | None:
+    """Read a `Retry-After` that names seconds.
+
+    Parameters
+    ----------
+    value
+        The header as sent, or `None`.
+
+    Returns
+    -------
+    float or None
+        The seconds; `None` without the header or for an HTTP date.
+    """
+    try:
+        return None if value is None else float(value)
+    except ValueError:
+        return None
+
+
 def _issued_link(data: dict[str, Any]) -> IssuedLink:
     """Build an `IssuedLink` from an `IssuedLinkOut` body.
 
@@ -217,7 +236,8 @@ class SignIn:
         Returns
         -------
         DeviceSignInPoll
-            The state, with the token once approved; ``slow_down`` when asked too soon.
+            The state, with the token once approved; ``slow_down`` for any 429: asked too soon,
+            or past the server's rate.
 
         Raises
         ------
@@ -231,8 +251,8 @@ class SignIn:
                 authenticated=False,
             ).json()
         except LakanaError as exc:
-            if exc.error_type == "CliPollTooFast":
-                return DeviceSignInPoll(state="slow_down")
+            if exc.status == 429:
+                return DeviceSignInPoll(state="slow_down", retry_after=_seconds(exc.retry_after))
             raise
         token = data["token"]
         return DeviceSignInPoll(

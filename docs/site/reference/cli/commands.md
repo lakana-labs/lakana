@@ -9,7 +9,7 @@ Usage: `lakana login [OPTIONS]`
 
 Sign in and save the credential as a profile.
 
-Against a server whose people sign in through an identity provider, opens the browser: you confirm there, and a new personal token named `lakana login on HOST`, HOST being this computer's name, is created for 90 days and saved. Anywhere else, asks for a token, as `--paste` does. The token is never printed.
+Against a server whose people sign in through an identity provider, opens the browser: you confirm there, and a new personal token named `lakana login on HOST`, HOST being this computer's name, is created for 90 days and saved. Anywhere else, and whenever stdin is not a terminal, asks for a token as before (`--paste`). On a computer without a browser, use `--device`: it shows an address and a short code to confirm in a browser elsewhere. The token is never printed.
 
 | Name | Type | Default | Description |
 |---|---|---|---|

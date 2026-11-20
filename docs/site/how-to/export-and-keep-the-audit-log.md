@@ -17,7 +17,7 @@ in the `AuditEventType` of `lakana_core.models`; in groups:
 
 | Group | Events |
 |---|---|
-| Sign-in | `AUTHENTICATION_SUCCEEDED`, `AUTHENTICATION_FAILED`, `OIDC_TOKEN_EXCHANGED`, `OIDC_EXCHANGE_REFUSED`, `SESSION_STARTED`, `SESSION_ENDED` (`detail.reason` says why), `SIGN_IN_LINK_*`, `PASSKEY_*`, `SIGN_IN_OIDC` and `SIGN_IN_OIDC_REFUSED` (`detail.reason` says why; a sign-in through the identity provider), `SIGN_IN_CLI_APPROVED` and `SIGN_IN_CLI_TOKEN_ISSUED` (`lakana login` confirmed in a browser, and its token), `SIGN_IN_SETTINGS_CHANGED` |
+| Sign-in | `AUTHENTICATION_SUCCEEDED`, `AUTHENTICATION_FAILED`, `OIDC_TOKEN_EXCHANGED`, `OIDC_EXCHANGE_REFUSED`, `SESSION_STARTED`, `SESSION_ENDED` (`detail.reason` says why), `SIGN_IN_LINK_*`, `PASSKEY_*`, `SIGN_IN_OIDC` and `SIGN_IN_OIDC_REFUSED` (`detail.reason` says why; a sign-in through the identity provider), `SIGN_IN_CLI_APPROVED`, `SIGN_IN_CLI_DENIED`, `SIGN_IN_CLI_REFUSED` (`detail.reason` says why) and `SIGN_IN_CLI_TOKEN_ISSUED` (`lakana login` confirmed or refused in a browser, a refused code, and the token), `SIGN_IN_SETTINGS_CHANGED` |
 | Refusals | `AUTHORIZATION_DENIED`, `PROTECTED_WRITE_DENIED`, `CODE_INTEGRITY_FAILED`, `CONNECTION_CREDENTIAL_REFUSED` |
 | Access | `GRANT_CREATED`, `GRANT_REVOKED`, `GROUP_*`, `PRINCIPAL_*` (among them `PRINCIPAL_OIDC_LINKED` and `PRINCIPAL_OIDC_UNLINKED`, a link to the identity provider; `detail.reason` says why one was undone), `PAT_*`, `TASK_TOKEN_*`, `ACCESS_APPLIED`, `MANAGED_SCOPE_OVERRIDDEN`, `BOOTSTRAP_ADMIN_RESTORED`, `CI_TRUST_RULE_*` |
 | Policies | `ROW_FILTER_*`, `COLUMN_MASK_*` |

@@ -537,7 +537,9 @@ Answer fields: `CliApprovalOut`
 
 ## `POST /api/v1/sign-in/cli/device/describe`
 
-Name the computer a code from `lakana login --device` would sign in
+Describe the sign-in a code from `lakana login --device` would approve
+
+Answers the name the command line gave its computer, the address it asked from and when, so the person can tell their own request from one someone sent them.
 
 Needs a browser session; a token is refused (403). 404 when no sign-in waits for the code (it expired, or was used, approved or denied); 429 past 5 such codes in 10 minutes for one person.
 
@@ -570,6 +572,8 @@ Answer fields: `CliDeviceHostOut`
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `host` | text | yes |  |
+| `requested_from` | text | yes |  |
+| `requested_at` | text (date-time) | yes |  |
 
 ## `POST /api/v1/sign-in/cli/device/approve`
 

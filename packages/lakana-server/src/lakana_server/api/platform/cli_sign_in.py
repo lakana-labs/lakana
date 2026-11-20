@@ -19,8 +19,10 @@ no `Origin` (`lakana_server.browser_guard`), and they read at most 16 KiB of bod
 - `POST /device` starts a device grant;
 - `POST /device/token` polls it (429 ``slow_down`` faster than every 5 seconds).
 
-Together they answer at most `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client
-address and `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute. Every
+The exchange and the start together answer at most
+`LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address and
+`LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute; the polls have
+buckets of their own, at `POLL_RATE` times those rates. Every
 route answers 409 while the interface is off. No route logs a code, a verifier or a token; the
 request bodies never reach the access log.
 """
@@ -70,6 +72,10 @@ TOO_MANY_WRONG_CODES = (
     "type the code lakana login --device shows."
 )
 """The 429 detail of the device routes past `WRONG_CODES`."""
+
+POLL_RATE = 12
+"""How many times the start rate the device polls may use: one poll every 5 seconds is 12 a
+minute, so as many sign-ins may wait at once behind one address as may start there."""
 
 TOO_MANY_REQUESTS = "Too many command-line sign-in requests from this address; wait a minute."
 """The 429 detail of the command line's routes past their rate."""
@@ -181,23 +187,28 @@ open_router = APIRouter(
 )
 
 
-def _admit(request: Request) -> None:
+def _admit(request: Request, *, poll: bool = False) -> None:
     """Refuse a command line's request past the per-address or per-network rate.
 
     Parameters
     ----------
     request
         The request, for the client's address and the limiters.
+    poll
+        Whether it is a device poll, counted in buckets of its own (`POLL_RATE` times the
+        rate), so that sign-ins waiting behind one address do not starve each other.
 
     Raises
     ------
     TooManyAttemptsError
         429 past either rate.
     """
+    state = request.app.state
     client = request.client.host if request.client else "unknown"
-    admitted, _ = request.app.state.cli_sign_in_limiter.admit(client_bucket(client))
+    limiter = state.cli_poll_limiter if poll else state.cli_sign_in_limiter
+    admitted, _ = limiter.admit(client_bucket(client))
     if admitted:
-        network = request.app.state.cli_sign_in_network_limiter
+        network = state.cli_poll_network_limiter if poll else state.cli_sign_in_network_limiter
         admitted, _ = network.admit(network_bucket(client))
     if not admitted:
         raise TooManyAttemptsError(TOO_MANY_REQUESTS)
@@ -292,7 +303,10 @@ def describe_cli_device(
     principal: PrincipalRef = Depends(get_principal),
     grants: CliGrantService = Depends(get_cli_grant_service),
 ) -> CliDeviceHostOut:
-    """Name the computer a code from `lakana login --device` would sign in.
+    """Describe the sign-in a code from `lakana login --device` would approve.
+
+    Answers the name the command line gave its computer, the address it asked from and when,
+    so the person can tell their own request from one someone sent them.
 
     Needs a browser session; a token is refused (403). 404 when no sign-in waits for the code
     (it expired, or was used, approved or denied); 429 past 5 such codes in 10 minutes for one
@@ -312,10 +326,16 @@ def describe_cli_device(
     Returns
     -------
     CliDeviceHostOut
-        The computer's name.
+        The computer's name, the requesting address and the time.
     """
-    host = _counted(request, principal, lambda: grants.describe_device(principal, body.user_code))
-    return CliDeviceHostOut(host=host)
+    described = _counted(
+        request, principal, lambda: grants.describe_device(principal, body.user_code)
+    )
+    return CliDeviceHostOut(
+        host=described.host,
+        requested_from=described.requested_from,
+        requested_at=described.requested_at,
+    )
 
 
 @router.post("/device/approve", status_code=204, responses=errors(404, 429))
@@ -391,8 +411,9 @@ def exchange_cli_code(
     """Exchange the one-time code of `lakana login` and its PKCE verifier for the new token.
 
     Needs no credential: the code and the verifier are the proof. The code is used up by the
-    first exchange, right or wrong (400, the same sentence for an unknown, used, expired or
-    wrong one, or when the browser session that confirmed it has ended). The token is the
+    first exchange, right or wrong (400, one sentence for an unknown, used, expired or wrong one,
+    or when the browser session that confirmed it has ended; each but the unknown one is audited
+    as `SIGN_IN_CLI_REFUSED`). The token is the
     confirming person's, named `lakana login on <host>`, and works for 90 days. 429 past the
     rate.
 
@@ -441,7 +462,8 @@ def start_cli_device(
         The codes, the page and the interval.
     """
     _admit(request)
-    started = grants.start_device(body.host)
+    client = request.client.host if request.client else "unknown"
+    started = grants.start_device(body.host, peer=client)
     origin = request.app.state.settings.public_origin().origin
     return CliDeviceOut(
         device_code=started.device_code,
@@ -479,7 +501,7 @@ def poll_cli_device(
     CliDevicePollOut
         The state, with the token once approved.
     """
-    _admit(request)
+    _admit(request, poll=True)
     polled = grants.poll_device(body.device_code)
     return CliDevicePollOut(
         state=polled.state, token=None if polled.token is None else _issued(polled.token)

@@ -106,13 +106,19 @@ LOGIN_TIMEOUT_HINT = (
 )
 """The error of a loopback sign-in that timed out."""
 
-_NO_BROWSER_FLOW = frozenset({404, 409, 421})
-"""The answers of the OIDC info route that keep today's token prompt: an older server (404),
-the interface off (409), an address the server does not answer browsers at (421)."""
+NO_BROWSER = (
+    "No browser could be opened here. Open the address above in a browser on this computer, or "
+    "press Ctrl+C and run lakana login --device to confirm on another one."
+)
+"""What `lakana login` says when the browser did not start."""
 
 
 def _uses_oidc(state: CliState, base_url: str) -> bool:
     """Say whether the server signs people in through an identity provider.
+
+    Any answer but a clear yes keeps today's token prompt: an older server (404), the interface
+    off (409), an address the server does not answer browsers at (421), a proxy's refusal, a
+    server error or no answer at all.
 
     Parameters
     ----------
@@ -124,20 +130,13 @@ def _uses_oidc(state: CliState, base_url: str) -> bool:
     Returns
     -------
     bool
-        `True` when it says so; `False` when it says not, or answers 404, 409 or 421.
-
-    Raises
-    ------
-    lakana.errors.LakanaError
-        For any other refusal.
+        `True` only when the server says so.
     """
     with state.login_client_factory(base_url, "") as client:
         try:
             return client.sign_in.oidc_info().enabled
-        except LakanaError as exc:
-            if exc.status in _NO_BROWSER_FLOW:
-                return False
-            raise
+        except LakanaError:
+            return False
 
 
 def _browser_login(state: CliState, base_url: str) -> str:
@@ -175,7 +174,14 @@ def _browser_login(state: CliState, base_url: str) -> str:
         sys.stderr.write(
             f"Opening your browser to sign in to {_output.inline(base_url)}…\n{page}\n"
         )
-        state.browser_opener(page)
+        # `webbrowser` raises its own `Error`, an `OSError` or whatever a launcher raises: in
+        # every case the address is on the screen already, and the person is told what to do.
+        try:
+            opened = state.browser_opener(page)
+        except Exception:
+            opened = False
+        if not opened:
+            sys.stderr.write(NO_BROWSER + "\n")
         answer = server.wait(state.login_timeout)
     if answer is None:
         raise CliError(LOGIN_TIMEOUT_HINT, exit_code=1, kind="LoginTimeout")
@@ -221,7 +227,7 @@ def _device_login(state: CliState, base_url: str) -> str:
             state.sleep(interval)
             polled = client.sign_in.poll_device(started.device_code)
             if polled.state == "slow_down":
-                interval += 5.0
+                interval = max(interval + 5.0, polled.retry_after or 0.0)
             elif polled.state == "approved" and polled.token is not None:
                 return polled.token.token
             elif polled.state == "denied":
@@ -266,8 +272,10 @@ def login(
 
     Against a server whose people sign in through an identity provider, opens the browser: you
     confirm there, and a new personal token named `lakana login on HOST`, HOST being this
-    computer's name, is created for 90 days and saved. Anywhere else, asks for a token, as
-    `--paste` does. The token is never printed.
+    computer's name, is created for 90 days and saved. Anywhere else, and whenever stdin is not
+    a terminal, asks for a token as before (`--paste`). On a computer without a browser, use
+    `--device`: it shows an address and a short code to confirm in a browser elsewhere. The
+    token is never printed.
 
     Parameters
     ----------
@@ -311,7 +319,7 @@ def login(
             base_url = typer.prompt("Lakana URL", err=True).strip()
         if device:
             token = _device_login(state, base_url)
-        elif browser or (not paste and _uses_oidc(state, base_url)):
+        elif browser or (not paste and state.is_interactive() and _uses_oidc(state, base_url)):
             token = _browser_login(state, base_url)
         else:
             token = typer.prompt("Token", hide_input=True, err=True).strip()

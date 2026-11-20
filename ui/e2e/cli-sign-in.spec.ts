@@ -55,7 +55,13 @@ async function stub(page: Page): Promise<string[]> {
     route.fulfill({ json: { code: "c0de", port: PORT } }),
   );
   await page.route("**/api/v1/sign-in/cli/device/describe", (route) =>
-    route.fulfill({ json: { host: "build-box" } }),
+    route.fulfill({
+      json: {
+        host: "build-box",
+        requested_from: "203.0.113.7",
+        requested_at: new Date(Date.now() - 60_000).toISOString(),
+      },
+    }),
   );
   await page.route("**/api/v1/sign-in/cli/device/approve", (route) =>
     route.fulfill({ status: 204 }),

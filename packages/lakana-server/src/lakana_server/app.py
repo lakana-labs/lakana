@@ -37,6 +37,7 @@ from lakana_server.api.platform.catalog import router as catalog_router
 from lakana_server.api.platform.ci_oidc import router as ci_oidc_router
 from lakana_server.api.platform.ci_trust_rules import router as ci_trust_rules_router
 from lakana_server.api.platform.cli_sign_in import (
+    POLL_RATE,
     WRONG_CODE_WINDOW,
     WRONG_CODES,
     WrongCodeLimit,
@@ -273,6 +274,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.cli_sign_in_network_limiter = AuthAuditLimiter(
             resolved_settings.ui.passkey_options_per_network_per_minute
+        )
+        app.state.cli_poll_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_ip_per_minute * POLL_RATE
+        )
+        app.state.cli_poll_network_limiter = AuthAuditLimiter(
+            resolved_settings.ui.passkey_options_per_network_per_minute * POLL_RATE
         )
         app.state.cli_user_code_limit = WrongCodeLimit(WRONG_CODES, WRONG_CODE_WINDOW)
         # One verifier per process: it holds the issuers' key cache.
