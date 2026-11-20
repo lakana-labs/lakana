@@ -282,8 +282,8 @@ def finish_oidc_sign_in(
     Needs no credential: the browser's flow cookie and the callback's checks are the proof. The
     interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is
     linked to their account gets a browser session exactly as a passkey sign-in gives one: a
-    fresh session id (a session the browser had is ended), its cookie, and a provider sign-in
-    that counts as a passkey touch for 15 minutes of step-up actions. Otherwise 403
+    fresh session id (a session the browser had is ended) and its cookie. A provider sign-in is
+    no passkey touch: an action that needs step-up asks for one. Otherwise 403
     `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite),
     `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or
     `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10
@@ -334,7 +334,10 @@ def finish_oidc_sign_in(
         replacing=request.cookies.get(cookie_name(origin)) or None,
         peer=peer,
         user_agent=request.headers.get("user-agent", ""),
-        touched=True,
+        # A provider can answer silently from its own session, so a provider sign-in proves
+        # no fresh presence and is no step-up touch; provider step-up (prompt=login, max_age,
+        # auth_time) is PR 2's.
+        touched=False,
     )
     now = clock()
     principal.last_provider_sign_in_at = now

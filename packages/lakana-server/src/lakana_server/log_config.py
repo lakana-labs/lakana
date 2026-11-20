@@ -17,8 +17,8 @@ class SafeDefaultFormatter(SafeFormatterMixin, DefaultFormatter):
 
 
 QUERY_DROPPED = ("/api/v1/sign-in/oidc/callback",)
-"""Paths whose query never reaches the access log: the OIDC callback's carries the
-authorization code and the state."""
+"""Paths whose query never reaches the access log, with any root path in front: the OIDC
+callback's carries the authorization code and the state."""
 
 
 class SafeAccessFormatter(SafeFormatterMixin, AccessFormatter):
@@ -44,7 +44,8 @@ class SafeAccessFormatter(SafeFormatterMixin, AccessFormatter):
         args = record.args
         if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
             path, separator, _ = args[2].partition("?")
-            if separator and path in QUERY_DROPPED:
+            # Behind `--root-path` uvicorn logs the prefixed path.
+            if separator and path.endswith(QUERY_DROPPED):
                 record = copy.copy(record)
                 record.args = (*args[:2], f"{path}?…", *args[3:])
         return super().formatMessage(record)

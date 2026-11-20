@@ -17,7 +17,8 @@ most once a minute, `lakana_core.oidc.keys`).
    not bound to another algorithm.
 7. The signature (PyJWT, with this one algorithm and this one key).
 8. With `IdTokenRules.refuse_typ_other_than_id`, a ``typ`` claim, when present, is ``ID``
-   (Keycloak marks its access tokens ``Bearer``).
+   (Keycloak marks its access tokens ``Bearer``), and the header's ``typ`` is not ``at+jwt``
+   (an RFC 9068 access token).
 9. ``aud`` is, or contains, the rules' audience.
 10. With `IdTokenRules.authorized_party`: ``azp``, when present, is that party, and it must be
     present when ``aud`` names more than one audience.
@@ -172,7 +173,9 @@ def _segment(text: str) -> dict[str, object] | None:
     return value if isinstance(value, dict) else None
 
 
-def _header(token: str, algorithms: frozenset[str]) -> tuple[str, str, dict[str, object]]:
+def _header(
+    token: str, algorithms: frozenset[str]
+) -> tuple[str, str, dict[str, object], dict[str, object]]:
     """Check the token's shape and header (steps 1 to 4).
 
     Parameters
@@ -184,8 +187,8 @@ def _header(token: str, algorithms: frozenset[str]) -> tuple[str, str, dict[str,
 
     Returns
     -------
-    tuple[str, str, dict[str, object]]
-        The algorithm, the key id and the unverified payload.
+    tuple[str, str, dict[str, object], dict[str, object]]
+        The algorithm, the key id, the unverified payload and the header.
 
     Raises
     ------
@@ -212,7 +215,7 @@ def _header(token: str, algorithms: frozenset[str]) -> tuple[str, str, dict[str,
     kid = header.get("kid")
     if not isinstance(kid, str) or not 0 < len(kid) <= _MAX_KID:
         raise IdTokenRefused(RefusalCode.MISSING_KEY_ID)
-    return alg, kid, payload
+    return alg, kid, payload, header
 
 
 def _check_signature(token: str, alg: str, keys: JwksCache, issuer: str, kid: str) -> None:
@@ -340,6 +343,28 @@ def _check_nonce(payload: Mapping[str, object], nonce: str | None) -> None:
         raise IdTokenRefused(RefusalCode.NONCE_MISMATCH)
 
 
+def _not_an_id_token(header: Mapping[str, object], payload: Mapping[str, object]) -> bool:
+    """Say whether a token marks itself as something other than an ID token.
+
+    Parameters
+    ----------
+    header
+        The JOSE header.
+    payload
+        The claims.
+
+    Returns
+    -------
+    bool
+        Whether the header's ``typ`` is an RFC 9068 access token (``at+jwt``) or the ``typ``
+        claim is present and not ``ID`` (Keycloak marks its access tokens ``Bearer``).
+    """
+    typ = header.get("typ")
+    if isinstance(typ, str) and typ.lower().removeprefix("application/") == "at+jwt":
+        return True
+    return payload.get("typ", "ID") != "ID"
+
+
 def verify_id_token(
     token: str,
     *,
@@ -380,12 +405,12 @@ def verify_id_token(
         raise ValueError("now must carry a time zone")
     if not issuers:
         raise IdTokenRefused(RefusalCode.DISABLED)
-    alg, kid, payload = _header(token, rules.algorithms)
+    alg, kid, payload, header = _header(token, rules.algorithms)
     issuer = payload.get("iss")
     if not isinstance(issuer, str) or issuer not in issuers:
         raise IdTokenRefused(RefusalCode.ISSUER_NOT_ALLOWED)
     _check_signature(token, alg, keys, issuer, kid)
-    if rules.refuse_typ_other_than_id and payload.get("typ", "ID") != "ID":
+    if rules.refuse_typ_other_than_id and _not_an_id_token(header, payload):
         raise IdTokenRefused(RefusalCode.NOT_AN_ID_TOKEN)
     _check_audience(payload, rules)
     exp = _check_times(payload, now.timestamp(), rules.max_age_seconds)

@@ -674,6 +674,9 @@ one way in per linked person, the token window and `lakana login` follow.
 - **Login CSRF.** A callback signs nobody in unless its `state` and the browser's flow cookie
   name the same open flow; the callback itself never starts a session. A `state` from another
   browser's flow, or a callback without the cookie, finds nothing.
+- **Step-up by a silent sign-in.** A provider sign-in is no step-up touch, since the provider
+  may answer from its own session without the person present; provider step-up with
+  `prompt=login` and `auth_time` comes with PR 2.
 - **Session fixation.** The session starts in `finish`, a same-origin POST, with a fresh id; a
   session the browser presented ends as `replaced`. The flow cookie, the flow row and the session
   id are all new after the callback.
@@ -686,7 +689,8 @@ one way in per linked person, the token window and `lakana login` follow.
 - **SSRF through discovery.** Discovery, the keys and the token endpoint, which carries the client
   secret, are fetched only over `https` on the issuer's host or a host of
   `LAKANA_OIDC__ALLOW_HOSTS`, on port 443 or the issuer's own port, never on a loopback,
-  link-local or metadata address, without redirects, at most 64 KiB in 10 s.
+  link-local or metadata address, without redirects, at most 64 KiB in 10 s per request (a
+  callback with a cold cache makes up to three: discovery, keys, token endpoint).
 - **Account takeover by e-mail.** A person is found by the provider's `iss` and `sub` only; the
   e-mail address and the name are shown, never matched. An identity linked to nobody is refused
   (`not_linked`): the provider never creates an account.
@@ -698,6 +702,8 @@ one way in per linked person, the token window and `lakana login` follow.
 2. **Signing out at the provider does not end a Lakana session** (a non-goal of #32).
 3. **The audit row's per-client bucket trusts `request.client.host`**, as for the other refused
    sign-ins.
+4. **A reverse proxy's own access log** records the callback's query (the single-use, PKCE-bound
+   code and the state); Lakana's access log writes it as `?…`.
 
 ## Explicitly not defended
 

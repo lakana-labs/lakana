@@ -158,6 +158,25 @@ def test_typ_other_than_id_is_refused() -> None:
     assert verify(claims(typ="Bearer"), loose).subject == "248289761001"
 
 
+@pytest.mark.parametrize("typ", ["at+jwt", "AT+JWT", "application/at+jwt"])
+def test_an_rfc_9068_access_token_is_refused_by_its_header(typ: str) -> None:
+    token = jwt.encode(
+        claims(), rsa_key("main"), algorithm="RS256", headers={"kid": "k1", "typ": typ}
+    )
+    with pytest.raises(IdTokenRefused) as info:
+        verify_id_token(token, keys=keys(), issuers=frozenset({ISSUER}), rules=RULES, now=NOW)
+    assert info.value.code is RefusalCode.NOT_AN_ID_TOKEN
+    loose = replace(RULES, refuse_typ_other_than_id=False)
+    verified = verify_id_token(
+        token, keys=keys(), issuers=frozenset({ISSUER}), rules=loose, now=NOW
+    )
+    assert verified.subject == "248289761001"
+    plain = jwt.encode(
+        claims(), rsa_key("main"), algorithm="RS256", headers={"kid": "k1", "typ": "JWT"}
+    )
+    assert verify_id_token(plain, keys=keys(), issuers=frozenset({ISSUER}), rules=RULES, now=NOW)
+
+
 def test_iat_older_than_the_rules_allow_is_too_old() -> None:
     assert refusal(claims(iat=T - 700, exp=T + 300)) is RefusalCode.TOO_OLD
 

@@ -768,6 +768,16 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   log's `SECRET_ROTATED` events remain the record of those. Nothing has to be done: the upgrade
   runs with the others.
 
+### Sign-in through an identity provider can be configured
+
+- Migration `0087` adds the columns `oidc_issuer`, `oidc_subject`, `oidc_email`, `oidc_name` and
+  `last_provider_sign_in_at` to `principals`, and the table `oidc_flows`. Every existing person
+  starts unlinked, and sign-in works as before. OIDC sign-in stays off until `LAKANA_OIDC__ISSUER`
+  is set. Nothing has to be done: the upgrade runs with the others.
+- Going back drops the columns: **every person linked to the identity provider is unlinked**, and
+  after a new upgrade each of them has to be linked again. Sign-in flows open during the
+  downgrade are lost; their people start the sign-in again.
+
 ### Row filters and column masks are listed in pages (breaking)
 
 - `GET /api/v1/row-filters` and `GET /api/v1/column-masks` take every filter as optional now, and

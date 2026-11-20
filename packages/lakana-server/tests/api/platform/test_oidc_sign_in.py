@@ -634,8 +634,9 @@ def test_linked_person_is_signed_in(
     assert r.status_code == 200, r.text
     current = r.json()
     assert (current["name"], current["via"]) == ("alice", "oidc")
-    step_up = datetime.fromisoformat(current["step_up_until"])
-    assert abs(step_up - (clock.now + timedelta(minutes=15))) < timedelta(seconds=2)
+    # A provider sign-in may be silent (the provider's own session answers), so it is no
+    # step-up touch: that needs a fresh provider sign-in with prompt=login (#32, PR 2).
+    assert current["step_up_until"] is None
     person = _person(client, "alice")
     assert person.last_provider_sign_in_at == clock.now
     assert (person.oidc_email, person.oidc_name) == ("alice@example.com", "Alice Example")
@@ -761,9 +762,28 @@ def test_a_session_answers_like_the_persons_token(client: TestClient, fake: Fake
     value = client.cookies.get("lakana_session_8000") or ""
     client.cookies.clear()
     by_session = session_headers("lakana_session_8000", value, body["csrf_token"])
-    r = client.post("/api/v1/principals/alice/tokens", headers=by_session, json={"name": "laptop"})
+    # The administrator issues the person's token: minting one in the session needs step-up.
+    r = client.post("/api/v1/principals/alice/tokens", headers=AUTH_HEADER, json={"name": "laptop"})
     assert r.status_code == 201, r.text
     by_token = {"Authorization": f"Bearer {r.json()['token']}"}
     for path in ("/api/v1/whoami", "/api/v1/principals/alice", "/api/v1/environments"):
         a, b = client.get(path, headers=by_session), client.get(path, headers=by_token)
         assert (a.status_code, a.json()) == (b.status_code, b.json()), path
+
+
+@pytest.mark.parametrize("auth_time", [None, 1_700_000_000, "now"], ids=["none", "old", "fresh"])
+def test_a_provider_sign_in_is_no_step_up_touch(
+    client: TestClient, fake: FakeProvider, auth_time: object
+) -> None:
+    _link(client, "alice")
+    if auth_time == "now":
+        auth_time = int(datetime.now(UTC).timestamp())
+    _signed_in_at_provider(client, fake, auth_time=auth_time)
+    body = client.post(FINISH, json={}).json()
+    value = client.cookies.get("lakana_session_8000") or ""
+    headers = session_headers("lakana_session_8000", value, body["csrf_token"])
+    r = client.get("/api/v1/sign-in/session", headers=headers)
+    assert (r.status_code, r.json()["step_up_until"]) == (200, None)
+    # Minting a token needs step-up: the provider sign-in did not grant it.
+    r = client.post("/api/v1/principals/alice/tokens", headers=headers, json={"name": "t"})
+    assert (r.status_code, r.json()["type"]) == (403, "StepUpRequired"), r.text

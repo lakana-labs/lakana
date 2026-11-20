@@ -106,3 +106,19 @@ def test_callback_query_is_not_in_the_access_log(capsys: pytest.CaptureFixture[s
     assert '"GET /api/v1/sign-in/oidc/callback?… HTTP/1.1" 303' in out
     assert "/api/v1/tables?q=x" in out
     assert '"GET /api/v1/sign-in/oidc/callback HTTP/1.1" 303' in out
+
+
+def test_callback_query_is_dropped_behind_a_root_path(capsys: pytest.CaptureFixture[str]) -> None:
+    """Behind `--root-path`, uvicorn logs the prefixed path; the query is still dropped."""
+    uvicorn.Config(_app, log_config=uvicorn_log_config(), log_level="info")
+    logging.getLogger("uvicorn.access").info(
+        '%s - "%s %s HTTP/%s" %d',
+        "1.2.3.4:5",
+        "GET",
+        "/lakana/api/v1/sign-in/oidc/callback?code=c0de-sentinel&state=st4te-sentinel",
+        "1.1",
+        303,
+    )
+    out = capsys.readouterr().out
+    assert "sentinel" not in out
+    assert '"GET /lakana/api/v1/sign-in/oidc/callback?… HTTP/1.1" 303' in out

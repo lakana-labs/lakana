@@ -706,3 +706,12 @@ def test_a_post_through_the_proxy(authority: Authority, tls: Server) -> None:
         )
     assert answer == {}
     assert proxy.targets == [f"{NAME}:{tls.port}"]
+
+
+def test_a_requests_repr_holds_no_secret() -> None:
+    request = https_json._Request(  # the repr of the private request is the point
+        "POST", b"client_secret=s3cr3t-sentinel", {"Authorization": "Basic czNjcjN0"}
+    )
+    shown = repr(request)
+    assert "s3cr3t-sentinel" not in shown and "czNjcjN0" not in shown
+    assert "POST" in shown

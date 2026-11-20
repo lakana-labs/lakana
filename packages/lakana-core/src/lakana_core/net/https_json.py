@@ -182,13 +182,14 @@ class _Request:
     method
         ``GET`` or ``POST``.
     content
-        The body, empty for a GET.
+        The body, empty for a GET; it may carry the client secret, so it is left out of the
+        `repr`.
     headers
         Headers of the caller's, such as ``Authorization``; never logged or quoted.
     """
 
     method: str
-    content: bytes = b""
+    content: bytes = field(default=b"", repr=False)
     headers: Mapping[str, str] = field(default_factory=dict, repr=False)
 
 
