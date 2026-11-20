@@ -216,16 +216,56 @@ describe("Delete environment and the reads of the page", () => {
     expect(abortedAtDelete).toBe(true);
   });
 
+  it("stops the environment's own read, started by a change, before it sends the delete", async () => {
+    let reads = 0;
+    let own: AbortSignal | undefined;
+    let abortedAtDelete: boolean | undefined;
+    const shell = renderShell("/settings/environments/dev", {
+      routes: {
+        "GET /api/v1/environments/dev": (request) => {
+          reads += 1;
+          if (reads === 1) return { status: 200, body: DEV };
+          // The read that Protect starts, still on its way when Delete is sent.
+          own = request.signal;
+          return new Promise<never>(() => undefined);
+        },
+        "GET /api/v1/environments/dev/usage": { status: 500, body: { detail: "down" } },
+        "GET /api/v1/environments": { status: 200, body: [] },
+        "GET /api/v1/sign-in/session": freshSession(),
+        "PATCH /api/v1/environments/dev": { status: 200, body: { ...DEV, is_protected: true } },
+        "DELETE /api/v1/environments/dev": () => {
+          abortedAtDelete = own?.aborted;
+          return { status: 200, body: gone(false) };
+        },
+      },
+    });
+    const { user } = shell;
+    await user.click(await screen.findByRole("button", { name: "Protect dev" }));
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    await user.click(screen.getByRole("button", { name: "Delete environment dev" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete environment dev?" });
+
+    await user.type(within(dialog).getByRole("textbox", { name: "Type dev to delete it" }), "dev");
+    await user.click(within(dialog).getByRole("button", { name: "Delete environment" }));
+
+    expect(await screen.findByText(/Deleted dev\. It can be restored until/)).toBeInTheDocument();
+    expect(abortedAtDelete).toBe(true);
+  });
+
   it("reads the usage again when the deletion is refused", async () => {
     let reads = 0;
+    let saysReading: boolean | undefined;
     const shell = await openDelete({
       "GET /api/v1/environments/dev/usage": () => {
         reads += 1;
         return { status: 500, body: { detail: "down" } };
       },
-      "DELETE /api/v1/environments/dev": {
-        status: 409,
-        body: { detail: "A repository is still deployed." },
+      "DELETE /api/v1/environments/dev": () => {
+        // While the deletion is on its way, the paused panel says it is reading, not that it failed.
+        saysReading = screen.queryByText("Reading the usage…") !== null;
+        return { status: 409, body: { detail: "A repository is still deployed." } };
       },
     });
     const { dialog, user } = shell;
@@ -239,5 +279,6 @@ describe("Delete environment and the reads of the page", () => {
     await waitFor(() => {
       expect(reads).toBe(2);
     });
+    expect(saysReading).toBe(true);
   });
 });

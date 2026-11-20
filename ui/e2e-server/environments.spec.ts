@@ -73,12 +73,16 @@ test("an environment's life", async ({ browser, browserName, request }) => {
   );
   await skipTheWelcome(page);
   const errors = consoleErrors(page);
-  // A slow usage read is still in flight when Delete is sent: the page must cancel it, or the
-  // server answers it with a 404 that the browser logs.
+  // The usage reads are held in flight until the last Delete is answered: the page must cancel
+  // them when it sends Delete, or the server answers them with a 404 that the browser logs.
+  let releaseReads: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    releaseReads = resolve;
+  });
   const slowReads: Promise<void>[] = [];
   await page.route(/\/api\/v1\/environments\/[^/]+\/usage$/, (route) => {
     slowReads.push(
-      new Promise<void>((resolve) => setTimeout(resolve, 2_000))
+      released
         .then(() => route.fetch())
         .then((answer) => route.fulfill({ response: answer }))
         .catch(() => undefined),
@@ -121,11 +125,16 @@ test("an environment's life", async ({ browser, browserName, request }) => {
   await live.getByRole("link", { name: environment }).click();
   await expect(page.getByRole("heading", { level: 1, name: environment })).toBeVisible();
 
+  const lastDelete = page.waitForResponse(
+    (response) => response.request().method() === "DELETE" && response.ok(),
+  );
   await deleteFromItsPage(page, environment, true);
+  await lastDelete;
+  releaseReads();
   await expect(
     page.getByText(`Deleted ${environment}. Its files are deleted at the next clean-up.`),
   ).toBeVisible();
-  // The held reads are answered now: the browser has logged any 404 among them.
+  // The held reads are answered now, after the deletion: the browser has logged any 404 among them.
   await Promise.all(slowReads);
   expect(errors).toEqual([]);
   await page.context().close();

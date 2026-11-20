@@ -180,10 +180,11 @@ export async function listDeletedEnvironments(): Promise<readonly EnvironmentOut
  * Reads one environment.
  *
  * @param name - Its name.
+ * @param signal - Aborted when the read is no longer wanted.
  * @returns The environment.
  */
-export async function getEnvironment(name: string): Promise<EnvironmentOut> {
-  return api.request<EnvironmentOut>("GET", environmentApiPath(name));
+export async function getEnvironment(name: string, signal?: AbortSignal): Promise<EnvironmentOut> {
+  return api.request<EnvironmentOut>("GET", environmentApiPath(name), undefined, { signal });
 }
 
 /**
