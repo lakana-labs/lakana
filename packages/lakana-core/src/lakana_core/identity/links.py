@@ -1570,6 +1570,23 @@ class LinkService:
         """
         return self._operator_token_lapse(row) is None
 
+    def _issuer_ref(self, row: SignInLink) -> PrincipalRef:
+        """Refer to the principal who issued a link, for the audit events of its use.
+
+        Parameters
+        ----------
+        row
+            The link; an operator's recovery link, whose issuer stands (`_issued_by_operator`).
+
+        Returns
+        -------
+        PrincipalRef
+            The issuer.
+        """
+        issuer = self._session.get(Principal, row.issued_by) if row.issued_by else None
+        assert issuer is not None  # nosec B101 -- the operator's token, checked to stand, is theirs
+        return PrincipalRef(id=issuer.id, name=issuer.name, type=issuer.type)
+
     def _check_issuer(self, row: SignInLink) -> None:
         """Refuse an invite or recovery link whose issuer no longer stands behind it.
 
@@ -1683,7 +1700,7 @@ class LinkService:
             # Only the operator's link gets here (`redeem`): the break-glass path.
             OidcLinkService(
                 self._session, self._authz, clock=self._clock, bootstrap_name=self._bootstrap_name
-            ).unlink_for_operator_recovery(principal, row.id)
+            ).unlink_for_operator_recovery(principal, row.id, operator=self._issuer_ref(row))
         if kind == "recovery":
             self._recover(principal, row)
         started = self._sessions.start(

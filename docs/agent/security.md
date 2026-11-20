@@ -7074,7 +7074,10 @@ token window. Threat model: "OIDC sign-in (#32)".
   deletes no passkey. The operator's recovery link of a linked administrator unlinks them on the
   passkey path (`PRINCIPAL_OIDC_UNLINKED`, reason `operator_recovery`, an `oidc_unlinked` notice to
   every administrator) and then registers a passkey: the break-glass path, whatever the provider
-  says (`test_operator_recovery_unlinks_and_registers_a_passkey`).
+  says (`test_operator_recovery_unlinks_and_registers_a_passkey`). It revokes the person's personal
+  tokens as L6 does (`PAT_REVOKED`, `source: operator_recovery`, attributed to the operator), so no
+  token outside the window works again once its person is unlinked
+  (`test_operator_recovery_revokes_the_linked_persons_tokens`).
 - **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN and
   step-up) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
   oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`) and
@@ -7103,8 +7106,9 @@ token window. Threat model: "OIDC sign-in (#32)".
   (`test_a_linked_administrator_steps_up_through_the_provider`). `SessionOut.provider_linked` tells
   the interface which ceremony to offer.
 - **Residuals:** a passkey disabled as a copy can take the last unlinked administrator (a security
-  response, never refused); the operator's recovery is then the way in. Operator recovery leaves
-  the person's personal tokens as they were: once unlinked, they are no longer under the window.
+  response, never refused); the operator's recovery is then the way in. A local sign-in link
+  (`lakana server start --local`) still signs a linked person in, but only with their own personal
+  token, which the window limits.
 
 ## Git fetch hardening (M5b)
 

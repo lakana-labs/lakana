@@ -414,32 +414,8 @@ class OidcLinkService:
             .returning(Passkey.id)
             .execution_options(synchronize_session="fetch")
         ).all()
-        now = self._clock()
         audit = AuditService(self._session)
-        tokens = list(
-            self._session.execute(
-                select(PersonalAccessToken)
-                .where(
-                    PersonalAccessToken.principal_id == target.id,
-                    PersonalAccessToken.revoked_at.is_(None),
-                )
-                .order_by(PersonalAccessToken.created_at, PersonalAccessToken.id)
-            ).scalars()
-        )
-        for token in tokens:
-            token.revoked_at = now
-            # As `PatService.revoke` records it, marked as coming from the unlink.
-            audit.record(
-                p.id,
-                AuditEventType.PAT_REVOKED,
-                detail={
-                    "actor": p.name,
-                    "subject": target.name,
-                    "key_id": token.key_id,
-                    "source": "oidc_unlinked",
-                },
-            )
-            revoke_task_tokens_of_pat(self._session, p, token)
+        revoked = self._revoke_tokens(p, target, source="oidc_unlinked")
         ended = SessionService(self._session, self._authz, clock=self._clock).end_for_principal(
             target.id, "oidc_unlinked", commit=False
         )
@@ -454,17 +430,69 @@ class OidcLinkService:
                 "reason": "administrator",
                 "actor": p.name,
                 "passkeys_deleted": len(passkeys),
-                "tokens_revoked": len(tokens),
+                "tokens_revoked": revoked,
                 "sessions_ended": ended,
             },
         )
         self._session.commit()
 
-    def unlink_for_operator_recovery(self, principal: Principal, link_id: uuid.UUID) -> None:
+    def _revoke_tokens(self, actor: PrincipalRef, target: Principal, *, source: str) -> int:
+        """Revoke every personal token of a person being unlinked, audited; the caller commits.
+
+        Each is one `PAT_REVOKED`, as `PatService.revoke` records it, with `source`; the task
+        tokens minted from it end with it. Unlinked, a person's tokens are no longer under the
+        provider window, so none may outlive the link.
+
+        Parameters
+        ----------
+        actor
+            Who unlinks: the administrator, or the server operator who issued the recovery link.
+        target
+            The person.
+        source
+            ``oidc_unlinked`` or ``operator_recovery``.
+
+        Returns
+        -------
+        int
+            How many tokens were revoked.
+        """
+        now = self._clock()
+        audit = AuditService(self._session)
+        tokens = list(
+            self._session.execute(
+                select(PersonalAccessToken)
+                .where(
+                    PersonalAccessToken.principal_id == target.id,
+                    PersonalAccessToken.revoked_at.is_(None),
+                )
+                .order_by(PersonalAccessToken.created_at, PersonalAccessToken.id)
+            ).scalars()
+        )
+        for token in tokens:
+            token.revoked_at = now
+            audit.record(
+                actor.id,
+                AuditEventType.PAT_REVOKED,
+                detail={
+                    "actor": actor.name,
+                    "subject": target.name,
+                    "key_id": token.key_id,
+                    "source": source,
+                },
+            )
+            revoke_task_tokens_of_pat(self._session, actor, token)
+        return len(tokens)
+
+    def unlink_for_operator_recovery(
+        self, principal: Principal, link_id: uuid.UUID, *, operator: PrincipalRef
+    ) -> None:
         """Unlink an administrator whose operator recovery link is being used; the caller commits.
 
-        The break-glass path: it works whatever the provider says. Every administrator, and the
-        person, gets the notice ``oidc_unlinked``.
+        The break-glass path: it works whatever the provider says. The person's personal tokens
+        are revoked, as an administrator's unlink revokes them, so that none outside the provider
+        window works again once they are unlinked. Every administrator, and the person, gets the
+        notice ``oidc_unlinked``.
 
         Parameters
         ----------
@@ -472,7 +500,10 @@ class OidcLinkService:
             The person recovered.
         link_id
             The recovery link.
+        operator
+            The server operator who issued the link, for the audit events of the tokens.
         """
+        revoked = self._revoke_tokens(operator, principal, source="operator_recovery")
         issuer, subject = self._clear(principal)
         AuditService(self._session).record(
             principal.id,
@@ -483,6 +514,7 @@ class OidcLinkService:
                 "sub": subject,
                 "reason": "operator_recovery",
                 "link_id": str(link_id),
+                "tokens_revoked": revoked,
             },
         )
         notices = NoticeService(self._session, clock=self._clock)

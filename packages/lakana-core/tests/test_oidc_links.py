@@ -483,7 +483,10 @@ def test_operator_recovery_unlink_notifies_every_admin(world: World) -> None:
     ann = world.person("ann", admin=True)
     world.link(ann)
     link_id = uuid.uuid4()
-    world.links.unlink_for_operator_recovery(ann, link_id)
+    operator = world.ref(
+        world.session.execute(select(Principal).where(Principal.name == "admin")).scalar_one()
+    )
+    world.links.unlink_for_operator_recovery(ann, link_id, operator=operator)
     world.session.commit()
     assert not is_linked(ann)
     [event] = world.events(AuditEventType.PRINCIPAL_OIDC_UNLINKED)
@@ -493,6 +496,7 @@ def test_operator_recovery_unlink_notifies_every_admin(world: World) -> None:
         "sub": "ann",
         "reason": "operator_recovery",
         "link_id": str(link_id),
+        "tokens_revoked": 0,
     }
     rows = world.session.execute(
         select(Principal.name, SignInNotice.detail)

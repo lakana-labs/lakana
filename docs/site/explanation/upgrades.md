@@ -788,7 +788,9 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   administrator unlinks them with `lakana principal unlink-provider`. A linked person signs in
   only through the provider: their passkeys stop signing them in (they stay stored), and their
   personal API tokens work only within 30 days of their last provider sign-in (`lakana sign-in
-  settings --token-window-days`, 1 to 365). Nothing changes for anyone who is not linked.
+  settings --token-window-days`, 1 to 365). Unlinking someone, by an administrator or by the
+  server operator's recovery link, revokes their personal tokens. Nothing changes for anyone who
+  is not linked.
 - While anyone is linked, at least one administrator who signs in with a passkey must remain:
   linking the last one, deactivating them, taking their ADMIN role away or deleting their last
   passkey answers 409 and says so.

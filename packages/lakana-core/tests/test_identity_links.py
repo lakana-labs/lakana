@@ -1668,3 +1668,34 @@ def test_operator_recovery_unlinks_and_registers_a_passkey(world: World) -> None
         world.session.execute(select(Principal.id).where(Principal.name == "other")).scalar_one()
     )
     assert set(recipients) == admins
+
+
+def test_operator_recovery_revokes_the_linked_persons_tokens(world: World) -> None:
+    """Unlinking by operator recovery revokes personal tokens, as an administrator's unlink does.
+
+    Otherwise a token outside the provider window would work again once its person is unlinked.
+    """
+    world.person("other", admin=True)
+    boss = world.person("boss", admin=True)
+    world.pat(boss)
+    _linked(world, boss)
+    link = world.links.issue_recovery(world.operator, principal_name="boss")
+    world.redeem(link)
+    tokens = world.session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.principal_id == boss.id)
+    ).scalars()
+    assert [t.revoked_at is not None for t in tokens] == [True]
+    revoked = world.session.execute(
+        select(AuditEvent.detail, AuditEvent.principal_id).where(
+            AuditEvent.event_type == AuditEventType.PAT_REVOKED
+        )
+    ).all()
+    assert [(d["subject"], d["source"], who) for d, who in revoked] == [
+        ("boss", "operator_recovery", world.operator.id)
+    ]
+    [event] = world.session.execute(
+        select(AuditEvent.detail).where(
+            AuditEvent.event_type == AuditEventType.PRINCIPAL_OIDC_UNLINKED
+        )
+    ).scalars()
+    assert event["tokens_revoked"] == 1

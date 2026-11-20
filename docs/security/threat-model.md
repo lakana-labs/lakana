@@ -694,7 +694,8 @@ their tokens only within the token window. `lakana login` follows.
   linked: linking the last one, and deactivating them, revoking their ADMIN, removing them from the
   admins group or deleting their last passkey, is refused, under the administrator-count lock, so
   two such changes at once take turns. The operator's recovery link unlinks a linked administrator
-  whatever the provider says.
+  whatever the provider says, and revokes their personal tokens, so none outside the window comes
+  back to life.
 - **Session fixation.** The session starts in `finish`, a same-origin POST, with a fresh id; a
   session the browser presented ends as `replaced`. The flow cookie, the flow row and the session
   id are all new after the callback.
