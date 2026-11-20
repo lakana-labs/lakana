@@ -7,6 +7,7 @@ import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { TaskAttemptOut } from "../api/jobs";
+import { Unknown } from "../catalog/cells";
 import { formatBytes, formatRows } from "../catalog/format";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
@@ -42,8 +43,8 @@ export interface AttemptsProps {
 /**
  * The attempts as a table in its own focusable scrolling region, so a narrow screen never scrolls
  * sideways: number, worker, start, duration, outcome, rows written, failure code, peak memory,
- * processor time and bytes read. Numbers are right-aligned; a value that was not measured is
- * empty, never zero.
+ * processor time and bytes read. Numbers are right-aligned; a figure that was not measured shows
+ * the catalog's dash with the words "Not measured", never zero.
  *
  * @param props - The task's asset and its attempts.
  * @param props.asset - The task's asset.
@@ -56,8 +57,9 @@ export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
   if (attempts.length === 0) {
     return <p>{t("jobs.attempts.none")}</p>;
   }
-  const bytes = (value: number | null): string =>
-    value === null ? "" : formatBytes(value, i18n.language);
+  const unmeasured = <Unknown words={t("jobs.attempts.notMeasured")} />;
+  const bytes = (value: number | null): JSX.Element | string =>
+    value === null ? unmeasured : formatBytes(value, i18n.language);
   return (
     <div
       className="list-scroll jobs-attempts-scroll"
@@ -88,8 +90,11 @@ export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
               </td>
               <td>{when(attempt.started_at)}</td>
               <td className="number">
-                {attempt.finished_at !== null &&
-                  formatDuration(secondsBetween(attempt.started_at, attempt.finished_at), t)}
+                {attempt.finished_at === null ? (
+                  <Unknown words={t("jobs.duration.notFinished")} />
+                ) : (
+                  formatDuration(secondsBetween(attempt.started_at, attempt.finished_at), t)
+                )}
               </td>
               <td>
                 {attempt.outcome === null ? (
@@ -101,7 +106,9 @@ export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
                 )}
               </td>
               <td className="number">
-                {attempt.rows_written !== null && formatRows(attempt.rows_written, i18n.language)}
+                {attempt.rows_written === null
+                  ? unmeasured
+                  : formatRows(attempt.rows_written, i18n.language)}
               </td>
               <td>
                 {attempt.failure !== null && (
@@ -110,7 +117,7 @@ export function Attempts({ asset, attempts }: AttemptsProps): JSX.Element {
               </td>
               <td className="number">{bytes(attempt.peak_memory_bytes)}</td>
               <td className="number">
-                {attempt.cpu_seconds !== null && formatDuration(attempt.cpu_seconds, t)}
+                {attempt.cpu_seconds === null ? unmeasured : formatDuration(attempt.cpu_seconds, t)}
               </td>
               <td className="number">{bytes(attempt.bytes_read)}</td>
             </tr>

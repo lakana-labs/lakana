@@ -438,7 +438,7 @@ function running(cancelled: boolean): RunOut {
   });
 }
 
-/** The attempts of the timed-out task. */
+/** The attempts of the timed-out task; the first measured nothing, the second only its use. */
 const ATTEMPTS: readonly TaskAttemptOut[] = [1, 2].map((attempt) => ({
   attempt,
   worker: attempt === 1 ? "w-2b9c" : "w-7f3a",
@@ -452,9 +452,10 @@ const ATTEMPTS: readonly TaskAttemptOut[] = [1, 2].map((attempt) => ({
     cause: TIMEOUT_CAUSE,
     next_step: "Raise the task's timeout in lakana.yaml or make it faster, then resume the run.",
   },
-  peak_memory_bytes: 805_306_368,
-  cpu_seconds: 1_795,
-  bytes_read: 52_428_800,
+  // The first attempt ran on a worker that measures nothing.
+  peak_memory_bytes: attempt === 1 ? null : 805_306_368,
+  cpu_seconds: attempt === 1 ? null : 1_795,
+  bytes_read: attempt === 1 ? null : 52_428_800,
 }));
 
 /**

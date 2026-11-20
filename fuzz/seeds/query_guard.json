@@ -135,6 +135,7 @@
  "SELECT gold.orders.id, other.orders.id, orders.address.country FROM gold.orders",
  "SELECT gold.v.id, (SELECT gold.v.id) FROM gold.v",
  "SELECT gold.v.id, v.id, other.v.id FROM gold.v",
+ "SELECT iEl{ pivtyp\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000{{{rders.adrd{{{{{{\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e{\u000e\u000e\u000e{\u0000\u0000\u0000\u0000\u0000\u0000\u0000Y{{{{{{{{{{{{{{{{u{{{\u0000\u0000{{{{{{{{{\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e{{u{{{this{{{{{{{\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u000e\u0000\u0000ident\u0000\u0000\u0000)( tF sROM gold.t",
  "SELECT id FROM ",
  "SELECT id FROM bronze.a JOIN gold.b ON bronze.a.x = gold.b.y",
  "SELECT id FROM bronze.a UNION SELECT id FROM bronze.b",

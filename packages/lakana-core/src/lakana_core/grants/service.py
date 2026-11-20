@@ -29,6 +29,7 @@ from lakana_core.grants.admin import (
     authorize_admin_only,
     credential_acts_as_admin,
 )
+from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
@@ -1217,10 +1218,11 @@ def assert_admin_headroom(
     principal being deactivated, or only the membership being removed) — all reduce to the
     same question: after this change, does at least one active principal
     still hold an active `admin` grant at instance scope, directly or
-    through a group? `GroupService.delete_group` does not call this: it
-    refuses outright while the group holds any active grant at all
-    , so it can never reach a group that still holds
-    a live admin grant for this to protect against.
+    through a group? It takes `lock_admin_count` before it counts, so two
+    such changes at once take turns and the second sees what the first left.
+    `GroupService.delete_group` does not call this: it refuses outright while
+    the group holds any active grant at all, so it can never reach a group
+    that still holds a live admin grant for this to protect against.
 
     Parameters
     ----------
@@ -1245,6 +1247,7 @@ def assert_admin_headroom(
         If no active principal would hold an active instance-scoped
         `admin` grant after the exclusion.
     """
+    lock_admin_count(session)
     # Only refuse when *this* exclusion is what would empty the set. An
     # instance that already has zero active admins (for example, before any
     # admin grant has ever been made) is a pre-existing condition this guard

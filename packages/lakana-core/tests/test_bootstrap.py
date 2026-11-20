@@ -787,3 +787,82 @@ def test_recovery_revokes_the_task_tokens_of_the_pats_it_revokes(
         "pat_revoked",
         "testkey",
     )
+
+
+def test_recovery_audits_each_pat_it_revokes_before_its_task_tokens(
+    session: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each earlier PAT gets a `PAT_REVOKED` event naming the recovery, before its task tokens."""
+    bootstrap_if_needed(session, "admin", key_id="testkey", secret="testsecret")
+    pats = PatService(session, AllowAllAuthorization())
+    signed_in = pats.verify("testkey", "testsecret")
+    second = pats.issue(signed_in, "admin", name="laptop")
+    minted = TaskTokenService(session, AllowAllAuthorization()).mint(
+        signed_in, "admin", environment="dev", asset_scope=[], ttl_seconds=60
+    )
+    [grant] = (
+        session.execute(select(Grant).where(Grant.principal_id == signed_in.id)).scalars().all()
+    )
+    grant.revoked_at = datetime.now(UTC)
+    session.commit()
+
+    recorded: list[tuple[AuditEventType, object]] = []
+    real_record = AuditService.record
+
+    def spy(
+        self: AuditService,
+        principal_id: uuid.UUID | None,
+        event_type: AuditEventType,
+        *,
+        securable: Securable | None = None,
+        detail: dict | None = None,
+        commit: bool = False,
+    ) -> AuditEvent:
+        recorded.append((event_type, (detail or {}).get("key_id")))
+        return real_record(
+            self, principal_id, event_type, securable=securable, detail=detail, commit=commit
+        )
+
+    monkeypatch.setattr(AuditService, "record", spy)
+
+    bootstrap_if_needed(session, "admin", token_file=tmp_path / "token")
+
+    events = (
+        session.execute(
+            select(AuditEvent).where(
+                AuditEvent.event_type.in_(
+                    [AuditEventType.PAT_REVOKED, AuditEventType.TASK_TOKEN_REVOKED]
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    revoked = [e for e in events if e.event_type == AuditEventType.PAT_REVOKED]
+    assert {e.detail["key_id"] for e in revoked} == {"testkey", second.key_id}
+    for e in revoked:
+        assert e.principal_id == signed_in.id
+        assert e.detail["actor"] == "admin"
+        assert e.detail["subject"] == "admin"
+        assert e.detail["source"] == "bootstrap_recovery"
+    [task_event] = [e for e in events if e.event_type == AuditEventType.TASK_TOKEN_REVOKED]
+    assert task_event.detail["key_id"] == minted.key_id
+    owner = next(e for e in revoked if e.detail["key_id"] == task_event.detail["pat_key_id"])
+    assert recorded.index((AuditEventType.PAT_REVOKED, owner.detail["key_id"])) < recorded.index(
+        (AuditEventType.TASK_TOKEN_REVOKED, minted.key_id)
+    )
+
+
+def test_recovery_audits_no_pat_revocation_when_there_is_nothing_to_revoke(
+    session: Session, tmp_path: Path
+) -> None:
+    """A recovery with no earlier PAT records no `PAT_REVOKED` event."""
+    bootstrap_if_needed(session, "admin", token_file=tmp_path / "token")
+    assert (
+        session.execute(
+            select(AuditEvent).where(AuditEvent.event_type == AuditEventType.PAT_REVOKED)
+        )
+        .scalars()
+        .all()
+        == []
+    )

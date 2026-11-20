@@ -346,8 +346,9 @@ function SecretChoice({ environment, value, onChange }: SecretChoiceProps): JSX.
  * Change storage: the storage secret, chosen from the environment's secrets, and the options,
  * kept as they are or replaced whole. Without the right to manage secrets in the environment the
  * secret is not offered (a sentence names the right), and the page offers no Change storage at
- * all for a storage with a secret, whose options need that right too. It names the options set now by their keys (never a value), asks for the passkey touch first when the
- * last one is old, and sends only what changes; the server's refusal stays here.
+ * all for a storage with a secret, whose options need that right too. It names the options set
+ * now by their keys (never a value), asks for the passkey touch first when the last one is old,
+ * and sends only what changes; the server's refusal stays here.
  *
  * @param props - The environment and what to call.
  * @param props.environment - The environment.
@@ -413,7 +414,6 @@ export function ChangeStorageDialog({
         ) : (
           <p>{t(`${s}.secretNeedsRight`, { name: markedText(environment.name) })}</p>
         )}
-
         <RadioGroup
           className="field"
           value={replace ? "replace" : "keep"}
@@ -471,6 +471,8 @@ export interface DeletedState {
   readonly deleted: {
     /** The environment's name. */
     readonly name: string;
+    /** When it was deleted, which tells this deletion from a later one of the same name. */
+    readonly deletedAt: string | null;
     /** Until when it can be restored; null when its files go at the next clean-up. */
     readonly restorableUntil: string | null;
   };
@@ -546,6 +548,7 @@ export function DeleteEnvironmentDialog({
         const state: DeletedState = {
           deleted: {
             name: environment.name,
+            deletedAt: deleted.deleted_at,
             restorableUntil: purge ? null : deleted.purge_after,
           },
         };
