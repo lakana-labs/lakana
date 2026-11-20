@@ -4135,6 +4135,30 @@ is the only way to change access there, so that what was reviewed in git is what
   waits for a running apply and cannot slip between its plan and its commit; guarded changes do
   not wait for one another. Inside an apply (`ACCESS_APPLY_KEY` in `session.info`) the guard
   returns at once: the apply already holds the exclusive lock and is the file.
+- **The administrator count has a lock of its own (#724).** Guarded changes share the access lock,
+  so it does not serialise two of them. Every change that can lower the number of active
+  administrators therefore takes `lock_admin_count` (`lakana_core.grants.admin_lock`,
+  `pg_advisory_xact_lock(ADMIN_COUNT_LOCK_KEY)`, exclusive, until the transaction ends) before it
+  counts, and before any read of something another change may alter that decides whether to count (a
+  grant's role and kind never change, and an early return lowers nothing). That covers revoking an
+  instance ADMIN grant, held directly or through a group; deactivating a principal (both through
+  `assert_admin_headroom`, also inside an apply); removing any member from any group, which takes
+  the lock before it asks whether the group holds ADMIN (a grant to the group may commit right after
+  that question, and a count that relies on the member must then wait for the removal); and an
+  apply's own last check (`AccessService._recheck_lockout`). Under READ COMMITTED the second change
+  waits for the first's commit, counts what it left and is refused with `LAST_ADMIN_MESSAGE`.
+  Changes that raise the count (a grant, a new member, a reactivation) take no lock: a count never
+  sees them before they commit, so on an instance with an administrator they can only make a check
+  refuse, never let one through. (On an instance with no administrator at all,
+  `assert_admin_headroom` lets every change through anyway.) Deleting a group needs no lock, since
+  it is refused while the group holds any active grant. Removing a passkey does not count
+  administrators today. The order is the access lock first, then this one: an apply holds the access
+  lock alone and takes this one inside it. A later rule of the same kind (the unlinked
+  administrators of OIDC sign-in) counts under this lock too. On SQLite nothing is taken, as with
+  the access lock. `packages/lakana-core/tests/test_admin_count_postgres_integration.py` races two
+  removals per pair on a real Postgres, and a grant to a group against the removal of its member and
+  the revoke of the other administrator; each test commits the first change only once
+  `pg_stat_activity` shows the second waiting on the lock, or finished.
 - **The override needs ADMIN.** `?override_managed=true&override_reason=...` (the server's
   `get_managed_write_principal`; one without the other is 422) sets
   `PrincipalRef.managed_override_reason`. The guard then asks `holds_instance_admin` itself, even
@@ -6096,15 +6120,41 @@ fuller text of each part where it already lives.
     `test_whoami_flags.py`, `test_admin_only_call_sites.py` (`_EXEMPT`).
   - **Host keys are trusted only by ticking fetched keys.** Edit never offers a text field for
     `ssh_known_hosts`: **Fetch host keys again** runs a worker's `host_keys` check and only the
-    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` lists every key the text
-    names with its line's type word, its fingerprint and its marker (`@cert-authority`, which
-    trusts every host certificate it signed, or `@revoked`, which ssh refuses), so the browser
-    hashes nothing; the page lists revoked keys apart and never as trusted. `known_host_keys`
-    skips the lines OpenSSH skips: an unknown marker, a key that names an empty type, or a type
-    word the key contradicts (`rsa-sha2-256` and `rsa-sha2-512` name an `ssh-rsa` key). The
-    audit log's fingerprints (`known_hosts_fingerprints`) read the same lines but count every
-    base64 key. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
-    ticked, never typed`), `test_repositories.py`, `test_repository_probes.py`.
+    ticked lines are sent, as in Connect. `RepositoryOut.host_keys` lists every key ssh reads
+    from the text, once, with its type as OpenSSH names it, its fingerprint as `ssh-keygen -l`
+    prints it and its marker (`@cert-authority`, which trusts every host certificate it
+    signed, or `@revoked`, which ssh refuses), so the browser hashes nothing; the page lists
+    revoked keys apart and never as trusted. `known_host_keys` reads each line as OpenSSH 10
+    does and skips what it skips: an unknown marker, base64 it cannot decode (unpadded, or a
+    bit set past the last byte), a type word that names another type than the key, and a key
+    it refuses (`ssh_keys.read_key`: the full wire format of each type, every length checked,
+    no byte left over; an RSA modulus under 1,024 bits; an ECDSA point that is compressed, off
+    the curve or that `sshkey_ec_validate_public` refuses; a certificate whose fields are
+    malformed or whose authority's signature does not verify). `rsa-sha2-256` and
+    `rsa-sha2-512` (and their certificate words) name an `ssh-rsa` key, listed once as
+    `ssh-rsa`. A certificate's fingerprint is its certified key's, so a `@revoked` certificate
+    revokes that key on the page as in ssh. Where the list differs from what ssh reads, it never
+    shows as trusted a key ssh refuses: a certificate on a line without a marker is left out,
+    since ssh never trusts a host through it (`sshkey_equal` compares types), so "No host key
+    is trusted yet" shows when it is the only line; a certificate on a `@revoked` line is
+    listed without its signature checked, so a revocation ssh applies always shows, even one
+    signed by a security key (`sk-`) or by an RSA key `cryptography` refuses (an exponent under
+    3 or even), whose signatures Lakana cannot check, and a revocation with a bad signature,
+    which ssh skips, is shown too (it can only make ssh stricter); a certificate on a
+    `@cert-authority` line is listed only when its signature verifies, so one signed by those
+    keys is left out; and `ssh-dss` is skipped, which OpenSSH 10 no longer reads either. The
+    reference is portable OpenSSH (8.9 to 10.2, OpenSSL). Apple's build (LibreSSL), which a
+    worker on macOS runs, differs on two crafted keys only: it trusts an ECDSA point that
+    `sshkey_ec_validate_public` refuses (left out here), and it skips a revocation signed by an
+    RSA key with exponent 1 (listed here). A
+    character base64 has no place for (non-ASCII, or a no-break space before a comment) skips
+    the line, never fails the answer. Each distinct line is read once. The audit log's
+    fingerprints (`known_hosts_fingerprints`) read the same lines but count every base64 key,
+    hashed as written. Pins: `RepositoryDialogs.test.tsx` (`host keys are fetched and
+    ticked, never typed`), `test_repositories.py` (`a line with a non-ASCII character still
+    lists`), `test_known_host_keys.py` (each case also
+    against `ssh-keygen -l -F` when it is installed), with keys ssh-keygen made
+    (`packages/lakana-core/tests/host_keys/make.sh`).
   - **A replaced deploy key's private half never leaves the server.** Replace key and Make the
     missing keys call `POST /api/v1/repositories/{name}/deploy-key` through `guarded` (step-up
     before the call), and the answer carries only public keys and fingerprints. Delete asks for
@@ -7459,7 +7509,8 @@ expected exception, and nothing else. `_fail_closed` turns any exception but its
 refusal, which would hide a bug, so the harness calls the functions under it. Its refusals are
 narrower than that list (`GUARD_REFUSALS`): `LakanaError`, `ParseError` and `TokenError`; a
 `RecursionError` only when parsing the text alone raises it too (the parser's nesting limit, not a
-walker's), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
+walker's; that parse runs `PARSE_HEADROOM` frames short of the limit, since the target's own parses
+sit a few frames deeper and a text at the edge once read as a crash, #733), and a `MemoryError` never. For the two file parsers it is `ValidationError`. A test
 (`scripts/tests/test_fuzz.py`) reads `_fail_closed`'s list from its source and compares it with
 `FAIL_CLOSED_PASSES`, and runs every seed on every pull request. The guard's seeds are the statements of its own tests
 that earlier guard-fuzzing runs collected, one per sequence of token types

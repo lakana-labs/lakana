@@ -24,7 +24,8 @@ function Kept({ start }: { readonly start: string | null }): JSX.Element {
         environments={QUERY_ENVIRONMENTS}
         filter={filter}
         onFilter={setFilter}
-        reloadKey={0}
+        savedKey={0}
+        recentKey={0}
       />
     </MemoryRouter>
   );

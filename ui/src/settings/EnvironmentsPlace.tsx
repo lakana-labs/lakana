@@ -30,7 +30,7 @@ import { ViewList } from "../catalog/views/ViewList";
 import { inPool, READS_IN_FLIGHT } from "../shell/inPool";
 import { type Resource, useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
-import { type DeletedRow, readDeleted } from "./deletedRows";
+import { type DeletedRow, deletionKey, readDeleted } from "./deletedRows";
 import type { DeletedAction, DeletedState } from "./EnvironmentDialogs";
 import { VisibleText } from "../shell/VisibleText";
 import "./environments.css";
@@ -266,12 +266,20 @@ export function EnvironmentsPlace(): JSX.Element {
   const managesAny = creates || (viewer.managedEnvironments as readonly string[]).length > 0;
   const heading = useRef<HTMLHeadingElement>(null);
   const read = useResource(listEnvironmentsFull);
-  // The environments whose files were deleted here: due whatever the browser's clock says.
-  const purged = useRef(new Set<string>());
+  const arrived = (useLocation().state as Partial<DeletedState> | null)?.deleted;
+  // The deletions whose files were deleted here, by deletionKey: due whatever the browser's clock
+  // says. A deletion with the files on the environment's page counts as one.
+  const [purged] = useState(
+    () =>
+      new Set(
+        arrived?.restorableUntil === null
+          ? [deletionKey({ name: arrived.name, deleted_at: arrived.deletedAt })]
+          : [],
+      ),
+  );
   const loadDeleted = useCallback(
-    (): Promise<readonly DeletedRow[]> =>
-      managesAny ? readDeleted(purged.current) : Promise.resolve([]),
-    [managesAny],
+    (): Promise<readonly DeletedRow[]> => (managesAny ? readDeleted(purged) : Promise.resolve([])),
+    [managesAny, purged],
   );
   const deleted = useResource(loadDeleted);
   const [creating, setCreating] = useState(false);
@@ -279,7 +287,6 @@ export function EnvironmentsPlace(): JSX.Element {
     setCreating(false);
   };
   const leave = useLeave(closeCreate);
-  const arrived = (useLocation().state as Partial<DeletedState> | null)?.deleted;
   const [note, setNote] = useState<string | null>(() =>
     arrived === undefined
       ? null
@@ -300,8 +307,9 @@ export function EnvironmentsPlace(): JSX.Element {
         : document.querySelector<HTMLElement>(`a[data-environment="${CSS.escape(target.link)}"]`);
     (element ?? heading.current)?.focus();
   }, [read.data, deleted.data]);
-  const changed = (action: DeletedAction, name: string): void => {
-    if (action === "purgeFiles") purged.current.add(name);
+  const changed = (action: DeletedAction, environment: EnvironmentOut): void => {
+    const { name } = environment;
+    if (action === "purgeFiles") purged.add(deletionKey(environment));
     setNote(t(`${P}.done.${action}`, { name }));
     focus.current =
       action === "restore"
