@@ -15,7 +15,7 @@ from types import MappingProxyType
 from typing import Any, cast
 
 import pytest
-from core_test_helpers import deploy_manifest
+from core_test_helpers import deploy_manifest, python_task_run
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import event, func, select
 from sqlalchemy import update as sa_update
@@ -57,8 +57,10 @@ from lakana_core.models import (
     PrincipalType,
     Secret,
     SecretUseKind,
+    TaskStatus,
 )
 from lakana_core.projects.package_indexes import PackageIndexService
+from lakana_core.runs.connection_failures import LastRunFailure
 from lakana_core.secrets.crypto import decrypt_secret_row
 from lakana_core.secrets.keys import EnvKeyProvider
 from lakana_core.secrets.service import SecretService
@@ -3116,3 +3118,68 @@ def test_test_all_answers_for_a_connection_deleted_after_its_test_was_queued(
         True,
     )
     assert world.session.get(ConnectionTest, item.test.id) is None
+
+
+def _failed_on(world: World, environment: str, name: str) -> LastRunFailure:
+    """Store a failed task whose failure names a connection, ending an hour from now.
+
+    Parameters
+    ----------
+    world
+        The world.
+    environment
+        The run's environment.
+    name
+        The connection its failure names.
+
+    Returns
+    -------
+    LastRunFailure
+        What the connection should show.
+    """
+    task = python_task_run(
+        world.session, world.admin.id, environment=environment, status=TaskStatus.FAILED
+    )
+    finished = datetime.now(UTC) + timedelta(hours=1)
+    task.failure_connection = name
+    task.finished_at = finished
+    world.session.commit()
+    return LastRunFailure(task.run_id, task.asset, finished)
+
+
+def test_a_connection_shows_the_newest_run_that_failed_on_it(world: World) -> None:
+    """The list, the cross-environment list, the page and an update all carry it."""
+    world.postgres(world.data_engineer)
+    _made_at(world, "prod", "files", _NOW)
+    failure = _failed_on(world, "prod", "crm-db")
+    _failed_on(world, "dev", "files")
+    service = world.connections()
+
+    listed = {v.name: v.last_run_failure for v in service.list(world.analyst, "prod").items}
+    assert listed == {"crm-db": failure, "files": None}
+    every = {v.name: v.last_run_failure for v in service.list_all(world.data_engineer).items}
+    assert every == {"crm-db": failure, "files": None}
+    assert service.get(world.analyst, "prod", "crm-db").last_run_failure == failure
+    changed = service.update(world.data_engineer, "prod", "crm-db", settings={"user": "writer"})
+    assert changed.last_run_failure == failure
+
+
+def test_a_reader_who_may_not_read_the_runs_learns_nothing_of_them(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The runs' own rule is asked: a connection never shows a run its reader may not open."""
+    world.postgres(world.data_engineer)
+    _failed_on(world, "prod", "crm-db")
+    asked: list[tuple[PrincipalRef, list[str]]] = []
+
+    def no_runs(authz: object, p: PrincipalRef, environments: list[str]) -> set[str]:
+        asked.append((p, list(environments)))
+        return set()
+
+    monkeypatch.setattr(service_module, "run_readers", no_runs)
+    service = world.connections()
+
+    assert [v.last_run_failure for v in service.list(world.analyst, "prod").items] == [None]
+    assert [v.last_run_failure for v in service.list_all(world.analyst).items] == [None]
+    assert service.get(world.analyst, "prod", "crm-db").last_run_failure is None
+    assert asked == [(world.analyst, ["prod"])] * 3

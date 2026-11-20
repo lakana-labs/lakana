@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from lakana_core.models.check_result import CheckOutcome, CheckResult
 from lakana_core.models.run import AttemptOutcome, TaskAttempt, TaskRun, TaskStatus
@@ -82,21 +82,19 @@ class Failure:
         One sentence: what happened.
     next_step
         One sentence: what to do about it.
+    connection
+        The connection the failure concerns, which the task's code named (an error of
+        `lakana.ingest`); `None` when it names none.
+    error_type
+        The class name of the exception a Python task's code ended with; `None` for any other
+        failure.
     """
 
     code: str
     cause: str
     next_step: str
-
-    def to_json(self) -> dict[str, str]:
-        """Build the REST body.
-
-        Returns
-        -------
-        dict[str, str]
-            ``code``, ``cause`` and ``next_step``.
-        """
-        return {"code": self.code, "cause": self.cause, "next_step": self.next_step}
+    connection: str | None = None
+    error_type: str | None = None
 
 
 FAILURES: Mapping[FailureCode, tuple[str, str]] = {
@@ -285,14 +283,19 @@ def task_failure(task: TaskRun) -> Failure | None:
         `None` for a task that succeeded, and for one that has no error. The stored code when
         there is one. For a row without one (written before the codes existed): the status says
         it exactly for ``upstream_failed`` and ``cancelled``; a ``failed`` task, or one with an
-        error text, is ``unknown``.
+        error text, is ``unknown``. With the connection and the exception's class name the
+        row stores.
     """
     if task.status is TaskStatus.SUCCEEDED:
         return None
     if task.failure_code is None and task.status in _BY_STATUS:
         return failure_of(_BY_STATUS[task.status])
-    return stored_failure(
-        task.failure_code, failed=task.status is TaskStatus.FAILED or task.error_message is not None
+    return _with_details(
+        stored_failure(
+            task.failure_code,
+            failed=task.status is TaskStatus.FAILED or task.error_message is not None,
+        ),
+        task,
     )
 
 
@@ -308,8 +311,29 @@ def attempt_failure(attempt: TaskAttempt) -> Failure | None:
     -------
     Failure or None
         `None` while it runs, when it succeeded and when it was handed back at a drain. The
-        stored code otherwise; ``unknown`` for a row without one.
+        stored code otherwise; ``unknown`` for a row without one. With the connection and the
+        exception's class name the row stores.
     """
     if attempt.outcome is None or attempt.outcome in _NOT_FAILURES:
         return None
-    return stored_failure(attempt.failure_code, failed=True)
+    return _with_details(stored_failure(attempt.failure_code, failed=True), attempt)
+
+
+def _with_details(failure: Failure | None, row: TaskRun | TaskAttempt) -> Failure | None:
+    """Add what a row stores of its failure besides the code.
+
+    Parameters
+    ----------
+    failure
+        The failure the code says.
+    row
+        The task run or attempt.
+
+    Returns
+    -------
+    Failure or None
+        `failure` with the row's `failure_connection` and `error_type`; `None` for none.
+    """
+    if failure is None or (row.failure_connection is None and row.error_type is None):
+        return failure
+    return replace(failure, connection=row.failure_connection, error_type=row.error_type)

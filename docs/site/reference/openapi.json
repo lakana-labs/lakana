@@ -29355,6 +29355,16 @@
             },
             "type": "array",
             "title": "Actions"
+          },
+          "last_run_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionRunFailureOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -29373,7 +29383,7 @@
           "actions"
         ],
         "title": "ConnectionOut",
-        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed.\nenvironment\n    The name of its environment.\nlast_test\n    Its newest test of any state (queued, running or done), or `null` if it was never\n    tested. A change keeps it: a test that finished before `updated_at` tested the\n    connection as it was. Every reader gets its `state`, `outcome` and `finished_at`; its\n    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` on\n    the environment, and for anyone else those keys are absent.\nactions\n    What the caller's rights allow on it: ``test``, ``update`` and ``delete`` with\n    `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound\n    to it, or a change that could send its secret somewhere new without new values) with\n    `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again."
+        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed.\nenvironment\n    The name of its environment.\nlast_test\n    Its newest test of any state (queued, running or done), or `null` if it was never\n    tested. A change keeps it: a test that finished before `updated_at` tested the\n    connection as it was. Every reader gets its `state`, `outcome` and `finished_at`; its\n    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` on\n    the environment, and for anyone else those keys are absent.\nactions\n    What the caller's rights allow on it: ``test``, ``update`` and ``delete`` with\n    `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound\n    to it, or a change that could send its secret somewhere new without new values) with\n    `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again.\nlast_run_failure\n    The newest run that failed on it (`ConnectionRunFailureOut`), for a caller who may read\n    the environment's runs; `null` when there is none, or the caller may not read it."
       },
       "ConnectionPage": {
         "properties": {
@@ -29457,6 +29467,32 @@
         ],
         "title": "ConnectionQueuedTestPage",
         "description": "One page of Test all: a test for each connection of a page of the environment's list.\n\nParameters\n----------\nitems\n    One entry per connection, newest connection first.\nnext_cursor\n    Pass back as `?cursor=` to test the next page; `null` on the last page."
+      },
+      "ConnectionRunFailureOut": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "asset": {
+            "type": "string",
+            "title": "Asset"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "asset",
+          "finished_at"
+        ],
+        "title": "ConnectionRunFailureOut",
+        "description": "The newest run that failed on a connection, while it is its asset's newest ending.\n\nA task's failure names a connection when the asset's code ended with an error of\n``lakana.ingest`` that names one the asset declares. Only failures after the connection's\nlast change count, and a later success or failure of the same asset hides it.\n\nParameters\n----------\nrun_id\n    The run; ``GET /api/v1/environments/{env}/runs/{run_id}`` shows it.\nasset\n    The task that failed.\nfinished_at\n    When it failed."
       },
       "ConnectionTestOut": {
         "properties": {
@@ -30882,6 +30918,28 @@
           "next_step": {
             "type": "string",
             "title": "Next Step"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
           }
         },
         "type": "object",
@@ -30891,7 +30949,7 @@
           "next_step"
         ],
         "title": "FailureOut",
-        "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,\n    `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,\n    `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure\n    recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it."
+        "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,\n    `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,\n    `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure\n    recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it.\nconnection\n    The connection the failure concerns: the task's code ended with an error of\n    ``lakana.ingest`` that names one the asset declares. `null` when it names none.\nerror_type\n    The class name of the exception a Python task's code ended with (``SourceRefused``,\n    ``KeyError``); `null` for any other failure and for one recorded before it was stored."
       },
       "GetStartedOut": {
         "properties": {
