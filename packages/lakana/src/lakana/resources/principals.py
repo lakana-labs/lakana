@@ -416,9 +416,10 @@ class Principals:
     def unlink_provider(self, name: str) -> None:
         """Unlink a person from the organisation's identity provider.
 
-        Deletes their stored passkeys, revokes all their personal API tokens and ends their
-        sessions; they come back with a recovery link. Needs the `ADMIN` role on the instance.
-        To offboard someone, deactivate them instead.
+        Deletes their stored passkeys, revokes all their personal API tokens, ends their
+        sessions and withdraws their open sign-in links; they come back with a new recovery
+        link. Needs the `ADMIN` role on the instance. To offboard someone, deactivate them
+        instead.
 
         Parameters
         ----------

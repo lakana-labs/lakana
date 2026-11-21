@@ -16,7 +16,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { useMe } from "../shell/me";
-import { markedText, VisibleText } from "../shell/VisibleText";
+import { markedName, VisibleText } from "../shell/VisibleText";
 import { catalogPath } from "./paths";
 import { writeChoice } from "./remember";
 import { ancestorIds, type CatalogNode, nodeId } from "./tree";
@@ -68,7 +68,7 @@ export function CatalogTree({ root, view }: CatalogTreeProps): JSX.Element {
 
   const render = (node: CatalogNode): JSX.Element => {
     const label = node.environment === null ? t("catalog.allTables") : node.label;
-    const text = t("catalog.treeNode", { label: markedText(label), count: node.count });
+    const text = t("catalog.treeNode", { label: markedName(label), count: node.count });
     return (
       <NavigationTreeItem
         key={node.id}
@@ -98,7 +98,7 @@ export function CatalogTree({ root, view }: CatalogTreeProps): JSX.Element {
                   });
                 }}
               >
-                <VisibleText text={label} />
+                <VisibleText text={label} name />
                 <span className="tree-count" aria-hidden="true">
                   · {node.count}
                 </span>

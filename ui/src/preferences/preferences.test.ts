@@ -38,19 +38,25 @@ afterEach(() => {
 describe("preferences", () => {
   it("reads the defaults from an empty storage", () => {
     expect(readPreferences(new MemoryStorage())).toEqual(DEFAULT_PREFERENCES);
-    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", density: "roomy", language: "en" });
+    expect(DEFAULT_PREFERENCES).toEqual({ theme: "system", language: "en" });
   });
 
   it("reads what was written", () => {
     const storage = new MemoryStorage();
-    writePreferences(storage, { theme: "dark", density: "compact", language: "en" });
+    writePreferences(storage, { theme: "dark", language: "en" });
 
     expect(JSON.parse(storage.getItem(PREFERENCES_KEY) ?? "")).toEqual({
       theme: "dark",
-      density: "compact",
       language: "en",
     });
-    expect(readPreferences(storage)).toEqual({ theme: "dark", density: "compact", language: "en" });
+    expect(readPreferences(storage)).toEqual({ theme: "dark", language: "en" });
+  });
+
+  it("ignores a density stored by an older version: there is one density now", () => {
+    const storage = new MemoryStorage();
+    storage.setItem(PREFERENCES_KEY, '{"theme":"dark","density":"roomy","language":"en"}');
+
+    expect(readPreferences(storage)).toEqual({ theme: "dark", language: "en" });
   });
 
   it.each(["{", "null", '{"theme":"neon"}', '{"density":7}', "[]", '"dark"', '{"language":"tlh"}'])(
@@ -97,17 +103,16 @@ describe("preferences", () => {
     applyPreferences(root, DEFAULT_PREFERENCES);
 
     expect(root.hasAttribute("data-theme")).toBe(false);
-    expect(root.getAttribute("data-density")).toBe("roomy");
+    expect(root.hasAttribute("data-density")).toBe(false);
     expect(root.lang).toBe("en");
   });
 
   it.each(["light", "dark"] as const)("a %s theme sets data-theme", (theme) => {
     const root = document.createElement("html");
 
-    applyPreferences(root, { theme, density: "compact", language: "en" });
+    applyPreferences(root, { theme, language: "en" });
 
     expect(root.getAttribute("data-theme")).toBe(theme);
-    expect(root.getAttribute("data-density")).toBe("compact");
   });
 
   it("fades the colours while the theme changes, and only then", () => {
@@ -116,11 +121,11 @@ describe("preferences", () => {
       const root = document.createElement("html");
       root.setAttribute("data-theme", "dark");
 
-      applyPreferences(root, { theme: "light", density: "roomy", language: "en" });
+      applyPreferences(root, { theme: "light", language: "en" });
       expect(root.hasAttribute("data-theme-fade")).toBe(true);
 
       vi.advanceTimersByTime(THEME_FADE_MS - 1);
-      applyPreferences(root, { theme: "dark", density: "roomy", language: "en" });
+      applyPreferences(root, { theme: "dark", language: "en" });
       // A second change restarts the fade; the attribute outlasts the transition by 50 ms.
       vi.advanceTimersByTime(THEME_FADE_MS + 49);
       expect(root.hasAttribute("data-theme-fade")).toBe(true);
@@ -171,7 +176,7 @@ describe("preferences", () => {
       root.setAttribute("data-theme", before);
     }
 
-    applyPreferences(root, { theme, density: "compact", language: "en" });
+    applyPreferences(root, { theme, language: "en" });
 
     expect(root.hasAttribute("data-theme-fade")).toBe(false);
   });

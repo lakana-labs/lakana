@@ -381,6 +381,8 @@ _GUARDED = {
     # An access file names every kind of access: only an administrator may export, plan or
     # apply one, or read the status of the scopes files manage.
     "access/service.py": ("MANAGE_GRANT", 4),
+    # Unlinking a person from the identity provider revokes their tokens (#32).
+    "identity/oidc_links.py": ("MANAGE_TOKEN", 1),
 }
 _SERVICES = {
     "grants/service.py": "GrantService",
@@ -388,6 +390,7 @@ _SERVICES = {
     "identity/pats.py": "PatService",
     "ci_oidc/rules.py": "CiTrustRuleService",
     "access/service.py": "AccessService",
+    "identity/oidc_links.py": "OidcLinkService",
 }
 _EXEMPT = {
     ("PatService", "verify"): "authenticates a presented token: it reads the token row and "
@@ -422,6 +425,17 @@ _EXEMPT = {
     "policy manager learned before; no hash, commit, applier or override",
     ("CiTrustRuleService", "check_rule"): "validates without writing; its caller "
     "(`grant`/`create`, or `AccessService`) has authorized",
+    ("OidcLinkService", "link"): "links the caller's own account, or the account an invite or "
+    "recovery link names, only after the provider verified the identity; its callers "
+    "(`finish-in-session` for the caller's own session, `LinkService.claim_for_provider` after "
+    "claiming the link) are the proof, and it grants no role",
+    ("OidcLinkService", "refusal_for"): "reads whether one person may be linked, for the "
+    "caller's own profile link before it starts, writing nothing",
+    ("OidcLinkService", "unlink_for_operator_recovery"): "runs only inside a recovery link's "
+    "use, in the claimed transaction, after `LinkService._complete` read the person afresh under "
+    "the row lock and refused (`ProviderSignInRequired`) a linked person's link that the server "
+    "operator's bootstrap token did not issue (`_issued_by_operator`): the operator stands "
+    "behind it",
 }
 """Public methods of the three services that need no administrator check, and why."""
 _NAMES = {action.name for action in ADMIN_ONLY_ACTIONS}

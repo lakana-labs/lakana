@@ -491,7 +491,7 @@ function ColumnMasks(): JSX.Element {
                   <SubjectName subject={mask} link />
                 </td>
                 <td>
-                  <VisibleText text={mask.column} breakable />
+                  <VisibleText text={mask.column} breakable name />
                 </td>
                 <ExpressionCell expression={mask.expression} />
               </tr>

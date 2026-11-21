@@ -232,6 +232,7 @@ from lakana_core.catalog.metadata import (
     check_requirements,
     next_metadata_location,
     read_metadata,
+    refuse_hidden_column_names,
     write_metadata,
 )
 from lakana_core.catalog.model_metadata import (
@@ -298,6 +299,7 @@ from lakana_core.catalog.tombstones import (
     PURGE_STARTED_MESSAGE,
     DroppedTable,
     drop_row,
+    dropped_columns,
     find_tombstone,
     list_environment_tombstones,
     list_tombstones,
@@ -358,9 +360,8 @@ from lakana_core.identifiers import (
     NamespacePath,
     TableRef,
     check_environment_name,
+    check_new_column_name,
     check_new_name,
-    refuse_hidden_characters,
-    refuse_outer_whitespace,
     shown,
     validate_path_component,
 )
@@ -3339,7 +3340,10 @@ class CatalogService:
         # call is needed here the way one was while `location=` could
         # bypass it.
         table_id = uuid.uuid4()
-        table_location = resolved.table_location(ref.namespace, ref.name, table_id)
+        stored = self._stored_dropped_names(env, ref, schema)
+        table_location = resolved.table_location(
+            ref.namespace, ref.name, table_id, stored_name=stored is not None
+        )
         metadata = build_table_metadata(
             schema=schema,
             location=table_location,
@@ -3347,6 +3351,7 @@ class CatalogService:
             sort_order=sort_order,
             properties=dict(properties or {}),
             table_uuid=table_id,
+            stored_columns=stored or frozenset(),
         )
         claim_location(
             self._session,
@@ -3596,8 +3601,8 @@ class CatalogService:
             active external table's claim in this environment, if it
             escapes the environment's storage root, if `format` is
             unsupported, or if a column name of the sample file holds an invisible or
-            line-breaking character (`refuse_hidden_characters`) or starts or ends with a
-            space (`refuse_outer_whitespace`).
+            line-breaking character, starts or ends with a space, holds a look-alike character
+            or is not in NFC (`check_new_column_name`).
         ConflictError
             If a deployed project declares the name, whatever it declares there
             (`lakana_core.catalog.git_owned.GIT_OWNED_CREATE`); checked before any storage
@@ -3643,8 +3648,7 @@ class CatalogService:
         schema = infer_schema(sample_bytes, format)
         # The column names come from the caller's own files: new names, under the same rule.
         for column in schema:
-            refuse_hidden_characters(column, what="Column name")
-            refuse_outer_whitespace(column, what="Column name")
+            check_new_column_name(column)
         # The lock is taken as late as possible, around only the claim
         # re-check and the insert: everything above only reads storage and
         # never touches the environment row, so holding the lock around a
@@ -3730,6 +3734,48 @@ class CatalogService:
                 "the write failed for a reason other than a name collision."
             ) from exc
         return row
+
+    def _stored_dropped_names(
+        self, env: Environment, ref: TableRef, schema: Schema
+    ) -> frozenset[str] | None:
+        """Find out whether a new table takes a name the catalog still holds for a dropped one.
+
+        A table re-created under the name of a dropped table the catalog still holds (a
+        rebuild's re-create, or one within its undo period) does not take a new name, and
+        neither do that table's columns (#609). The tombstones are read only when a rule for
+        new names refuses the name or a column; a refusal stands when there is none.
+
+        Parameters
+        ----------
+        env
+            The environment.
+        ref
+            The new table.
+        schema
+            Its schema.
+
+        Returns
+        -------
+        frozenset of str or None
+            The dropped table's column names; `None` when the name and the columns meet the
+            rules for new names.
+
+        Raises
+        ------
+        ValidationError
+            From `validate_path_component`, or from `check_new_name` or
+            `refuse_hidden_column_names` when no dropped table holds the name.
+        """
+        validate_path_component(ref.name, what="Table name")
+        try:
+            check_new_name(ref.name, what="Table name")
+            refuse_hidden_column_names(schema)
+        except ValidationError:
+            stored = dropped_columns(self._session, env.id, ref.namespace, ref.name)
+            if stored is None:
+                raise
+            return stored
+        return None
 
     def _lookup_table(self, ns: Namespace, name: str) -> Table | None:
         """Look up a table row within a namespace, without authorizing.
@@ -9310,8 +9356,7 @@ class CatalogService:
         )
         for column in columns:
             if column.name not in stored_columns:
-                refuse_hidden_characters(column.name, what="Column name")
-                refuse_outer_whitespace(column.name, what="Column name")
+                check_new_column_name(column.name)
         top_level = ref.namespace.parts[0]
         if top_level not in _MEDALLION_TOP_LEVEL_NAMESPACES:
             raise ValidationError(

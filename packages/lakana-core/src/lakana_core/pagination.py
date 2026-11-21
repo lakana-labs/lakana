@@ -35,10 +35,12 @@ from lakana_core.errors import ValidationError
 _E = TypeVar("_E", bound=enum.StrEnum)
 _T = TypeVar("_T")
 
-_BAD_CURSOR = (
+BAD_CURSOR = (
     "The cursor is not valid. Start the listing again without `cursor`; pass the `next_cursor` of "
     "a page only to continue that listing."
 )
+"""Why a cursor no list of this server could have issued is refused."""
+_BAD_CURSOR = BAD_CURSOR
 _OTHER_LIST = (
     "The cursor is not valid for the `{expected}` list: it came from the `{actual}` list. "
     "Start the listing again without `cursor`; pass the `next_cursor` of a page only to "
@@ -781,11 +783,10 @@ def page_in_order(
     ValueError
         If two items have the same key, which would make a page skip or repeat items.
     """
-    if not 1 <= limit <= LIST_LIMIT_MAX:
-        raise ValidationError(f"limit must be between 1 and {LIST_LIMIT_MAX}; got {limit}.")
+    check_list_limit(limit)
     after: tuple[str, ...] | None = None
     if cursor is not None:
-        after = _key_from_cursor(kind, cursor)
+        after = decode_tuple_cursor(kind, cursor)
     keyed = sorted(((key_of(item), item) for item in items), key=lambda p: p[0], reverse=descending)
     if any(a[0] == b[0] for a, b in itertools.pairwise(keyed)):
         raise ValueError(f"The keys of the `{kind}` list are not unique; a page would skip items.")
@@ -794,12 +795,50 @@ def page_in_order(
     page = keyed[:limit]
     next_cursor = None
     if len(keyed) > limit:
-        next_cursor = encode_key_cursor(kind, json.dumps(list(page[-1][0])))
+        next_cursor = encode_tuple_cursor(kind, page[-1][0])
     return Page([item for _, item in page], next_cursor)
 
 
-def _key_from_cursor(kind: str, cursor: str) -> tuple[str, ...]:
-    """Read the tuple key out of a cursor made by `page_in_order`.
+def check_list_limit(limit: int) -> None:
+    """Refuse the page size of a list sorted by a tuple key, as `page_in_order` does.
+
+    Parameters
+    ----------
+    limit
+        The page size.
+
+    Raises
+    ------
+    ValidationError
+        If it is not 1 to `LIST_LIMIT_MAX`.
+    """
+    if not 1 <= limit <= LIST_LIMIT_MAX:
+        raise ValidationError(f"limit must be between 1 and {LIST_LIMIT_MAX}; got {limit}.")
+
+
+def encode_tuple_cursor(kind: str, key: tuple[str, ...]) -> str:
+    """Encode the tuple key of a page's last item, the cursor `page_in_order` issues.
+
+    A list that orders and cuts its pages in the database issues the same cursor, so it reads the
+    cursors of a list `page_in_order` paged before.
+
+    Parameters
+    ----------
+    kind
+        The list the cursor belongs to.
+    key
+        The last item's key.
+
+    Returns
+    -------
+    str
+        A key cursor (`encode_key_cursor`) of the key as a JSON array.
+    """
+    return encode_key_cursor(kind, json.dumps(list(key)))
+
+
+def decode_tuple_cursor(kind: str, cursor: str) -> tuple[str, ...]:
+    """Read the tuple key out of a cursor made by `encode_tuple_cursor`.
 
     Parameters
     ----------

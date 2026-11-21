@@ -6,7 +6,7 @@ from, who approved it from which browser session, and the token it was exchanged
 works once and expires after 2 minutes (loopback) or 10 minutes (device).
 
 Revision ID: 7c3e91a0b5d2
-Revises: 431d39830234
+Revises: 7c1e5a9d3f20
 Create Date: 2026-11-20 18:00:00.000000
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "7c3e91a0b5d2"
-down_revision: str | Sequence[str] | None = "431d39830234"
+down_revision: str | Sequence[str] | None = "7c1e5a9d3f20"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -69,11 +69,11 @@ export function ObjectRow({ to, name, environment, second, aside }: ObjectRowPro
       <td>
         {to === null ? (
           <span className="row-name">
-            <VisibleText text={name} />
+            <VisibleText text={name} name />
           </span>
         ) : (
           <Link className="row-name" to={to}>
-            <VisibleText text={name} />
+            <VisibleText text={name} name />
           </Link>
         )}{" "}
         <EnvironmentLabel environment={environment} />

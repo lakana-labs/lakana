@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select, text, update
+from sqlalchemy import event, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
@@ -25,14 +25,32 @@ from lakana_core import migrate
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
-from lakana_core.errors import ConflictError, OidcSignInRefused
+from lakana_core.errors import ConflictError, LinkUnusableError, NotFoundError, OidcSignInRefused
+from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE
 from lakana_core.grants.roles import Role
-from lakana_core.grants.service import GrantService
+from lakana_core.grants.service import GrantService, active_instance_admin_ids
+from lakana_core.identity.groups import GroupService
+from lakana_core.identity.link_withdrawal import withdraw_open_links
+from lakana_core.identity.links import LinkService
+from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity
-from lakana_core.identity.oidc_links import OidcLinkService, unlinked_admin_count
+from lakana_core.identity.oidc_links import (
+    OidcLinkService,
+    linked_principal_for_sign_in,
+    unlinked_admin_count,
+)
+from lakana_core.identity.passkeys import PasskeyService
 from lakana_core.identity.principals import PrincipalService
-from lakana_core.models import Grant, Passkey, Principal, PrincipalType
+from lakana_core.identity.sessions import SessionService
+from lakana_core.models import (
+    BrowserSession,
+    Grant,
+    Passkey,
+    Principal,
+    PrincipalType,
+    SignInLink,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -41,6 +59,21 @@ _WAIT_LIMIT = 30.0
 """Seconds the test waits at most for the second change to block or finish."""
 
 _ISSUER = "https://idp.example.com/realms/lakana"
+
+
+def _bounded_lock_waits(connection: object, _record: object) -> None:
+    """Make every lock wait of a new connection give up after 60 seconds.
+
+    Parameters
+    ----------
+    connection
+        The DBAPI connection.
+    _record
+        The pool's record, unused.
+    """
+    cursor = connection.cursor()  # ty: ignore[missing-attribute]
+    cursor.execute("SET lock_timeout = '60s'")
+    cursor.close()
 
 
 @pytest.fixture(scope="module")
@@ -56,6 +89,9 @@ def engine() -> Iterator[Engine]:
         url = pg.get_connection_url()
         migrate.upgrade(url)
         engine = create_engine(DatabaseConfig(url=url))
+        # A wait on a lock that never comes fails the test within a minute instead of hanging
+        # the run: the races wait on the advisory lock only briefly.
+        event.listen(engine, "connect", _bounded_lock_waits)
         yield engine
         engine.dispose()
 
@@ -92,8 +128,10 @@ def actor(engine: Engine) -> PrincipalRef:
     return ref
 
 
-def _person(session: Session, actor: PrincipalRef, *, admin: bool) -> Principal:
-    """Create a person with a working passkey, optionally an administrator; committed.
+def _person(
+    session: Session, actor: PrincipalRef, *, admin: bool, passkey: bool = True
+) -> Principal:
+    """Create a person, with a working passkey by default, optionally an administrator.
 
     Parameters
     ----------
@@ -103,11 +141,13 @@ def _person(session: Session, actor: PrincipalRef, *, admin: bool) -> Principal:
         The acting principal.
     admin
         Whether to grant ADMIN on the instance.
+    passkey
+        Whether to give them a working passkey.
 
     Returns
     -------
     Principal
-        The person.
+        The person; committed.
     """
     allow = AllowAllAuthorization()
     name = f"p-{uuid.uuid4().hex[:8]}"
@@ -118,6 +158,9 @@ def _person(session: Session, actor: PrincipalRef, *, admin: bool) -> Principal:
         GrantService(session, allow).grant(
             actor, principal=name, role=Role.ADMIN, kind=SecurableKind.INSTANCE
         )
+    if not passkey:
+        session.commit()
+        return row
     session.add(
         Passkey(
             id=uuid.uuid4(),
@@ -220,6 +263,14 @@ class _Second:
                 session.rollback()
                 self.outcome = refused.reason
                 return
+            except LinkUnusableError as refused:
+                session.rollback()
+                self.outcome = f"link {refused.state}"
+                return
+            except NotFoundError as refused:
+                session.rollback()
+                self.outcome = f"not found: {refused}"
+                return
             except ConflictError as refused:
                 session.rollback()
                 self.outcome = str(refused)
@@ -230,8 +281,14 @@ class _Second:
                 return
             self.outcome = _DONE
 
-    def blocked_or_done(self) -> None:
-        """Wait until the change waits on an advisory lock, or has finished.
+    def blocked_or_done(self, wait_event: str | None = "advisory") -> None:
+        """Wait until the change waits on a lock, or has finished.
+
+        Parameters
+        ----------
+        wait_event
+            The lock it waits on: ``advisory`` (the administrator-count lock), or `None` for any
+            lock, a row lock included.
 
         Raises
         ------
@@ -246,8 +303,10 @@ class _Second:
                 waiting = connection.execute(
                     text(
                         "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()"
-                        " AND wait_event_type = 'Lock' AND wait_event = 'advisory'"
-                    )
+                        " AND wait_event_type = 'Lock'"
+                        " AND (CAST(:event AS text) IS NULL OR wait_event = :event)"
+                    ),
+                    {"event": wait_event},
                 ).scalar_one()
             if waiting:
                 return
@@ -369,3 +428,548 @@ def test_two_accounts_linking_one_identity_concurrently(
         session.commit()
     assert racing.finish() == "identity_taken"
     assert _linked_subjects(engine, subject) == [alice_name]
+
+
+def test_a_grant_to_a_linked_person_and_a_deactivation_of_the_last_unlinked_admin_at_once(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: the last unlinked administrator goes while a linked person gains ADMIN.
+
+    Each alone keeps the rule. The grant must wait for the deactivation and count again, or the
+    instance ends with only linked administrators.
+    """
+    allow = AllowAllAuthorization()
+    with Session(engine) as session:
+        una = _person(session, actor, admin=True)
+        _person(session, actor, admin=True, passkey=False)
+        lin = _person(session, actor, admin=False)
+        una_name, lin_id, lin_name = una.name, lin.id, lin.name
+        OidcLinkService(session, allow, bootstrap_name="admin").link(
+            lin_id, _identity(f"lin-{lin_id.hex}"), via="profile"
+        )
+        session.commit()
+    assert _unlinked(engine) == 1
+    with Session(engine) as session:
+        PrincipalService(session, allow).deactivate_principal(actor, una_name, commit=False)
+
+        def grant(other: Session) -> None:
+            """Grant ADMIN to the linked person in `other` without committing.
+
+            Parameters
+            ----------
+            other
+                The change's own session.
+            """
+            GrantService(other, allow).grant(
+                actor,
+                principal=lin_name,
+                role=Role.ADMIN,
+                kind=SecurableKind.INSTANCE,
+                commit=False,
+            )
+
+        racing = _Second(engine, grant)
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == LAST_UNLINKED_ADMIN_MESSAGE
+    with Session(engine) as session:
+        assert session.get(Principal, lin_id) is not None
+        held = session.execute(
+            select(Grant.id).where(Grant.principal_id == lin_id, Grant.revoked_at.is_(None))
+        ).all()
+    assert held == []
+
+
+def test_two_finishes_linking_one_person_at_once(engine: Engine, actor: PrincipalRef) -> None:
+    """Review of #780: two links of one person, two identities; the second overwrites nothing."""
+    with Session(engine) as session:
+        alice = _person(session, actor, admin=False)
+        alice_id = alice.id
+    first, second = f"a-{alice_id.hex}", f"b-{alice_id.hex}"
+    with Session(engine) as session:
+        _linking(alice_id, first)(session)
+        racing = _Second(engine, _linking(alice_id, second))
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == "already_linked"
+    with Session(engine) as session:
+        row = session.get(Principal, alice_id)
+        assert row is not None and row.oidc_subject == first
+
+
+# -- round 2 of the review of #780 ---------------------------------------------------------------
+
+
+def _linked_and_a_group(engine: Engine, actor: PrincipalRef) -> tuple[str, str]:
+    """Make an administrator without a passkey, a linked person and an empty group.
+
+    Parameters
+    ----------
+    engine
+        The engine.
+    actor
+        The acting principal.
+
+    Returns
+    -------
+    tuple of (str, str)
+        The linked person's name and the group's name.
+    """
+    allow = AllowAllAuthorization()
+    group = f"g-{uuid.uuid4().hex[:8]}"
+    with Session(engine) as session:
+        _person(session, actor, admin=True, passkey=False)
+        lin = _person(session, actor, admin=False)
+        lin_id, lin_name = lin.id, lin.name
+        OidcLinkService(session, allow, bootstrap_name="admin").link(
+            lin_id, _identity(f"lin-{lin_id.hex}"), via="profile"
+        )
+        GroupService(session, allow).create_group(actor, name=group)
+        session.commit()
+    return lin_name, group
+
+
+def _group_grant(actor: PrincipalRef, group: str) -> Callable[[Session], None]:
+    """Build a grant of instance ADMIN to a group that leaves its change uncommitted.
+
+    Parameters
+    ----------
+    actor
+        The acting principal.
+    group
+        The group.
+
+    Returns
+    -------
+    Callable[[Session], None]
+        The grant.
+    """
+
+    def run(session: Session) -> None:
+        """Grant in `session` without committing.
+
+        Parameters
+        ----------
+        session
+            The grant's own session.
+        """
+        GrantService(session, AllowAllAuthorization()).grant(
+            actor, group=group, role=Role.ADMIN, kind=SecurableKind.INSTANCE, commit=False
+        )
+
+    return run
+
+
+def _membership(actor: PrincipalRef, group: str, member: str) -> Callable[[Session], None]:
+    """Build a new member of a group that leaves its change uncommitted.
+
+    Parameters
+    ----------
+    actor
+        The acting principal.
+    group
+        The group.
+    member
+        The new member.
+
+    Returns
+    -------
+    Callable[[Session], None]
+        The change.
+    """
+
+    def run(session: Session) -> None:
+        """Add the member in `session` without committing.
+
+        Parameters
+        ----------
+        session
+            The change's own session.
+        """
+        GroupService(session, AllowAllAuthorization()).add_member(
+            actor, group, member, commit=False
+        )
+
+    return run
+
+
+def _linked_admins(engine: Engine) -> int:
+    """Count the active administrators linked to the provider, as committed.
+
+    Parameters
+    ----------
+    engine
+        The engine.
+
+    Returns
+    -------
+    int
+        How many there are.
+    """
+    with Session(engine) as session:
+        admins = active_instance_admin_ids(session)
+        return len(
+            session.execute(
+                select(Principal.id).where(
+                    Principal.id.in_(admins), Principal.oidc_subject.is_not(None)
+                )
+            ).all()
+        )
+
+
+@pytest.mark.parametrize("first", ["member", "grant"])
+def test_a_group_grant_and_a_new_linked_member_at_once(
+    engine: Engine, actor: PrincipalRef, first: str
+) -> None:
+    """Review of #780: the grant reads the group's members only under the lock, in either order."""
+    lin, group = _linked_and_a_group(engine, actor)
+    grant, member = _group_grant(actor, group), _membership(actor, group, lin)
+    one, other = (member, grant) if first == "member" else (grant, member)
+    with Session(engine) as session:
+        one(session)
+        racing = _Second(engine, other)
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == LAST_UNLINKED_ADMIN_MESSAGE
+    assert _linked_admins(engine) == 0
+
+
+def test_a_provider_finish_takes_the_admin_lock_before_the_links_row(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: a finish against a withdrawal of its link by the issuer's deactivation.
+
+    The deactivation holds the administrator-count lock and then updates the link. The finish
+    takes that lock before it claims the link, so it waits, and then finds the link withdrawn,
+    instead of holding the link's row while it waits (a deadlock).
+    """
+    allow = AllowAllAuthorization()
+    with Session(engine) as session:
+        issuer = _person(session, actor, admin=True)
+        _person(session, actor, admin=True)
+        issuer_name = issuer.name
+        issuer_ref = PrincipalRef(id=issuer.id, name=issuer.name, type=PrincipalType.USER)
+        link = _links(session).issue_invite(
+            issuer_ref, name=f"c-{uuid.uuid4().hex[:8]}", display_name=None
+        )
+        link_id = link.id
+
+    def finish(other: Session) -> None:
+        """Use the invite through the provider in `other`.
+
+        Parameters
+        ----------
+        other
+            The finish's own session.
+        """
+        _links(other).claim_for_provider(
+            link_id, _identity(f"c-{link_id.hex}"), replacing=None, peer="p", user_agent="u"
+        )
+
+    with Session(engine) as session:
+        lock_admin_count(session)
+        racing = _Second(engine, finish)
+        racing.blocked_or_done()
+        PrincipalService(session, allow).deactivate_principal(actor, issuer_name, commit=False)
+        session.commit()
+    assert racing.finish() == "link_unusable"
+    with Session(engine) as session:
+        row = session.get(SignInLink, link_id)
+        assert row is not None and row.withdrawn_at is not None and row.used_at is None
+
+
+def _links(session: Session) -> LinkService:
+    """Build the link service.
+
+    Parameters
+    ----------
+    session
+        Database session.
+
+    Returns
+    -------
+    LinkService
+        Over allow-all authorization.
+    """
+    allow = AllowAllAuthorization()
+    return LinkService(
+        session,
+        allow,
+        SessionService(session, allow),
+        origin="http://localhost:8000",
+        local_mode=False,
+        bootstrap_name="admin",
+    )
+
+
+def _uncommitted_unlink(engine: Engine, admin: PrincipalRef, name: str) -> Session:
+    """Unlink a person in a session that stays open, its commit held back.
+
+    Parameters
+    ----------
+    engine
+        The engine.
+    admin
+        The acting administrator.
+    name
+        The person.
+
+    Returns
+    -------
+    Session
+        The open session; `Session.commit(session)` commits it.
+    """
+    session = Session(engine)
+    session.commit = lambda: None
+    OidcLinkService(session, AllowAllAuthorization(), bootstrap_name="admin").unlink(admin, name)
+    return session
+
+
+def _open_sessions(engine: Engine, principal_id: uuid.UUID) -> int:
+    """Count a person's open browser sessions.
+
+    Parameters
+    ----------
+    engine
+        The engine.
+    principal_id
+        The person.
+
+    Returns
+    -------
+    int
+        How many there are.
+    """
+    with Session(engine) as session:
+        return len(
+            session.execute(
+                select(BrowserSession.id).where(
+                    BrowserSession.principal_id == principal_id,
+                    BrowserSession.ended_at.is_(None),
+                )
+            ).all()
+        )
+
+
+def _admin_and_linked(engine: Engine, actor: PrincipalRef) -> tuple[PrincipalRef, Principal, str]:
+    """Make an administrator and a linked person.
+
+    Parameters
+    ----------
+    engine
+        The engine.
+    actor
+        The acting principal.
+
+    Returns
+    -------
+    tuple of (PrincipalRef, Principal, str)
+        The administrator, the linked person and their subject.
+    """
+    with Session(engine, expire_on_commit=False) as session:
+        admin = _person(session, actor, admin=True)
+        alice = _person(session, actor, admin=False)
+        subject = f"alice-{alice.id.hex}"
+        OidcLinkService(session, AllowAllAuthorization(), bootstrap_name="admin").link(
+            alice.id, _identity(subject), via="profile"
+        )
+        session.commit()
+    return PrincipalRef(id=admin.id, name=admin.name, type=PrincipalType.USER), alice, subject
+
+
+def _provider_sign_in(subject: str) -> Callable[[Session], None]:
+    """Build a provider sign-in's session start, as the finish runs it.
+
+    Parameters
+    ----------
+    subject
+        The ``sub`` the provider verified.
+
+    Returns
+    -------
+    Callable[[Session], None]
+        The sign-in; it raises `OidcSignInRefused` (``not_linked``) when nobody is linked.
+    """
+
+    def run(session: Session) -> None:
+        """Find the linked person under the row lock and start the session.
+
+        Parameters
+        ----------
+        session
+            The sign-in's own session.
+
+        Raises
+        ------
+        OidcSignInRefused
+            When nobody is linked to the identity.
+        """
+        found = linked_principal_for_sign_in(session, _identity(subject))
+        if found is None:
+            raise OidcSignInRefused("not_linked")
+        SessionService(session, AllowAllAuthorization()).start(
+            found.id, via="oidc", replacing=None, peer="p", user_agent="u", touched=False
+        )
+
+    return run
+
+
+def test_a_provider_sign_in_waits_for_an_unlink_and_gets_no_session(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: an unlink holds the person's row; the sign-in then finds nobody linked."""
+    admin, alice, subject = _admin_and_linked(engine, actor)
+    unlinking = _uncommitted_unlink(engine, admin, alice.name)
+    racing = _Second(engine, _provider_sign_in(subject))
+    racing.blocked_or_done(wait_event=None)
+    Session.commit(unlinking)
+    unlinking.close()
+    assert racing.finish() == "not_linked"
+    assert _open_sessions(engine, alice.id) == 0
+
+
+def test_an_unlink_waits_for_a_provider_sign_in_and_ends_its_session(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: the sign-in holds the row first; the unlink then ends its new session."""
+    admin, alice, subject = _admin_and_linked(engine, actor)
+
+    def unlink(other: Session) -> None:
+        """Unlink Alice in `other`; it commits itself.
+
+        Parameters
+        ----------
+        other
+            The unlink's own session.
+        """
+        OidcLinkService(other, AllowAllAuthorization(), bootstrap_name="admin").unlink(
+            admin, alice.name
+        )
+
+    with Session(engine) as session:
+        _provider_sign_in(subject)(session)
+        racing = _Second(engine, unlink)
+        racing.blocked_or_done(wait_event=None)
+        session.commit()
+    assert racing.finish() == _DONE
+    assert _open_sessions(engine, alice.id) == 0
+
+
+def test_a_recovery_through_the_provider_waits_for_an_unlink(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: a recovery's finish waits for an unlink, which withdrew its link.
+
+    The unlink holds the administrator lock and the person's row; the finish takes that lock
+    first, so it waits, and then finds the link withdrawn: no session, and nobody linked again.
+    """
+    admin, alice, subject = _admin_and_linked(engine, actor)
+    with Session(engine) as session:
+        link = _links(session).issue_recovery(admin, principal_name=alice.name)
+        link_id = link.id
+    unlinking = _uncommitted_unlink(engine, admin, alice.name)
+
+    def recover(other: Session) -> None:
+        """Use the recovery link through the provider in `other`.
+
+        Parameters
+        ----------
+        other
+            The finish's own session.
+        """
+        _links(other).claim_for_provider(
+            link_id, _identity(subject), replacing=None, peer="p", user_agent="u"
+        )
+
+    racing = _Second(engine, recover)
+    racing.blocked_or_done(wait_event=None)
+    Session.commit(unlinking)
+    unlinking.close()
+    assert racing.finish() == "link_unusable"
+    with Session(engine) as session:
+        row = session.get(Principal, alice.id)
+        assert row is not None and row.oidc_subject is None
+    assert _open_sessions(engine, alice.id) == 0
+
+
+# -- round 3 of the review of #780 ---------------------------------------------------------------
+
+
+def test_a_redeem_takes_the_admin_lock_before_the_links_row(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: using a recovery link against a deactivation of its person.
+
+    The deactivation holds the administrator-count lock, locks the person's row, and then
+    withdraws their links. The redeem takes that lock before it claims the link, so it waits and
+    then finds the link withdrawn, instead of holding the link's row while it waits for the
+    person's (a deadlock).
+    """
+    with Session(engine) as session:
+        admin = _person(session, actor, admin=True)
+        dana = _person(session, actor, admin=False)
+        admin_ref = PrincipalRef(id=admin.id, name=admin.name, type=PrincipalType.USER)
+        issued = _links(session).issue_recovery(admin_ref, principal_name=dana.name)
+        dana_id, link_id = dana.id, issued.id
+        public_id, secret = issued.url.split("#", 1)[1].split("&")
+        public_id, secret = public_id.split("=", 1)[1], secret.split("=", 1)[1]
+
+    def redeem(other: Session) -> None:
+        """Use the recovery link on the passkey path in `other`.
+
+        Parameters
+        ----------
+        other
+            The redeem's own session.
+        """
+        _links(other).redeem(
+            public_id, secret, replacing=None, peer="p", user_agent="u", has_session=False
+        )
+
+    with Session(engine) as session:
+        # The deactivation's first steps: the administrator lock, then the person's row.
+        lock_admin_count(session)
+        session.execute(update(Principal).where(Principal.id == dana_id).values(is_active=False))
+        racing = _Second(engine, redeem)
+        racing.blocked_or_done(wait_event=None)
+        withdraw_open_links(session, dana_id, now=datetime.now(UTC), reason="deactivated")
+        session.commit()
+    assert racing.finish() == "link withdrawn"
+    with Session(engine) as session:
+        row = session.get(SignInLink, link_id)
+        assert row is not None and row.used_at is None and row.withdrawn_at is not None
+
+
+def test_removing_a_passkey_while_its_person_is_unlinked(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: the removal waits for the unlink, then finds the passkey gone (no 500)."""
+    admin, alice, _ = _admin_and_linked(engine, actor)
+    with Session(engine) as session:
+        [passkey_id] = session.execute(
+            select(Passkey.id).where(Passkey.principal_id == alice.id)
+        ).scalars()
+    unlinking = _uncommitted_unlink(engine, admin, alice.name)
+
+    def remove(other: Session) -> None:
+        """Remove the passkey as an administrator in `other`.
+
+        Parameters
+        ----------
+        other
+            The removal's own session.
+        """
+        PasskeyService(
+            other,
+            AllowAllAuthorization(),
+            SessionService(other, AllowAllAuthorization()),
+            NoticeService(other),
+            rp_id="localhost",
+            origin="http://localhost:8000",
+        ).remove(admin, alice.name, passkey_id)
+
+    racing = _Second(engine, remove)
+    racing.blocked_or_done()
+    Session.commit(unlinking)
+    unlinking.close()
+    assert racing.finish().startswith("not found: ")

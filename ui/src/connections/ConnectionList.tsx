@@ -30,6 +30,7 @@ import { type ConnectionEnvironment, readConnectionEnvironments } from "./enviro
 import { isKnownKind, whereText } from "./kinds";
 import { connectionPath, NEW_CONNECTION_PATH } from "./paths";
 import { readFilter, writeFilter } from "./remember";
+import { RunFailure } from "./RunFailure";
 import { TestAll } from "./TestAll";
 import { TestButton } from "./TestButton";
 import { TestStatus } from "./TestStatus";
@@ -198,6 +199,15 @@ function ConnectionTable({
               </td>
               <td>
                 <TestStatus connection={row} now={now} queuedSince={follow.queuedSince.get(key)} />
+                {row.last_run_failure != null && (
+                  <span className="run-failure-line">
+                    <RunFailure
+                      environment={row.environment}
+                      failure={row.last_run_failure}
+                      now={now}
+                    />
+                  </span>
+                )}
               </td>
               <td className="number narrow-hide">
                 {used === 0 ? <Unknown words={usedText} /> : usedText}
@@ -261,13 +271,15 @@ function ConnectionRows({
   const { t } = useTranslation();
   return (
     <>
-      <EnvironmentPicker
-        environments={environments}
-        value={filter}
-        label={t("connections.list.environment")}
-        all={t("connections.list.all")}
-        onChange={onFilter}
-      />
+      <div className="toolbar">
+        <EnvironmentPicker
+          environments={environments}
+          value={filter}
+          label={t("connections.list.environment")}
+          all={t("connections.list.all")}
+          onChange={onFilter}
+        />
+      </div>
       <ConnectionTable
         key={filter ?? ""}
         environments={environments}

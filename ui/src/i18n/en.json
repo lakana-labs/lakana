@@ -59,11 +59,6 @@
       "light": "Light",
       "dark": "Dark"
     },
-    "density": "Density",
-    "densities": {
-      "roomy": "Roomy",
-      "compact": "Compact"
-    },
     "language": "Language",
     "languages": {
       "en": "English"
@@ -288,6 +283,7 @@
     "notNow": "Not now",
     "signOut": "Sign out",
     "waiting": "Waiting for your passkey…",
+    "finishing": "Finishing adding your passkey…",
     "signingOut": "Signing you out…"
   },
   "notices": {
@@ -691,6 +687,10 @@
     "enter": {
       "keys": "Enter",
       "text": "Open the row that has focus."
+    },
+    "back": {
+      "keys": "Alt ←",
+      "text": "Go back to the page before, such as a detail page's list."
     }
   },
   "tour": {

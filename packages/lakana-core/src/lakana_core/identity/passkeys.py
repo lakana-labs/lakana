@@ -80,7 +80,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.grants.admin_lock import lock_admin_count
-from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, leaves_no_unlinked_admin
+from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, breaks
 from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.links import has_passkey
 from lakana_core.identity.notices import NoticeService
@@ -1192,6 +1192,9 @@ class PasskeyService:
         if principal_name != p.name:
             self._require_admin(p)
         require_step_up(p, now=self._clock())
+        # Before the passkey is read: an unlink at the same moment (which deletes it) holds
+        # this lock, so the removal then finds it gone instead of failing on a stale row.
+        lock_admin_count(self._session)
         target = principal_named(self._session, principal_name)
         row = self._session.execute(
             select(Passkey).where(Passkey.id == passkey_id, Passkey.principal_id == target.id)
@@ -1218,9 +1221,8 @@ class PasskeyService:
                     "another passkey first, or ask an administrator for a recovery link."
                 )
         # A removal can take the last administrator who signs in without the identity provider.
-        lock_admin_count(self._session)
         admins = active_instance_admin_ids(self._session)
-        if target.id in admins and leaves_no_unlinked_admin(
+        if target.id in admins and breaks(
             self._session, before=admins, after=admins, excluding_passkey_id=row.id
         ):
             raise ConflictError(LAST_UNLINKED_ADMIN_MESSAGE)

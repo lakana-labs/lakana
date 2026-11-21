@@ -51,6 +51,7 @@ from lakana_core.ci_oidc.rules import CiTrustRuleService
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.admin_lock import lock_admin_count
+from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, holds
 from lakana_core.grants.service import GrantService, active_instance_admin_ids
 from lakana_core.identifiers import TableRef, environment_name_problem
 from lakana_core.identity.sessions import require_step_up
@@ -720,6 +721,10 @@ class AccessService:
         commit = _valid_commit(source_commit)
         try:
             lock_access(self._session, shared=False)
+            # The break-glass rule is checked once, on the state the apply leaves: take its
+            # lock now, after the access lock, and note whether the rule holds before.
+            lock_admin_count(self._session)
+            kept = holds(self._session, active_instance_admin_ids(self._session))
             plan = self._plan_text(p, text, file_name=file_name, allow_lockout=allow_lockout)
             if plan.fingerprint != plan_fingerprint:
                 raise ConflictError(
@@ -736,7 +741,7 @@ class AccessService:
                 )
                 applier.run(p, plan.changes)
                 self._session.flush()
-                self._recheck_lockout(p, plan, allow_lockout=allow_lockout)
+                self._recheck_lockout(p, plan, allow_lockout=allow_lockout, kept=kept)
                 result = self._record(p, plan, apply_id, commit)
                 finish_apply(self._session)
             record_deferred_denials(self._session)
@@ -746,7 +751,9 @@ class AccessService:
             raise
         return result
 
-    def _recheck_lockout(self, p: PrincipalRef, plan: AccessPlan, *, allow_lockout: bool) -> None:
+    def _recheck_lockout(
+        self, p: PrincipalRef, plan: AccessPlan, *, allow_lockout: bool, kept: bool
+    ) -> None:
         """Check the administrators the changes as made leave, inside the transaction.
 
         Parameters
@@ -757,12 +764,15 @@ class AccessService:
             The plan just made; a service account it creates never counts.
         allow_lockout
             Whether the caller accepts losing their own ADMIN role.
+        kept
+            Whether the break-glass rule (`lakana_core.grants.break_glass`) held before the apply.
 
         Raises
         ------
         ConflictError
             When no active administrator remains, or the caller's own role goes without
-            `allow_lockout`.
+            `allow_lockout`; with `LAST_UNLINKED_ADMIN_MESSAGE` when the changes leave only
+            administrators linked to the identity provider.
         """
         created = {
             change.entry.name
@@ -770,7 +780,10 @@ class AccessService:
             if isinstance(change.entry, ServiceAccountEntry)
         }
         lock_admin_count(self._session)
-        names = self._names(set(active_instance_admin_ids(self._session)))
+        admins = set(active_instance_admin_ids(self._session))
+        if kept and not holds(self._session, admins):
+            raise ConflictError(LAST_UNLINKED_ADMIN_MESSAGE)
+        names = self._names(set[uuid.UUID | None](admins))
         problems = lockout_problems(
             file_name=plan.file_name,
             after=frozenset(names.values()) - created,

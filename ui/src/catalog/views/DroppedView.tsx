@@ -12,7 +12,7 @@ import { ApiError, type TableOut } from "../../api";
 import { type DroppedTableOut, listDropped, undropTable } from "../../api/manage";
 import "../actions/actionStrings";
 import { PendingButton } from "../../shell/PendingButton";
-import { markedText, VisibleText } from "../../shell/VisibleText";
+import { markedName, markedText, VisibleText } from "../../shell/VisibleText";
 import { problemText } from "../../sign-in/messages";
 import { UndropDialog } from "../actions/UndropDialog";
 import { useProtected } from "../actions/useProtected";
@@ -131,19 +131,19 @@ export function DroppedView({ environment, namespace, onChanged }: DroppedViewPr
     }
   };
 
-  const place = markedText(namespace ?? environment);
+  const place = markedName(namespace ?? environment);
   return (
     <div className="dropped-view">
       <p className="page-purpose">
         {namespace === null
-          ? t("catalog.views.dropped.inEnvironment", { environment: markedText(environment) })
-          : t("catalog.views.dropped.fromNamespace", { namespace: markedText(namespace) })}
+          ? t("catalog.views.dropped.inEnvironment", { environment: markedName(environment) })
+          : t("catalog.views.dropped.fromNamespace", { namespace: markedName(namespace) })}
       </p>
       <p className="catalog-result" role="status" tabIndex={-1} ref={status}>
         {result !== null && (
           <>
             {t(`catalog.views.dropped.${result.kind === "dropped" ? "droppedNow" : "restored"}`, {
-              table: markedText(result.table),
+              table: markedName(result.table),
             })}
             {result.path !== undefined && (
               <>
@@ -178,10 +178,10 @@ export function DroppedView({ environment, namespace, onChanged }: DroppedViewPr
           <tr key={row.uuid}>
             <td>
               <span className="row-name" tabIndex={-1}>
-                <VisibleText text={row.name} />
+                <VisibleText text={row.name} name />
               </span>
               <span className="second">
-                <VisibleText text={row.namespace} />
+                <VisibleText text={row.namespace} name />
               </span>
               {(refusals[row.uuid] ?? "") !== "" && (
                 <p className="step-error" role="alert">
@@ -204,7 +204,7 @@ export function DroppedView({ environment, namespace, onChanged }: DroppedViewPr
                 <PendingButton
                   className="button"
                   aria-label={t("table.actions.undrop.for", {
-                    table: markedText(`${row.namespace}.${row.name}`),
+                    table: markedName(`${row.namespace}.${row.name}`),
                   })}
                   pending={working.has(row.uuid) || protectedEnvironment === undefined}
                   onPress={() => {

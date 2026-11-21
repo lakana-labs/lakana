@@ -1,5 +1,5 @@
 /**
- * The menu under the signed-in person's name: theme, density, language, the profile picture,
+ * The menu under the signed-in person's name: theme, language, the profile picture,
  * passkeys and sessions, and signing out.
  *
  * @packageDocumentation
@@ -18,7 +18,7 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { usePreferences } from "../preferences/PreferencesProvider";
 import { Avatar } from "../profile/Avatar";
-import type { Density, Language, Preferences, Theme } from "../preferences/preferences";
+import type { Language, Preferences, Theme } from "../preferences/preferences";
 import { problemText } from "../sign-in/messages";
 import { useSession } from "../sign-in/SessionProvider";
 import { useMe } from "./me";
@@ -30,7 +30,6 @@ const PictureDialog = lazy(async () => {
 });
 
 const THEMES: readonly Theme[] = ["system", "light", "dark"];
-const DENSITIES: readonly Density[] = ["roomy", "compact"];
 const LANGUAGES: readonly Language[] = ["en"];
 
 /**
@@ -149,12 +148,6 @@ export function UserMenu(): JSX.Element {
               label={t("shell.theme")}
               options={THEMES}
               names="shell.themes"
-            />
-            <ChoiceSection
-              field="density"
-              label={t("shell.density")}
-              options={DENSITIES}
-              names="shell.densities"
             />
             <ChoiceSection
               field="language"

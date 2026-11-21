@@ -449,6 +449,40 @@ namespace's path and an undrop's new name without their outer spaces; it now sen
 so it and the CLI create the same names and refuse the same ones with the same sentence. Existing
 names are not touched: they stay readable and writable, and can be renamed or dropped.
 
+### New table names hold only letters, digits, `_`, `-` and spaces (breaking)
+
+A new namespace, table or view name may now hold only letters of any script, decimal digits, `_`,
+`-` and the plain space (inside the name, as before), with the accents and vowel signs that belong
+to its letters. A symbol or punctuation mark such as `$`, `#` or `(` is refused, for example
+`Table name 'price$' holds U+0024 at character 6, which is neither a letter nor a decimal digit. A
+new namespace, table or view name may hold only letters, decimal digits, '_', '-' and the plain
+space.` So is a letter, accent or digit that Unicode lists as looking like `.`, `/`, `\` or `:`,
+such as the Lisu tone letter U+A4F8 or the Arabic-Indic zero U+0660 (both look like `.`, so a
+name with one would read as two), the Japanese `ノ` (`/`) and the Devanagari visarga (`:`).
+Letters that look like other punctuation, such as `ð`, `ʔ` or `ʼ`, stay allowed. Column names keep their symbols: `count(*)` and `price ($)` work as before.
+
+Every new name, a column's included, must also be in Unicode NFC, the composed spelling: `cafe`
+followed by U+0301 COMBINING ACUTE ACCENT looks like `café` but is another name, and the refusal
+names the spelling to use (`… Use 'caf\xe9' instead.`). Refused in every new name too, each with
+a sentence that says what to do: a character drawn as nothing (the combining grapheme joiner
+U+034F, the variation selectors, the Hangul fillers such as U+3164, the braille blank U+2800), a
+space other than the plain one (such as the no-break space U+00A0), an unassigned or private-use
+code point, an accent with no letter before it, the same accent twice in a row, and more than four
+accents on one letter.
+
+Earlier releases accepted such names (422 from the REST API now, a refused commit from an Iceberg
+client, a failed load). A project's deploy now refuses an asset whose new table or namespace name
+breaks the rule, with the same sentence, for example for `assets/gold/price$.sql`; rename the file.
+Existing names are not touched: they stay readable and writable, can be renamed or dropped, and an
+asset whose table exists keeps deploying. A rebuild of such a table works: a table re-created
+under the name of a dropped one the catalog still holds (during the undo period) keeps its name and
+columns. A view or external table with such a name, or any such table when the undo period is 0
+days, cannot be rebuilt under it: the rebuild says so before dropping anything; rename the asset's
+file in git and deploy. The web interface now marks these characters as `U+XXXX` in names (the
+Catalog, the table pages, the result grid's columns, the editor's completions); descriptions,
+labels and other free text show them as they are. Repository, group, token, secret, package index
+and artifact names are not judged by this rule.
+
 ### The same name rules for repositories, groups, tokens, secrets, package indexes, principals and passkeys (breaking)
 
 The two rules above now hold for more of the names you choose. A new repository, group, package
@@ -478,8 +512,8 @@ instead, …`.
 
 Environment and connection names already met both rules: an environment name must be printable
 without a blank at either end, and a connection name is lower-case letters, digits and `-`. A job
-name in `lakana.yaml` already refused these characters at deploy; a space at either end of a job
-name is still accepted there, because a project that has one would fail its next deploy.
+name in `lakana.yaml` already refused the hidden characters at deploy; for a space at either end,
+see [A job name with a space at either end](#a-job-name-with-a-space-at-either-end-breaking).
 
 Earlier releases accepted such names, so a script that still creates one now gets 422 where it
 worked before; choose a name without the character or the outer space. Existing names are not
@@ -487,6 +521,39 @@ touched: such a repository, group, package index, secret or token stays readable
 changed and can be deleted or revoked as before. To find one, search the JSON output of the list
 commands (`lakana --output json repo list`, `group list`, `token list NAME`) with the `grep`
 above.
+
+### A job name with a space at either end (breaking)
+
+A job name in `lakana.yaml` may no longer start or end with a space (any Unicode space), unless
+the environment's current deployed version of that repository's project already has a job of
+exactly that name. The deploy compares the names with that version only, so a job deployed in
+another environment or by another repository does not excuse the name, and after a rollback to a
+version without the job, or a deploy that dropped it, the name counts as new and is refused. The
+refusal uses the sentence of the other names, for example `lakana.yaml:3: Job name 'daily ' ends
+with a space, so it would look like 'daily' in every list but be a different name. Use 'daily'
+instead, or another name without a space at either end.`
+
+A project that has such a job keeps deploying where it is deployed, so nothing fails at the
+upgrade, and a failed deploy leaves the exception as it was. To end the exception, rename the job
+in git (`daily ` to `daily`); a renamed job is a new name, so a new name with a space is refused.
+The first deploy of such a project to another environment, such as a new staging environment, is
+refused until the job is renamed. To find the jobs, run this in the project; it needs only
+Python 3 and prints the line and name of every key written as `"name":`, `'name':` or bare that
+starts or ends with a space, no-break spaces included:
+
+<!-- source: docs/examples/find-outer-space-job-names.sh#find -->
+```bash
+python3 - <<'PY'
+import re
+
+key = re.compile(r"""[ \t]+(?:"([^"]*)"|'([^']*)'|([^ \t:#][^:#]*)):\s*(?:#.*)?$""")
+for number, line in enumerate(open("lakana.yaml", encoding="utf-8"), 1):
+    found = key.match(line.rstrip("\n"))
+    name = next((g for g in found.groups() if g is not None), "") if found else ""
+    if name and (name[0].isspace() or name[-1].isspace()):
+        print(number, repr(name))
+PY
+```
 
 ### Control characters in asset files are refused (breaking)
 
@@ -785,21 +852,30 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   after a new upgrade each of them has to be linked again. Sign-in flows open during the
   downgrade are lost; their people start the sign-in again.
 - People link their identity through an invite, from their profile or with a recovery link; an
-  administrator unlinks them with `lakana principal unlink-provider`. A linked person signs in
-  only through the provider: their passkeys stop signing them in (they stay stored), and their
+  administrator unlinks them with `lakana principal unlink-provider`, which also withdraws their
+  open sign-in links. A linked person signs in only through the provider: their passkeys stop
+  signing them in (they stay stored), and their
   personal API tokens work only within 30 days of their last provider sign-in (`lakana sign-in
   settings --token-window-days`, 1 to 365). Unlinking someone, by an administrator or by the
   server operator's recovery link, revokes their personal tokens. Nothing changes for anyone who
   is not linked.
-- While anyone is linked, at least one administrator who signs in with a passkey must remain:
-  linking the last one, deactivating them, taking their ADMIN role away or deleting their last
-  passkey answers 409 and says so.
+- While any administrator is linked, at least one administrator who signs in with a passkey at
+  this address must remain: linking the last one, deactivating them, taking their ADMIN role away
+  or deleting their last passkey answers 409 and says so, and so does giving the ADMIN role to a
+  linked person (directly, through a group or in an access file) when no such administrator is
+  left. A task token minted with a linked person's own token, and a local sign-in's session, end
+  with that person's token window.
+- Changing the public address (`LAKANA_UI__PUBLIC_URL`) while people are linked: passkeys made for
+  the old address no longer count as a way in, as they no longer sign in. The server's start-up log
+  says how many administrators can still sign in with a passkey; at none, issue one a recovery
+  link with the bootstrap token (`lakana recovery create NAME`) and have them register a passkey at
+  the new address. Run every server of one database with the same public address.
 - `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
   from now on.
 
 ### `lakana login` can sign in through the browser
 
-- Migration `0088` adds the table `cli_sign_in_grants`, which holds the one-time grants of a
+- Migration `0090` adds the table `cli_sign_in_grants`, which holds the one-time grants of a
   command-line sign-in. Nothing has to be done: the upgrade runs with the others. Going back drops
   the table; a sign-in waiting in a browser has to start again, and the tokens it created stay.
 - Against a server with OIDC sign-in on, `lakana login` run in a terminal now opens the browser,
@@ -810,6 +886,30 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   in), `lakana login` asks for a token as before.
 - The audit log has four new events, `SIGN_IN_CLI_APPROVED`, `SIGN_IN_CLI_DENIED`,
   `SIGN_IN_CLI_REFUSED` and `SIGN_IN_CLI_TOKEN_ISSUED`, beside the `PAT_ISSUED` of the token.
+
+### A run records the connection it failed on
+
+- Migration `0088` adds `failure_connection` and `error_type` to `task_runs` and
+  `task_attempts`, and two indexes on `task_runs`. A Python task that fails with an error of a
+  `lakana.ingest` helper stores the connection the helper was called with (only one the asset
+  declares) and the exception's class name. Runs from before the upgrade keep both empty: nothing
+  recorded what they concerned. Nothing has to be done: the upgrade runs with the others. Going
+  back drops the columns and the indexes.
+- `failure` on tasks, attempts and failed runs gains `connection` and `error_type`; a connection
+  gains `last_run_failure`, the newest run that failed on it ([A run that failed on a
+  connection](../reference/connections.md#a-run-that-failed-on-a-connection)). The Connections
+  screen and `lakana connection show` show it, `lakana runs show` names the connection.
+- The SDK: every error of `lakana.ingest` has `connection`, set by the helper (`None` for
+  `ConnectionNotDeclared`, for a `UsageError` that is a mistake in the asset's code, and for an
+  error your code raises). The connection's own configuration (another kind, a missing secret
+  key, a token endpoint or CA certificate that does not work) raises the new
+  `lakana.ingest.ConnectionSetupError`, a `UsageError`, which names it; code that catches
+  `UsageError` catches it too. The task harness writes it into its
+  result as `failure_connection`. A task image with an older `lakana` records no connection; a
+  worker older than the server ignores the field.
+- New values for a connection's secret now change its `updated_at` (`lakana connection update
+  --password-stdin`, `--values-stdin`, and `lakana secret rotate` of the secret it uses), so its
+  last test reads "tested before the last change" afterwards, as for any other change.
 
 ### Row filters and column masks are listed in pages (breaking)
 
@@ -828,6 +928,40 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
 - Upgrade every `lakana` package (SDK and CLI) together with the server: an older client reads
   one request and so gets only the first 100 row filters or column masks of a list, without a
   sign that more exist.
+
+### Queries run on DuckDB 2.0.1
+
+The worker runs queries on DuckDB 2.0.1 instead of 2.0.0, a release of fixes, and
+`lakana-worker` requires `duckdb>=2.0.1,<3` (was `>=2.0,<3`): a `pip install` of the worker
+upgrades DuckDB with it.
+
+- **One more download for a worker installed with `pip`.** Each DuckDB release has its own build
+  of the `httpfs` extension, so such a worker downloads it once more on its first query (see
+  [What leaves the machine](what-leaves-the-machine.md)). The container image already contains
+  it. On a machine without internet access, put the extension for DuckDB 2.0.1 (the folder
+  `v2.0.1/<platform>`) into the worker's extension directory before you upgrade, as
+  [Install without internet access](../how-to/install-without-internet-access.md) describes; with
+  `LAKANA_WORKER__EXTENSION_SOURCE=none` a worker without it refuses to start and names the path.
+- **`x = ANY(ARRAY(SELECT ...))` and `ALL` compare `x` with the list's elements.** DuckDB 2.0.0
+  refused them with "Cannot compare values of type ... in IN/ANY/ALL clause"; such a query now
+  runs.
+- **DuckDB 2.0.1's four new table functions are refused in queries**, like every table function
+  but `range`, `generate_series` and `unnest`. The refusal of `parquet_page_index` says that it
+  reads a file, and `duckdb_live_query_metrics` (the query process's own counters) is refused
+  wherever a query calls it, like the other introspection functions. None existed in 2.0.0, so
+  no query that ran before is affected.
+- **A URL with a `..` segment is refused by DuckDB itself.** A query cannot name a file by URL
+  (Lakana's checks refuse it first); behind those checks DuckDB 2.0.0 let `t1/../t2/` through
+  to the object store, and 2.0.1 refuses it before any request.
+
+### One density in the web interface
+
+- The web interface has one density, compact: 32 px rows in lists and 24 px rows in data grids.
+  The Density choice (Roomy or Compact) is gone from the menu under your name. A choice an
+  earlier release stored in the browser is ignored, and nobody needs to do anything.
+- Screens and their tables use the full width of the window; a long name in a list ends with
+  an ellipsis and shows whole in a tooltip. A state in a list is a small pill.
+- Alt+Left goes back from any page, as in the browser, unless the focus is in a text field.
 
 ## Notes for 0.22.0
 

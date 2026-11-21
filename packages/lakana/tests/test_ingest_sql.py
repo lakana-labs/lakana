@@ -25,6 +25,7 @@ from pymysql import converters as real_converters
 from lakana import _usage, context
 from lakana.ingest import (
     CapExceeded,
+    ConnectionSetupError,
     SourceError,
     SourceRefused,
     UsageError,
@@ -424,8 +425,9 @@ def test_parameters_are_bound_and_checked_before_any_connection(driver: _Driver)
     _postgres(relay=False)
 
     sql.read("crm-db", "SELECT id FROM t WHERE u > :since", params={"since": 5})
-    with pytest.raises(UsageError, match="placeholder :x has no value"):
+    with pytest.raises(UsageError, match="placeholder :x has no value") as caught:
         sql.read("crm-db", "SELECT :x")
+    assert caught.value.connection is None
 
     assert driver.cursor.executed == [("SELECT id FROM t WHERE u > $1", [5])]
     assert len(driver.seen) == 1
@@ -435,10 +437,11 @@ def test_a_none_parameter_is_refused_before_the_query_runs(driver: _Driver) -> N
     """Review Focus 1, end to end: the first run's watermark is `None`."""
     _postgres(relay=False)
 
-    with pytest.raises(UsageError, match=r"ctx\.watermark\(default=\.\.\.\)"):
+    with pytest.raises(UsageError, match=r"ctx\.watermark\(default=\.\.\.\)") as caught:
         sql.read("crm-db", "SELECT * FROM t WHERE u > :since", params={"since": None})
 
     assert driver.seen == []
+    assert caught.value.connection is None
 
 
 @pytest.mark.parametrize(
@@ -468,11 +471,23 @@ def test_a_relay_reset_points_to_the_relay_line(driver: _Driver) -> None:
     with pytest.raises(SourceError) as caught:
         sql.read("crm-db", "SELECT 1")
 
+    assert caught.value.connection == "crm-db"
     assert str(caught.value) == (
         "`crm-db`: the connection through the task's relay closed before PostgreSQL answered; "
         "the task's log has a `lakana-relay:` line that says why (an address inside the Lakana "
         "stack or on the Docker host is never reachable)"
     )
+
+
+def test_a_missing_database_at_login_is_the_connections_setup(driver: _Driver) -> None:
+    """The login names the connection's own database: fixing the connection is the fix."""
+    driver.refuse = _Error('FATAL:  database "missing" does not exist')
+    _postgres(relay=False)
+
+    with pytest.raises(ConnectionSetupError, match=r'database "missing" does not exist') as caught:
+        sql.read("crm-db", "SELECT 1")
+
+    assert caught.value.connection == "crm-db"
 
 
 def test_the_same_reset_without_a_relay_keeps_the_drivers_words(driver: _Driver) -> None:
@@ -618,10 +633,12 @@ def test_a_connection_of_another_kind_names_the_helper(driver: _Driver) -> None:
     )
 
     with pytest.raises(
-        UsageError,
+        ConnectionSetupError,
         match=r"sql.read reads postgresql, mariadb and sqlite-file connections; `landing` is s3",
-    ):
+    ) as caught:
         sql.read("landing", "SELECT 1")
+    # The connection's kind is its configuration: fixing the connection is the fix.
+    assert caught.value.connection == "landing"
 
 
 def test_without_the_assets_extra_the_error_says_what_to_add(
@@ -722,12 +739,13 @@ def test_a_connection_without_a_password_names_the_command_that_stores_it(
     _postgres(relay=False, password=None)
 
     with pytest.raises(
-        UsageError,
+        ConnectionSetupError,
         match=r"`crm-db` has no secret with `password`.*--env prod --password-stdin",
-    ):
+    ) as caught:
         sql.read("crm-db", "SELECT 1")
 
     assert driver.seen == []
+    assert caught.value.connection == "crm-db"
 
 
 def test_an_empty_query_is_refused() -> None:
@@ -1606,7 +1624,7 @@ def mysql(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return state
 
 
-def _mariadb(*, relay: bool, tls: str = "verify-full") -> None:
+def _mariadb(*, relay: bool, tls: str = "verify-full", ca: str | None = None) -> None:
     """Declare `shop-db`, a MariaDB connection.
 
     Parameters
@@ -1615,12 +1633,17 @@ def _mariadb(*, relay: bool, tls: str = "verify-full") -> None:
         Whether the task runs isolated.
     tls
         The connection's ``tls``.
+    ca
+        The connection's own CA certificate, if any.
     """
+    settings: dict[str, object] = {"user": "reader", "tls": tls}
+    if ca is not None:
+        settings["ca_certificate"] = ca
     body = {
         "name": "shop-db",
         "kind": "mariadb",
         "address": {"host": "db.example.com", "port": 3306, "database": "shop"},
-        "settings": {"user": "reader", "tls": tls},
+        "settings": settings,
         "endpoints": [{"host": "db.example.com", "port": 3306, "role": "service"}],
         "secret": {"password": _PASSWORD},
     }
@@ -1728,6 +1751,52 @@ def test_mariadb_errors_are_classed_by_their_code(
         sql.read("shop-db", "SELECT 1")
 
     assert type(caught.value) is kind
+
+
+def test_mariadb_a_database_missing_at_login_is_the_connections_setup(
+    mysql: dict[str, Any],
+) -> None:
+    """1049 at the login names the connection's own database; in a query it is the query's."""
+    mysql["refuse"] = _MyError(1049, "Unknown database 'shop'")
+    _mariadb(relay=False)
+
+    with pytest.raises(ConnectionSetupError, match="Unknown database 'shop'") as caught:
+        sql.read("shop-db", "SELECT 1")
+    assert caught.value.connection == "shop-db"
+
+    mysql["refuse"] = None
+    mysql["cursor"].fail = _MyError(1049, "Unknown database 'other'")
+    with pytest.raises(UsageError, match="Unknown database 'other'") as query:
+        sql.read("shop-db", "SELECT * FROM other.t")
+    assert type(query.value) is UsageError
+    assert query.value.connection is None
+
+
+def test_mariadb_a_ca_certificate_ssl_refuses_is_the_connections_setup(
+    mysql: dict[str, Any],
+) -> None:
+    """The connection's own CA is its configuration; the worker's bundle stays the worker's."""
+    _mariadb(relay=False, ca="-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n")
+
+    with pytest.raises(ConnectionSetupError, match="CA certificate of `shop-db`") as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert caught.value.connection == "shop-db"
+    assert mysql["made"] == []
+
+
+def test_mariadb_an_unreadable_bundle_is_the_workers_even_with_a_ca_of_its_own(
+    mysql: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """When the bundle alone fails, the worker is to fix, not the connection."""
+    monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
+    _mariadb(relay=False, ca="-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n")
+
+    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE") as caught:
+        sql.read("shop-db", "SELECT 1")
+
+    assert type(caught.value) is UsageError
+    assert mysql["made"] == []
 
 
 def test_mariadb_a_certificate_failure_gives_the_tls_text(mysql: dict[str, Any]) -> None:
@@ -1855,10 +1924,12 @@ def test_mariadb_an_unreadable_trust_bundle_names_the_worker_setting(
     monkeypatch.setenv("LAKANA_CA_BUNDLE", str(tmp_path / "missing.pem"))
     _shop_body({"password": _PASSWORD})
 
-    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE"):
+    with pytest.raises(UsageError, match=r"trust bundle .*LAKANA_RUN__CA_BUNDLE") as caught:
         sql.read("shop-db", "SELECT 1")
 
     assert mysql["made"] == []
+    assert type(caught.value) is UsageError
+    assert caught.value.connection is None
 
 
 def test_mariadb_caching_sha2_without_tls_names_both_ways_out(mysql: dict[str, Any]) -> None:

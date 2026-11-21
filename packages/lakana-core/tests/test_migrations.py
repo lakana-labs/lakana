@@ -18,7 +18,7 @@ import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import sqlalchemy as sa
@@ -6917,11 +6917,13 @@ def test_0087_links_principals_to_a_provider_and_keeps_flows(migrated_db: Migrat
         engine.dispose()
 
 
-_REVISION_0088 = "7c3e91a0b5d2"
+_REVISION_0088 = "95737c487bf3"
 
 
-def test_0088_keeps_the_grants_of_lakana_login(migrated_db: MigratedDb) -> None:
-    """Revision `0088`: the `cli_sign_in_grants` table, its unique code hashes and its drop.
+def test_0088_adds_what_a_failure_concerns(migrated_db: MigratedDb) -> None:
+    """Revision `0088`: nullable `error_type` and `failure_connection`, and two indexes.
+
+    Both columns are on `task_runs` and `task_attempts`; the downgrade drops all of it.
 
     Parameters
     ----------
@@ -6929,6 +6931,119 @@ def test_0088_keeps_the_grants_of_lakana_login(migrated_db: MigratedDb) -> None:
         Copies the file migrated to the revision the test starts from.
     """
     db_path = migrated_db(_REVISION_0087)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def columns(table: str) -> dict[str, Any]:
+        return {c["name"]: c for c in inspect(engine).get_columns(table)}
+
+    def indexes() -> set[str]:
+        return {str(i["name"]) for i in inspect(engine).get_indexes("task_runs")}
+
+    added = {"ix_task_runs_failure_connection", "ix_task_runs_asset_finished_at"}
+    try:
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
+        command.upgrade(config, _REVISION_0088)
+        for table in ("task_runs", "task_attempts"):
+            found = columns(table)
+            assert found["error_type"]["nullable"]
+            assert getattr(found["error_type"]["type"], "length", None) == 100
+            assert found["failure_connection"]["nullable"]
+            assert getattr(found["failure_connection"]["type"], "length", None) == 63
+        assert added <= indexes()
+        with engine.connect() as connection:
+            partial = connection.execute(
+                sa.text(
+                    "SELECT sql FROM sqlite_master WHERE name = 'ix_task_runs_failure_connection'"
+                )
+            ).scalar_one()
+        assert partial.endswith("WHERE failure_connection IS NOT NULL")
+        command.downgrade(config, _REVISION_0087)
+        for table in ("task_runs", "task_attempts"):
+            assert {"error_type", "failure_connection"}.isdisjoint(columns(table))
+        assert added.isdisjoint(indexes())
+    finally:
+        engine.dispose()
+
+
+_REVISION_0089 = "7c1e5a9d3f20"
+
+
+def test_0089_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
+    migrated_db: MigratedDb,
+) -> None:
+    """Revision `0089`: `saved_queries.name_key`, each existing name's `str.casefold`, required.
+
+    The index `ix_saved_queries_environment_visibility_name_key` is added. The downgrade drops
+    both and keeps the rows.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0088)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    index = "ix_saved_queries_environment_visibility_name_key"
+    owner = uuid.uuid4().hex
+    names = ("Straße", "REVENUE", "Ω alpha")
+
+    def columns() -> dict[str, bool]:
+        return {c["name"]: c["nullable"] for c in inspect(engine).get_columns("saved_queries")}
+
+    def indexes() -> dict[str | None, list[str | None]]:
+        return {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("saved_queries")}
+
+    try:
+        with engine.begin() as connection:
+            for name in names:
+                connection.execute(
+                    sa.text(
+                        "INSERT INTO saved_queries (id, environment_id, name, sql_text, visibility,"
+                        " owner_id, private_owner_id, created_at, updated_at) VALUES (:id, :env,"
+                        " :name, 'SELECT 1', 'private', :owner, :owner, :now, :now)"
+                    ),
+                    {
+                        "id": uuid.uuid4().hex,
+                        "env": uuid.uuid4().hex,
+                        "name": name,
+                        "owner": owner,
+                        "now": _utc_text(),
+                    },
+                )
+        assert "name_key" not in columns()
+        command.upgrade(config, _REVISION_0089)
+        assert columns()["name_key"] is False
+        assert indexes()[index] == ["environment_id", "visibility", "name_key"]
+        with engine.connect() as connection:
+            rows = connection.execute(sa.text("SELECT name, name_key FROM saved_queries")).all()
+        assert sorted(tuple(r) for r in rows) == sorted((n, n.casefold()) for n in names)
+        assert ("Straße", "strasse") in {tuple(r) for r in rows}
+        command.downgrade(config, _REVISION_0088)
+        assert "name_key" not in columns()
+        assert index not in indexes()
+        with engine.connect() as connection:
+            kept = connection.execute(sa.text("SELECT name FROM saved_queries")).scalars().all()
+        assert sorted(kept) == sorted(names)
+    finally:
+        engine.dispose()
+
+
+_REVISION_0090 = "7c3e91a0b5d2"
+
+
+def test_0090_keeps_the_grants_of_lakana_login(migrated_db: MigratedDb) -> None:
+    """Revision `0090`: the `cli_sign_in_grants` table, its unique code hashes and its drop.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0089)
     config = Config(str(ALEMBIC_INI))
     engine = create_engine(f"sqlite:///{db_path}")
 
@@ -6944,13 +7059,13 @@ def test_0088_keeps_the_grants_of_lakana_login(migrated_db: MigratedDb) -> None:
 
     try:
         assert "cli_sign_in_grants" not in inspect(engine).get_table_names()
-        command.upgrade(config, _REVISION_0088)
+        command.upgrade(config, _REVISION_0090)
         assert "cli_sign_in_grants" in inspect(engine).get_table_names()
         with engine.begin() as connection:
             insert(connection, "a" * 64)
         with pytest.raises(IntegrityError), engine.begin() as connection:
             insert(connection, "a" * 64)
-        command.downgrade(config, _REVISION_0087)
+        command.downgrade(config, _REVISION_0089)
         assert "cli_sign_in_grants" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()

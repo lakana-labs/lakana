@@ -19,6 +19,17 @@
   gap: var(--space-2);
 }
 
+/* The newest run that failed on a connection, under its last test. Its link sits above the row's
+   own link, so the pointer reaches it. */
+.run-failure-line {
+  display: block;
+  margin-top: var(--space-1);
+}
+
+.run-failure a {
+  position: relative;
+}
+
 /* Never tested, or tested before the last change: nothing current to claim. */
 .test-status-muted {
   color: var(--color-text-muted);
@@ -40,35 +51,28 @@
 
 /* Test all below the table: the button with its refusal beside it, then its status line. */
 .connections-test-all {
-  margin-top: var(--space-4);
+  margin-top: var(--space-3);
 }
 
 .connections-test-all-act {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
-}
-
-/* A connection's page: its panels stand apart by more space than lies inside them. */
-.connection-page {
-  display: grid;
-  gap: var(--space-4);
-  min-width: 0;
+  gap: var(--control-gap);
 }
 
 .connection-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-gap);
 }
 
 .connection-heading {
   margin: 0 0 var(--space-2);
-  font-size: var(--type-title-size);
-  line-height: var(--type-title-line);
-  font-weight: var(--type-title-weight);
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
 }
 
 .connection-facts {
@@ -78,6 +82,7 @@
 .connection-fact {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: var(--space-1) var(--space-3);
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--color-line);
@@ -163,7 +168,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 0 var(--space-3);
+  gap: 0 var(--control-gap);
   margin: 0 0 var(--space-2);
 }
 
@@ -180,7 +185,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-3);
+  gap: var(--control-gap);
   margin: 0 0 var(--space-4);
 }
 

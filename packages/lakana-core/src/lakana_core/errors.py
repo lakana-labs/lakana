@@ -109,6 +109,11 @@ _SESSION_ENDED = {
         "Your account is deactivated, so your session ended. Ask an administrator to "
         "reactivate it, then sign in again."
     ),
+    "token_window": (  # nosec B105 -- a reason label and its message, not a credential
+        "This session was started with an API token of an account that signs in through your "
+        "organisation's identity provider, and nobody has signed in there as you within the "
+        "token window, so the session ended. Sign in through the identity provider."
+    ),
     "token_revoked": (  # nosec B105 -- a reason label and its message, not a credential
         "The token this session was created with was revoked or expired, so the session ended. "
         "Sign in again."

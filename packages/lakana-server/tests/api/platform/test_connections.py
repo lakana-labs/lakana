@@ -30,6 +30,11 @@ from lakana_core.models import (
     JobVersion,
     Repository,
     RepositoryKind,
+    Run,
+    RunKind,
+    RunStatus,
+    TaskRun,
+    TaskStatus,
 )
 from lakana_server.api.platform.schemas import ConnectionLastTestOut
 from tests.api.platform.test_artifacts_delete import _task_headers
@@ -405,7 +410,9 @@ def test_a_data_engineer_creates_lists_shows_updates_and_deletes(
         "environment",
         "last_test",
         "actions",
+        "last_run_failure",
     }
+    assert body["last_run_failure"] is None
     assert body["address"] == {"host": "db.example.com", "port": 5432, "database": "crm"}
     assert body["settings"] == {"user": "reader", "tls": "verify-full"}
     assert (body["secret"], body["declared_by"], body["created_by"]) == (
@@ -1218,3 +1225,66 @@ def test_post_connection_tests_with_a_cursor_of_the_cross_environment_list_is_42
 
     assert answer.status_code == 422, answer.text
     assert admin.get(_BASE).json()["items"][0]["last_test"] is None
+
+
+def test_a_connection_names_the_newest_run_that_failed_on_it(
+    client: TestClient, client_as: ClientAs
+) -> None:
+    """Its list, the list of every environment and its page carry `last_run_failure`."""
+    engineer = client_as("data_engineer")
+    assert (
+        engineer.post(_BASE, json={**_PG, "secret_values": {"password": _VALUE}}).status_code == 201
+    )
+    _deploy(client, "prod", "analytics", {"silver.crm": ["crm-db"]})
+    finished = datetime.datetime.now(datetime.UTC) + datetime.timedelta(hours=1)
+    with Session(client.app.state.engine) as session:
+        env_id = session.execute(
+            select(Environment.id).where(Environment.name == "prod")
+        ).scalar_one()
+        repo = session.execute(
+            select(Repository).where(Repository.name == "analytics")
+        ).scalar_one()
+        version = session.execute(
+            select(JobVersion.id).where(JobVersion.repository_id == repo.id)
+        ).scalar_one()
+        run_id = uuid.uuid4()
+        run = Run(
+            id=run_id,
+            environment_id=env_id,
+            repository_id=repo.id,
+            job_version_id=version,
+            kind=RunKind.FULL,
+            status=RunStatus.FAILED,
+            selection_json={},
+        )
+        session.add(run)
+        session.add(
+            TaskRun(
+                id=uuid.uuid4(),
+                run_id=run_id,
+                asset="silver.crm",
+                status=TaskStatus.FAILED,
+                max_attempts=1,
+                timeout_seconds=60,
+                retry_delay_seconds=0,
+                upstream_json=[],
+                failure_code="build_failed",
+                failure_connection="crm-db",
+                error_type="SourceRefused",
+                finished_at=finished,
+            )
+        )
+        session.commit()
+    expected = {
+        "run_id": str(run_id),
+        "asset": "silver.crm",
+        "finished_at": finished.isoformat().replace("+00:00", "Z"),
+    }
+
+    analyst = client_as("analyst")
+    for reader in (engineer, analyst):
+        (listed,) = reader.get(_BASE).json()["items"]
+        assert listed["last_run_failure"] == expected
+        (every,) = reader.get(_ALL).json()["items"]
+        assert every["last_run_failure"] == expected
+        assert reader.get(f"{_BASE}/crm-db").json()["last_run_failure"] == expected

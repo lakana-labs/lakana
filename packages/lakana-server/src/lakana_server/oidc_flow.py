@@ -55,6 +55,12 @@ LANDING_PATH = "/sign-in/oidc"
 CONFIRMED_PATH = "/sign-in/oidc/confirmed"
 """The interface's page that finishes a link from the profile or a provider step-up."""
 
+LINK_PARAMETERS: dict[str, str] = {"prompt": "login", "max_age": "0"}
+"""What a flow that links an identity adds to the authorization request (an invite, a recovery
+link, a link from the profile): a fresh sign-in at the provider, so the person sees which
+identity they bind, never one a shared browser's provider session answers silently. A provider
+may ignore the request, so the finish checks ``auth_time`` as provider step-up does."""
+
 STEP_UP_PARAMETERS: dict[str, str] = {"prompt": "login", "max_age": "0"}
 """What a provider step-up adds to the authorization request: a fresh sign-in at the provider,
 never one its own session answers silently; the finish checks ``auth_time``."""

@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change
-from lakana_core.audit.service import AuditService
+from lakana_core.audit.service import ACCESS_APPLY_KEY, AuditService
 from lakana_core.auth import (
     Action,
     AuthorizationService,
@@ -30,7 +30,7 @@ from lakana_core.grants.admin import (
     credential_acts_as_admin,
 )
 from lakana_core.grants.admin_lock import lock_admin_count
-from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, leaves_no_unlinked_admin
+from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, breaks
 from lakana_core.grants.explain import PermissionReport, explain_permissions, grant_scope
 from lakana_core.grants.roles import ROLE_ACTIONS, Role
 from lakana_core.identifiers import NamespacePath
@@ -368,6 +368,9 @@ class GrantService:
         AlreadyExistsError
             If the subject already holds a live grant of the same role or action, kind and
             target (`lakana_core.grants.duplicates`); the sentence names that grant's id.
+        ConflictError
+            For instance ADMIN that would leave only administrators linked to the identity
+            provider (`assert_break_glass_on_raise`).
         IntegrityError
             If the database refuses the row for another reason than a twin; with `commit`
             false, also a twin written since the check, at the caller's flush.
@@ -418,6 +421,8 @@ class GrantService:
         twin = duplicates.live_twin(self._session, row)
         if twin is not None:
             raise AlreadyExistsError(duplicates.twin_message(subject, twin))
+        if role == Role.ADMIN and kind == SecurableKind.INSTANCE:
+            assert_break_glass_on_raise(self._session, principal_id=principal_id, group_id=group_id)
         self._session.add(row)
         if not commit:
             self._record_created(p, row, principal=principal, group=group)
@@ -1270,5 +1275,64 @@ def assert_admin_headroom(
     remaining_ids.discard(excluding_principal_id)
     if not remaining_ids:
         raise ConflictError(LAST_ADMIN_MESSAGE)
-    if leaves_no_unlinked_admin(session, before=current_ids, after=remaining_ids):
+    # An access apply checks the break-glass rule once, on the state it leaves.
+    if ACCESS_APPLY_KEY not in session.info and breaks(
+        session, before=current_ids, after=remaining_ids
+    ):
+        raise ConflictError(LAST_UNLINKED_ADMIN_MESSAGE)
+
+
+def assert_break_glass_on_raise(
+    session: Session,
+    *,
+    principal_id: uuid.UUID | None = None,
+    group_id: uuid.UUID | None = None,
+) -> None:
+    """Refuse making people instance administrators when that breaks the break-glass rule.
+
+    The raising side of `lakana_core.grants.break_glass`: a grant of instance ADMIN (to a person,
+    or to a group and so to its members) or a new member of a group that holds it may make a
+    linked person an administrator while no unlinked administrator remains. Takes
+    `lock_admin_count` first, after the access lock the change took, and reads a group's members
+    only then: a member added at the same moment either committed before (and counts) or waits
+    for this change and then asks itself (review of #780). A concurrent removal of the last
+    unlinked administrator takes turns with it the same way. Inside an access apply it does
+    nothing: the apply checks the rule once, at its end.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal_id
+        The person the change makes an administrator.
+    group_id
+        The group whose members the change makes administrators.
+
+    Raises
+    ------
+    ConflictError
+        With `LAST_UNLINKED_ADMIN_MESSAGE`, if the rule held and would not after the change.
+    """
+    if ACCESS_APPLY_KEY in session.info:
+        return
+    lock_admin_count(session)
+    ids: set[uuid.UUID] = set()
+    if principal_id is not None:
+        ids.add(principal_id)
+    if group_id is not None:
+        ids.update(
+            session.execute(
+                select(GroupMembership.principal_id).where(GroupMembership.group_id == group_id)
+            ).scalars()
+        )
+    before = active_instance_admin_ids(session)
+    ids -= before
+    if not ids:
+        return
+    joining = set(
+        session.execute(
+            select(Principal.id).where(Principal.id.in_(ids), Principal.is_active.is_(True))
+        ).scalars()
+    )
+    if breaks(session, before=before, after=before | joining):
         raise ConflictError(LAST_UNLINKED_ADMIN_MESSAGE)

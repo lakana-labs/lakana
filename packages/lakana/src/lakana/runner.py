@@ -57,7 +57,10 @@ text, prefixed with its class name when the repository's own code raised it
 (phases ``load`` and ``function``). `conflict` is true only
 when the SDK's `Conflict` was raised by the upload call itself, so an exception
 the user's function raises (even one named `Conflict`) never reads as one;
-`error_type` is the exception's class name, for display only.
+`error_type` is the exception's class name, for display only. A failed record also has
+``"failure_connection": str`` when the exception is an error of `lakana.ingest` that names its
+connection (`IngestError.connection`); the worker keeps it only for a connection the asset
+declares.
 
 polars is imported inside functions only, so the SDK and CLI work without
 the `lakana[assets]` extra.
@@ -1968,7 +1971,8 @@ def _failure_record(exc: BaseException, token: str) -> dict[str, object]:
     -------
     dict
         The record; built field by field, so an exception whose ``str`` or
-        class name raises still yields one.
+        class name raises still yields one. ``failure_connection`` is there only for an error
+        of `lakana.ingest` that names its connection.
     """
     phase, cause = (exc.phase, exc.cause) if isinstance(exc, Failure) else ("load", exc)
     name = _safe(lambda: type(cause).__name__, "Exception")
@@ -1985,7 +1989,7 @@ def _failure_record(exc: BaseException, token: str) -> dict[str, object]:
         if len(message) > room:
             message = message[: room - 1] + "…"
         message += _TYPE_ERROR_HINT
-    return {
+    record: dict[str, object] = {
         "status": "failed",
         "error_type": _clean(_mask(name, token)),
         "message": message[:MAX_ERROR_MESSAGE_CHARS],
@@ -1993,6 +1997,13 @@ def _failure_record(exc: BaseException, token: str) -> dict[str, object]:
         "phase": phase,
         "conflict": phase == "upload" and isinstance(cause, Conflict),
     }
+    try:
+        connection = cause.connection if isinstance(cause, IngestError) else None
+    except BaseException:
+        connection = None
+    if isinstance(connection, str):
+        record["failure_connection"] = _clean(_mask(connection, token))
+    return record
 
 
 def main(stdin: TextIO | None = None, client_factory: Callable[..., Client] | None = None) -> int:

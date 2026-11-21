@@ -529,10 +529,14 @@ def test_a_text_the_scheduler_writes_clears_the_check_message_state(
     task.lease_expires_at = NOW - timedelta(seconds=1)
     task.error_message = "1 check warned: `positive` (2 rows)."
     task.check_message_state = {"branch": "passed"}
+    # What an earlier attempt's failure concerned is not what the scheduler's text says.
+    task.error_type = "SourceRefused"
+    task.failure_connection = "crm-db"
     session.commit()
     scheduler_tick(session, NOW, _half)
     task = _task(session, "silver.clean")
     assert (task.error_message, task.check_message_state) == (LOST_MESSAGE, None)
+    assert (task.error_type, task.failure_connection) == (None, None)
 
 
 def _running_with_open_attempt(session: Session, expires: datetime) -> TaskRun:

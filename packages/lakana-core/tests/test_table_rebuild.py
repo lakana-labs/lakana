@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -23,7 +25,9 @@ from core_test_helpers import (
     deploy_assets,
     store_version,
 )
-from sqlalchemy import func, select
+from pyiceberg.schema import Schema
+from pyiceberg.types import LongType, NestedField
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import (
@@ -42,7 +46,14 @@ from lakana_core.catalog.rebuild import (
     TableRebuild,
 )
 from lakana_core.catalog.service import CatalogService
-from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
+from lakana_core.catalog.tombstones import drop_row
+from lakana_core.errors import (
+    AlreadyExistsError,
+    ConflictError,
+    NotFoundError,
+    PermissionDenied,
+    ValidationError,
+)
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -53,6 +64,7 @@ from lakana_core.models import (
     PrincipalType,
     Run,
     Table,
+    TableColumn,
     TableLocation,
     TableLocationState,
     TaskRun,
@@ -368,13 +380,35 @@ def test_a_read_granted_on_the_table_itself_names_the_file(
     assert result.path == path
 
 
+def _stored_starred(session: Session, catalog: CatalogService, principal: PrincipalRef) -> TableRef:
+    """Create `silver.c*` as an older release stored it: a new name may not hold `*` (#609).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    catalog
+        The catalog.
+    principal
+        The acting principal.
+
+    Returns
+    -------
+    TableRef
+        The stored table.
+    """
+    catalog.create_table(principal, TableRef("dev", _SILVER, "cstar"), schema=_minimal_schema())
+    session.execute(update(Table).where(Table.name == "cstar").values(name="c*"))
+    session.commit()
+    return TableRef("dev", _SILVER, "c*")
+
+
 def test_a_name_with_a_glob_character_queues_only_its_own_asset(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:
     """`silver.c*` is matched as itself, never as a pattern that also takes `silver.clean`."""
     catalog = _catalog(session, tmp_path)
-    starred = TableRef("dev", _SILVER, "c*")
-    catalog.create_table(principal, starred, schema=_minimal_schema())
+    starred = _stored_starred(session, catalog, principal)
     _managed(catalog, principal)
     deploy_assets(session, "dev", "analytics", {"silver.c*": {}, "silver.clean": {}})
 
@@ -389,8 +423,8 @@ def test_a_selection_of_more_than_its_asset_drops_nothing(
 ) -> None:
     """Without the escape, `silver.c*` would take `silver.clean` too: refused before any write."""
     catalog = _catalog(session, tmp_path)
-    starred = TableRef("dev", _SILVER, "c*")
-    starred_id = catalog.create_table(principal, starred, schema=_minimal_schema()).uuid
+    starred = _stored_starred(session, catalog, principal)
+    starred_id = catalog.load_table(principal, starred).uuid
     _managed(catalog, principal)
     deploy_assets(session, "dev", "analytics", {"silver.c*": {}, "silver.clean": {}})
 
@@ -403,6 +437,174 @@ def test_a_selection_of_more_than_its_asset_drops_nothing(
     assert str(refused.value) == REBUILD_SELECTION_MISMATCH.format(name="silver.c*", assets=2)
     _assert_intact(session, starred_id)
     assert session.scalars(select(Run)).all() == []
+
+
+def test_a_dropped_tables_stored_name_and_columns_may_be_created_again(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A tombstone keeps `c*` and its column from counting as new, as a rebuild's run needs."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    session.execute(
+        update(TableColumn)
+        .where(TableColumn.table_id == catalog.load_table(principal, starred).uuid)
+        .values(name="amount\xa0eur")
+    )
+    session.commit()
+    catalog.drop_table(principal, starred)
+    schema = Schema(NestedField(1, "amount\xa0eur", LongType(), required=False))
+
+    created = catalog.create_table(principal, starred, schema=schema)
+
+    assert created.ref == starred
+    with pytest.raises(ValidationError, match="U\\+0024"):
+        catalog.create_table(principal, TableRef("dev", _SILVER, "cost$"), schema=schema)
+    with pytest.raises(ValidationError, match="U\\+00A0"):
+        catalog.create_table(principal, TableRef("dev", _SILVER, "fresh"), schema=schema)
+
+
+def test_the_tombstone_rule_lets_only_the_dropped_tables_own_spelling_and_columns_through(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """An extra look-alike column, another namespace, another spelling: all judged as new."""
+    catalog = _catalog(session, tmp_path)
+    gold = NamespacePath.from_parts(["gold"])
+    starred = _stored_starred(session, catalog, principal)
+    catalog.drop_table(principal, starred)
+    plain = NestedField(1, "id", LongType(), required=False)
+
+    with pytest.raises(ValidationError, match="Column name 'x\\\\u3164' holds U\\+3164"):
+        catalog.create_table(
+            principal,
+            starred,
+            schema=Schema(plain, NestedField(2, "x\u3164", LongType(), required=False)),
+        )
+    with pytest.raises(ValidationError, match="U\\+002A"):
+        catalog.create_table(principal, TableRef("dev", gold, "c*"), schema=Schema(plain))
+    for spelling in ("C*", "c*\u0301"):
+        with pytest.raises(ValidationError, match="U\\+002A"):
+            catalog.create_table(
+                principal, TableRef("dev", _SILVER, spelling), schema=Schema(plain)
+            )
+    assert catalog.create_table(principal, starred, schema=Schema(plain)).ref == starred
+
+
+def test_a_dropped_name_taken_again_makes_its_undrop_say_so_and_offer_another_name(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Whoever re-creates `c*` first keeps it; the undrop is refused with the way out."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    catalog.drop_table(principal, starred)
+    catalog.create_table(principal, starred, schema=_minimal_schema())
+
+    with pytest.raises(AlreadyExistsError) as refused:
+        catalog.undrop_table(principal, starred)
+
+    assert str(refused.value).startswith(
+        "silver.c* cannot be restored as 'c*': a table of that name exists in silver now. "
+        "Restore it under another name with `lakana table undrop silver.c* --as NEW_NAME`"
+    )
+    assert catalog.undrop_table(principal, starred, new_name="c_restored").ref.name == "c_restored"
+
+
+def test_a_rebuild_of_a_view_with_a_stored_symbol_name_drops_nothing(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A view leaves no tombstone, so its run could not create `v$` again: refused first."""
+    catalog = _catalog(session, tmp_path)
+    view = TableRef("dev", _SILVER, "vx")
+    catalog.create_or_replace_view(principal, view, sql="SELECT 1 AS id", references=[], columns=[])
+    session.execute(update(Table).where(Table.name == "vx").values(name="v$"))
+    session.commit()
+    stored = TableRef("dev", _SILVER, "v$")
+    view_id = session.scalars(select(Table.id).where(Table.name == "v$")).one()
+    deploy_assets(session, "dev", "analytics", {"silver.v$": {"materialize": "view"}})
+
+    with pytest.raises(ConflictError) as refused:
+        _rebuild(session, catalog).rebuild(principal, stored, reason=_REASON)
+
+    message = str(refused.value)
+    assert message.startswith("`silver.v$` was not dropped")
+    assert "a view" in message
+    assert "U+0024" in message
+    assert "Rename the asset's file in git and deploy" in message
+    assert session.scalars(select(Table.id).where(Table.name == "v$")).one() == view_id
+    assert session.scalars(select(Run)).all() == []
+
+
+def test_a_rebuild_whose_drop_keeps_no_tombstone_of_a_stored_name_rolls_the_drop_back(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A table whose drop leaves no tombstone cannot keep `c*`: refused, and nothing changes."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    starred_id = catalog.load_table(principal, starred).uuid
+    deploy_assets(session, "dev", "analytics", {"silver.c*": {}})
+
+    def no_tombstone(
+        session: Session,
+        actor: PrincipalRef | None,
+        ref: TableRef,
+        row: Table,
+        *,
+        now: datetime,
+        purge_after: datetime,
+        reason: str,
+        detail: Mapping[str, object] | None = None,
+    ) -> None:
+        """Drop as the real code does, then report that no tombstone was left.
+
+        Parameters
+        ----------
+        session
+            The drop's session.
+        actor
+            Who drops.
+        ref
+            The table.
+        row
+            Its row.
+        now
+            The drop's time.
+        purge_after
+            When the files may go.
+        reason
+            Why.
+        detail
+            More facts for the audit event.
+        """
+        drop_row(
+            session, actor, ref, row, now=now, purge_after=purge_after, reason=reason, detail=detail
+        )
+
+    with (
+        mock.patch("lakana_core.catalog.rebuild.drop_row", no_tombstone),
+        pytest.raises(ConflictError) as refused,
+    ):
+        _rebuild(session, catalog).rebuild(principal, starred, reason=_REASON)
+
+    assert "a table whose drop keeps no record of it" in str(refused.value)
+    assert "U+002A" in str(refused.value)
+    _assert_intact(session, starred_id)
+    assert session.scalars(select(Run)).all() == []
+
+
+def test_a_rebuild_without_an_undo_period_of_a_stored_symbol_name_drops_nothing(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """With 0 days the tombstone may be purged before the run, so the same refusal applies."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    starred_id = catalog.load_table(principal, starred).uuid
+    deploy_assets(session, "dev", "analytics", {"silver.c*": {}})
+    authz = AllowAllAuthorization()
+    rebuild = TableRebuild(session, catalog, RunService(session, authz), authz, undo_days=0)
+
+    with pytest.raises(ConflictError, match="a table dropped without an undo period"):
+        rebuild.rebuild(principal, starred, reason=_REASON)
+
+    _assert_intact(session, starred_id)
 
 
 def test_a_row_gone_after_the_run_is_inserted_leaves_no_run(

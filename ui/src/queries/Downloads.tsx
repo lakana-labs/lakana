@@ -122,7 +122,7 @@ export function Downloads({ environment, run, name }: DownloadsProps): JSX.Eleme
   );
   return (
     <div className="queries-downloads">
-      <div className="queries-downloads-buttons">
+      <div className="queries-downloads-buttons button-row">
         {button("csv")}
         {run.result_rows !== null && run.result_rows > XLSX_MAX_ROWS ? (
           <p className="second">

@@ -143,7 +143,10 @@ const NAMED_LIMITS = [
   // Measured 9.85 kB (2026-11-17) with the editor's catalog cache (queries/editor/catalog.ts),
   // which the screen now hands to the editor, so that the editor's chunk reaches no API module
   // (see the first load below); the limit holds.
-  { name: "Queries", prefix: "QueriesScreen-", limit: "10.05 kB" },
+  // Raised to the measured 10.13 kB (2026-11-20) + 10 %: the catalog cache hands a catalog an
+  // editor still holds after a session ended to the next person's, and Try again on a saved query
+  // moves the focus to Run once it opens and forgets that after a failed read (#753).
+  { name: "Queries", prefix: "QueriesScreen-", limit: "11.14 kB" },
   // Measured 1.1 kB (2026-11-17) + 10 %: the Jobs area's screen, for now its routes (a job, a run and
   // a task, each a page of its own below), the area's page at /jobs and the screen's strings. The
   // lists, facts and logs come in the next changes.
@@ -269,9 +272,9 @@ const NAMED_LIMITS = [
     prefix: "TreeDropTargetDelegate-",
     limit: "7.73 kB",
   },
-  // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
-  // shares with the screens that show a state.
-  { name: "the status label", prefix: "StatusLabel-", limit: "0.27 kB" },
+  // Measured 321 B (2026-11-21) + 10 %: the status glyph with its word as a pill, with the map of
+  // each state's tint (#782), which the Queries screen shares with the screens that show a state.
+  { name: "the status label", prefix: "StatusLabel-", limit: "0.36 kB" },
   // Measured 125.08 kB (2026-11-17) + 10 %: the SQL editor, almost all of it CodeMirror 6 (state,
   // view, commands, language, lang-sql's grammar and keywords, autocomplete, lint) with the
   // Still Water theme, the run keys, the error mark and the sources' registry. It loads only when

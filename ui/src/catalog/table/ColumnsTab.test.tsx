@@ -243,6 +243,25 @@ describe("ColumnsTab", () => {
     expect(region.textContent).not.toMatch(/\u202E/u);
   });
 
+  it("marks a look-alike in a column's name but not a no-break space in its description", async () => {
+    renderShell(PAGE, {
+      routes: {
+        [`GET ${TABLE_PATH}`]: {
+          status: 200,
+          body: withColumn("channel", {
+            name: "chan\u3164nel",
+            description: "Prix\u00A0: en euros",
+          }),
+        },
+      },
+    });
+
+    const region = await screen.findByRole("region", { name: "Table columns" });
+    expect(region).toHaveTextContent("chanU+3164nel");
+    expect(region.textContent).toContain("Prix\u00A0: en euros");
+    expect(region.textContent).not.toMatch(/\u3164/u);
+  });
+
   it("marks a hidden character in a column's glossary terms", async () => {
     renderShell(PAGE, {
       routes: {

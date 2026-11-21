@@ -183,6 +183,172 @@ sequence, so it can forge a log record or recolour a terminal.
   human-readable `message` of `done` without a result object is the same sentence as in table mode,
   so its names are escaped.
 
+## New names that could look like another (#593, #609)
+
+A new namespace, table, view or column name is shown in every list, breadcrumb, grant and query,
+so two that look alike but differ let one person's table pass for another's. The decision (#609,
+option A, refined on #789 and its security review): every new name gets the look-alike
+protection, and namespace, table and view names also an allowlist; a column name keeps its
+visible symbols. In order:
+
+| Check | `check_new_name` (namespaces, tables, views, rename and undrop targets) | `check_new_column_name` (columns of `catalog.metadata`, `create_or_replace_view`, `create_external_table`) |
+|---|---|---|
+| `refuse_percent_in_new_name`: no `%` | yes | no |
+| `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
+| `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020), but none of `SEPARATOR_LIKE_CHARACTERS` | yes | no |
+| `refuse_look_alike_characters` (#609): see below; then NFC | yes | yes |
+
+`look_alike_character` refuses, each with its own sentence (`LookAlike`):
+
+- **Drawn as nothing** (`_DRAWN_AS_NOTHING`): Unicode's default-ignorable code points, whatever
+  their category (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F and
+  U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
+  U+3164, U+FFA0, which are `Lo`), and the blank glyphs that are not default-ignorable: U+2800
+  BRAILLE PATTERN BLANK and U+1D159 MUSICAL SYMBOL NULL NOTEHEAD (`So`), U+16FE4 KHITAN SMALL
+  SCRIPT FILLER (`Mn`). NFC keeps all of them. The list was checked against
+  `Default_Ignorable_Code_Point` (Unicode 17); the blank glyphs come from the known lists of
+  invisible characters.
+- **Another space**: every `Zs` but U+0020.
+- **Unassigned and private use**: `Cn` (unassigned code points and the 66 noncharacters, such as
+  U+FDD0 and U+FFFF) and `Co`. A browser draws them as nothing or as a box, and a later Unicode
+  version may assign a `Cn` anything. `Cn` is the running Python's: a character newer than its
+  Unicode version (3.11 has 14.0) is refused as unassigned. On a newer Python it is judged by
+  its category; a newer letter that looks like a separator is still refused, because
+  `SEPARATOR_LIKE_CHARACTERS` is generated with unknown characters as candidates (see below),
+  and a Python whose Unicode is newer than the table's fails a test until the table is
+  regenerated.
+- **A loose mark**: a combining mark (`M*`) with no letter (or mark of a letter) before it, at
+  the start, on a digit (keycap U+20E3) or on a symbol.
+- **A repeated mark**: the same nonspacing mark twice in a row, counting the marks NFC composed
+  into the letter (`é` + U+0301 is refused like `e` + U+0301 + U+0301), as UTS #39 (5.4) suggests.
+- **Too many marks**: more than `MAX_COMBINING_MARKS` (4) marks on one letter, counted the same
+  way.
+
+The allowlist leaves to `look_alike_character` what it judges whatever comes around it (drawn as
+nothing, spaces, `Cn`, `Co`), which names it more exactly.
+
+**NFC** (`unicodedata.is_normalized`) is checked last, after every character check, and the NFC
+form is run through every rule of the caller (`composed_check`: `check_new_name` or
+`check_new_column_name`) before it is suggested. When it would be refused, that refusal is given
+instead, so a suggestion is always a name that would be accepted (`a` + U+0301 + U+0323 + U+0301
+composes to `ạ` with the acute twice and is refused as a repeated mark).
+
+**Separator-like characters** (`SEPARATOR_LIKE_CHARACTERS`, `lakana_core/separator_like.py`):
+every letter, mark or digit the allowlist would accept whose skeleton in Unicode's
+`confusables.txt` holds `.`, `/`, `\` or `:` (#789, option A). U+A4F8 LISU LETTER TONE MYA TI
+(`Lm`), U+1D16D MUSICAL SYMBOL COMBINING AUGMENTATION DOT (`Mc`) and the Arabic-Indic zeros
+U+0660 and U+06F0 look like `.`, so `sales` + U+A4F8 + `daily` would read as the dotted path
+`sales.daily`; U+30CE KATAKANA LETTER NO and its halfwidth form look like `/`, U+4E36 like `\`,
+the visarga of Devanagari and seven other scripts and U+11DD9 TOLONG SIKI SIGN SELA like `:`.
+The table is generated, never edited: `scripts/separator_like_characters.py CONFUSABLES_TXT`
+writes it from a local copy of the file (version 18.0.0 of 2026-08-06, 25 characters). The
+script takes categories from the running Python but counts a source character that Python does
+not know (`Cn`) as a candidate, so the table is the same on every supported Python: U+11DD9, a
+letter of Unicode 17, is in it although Python 3.14 runs Unicode 16 (an older Python refuses it
+as `Cn` anyway). `--check` compares the entries and the date, not the text, and passes on 3.11
+to 3.14. The module records the Unicode version it was written under (`UNICODE_VERSION`,
+16.0.0); `test_this_pythons_unicode_is_not_newer_than_the_table` fails on a Python whose Unicode
+is newer (3.15 and later), asking for a regeneration from a `confusables.txt` at least as new
+and a review of the new entries.
+`scripts/tests/test_separator_like_characters.py` regenerates it from the checked-in excerpt
+`scripts/tests/confusables-excerpt.txt` (every line behind an entry, and lines that must make
+none) and compares, without the network. The file has no line whose source is a sequence; a
+test of its own pins that such a line is skipped. Refused in namespace, table and view names with their
+own sentence (`… which looks like '.', a separator, so the name could read as a path of two
+names`); allowed in a column name, since they are visible and a column is shown only inside its
+table. A letter whose skeleton holds other punctuation is allowed: `ð`, `ŀ`, `ʔ`, `ʼ`, `ʻ`, `正`,
+the Lisu comma tone letter U+A4F9 and the Canadian syllabics with a middle dot.
+
+**Accepted casualties of the separator rule:** real letters that still look like a separator are
+refused in table names: Japanese `ノ` (U+30CE) and `ﾉ` (U+FF89), the CJK ideographs `丶` and `丿`,
+Coptic old esh, the vertical kana repeat mark, the IPA length mark `ː` (U+02D0), the visarga in Devanagari, Gujarati, Brahmi,
+Kaithi, Sharada, Siddham, Takri and Dogra, the Tolong Siki sign sela, the Meetei Mayek lum iyek and the Lisu tone letters
+that look like `.`, `..`, `.,` or `:`. None of the Canadian syllabics maps to a separator. Such a
+word needs another spelling in a table name; a column name keeps it.
+
+**Why marks are allowed:** NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
+Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
+`M*` would refuse those scripts.
+
+**Why U+0020 stays:** #652 decided that a space inside a name stays allowed, and CSV headers such
+as `Order ID` are common column names; once every other space is refused, a plain space cannot
+pass for another character. `-` is kept for names such as `daily-orders`; in a table name
+U+2010 HYPHEN and U+2212 MINUS SIGN, which look like it, are refused (`Pd`, `Sm`), as are `$`,
+`#`, `(`, `²`, `Ⅻ` and every other symbol or punctuation mark.
+
+**Why columns keep their symbols:** a column name comes from a query's unaliased expression
+(`count(*)`) or a file's header (`price ($)`) as often as from a person, it is shown only inside
+its table, and visible symbols do not hide or impersonate anything. So a column may hold `(`,
+`*`, `$`, `#`, `\`, `%`, U+2212 and the like; only the look-alike check applies.
+
+**Stored names.** Existing names are never judged: lookups, listings, `NamespacePath.parse`,
+renames away and drops take any stored name, and a child namespace may be created under a stored
+one. A table re-created under the name of a dropped table the catalog still holds (a
+tombstone: a rebuild's re-create, or any create within the undo period) is not a new name:
+`CatalogService._stored_dropped_names` reads the tombstones only when a rule refuses the name or
+a column, and then lets the name and the dropped table's top-level columns (`dropped_columns`)
+pass; `ResolvedStorage.table_location(stored_name=True)` still applies
+`validate_path_component`. This opens no way to a new bad name: only a name the catalog already
+held passes. A rebuild of a view or an external table (no tombstone) or with an undo period of 0
+days, whose stored name `check_new_name` refuses, is refused before anything is dropped
+(`REBUILD_STORED_NAME`, naming the problem and the way out: rename the asset's file). An Iceberg
+table whose drop turns out to leave no tombstone (`drop_row` returns `None`: two legacy tables
+sharing a directory) is refused the same way inside the rebuild's transaction, which rolls the
+drop back.
+
+**The same existence leak on create.** A person with `CREATE_TABLE` in a namespace who creates a
+table under a name today's rules refuse learns whether a dropped table of exactly that name has a
+tombstone there: the create succeeds instead of answering 422. Accepted, like the deploy's: it
+tells only that a name refused today existed at that path within the undo period, and the name
+is in the request, so nothing about other tables is learnt. That person can also take the name
+before its owner undrops the table, as with any dropped name: the undrop is then refused with
+`silver.c* cannot be restored as 'c*': a table of that name exists in silver now. Restore it
+under another name with lakana table undrop silver.c* --as NEW_NAME …`, and `--as` gives a name
+that meets today's rules (pin:
+`test_a_dropped_name_taken_again_makes_its_undrop_say_so_and_offer_another_name`). The boundary
+of the rule is pinned by
+`test_the_tombstone_rule_lets_only_the_dropped_tables_own_spelling_and_columns_through`: an
+extra new look-alike column, the same name in another namespace, and another spelling (a case
+change, an added mark) are all judged as new.
+
+**Deploy** (`DeployService._new_name_issues`, in `validate_against_environment`): an asset whose
+table does not exist and whose name no tombstone holds has its table name and each namespace
+component that does not exist checked with `check_new_name`, so `price$.sql` fails the deploy
+with the run's sentence and an NFD file name is told its NFC form; artifact assets are left out.
+Existence is read from the rows, whoever may read them, so a deployer learns that a table with a
+name today's rules refuse exists (or was dropped within the undo period); accepted, since only
+such names give a different answer.
+
+**The web interface** marks the wider set (`NAME_INVISIBLE` in `ui/src/shell/VisibleText.tsx`:
+default-ignorable, U+2800, U+16FE4, U+1D159, every space but U+0020, `Cn`, `Co`, besides
+`INVISIBLE`) only where a namespace, table, view or column name is shown (the `name` mode of
+`VisibleText` and `VisibleTspan`, `markedName`): the Catalog's tree, list places, dropped and
+expiring views, breadcrumbs, page titles, the table header and page, columns, references,
+lineage, the orphans and table lists, the namespace dialogs, notes and actions, the access and
+health tabs' column names, row-filter and mask columns, the task rows' assets, the dialogs that
+name a table, the preview, the result grid's column names and the editor's completion and
+hover. Free text (descriptions, labels, snippets, reasons, display names,
+expressions, messages) and file names keep `INVISIBLE`, so French spacing, a pasted no-break
+space and emoji with U+FE0F show as they are, and `Monthly revenue` with a no-break space still
+saves as `Monthly-revenue-….csv`.
+
+**Not covered, accepted:**
+
+- Letters of different scripts that look alike (Latin `o` and Cyrillic `о`) and compatibility
+  forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so such twins are
+  two names; the web interface does not mark them.
+- Non-Latin decimal digits (Devanagari `१`, Arabic-Indic `١`, which looks like `1` or `l`) and
+  every letter whose skeleton holds no separator: `SEPARATOR_LIKE_CHARACTERS` covers only
+  skeletons with `.`, `/`, `\` or `:`, so `ð`, `ʔ` (`?`), `ʼ` (`'`) and U+A4F9 (`,`) pass.
+- A single mark on a letter that reads as another letter: `pri̇ce` (`i` + U+0307 COMBINING DOT
+  ABOVE) reads as `price` in most fonts.
+- The CLI escapes only the #593 set, so it shows a stored name holding U+3164 or U+2800 as blank,
+  and a no-break space as a space.
+- A stored name inside a nested column of a re-created table is still judged as new.
+- Other names (repositories, groups, tokens, secrets, package indexes, artifacts) keep the #593
+  and #652 checks only.
+
 ## Request bodies: a JSON limit, authentication first, a limit per streamed route
 
 Every body is one of two kinds.
@@ -4147,10 +4313,13 @@ is the only way to change access there, so that what was reviewed in git is what
   that question, and a count that relies on the member must then wait for the removal); and an
   apply's own last check (`AccessService._recheck_lockout`). Under READ COMMITTED the second change
   waits for the first's commit, counts what it left and is refused with `LAST_ADMIN_MESSAGE`.
-  Changes that raise the count (a grant, a new member, a reactivation) take no lock: a count never
-  sees them before they commit, so on an instance with an administrator they can only make a check
-  refuse, never let one through. (On an instance with no administrator at all,
-  `assert_admin_headroom` lets every change through anyway.) Deleting a group needs no lock, since
+  For this count alone, changes that raise it (a grant, a new member, a reactivation) need no lock:
+  a count never sees them before they commit, so on an instance with an administrator they can only
+  make a check refuse, never let one through. (On an instance with no administrator at all,
+  `assert_admin_headroom` lets every change through anyway.) The break-glass rule can be broken by
+  raising, though, so a grant of instance ADMIN and a new member of a group that holds it take the
+  lock as well (#32, below); `test_a_member_removal_decides_under_the_lock_while_its_group_gains_admin`
+  now sees the removal wait for the grant. Deleting a group needs no lock, since
   it is refused while the group holds any active grant. The order is the access lock first, then
   this one: an apply holds the access lock alone and takes this one inside it. The break-glass count
   of OIDC sign-in (the unlinked administrators, #32 PR 2) counts under this lock too: linking a
@@ -4291,8 +4460,21 @@ own process opens no DuckDB connection and imports no `duckdb`.
   find nothing and try to download `httpfs`; it is told the worker's `~/.duckdb/extensions`
   instead (the image fills it at build time, local mode on the first query), so it loads the
   extension without network access. Then `allow_community_extensions = false` and
-  `allow_extension_repositories = 'forbidden'`: the default `undecided` may still change to
-  `allowed` at run time, `forbidden` may not and refuses `CREATE EXTENSION REPOSITORY`. All
+  `allow_extension_repositories = 'forbidden'`: the default (`undecided` on 2.0.0, which may
+  still change to `allowed` at run time; `hosts` on 2.0.1, under which `CREATE EXTENSION
+  REPOSITORY <host>`, new syntax in 2.0.1, adds a repository by its host name) can be loosened
+  or used, `forbidden` cannot change and refuses `CREATE EXTENSION REPOSITORY` in every form
+  (2.0.1: "allow_extension_repositories is 'forbidden', which does not allow adding any
+  repository"). On the configured connection that check is the third layer, and DuckDB 2.0.1
+  never reaches it: external access is off, so it first fails to open the repository file under
+  `HOME` (`Permission Error: Cannot access file ".../extension_repositories/<host>.duckdb_extension.repo.json"`),
+  and behind that the lock refuses adding or dropping a repository.
+  `test_no_setting_can_be_changed_once_configured` pins that the configured connection refuses
+  the host form and the move back to `hosts` or `allowed` (whichever layer answers);
+  `test_forbidden_alone_refuses_an_extension_repository` pins `forbidden` by itself, on a
+  connection with external access on and no lock, by its message, with nothing written under
+  `HOME` (under the default `hosts` the statement installs `httpfs` and fetches
+  `https://<host>/.well-known/duckdb-extension-repo.json`). All
   three read back in `test_the_connection_holds_no_credential_and_loads_nothing_by_itself`, and
   in a real child in `test_a_child_reads_back_the_settings_duckdb_2_names_differently`.
   `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`, `duckdb` or `none`) changes
@@ -4433,12 +4615,20 @@ own process opens no DuckDB connection and imports no `duckdb`.
   (`http_retries`) still repeat the handshake inside the one attempt.
 - **What allow-list mode still leaves open** (reachable only past the guard; the guard is the
   first layer, credential scoping the structural one):
-  - **The whole store host:port, not just the prefix**, for SQL that spells a literal URL: a
-    `..` or `%2e%2e` segment passes DuckDB's string check (the HTTP client normalises `..` and
-    asks for the other path). Without a signature the store answers 403, so what remains is what
-    it serves without authentication on that port: anonymous-readable buckets or objects, and
-    unauthenticated endpoints on the S3 port. AWS virtual-host style confines this to the
-    bucket's host. Pinned by `test_known_residual_a_literal_dotdot_reaches_the_same_server`.
+  - **Closed by DuckDB 2.0.1: the whole store host:port, not just the prefix**, for SQL that
+    spells a literal URL. On 2.0.0 a `..` or `%2e%2e` segment passed DuckDB's string check (the
+    HTTP client normalised `..` and asked for the other path; without a signature the store
+    answers 403, so the reach was what it serves without authentication on that port). 2.0.1
+    refuses such a URL (`..`, `./..`, `%2e%2e`, `%2E%2E`) with a `Permission Error` before any
+    request, reported as `invalid` with the fixed text, and the worker requires
+    `duckdb>=2.0.1` for it. Pinned by `test_a_literal_dotdot_is_refused_and_reaches_no_server`
+    (red on 2.0.0; it replaced `test_known_residual_a_literal_dotdot_reaches_the_same_server`).
+    Not in DuckDB's release notes; found when the pinned residual failed on 2.0.1. "Dot
+    segment" is meant as RFC 3986 says: `..;` (`t1/..;/t2/a.parquet`) is no dot segment, passes
+    2.0.1, and reaches the store unchanged. S3 and SeaweedFS take the path literally, so it stays
+    inside the prefix there; a front end that strips `;` path parameters before normalising (as
+    Tomcat-style servers do) would resolve it to `t2`. Not a concern for the stores Lakana
+    supports, but an operator who puts such a proxy in front of the store reopens the residual.
   - **Unsigned requests to the allowed prefixes**: objects of a table nested in another's
     location; the same 403 limit.
   - **Redirects are followed.** httpfs follows a 3xx from an allowed URL to another host
@@ -4494,7 +4684,8 @@ so too.
 `_BLACKLISTED_FUNCTIONS` covers every file-reading, SQL-evaluating, or
 secret-revealing DuckDB table function found by inspecting DuckDB 1.5.5's function list,
 swept again on 2.0.0 (a diff of `duckdb_functions()`: 225 names new, the 18 new table
-functions refused by the allow-list below, the scalars read one by one)
+functions refused by the allow-list below, the scalars read one by one) and on 2.0.1 (see
+"The 2.0.1 sweep" below)
 — `query`/`query_table`/
 `json_execute_serialized_sql` each evaluate a string argument as SQL/a table reference
 (`json_execute_serialized_sql` takes `json_serialize_sql`'s own output, so a query naming
@@ -4537,7 +4728,7 @@ catalog instead" is no next step for them.
 error points at the SQL the function stands for (`CAST`, `BETWEEN`). Like every entry, the
 name is compared in lower case after sqlglot has removed quotes and any catalog or schema
 qualifier, so `"SETVAL"(…)`, `main.setval(…)` and the method form `'s'.setval(…)` are refused
-alike. This is a reference list confirmed against DuckDB 2.0.0, not a completeness guarantee — DuckDB adds table functions across
+alike. This is a reference list confirmed against DuckDB 2.0.0 and 2.0.1, not a completeness guarantee — DuckDB adds table functions across
 releases, and a future one in any of these categories (file-reading, SQL-evaluating,
 secret-revealing, introspecting, statistics-reading or state-changing) needs adding here as
 it's found.
@@ -4547,6 +4738,57 @@ any table function except the generators in `_ALLOWED_TABLE_FUNCTIONS` (`range`,
 `generate_series`, `unnest`) in any FROM-item position (`FROM fn()`, `LATERAL fn()`, `TABLE(fn())`),
 so a function DuckDB adds later is refused by default.
 `extract_table_refs` never reports a function call as a table.
+
+**The 2.0.1 sweep** (2026-11-21, the lock's move from 2.0.0 to 2.0.1). `duckdb_functions()`,
+`duckdb_settings()`, `duckdb_keywords()`, `duckdb_types()` and `duckdb_extensions()` of both
+versions, each with `httpfs` loaded, were diffed. Functions: 3,233 rows on 2.0.0, 3,327 on
+2.0.1; five names new, none gone. The four new table functions are refused by the allow-list:
+`parquet_page_index` (reads a Parquet file's page index, each page's min and max; also listed in
+`_BLACKLISTED_FUNCTIONS` and `_READER_NAMES`, with the metadata family), `duckdb_live_query_metrics`
+(the connection's I/O and memory counters; listed with the introspection functions), and
+`add_grammar_extension`/`remove_grammar_extension` (switch a parser grammar extension on or off
+for later statements; left to the allow-list like 2.0.0's external-resource functions). Past the
+guard the lock is the layer that holds: both write the setting `active_grammar_extensions`, and
+on the configured connection DuckDB refuses them with "Cannot change configuration option
+"active_grammar_extensions" - the configuration has been locked" before it looks the extension
+up (`test_a_grammar_extension_cannot_be_switched_once_configured`); besides, the child runs one
+statement and registers no grammar extension. The fifth, the `pg_catalog` macro
+`map_type_id_to_pg_oid`, is a `CASE` over type ids and stays allowed. The other changed rows are
+new `TIMESTAMP_S`/`_MS`/`_NS`/`TIMESTAMPTZ_NS` overloads, stability labels
+(`CONSISTENT_WITHIN_QUERY` on time-zone arithmetic), `fmod` turned from a macro into a scalar,
+new options of the file readers (already refused) and a `type` argument of
+`duckdb_external_resources` (refused). No new lambda-taking function (`_LAMBDA_FUNCTIONS`
+unchanged), no keyword change; one type, `PARQUET_VARIANT`. Settings: seven no longer listed in
+`duckdb_settings()` (`error_on_division_by_zero`, `regex_match_operator_semantics`,
+`table_function_identifier_conversion`, `legacy_disable_null_type`, `delim_join_as_cte`,
+`experimental_metadata_reuse`, `force_column_metadata_reuse`) but still readable, settable before
+the lock and refused after it, like `lambda_syntax` on 2.0.0; `logging_storage` is now listed as
+`logging_sink` (both names locked); new `http_retry_quota_throttled`,
+`http_retry_throttled_wait_ms`, `parquet_can_have_nan`, `parquet_use_page_index` and
+`s3_use_global_endpoint` (all refused after the lock); `allow_extension_repositories` changed as
+described above. What DuckDB enforces changed once, for the better: a literal URL with a dot
+segment is refused (see "Closed by DuckDB 2.0.1" under "What allow-list mode still leaves open").
+Otherwise as on 2.0.0: with external access off,
+`parquet_page_index` of a file outside the allowed paths is a `Permission Error`, `LOAD` of
+`glue` or `legacy_parser` (new default extensions in 2.0.1) is refused, and `CREATE SECRET (TYPE
+http, HTTP_PROXY …)` still succeeds on 2.0.1 (DuckDB reverted a change that would have refused it
+before the release; the child refuses it as a statement that is not one `SELECT`). The function diff was
+repeated with the iceberg, delta, ducklake, glue, aws, azure, avro, sqlite, postgres, mysql,
+spatial, fts, vortex and excel extensions installed and loaded in a scratch environment (3,665
+rows on 2.0.0, 3,816 on 2.0.1). Their new table functions (Iceberg `iceberg_partitions`,
+`iceberg_schemas`, `iceberg_expire_snapshots`; Glue `glue_get_partition_response`,
+`glue_repair_table`, `glue_requests`; the aws extension's `s3_*`, `s3tables_*`,
+`aws_system_table(s)`, `aws_system_table_families` and `__aws__*`; `read_single_avro_file`) are
+refused by the allow-list (`__aws__*` also by the `__` prefix). The readers among them,
+`iceberg_partitions`, `iceberg_schemas` and `aws_system_table` (an Iceberg scan), went into
+`_READER_NAMES` so the refusal says they reach data; the writing and managing ones keep the
+"check the name" message, as 2.0.0's `iceberg_rewrite_data_files` and `glue_*` did. Their new
+scalars (`ST_AsGrid`, `fts_analyze_pattern`, `fts_near_tf`, `ducklake_unreadable_macro_default`)
+and the window functions `ST_ClusterDBSCAN`/`ST_ClusterKMeans` belong to extensions the query
+process never loads; none matches the `SQL_RUNNING_FUNCTIONS` criterion. One behaviour
+change touched a test: 2.0.1's profiler writes `profile.json` for a failed statement too (2.0.0
+only for one that succeeded), so a query that ran out of memory without spilling leaves that file,
+and nothing else, in its temp directory.
 
 **Lambdas are re-spelled, not passed through.** DuckDB 2.0 refuses the arrow lambda
 (`x -> x + 1`), so `query_rewrite._render` marks every `exp.Lambda` for sqlglot's keyword form
@@ -5390,6 +5632,17 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   `reason: secret_unreadable` (`decrypt_secret_row` logs why, without a value). The S1 binding
   rules above decide which secret that can be; their tests are in `test_connection_service.py`,
   and `test_connection_fetch.py` pins that a moved or revoked secret is never sent.
+- **A run that failed on a connection (#705).** `ConnectionOut.last_run_failure` names a run, a
+  task and a time, nothing of the run's message. `ConnectionService._run_failures` asks the runs'
+  own rule (`run_readers`: `RUN` or `READ_ENVIRONMENT`, `authorize_run_read`'s rule, in one
+  `permits_each` batch that audits nothing) and leaves it `null` for an environment whose runs the
+  caller may not read, so a connection never shows a run its reader cannot open; today every
+  connection reader holds `READ_ENVIRONMENT`, so the two agree, and the check keeps them so if
+  either rule changes. The failures are matched by environment and name through the connection
+  row (`runs.connection_failures`), so another environment's connection of the same name never
+  lends its runs. The name comes from the task's result record, which the asset's code writes:
+  the worker keeps it only for a connection the asset declares, so an asset can mark at most its
+  own connections, which its code reads anyway.
 - **What a reader sees of a test.** `last_test` on a connection answer (`ConnectionOut`, every
   route that answers one, and `GET /api/v1/connections`) carries `state`, `outcome` and
   `finished_at` for anyone with `READ_ENVIRONMENT`. Its `message`, `id`, time requested
@@ -5492,8 +5745,9 @@ secret's values, and the only way a secret reaches a Python asset (#23). User re
   `getenv` are not safe against each other), and a value another thread writes then is
   replaced by the earlier one. Only the task's own code can do any of this, and it is trusted
   (one instance, one trust domain). obstore's refusal of a value (a bad RSA key, a non-base64
-  account key) is a `UsageError` that names the connection and never echoes the value; a
-  bundle with no certificate that parses is refused before obstore sees it, naming
+  account key) is a `ConnectionSetupError` (a `UsageError`) that names the connection and never
+  echoes the value; a bundle with no certificate that parses is refused before obstore sees it,
+  naming
   `LAKANA_RUN__CA_BUNDLE`. The error class comes from obstore's structure only: its exception
   type, or its dump of the cause with every string literal (key, reply body) blanked first
   (`files._structure`). obstore's client
@@ -5921,7 +6175,8 @@ exit criterion is being re-run after the M3f fixes above — see
 A saved query is SQL text under a name in an environment, owned by one principal, `private` or `everyone`. It is only text: running it is `POST …/queries` by the runner, with the runner's rights, never the owner's. `lakana_core.catalog.saved_queries.SavedQueryService` decides everything; the routes (`api/platform/saved_queries.py`) add only the statement length check (`check_statement`, 422 as for a submitted query) before it.
 
 - **Who sees a saved query (S2).** The owner always, with or without `SUBMIT_QUERY` today (so they can clean up); an `everyone` query, whoever holds `SUBMIT_QUERY` on its environment, so nobody sees a query they cannot run; an instance administrator (`acts_as_instance_admin`, personal token or session, never a CI token) every one. Anyone else gets `No saved query {id} in {env!r}.`, the same 404 as for a missing id, so the route is no oracle for another person's private query. A soft-deleted environment hides its saved queries (404, and absent from both lists); a restore shows them again. A task token gets 403 on every route and on both lists; the check comes before any read. The one thing that comes earlier is the routes' SQL length check on POST and PUT (`check_statement`, before the service is called), so an over-long SQL from a task token is a 422, not a 403.
-- **The SQL of a private query is protected as the audit log's query text is.** An administrator sees the name, owner and environment of someone else's private saved query and may delete it, but reads its `sql` only with `READ_QUERY_TEXT` on the instance, which the `ADMIN` role does not carry. Without it the answer **has no `sql` key** (`SavedQueryOut` is built with `sql` unset and the routes use `response_model_exclude_unset=True`; it is absent, never `null`), on the item and in both lists. The reason: a person's query can hold literals, names and comments they would not show an administrator, and administering the instance must not by itself show what everyone wrote. The right is asked at most once per request, and only for a private query of someone else. Tests: `test_an_admin_reads_a_private_query_without_its_sql_key` (route), `test_an_admin_sees_a_private_query_without_sql_and_may_only_delete` (service).
+- **The SQL of a private query is protected as the audit log's query text is.** An administrator sees the name, owner and environment of someone else's private saved query and may delete it, but reads its `sql` only with `READ_QUERY_TEXT` on the instance, which the `ADMIN` role does not carry. Without it the answer **has no `sql` key** (`SavedQueryOut` is built with `sql` unset and the routes use `response_model_exclude_unset=True`; it is absent, never `null`) on the item. The reason: a person's query can hold literals, names and comments they would not show an administrator, and administering the instance must not by itself show what everyone wrote. The right is asked at most once per request, and only for a private query of someone else. Tests: `test_an_admin_reads_a_private_query_without_its_sql_key` (route), `test_an_admin_sees_a_private_query_without_sql_and_may_only_delete` (service).
+- **Lists carry no SQL, for anyone (#692).** The items of both lists have no `sql` key, the owner's included; only reading one saved query (`get`) returns it, under the rule above. The list's one statement selects every column but `sql_text` (`_LISTED` in `lakana_core.catalog.saved_queries`), keeps the caller's rows by the visibility condition and the cursor's position together, and cuts the page with `LIMIT`; a cursor only narrows the set. Do not add the text back to a list: `test_a_list_reads_no_sql_text_and_the_same_statements_for_many_queries` fails on any list statement that names `sql_text`, and `test_the_lists_show_no_sql_even_to_the_owner_and_reading_one_does` on any list item with `sql`.
 - **What each may do (S3).** `actions` on each item: the owner `["update", "delete"]` (only `["delete"]` once they have lost `SUBMIT_QUERY`, because an update asks for it now), an administrator who is not the owner `["delete"]`, anyone else `[]`. The routes enforce the same: PUT by anyone but the owner is 403 (`Only the owner of a saved query can change it; save a copy under your own name instead.`), DELETE by anyone but the owner or an administrator is 403. A person who does not see the query gets the 404 first, so the 403 only ever reaches someone who already sees it.
 - **The cross-environment list asks every right in one batch (S2).** `GET /api/v1/saved-queries` reads the live environments once, asks `SUBMIT_QUERY` on each in one `permits_each` batch and keeps the rows by one SQL condition (own, or shared in a queryable environment, or all for an administrator), so an environment where the caller sees nothing contributes nothing and the route says nothing about which environments exist. With `environment` it is the per-environment list, with its 403 and 404 (404 for an unknown name). The cursor names the list (`saved-queries` or `all-saved-queries`); a cursor of the other is a 422.
 - **A deleted principal (S5).** Lakana deactivates principals and never deletes them; only an operator's SQL does. Then `private_owner_id … ON DELETE CASCADE` removes the person's private queries, and `owner_id … ON DELETE SET NULL` keeps their shared ones with `owner: null` and `former_owner: true`; only an administrator may delete those, and no one may update them.
@@ -7023,7 +7278,10 @@ token window. Threat model: "OIDC sign-in (#32)".
   link is checked without being used (`LinkService.check_open`, a wrong secret answers like an
   unknown link, `test_start_with_a_wrong_secret_is_like_unknown`) and the flow keeps only its row
   id; the secret is never stored, logged or audited
-  (`test_invite_through_the_provider_signs_in_and_links`). The finish uses the link by id with
+  (`test_invite_through_the_provider_signs_in_and_links`). Every flow that links (`invite`,
+  `recovery`, `link`) sends `prompt=login`, so the person sees the identity they bind, never one a
+  shared browser's provider session answers silently
+  (`test_every_link_flow_asks_the_provider_for_a_fresh_sign_in`). The finish uses the link by id with
   `redeem`'s conditional update, in the transaction that links and starts the session, so a link
   withdrawn or used meanwhile is `link_unusable` and creates nobody
   (`test_invite_withdrawn_after_start_creates_nobody`, `test_invite_used_twice_one_wins`). `link`
@@ -7039,37 +7297,67 @@ token window. Threat model: "OIDC sign-in (#32)".
   `last_unlinked_admin`, `cannot_link_operator` (the bootstrap principal and service accounts,
   `test_bootstrap_principal_can_never_be_linked`), `already_linked`, `auth_too_old`. Each is a 403
   `OidcSignInRefused` with one rate-limited `SIGN_IN_OIDC_REFUSED` row carrying `iss` and `sub`.
-- **One identity per account.** `OidcLinkService.link` looks the identity up and refuses
+- **One identity per account.** `OidcLinkService.link` updates the row only while it is unlinked
+  (`oidc_subject IS NULL`), so a second finish for one person never overwrites a link made
+  meanwhile and is refused `already_linked` (`test_a_link_made_meanwhile_is_not_overwritten`, on
+  Postgres `test_two_finishes_linking_one_person_at_once`). It looks the identity up and refuses
   `identity_taken`; the unique constraint on `(oidc_issuer, oidc_subject)` decides a race, in a
   nested transaction, and the loser gets the refusal, never a 500
   (`test_two_accounts_linking_one_identity_one_wins`, and on Postgres
   `test_two_accounts_linking_one_identity_concurrently`).
-- **L3, break-glass** (`lakana_core.grants.break_glass`). An unlinked administrator is active,
-  holds ADMIN directly or through a group, is not linked and has a passkey that is not disabled
-  (`test_admin_through_a_group_counts`, `test_admin_without_a_working_passkey_does_not_count`). The
-  count is taken under `lock_admin_count`, not with row locks: the lock already serialises every
-  change that lowers the administrator count, in the documented order (the access lock first). The
-  rule refuses a change that takes the count from one or more to none while a linked administrator
-  remains: linking the last one (`last_unlinked_admin`, `test_last_unlinked_admin_is_refused`), and
-  with `LAST_UNLINKED_ADMIN_MESSAGE` (409) deactivating them, revoking their ADMIN, removing them
-  from the group that holds it and deleting their last working passkey
+- **L3, break-glass** (`lakana_core.grants.break_glass`), an invariant: whenever at least one
+  active administrator is linked, at least one *unlinked administrator* remains, an active principal
+  who holds ADMIN directly or through a group, is not linked and has a passkey that is not disabled,
+  for the relying party the server records at start-up (`sign_in.rp_id`): a passkey of an earlier
+  public address is no way in (`test_admin_through_a_group_counts`,
+  `test_admin_without_a_working_passkey_does_not_count`, `test_only_passkeys_of_this_address_count`).
+  Every change that can break it is refused when it would, under `lock_admin_count` (not row
+  locks), after the access lock where one is taken. On the lowering side: linking the last one
+  (`last_unlinked_admin`, `test_last_unlinked_admin_is_refused`), and with
+  `LAST_UNLINKED_ADMIN_MESSAGE` (409) deactivating them, revoking their ADMIN, removing them from
+  the group that holds it and deleting their last working passkey
   (`test_deactivating_the_last_unlinked_admin_is_refused`,
   `test_revoking_the_last_unlinked_admins_role_is_refused`,
   `test_removing_the_last_unlinked_admin_from_the_admins_group_is_refused`,
-  `test_deleting_the_last_unlinked_admins_last_passkey_is_refused`). An instance that links nobody
-  keeps today's rules, and a count already at zero blocks nothing
+  `test_deleting_the_last_unlinked_admins_last_passkey_is_refused`). On the raising side
+  (`assert_break_glass_on_raise`, review of #780): granting instance ADMIN to a linked person or to
+  a group with a linked member, and adding a linked person to a group that holds it, so the order
+  of two changes does not matter (`test_the_reviewers_counterexample_deactivate_then_grant`,
+  `test_the_reviewers_counterexample_grant_then_deactivate`,
+  `test_adding_a_linked_person_to_the_admins_group_is_refused`,
+  `test_granting_admin_to_a_group_with_a_linked_member_is_refused`). An access apply checks the
+  rule once, on the state it leaves (`test_an_apply_that_leaves_only_linked_administrators_is_refused`).
+  Only the bootstrap principal is ever reactivated, and it is never linked. A change is refused
+  only when the rule held before it: an instance that links nobody keeps today's rules, and one
+  where it is already broken (a copy disabled) is not frozen
   (`test_lowering_the_count_is_allowed_while_no_administrator_is_linked`,
-  `test_a_count_already_at_zero_blocks_nothing`). On Postgres,
-  `test_oidc_links_postgres_integration.py` links the last two at once and a link against a
-  deactivation of the other; the second waits on the lock and is refused, and one unlinked
-  administrator is left.
+  `test_a_rule_already_broken_blocks_nothing`). On Postgres,
+  `test_oidc_links_postgres_integration.py` races the last two linking at once, a link against a
+  deactivation of the other, and a grant of ADMIN to a linked person against the deactivation of
+  the last unlinked administrator, and a grant of ADMIN to a group against a new linked member in
+  both orders (the grant reads the members only under the lock); the second waits on the lock and
+  is refused. A change of the public address is recounted at start-up and logged while anyone is
+  linked (`test_a_changed_address_with_people_linked_is_logged_at_start_up`).
+- **Locks of a finish.** A provider finish that uses a link takes the administrator-count lock
+  before the link's row lock, the order a withdrawal of the link keeps
+  (`test_a_provider_finish_takes_the_admin_lock_before_the_links_row`). A provider sign-in, a
+  recovery through the provider and an unlink lock the person's row and read it afresh before they
+  decide (`locked_principal`), so no session started during an unlink survives it
+  (`test_a_provider_sign_in_waits_for_an_unlink_and_gets_no_session`,
+  `test_an_unlink_waits_for_a_provider_sign_in_and_ends_its_session`,
+  `test_a_recovery_through_the_provider_waits_for_an_unlink`). `_complete` refuses an
+  administrator's recovery link of a person who linked since `redeem` looked
+  (`test_an_admins_recovery_link_of_someone_linked_meanwhile_needs_the_provider`). Link flows send
+  `max_age=0` with `prompt=login` and need a fresh `auth_time`, as provider step-up does
+  (`test_a_link_without_a_fresh_provider_sign_in_is_refused`).
 - **L4, linking keeps passkeys stored and ends no session**
   (`test_link_from_profile_links_and_keeps_passkeys_stored`).
 - **L5, recovery links.** An administrator's recovery link of a linked person answers 403
   `ProviderSignInRequired` at `/links/redeem`, stays usable, and works through the provider only as
   the same identity (`test_admin_recovery_link_for_linked_person_needs_the_provider`,
   `test_recovery_of_a_linked_person_needs_the_same_identity`); `/links/describe` says
-  `provider_only`. Of an unlinked person it may link them (`test_recovery_of_an_unlinked_person_may_link`).
+  `provider_only`. Of an unlinked person it may link them
+  (`test_recovery_of_an_unlinked_person_may_link`).
   A recovery through the provider ends the sessions and notifies as a passkey recovery does, and
   deletes no passkey. The operator's recovery link of a linked administrator unlinks them on the
   passkey path (`PRINCIPAL_OIDC_UNLINKED`, reason `operator_recovery`, an `oidc_unlinked` notice to
@@ -7078,9 +7366,11 @@ token window. Threat model: "OIDC sign-in (#32)".
   tokens as L6 does (`PAT_REVOKED`, `source: operator_recovery`, attributed to the operator), so no
   token outside the window works again once its person is unlinked
   (`test_operator_recovery_revokes_the_linked_persons_tokens`).
-- **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN and
-  step-up) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
-  oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`) and
+- **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN through
+  `authorize_admin_only` with `MANAGE_TOKEN`, as it revokes tokens, and step-up; `OidcLinkService`
+  is in the admin-only call-site check) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
+  oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`),
+  withdraws every open sign-in link of theirs (`test_unlink_withdraws_the_persons_open_links`) and
   clears the identity, in one transaction (`test_unlink_deletes_passkeys_revokes_tokens_ends_sessions`,
   `test_unlink_needs_step_up_and_admin`). Unlinking oneself is 409 (`test_unlinking_oneself_is_refused`).
 - **L7, the token window** (`sign_in.token_provider_window_days`, default 30, 1 to 365, changed with
@@ -7089,7 +7379,12 @@ token window. Threat model: "OIDC sign-in (#32)".
   with the next step, and the token is not revoked
   (`test_token_outside_the_window_is_401_and_not_revoked`, `test_a_provider_sign_in_reopens_the_window`,
   `test_window_change_applies_at_once`). Task and CI tokens are not personal tokens and are untouched
-  (`test_task_and_ci_tokens_ignore_the_window`); the bootstrap principal is never linked.
+  (`test_a_task_token_an_administrator_minted_ignores_the_window`,
+  `test_ci_trust_tokens_ignore_the_window`); the bootstrap principal is never linked. What a linked
+  person's own personal token made stops with the window too (review of #780): a task token minted
+  with it, and a session a local link started with it, which ends as `token_window`
+  (`within_token_window`; `test_a_task_token_minted_with_a_linked_persons_token_ends_with_the_window`,
+  `test_a_local_link_session_ends_with_the_window`).
 - **L8, one way in.** A passkey sign-in of a linked person verifies and then answers 403
   `ProviderSignInRequired`, audited through the refusal limiter (an unknown passkey still reads as
   today's 401); registering a passkey is refused the same way, also with a challenge issued before
@@ -7108,7 +7403,7 @@ token window. Threat model: "OIDC sign-in (#32)".
 - **Residuals:** a passkey disabled as a copy can take the last unlinked administrator (a security
   response, never refused); the operator's recovery is then the way in. A local sign-in link
   (`lakana server start --local`) still signs a linked person in, but only with their own personal
-  token, which the window limits.
+  token, within the window, and its session ends with it.
 
 ## OIDC sign-in (#32, PR 3)
 

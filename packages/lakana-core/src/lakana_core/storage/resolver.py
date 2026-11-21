@@ -627,7 +627,9 @@ class ResolvedStorage:
     storage: Storage
     file_io: FileIO
 
-    def table_location(self, ns: NamespacePath, table: str, table_id: uuid.UUID) -> str:
+    def table_location(
+        self, ns: NamespacePath, table: str, table_id: uuid.UUID, *, stored_name: bool = False
+    ) -> str:
         """Return the root location for a table's data and metadata.
 
         This is the choke point where a namespace and a table name become a
@@ -656,6 +658,11 @@ class ResolvedStorage:
         table_id
             The table's id, suffixed onto the directory name so each
             table's location is unique for the table's lifetime.
+        stored_name
+            `table` is the name of a dropped table the catalog still holds (a rebuild's
+            re-create, or one within its undo period), so it is not a new name and
+            `check_new_name` is skipped; `validate_path_component` still applies. Only
+            `CatalogService._prepare_table` passes it, after finding that table's tombstone.
 
         Returns
         -------
@@ -667,10 +674,11 @@ class ResolvedStorage:
         ValidationError
             If `table` is empty, whitespace-only, ``.``, ``..``, or contains
             ``.``, ``/`` or the unit separator, or ``%`` or a hidden character (only a new table
-            gets a location: `check_new_name`).
+            gets a location: `check_new_name`, unless `stored_name`).
         """
         validate_path_component(table, what="Table name")
-        check_new_name(table, what="Table name")
+        if not stored_name:
+            check_new_name(table, what="Table name")
         parts = "/".join(ns.parts)
         return f"{self.config.root.rstrip('/')}/{MANAGED_PREFIX}/{parts}/{table}-{table_id.hex}"
 

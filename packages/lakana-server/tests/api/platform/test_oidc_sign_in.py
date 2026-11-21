@@ -795,6 +795,17 @@ def test_a_provider_sign_in_is_no_step_up_touch(
 DESCRIBE = "/api/v1/sign-in/links/describe"
 
 
+def _now() -> int:
+    """Read the time as an ``auth_time``: a sign-in at the provider just now.
+
+    Returns
+    -------
+    int
+        Seconds since the epoch.
+    """
+    return int(datetime.now(UTC).timestamp())
+
+
 def _halves(url: str) -> tuple[str, str]:
     """Split a sign-in link into its public id and secret.
 
@@ -867,7 +878,7 @@ def test_invite_through_the_provider_signs_in_and_links(
     assert r.status_code == 200, r.text
     [flow] = _flows(client)
     assert (flow.purpose, flow.link_id is not None, flow.return_to) == ("invite", True, "/x")
-    code, state = fake.authorize(r.json()["authorization_url"])
+    code, state = fake.authorize(r.json()["authorization_url"], auth_time=_now())
     _callback(client, code=code, state=state)
     r = client.post(FINISH, json={})
     assert r.status_code == 200, r.text
@@ -918,7 +929,7 @@ def test_invite_withdrawn_after_start_creates_nobody(
 ) -> None:
     invite_id, public_id, secret = _invite(client)
     r = _start_with_link(client, "invite", public_id, secret)
-    code, state = fake.authorize(r.json()["authorization_url"])
+    code, state = fake.authorize(r.json()["authorization_url"], auth_time=_now())
     _callback(client, code=code, state=state)
     assert client.delete(f"/api/v1/invites/{invite_id}", headers=AUTH_HEADER).status_code == 204
     _refused(client.post(FINISH, json={}), "link_unusable")
@@ -936,11 +947,13 @@ def test_recovery_of_a_linked_person_through_the_provider(
     assert r.status_code == 201, r.text
     public_id, secret = _halves(r.json()["url"])
     r = _start_with_link(client, "recovery", public_id, secret)
-    code, state = fake.authorize(r.json()["authorization_url"], sub="someone-else")
+    code, state = fake.authorize(
+        r.json()["authorization_url"], sub="someone-else", auth_time=_now()
+    )
     _callback(client, code=code, state=state)
     _refused(client.post(FINISH, json={}), "identity_mismatch")
     r = _start_with_link(client, "recovery", public_id, secret)
-    code, state = fake.authorize(r.json()["authorization_url"])
+    code, state = fake.authorize(r.json()["authorization_url"], auth_time=_now())
     _callback(client, code=code, state=state)
     r = client.post(FINISH, json={})
     assert (r.status_code, r.json()["name"]) == (200, "alice"), r.text
@@ -1127,7 +1140,10 @@ def test_link_from_profile_links_and_keeps_passkeys_stored(
     assert r.status_code == 200, r.text
     [flow] = _flows(linking)
     assert (flow.purpose, flow.session_id is not None) == ("link", True)
-    assert _callback_to(linking, r.json()["authorization_url"], sub="bob-sub") == CONFIRMED
+    assert (
+        _callback_to(linking, r.json()["authorization_url"], sub="bob-sub", auth_time=_now())
+        == CONFIRMED
+    )
     r = linking.post(FINISH_IN_SESSION, headers=headers, json={})
     assert r.status_code == 200, r.text
     assert r.json()["return_to"] == "/me"
@@ -1168,7 +1184,7 @@ def test_link_finish_from_another_session_is_refused(
     _person_with_passkey(linking, "bob")
     headers = _in_session(linking, "bob", touched_at=clock.now)
     r = linking.post(LINK_START, headers=headers, json={})
-    _callback_to(linking, r.json()["authorization_url"], sub="bob-sub")
+    _callback_to(linking, r.json()["authorization_url"], sub="bob-sub", auth_time=_now())
     other = _in_session(linking, "bob", touched_at=clock.now)
     _refused(linking.post(FINISH_IN_SESSION, headers=other, json={}), "flow_expired")
     assert _person(linking, "bob").oidc_subject is None
@@ -1291,3 +1307,65 @@ def test_a_refused_flow_finishes_in_session_once(linking: TestClient, clock: Set
     _callback_to(linking, r.json()["authorization_url"], nonce="wrong")
     _refused(linking.post(FINISH_IN_SESSION, headers=headers, json={}), "token_invalid")
     _refused(linking.post(FINISH_IN_SESSION, headers=headers, json={}), "flow_expired")
+
+
+def test_every_link_flow_asks_the_provider_for_a_fresh_sign_in(
+    linking: TestClient, clock: SettableClock
+) -> None:
+    """An invite, a recovery link and a profile link send prompt=login; a sign-in does not."""
+
+    def prompt(url: str) -> list[str] | None:
+        """Read the prompt of an authorization URL.
+
+        Parameters
+        ----------
+        url
+            The URL.
+
+        Returns
+        -------
+        list of str or None
+            The values of ``prompt``.
+        """
+        return parse_qs(urlsplit(url).query).get("prompt")
+
+    _, public_id, secret = _invite(linking)
+    assert prompt(
+        _start_with_link(linking, "invite", public_id, secret).json()["authorization_url"]
+    ) == ["login"]
+    _link(linking, "alice")
+    r = linking.post("/api/v1/principals/alice/recovery-link", headers=AUTH_HEADER)
+    public_id, secret = _halves(r.json()["url"])
+    assert prompt(
+        _start_with_link(linking, "recovery", public_id, secret).json()["authorization_url"]
+    ) == ["login"]
+    _person_with_passkey(linking, "bob")
+    headers = _in_session(linking, "bob", touched_at=clock.now)
+    assert prompt(
+        linking.post(LINK_START, headers=headers, json={}).json()["authorization_url"]
+    ) == ["login"]
+    linking.cookies.clear()
+    assert prompt(_start(linking)) is None
+
+
+def test_a_link_without_a_fresh_provider_sign_in_is_refused(
+    linking: TestClient, fake: FakeProvider, clock: SettableClock
+) -> None:
+    """A provider may ignore prompt=login: an invite or a profile link checks auth_time."""
+    _, public_id, secret = _invite(linking)
+    r = _start_with_link(linking, "invite", public_id, secret)
+    query = parse_qs(urlsplit(r.json()["authorization_url"]).query)
+    assert (query["prompt"], query["max_age"]) == (["login"], ["0"])
+    code, state = fake.authorize(r.json()["authorization_url"], auth_time=_now() - 3600)
+    _callback(linking, code=code, state=state)
+    _refused(linking.post(FINISH, json={}), "auth_too_old")
+    assert "carol" not in {p.name for p in _all_people(linking)}
+    linking.cookies.clear()
+    _person_with_passkey(linking, "bob")
+    headers = _in_session(linking, "bob", touched_at=clock.now)
+    r = linking.post(LINK_START, headers=headers, json={})
+    _callback_to(linking, r.json()["authorization_url"], sub="bob-sub")
+    _refused(linking.post(FINISH_IN_SESSION, headers=headers, json={}), "auth_too_old")
+    assert _person(linking, "bob").oidc_subject is None
+    reasons = [e["reason"] for e in _events(linking, AuditEventType.SIGN_IN_OIDC_REFUSED)]
+    assert reasons == ["auth_too_old", "auth_too_old"]

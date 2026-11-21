@@ -4241,12 +4241,129 @@ def test_0087_on_postgres() -> None:
 
 
 def test_0088_on_postgres() -> None:
-    """0088 adds `cli_sign_in_grants` with unique code hashes, and drops it again."""
+    """0088 adds the nullable columns of what a failure concerns and two indexes; undone down."""
     revision_0087 = "431d39830234"
-    revision_0088 = "7c3e91a0b5d2"
+    revision_0088 = "95737c487bf3"
     with PostgresContainer("postgres:16", driver="pg8000") as pg:
         url = pg.get_connection_url()
         migrate.upgrade(url, revision_0087)
+        engine = sqlalchemy.create_engine(url)
+        columns = sqlalchemy.text(
+            "SELECT table_name, column_name, is_nullable, character_maximum_length"
+            " FROM information_schema.columns"
+            " WHERE column_name IN ('error_type', 'failure_connection')"
+            " ORDER BY table_name, column_name"
+        )
+        indexes = sqlalchemy.text(
+            "SELECT indexname FROM pg_indexes WHERE tablename = 'task_runs'"
+            " AND indexname IN ('ix_task_runs_failure_connection',"
+            " 'ix_task_runs_asset_finished_at') ORDER BY indexname"
+        )
+        with engine.connect() as conn:
+            assert conn.execute(columns).all() == []
+            assert conn.execute(indexes).all() == []
+        migrate.upgrade(url, revision_0088)
+        assert _alembic_version(engine) == revision_0088
+        with engine.connect() as conn:
+            assert [tuple(row) for row in conn.execute(columns)] == [
+                ("task_attempts", "error_type", "YES", 100),
+                ("task_attempts", "failure_connection", "YES", 63),
+                ("task_runs", "error_type", "YES", 100),
+                ("task_runs", "failure_connection", "YES", 63),
+            ]
+            assert conn.execute(indexes).scalars().all() == [
+                "ix_task_runs_asset_finished_at",
+                "ix_task_runs_failure_connection",
+            ]
+            partial = conn.execute(
+                sqlalchemy.text(
+                    "SELECT indexdef FROM pg_indexes"
+                    " WHERE indexname = 'ix_task_runs_failure_connection'"
+                )
+            ).scalar_one()
+            assert partial.endswith("WHERE (failure_connection IS NOT NULL)")
+        migrate.downgrade(url, revision_0087)
+        assert _alembic_version(engine) == revision_0087
+        with engine.connect() as conn:
+            assert conn.execute(columns).all() == []
+            assert conn.execute(indexes).all() == []
+        engine.dispose()
+
+
+def test_0089_on_postgres() -> None:
+    """0089 keys saved queries by their folded name, collated by code point, and indexes it.
+
+    An existing row gets its name's `str.casefold`; the column is required and collated ``"C"``,
+    so `ORDER BY name_key` is code-point order under the image's glibc collation. The downgrade
+    drops the index and the column and keeps the rows.
+    """
+    revision_0088 = "95737c487bf3"
+    revision_0089 = "7c1e5a9d3f20"
+    now = datetime(2026, 11, 20, 9, 0, tzinfo=UTC)
+    owner, environment_id = uuid.uuid4(), uuid.uuid4()
+    names = ("Straße", "a-b", "ab", "REVENUE")
+    insert = sqlalchemy.text(
+        "INSERT INTO saved_queries (id, environment_id, name, sql_text, visibility, owner_id, "
+        "private_owner_id, created_at, updated_at) VALUES (:id, :env, :name, 'SELECT 1', "
+        "'private', :owner, :owner, :now, :now)"
+    )
+    column = sqlalchemy.text(
+        "SELECT is_nullable, collation_name FROM information_schema.columns"
+        " WHERE table_name = 'saved_queries' AND column_name = 'name_key'"
+    )
+    definitions = sqlalchemy.text(
+        "SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'saved_queries'"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0088)
+        engine = sqlalchemy.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            for name in names:
+                conn.execute(
+                    insert,
+                    {
+                        "id": uuid.uuid4(),
+                        "env": environment_id,
+                        "name": name,
+                        "owner": owner,
+                        "now": now,
+                    },
+                )
+        with engine.connect() as conn:
+            assert conn.execute(column).all() == []
+        migrate.upgrade(url, revision_0089)
+        assert _alembic_version(engine) == revision_0089
+        with engine.connect() as conn:
+            assert tuple(conn.execute(column).one()) == ("NO", "C")
+            keys = conn.execute(
+                sqlalchemy.text("SELECT name_key FROM saved_queries ORDER BY name_key")
+            ).scalars()
+            assert list(keys) == sorted(n.casefold() for n in names)
+            found = dict(conn.execute(definitions).all())
+        assert found["ix_saved_queries_environment_visibility_name_key"].endswith(
+            "(environment_id, visibility, name_key)"
+        )
+        migrate.downgrade(url, revision_0088)
+        assert _alembic_version(engine) == revision_0088
+        with engine.connect() as conn:
+            assert conn.execute(column).all() == []
+            kept = conn.execute(sqlalchemy.text("SELECT name FROM saved_queries")).scalars()
+            assert sorted(kept) == sorted(names)
+            assert "ix_saved_queries_environment_visibility_name_key" not in dict(
+                conn.execute(definitions).all()
+            )
+        engine.dispose()
+
+
+def test_0090_on_postgres() -> None:
+    """0090 adds `cli_sign_in_grants` with unique code hashes, and drops it again."""
+    revision_0089 = "7c1e5a9d3f20"
+    revision_0090 = "7c3e91a0b5d2"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0089)
         engine = sqlalchemy.create_engine(url)
         tables = sqlalchemy.text(
             "SELECT count(*) FROM information_schema.tables WHERE table_name = 'cli_sign_in_grants'"
@@ -4257,15 +4374,15 @@ def test_0088_on_postgres() -> None:
         )
         with engine.connect() as conn:
             assert conn.execute(tables).scalar_one() == 0
-        migrate.upgrade(url, revision_0088)
-        assert _alembic_version(engine) == revision_0088
+        migrate.upgrade(url, revision_0090)
+        assert _alembic_version(engine) == revision_0090
         with engine.begin() as conn:
             assert conn.execute(tables).scalar_one() == 1
             conn.execute(insert, {"id": uuid.uuid4(), "hash": "b" * 64})
         with pytest.raises(IntegrityError), engine.begin() as conn:
             conn.execute(insert, {"id": uuid.uuid4(), "hash": "b" * 64})
-        migrate.downgrade(url, revision_0087)
-        assert _alembic_version(engine) == revision_0087
+        migrate.downgrade(url, revision_0089)
+        assert _alembic_version(engine) == revision_0089
         with engine.connect() as conn:
             assert conn.execute(tables).scalar_one() == 0
         engine.dispose()

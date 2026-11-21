@@ -10,6 +10,7 @@ import {
   aListedRun,
   aPage,
   aRun,
+  aListedSavedQuery,
   aSavedQuery,
   queryRoutes,
   RUN_ID,
@@ -328,8 +329,11 @@ describe("the Queries screen's work", () => {
         "GET /api/v1/saved-queries": ({ path }) => ({
           status: 200,
           body: path.includes("cursor=c-2")
-            ? { items: [aSavedQuery({ id: "b2", name: "Station ranking" })], next_cursor: null }
-            : { items: [aSavedQuery()], next_cursor: "c-2" },
+            ? {
+                items: [aListedSavedQuery({ id: "b2", name: "Station ranking" })],
+                next_cursor: null,
+              }
+            : { items: [aListedSavedQuery()], next_cursor: "c-2" },
         }),
       }),
     });
@@ -836,7 +840,7 @@ describe("the Queries screen's work", () => {
 
   it("after save as the address is the saved query's and the Saved list shows it", async () => {
     const created = aSavedQuery({ id: "7b8c9d0e", environment: "dev", name: "Late trains" });
-    let listed = [aSavedQuery()];
+    let listed = [aListedSavedQuery()];
     const shell = renderShell("/queries", {
       routes: routes({
         "GET /api/v1/saved-queries": () => ({
@@ -844,7 +848,7 @@ describe("the Queries screen's work", () => {
           body: { items: listed, next_cursor: null },
         }),
         "POST /api/v1/environments/dev/saved-queries": () => {
-          listed = [aSavedQuery(), created];
+          listed = [aListedSavedQuery(), aListedSavedQuery(created)];
           return { status: 201, body: created };
         },
         "GET /api/v1/environments/dev/saved-queries/7b8c9d0e": { status: 200, body: created },
@@ -1005,6 +1009,50 @@ describe("the Queries screen's work", () => {
       expect(screen.queryByRole("alert")).toBeNull();
     });
     expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
+    // The alert went with the focus; it moves to Run, as the run's own Try again does.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Run" })).toHaveFocus();
+    });
+  });
+
+  it("a saved query's Try again that fails again leaves the focus on Try again", async () => {
+    const answers: FakeAnswer[] = [
+      { status: 503, body: { type: "Unavailable", detail: "The server is busy." } },
+      { status: 503, body: { type: "Unavailable", detail: "Still busy." } },
+    ];
+    const { user } = renderShell(SAVED_PATH, {
+      routes: routes({ [`GET ${SAVED_ONE}`]: () => answers.shift() as FakeAnswer }),
+    });
+    const alert = await screen.findByRole("alert");
+
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+
+    expect(await screen.findByText("Still busy.")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("alert")).getByRole("button", { name: "Try again" }),
+    ).toHaveFocus();
+  });
+
+  it("a saved query's failed Try again moves no focus when the query opens later", async () => {
+    const answers: FakeAnswer[] = [
+      { status: 503, body: { type: "Unavailable", detail: "The server is busy." } },
+      { status: 503, body: { type: "Unavailable", detail: "Still busy." } },
+      { status: 200, body: aSavedQuery() },
+    ];
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`GET ${SAVED_ONE}`]: () => answers.shift() as FakeAnswer }),
+    });
+    const alert = await screen.findByRole("alert");
+    await shell.user.click(within(alert).getByRole("button", { name: "Try again" }));
+    await screen.findByText("Still busy.");
+
+    await act(() => shell.router.navigate("/queries"));
+    await act(() => shell.router.navigate(SAVED_PATH));
+
+    await waitFor(() => {
+      expect(document.querySelector(".queries-name")).toHaveTextContent(/^Daily sales$/);
+    });
+    expect(screen.getByRole("button", { name: "Run" })).not.toHaveFocus();
   });
 
   it("back at a new query no run shows, and the remembered environment is read again", async () => {

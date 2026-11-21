@@ -1329,11 +1329,20 @@ class Failure:
         One sentence: what happened.
     next_step
         One sentence: what to do about it.
+    connection
+        The connection the failure concerns: the task's code ended with an error of
+        `lakana.ingest` that names one the asset declares. `None` when it names none (or the
+        server does not say).
+    error_type
+        The class name of the exception a Python task's code ended with, such as
+        ``SourceRefused``; `None` for any other failure (or when the server does not say).
     """
 
     code: str
     cause: str
     next_step: str
+    connection: str | None = None
+    error_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1402,8 +1411,9 @@ class SavedQuery:
     name
         Its name; unique among its owner's saved queries in the environment.
     sql
-        Its SQL; `None` when the server left it out because you may not read it (an
-        administrator without `READ_QUERY_TEXT` on someone else's private query).
+        Its SQL; always `None` in the items of `list` and `iter`, which carry no SQL (read it
+        with `get`), and `None` from `get` when you may not read it (an administrator without
+        `READ_QUERY_TEXT` on someone else's private query).
     visibility
         ``private`` (only the owner) or ``everyone`` (whoever may query the environment).
     owner
@@ -2905,6 +2915,25 @@ class LastConnectionTest:
 
 
 @dataclass(frozen=True)
+class ConnectionRunFailure:
+    """The newest run that failed on a connection, while it is its asset's newest ending.
+
+    Parameters
+    ----------
+    run_id
+        The run; ``lakana runs show RUN_ID`` shows it.
+    asset
+        The task that failed.
+    finished_at
+        When it failed.
+    """
+
+    run_id: str
+    asset: str
+    finished_at: datetime
+
+
+@dataclass(frozen=True)
 class Connection:
     """A connection of an environment. Carries its secret's name, never a value.
 
@@ -2941,6 +2970,10 @@ class Connection:
         ``name_secret`` (naming a secret not bound to it, or a change that could send its
         secret somewhere new without new values); empty for a reader. The server decides every
         request again.
+    last_run_failure
+        The newest run that failed on it (its code ended with an error of `lakana.ingest` that
+        names it), after its last change and while it is its asset's newest ending; `None` when
+        there is none, or the server does not send it.
     """
 
     name: str
@@ -2955,6 +2988,7 @@ class Connection:
     environment: str | None = None
     last_test: LastConnectionTest | None = None
     actions: tuple[str, ...] = ()
+    last_run_failure: ConnectionRunFailure | None = None
 
 
 @dataclass(frozen=True)

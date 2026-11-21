@@ -61,6 +61,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.grants.admin import holds_instance_admin
+from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.service import (
     ISSUED_BY_ADMINS,
     active_instance_admin_ids,
@@ -68,9 +69,10 @@ from lakana_core.grants.service import (
     lapsed_issuer_reason,
 )
 from lakana_core.identifiers import HIDDEN_CHARACTER_CATEGORIES
+from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity
-from lakana_core.identity.oidc_links import OidcLinkService, is_linked
+from lakana_core.identity.oidc_links import OidcLinkService, is_linked, locked_principal
 from lakana_core.identity.sessions import (
     SessionService,
     StartedSession,
@@ -534,48 +536,6 @@ def name_unavailable(session: Session, name: str, *, now: datetime) -> str | Non
             "choose another name."
         )
     return None
-
-
-def withdraw_open_links(
-    session: Session, principal_id: uuid.UUID, *, now: datetime, reason: str
-) -> int:
-    """Withdraw every open link bound to a person, each with one audit event; the caller commits.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    principal_id
-        The person.
-    now
-        The withdrawal time.
-    reason
-        Why, for the audit log (``deactivated``, ``reactivated``).
-
-    Returns
-    -------
-    int
-        How many links this call withdrew.
-    """
-    withdrawn = session.execute(
-        update(SignInLink)
-        .where(
-            SignInLink.principal_id == principal_id,
-            SignInLink.used_at.is_(None),
-            SignInLink.withdrawn_at.is_(None),
-        )
-        .values(withdrawn_at=now, reserved_name=None)
-        .returning(SignInLink.id, SignInLink.kind)
-        .execution_options(synchronize_session="fetch")
-    ).all()
-    audit = AuditService(session)
-    for link_id, kind in sorted(withdrawn, key=lambda r: str(r[0])):
-        audit.record(
-            principal_id,
-            AuditEventType.SIGN_IN_LINK_WITHDRAWN,
-            detail={"kind": kind, "link_id": str(link_id), "reason": reason},
-        )
-    return len(withdrawn)
 
 
 def _state(row: SignInLink, now: datetime) -> LinkState:
@@ -1174,6 +1134,10 @@ class LinkService:
             # Not used: the same link still works through the provider.
             raise ProviderSignInRequired(PROVIDER_RECOVERY_MESSAGE)
         now = self._clock()
+        # Before the link's row lock, as `claim_for_provider` takes it: a deactivation of the
+        # link's person locks their row and then withdraws the link under this lock, and
+        # `_complete` locks the person's row after the claim (review of #780).
+        lock_admin_count(self._session)
         if not self._claim(row.id, now, peer=peer, user_agent=user_agent):
             self._session.rollback()
             self._session.refresh(row)
@@ -1293,6 +1257,9 @@ class LinkService:
         """
         row = self._session.get(SignInLink, link_id) if link_id is not None else None
         now = self._clock()
+        # Linking counts under the administrator-count lock, so take it before the link's row
+        # lock: a change that withdraws this link holds that lock first (`admin_lock`, order).
+        lock_admin_count(self._session)
         if (
             row is None
             or row.kind not in ISSUED_BY_ADMINS
@@ -1388,8 +1355,9 @@ class LinkService:
             principal = oidc.link(self._create_invitee(row), identity, via="invite")
         else:
             assert row.principal_id is not None  # nosec B101 -- only invites have none
-            principal = self._session.get(Principal, row.principal_id)
-            assert principal is not None  # nosec B101 -- a link's principal cascades with it
+            # Locked and read afresh: an unlink at the same moment either committed before (the
+            # person is then unlinked here) or waits for this session to exist and ends it.
+            principal = locked_principal(self._session, row.principal_id)
             if self._is_or_was_admin(principal) and not self._issued_by_operator(row):
                 raise _CloseLink(
                     PermissionDenied(
@@ -1658,6 +1626,9 @@ class LinkService:
             setup link has a passkey now, or the person of a recovery
             link holds or has held ADMIN (`Principal.held_admin`) and the link was not the
             operator's. The caller withdraws the link and raises the carried error.
+        ProviderSignInRequired
+            For an administrator's recovery link of a person who linked to the identity provider
+            since `redeem` looked; the link is left usable.
         """
         kind = row.kind
         if kind in ISSUED_BY_ADMINS:
@@ -1667,8 +1638,7 @@ class LinkService:
         else:
             assert row.principal_id is not None  # nosec B101 -- only invites have none
             principal_id = row.principal_id
-        principal = self._session.get(Principal, principal_id)
-        assert principal is not None  # nosec B101 -- a link's principal cascades with it
+        principal = locked_principal(self._session, principal_id)
         if kind == "local" and not self._local_mode:
             raise _CloseLink(
                 PermissionDenied(
@@ -1696,8 +1666,13 @@ class LinkService:
                 PermissionDenied(f"{not_operator_recovery(principal.name)} This link was closed."),
                 "became_admin",
             )
+        if kind == "recovery" and is_linked(principal) and not self._issued_by_operator(row):
+            # `redeem` refused this before the claim; the person may have linked since, and the
+            # row is read afresh under its lock. An administrator's link stays usable through
+            # the provider, so it is not closed.
+            raise ProviderSignInRequired(PROVIDER_RECOVERY_MESSAGE)
         if kind == "recovery" and is_linked(principal):
-            # Only the operator's link gets here (`redeem`): the break-glass path.
+            # Only the operator's link gets here: the break-glass path.
             OidcLinkService(
                 self._session, self._authz, clock=self._clock, bootstrap_name=self._bootstrap_name
             ).unlink_for_operator_recovery(principal, row.id, operator=self._issuer_ref(row))

@@ -151,4 +151,28 @@ describe("tokens", () => {
       expect(zeroed[name], name).toBe("0ms");
     }
   });
+
+  it("has one density, compact, and no density switch", () => {
+    const body = properties(block(tokens, ":root"));
+    expect(body["--row-height"]).toBe("32px");
+    expect(body["--grid-row-height"]).toBe("24px");
+    expect(body["--cell-line"]).toBe("var(--type-dense-line)");
+    expect(tokens).not.toMatch(/data-density/);
+  });
+
+  it("gives controls one height of at least the 24 px target size, 8 px apart", () => {
+    const body = properties(block(tokens, ":root"));
+    expect(Number.parseInt(body["--control-height"] ?? "", 10)).toBeGreaterThanOrEqual(24);
+    expect(body["--control-gap"]).toBe("var(--space-2)");
+  });
+
+  it("keeps the layout on the 4/8 px grid: gutter, panel gap, row and control heights", () => {
+    const body = properties(block(tokens, ":root"));
+    for (const name of ["--row-height", "--grid-row-height", "--control-height"]) {
+      expect(Number.parseInt(body[name] ?? "", 10) % 4, name).toBe(0);
+    }
+    for (const name of ["--page-gutter", "--panel-gap", "--control-gap"]) {
+      expect(body[name], name).toMatch(/^var\(--space-\d\)$/);
+    }
+  });
 });

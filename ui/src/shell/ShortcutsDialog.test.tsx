@@ -20,7 +20,7 @@ describe("ShortcutsDialog", () => {
     const terms = within(dialog)
       .getAllByRole("term")
       .map((term) => term.textContent);
-    expect(terms).toEqual(["Ctrl K", "Esc", "Tab, Shift Tab", "Enter"]);
+    expect(terms).toEqual(["Ctrl K", "Esc", "Tab, Shift Tab", "Enter", "Alt ←"]);
     const details = within(dialog)
       .getAllByRole("definition")
       .map((detail) => detail.textContent);
@@ -29,6 +29,7 @@ describe("ShortcutsDialog", () => {
       "Close a menu, a dialog or the tour.",
       "Move to the next or the previous control.",
       "Open the row that has focus.",
+      "Go back to the page before, such as a detail page's list.",
     ]);
   });
 

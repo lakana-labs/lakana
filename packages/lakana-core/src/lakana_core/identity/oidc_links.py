@@ -32,17 +32,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
-from lakana_core.auth import AuthorizationService, PrincipalRef, SessionContext
+from lakana_core.auth import Action, AuthorizationService, PrincipalRef, SessionContext
 from lakana_core.errors import ConflictError, NotFoundError, OidcSignInRefused
+from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.admin_lock import lock_admin_count
-from lakana_core.grants.break_glass import leaves_no_unlinked_admin, unlinked_admin_ids
+from lakana_core.grants.break_glass import breaks, unlinked_admin_ids
 from lakana_core.grants.service import active_instance_admin_ids
+from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
 from lakana_core.identity.sessions import (
     SessionService,
     principal_named,
-    require_principal_admin,
     require_step_up,
     token_window_ends_at,
     utc_now,
@@ -88,6 +89,60 @@ def in_browser_session(p: PrincipalRef) -> SessionContext:
     if p.session is None:
         raise ConflictError(SESSION_ONLY)
     return p.session
+
+
+def locked_principal(session: Session, principal_id: uuid.UUID) -> Principal:
+    """Read a principal afresh and lock its row until the transaction ends.
+
+    A provider sign-in, a recovery through the provider and an unlink all take this lock before
+    they decide whether the person is linked, so a sign-in racing an unlink either starts its
+    session before the unlink ends every session, or sees the person unlinked (review of #780).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal_id
+        The principal; it must exist.
+
+    Returns
+    -------
+    Principal
+        The row as committed now, never the session's cached copy.
+    """
+    return session.execute(
+        select(Principal)
+        .where(Principal.id == principal_id)
+        # FOR NO KEY UPDATE: it orders these three against each other, and still lets other
+        # transactions insert rows that refer to the person (an audit event, a passkey).
+        .with_for_update(key_share=True)
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+
+
+def linked_principal_for_sign_in(session: Session, identity: ProviderIdentity) -> Principal | None:
+    """Find the person linked to a verified identity and lock their row, for a sign-in.
+
+    Parameters
+    ----------
+    session
+        Database session; the caller starts the session in this transaction.
+    identity
+        The verified identity.
+
+    Returns
+    -------
+    Principal or None
+        The linked person, read afresh under the row lock, still linked to this identity;
+        `None` when nobody is (also when an unlink committed meanwhile).
+    """
+    found = principal_for(session, identity)
+    if found is None:
+        return None
+    locked = locked_principal(session, found.id)
+    if (locked.oidc_issuer, locked.oidc_subject) != (identity.issuer, identity.subject):
+        return None
+    return locked
 
 
 def is_linked(principal: Principal) -> bool:
@@ -293,9 +348,11 @@ class OidcLinkService:
             raise OidcSignInRefused("identity_taken")
         try:
             with self._session.begin_nested():
-                self._session.execute(
+                # Only while still unlinked: a link another finish committed meanwhile (this
+                # session may have read the row before it) is never overwritten.
+                linked = self._session.execute(
                     update(Principal)
-                    .where(Principal.id == principal.id)
+                    .where(Principal.id == principal.id, Principal.oidc_subject.is_(None))
                     .values(
                         oidc_issuer=identity.issuer,
                         oidc_subject=identity.subject,
@@ -304,9 +361,11 @@ class OidcLinkService:
                         last_provider_sign_in_at=self._clock(),
                     )
                     .execution_options(synchronize_session=False)
-                )
+                ).rowcount  # ty: ignore[missing-attribute]
         except IntegrityError:
             raise OidcSignInRefused("identity_taken") from None
+        if linked != 1:
+            raise OidcSignInRefused("already_linked")
         self._session.refresh(principal)
         AuditService(self._session).record(
             principal.id,
@@ -341,7 +400,7 @@ class OidcLinkService:
         if refusal is not None:
             return refusal
         admins = active_instance_admin_ids(self._session)
-        if principal.id in admins and leaves_no_unlinked_admin(
+        if principal.id in admins and breaks(
             self._session, before=admins, after=admins, linking=principal.id
         ):
             return OidcSignInRefused("last_unlinked_admin")
@@ -373,8 +432,9 @@ class OidcLinkService:
 
         In one transaction: the person's passkeys are deleted, every personal API token of theirs
         is revoked (with the task tokens minted from it), every session of theirs ends
-        (``oidc_unlinked``) and the provider identity is cleared. They come back with a recovery
-        link. To offboard someone, deactivate them instead.
+        (``oidc_unlinked``), every open sign-in link bound to them is withdrawn (an earlier
+        recovery link would bind an identity again) and the provider identity is cleared. They
+        come back with a new recovery link. To offboard someone, deactivate them instead.
 
         Parameters
         ----------
@@ -386,7 +446,8 @@ class OidcLinkService:
         Raises
         ------
         PermissionDenied
-            If `p` is not an instance administrator.
+            If `p` is not an instance administrator (`MANAGE_TOKEN` works only with the ADMIN
+            role).
         StepUpRequired
             Without a fresh step-up in a browser session.
         NotFoundError
@@ -394,11 +455,13 @@ class OidcLinkService:
         ConflictError
             For oneself (use a recovery link instead) and for a person who is not linked.
         """
-        require_principal_admin(
-            self._session, self._authz, p, doing="unlink a person from the identity provider"
-        )
+        # Unlinking revokes the person's tokens: administering tokens, an administrator's alone.
+        authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         require_step_up(p, now=self._clock())
-        target = principal_named(self._session, name)
+        # The administrator lock first, then the person's row, then their links: the order of
+        # a link's use (`lakana_core.grants.admin_lock`), so an unlink and a redeem take turns.
+        lock_admin_count(self._session)
+        target = locked_principal(self._session, principal_named(self._session, name).id)
         if target.id == p.id:
             raise ConflictError(
                 "You cannot unlink yourself: you would lose every way in at once. Ask another "
@@ -419,6 +482,10 @@ class OidcLinkService:
         ended = SessionService(self._session, self._authz, clock=self._clock).end_for_principal(
             target.id, "oidc_unlinked", commit=False
         )
+        # An open recovery link would bind an identity again: they come back with a new one.
+        links = withdraw_open_links(
+            self._session, target.id, now=self._clock(), reason="oidc_unlinked"
+        )
         issuer, subject = self._clear(target)
         audit.record(
             p.id,
@@ -432,6 +499,7 @@ class OidcLinkService:
                 "passkeys_deleted": len(passkeys),
                 "tokens_revoked": revoked,
                 "sessions_ended": ended,
+                "links_withdrawn": links,
             },
         )
         self._session.commit()

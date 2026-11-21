@@ -10,7 +10,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { GraphNodeOut } from "../../api";
-import { markedText, VisibleTspan } from "../../shell/VisibleText";
+import { markedName, markedText, VisibleTspan } from "../../shell/VisibleText";
 import { splitDotted, tablePath } from "../paths";
 import { boxLines, estimateWidth, fitText, type Measure, TEXT_X } from "./boxText";
 import { BOX_H, jobLabel, type LineageBox, type LineageLayout } from "./layout";
@@ -80,19 +80,19 @@ function BoxText({ box, measure }: BoxTextProps): JSX.Element {
         t={t}
         i18nKey={repository === null ? "table.lineage.asset" : "table.lineage.assetIn"}
         components={{
-          name: <VisibleTspan text={node.name} />,
+          name: <VisibleTspan text={node.name} name />,
           repository: <VisibleTspan text={repository ?? ""} />,
         }}
       />
     );
   } else if (node.kind === "connection") {
     const kind = kindName(t, node.connection_kind);
-    first = <VisibleTspan text={node.name} />;
+    first = <VisibleTspan text={node.name} name />;
     second = "word" in kind ? <>{kind.word}</> : <VisibleTspan text={kind.raw} />;
   } else {
     const place = splitDotted(node.name);
-    first = <VisibleTspan text={place === null ? node.name : place.name} />;
-    second = place === null ? null : <VisibleTspan text={place.namespace} />;
+    first = <VisibleTspan text={place === null ? node.name : place.name} name />;
+    second = place === null ? null : <VisibleTspan text={place.namespace} name />;
   }
   const [firstFit, secondFit] = fitted;
   return (
@@ -134,9 +134,9 @@ function boxTitle(t: TFunction, box: LineageBox): string {
     ];
   } else if (node.kind === "connection") {
     const kind = kindName(t, node.connection_kind);
-    lines = [markedText(node.name), "word" in kind ? kind.word : markedText(kind.raw)];
+    lines = [markedName(node.name), "word" in kind ? kind.word : markedText(kind.raw)];
   } else {
-    lines = [markedText(node.name)];
+    lines = [markedName(node.name)];
   }
   return lines.join("\n");
 }

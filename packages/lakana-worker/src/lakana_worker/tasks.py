@@ -750,6 +750,8 @@ def _finish(
         rand=engine.rand,
         error_message=outcome.message,
         failure_code=outcome.failure_code,
+        error_type=outcome.error_type,
+        failure_connection=outcome.failure_connection,
         rows_written=outcome.rows,
         on_committed=COMMITTED_BEFORE_RECORDED_MESSAGE,
         in_transaction=store_log_then,

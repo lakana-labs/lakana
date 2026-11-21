@@ -13,7 +13,7 @@ import type { ResultPageOut } from "../api";
 import "./data-grid.css";
 import "./gridStrings";
 import { isNumberType, type PreviewText, previewValue } from "./previewValue";
-import { markedText, VisibleText } from "./VisibleText";
+import { markedName, markedText, VisibleText } from "./VisibleText";
 
 /** Properties of {@link CellText}. */
 interface CellTextProps {
@@ -196,7 +196,7 @@ export function ResultGrid({ page, cells, label }: ResultGridProps): JSX.Element
                 textValue={one.name}
                 {...(numbers[at] === undefined ? {} : { className: numbers[at] })}
               >
-                <VisibleText text={one.name} />
+                <VisibleText text={one.name} name />
               </Column>
             ))}
           </TableHeader>
@@ -224,12 +224,12 @@ export function ResultGrid({ page, cells, label }: ResultGridProps): JSX.Element
         <section
           className="preview-value"
           aria-label={t("grid.valueOf", {
-            column: markedText(column.name),
+            column: markedName(column.name),
             row: chosen.row + 1,
           })}
         >
           <p className="second">
-            {t("grid.value")} · <VisibleText text={column.name} />
+            {t("grid.value")} · <VisibleText text={column.name} name />
           </p>
           <p
             className="preview-whole"

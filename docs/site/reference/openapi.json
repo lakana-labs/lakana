@@ -2959,7 +2959,7 @@
           "saved-queries"
         ],
         "summary": "List the saved queries of an environment you see",
-        "description": "You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. An administrator sees the `sql` of a private query that is someone else's only with `READ_QUERY_TEXT`; without it the item has no `sql` key. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.",
+        "description": "You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. The items have no `sql` key: read a saved query (`GET .../saved-queries/{saved_query_id}`) for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.",
         "operationId": "list_saved_queries_api_v1_environments__env__saved_queries_get",
         "parameters": [
           {
@@ -3530,7 +3530,7 @@
           "saved-queries"
         ],
         "summary": "List the saved queries of every environment you see",
-        "description": "Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. An administrator sees the `sql` of someone else's private query only with `READ_QUERY_TEXT`; without it the item has no `sql` key. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
+        "description": "Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. The items have no `sql` key: read a saved query in its environment for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
         "operationId": "list_all_saved_queries_api_v1_saved_queries_get",
         "parameters": [
           {
@@ -11657,7 +11657,7 @@
           "principals"
         ],
         "summary": "Unlink a person from the identity provider",
-        "description": "Deletes the person's stored passkeys, revokes all their personal API tokens and ends their sessions, in one step; they come back with a recovery link (`lakana recovery create`), and then sign in with a passkey again until they link once more. To offboard someone, deactivate them instead. Needs the ADMIN role on the instance and, from the web interface, a passkey touch (or provider step-up) within the last 15 minutes (403 `StepUpRequired`). Answers 404 for an unknown name and 409 for yourself or a person who is not linked.",
+        "description": "Deletes the person's stored passkeys, revokes all their personal API tokens, ends their sessions and withdraws their open sign-in links (an earlier recovery link too), in one step; they come back with a new recovery link (`lakana recovery create`), and then sign in with a passkey again until they link once more. To offboard someone, deactivate them instead. Needs the ADMIN role on the instance and, from the web interface, a passkey touch (or provider step-up) within the last 15 minutes (403 `StepUpRequired`). Answers 404 for an unknown name and 409 for yourself or a person who is not linked.",
         "operationId": "unlink_provider_api_v1_principals__name__oidc_link_delete",
         "parameters": [
           {
@@ -30880,6 +30880,16 @@
             },
             "type": "array",
             "title": "Actions"
+          },
+          "last_run_failure": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionRunFailureOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -30898,7 +30908,7 @@
           "actions"
         ],
         "title": "ConnectionOut",
-        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed.\nenvironment\n    The name of its environment.\nlast_test\n    Its newest test of any state (queued, running or done), or `null` if it was never\n    tested. A change keeps it: a test that finished before `updated_at` tested the\n    connection as it was. Every reader gets its `state`, `outcome` and `finished_at`; its\n    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` on\n    the environment, and for anyone else those keys are absent.\nactions\n    What the caller's rights allow on it: ``test``, ``update`` and ``delete`` with\n    `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound\n    to it, or a change that could send its secret somewhere new without new values) with\n    `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again."
+        "description": "Response body for a connection. Carries its secret's name, never a value.\n\nParameters\n----------\nname\n    Its name.\nkind\n    Its kind.\naddress\n    Its address, with defaults filled in.\nsettings\n    Its settings, with defaults filled in; a ``ca_certificate`` is shown as its SHA-256\n    fingerprints (``sha256:<hex>``), never as the certificate.\nsecret\n    The name of the secret it uses, or `null`.\ndeclared_by\n    The assets whose deployed version declares it; a delete is refused while any does.\ncreated_by\n    The name of the principal who created it.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed.\nenvironment\n    The name of its environment.\nlast_test\n    Its newest test of any state (queued, running or done), or `null` if it was never\n    tested. A change keeps it: a test that finished before `updated_at` tested the\n    connection as it was. Every reader gets its `state`, `outcome` and `finished_at`; its\n    `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` on\n    the environment, and for anyone else those keys are absent.\nactions\n    What the caller's rights allow on it: ``test``, ``update`` and ``delete`` with\n    `MANAGE_CONNECTION` on the environment, and ``name_secret`` (naming a secret not bound\n    to it, or a change that could send its secret somewhere new without new values) with\n    `MANAGE_SECRET` there too; `[]` for a reader. The server decides every request again.\nlast_run_failure\n    The newest run that failed on it (`ConnectionRunFailureOut`), for a caller who may read\n    the environment's runs; `null` when there is none, or the caller may not read it."
       },
       "ConnectionPage": {
         "properties": {
@@ -30982,6 +30992,32 @@
         ],
         "title": "ConnectionQueuedTestPage",
         "description": "One page of Test all: a test for each connection of a page of the environment's list.\n\nParameters\n----------\nitems\n    One entry per connection, newest connection first.\nnext_cursor\n    Pass back as `?cursor=` to test the next page; `null` on the last page."
+      },
+      "ConnectionRunFailureOut": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "asset": {
+            "type": "string",
+            "title": "Asset"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Finished At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "asset",
+          "finished_at"
+        ],
+        "title": "ConnectionRunFailureOut",
+        "description": "The newest run that failed on a connection, while it is its asset's newest ending.\n\nA task's failure names a connection when the asset's code ended with an error of\n``lakana.ingest`` that names one the asset declares. Only failures after the connection's\nlast change count, and a later success or failure of the same asset hides it.\n\nParameters\n----------\nrun_id\n    The run; ``GET /api/v1/environments/{env}/runs/{run_id}`` shows it.\nasset\n    The task that failed.\nfinished_at\n    When it failed."
       },
       "ConnectionTestOut": {
         "properties": {
@@ -32407,6 +32443,28 @@
           "next_step": {
             "type": "string",
             "title": "Next Step"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
           }
         },
         "type": "object",
@@ -32416,7 +32474,7 @@
           "next_step"
         ],
         "title": "FailureOut",
-        "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,\n    `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,\n    `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure\n    recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it."
+        "description": "Why a task or an attempt failed.\n\nParameters\n----------\ncode\n    A stable code: `build_failed`, `code_changed`, `secret_refused`, `no_runtime`,\n    `upstream_failed`, `upstream_missing`, `check_blocked`, `check_error`,\n    `checks_unfinished`, `query_invalid`, `permission_denied`, `not_found`, `memory`,\n    `timeout`, `cancelled`, `worker_lost`, `conflict` or `internal`; `unknown` for a failure\n    recorded before the codes existed\n    (never stored). A client treats a code it does not know like `internal`.\ncause\n    One sentence: what happened. The sentences may be reworded; the codes do not change.\nnext_step\n    One sentence: what to do about it.\nconnection\n    The connection the failure concerns: the task's code ended with an error of\n    ``lakana.ingest`` that names one the asset declares. `null` when it names none.\nerror_type\n    The class name of the exception a Python task's code ended with (``SourceRefused``,\n    ``KeyError``); `null` for any other failure and for one recorded before it was stored."
       },
       "GetStartedOut": {
         "properties": {
@@ -37928,7 +37986,7 @@
           "updated_at"
         ],
         "title": "SavedQueryOut",
-        "description": "A saved query as the caller sees it.\n\nParameters\n----------\nid\n    The saved query's id.\nenvironment\n    The name of its environment.\nname\n    Its name.\nsql\n    Its SQL. Absent, not `null`, when the caller may not read it: an administrator without\n    `READ_QUERY_TEXT` reading someone else's private query.\nvisibility\n    ``private`` or ``everyone``.\nowner\n    The owner's name, or `null` once the owner's principal is deleted.\nformer_owner\n    Whether the owner's principal is deleted; nobody may then update it.\nactions\n    What the caller may do with it: ``update`` and ``delete`` for the owner (``update`` only\n    while they hold `SUBMIT_QUERY` there), ``delete`` for an administrator who is not the\n    owner, none for anyone else.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed."
+        "description": "A saved query as the caller sees it.\n\nParameters\n----------\nid\n    The saved query's id.\nenvironment\n    The name of its environment.\nname\n    Its name.\nsql\n    Its SQL. Absent, not `null`, in a list's items, and when the caller may not read it: an\n    administrator without `READ_QUERY_TEXT` reading someone else's private query.\nvisibility\n    ``private`` or ``everyone``.\nowner\n    The owner's name, or `null` once the owner's principal is deleted.\nformer_owner\n    Whether the owner's principal is deleted; nobody may then update it.\nactions\n    What the caller may do with it: ``update`` and ``delete`` for the owner (``update`` only\n    while they hold `SUBMIT_QUERY` there), ``delete`` for an administrator who is not the\n    owner, none for anyone else.\ncreated_at\n    When it was created.\nupdated_at\n    When it was last changed."
       },
       "SavedQueryPageOut": {
         "properties": {
