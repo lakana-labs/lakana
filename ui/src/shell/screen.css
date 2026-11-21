@@ -1,11 +1,38 @@
 /* The parts every screen shares: the page head with its one action, tabs, lists, panels, dialogs
-   and fields. */
+   and fields. One density, compact (#782): the sizes come from tokens.css. */
+
+/* The title at the top left, the one primary action at the top right, centred on the title's
+   line; on a narrow screen the action wraps under it. */
 .page-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-2);
+}
+
+/* Controls side by side (buttons, a field and its button): one height, 8 px apart, wrapping on a
+   narrow screen. A toolbar is the same row with its search on the left and the rest pushed right
+   (.toolbar-end). */
+.button-row,
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--control-gap);
+}
+
+.toolbar {
+  margin: 0 0 var(--space-3);
+}
+
+.toolbar-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--control-gap);
+  margin-left: auto;
 }
 
 /* The breadcrumb above a detail page's heading; it wraps rather than scroll at 320 px. */
@@ -44,7 +71,7 @@
 .tabs {
   display: flex;
   gap: var(--space-5);
-  margin: 0 0 var(--space-5);
+  margin: 0 0 var(--space-4);
   border-bottom: 1px solid var(--color-line);
 }
 
@@ -60,27 +87,39 @@
   color: var(--color-text);
 }
 
+/* A list spans the full width of its place; one hairline between rows, no stripes. */
 .list {
   width: 100%;
-  margin: 0 0 var(--space-5);
+  margin: 0 0 var(--space-4);
   border-collapse: collapse;
 }
 
+/* Column heads: small, muted labels on one line, as high as a row. */
 .list th {
-  padding: var(--space-2) var(--space-3);
+  height: var(--row-height);
+  padding: 0 var(--space-3);
   border-bottom: 1px solid var(--color-line);
   color: var(--color-text-muted);
   font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
   font-weight: var(--type-label-weight);
   text-align: left;
+  white-space: nowrap;
 }
 
 /* 24 px between columns: a right-aligned number never meets the text after it. */
 .list td {
+  box-sizing: border-box;
   height: var(--row-height);
   padding: var(--space-1) var(--space-3);
   line-height: var(--cell-line);
   border-bottom: 1px solid var(--color-line);
+}
+
+/* A list whose rows hold buttons: every row as high as a button and its padding, so a row
+   without one (a protected environment's connection) is not lower than the rest. */
+.list:has(td .button) td {
+  height: calc(var(--control-height) + 2 * var(--space-1));
 }
 
 .list .number {
@@ -110,6 +149,20 @@ a.row-name {
   color: var(--color-accent);
 }
 
+/* A name in a list stays on one line: past --name-width it ends with an ellipsis, and the shell's
+   tooltip (shell/TruncationTip.tsx) shows it whole on hover and on focus. Its text is whole for
+   a screen reader. Any other cut text takes .truncate. */
+.list .row-name,
+.truncate {
+  display: inline-block;
+  /* Half the window at most, so a narrow screen (320 px) cuts a name inside its panel too. */
+  max-width: min(var(--name-width), 50vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
 a.row-name::after {
   content: "";
   position: absolute;
@@ -137,9 +190,61 @@ tr:hover a.row-name {
   overflow-wrap: normal;
 }
 
+/* A state as a small pill: its glyph and its word on the state's tinted ground (StatusLabel).
+   The word keeps sentence case and the label step; the corners are a control's, since only a
+   person is round. A pill sits on the line of the text beside it. */
+.pill {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 20px;
+  padding: 0 var(--space-2) 0 var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+  font-weight: var(--type-label-weight);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.pill-ok {
+  background: var(--color-ok-bg);
+  color: var(--color-ok);
+}
+
+.pill-bad {
+  background: var(--color-bad-bg);
+  color: var(--color-bad);
+}
+
+.pill-warn {
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+}
+
+.pill-accent {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+}
+
+/* Queued, cancelled and upstream failed: no colour to claim, a hairline instead. */
+.pill-neutral {
+  border-color: var(--color-line);
+  color: var(--color-text-muted);
+}
+
+@media (forced-colors: active) {
+  .pill {
+    border-color: CanvasText;
+  }
+}
+
 .second,
 .chevron {
   display: block;
+  line-height: var(--type-dense-line);
   color: var(--color-text-muted);
   font-size: var(--type-dense-size);
 }
@@ -191,7 +296,8 @@ tr:hover .chevron {
 }
 
 .field input {
-  min-height: 32px;
+  box-sizing: border-box;
+  min-height: var(--control-height);
   max-width: 320px;
   padding: 0 var(--space-2);
   border: 1px solid var(--color-edge);
@@ -207,7 +313,7 @@ tr:hover .chevron {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 32px;
+  min-height: var(--control-height);
 }
 
 .radio::before {
@@ -256,6 +362,79 @@ tr:hover .chevron {
   background: var(--color-surface);
 }
 
+/* Panels stacked on a page: --panel-gap apart, more than the space inside a panel's rows. */
+.panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--panel-gap);
+  min-width: 0;
+}
+
+/* A panel's head: its title on the left, its own actions (Refresh, Edit) on the right, on one
+   line; a muted subtitle may sit under the title. */
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--control-gap);
+  margin: 0 0 var(--space-3);
+}
+
+.panel-title {
+  margin: 0;
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.panel-subtitle {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+}
+
+/* A dashboard panel (Home's attention panel, #785): a flat panel whose head carries a title and a
+   subtitle ("Recently started · top 5"), at most five rows with their state on the right, and a
+   link on to the full list at its foot. */
+.dashboard-panel .list {
+  margin: 0;
+}
+
+.panel-foot {
+  margin: var(--space-3) 0 0;
+}
+
+.panel-foot a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.panel-foot a:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+/* Facts as name and value: the name muted, both on one baseline, the names in one column. */
+.fact-list {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.fact-list dt {
+  color: var(--color-text-muted);
+}
+
+.fact-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Inside a panel a list sits closer to what follows it than panels sit to each other. */
 .flat-panel .list {
   margin-bottom: var(--space-3);
@@ -272,10 +451,15 @@ tr:hover .chevron {
   min-height: 0;
 }
 
-/* Narrow screens: less padding, so a table inside keeps its words whole. */
+/* Narrow screens: less padding, so a table inside keeps its words whole, and a column head may
+   wrap, so a list that does not scroll in its own region stays inside its panel at 320 px. */
 @media (max-width: 639.98px) {
   .flat-panel {
     padding: var(--space-3);
+  }
+
+  .list th {
+    white-space: normal;
   }
 }
 
@@ -292,10 +476,6 @@ tr:hover .chevron {
 .list-scroll:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
-}
-
-.list-scroll .row-name {
-  overflow-wrap: anywhere;
 }
 
 /* Static blocks, no motion: the rows' height, so nothing jumps when the page arrives. */

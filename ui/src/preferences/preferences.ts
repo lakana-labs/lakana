@@ -1,14 +1,11 @@
 /**
- * Personal preferences (theme, density, language), kept in the browser's local storage.
+ * Personal preferences (theme, language), kept in the browser's local storage.
  *
  * @packageDocumentation
  */
 
 /** The colour theme: the system's, or one the user chose. */
 export type Theme = "system" | "light" | "dark";
-
-/** The density of lists: roomy by default, compact as a personal choice. */
-export type Density = "roomy" | "compact";
 
 /** The interface language; English is the only one so far. */
 export type Language = "en";
@@ -17,8 +14,6 @@ export type Language = "en";
 export interface Preferences {
   /** The colour theme. */
   readonly theme: Theme;
-  /** The density of lists. */
-  readonly density: Density;
   /** The interface language. */
   readonly language: Language;
 }
@@ -26,7 +21,6 @@ export interface Preferences {
 /** What a person gets before choosing anything, and per field whenever a stored value is bad. */
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: "system",
-  density: "roomy",
   language: "en",
 };
 
@@ -34,7 +28,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
 export const PREFERENCES_KEY = "lakana.preferences";
 
 const THEMES: readonly Theme[] = ["system", "light", "dark"];
-const DENSITIES: readonly Density[] = ["roomy", "compact"];
 const LANGUAGES: readonly Language[] = ["en"];
 
 /**
@@ -65,7 +58,8 @@ export function browserStorage(): Storage | null {
 
 /**
  * Reads the stored preferences, falling back to the default per field: a value that is
- * missing, corrupt, from an older version or unreadable never crashes the interface.
+ * missing, corrupt, from an older version or unreadable never crashes the interface. A
+ * `density` an older version stored is ignored: there is one density, compact.
  *
  * @param storage - Where the preferences are kept, or null when there is no storage.
  * @returns The preferences.
@@ -81,7 +75,6 @@ export function readPreferences(storage: Storage | null): Preferences {
     typeof stored === "object" && stored !== null ? (stored as Record<string, unknown>) : {};
   return {
     theme: pick(THEMES, fields["theme"], DEFAULT_PREFERENCES.theme),
-    density: pick(DENSITIES, fields["density"], DEFAULT_PREFERENCES.density),
     language: pick(LANGUAGES, fields["language"], DEFAULT_PREFERENCES.language),
   };
 }
@@ -152,7 +145,7 @@ export function fadeOnSystemThemeChange(
 
 /**
  * Applies the preferences to the document root: `data-theme` only for a chosen light or dark
- * theme (the system theme leaves it to `prefers-color-scheme`), `data-density` and `lang`. A
+ * theme (the system theme leaves it to `prefers-color-scheme`) and `lang`. A
  * change of `data-theme` fades the colours; the first paint and an unchanged theme do not.
  *
  * @param root - The `<html>` element.
@@ -167,6 +160,5 @@ export function applyPreferences(root: HTMLElement, value: Preferences): void {
   } else {
     root.setAttribute("data-theme", value.theme);
   }
-  root.setAttribute("data-density", value.density);
   root.lang = value.language;
 }

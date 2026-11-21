@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { MACHADO_2009, simulate, type Vision, VISIONS } from "../test/colour-vision";
 import { luminanceOf, PALETTES, ratio } from "../test/palette";
 import { StatusGlyph } from "./StatusGlyph";
+import { PILL_TONES } from "./StatusLabel";
 import { STATUS_KINDS, type StatusKind } from "./status";
 
 // The glyphs' colour checks through simulated colour vision (docs/site/explanation/
@@ -17,6 +18,20 @@ import { STATUS_KINDS, type StatusKind } from "./status";
 
 // Vitest hands `?raw` CSS imports back empty, so the file is read directly.
 const statusCss = readFileSync(resolve(import.meta.dirname, "status.css"), "utf8");
+const screenCss = readFileSync(resolve(import.meta.dirname, "../shell/screen.css"), "utf8");
+
+/**
+ * The tinted ground of a state's pill, as screen.css's `.pill-<tone>` sets it; none for a pill
+ * without a tint (the glyph then stands on the surface around it, which the checks above cover).
+ *
+ * @param kind - The state.
+ * @returns The background token, or null.
+ */
+function pillGround(kind: StatusKind): string | null {
+  const rule =
+    new RegExp(`\\.pill-${PILL_TONES[kind]}\\s*\\{([^}]*)\\}`).exec(screenCss)?.[1] ?? "";
+  return /background:\s*var\((--[\w-]+)\)/.exec(rule)?.[1] ?? null;
+}
 
 /** The surfaces a glyph is drawn on. */
 const BACKGROUNDS = ["--color-ground", "--color-surface", "--color-sunk", "--color-float"];
@@ -164,6 +179,39 @@ describe("the status glyphs through simulated colour vision", () => {
       }
     },
   );
+
+  it("tints the pills of succeeded, failed, warning and running, and only those", () => {
+    expect(STATUS_KINDS.filter((kind) => pillGround(kind) !== null)).toEqual([
+      "succeeded",
+      "failed",
+      "warning",
+      "running",
+    ]);
+  });
+
+  it.each(CASES)("each glyph stays at 3:1 on its pill's tint (%s, %s)", (mode, vision) => {
+    const palette = PALETTES[mode] ?? {};
+    for (const kind of STATUS_KINDS) {
+      const ground = pillGround(kind);
+      if (ground === null) {
+        continue;
+      }
+      expect(
+        seen(mode, vision, TOKENS[kind], ground),
+        `${kind} on ${ground}`,
+      ).toBeGreaterThanOrEqual(3);
+      if (kind === "running") {
+        const faded = over(palette[TOKENS.running] ?? "", palette[ground] ?? "", pulseLow());
+        expect(
+          ratio(
+            luminanceOf(simulate(faded, vision)),
+            luminanceOf(simulate(palette[ground] ?? "", vision)),
+          ),
+          `running at its pulse's lowest on ${ground}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
 
   it.each(CASES)("each knock-out mark stays at 3:1 on its glyph (%s, %s)", (mode, vision) => {
     for (const kind of KNOCKED_OUT) {

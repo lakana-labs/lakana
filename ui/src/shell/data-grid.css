@@ -1,5 +1,5 @@
 /* The data grid: rows of a table's data (a table's Preview, later query results). Denser than a
-   list, because people scan it rather than read it: 32 px rows in roomy, 26 px in compact,
+   list, because people scan it rather than read it: 24 px rows (--grid-row-height),
    smaller cell padding, every value on one line and cut with an ellipsis (the Value panel shows
    it whole). Numbers sit on the right in tabular figures. The header row and the gutter of row
    numbers stay in view while the grid scrolls both ways inside its own region, so the page never
