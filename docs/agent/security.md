@@ -4456,8 +4456,21 @@ own process opens no DuckDB connection and imports no `duckdb`.
   find nothing and try to download `httpfs`; it is told the worker's `~/.duckdb/extensions`
   instead (the image fills it at build time, local mode on the first query), so it loads the
   extension without network access. Then `allow_community_extensions = false` and
-  `allow_extension_repositories = 'forbidden'`: the default `undecided` may still change to
-  `allowed` at run time, `forbidden` may not and refuses `CREATE EXTENSION REPOSITORY`. All
+  `allow_extension_repositories = 'forbidden'`: the default (`undecided` on 2.0.0, which may
+  still change to `allowed` at run time; `hosts` on 2.0.1, under which `CREATE EXTENSION
+  REPOSITORY <host>`, new syntax in 2.0.1, adds a repository by its host name) can be loosened
+  or used, `forbidden` cannot change and refuses `CREATE EXTENSION REPOSITORY` in every form
+  (2.0.1: "allow_extension_repositories is 'forbidden', which does not allow adding any
+  repository"). On the configured connection that check is the third layer, and DuckDB 2.0.1
+  never reaches it: external access is off, so it first fails to open the repository file under
+  `HOME` (`Permission Error: Cannot access file ".../extension_repositories/<host>.duckdb_extension.repo.json"`),
+  and behind that the lock refuses adding or dropping a repository.
+  `test_no_setting_can_be_changed_once_configured` pins that the configured connection refuses
+  the host form and the move back to `hosts` or `allowed` (whichever layer answers);
+  `test_forbidden_alone_refuses_an_extension_repository` pins `forbidden` by itself, on a
+  connection with external access on and no lock, by its message, with nothing written under
+  `HOME` (under the default `hosts` the statement installs `httpfs` and fetches
+  `https://<host>/.well-known/duckdb-extension-repo.json`). All
   three read back in `test_the_connection_holds_no_credential_and_loads_nothing_by_itself`, and
   in a real child in `test_a_child_reads_back_the_settings_duckdb_2_names_differently`.
   `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`, `duckdb` or `none`) changes
@@ -4598,12 +4611,20 @@ own process opens no DuckDB connection and imports no `duckdb`.
   (`http_retries`) still repeat the handshake inside the one attempt.
 - **What allow-list mode still leaves open** (reachable only past the guard; the guard is the
   first layer, credential scoping the structural one):
-  - **The whole store host:port, not just the prefix**, for SQL that spells a literal URL: a
-    `..` or `%2e%2e` segment passes DuckDB's string check (the HTTP client normalises `..` and
-    asks for the other path). Without a signature the store answers 403, so what remains is what
-    it serves without authentication on that port: anonymous-readable buckets or objects, and
-    unauthenticated endpoints on the S3 port. AWS virtual-host style confines this to the
-    bucket's host. Pinned by `test_known_residual_a_literal_dotdot_reaches_the_same_server`.
+  - **Closed by DuckDB 2.0.1: the whole store host:port, not just the prefix**, for SQL that
+    spells a literal URL. On 2.0.0 a `..` or `%2e%2e` segment passed DuckDB's string check (the
+    HTTP client normalised `..` and asked for the other path; without a signature the store
+    answers 403, so the reach was what it serves without authentication on that port). 2.0.1
+    refuses such a URL (`..`, `./..`, `%2e%2e`, `%2E%2E`) with a `Permission Error` before any
+    request, reported as `invalid` with the fixed text, and the worker requires
+    `duckdb>=2.0.1` for it. Pinned by `test_a_literal_dotdot_is_refused_and_reaches_no_server`
+    (red on 2.0.0; it replaced `test_known_residual_a_literal_dotdot_reaches_the_same_server`).
+    Not in DuckDB's release notes; found when the pinned residual failed on 2.0.1. "Dot
+    segment" is meant as RFC 3986 says: `..;` (`t1/..;/t2/a.parquet`) is no dot segment, passes
+    2.0.1, and reaches the store unchanged. S3 and SeaweedFS take the path literally, so it stays
+    inside the prefix there; a front end that strips `;` path parameters before normalising (as
+    Tomcat-style servers do) would resolve it to `t2`. Not a concern for the stores Lakana
+    supports, but an operator who puts such a proxy in front of the store reopens the residual.
   - **Unsigned requests to the allowed prefixes**: objects of a table nested in another's
     location; the same 403 limit.
   - **Redirects are followed.** httpfs follows a 3xx from an allowed URL to another host
@@ -4659,7 +4680,8 @@ so too.
 `_BLACKLISTED_FUNCTIONS` covers every file-reading, SQL-evaluating, or
 secret-revealing DuckDB table function found by inspecting DuckDB 1.5.5's function list,
 swept again on 2.0.0 (a diff of `duckdb_functions()`: 225 names new, the 18 new table
-functions refused by the allow-list below, the scalars read one by one)
+functions refused by the allow-list below, the scalars read one by one) and on 2.0.1 (see
+"The 2.0.1 sweep" below)
 — `query`/`query_table`/
 `json_execute_serialized_sql` each evaluate a string argument as SQL/a table reference
 (`json_execute_serialized_sql` takes `json_serialize_sql`'s own output, so a query naming
@@ -4702,7 +4724,7 @@ catalog instead" is no next step for them.
 error points at the SQL the function stands for (`CAST`, `BETWEEN`). Like every entry, the
 name is compared in lower case after sqlglot has removed quotes and any catalog or schema
 qualifier, so `"SETVAL"(…)`, `main.setval(…)` and the method form `'s'.setval(…)` are refused
-alike. This is a reference list confirmed against DuckDB 2.0.0, not a completeness guarantee — DuckDB adds table functions across
+alike. This is a reference list confirmed against DuckDB 2.0.0 and 2.0.1, not a completeness guarantee — DuckDB adds table functions across
 releases, and a future one in any of these categories (file-reading, SQL-evaluating,
 secret-revealing, introspecting, statistics-reading or state-changing) needs adding here as
 it's found.
@@ -4712,6 +4734,57 @@ any table function except the generators in `_ALLOWED_TABLE_FUNCTIONS` (`range`,
 `generate_series`, `unnest`) in any FROM-item position (`FROM fn()`, `LATERAL fn()`, `TABLE(fn())`),
 so a function DuckDB adds later is refused by default.
 `extract_table_refs` never reports a function call as a table.
+
+**The 2.0.1 sweep** (2026-11-21, the lock's move from 2.0.0 to 2.0.1). `duckdb_functions()`,
+`duckdb_settings()`, `duckdb_keywords()`, `duckdb_types()` and `duckdb_extensions()` of both
+versions, each with `httpfs` loaded, were diffed. Functions: 3,233 rows on 2.0.0, 3,327 on
+2.0.1; five names new, none gone. The four new table functions are refused by the allow-list:
+`parquet_page_index` (reads a Parquet file's page index, each page's min and max; also listed in
+`_BLACKLISTED_FUNCTIONS` and `_READER_NAMES`, with the metadata family), `duckdb_live_query_metrics`
+(the connection's I/O and memory counters; listed with the introspection functions), and
+`add_grammar_extension`/`remove_grammar_extension` (switch a parser grammar extension on or off
+for later statements; left to the allow-list like 2.0.0's external-resource functions). Past the
+guard the lock is the layer that holds: both write the setting `active_grammar_extensions`, and
+on the configured connection DuckDB refuses them with "Cannot change configuration option
+"active_grammar_extensions" - the configuration has been locked" before it looks the extension
+up (`test_a_grammar_extension_cannot_be_switched_once_configured`); besides, the child runs one
+statement and registers no grammar extension. The fifth, the `pg_catalog` macro
+`map_type_id_to_pg_oid`, is a `CASE` over type ids and stays allowed. The other changed rows are
+new `TIMESTAMP_S`/`_MS`/`_NS`/`TIMESTAMPTZ_NS` overloads, stability labels
+(`CONSISTENT_WITHIN_QUERY` on time-zone arithmetic), `fmod` turned from a macro into a scalar,
+new options of the file readers (already refused) and a `type` argument of
+`duckdb_external_resources` (refused). No new lambda-taking function (`_LAMBDA_FUNCTIONS`
+unchanged), no keyword change; one type, `PARQUET_VARIANT`. Settings: seven no longer listed in
+`duckdb_settings()` (`error_on_division_by_zero`, `regex_match_operator_semantics`,
+`table_function_identifier_conversion`, `legacy_disable_null_type`, `delim_join_as_cte`,
+`experimental_metadata_reuse`, `force_column_metadata_reuse`) but still readable, settable before
+the lock and refused after it, like `lambda_syntax` on 2.0.0; `logging_storage` is now listed as
+`logging_sink` (both names locked); new `http_retry_quota_throttled`,
+`http_retry_throttled_wait_ms`, `parquet_can_have_nan`, `parquet_use_page_index` and
+`s3_use_global_endpoint` (all refused after the lock); `allow_extension_repositories` changed as
+described above. What DuckDB enforces changed once, for the better: a literal URL with a dot
+segment is refused (see "Closed by DuckDB 2.0.1" under "What allow-list mode still leaves open").
+Otherwise as on 2.0.0: with external access off,
+`parquet_page_index` of a file outside the allowed paths is a `Permission Error`, `LOAD` of
+`glue` or `legacy_parser` (new default extensions in 2.0.1) is refused, and `CREATE SECRET (TYPE
+http, HTTP_PROXY …)` still succeeds on 2.0.1 (DuckDB reverted a change that would have refused it
+before the release; the child refuses it as a statement that is not one `SELECT`). The function diff was
+repeated with the iceberg, delta, ducklake, glue, aws, azure, avro, sqlite, postgres, mysql,
+spatial, fts, vortex and excel extensions installed and loaded in a scratch environment (3,665
+rows on 2.0.0, 3,816 on 2.0.1). Their new table functions (Iceberg `iceberg_partitions`,
+`iceberg_schemas`, `iceberg_expire_snapshots`; Glue `glue_get_partition_response`,
+`glue_repair_table`, `glue_requests`; the aws extension's `s3_*`, `s3tables_*`,
+`aws_system_table(s)`, `aws_system_table_families` and `__aws__*`; `read_single_avro_file`) are
+refused by the allow-list (`__aws__*` also by the `__` prefix). The readers among them,
+`iceberg_partitions`, `iceberg_schemas` and `aws_system_table` (an Iceberg scan), went into
+`_READER_NAMES` so the refusal says they reach data; the writing and managing ones keep the
+"check the name" message, as 2.0.0's `iceberg_rewrite_data_files` and `glue_*` did. Their new
+scalars (`ST_AsGrid`, `fts_analyze_pattern`, `fts_near_tf`, `ducklake_unreadable_macro_default`)
+and the window functions `ST_ClusterDBSCAN`/`ST_ClusterKMeans` belong to extensions the query
+process never loads; none matches the `SQL_RUNNING_FUNCTIONS` criterion. One behaviour
+change touched a test: 2.0.1's profiler writes `profile.json` for a failed statement too (2.0.0
+only for one that succeeded), so a query that ran out of memory without spilling leaves that file,
+and nothing else, in its temp directory.
 
 **Lambdas are re-spelled, not passed through.** DuckDB 2.0 refuses the arrow lambda
 (`x -> x + 1`), so `query_rewrite._render` marks every `exp.Lambda` for sqlglot's keyword form

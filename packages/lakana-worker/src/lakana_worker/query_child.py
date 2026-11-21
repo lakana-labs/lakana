@@ -46,9 +46,14 @@ Why each configuration statement is there, and why their order matters:
    download the extension for every query, and fail without network access. DuckDB 2 takes a
    list here (a string fails the cast to ``VARCHAR[]``).
 2. ``allow_community_extensions = false`` and ``allow_extension_repositories = 'forbidden'``
-   (``undecided``, the default, may still change to ``allowed`` at run time; ``forbidden`` may
-   not, and refuses ``CREATE EXTENSION REPOSITORY``); then ``INSTALL``/``LOAD httpfs``, which
-   need the extension directory, before external access is switched off.
+   (the default, ``undecided`` on 2.0.0 and ``hosts`` on 2.0.1, may still be loosened or, on
+   2.0.1, lets ``CREATE EXTENSION REPOSITORY <host>`` add a repository; ``forbidden`` may not
+   change, and refuses ``CREATE EXTENSION REPOSITORY`` in every form). On the configured
+   connection the statement meets two other layers first: with external access off DuckDB
+   cannot open the repository file under ``HOME`` (a ``Permission Error``), and the lock
+   refuses adding or dropping a repository; ``forbidden`` is the third; then
+   ``INSTALL``/``LOAD httpfs``, which need the extension directory, before external access is
+   switched off.
 3. ``s3_access_key_id``, ``s3_secret_access_key`` and ``s3_session_token`` are cleared.
    `duckdb.connect()` fills them from ``AWS_*`` environment variables. The child's environment
    has none, and the statements stay as a second layer.
@@ -248,15 +253,21 @@ in ``FROM`` or as an expression, by any qualified or quoted spelling or as a met
 SELECT 1'))`` ran the inner ``COPY`` on 2.0.0 and wrote the file.
 
 Derived like the guard's blacklist (`lakana_core.query_rewrite`, which refuses all of these
-first): every function of DuckDB 2.0.0's ``duckdb_functions()`` whose name or description matches
-``sql``, ``query``, ``exec``, ``serial``, ``pragma``, ``eval``, ``parse``, ``prepare``,
-``statement`` or ``plan``, read one by one. ``json_execute_serialized_sql`` (table and pragma),
-``query`` and ``query_table`` execute; ``json_serialize_plan`` binds and plans (it does not write,
-but binding opens what the SQL names); ``postgres_*``/``mysql_*`` belong to extensions the child
-never loads (autoloading is off) and are listed should one ever be loaded. Left out:
+first): every function of DuckDB 2.0.0's ``duckdb_functions()`` (swept again on 2.0.1) whose
+name or description matches ``sql``, ``query``, ``exec``, ``serial``, ``pragma``, ``eval``,
+``parse``, ``prepare``, ``statement`` or ``plan``, read one by one.
+``json_execute_serialized_sql`` (table and pragma), ``query`` and ``query_table`` execute;
+``json_serialize_plan`` binds and plans (it does not write, but binding opens what the SQL
+names); ``postgres_*``/``mysql_*`` belong to extensions the child never loads (autoloading is
+off) and are listed should one ever be loaded. Left out:
 ``json_serialize_sql`` and ``json_deserialize_sql`` only turn text into a tree and back;
 ``aggregate``/``list_aggregate`` call an aggregate by name, not SQL; the ``pragma_*`` table
-functions read settings and metadata, which the guard governs."""
+functions read settings and metadata, which the guard governs. Of 2.0.1's new functions,
+``add_grammar_extension`` and ``remove_grammar_extension`` switch a grammar extension of the
+parser on or off for later statements by writing the setting ``active_grammar_extensions``,
+which the lock refuses (step 10); besides, the child runs one statement and loads no extension
+that registers one (``duckdb_grammar_extensions()`` is empty). ``duckdb_live_query_metrics``
+only reads counters."""
 
 NO_SPILL = (
     f"Query failed: the query ran out of memory and cannot spill to disk. {MEMORY_LIMIT_ADVICE}"

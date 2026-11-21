@@ -613,7 +613,7 @@ def test_a_refused_function_in_a_json_arrow_argument_is_still_refused() -> None:
 
 
 def test_the_lambda_functions_are_the_ones_duckdbs_catalog_lists() -> None:
-    """The union of `duckdb_functions()` with a LAMBDA parameter on 1.5.5 and 2.0.0."""
+    """The union of `duckdb_functions()` with a LAMBDA parameter on 1.5.5 and 2.0.0 (and 2.0.1)."""
     assert (
         frozenset(
             {
@@ -1419,6 +1419,57 @@ def test_blacklist_refuses_every_table_function_new_in_duckdb_2(function_name: s
 
 
 @pytest.mark.parametrize(
+    "function_name",
+    [
+        "add_grammar_extension",
+        "duckdb_live_query_metrics",
+        "parquet_page_index",
+        "remove_grammar_extension",
+    ],
+)
+def test_blacklist_refuses_every_table_function_new_in_duckdb_2_0_1(function_name: str) -> None:
+    """The four table functions DuckDB 2.0.1 adds are outside the generator allow-list.
+
+    Parameters
+    ----------
+    function_name
+        The table function the query calls.
+    """
+    for sql in (
+        f"SELECT * FROM {function_name}('x')",
+        f"SELECT (SELECT count(*) FROM {function_name}('x'))",
+    ):
+        with pytest.raises(ValidationError, match=f"table function {function_name} is not"):
+            check_blacklist(sql)
+
+
+@pytest.mark.parametrize("function_name", ["duckdb_live_query_metrics", "parquet_page_index"])
+def test_blacklist_refuses_the_duckdb_2_0_1_introspection_and_metadata_functions_by_name(
+    function_name: str,
+) -> None:
+    """DuckDB 2.0.1's new introspection and Parquet metadata functions are named as refused.
+
+    `duckdb_live_query_metrics` shows the connection's I/O and memory counters, and
+    `parquet_page_index` reads the page index (each page's min and max) of a named file. Both are
+    table functions, refused in `FROM` by the allow-list; the blacklist names them wherever else a
+    query writes the call, like `duckdb_memory` and `parquet_metadata`.
+
+    Parameters
+    ----------
+    function_name
+        The function the query calls.
+    """
+    with pytest.raises(ValidationError, match=f"{function_name} may not be called"):
+        check_blacklist(f"SELECT {function_name}('x') AS v")
+
+
+def test_blacklist_refuses_an_extension_repository_named_by_its_host() -> None:
+    """DuckDB 2.0.1 reads `CREATE EXTENSION REPOSITORY <host>` (2.0.0 did not parse it)."""
+    with pytest.raises(ValidationError, match="CREATE is not permitted"):
+        check_blacklist("CREATE EXTENSION REPOSITORY example.com")
+
+
+@pytest.mark.parametrize(
     ("statement", "message"),
     [
         ("SELECT $v_0_files", "placeholders are not allowed"),
@@ -1857,6 +1908,7 @@ _NAMED_READERS = [
     "parquet_kv_metadata",
     "parquet_full_metadata",
     "parquet_bloom_probe",
+    "parquet_page_index",
     "avro_metadata",
     "delta_domain_metadata",
     "delta_get_transaction_version",
@@ -1871,6 +1923,11 @@ _NAMED_READERS = [
     "iceberg_partition_stats",
     "iceberg_refs",
     "iceberg_snapshots",
+    # Added by the 2.0.1 sweep with the extensions loaded: Iceberg metadata, and an AWS
+    # system table read through `iceberg_scan`.
+    "iceberg_partitions",
+    "iceberg_schemas",
+    "aws_system_table",
     # Another database.
     "sqlite_attach",
     "sqlite_query",
@@ -1882,9 +1939,10 @@ _NAMED_READERS = [
     "glob",
     "sniff_csv",
 ]
-"""DuckDB 2.0.0's table functions that read a file, a URL or another database by a name that
-neither starts with ``read_`` nor ends with ``_scan`` (``duckdb_functions()``, with the parquet,
-json, httpfs, iceberg, delta, sqlite, postgres, mysql, avro and ducklake extensions loaded)."""
+"""DuckDB's table functions that read a file, a URL or another database by a name that neither
+starts with ``read_`` nor ends with ``_scan``: 2.0.0's (``duckdb_functions()`` with the parquet,
+json, httpfs, iceberg, delta, sqlite, postgres, mysql, avro and ducklake extensions loaded) and
+the four 2.0.1 adds (the same extensions and glue, aws, azure, spatial, fts, vortex and excel)."""
 
 
 @pytest.mark.parametrize("function", _NAMED_READERS)
