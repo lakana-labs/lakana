@@ -15,6 +15,7 @@ import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import { countWords, ListToolbar, useListState } from "../shell/ListToolbar";
 import { useResource } from "../shell/useResource";
 import "./access.css";
 import { tokensPath } from "./accessPaths";
@@ -55,6 +56,9 @@ export function TokensPage(): JSX.Element {
     setTyped(owner ?? "");
   }
   const [taskRound, setTaskRound] = useState(0);
+  const [personalRound, setPersonalRound] = useState(0);
+  const [personal, reportPersonal] = useListState();
+  const [task, reportTask] = useListState();
   const loadEnvironments = useCallback(() => listEnvironments(), []);
   const environments = useResource(loadEnvironments);
   const personalHeading = useRef<HTMLHeadingElement>(null);
@@ -75,9 +79,17 @@ export function TokensPage(): JSX.Element {
   return (
     <SettingsFrame title={t("settings.places.tokens")}>
       <section className="flat-panel access-section" aria-labelledby={personalId}>
-        <h2 id={personalId} ref={personalHeading} tabIndex={-1}>
-          {t("tokens.personal.title")}
-        </h2>
+        {/* The panel holds one list: its count is the panel's heading. */}
+        <ListToolbar
+          heading={t("tokens.personal.title")}
+          headingId={personalId}
+          headingRef={personalHeading}
+          count={countWords(t, "tokens.personal", personal.shown, personal.more)}
+          onRefresh={() => {
+            setPersonalRound((previous) => previous + 1);
+          }}
+          refreshing={personal.busy}
+        />
         <TextField
           className="field"
           value={typed}
@@ -92,9 +104,10 @@ export function TokensPage(): JSX.Element {
           <Text slot="description">{t("tokens.personal.filterHelp")}</Text>
         </TextField>
         <PersonalTokens
-          key={owner ?? ""}
+          key={`${owner ?? ""}\n${String(personalRound)}`}
           owner={owner}
           heading={personalHeading}
+          onState={reportPersonal}
           onRevoked={() => {
             setTaskRound((previous) => previous + 1);
           }}
@@ -103,22 +116,32 @@ export function TokensPage(): JSX.Element {
         <CopyLine text={t("tokens.personal.issueCommand")} copyLabel={t("tokens.copyCommand")} />
       </section>
       <section className="flat-panel access-section" aria-labelledby={taskId}>
-        <h2 id={taskId} ref={taskHeading} tabIndex={-1}>
-          {t("tokens.task.title")}
-        </h2>
-        <EnvironmentPicker
-          environments={environments.data ?? []}
-          value={environment}
-          label={t("tokens.task.environment")}
-          all={t("tokens.task.all")}
-          onChange={(next: string | null) => {
-            go({ owner, environment: next });
+        <ListToolbar
+          heading={t("tokens.task.title")}
+          headingId={taskId}
+          headingRef={taskHeading}
+          count={countWords(t, "tokens.task", task.shown, task.more)}
+          filters={
+            <EnvironmentPicker
+              environments={environments.data ?? []}
+              value={environment}
+              label={t("tokens.task.environment")}
+              all={t("tokens.task.all")}
+              onChange={(next: string | null) => {
+                go({ owner, environment: next });
+              }}
+            />
+          }
+          onRefresh={() => {
+            setTaskRound((previous) => previous + 1);
           }}
+          refreshing={task.busy}
         />
         <TaskTokens
           key={`${environment ?? ""}\n${String(taskRound)}`}
           environment={environment}
           heading={taskHeading}
+          onState={reportTask}
         />
         <p>{t("tokens.task.mint")}</p>
         <CopyLine text={t("tokens.task.mintCommand")} copyLabel={t("tokens.copyCommand")} />

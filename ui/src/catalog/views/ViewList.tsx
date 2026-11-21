@@ -7,6 +7,13 @@
 import { type JSX, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import {
+  countWords,
+  ListToolbar,
+  type ListState,
+  type ListToolbarProps,
+  useSteadyMore,
+} from "../../shell/ListToolbar";
 import { PendingButton } from "../../shell/PendingButton";
 import { ReadFailed } from "../ReadFailed";
 import { ListSkeleton } from "../ListSkeleton";
@@ -37,6 +44,27 @@ export interface ViewListProps {
   readonly rowsOpen?: boolean;
   /** The class that sizes the scrolling region's table; the Dropped list's by default. */
   readonly scroll?: string;
+  /**
+   * The toolbar above the list (`ListToolbar`): the strings of its count (plural keys
+   * `<count>.count` and `<count>.countFirst`), its search and its filters; Refresh reads the
+   * pages again. None by default.
+   */
+  readonly toolbar?: {
+    /** The key the count's strings sit under, such as `connections.list`. */
+    readonly count: string;
+    /** The search field, on the left after the count. */
+    readonly search?: ReactNode;
+    /** The filters, on the right before Refresh. */
+    readonly filters?: ReactNode;
+    /** Where a panel holds only this list: the count is its heading (`ListToolbar`'s `heading`). */
+    readonly heading?: ListToolbarProps["heading"];
+    /** That heading's id. */
+    readonly headingId?: ListToolbarProps["headingId"];
+    /** A ref to that heading. */
+    readonly headingRef?: ListToolbarProps["headingRef"];
+  };
+  /** Told the rows shown and the state of the read, for a toolbar the page renders itself. */
+  readonly onState?: ((state: ListState) => void) | undefined;
 }
 
 /**
@@ -53,6 +81,8 @@ export interface ViewListProps {
  * @param props.regionRef - The region's element.
  * @param props.rowsOpen - Whether each row opens its object.
  * @param props.scroll - The class that sizes the table.
+ * @param props.toolbar - The toolbar's count, search and filters.
+ * @param props.onState - Told the rows shown and the state of the read.
  * @returns The frame.
  */
 export function ViewList({
@@ -66,6 +96,8 @@ export function ViewList({
   regionRef,
   rowsOpen = false,
   scroll = "dropped-scroll",
+  toolbar,
+  onState,
 }: ViewListProps): JSX.Element {
   const { t } = useTranslation();
   const own = useRef<HTMLDivElement>(null);
@@ -90,9 +122,27 @@ export function ViewList({
     }
   });
 
+  const shown = pages.items === undefined ? undefined : rowCount;
+  const more = useSteadyMore(pages.hasMore, pages.busy);
+  useEffect(() => {
+    onState?.({ shown, more, busy: pages.busy });
+  }, [onState, shown, more, pages.busy]);
+
   useImperativeHandle(regionRef, () => own.current as HTMLDivElement);
   return (
     <>
+      {toolbar !== undefined && (
+        <ListToolbar
+          count={countWords(t, toolbar.count, shown, more)}
+          search={toolbar.search}
+          filters={toolbar.filters}
+          onRefresh={pages.reload}
+          refreshing={pages.busy}
+          heading={toolbar.heading}
+          headingId={toolbar.headingId}
+          headingRef={toolbar.headingRef}
+        />
+      )}
       {pages.items === undefined && pages.error === null && <ListSkeleton />}
       {pages.items === undefined && pages.error !== null && (
         <ReadFailed message={pages.error} onRetry={pages.reload} />

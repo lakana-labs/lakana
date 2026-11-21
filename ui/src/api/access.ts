@@ -135,18 +135,29 @@ export async function withdrawRecoveryLink(id: string): Promise<void> {
   await api.request("DELETE", `/api/v1/recovery-links/${encodeURIComponent(id)}`);
 }
 
+/** The first page of people, and whether the server has more. */
+interface PeoplePage {
+  /** The principals, newest first. */
+  readonly people: readonly PrincipalOut[];
+  /** Whether more match than this page holds (the server sent a next cursor). */
+  readonly more: boolean;
+}
+
 /**
- * Lists people and service accounts, newest first.
+ * Lists the first {@link PEOPLE_LIMIT} people and service accounts, newest first. Whether more
+ * exist comes from the server's `X-Next-Cursor`, not from a full page: exactly
+ * {@link PEOPLE_LIMIT} people are all of them.
  *
  * @param words - Only those whose name contains this text; blank for all.
- * @returns The principals.
+ * @returns The principals and whether there are more.
  */
-export async function listPeople(words: string): Promise<readonly PrincipalOut[]> {
+export async function listPeople(words: string): Promise<PeoplePage> {
   const query = new URLSearchParams({ limit: String(PEOPLE_LIMIT) });
   if (words !== "") {
     query.set("q", words);
   }
-  return api.request<readonly PrincipalOut[]>("GET", `/api/v1/principals?${query.toString()}`);
+  const page = await api.page(`/api/v1/principals?${query.toString()}`);
+  return { people: page.body as readonly PrincipalOut[], more: page.nextCursor !== null };
 }
 
 /**

@@ -195,6 +195,7 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
           region={t("jobs.runsTab.region")}
           rowsOpen
           scroll="jobs-tab-runs-scroll"
+          toolbar={{ count: "jobs.runsTab" }}
           regionRef={region}
           head={
             <tr>

@@ -72,7 +72,7 @@ person → **Remove picture**. The person can set a new one whenever they like.
 | **Esc** | Close a menu, a window or the tour. |
 | **Tab**, **Shift Tab** | Move to the next or the previous control. |
 | **Enter** | Open the row that has focus. |
-| **Alt ←** | Go back to the page before, such as from a table to the Catalog. Not in a text field, where it moves the cursor. |
+| **Alt ←** | Go back to the page before, from any page, such as from a table to the Catalog. Not in a text field, where it moves the cursor, and not while a menu or a window is open. |
 | **Ctrl Enter** (**⌘ Enter** on a Mac) | In the editor of **Queries**: run the query. |
 | **Esc** in the editor of **Queries** | Close the completion list or a tooltip; with none open, cancel the running query. |
 

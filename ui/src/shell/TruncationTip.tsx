@@ -2,7 +2,8 @@
  * The tooltip that shows a cut name whole: a list's names stay on one line and end with an
  * ellipsis (`.list .row-name` and `.truncate` in `screen.css`), and this one tooltip, for the
  * whole interface, shows the full text while the pointer rests on a cut name or the focus is on
- * it.
+ * it. A cut name that is not a link (a dropped table, an upload) is made a Tab stop while it is
+ * cut, so the keyboard reaches its tooltip too.
  *
  * @packageDocumentation
  */
@@ -10,6 +11,32 @@ import { type JSX, useEffect, useRef, useState } from "react";
 
 /** What is cut with an ellipsis, and so gets the tooltip when it does not fit. */
 const TRUNCATED = ".list .row-name, .truncate";
+
+/** The mark on a name this file made a Tab stop, so it only ever takes back its own tabindex. */
+const OWN_STOP = "data-cut-stop";
+
+/**
+ * Makes every cut name that is not focusable of its own a Tab stop, and takes the stop back from
+ * one that fits again. A name with a tabindex of its own, or a link, is left alone.
+ */
+function markCutStops(): void {
+  for (const element of document.querySelectorAll<HTMLElement>(TRUNCATED)) {
+    const ours = element.hasAttribute(OWN_STOP);
+    if (!ours && (element.hasAttribute("tabindex") || element instanceof HTMLAnchorElement)) {
+      continue;
+    }
+    const cut = element.scrollWidth > element.clientWidth;
+    if (cut && !ours) {
+      element.setAttribute("tabindex", "0");
+      element.setAttribute(OWN_STOP, "");
+    } else if (!cut && ours && element !== document.activeElement) {
+      // A name that fits again keeps its stop while it has the focus, so the focus never drops
+      // to the page; the next change after the focus has left takes the stop back.
+      element.removeAttribute("tabindex");
+      element.removeAttribute(OWN_STOP);
+    }
+  }
+}
 
 /** Where the tooltip shows, and what it says. */
 interface Tip {
@@ -55,8 +82,9 @@ function inside(element: Element, x: number, y: number): boolean {
 
 /**
  * Shows the whole text of the cut name under the pointer or the focus, just below it. It closes
- * when the pointer and the focus leave, on Escape and on a scroll (WCAG 1.4.13: dismissible,
- * hoverable, persistent). Screen readers already read the whole name, so the tooltip is hidden
+ * when the pointer and the focus leave, on Escape, on a scroll and when the name leaves the page
+ * (WCAG 1.4.13: dismissible, hoverable, persistent). It watches the page for names that are cut
+ * and makes those without a link a Tab stop ({@link markCutStops}). Screen readers already read the whole name, so the tooltip is hidden
  * from them.
  *
  * @returns The tooltip, or nothing.
@@ -105,12 +133,25 @@ export function TruncationTip(): JSX.Element | null {
         hide();
       }
     };
+    // New rows, a list read again, a wider or narrower window: which names are cut changes.
+    const onChange = (): void => {
+      if (shown.current?.isConnected === false) {
+        hide();
+      }
+      markCutStops();
+    };
+    const watcher = new MutationObserver(onChange);
+    watcher.observe(document.body, { childList: true, subtree: true, characterData: true });
+    markCutStops();
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("focusin", onFocusIn);
     document.addEventListener("focusout", hide);
     document.addEventListener("keydown", onKeyDown);
     window.addEventListener("scroll", hide, { capture: true, passive: true });
+    window.addEventListener("resize", onChange);
     return () => {
+      watcher.disconnect();
+      window.removeEventListener("resize", onChange);
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("focusin", onFocusIn);
       document.removeEventListener("focusout", hide);

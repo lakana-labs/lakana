@@ -1,4 +1,8 @@
 {
+  "count_one": "{{count}} setting",
+  "count_other": "{{count}} settings",
+  "countFirst_one": "The first {{count}} setting",
+  "countFirst_other": "The first {{count}} settings",
   "purpose": "The server's settings as it runs now. A secret shows only whether it is set.",
   "restart": "Values change in the server's .env file (or its environment) and take effect after a restart.",
   "workers": "Workers and the launcher read their own settings; they are not shown here.",

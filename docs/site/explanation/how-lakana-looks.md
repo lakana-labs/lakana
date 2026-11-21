@@ -144,8 +144,11 @@ Small misalignments make an interface look unfinished, so a few rules hold on ev
 the title sits at the top left and the one primary action at the top right, on the title's
 line; controls in a row are one height, 8 px apart; left edges line up from the title down to
 the table; a label and its value share a baseline; and a state is a small pill, its shape and
-its word on a pale tint of its colour. The checklist names the shared classes that carry these
-rules, and an end-to-end test measures them.
+its word on a pale tint of its colour. Above every list a toolbar says how many rows it has
+("5 connections", or "The first 100 grants" while more can be read), with the search beside the
+count and the filters and Refresh on the right. A name cut short in a list shows whole in a
+tooltip, also to the keyboard: one that is not a link becomes a Tab stop while it is cut. The
+checklist names the shared classes that carry these rules, and an end-to-end test measures them.
 
 ## One pattern for every area
 

@@ -374,7 +374,8 @@ for (const theme of ["light", "dark"] as const) {
       ).toBeFocused();
       await expect(page.getByRole("link", { name: DEV_JOB })).toHaveCount(0);
 
-      await page.keyboard.press("Tab");
+      // The search sits left of the filter in the toolbar (#782): one step back.
+      await page.keyboard.press("Shift+Tab");
       await expect(page.getByRole("searchbox", { name: "Search jobs" })).toBeFocused();
       await page.keyboard.type("daily");
       await expect(page).toHaveURL(/q=daily/);

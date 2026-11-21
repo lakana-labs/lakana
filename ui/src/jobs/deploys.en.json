@@ -1,4 +1,8 @@
 {
+  "count_one": "{{count}} deploy",
+  "count_other": "{{count}} deploys",
+  "countFirst_one": "The first {{count}} deploy",
+  "countFirst_other": "The first {{count}} deploys",
   "oneAtATime": "Deploys are listed one environment at a time.",
   "repository": "Repository",
   "allRepositories": "All repositories",

@@ -11,6 +11,10 @@
     "environmentHelp": "You may list no environment here: type its name; applied on Enter."
   },
   "row-filter": {
+    "count_one": "{{count}} row filter",
+    "count_other": "{{count}} row filters",
+    "countFirst_one": "The first {{count}} row filter",
+    "countFirst_other": "The first {{count}} row filters",
     "title": "Row filters",
     "none": "No row filter yet.",
     "noMatch": "No row filter matches these filters.",
@@ -18,6 +22,10 @@
     "created": "Row filter created."
   },
   "column-mask": {
+    "count_one": "{{count}} column mask",
+    "count_other": "{{count}} column masks",
+    "countFirst_one": "The first {{count}} column mask",
+    "countFirst_other": "The first {{count}} column masks",
     "title": "Column masks",
     "none": "No column mask yet.",
     "noMatch": "No column mask matches these filters.",

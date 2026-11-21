@@ -83,6 +83,18 @@ describe("SecretsPage", () => {
     expect(secretReads(shell)).toEqual(["/api/v1/environments/dev/secrets"]);
   });
 
+  it("counts the secrets and reads them again on Refresh", async () => {
+    const shell = renderSecrets(["dev"]);
+    await screen.findByRole("region", { name: "Secrets of dev" });
+    expect(await screen.findByText(/^\d+ secrets?$/)).toHaveClass("toolbar-count");
+
+    await shell.user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(secretReads(shell)).toHaveLength(2);
+    });
+  });
+
   it("remembers the environment", async () => {
     const shell = renderSecrets(["dev", "prod"]);
     await screen.findByRole("region", { name: "Secrets of dev" });

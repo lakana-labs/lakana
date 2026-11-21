@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useState } from "react";
+import { type JSX, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -38,6 +38,8 @@ export interface AllJobsProps {
   readonly reloadKey: number;
   /** Told that a control acted, so the list is read again. */
   readonly onChanged: () => void;
+  /** Told whether a read the person waits for is on its way, for the toolbar's Refresh. */
+  readonly onBusy?: ((busy: boolean) => void) | undefined;
 }
 
 /** Properties of {@link Schedule}. */
@@ -83,12 +85,23 @@ function Schedule({ job }: ScheduleProps): JSX.Element {
  * @param props.query - The words searched for.
  * @param props.reloadKey - Changes when the jobs must be read again.
  * @param props.onChanged - Told that a control acted.
+ * @param props.onBusy - Told whether a read the person waits for is on its way.
  * @returns The section.
  */
-export function AllJobs({ environments, query, reloadKey, onChanged }: AllJobsProps): JSX.Element {
+export function AllJobs({
+  environments,
+  query,
+  reloadKey,
+  onChanged,
+  onBusy,
+}: AllJobsProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const { rows, failed, poll } = useJobsOf(environments, reloadKey);
+  const { busy } = poll;
+  useEffect(() => {
+    onBusy?.(busy);
+  }, [onBusy, busy]);
   const [note, setNote] = useState<ControlNoteValue | null>(null);
   // A job as the server answered a pause or a resume, until the jobs are read again.
   const [changed, setChanged] = useState<{

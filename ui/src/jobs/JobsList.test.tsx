@@ -252,4 +252,24 @@ describe("JobsList", () => {
     expect(server.sent.filter((request) => request.path.includes("staging"))).toEqual([]);
     expect(server.sent.map((request) => request.path)).toContain("/api/v1/runs/failed");
   });
+
+  it("reads every section again on Refresh", async () => {
+    const { server, user } = renderShell("/jobs", { routes: jobsListRoutes() });
+    await screen.findByRole("heading", { level: 1, name: "Jobs" });
+    const reads = (): number =>
+      server.sent.filter(
+        (request) => request.method === "GET" && request.path.startsWith("/api/v1/runs"),
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    // Refresh waits while the sections' first reads are on their way.
+    await user.click(await screen.findByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
 });

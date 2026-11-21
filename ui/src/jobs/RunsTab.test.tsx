@@ -494,4 +494,24 @@ describe("RunsTab", () => {
     const buttons = screen.getAllByRole("button").map((button) => button.textContent);
     expect(buttons.some((text) => /run|start/iu.test(text))).toBe(false);
   });
+
+  it("counts the runs and reads them again on Refresh", async () => {
+    const { server, user } = renderTab(twoPages);
+    await screen.findByRole("region", { name: "Runs listed" });
+    expect(await screen.findByText(/^The first \d+ runs?$/)).toBeInTheDocument();
+    const reads = (): number =>
+      server.sent.filter(
+        (request) => request.method === "GET" && request.path.startsWith("/api/v1/runs"),
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
 });

@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
 import { type ConfigurationSettingOut, getConfiguration } from "../api/configuration";
+import { countWords, ListToolbar } from "../shell/ListToolbar";
 import { DOCS_URL } from "../shell/docs";
 import { useResource } from "../shell/useResource";
 import { VisibleText } from "../shell/VisibleText";
@@ -51,10 +52,19 @@ function SettingsList({ settings }: SettingsListProps): JSX.Element {
   const groups = groupSettings(settings.filter((setting) => matchesSetting(setting, typed)));
   return (
     <>
-      <SearchField className="field" value={typed} onChange={setTyped}>
-        <Label className="visually-hidden">{t("settings.configuration.find")}</Label>
-        <Input ref={field} placeholder={t("settings.configuration.find")} />
-      </SearchField>
+      <ListToolbar
+        count={countWords(
+          t,
+          "settings.configuration",
+          groups.reduce((sum, group) => sum + group.settings.length, 0),
+        )}
+        search={
+          <SearchField className="field" value={typed} onChange={setTyped}>
+            <Label className="visually-hidden">{t("settings.configuration.find")}</Label>
+            <Input ref={field} placeholder={t("settings.configuration.find")} />
+          </SearchField>
+        }
+      />
       {groups.length === 0 ? (
         <div className="empty">
           <p>{t("settings.configuration.noMatch", { words: typed.trim() })}</p>

@@ -210,6 +210,7 @@ function EnvironmentList({ read, viewer, heading }: EnvironmentListProps): JSX.E
       region={t(`${P}.region`)}
       rowsOpen
       scroll="environments-scroll"
+      toolbar={{ count: P }}
       head={
         <tr>
           <th scope="col">{t("list.name")}</th>

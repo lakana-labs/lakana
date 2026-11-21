@@ -1,7 +1,9 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { expectPending } from "../test/pending";
 import { renderShell } from "../test/render";
+import type { FakeAnswer } from "../test/server";
 
 const PEOPLE = [
   { name: "kim", type: "USER", is_active: true },
@@ -30,7 +32,12 @@ describe("PeoplePage", () => {
       expect(within(row).getByText("›")).toBeInTheDocument();
     }
     expect(within(rows[1] as HTMLElement).getByText("Service account")).toBeInTheDocument();
-    expect(within(rows[2] as HTMLElement).getByText("Deactivated")).toBeInTheDocument();
+    expect(within(rows[2] as HTMLElement).getByText("Deactivated")).toHaveClass(
+      "pill",
+      "pill-warn",
+    );
+    // An active person's state is named too, quietly: no row has a blank state.
+    expect(within(rows[0] as HTMLElement).getByText("Active")).toHaveClass("pill", "pill-neutral");
     expect(screen.getByRole("link", { name: "People" })).toHaveAttribute("aria-current", "page");
 
     await user.click(screen.getByRole("link", { name: "kim" }));
@@ -58,17 +65,68 @@ describe("PeoplePage", () => {
     expect(server.sent.some((request) => request.path.endsWith("q=k"))).toBe(false);
   });
 
-  it("says when the list shows only the first 200", async () => {
+  it("says when the list shows only the first 200, as the server's next cursor tells", async () => {
     const many = Array.from({ length: 200 }, (_, index) => ({
       name: `user${String(index)}`,
       type: "USER",
       is_active: true,
     }));
     renderShell("/settings/access/people", {
-      routes: { "GET /api/v1/principals": { status: 200, body: many } },
+      routes: {
+        "GET /api/v1/principals": {
+          status: 200,
+          body: many,
+          headers: { "X-Next-Cursor": "next" },
+        },
+      },
     });
 
     expect(await screen.findByText(/Showing the first 200/)).toBeInTheDocument();
+    expect(screen.getByText("The first 200 people")).toBeInTheDocument();
+  });
+
+  it("counts exactly 200 people as all of them when the server has no more", async () => {
+    const all = Array.from({ length: 200 }, (_, index) => ({
+      name: `user${String(index)}`,
+      type: "USER",
+      is_active: true,
+    }));
+    renderShell("/settings/access/people", {
+      routes: { "GET /api/v1/principals": { status: 200, body: all } },
+    });
+
+    expect(await screen.findByText("200 people")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing the first 200/)).toBeNull();
+  });
+
+  it("reads the people again on Refresh, showing that it waits", async () => {
+    let reads = 0;
+    let answer: (value: FakeAnswer) => void = () => undefined;
+    const { server, user } = renderShell("/settings/access/people", {
+      routes: {
+        "GET /api/v1/principals": () => {
+          reads += 1;
+          return reads === 1
+            ? { status: 200, body: [{ name: "kim", type: "USER", is_active: true }] }
+            : new Promise<FakeAnswer>((resolve) => {
+                answer = resolve;
+              });
+        },
+      },
+    });
+    expect(await screen.findByText("1 person")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    expectPending(screen.getByRole("button", { name: /^Refresh/ }));
+    answer({ status: 200, body: [{ name: "kim", type: "USER", is_active: true }] });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Refresh" })).not.toHaveAttribute("data-pending");
+    });
+    expect(server.sent.at(-1)?.path).toBe("/api/v1/principals?limit=200");
   });
 
   it("says when nobody matches", async () => {
