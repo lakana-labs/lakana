@@ -11,6 +11,7 @@ import { listDeployments, listDeploys } from "../api/jobs";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
+import { countWords, ListToolbar } from "../shell/ListToolbar";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { settingParam, useAddressParams } from "../shell/useAddressParams";
@@ -122,23 +123,34 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   const rows = pages.items ?? [];
   return (
     <div ref={area}>
-      <div className="jobs-find">
-        <ChoiceMenu
-          className="jobs-filter"
-          label={t("jobs.deploys.repository")}
-          choices={[
-            { id: ALL_REPOSITORIES, text: t("jobs.deploys.allRepositories") },
-            ...repositories.map((name) => ({ id: `repo:${name}`, text: markedText(name) })),
-          ]}
-          selected={repository === null ? ALL_REPOSITORIES : `repo:${repository}`}
-          onChoose={(id) => {
-            update(
-              settingParam("repository", id === ALL_REPOSITORIES ? null : id.slice("repo:".length)),
-              { replace: true },
-            );
-          }}
-        />
-      </div>
+      <ListToolbar
+        count={countWords(t, "jobs.deploys", pages.items?.length, pages.hasMore)}
+        filters={
+          <ChoiceMenu
+            className="jobs-filter"
+            label={t("jobs.deploys.repository")}
+            choices={[
+              { id: ALL_REPOSITORIES, text: t("jobs.deploys.allRepositories") },
+              ...repositories.map((name) => ({ id: `repo:${name}`, text: markedText(name) })),
+            ]}
+            selected={repository === null ? ALL_REPOSITORIES : `repo:${repository}`}
+            onChoose={(id) => {
+              update(
+                settingParam(
+                  "repository",
+                  id === ALL_REPOSITORIES ? null : id.slice("repo:".length),
+                ),
+                { replace: true },
+              );
+            }}
+          />
+        }
+        onRefresh={() => {
+          pages.reload();
+          deployments.reload();
+        }}
+        refreshing={pages.busy}
+      />
       {deployments.error !== null && (
         <ReadFailed
           message={t("jobs.deploys.currentFailed", { sentence: deployments.error })}

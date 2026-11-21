@@ -26,6 +26,7 @@ import "../settings/settingsStrings";
 import { useSettingsViewer } from "../settings/viewer";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import { countWords, ListToolbar, type ListState, useListState } from "../shell/ListToolbar";
 import { readRemembered, writeRemembered } from "../shell/remembered";
 import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
@@ -74,6 +75,8 @@ interface Refresh {
 
 /** Properties of {@link SecretList}. */
 interface SecretListProps {
+  /** Told the rows shown and the state of the read, for the page's toolbar. */
+  readonly onState: (state: ListState) => void;
   /** The environment whose secrets are listed. */
   readonly environment: string;
   /** The page's heading, which takes the focus once a failed list has been read again. */
@@ -94,14 +97,26 @@ interface SecretListProps {
  * @param props.heading - The page's heading.
  * @param props.refresh - When to read the list again.
  * @param props.onOpen - Opens a dialog for a secret.
+ * @param props.onState - Told the rows shown and the state of the read.
  * @returns The list.
  */
-function SecretList({ environment, heading, refresh, onOpen }: SecretListProps): JSX.Element {
+function SecretList({
+  environment,
+  heading,
+  refresh,
+  onOpen,
+  onState,
+}: SecretListProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const load = useCallback(() => listSecrets(environment), [environment]);
   const secrets = useResource(load);
   const { reload } = secrets;
+  const shown = secrets.data?.length;
+  const busy = secrets.data === undefined && secrets.error === null;
+  useEffect(() => {
+    onState({ shown, more: false, busy });
+  }, [onState, shown, busy]);
   // Try again unmounts with the focus on it, and so does a deleted secret's row: the focus goes
   // to the heading once the list is in.
   const focusNext = useRef(false);
@@ -266,6 +281,7 @@ export function SecretsPage(): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const [open, setOpen] = useState<Open | null>(null);
   const [refresh, setRefresh] = useState<Refresh>({ round: 0, focus: false });
+  const [list, report] = useListState();
   // The page is shown only once the viewer names at least one environment.
   const linked = params.get("environment");
   const { allowed, chosen, refused } = chooseEnvironment(
@@ -293,14 +309,23 @@ export function SecretsPage(): JSX.Element {
         </Button>
       }
     >
-      <EnvironmentPicker
-        environments={choices}
-        value={chosen}
-        label={t("secrets.environment")}
-        onChange={(next) => {
-          writeRemembered(SECRETS_ENVIRONMENT_KEY, next);
-          setParams({ environment: next }, { replace: true });
+      <ListToolbar
+        count={countWords(t, "secrets", list.shown, list.more)}
+        filters={
+          <EnvironmentPicker
+            environments={choices}
+            value={chosen}
+            label={t("secrets.environment")}
+            onChange={(next) => {
+              writeRemembered(SECRETS_ENVIRONMENT_KEY, next);
+              setParams({ environment: next }, { replace: true });
+            }}
+          />
+        }
+        onRefresh={() => {
+          setRefresh((previous) => ({ round: previous.round + 1, focus: false }));
         }}
+        refreshing={list.busy}
       />
       {refused && <p className="page-notice">{t("secrets.refused", { environment: linked })}</p>}
       <SecretList
@@ -309,6 +334,7 @@ export function SecretsPage(): JSX.Element {
         heading={heading}
         refresh={refresh}
         onOpen={setOpen}
+        onState={report}
       />
       {open !== null && (
         <Suspense fallback={null}>

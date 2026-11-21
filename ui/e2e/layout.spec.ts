@@ -1,10 +1,11 @@
 import { expect, type Locator, type Page, test } from "@playwright/test";
 
-import { stubAccess } from "./access";
+import { stubAccess, stubPolicies, stubSignInAndConfiguration, stubTokensSecrets } from "./access";
 import { PROD, stubConnections, WAREHOUSE } from "./connections";
 import { stubEnvironments } from "./environments";
 import { FAILED_ID, stubJobs, TIMED_OUT } from "./jobs";
 import { SALES_SQL, stubQueries } from "./queries";
+import { stubRepositories } from "./repositories";
 import { signInAsAdmin } from "./session";
 
 // One compact density, full-width screens and the alignment rules of #782
@@ -291,5 +292,112 @@ for (const detail of DETAILS) {
     await page.keyboard.press("Alt+ArrowLeft");
 
     await expect(page).toHaveURL((url) => `${url.pathname}${url.search}` === detail.from);
+  });
+}
+
+test("Alt+Left in the SQL editor stays in the editor; on a page without a breadcrumb it goes back", async ({
+  page,
+}) => {
+  await stubQueries(page);
+  await page.goto("/jobs");
+  await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeVisible();
+  await page.goto("/queries");
+  const editor = page.getByRole("textbox", { name: "SQL" });
+  await editor.click();
+  await page.keyboard.insertText("SELECT 1");
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page).toHaveURL(/\/queries$/);
+
+  // Out of the editor, Queries (no breadcrumb) is left like any page: Alt+Left is global.
+  await page.getByRole("heading", { level: 1, name: "Queries" }).focus();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page).toHaveURL(/\/jobs$/);
+});
+
+test("Alt+Left does nothing while a dialog or a menu is open", async ({ page }) => {
+  await signInAsAdmin(page);
+  await page.goto("/catalog?env=prod&ns=gold.sales");
+  await expect(page.getByRole("region", { name: "Tables" })).toBeVisible();
+  await page.goto("/catalog/prod/gold.sales/fact_sales");
+  await expect(page.getByRole("navigation", { name: "Breadcrumb" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Actions" }).click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByRole("menu")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await expect(page).toHaveURL(/\/catalog\/prod\/gold\.sales\/fact_sales$/);
+});
+
+/**
+ * Signs in as an administrator, then answers the routes of one more stub.
+ *
+ * @param stub - The screen's stub.
+ * @returns What a test calls with its page.
+ */
+function admin(stub: (page: Page) => Promise<unknown>): (page: Page) => Promise<void> {
+  return async (page) => {
+    await signInAsAdmin(page);
+    await stub(page);
+  };
+}
+
+/** A list screen with the shared toolbar, and whether its toolbar carries the list's count. */
+const TOOLBARS: readonly [string, (page: Page) => Promise<unknown>, string, boolean][] = [
+  ["Connections", stubConnections, "/connections", true],
+  ["Jobs", stubJobs, "/jobs", false],
+  ["Runs", stubJobs, "/jobs/runs", true],
+  ["Deploys", stubJobs, "/jobs/deploys", true],
+  ["Environments", admin(stubEnvironments), "/settings/environments", true],
+  ["Repositories", admin(stubRepositories), "/settings/repositories", true],
+  ["People", admin(stubAccess), "/settings/access", true],
+  ["Groups", admin(stubAccess), "/settings/access/groups", true],
+  ["Grants", admin(stubAccess), "/settings/access/grants", true],
+  ["Tokens", admin(stubTokensSecrets), "/settings/access/tokens", true],
+  ["Secrets", admin(stubTokensSecrets), "/settings/access/secrets?environment=prod", true],
+  ["Row filters & masks", admin(stubPolicies), "/settings/access/filters-and-masks", true],
+  ["Invites", admin(stubSignInAndConfiguration), "/settings/sign-in/invites", true],
+  ["Configuration", admin(stubSignInAndConfiguration), "/settings/configuration", true],
+];
+
+for (const [name, stub, path, counted] of TOOLBARS) {
+  test(`${name}: the toolbar's count on the left, Refresh on the right, its controls one height`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await stub(page);
+    await page.goto(path);
+    const bar = page.locator(".list-toolbar").first();
+    await expect(bar).toBeVisible();
+    const count = bar.locator(".toolbar-count");
+    if (counted) {
+      await expect(count).toHaveText(/^(\d[\d,]* \S|The first \d)/);
+    } else {
+      await expect(count).toBeEmpty();
+    }
+    // The list's search, filters and Refresh: one height.
+    const heights = await bar
+      .locator("input, .button, button")
+      .evaluateAll((controls) =>
+        controls
+          .filter((control) => control.getClientRects().length > 0)
+          .map((control) => Math.round(control.getBoundingClientRect().height)),
+      );
+    expect(heights.length, "controls").toBeGreaterThan(0);
+    expect(new Set(heights), heights.join(" ")).toEqual(new Set([32]));
+    const refresh = bar.getByRole("button", { name: "Refresh" });
+    if ((await refresh.count()) > 0) {
+      const box = await refresh.boundingBox();
+      const own = await bar.boundingBox();
+      expect(
+        Math.abs((box?.x ?? 0) + (box?.width ?? 0) - ((own?.x ?? 0) + (own?.width ?? 0))),
+      ).toBeLessThanOrEqual(1);
+    }
   });
 }

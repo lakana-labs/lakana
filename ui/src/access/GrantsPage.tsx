@@ -13,6 +13,7 @@ import { listEnvironments } from "../api/environments";
 import { type GrantFilter, NO_FILTER } from "../api/grants";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { SettingsFrame } from "../settings/SettingsFrame";
+import { countWords, ListToolbar, useListState } from "../shell/ListToolbar";
 import "../settings/settingsStrings";
 import { useResource } from "../shell/useResource";
 import "./access.css";
@@ -48,6 +49,7 @@ export function GrantsPage(): JSX.Element {
   const heading = useRef<HTMLHeadingElement>(null);
   const [note, setNote] = useState("");
   const [round, setRound] = useState(0);
+  const [list, report] = useListState();
   const [adding, setAdding] = useState(false);
   const scopes = status.data?.scopes ?? null;
   const choices = environments.data ?? [];
@@ -86,6 +88,13 @@ export function GrantsPage(): JSX.Element {
       {managedInstance !== undefined && managedInstance !== null && (
         <ManagedNote scope={managedInstance} commands={[t("access.managed.grantCommand")]} />
       )}
+      <ListToolbar
+        count={countWords(t, "access.grants", list.shown, list.more)}
+        onRefresh={() => {
+          setRound((previous) => previous + 1);
+        }}
+        refreshing={list.busy}
+      />
       <GrantFilters filter={filter} environments={choices} onChange={go} />
       <p className="step-status" role="status">
         {note}
@@ -96,6 +105,7 @@ export function GrantsPage(): JSX.Element {
         scopes={scopes}
         round={round}
         headingRef={heading}
+        onState={report}
         onRemoved={() => {
           setNote(t("access.grants.removed"));
         }}

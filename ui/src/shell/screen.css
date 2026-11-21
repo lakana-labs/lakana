@@ -27,6 +27,20 @@
   margin: 0 0 var(--space-3);
 }
 
+/* A list's count, the section's title: the section step, on the controls' line. */
+.toolbar-count {
+  min-width: 0;
+  min-height: var(--type-section-line);
+  margin: 0 var(--space-2) 0 0;
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.toolbar-count:empty {
+  margin: 0;
+}
+
 .toolbar-end {
   display: flex;
   flex-wrap: wrap;
@@ -504,5 +518,17 @@ tr:hover .chevron {
 }
 
 .read-failed p {
+  margin: 0;
+}
+
+/* A cut name without a page is a Tab stop while it is cut (TruncationTip), so its ring shows. */
+.row-name[data-cut-stop]:focus-visible,
+.truncate[data-cut-stop]:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* A field in a toolbar keeps no room below it: the row sets the spacing. */
+.toolbar .field {
   margin: 0;
 }

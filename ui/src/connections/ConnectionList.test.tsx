@@ -151,6 +151,30 @@ describe("ConnectionList", () => {
     ).toHaveClass("test-status-muted");
   });
 
+  it("counts the connections in the toolbar, with the filter and Refresh on its right", async () => {
+    const server = fakeServer(
+      connectionRoutes(
+        [aConnection(), aConnection({ name: "files", environment: "dev" })],
+        MANAGER,
+      ),
+    );
+    renderList();
+
+    expect(await screen.findByText("2 connections")).toHaveClass("toolbar-count");
+    const end = document.querySelector(".list-toolbar .toolbar-end");
+    expect(end).toContainElement(screen.getByRole("button", { name: /Environment/ }));
+    const reads = server.sent.filter((sent) => sent.path.includes("/connections")).length;
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(
+        server.sent.filter((sent) => sent.path.includes("/connections")).length,
+      ).toBeGreaterThan(reads);
+    });
+    expect(await screen.findByText("2 connections")).toBeInTheDocument();
+  });
+
   it("shows under the status the newest run that failed on a connection, linked to its task", async () => {
     fakeServer(
       connectionRoutes(

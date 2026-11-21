@@ -10,6 +10,7 @@ import { Link } from "react-router";
 
 import { listPeople, PEOPLE_LIMIT } from "../api";
 import { Avatar } from "../profile/Avatar";
+import { countWords, ListToolbar } from "../shell/ListToolbar";
 import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
@@ -44,10 +45,21 @@ export function PeoplePage(): JSX.Element {
   const people = useResource(load);
   return (
     <SettingsFrame title={t("settings.places.people")}>
-      <SearchField className="field" value={words} onChange={setWords}>
-        <Label className="visually-hidden">{t("access.people.find")}</Label>
-        <Input placeholder={t("access.people.find")} />
-      </SearchField>
+      <ListToolbar
+        count={countWords(
+          t,
+          "access.people",
+          people.data?.length,
+          people.data?.length === PEOPLE_LIMIT,
+        )}
+        search={
+          <SearchField className="field" value={words} onChange={setWords}>
+            <Label className="visually-hidden">{t("access.people.find")}</Label>
+            <Input placeholder={t("access.people.find")} />
+          </SearchField>
+        }
+        onRefresh={people.reload}
+      />
       <Loaded resource={people}>
         {(found) =>
           found.length === 0 ? (

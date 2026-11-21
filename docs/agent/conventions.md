@@ -270,7 +270,7 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   Settings › Access › People › test1 for `/settings/access/people/test1`. `Page` renders the one shared component,
   `ui/src/shell/Breadcrumbs.tsx`, above the heading: a `nav` landmark named "Breadcrumb", every
   part but the last a link, `aria-current="page"` on the last, separators hidden from screen
-  readers, wrapping at 320 px. An area's own pages (a list, a tab of the area) have none. Alt+Left goes back from any page, as in the browser: the shell does it itself (`AppShell.tsx`), unless the focus is in a text field or a widget used the key, and `e2e/layout.spec.ts` checks it on the detail pages.
+  readers, wrapping at 320 px. An area's own pages (a list, a tab of the area) have none. Alt+Left goes back from any page, with or without a breadcrumb, as in the browser: it is global on purpose. The shell does it itself (`AppShell.tsx`), unless the focus is in a text field (an input, a select, a text area, the SQL editor) or a widget used the key, and it does nothing while a dialog, a menu or a popover is open, so the page behind it is not left. `e2e/layout.spec.ts` checks it on the detail pages, on Queries, in the SQL editor and with a menu and the palette open.
 - **Every screen pull request is checked against the Still Water checklist**
   (`docs/agent/still-water.md`): the Still Water tokens and component rules, one pattern
   per area, rows that open their object, breadcrumbs, refusals that name the cause and the next

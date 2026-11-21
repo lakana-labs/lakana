@@ -189,6 +189,7 @@ export function PersonalTokens({ owner, heading, onRevoked }: PersonalTokensProp
         }
         region={t("tokens.personal.region")}
         scroll="tokens-scroll"
+        toolbar={{ count: "tokens.personal" }}
         head={
           <HeadRow
             columns={[
@@ -340,6 +341,7 @@ export function TaskTokens({ environment, heading }: TaskTokensProps): JSX.Eleme
         empty={t("tokens.task.none")}
         region={t("tokens.task.region")}
         scroll="tokens-scroll"
+        toolbar={{ count: "tokens.task" }}
         head={
           <HeadRow
             columns={[

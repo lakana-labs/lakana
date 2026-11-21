@@ -185,4 +185,63 @@ describe("AppShell", () => {
 
     expect(router.state.location.pathname).toBe("/catalog");
   });
+
+  it("goes back with Alt+Left on a page without a breadcrumb too: it is global, as in the browser", async () => {
+    const { router, user } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    await act(() => router.navigate("/queries"));
+    await screen.findByRole("heading", { level: 1, name: "Queries" });
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Catalog" })).toBeInTheDocument();
+  });
+
+  it("leaves Alt+Left to a select and to editable content", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    for (const make of [
+      () => document.createElement("select"),
+      () => {
+        const editable = document.createElement("div");
+        editable.setAttribute("contenteditable", "true");
+        editable.setAttribute("tabindex", "0");
+        return editable;
+      },
+    ]) {
+      const field = make();
+      document.body.append(field);
+      field.focus();
+      await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+      expect(router.state.location.pathname, field.tagName).toBe("/catalog");
+      field.remove();
+    }
+
+    expect(router.state.location.pathname).toBe("/catalog");
+  });
+
+  it("does nothing with Alt+Left while a dialog, a menu or a popover is open", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await user.click(screen.getByRole("button", { name: "Help" }));
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    const pressed = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(pressed);
+
+    // Prevented, so the browser does not go back either.
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(router.state.location.pathname).toBe("/catalog");
+  });
 });

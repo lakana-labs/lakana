@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { listRecoveryLinks, withdrawRecoveryLink } from "../api";
+import { countWords, ListToolbar } from "../shell/ListToolbar";
 import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
 import { useFocusAfter } from "../shell/useFocusAfter";
@@ -54,6 +55,10 @@ export function RecoveryLinksPage(): JSX.Element {
       }
     >
       <p className="page-purpose">{t("access.recovery.intro")}</p>
+      <ListToolbar
+        count={countWords(t, "access.recovery", links.data?.length)}
+        onRefresh={links.reload}
+      />
       <Loaded resource={links}>
         {(open) =>
           open.length === 0 ? (

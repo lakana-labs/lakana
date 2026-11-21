@@ -143,6 +143,7 @@ export function PolicyList({
         empty={filtered ? t(`policies.${kind}.noMatch`) : t(`policies.${kind}.none`)}
         region={t(`policies.${kind}.title`)}
         scroll="policies-scroll"
+        toolbar={{ count: `policies.${kind}` }}
         head={
           <tr>
             <th scope="col">{t("policies.who")}</th>

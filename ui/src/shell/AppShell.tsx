@@ -82,7 +82,23 @@ function isTextEntry(target: EventTarget | undefined): boolean {
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
+    (target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        target.closest('[contenteditable="true"], [contenteditable=""]') !== null))
+  );
+}
+
+/**
+ * Whether a modal dialog, a menu or a popover is open: React Aria marks each popover with the
+ * trigger that opened it (`data-trigger`), and a dialog has its role.
+ *
+ * @returns True when one is.
+ */
+function overlayOpen(): boolean {
+  return (
+    document.querySelector(
+      '[data-trigger], [role="dialog"], [role="alertdialog"], [role="menu"]',
+    ) !== null
   );
 }
 
@@ -161,10 +177,12 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
     };
   }, []);
 
-  // Alt+Left goes back, as in the browser, which a headless or embedded browser may not do on its
-  // own; doing it here also makes it one behaviour everywhere. A text field keeps it (it moves the
-  // cursor there on a Mac), and so does a widget that used the key itself (defaultPrevented: this
-  // listener bubbles, after theirs). Prevented here, so the browser does not go back a second time.
+  // Alt+Left goes back from any page, as in the browser, which a headless or embedded browser may
+  // not do on its own; doing it here also makes it one behaviour everywhere. A text field keeps it
+  // (it moves the cursor there on a Mac), and so does a widget that used the key itself
+  // (defaultPrevented: this listener bubbles, after theirs). While a dialog, a menu or a popover
+  // is open it does nothing, so the page behind it is not left. Prevented here in both cases, so
+  // the browser does not go back on its own.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (
@@ -179,7 +197,9 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
         return;
       }
       event.preventDefault();
-      void navigate(-1);
+      if (!overlayOpen()) {
+        void navigate(-1);
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => {

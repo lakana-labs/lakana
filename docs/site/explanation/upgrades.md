@@ -867,7 +867,10 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   earlier release stored in the browser is ignored, and nobody needs to do anything.
 - Screens and their tables use the full width of the window; a long name in a list ends with
   an ellipsis and shows whole in a tooltip. A state in a list is a small pill.
-- Alt+Left goes back from any page, as in the browser, unless the focus is in a text field.
+- Alt+Left goes back from any page, as in the browser, unless the focus is in a text field or a
+  dialog, a menu or a popover is open.
+- Each list says how many rows it has above it, with its search on the left and its filters and
+  a Refresh button on the right.
 
 ## Notes for 0.22.0
 

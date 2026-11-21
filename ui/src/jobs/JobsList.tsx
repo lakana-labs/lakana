@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 
 import type { EnvironmentChoice } from "../api/environments";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import { ListToolbar } from "../shell/ListToolbar";
 import { AllJobs } from "./AllJobs";
 import { Environments } from "./Environments";
 import { FailedRuns } from "./FailedRuns";
@@ -42,16 +43,21 @@ function JobsSections({ listed }: JobsSectionsProps): JSX.Element {
   }, []);
   return (
     <>
-      <div className="jobs-find">
-        <EnvironmentPicker
-          environments={listed}
-          value={filter.environment}
-          label={t("jobs.list.environment")}
-          all={t("jobs.list.allEnvironments")}
-          onChange={filter.setEnvironment}
-        />
-        <JobsSearch query={filter.query} onSearch={filter.setQuery} />
-      </div>
+      {/* Each section's heading carries its own count, so the toolbar has none. */}
+      <ListToolbar
+        count={null}
+        search={<JobsSearch query={filter.query} onSearch={filter.setQuery} />}
+        filters={
+          <EnvironmentPicker
+            environments={listed}
+            value={filter.environment}
+            label={t("jobs.list.environment")}
+            all={t("jobs.list.allEnvironments")}
+            onChange={filter.setEnvironment}
+          />
+        }
+        onRefresh={onChanged}
+      />
       {/* A new filter mounts the sections afresh: no row, count or control of the previous
           filter stays while the new read is open, and a failed first read says so at once. */}
       <div className="panel-stack">
