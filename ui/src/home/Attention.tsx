@@ -6,8 +6,10 @@
  */
 import { type JSX, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import { type AttentionItemOut, type AttentionKind, getAttention } from "../api";
+import { runsTabPath } from "../jobs/paths";
 import { Loaded } from "../shell/Loaded";
 import { useWhen } from "../shell/useWhen";
 import { StatusLabel } from "../status/StatusLabel";
@@ -77,33 +79,45 @@ interface RowsProps {
   readonly items: readonly AttentionItemOut[];
   /** Whether the server left more out. */
   readonly truncated: boolean;
+  /** Whether every row is shown, not only the newest five. */
+  readonly expanded: boolean;
+  /** Shows every row, or only the newest five again. */
+  readonly setExpanded: (expanded: boolean) => void;
 }
 
 /**
  * The newest five rows, each opening its failure; under them, when there are more, Show all N
- * shows the rest in place and moves the focus to the first of them, and Show fewer hides them
- * again with the focus left on the button.
+ * shows the rest in place and moves the focus to the first of them (its link, or the row itself
+ * when it opens nothing), and Show fewer hides them again with the focus left on the button.
+ * When the server cut the list, a muted line under the expanded rows says so and links on to
+ * every failed run. A list that drops to five rows or fewer starts collapsed again.
  *
- * @param props - The rows and whether more were left out.
+ * @param props - The rows, whether more were left out, and whether all are shown.
  * @param props.items - The rows.
  * @param props.truncated - Whether more were left out.
+ * @param props.expanded - Whether every row is shown.
+ * @param props.setExpanded - Shows every row or only the newest five.
  * @returns The table and its foot.
  */
-function Rows({ items, truncated }: RowsProps): JSX.Element {
+function Rows({ items, truncated, expanded, setExpanded }: RowsProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const since = useSince();
   const table = useId();
-  const [expanded, setExpanded] = useState(false);
   const opened = useRef(false);
-  const toggle = useRef<HTMLButtonElement>(null);
+  const more = items.length > SHOWN;
+  useEffect(() => {
+    if (!more && expanded) {
+      setExpanded(false);
+    }
+  }, [more, expanded, setExpanded]);
   useEffect(() => {
     if (!opened.current) {
       return;
     }
     opened.current = false;
-    const first = document.getElementById(table)?.querySelectorAll("tbody tr")[SHOWN];
-    (first?.querySelector<HTMLElement>("a") ?? toggle.current)?.focus();
+    const first = document.getElementById(table)?.querySelectorAll<HTMLElement>("tbody tr")[SHOWN];
+    (first?.querySelector<HTMLElement>("a") ?? first)?.focus();
   }, [expanded, table]);
   const shown = expanded ? items : items.slice(0, SHOWN);
   return (
@@ -117,31 +131,41 @@ function Rows({ items, truncated }: RowsProps): JSX.Element {
         tabIndex={0}
       >
         <ObjectTable column={t("list.state")} id={table}>
-          {shown.map((item) => (
-            <ObjectRow
-              key={`${item.kind} ${item.ref} ${item.title}`}
-              to={attentionPath(item)}
-              name={item.title}
-              environment={item.environment}
-              second={
-                item.count > 1 && item.since !== null
-                  ? t("home.attention.repeated", { count: item.count, since: since(item.since) })
-                  : when(item.at)
-              }
-              aside={
-                <StatusLabel
-                  kind={GLYPHS[item.kind]}
-                  label={t(`home.attention.kinds.${item.kind}`)}
-                />
-              }
-            />
-          ))}
+          {shown.map((item) => {
+            const to = attentionPath(item);
+            return (
+              <ObjectRow
+                key={`${item.kind} ${item.ref} ${item.title}`}
+                to={to}
+                name={item.title}
+                environment={item.environment}
+                second={
+                  item.count > 1 && item.since !== null
+                    ? t("home.attention.repeated", { count: item.count, since: since(item.since) })
+                    : when(item.at)
+                }
+                aside={
+                  <StatusLabel
+                    kind={GLYPHS[item.kind]}
+                    label={t(`home.attention.kinds.${item.kind}`)}
+                  />
+                }
+                focusable={to === null}
+              />
+            );
+          })}
         </ObjectTable>
       </div>
-      {items.length > SHOWN && (
+      {expanded && truncated && (
+        <p className="panel-note">
+          {t("home.attention.truncated", { count: items.length })}{" "}
+          <Link to={runsTabPath({ status: ["failed"] })}>{t("home.attention.everyFailedRun")}</Link>
+        </p>
+      )}
+      {more && (
         <p className="panel-foot">
           <button
-            ref={toggle}
+            className="link-button"
             type="button"
             aria-expanded={expanded}
             aria-controls={table}
@@ -172,6 +196,7 @@ export function Attention(): JSX.Element {
   const { t } = useTranslation();
   const heading = useId();
   const attention = usePolled(getAttention, EVERY_MS);
+  const [expanded, setExpanded] = useState(false);
   return (
     <section className="flat-panel dashboard-panel home-attention" aria-labelledby={heading}>
       <div className="panel-head">
@@ -179,7 +204,11 @@ export function Attention(): JSX.Element {
           <h2 className="panel-title" id={heading}>
             {t("home.attention.title")}
           </h2>
-          <p className="panel-subtitle">{t("home.attention.subtitle", { count: SHOWN })}</p>
+          <p className="panel-subtitle">
+            {expanded
+              ? t("home.attention.subtitleAll")
+              : t("home.attention.subtitle", { count: SHOWN })}
+          </p>
         </div>
       </div>
       <Loaded resource={attention}>
@@ -187,7 +216,12 @@ export function Attention(): JSX.Element {
           found.items.length === 0 ? (
             <p className="empty">{t("home.attention.none")}</p>
           ) : (
-            <Rows items={found.items} truncated={found.truncated} />
+            <Rows
+              items={found.items}
+              truncated={found.truncated}
+              expanded={expanded}
+              setExpanded={setExpanded}
+            />
           )
         }
       </Loaded>

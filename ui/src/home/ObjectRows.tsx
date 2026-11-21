@@ -53,6 +53,11 @@ export interface ObjectRowProps {
   readonly second: string;
   /** The second column. */
   readonly aside: ReactNode;
+  /**
+   * Whether the row itself may take the focus from a script (`tabIndex` -1), as a row with no
+   * link must when a list moves the focus to it; never a tab stop.
+   */
+  readonly focusable?: boolean;
 }
 
 /**
@@ -64,11 +69,19 @@ export interface ObjectRowProps {
  * @param props.environment - The object's environment, or null.
  * @param props.second - The line under the name.
  * @param props.aside - The second column.
+ * @param props.focusable - Whether a script may move the focus to the row.
  * @returns The row.
  */
-export function ObjectRow({ to, name, environment, second, aside }: ObjectRowProps): JSX.Element {
+export function ObjectRow({
+  to,
+  name,
+  environment,
+  second,
+  aside,
+  focusable = false,
+}: ObjectRowProps): JSX.Element {
   return (
-    <tr>
+    <tr tabIndex={focusable ? -1 : undefined}>
       <td>
         {to === null ? (
           <span className="row-name">

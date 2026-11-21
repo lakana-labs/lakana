@@ -416,25 +416,31 @@ tr:hover .chevron {
   text-decoration: underline;
 }
 
-/* A foot that changes the panel in place (Show all N, Show fewer) is a button that reads as the
-   footer link does; its padding keeps the target above 24 px. */
-.panel-foot button {
-  padding: var(--space-1) 0;
+/* A muted line in a panel, such as the note that the server cut a list, with its link on. */
+.panel-note {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+}
+
+/* Underlined: colour alone does not set a link in a sentence apart (WCAG 1.4.1). */
+.panel-note a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+/* A button that reads as a link: Defined in's path, which opens the file, and a dashboard panel's
+   Show all N, which shows the rest of its rows in place. */
+.link-button {
+  padding: 0;
   border: 0;
   background: none;
   color: var(--color-accent);
   font: inherit;
-  cursor: pointer;
-}
-
-.panel-foot button:hover {
-  color: var(--color-accent-hover);
+  text-align: start;
   text-decoration: underline;
-}
-
-.panel-foot button:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
+  cursor: pointer;
 }
 
 /* Facts as name and value: the name muted, both on one baseline, the names in one column. */

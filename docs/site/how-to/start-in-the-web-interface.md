@@ -129,8 +129,9 @@ The order is the same for everyone; what you may do changes what is inside the b
    tables among the tables they read or opened recently, and their own failed queries. A job, a
    deploy or a check that failed several times in a row is one row, such as "nightly_ranking:
    Failed 3 times since Tuesday", and opens the newest failure. With more than five rows,
-   **Show all N** shows the rest in the panel and **Show fewer** hides them again. With nothing to report
-   it says "Nothing needs your attention."
+   **Show all N** shows the rest in the panel and **Show fewer** hides them again. Home keeps the
+   newest 50; when there are more, a line under them says so and links to every failed run. With
+   nothing to report it says "Nothing needs your attention."
 5. **Recently opened**: the tables you opened, kept on the server so the list follows you to
    another browser. A table's row opens its page, a query's its run on the Queries screen, and a
    job's or a run's its page under Jobs.

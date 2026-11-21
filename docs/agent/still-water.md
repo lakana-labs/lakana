@@ -109,8 +109,12 @@ Every screen, every time (the end-to-end test `ui/e2e/layout.spec.ts` measures m
   button.
 - **Panels** are `.flat-panel` with a `.panel-head` (title, own actions at the right), `--panel-gap`
   apart. A dashboard panel (`.dashboard-panel`, for Home) has a title and a muted subtitle
-  (`.panel-subtitle`, "Recently started · top 5"), at most five rows with their state on the
-  right and a link on at its foot (`.panel-foot`).
+  (`.panel-subtitle`, "Newest first · top 5"), the newest five rows with their state on the
+  right, and at its foot (`.panel-foot`) **Show all N**, a `.link-button` that shows the other
+  rows in place (`aria-expanded`, `aria-controls` on the table) and moves the focus to the first
+  of them; **Show fewer** hides them again, and the subtitle drops "· top 5" while all are shown.
+  When the server cut the list, a muted `.panel-note` under the rows says how many are shown and
+  links on to the full list (Home's Needs your attention, #785).
 - **Tokens, not pixels.** A new spacing or size need is a token or a shared class in
   `ui/src/shell/screen.css`, never a one-off value in an area's stylesheet.
 

@@ -141,6 +141,60 @@ describe("Attention", () => {
     expect(within(list).getByRole("button", { name: "Show all 7" })).toHaveFocus();
   });
 
+  it("moves the focus to the first new row even when it opens nothing", async () => {
+    const plain = once("table_late", null, "gold.station_ranking", "gold.station_ranking");
+    const { user } = renderShell("/", { routes: answering([...ITEMS.slice(0, 5), plain]) });
+
+    const list = await region();
+    const toggle = await within(list).findByRole("button", { name: "Show all 6" });
+    expect(toggle).toHaveClass("link-button");
+    await user.click(toggle);
+
+    const plainName = list.querySelector("span.row-name");
+    expect(plainName).toHaveTextContent("gold.station_ranking");
+    expect(plainName?.closest("tr")).toHaveFocus();
+  });
+
+  it("says Newest first · top 5 while collapsed and Newest first while expanded", async () => {
+    const { user } = renderShell("/", { routes: answering(ITEMS) });
+
+    const list = await region();
+    await user.click(await within(list).findByRole("button", { name: "Show all 7" }));
+    expect(within(list).getByText("Newest first")).toHaveClass("panel-subtitle");
+    expect(within(list).queryByText("Newest first · top 5")).toBeNull();
+    await user.click(within(list).getByRole("button", { name: "Show fewer" }));
+    expect(within(list).getByText("Newest first · top 5")).toBeVisible();
+  });
+
+  it("starts collapsed again after the list dropped to five rows or fewer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let items: object[] = ITEMS;
+    const { user } = renderShell("/", {
+      routes: {
+        "GET /api/v1/home/attention": () => ({ status: 200, body: { items, truncated: false } }),
+      },
+    });
+
+    const list = await region();
+    await user.click(await within(list).findByRole("button", { name: "Show all 7" }));
+    items = ITEMS.slice(0, 3);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    await waitFor(() => {
+      expect(within(list).queryByRole("button", { name: "Show fewer" })).toBeNull();
+    });
+    items = ITEMS;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(await within(list).findByRole("button", { name: "Show all 7" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(within(list).getAllByRole("row")).toHaveLength(6);
+  });
+
   it("offers no Show all for five rows or fewer", async () => {
     renderShell("/", { routes: answering(ITEMS.slice(0, 5)) });
 
@@ -149,15 +203,24 @@ describe("Attention", () => {
     expect(within(list).queryByRole("button", { name: /^Show all/ })).toBeNull();
   });
 
-  it("says Show all 50+ when the server cut the list", async () => {
+  it("says Show all 50+ when the server cut the list, and where the rest are once expanded", async () => {
     const many = Array.from({ length: 50 }, (_, index) =>
       once("run_failed", "prod", `job_${String(index)}`, `run-${String(index)}`),
     );
-    const { user } = renderShell("/", { routes: answering(many, true) });
+    const { user, router } = renderShell("/", { routes: answering(many, true) });
 
     const list = await region();
+    expect(within(list).queryByText("Showing the newest 50.", { exact: false })).toBeNull();
     await user.click(await within(list).findByRole("button", { name: "Show all 50+" }));
     expect(within(list).getAllByRole("row")).toHaveLength(51);
+    const note = within(list).getByText("Showing the newest 50.", { exact: false });
+    expect(note).toHaveClass("panel-note");
+    await user.click(within(note).getByRole("link", { name: "See every failed run" }));
+    await waitFor(() => {
+      expect(router.state.location.pathname + router.state.location.search).toBe(
+        "/jobs/runs?status=failed",
+      );
+    });
   });
 
   it.each([
