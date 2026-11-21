@@ -17,7 +17,7 @@ from enum import Enum
 from typing import Final
 
 from lakana_core.errors import ValidationError
-from lakana_core.punctuation_like import PUNCTUATION_LIKE_CHARACTERS
+from lakana_core.separator_like import SEPARATOR_LIKE_CHARACTERS
 
 NAMESPACE_SEPARATOR: Final[str] = "\x1f"
 """ASCII unit separator, matching the Iceberg REST namespace encoding."""
@@ -578,12 +578,13 @@ def refuse_look_alike_characters(
 def character_outside_name_allowlist(name: str) -> tuple[int, str] | None:
     """Find the first character a new namespace, table or view name may not hold.
 
-    Such a name may hold letters (``L*``), combining marks (``M*``), decimal digits (``Nd``)
-    and `NAME_SYMBOLS`, but none of `PUNCTUATION_LIKE_CHARACTERS` (generated from Unicode's
+    Such a name may hold letters (``L*``), combining marks (``M*``), decimal digits (``Nd``) and
+    `NAME_SYMBOLS`, but none of `SEPARATOR_LIKE_CHARACTERS` (generated from Unicode's
     `confusables.txt`: U+A4F8 LISU LETTER TONE MYA TI and U+0660 ARABIC-INDIC DIGIT ZERO look
-    like ``.``, so ``sales`` + U+A4F8 + ``daily`` would read as the dotted path
-    ``sales.daily``). A character `look_alike_character` judges whatever comes around it (drawn
-    as nothing, a space, unassigned, private use) is left to it, which names it more exactly.
+    like ``.``, so ``sales`` + U+A4F8 + ``daily`` would read as the dotted path ``sales.daily``;
+    U+30CE KATAKANA LETTER NO looks like ``/``). A character `look_alike_character` judges
+    whatever comes around it (drawn as nothing, a space, unassigned, private use) is left to it,
+    which names it more exactly.
 
     Parameters
     ----------
@@ -597,7 +598,7 @@ def character_outside_name_allowlist(name: str) -> tuple[int, str] | None:
     """
     for position, character in enumerate(name, start=1):
         category = unicodedata.category(character)
-        if character in PUNCTUATION_LIKE_CHARACTERS:
+        if character in SEPARATOR_LIKE_CHARACTERS:
             return position, character
         if (
             category.startswith(("L", "M"))
@@ -633,11 +634,11 @@ def refuse_characters_outside_name_allowlist(name: str, *, what: str) -> None:
     if found is None:
         return
     position, character = found
-    if character in PUNCTUATION_LIKE_CHARACTERS:
+    if character in SEPARATOR_LIKE_CHARACTERS:
         raise ValidationError(
             f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, which "
-            f"looks like '{shown(PUNCTUATION_LIKE_CHARACTERS[character])}', so the name could read "
-            "as another one or as a dotted path. Use another character, such as '_'."
+            f"looks like '{shown(SEPARATOR_LIKE_CHARACTERS[character])}', a separator, so the name "
+            "could read as a path of two names. Use another character, such as '_'."
         )
     raise ValidationError(
         f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, which is "

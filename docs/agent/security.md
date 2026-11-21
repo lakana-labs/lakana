@@ -196,7 +196,7 @@ visible symbols. In order:
 | `refuse_percent_in_new_name`: no `%` | yes | no |
 | `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
 | `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
-| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS`, but none of `PUNCTUATION_LIKE_CHARACTERS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS`, but none of `SEPARATOR_LIKE_CHARACTERS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
 | `refuse_look_alike_characters` (#609): see below; then NFC | yes | yes |
 
 `look_alike_character` refuses, each with its own sentence (`LookAlike`):
@@ -230,24 +230,29 @@ form is run through every rule of the caller (`composed_check`: `check_new_name`
 instead, so a suggestion is always a name that would be accepted (`a` + U+0301 + U+0323 + U+0301
 composes to `ạ` with the acute twice and is refused as a repeated mark).
 
-**Punctuation-like characters** (`PUNCTUATION_LIKE_CHARACTERS`, `lakana_core/punctuation_like.py`):
+**Separator-like characters** (`SEPARATOR_LIKE_CHARACTERS`, `lakana_core/separator_like.py`):
 every letter, mark or digit the allowlist would accept whose skeleton in Unicode's
-`confusables.txt` holds a character the allowlist refuses. U+A4F8 LISU LETTER TONE MYA TI
+`confusables.txt` holds `.`, `/`, `\` or `:` (#789, option A). U+A4F8 LISU LETTER TONE MYA TI
 (`Lm`), U+1D16D MUSICAL SYMBOL COMBINING AUGMENTATION DOT (`Mc`) and the Arabic-Indic zeros
 U+0660 and U+06F0 look like `.`, so `sales` + U+A4F8 + `daily` would read as the dotted path
-`sales.daily`; U+30CE KATAKANA LETTER NO looks like `/`, the Devanagari visarga like `:`. The
-table is generated, never edited: `scripts/punctuation_like_characters.py CONFUSABLES_TXT`
-writes it from a local copy of the file (version 18.0.0 of 2026-08-06, 307 characters, with
-Python 3.14's Unicode 16 categories; a skeleton character that Python does not know counts as
-allowed). `scripts/tests/test_punctuation_like_characters.py` regenerates it from the checked-in
-excerpt `scripts/tests/confusables-excerpt.txt` (every line behind an entry, and lines that must
-make none) and compares, without the network. Refused in namespace, table and view names with
-their own sentence (`… which looks like '.', so the name could read as another one or as a
-dotted path`); allowed in a column name, since they are visible and a column is shown only
-inside its table. The rule is broad by design and refuses real letters in table names:
-207 Canadian syllabics (the ones with a dot, such as `ᐧ`-forms), `ð` (`∂̵`), `ŀ` (`l·`),
-`ʔ` (`?`), `ʼ` and `ʻ` (`'`), the visarga `ः` (`:`), Japanese `ノ` (`/`) and Chinese `正`
-(a counting rod). Such a word needs another spelling in a table name; a column name keeps it.
+`sales.daily`; U+30CE KATAKANA LETTER NO and its halfwidth form look like `/`, U+4E36 like `\`,
+the visarga of Devanagari and six other scripts like `:`. The table is generated, never edited:
+`scripts/separator_like_characters.py CONFUSABLES_TXT` writes it from a local copy of the file
+(version 18.0.0 of 2026-08-06, 24 characters, with Python 3.14's Unicode 16 categories).
+`scripts/tests/test_separator_like_characters.py` regenerates it from the checked-in excerpt
+`scripts/tests/confusables-excerpt.txt` (every line behind an entry, and lines that must make
+none) and compares, without the network. Refused in namespace, table and view names with their
+own sentence (`… which looks like '.', a separator, so the name could read as a path of two
+names`); allowed in a column name, since they are visible and a column is shown only inside its
+table. A letter whose skeleton holds other punctuation is allowed: `ð`, `ŀ`, `ʔ`, `ʼ`, `ʻ`, `正`,
+the Lisu comma tone letter U+A4F9 and the Canadian syllabics with a middle dot.
+
+**Accepted casualties of the separator rule:** real letters that still look like a separator are
+refused in table names: Japanese `ノ` (U+30CE) and `ﾉ` (U+FF89), the CJK ideographs `丶` and `丿`,
+Coptic old esh, the vertical kana repeat mark, the IPA length mark `ː` (U+02D0), the visarga in Devanagari, Gujarati, Brahmi,
+Kaithi, Sharada, Siddham, Takri and Dogra, the Meetei Mayek lum iyek and the Lisu tone letters
+that look like `.`, `..`, `.,` or `:`. None of the Canadian syllabics maps to a separator. Such a
+word needs another spelling in a table name; a column name keeps it.
 
 **Why marks are allowed:** NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
 Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
@@ -321,8 +326,8 @@ saves as `Monthly-revenue-….csv`.
   forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so such twins are
   two names; the web interface does not mark them.
 - Non-Latin decimal digits (Devanagari `१`, Arabic-Indic `١`, which looks like `1` or `l`) and
-  every letter whose skeleton is letters and digits only: `PUNCTUATION_LIKE_CHARACTERS` covers
-  only skeletons with a refused character.
+  every letter whose skeleton holds no separator: `SEPARATOR_LIKE_CHARACTERS` covers only
+  skeletons with `.`, `/`, `\` or `:`, so `ð`, `ʔ` (`?`), `ʼ` (`'`) and U+A4F9 (`,`) pass.
 - A single mark on a letter that reads as another letter: `pri̇ce` (`i` + U+0307 COMBINING DOT
   ABOVE) reads as `price` in most fonts.
 - The CLI escapes only the #593 set, so it shows a stored name holding U+3164 or U+2800 as blank,

@@ -1,19 +1,20 @@
-r"""Generate `lakana_core.punctuation_like` from Unicode's `confusables.txt` (#609).
+r"""Generate `lakana_core.separator_like` from Unicode's `confusables.txt` (#609).
 
 A new namespace, table or view name may hold letters, combining marks, decimal digits and
-`lakana_core.identifiers.NAME_SYMBOLS`. Some of those characters look like a character the
-allowlist refuses: U+A4F8 LISU LETTER TONE MYA TI and U+0660 ARABIC-INDIC DIGIT ZERO look like
-``.``, so ``sales\ua4f8daily`` reads as the dotted path ``sales.daily``. Unicode's
-`confusables.txt` maps each such character to its *skeleton*. This script keeps every single
-code point the allowlist accepts whose skeleton holds a character it refuses, and writes them,
-with their skeletons, to `packages/lakana-core/src/lakana_core/punctuation_like.py`, pinned to
-the data's date.
+`lakana_core.identifiers.NAME_SYMBOLS`. Some of those characters look like a separator of a
+path: U+A4F8 LISU LETTER TONE MYA TI and U+0660 ARABIC-INDIC DIGIT ZERO look like ``.``, so
+``sales`` + U+A4F8 + ``daily`` reads as the dotted path ``sales.daily``, and U+30CE KATAKANA
+LETTER NO looks like ``/``. Unicode's `confusables.txt` maps each such character to its
+*skeleton*. This script keeps every single code point the allowlist accepts whose skeleton holds
+one of `SEPARATORS` (``.``, ``/``, ``\``, ``:``), and writes them, with their skeletons, to
+`packages/lakana-core/src/lakana_core/separator_like.py`, pinned to the data's date. A letter
+whose skeleton holds other punctuation (U+00F0 eth, U+0294 glottal stop) stays allowed (#789,
+option A).
 
-Categories come from the running Python's `unicodedata`. A skeleton character that Python does
-not know yet (``Cn``) is not counted as refused: a newer Unicode adds letters and marks, not the
-punctuation the skeletons point at. Run it with the newest Python the project supports.
+Categories come from the running Python's `unicodedata`. Run it with the newest Python the
+project supports.
 
-Usage: ``uv run --python 3.14 python scripts/punctuation_like_characters.py CONFUSABLES_TXT``
+Usage: ``uv run --python 3.14 python scripts/separator_like_characters.py CONFUSABLES_TXT``
 (``--check`` writes nothing and fails when the module differs). The file is
 https://www.unicode.org/Public/security/latest/confusables.txt; the script never downloads it.
 """
@@ -27,12 +28,16 @@ import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
 
-MODULE = Path("packages/lakana-core/src/lakana_core/punctuation_like.py")
+MODULE = Path("packages/lakana-core/src/lakana_core/separator_like.py")
 """The module this script writes, relative to the repository root."""
 
 NAME_SYMBOLS = frozenset({"_", "-", " "})
 """`lakana_core.identifiers.NAME_SYMBOLS`, repeated so the script needs no installed package
-(`test_punctuation_like_characters.py` checks that the two agree)."""
+(`test_separator_like_characters.py` checks that the two agree)."""
+
+SEPARATORS = frozenset({".", "/", "\\", ":"})
+"""The skeleton characters that make a character separator-like: the dot of the dotted display
+form, the slashes of a path, and the colon."""
 
 _DATE = re.compile(r"^# Date: (\d{4}-\d{2}-\d{2})")
 
@@ -54,25 +59,8 @@ def allowed(character: str) -> bool:
     return category[0] in "LM" or category == "Nd" or character in NAME_SYMBOLS
 
 
-def refused(character: str) -> bool:
-    """Say whether the allowlist refuses a skeleton character.
-
-    Parameters
-    ----------
-    character
-        One character of a skeleton.
-
-    Returns
-    -------
-    bool
-        `True` for punctuation, a symbol, a space but U+0020 and a control or format character;
-        `False` for an allowed character and for one this Python does not know (``Cn``).
-    """
-    return not allowed(character) and unicodedata.category(character) != "Cn"
-
-
 def skeletons(lines: Iterable[str]) -> dict[str, str]:
-    """Pick the allowed single characters whose skeleton holds a refused character.
+    """Pick the allowed single characters whose skeleton holds one of `SEPARATORS`.
 
     Parameters
     ----------
@@ -95,7 +83,7 @@ def skeletons(lines: Iterable[str]) -> dict[str, str]:
             continue
         character = chr(int(codes[0], 16))
         skeleton = "".join(chr(int(code, 16)) for code in target.split())
-        if allowed(character) and any(refused(part) for part in skeleton):
+        if allowed(character) and any(part in SEPARATORS for part in skeleton):
             found[character] = skeleton
     return dict(sorted(found.items()))
 
@@ -163,13 +151,13 @@ def render(table: dict[str, str], date: str) -> str:
         for character, skeleton in table.items()
     )
     return (
-        '"""Letters, marks and digits that look like punctuation (#609); generated, do not edit.\n'
+        '"""Letters, marks and digits that look like a separator (#609); generated, do not edit.\n'
         "\n"
-        "Written by `scripts/punctuation_like_characters.py` from Unicode's `confusables.txt` of\n"
+        "Written by `scripts/separator_like_characters.py` from Unicode's `confusables.txt` of\n"
         f"{date}, with Python {sys.version_info[0]}.{sys.version_info[1]}'s `unicodedata` "
         f"(Unicode {unicodedata.unidata_version}).\n"
         "Each key is a character the table-name allowlist would accept, and its value the\n"
-        "skeleton `confusables.txt` gives it, which holds a character the allowlist refuses.\n"
+        "skeleton `confusables.txt` gives it, which holds `.`, `/`, a backslash or `:`.\n"
         '"""\n'
         "\n"
         "from typing import Final\n"
@@ -177,7 +165,7 @@ def render(table: dict[str, str], date: str) -> str:
         f'CONFUSABLES_DATE: Final[str] = "{date}"\n'
         '"""The date of the `confusables.txt` the table was generated from."""\n'
         "\n"
-        "PUNCTUATION_LIKE_CHARACTERS: Final[dict[str, str]] = {\n"
+        "SEPARATOR_LIKE_CHARACTERS: Final[dict[str, str]] = {\n"
         f"{rows}"
         "}\n"
         '"""Character to skeleton; `lakana_core.identifiers.character_outside_name_allowlist`\n'
@@ -206,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     text = render(skeletons(lines), data_date(lines))
     if args.check:
         if MODULE.read_text(encoding="utf-8") != text:
-            print(f"{MODULE} differs; run scripts/punctuation_like_characters.py to regenerate it")
+            print(f"{MODULE} differs; run scripts/separator_like_characters.py to regenerate it")
             return 1
         return 0
     MODULE.write_text(text, encoding="utf-8")

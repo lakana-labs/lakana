@@ -258,8 +258,8 @@ def test_every_way_of_creating_a_name_refuses_a_look_alike(
         (_NFD_CAFE, "NFC"),
         ("a\u3164", "U\\+3164"),
         ("n$", "U\\+0024.*neither a letter nor a decimal digit"),
-        ("sales\u0660daily", "U\\+0660.*dotted path"),
-        ("sales\ua4f8daily", "U\\+A4F8.*dotted path"),
+        ("sales\u0660daily", "U\\+0660.*a separator"),
+        ("sales\ua4f8daily", "U\\+A4F8.*a separator"),
     ):
         new = _ref(f"gold.{bad}")
         attempts = [
@@ -376,11 +376,12 @@ def test_an_added_schema_refuses_a_new_look_alike_column_and_keeps_a_stored_one(
         ("\U0001d16d", "U+1D16D", "."),  # musical symbol combining augmentation dot, a mark
         ("\u0660", "U+0660", "."),  # Arabic-Indic digit zero
         ("\u06f0", "U+06F0", "."),  # extended Arabic-Indic digit zero
-        ("\ua4f9", "U+A4F9", ","),  # Lisu letter tone na po
         ("\u30ce", "U+30CE", "/"),  # katakana letter no
+        ("\u4e36", "U+4E36", "\\\\"),  # CJK ideograph that looks like a backslash
+        ("\u0903", "U+0903", ":"),  # Devanagari sign visarga
     ],
 )
-def test_a_character_that_looks_like_punctuation_is_refused_in_a_table_name_only(
+def test_a_character_that_looks_like_a_separator_is_refused_in_a_table_name_only(
     character: str, code: str, looks_like: str
 ) -> None:
     """``sales`` + U+A4F8 + ``daily`` reads as ``sales.daily``; a column name may hold it."""
@@ -388,9 +389,27 @@ def test_a_character_that_looks_like_punctuation_is_refused_in_a_table_name_only
     with pytest.raises(ValidationError) as refused:
         check_new_name(name, what="Table name")
     message = str(refused.value)
-    assert f"holds {code} at character 6, which looks like '{looks_like}'" in message
-    assert "could read as another one or as a dotted path" in message
+    assert f"holds {code} at character 6, which looks like '{looks_like}', a separator" in message
+    assert "could read as a path of two names" in message
     # Visible, so a column, which shows only inside its table, may hold it.
+    check_new_column_name(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "\xf0ingvellir",  # eth looks like a struck-through partial sign, not a separator
+        "\u6b63\u5e38",  # a CJK ideograph that looks like a counting rod
+        "ca\u0140la",  # l with a middle dot
+        "\u0294aq",  # glottal stop, which looks like '?'
+        "Hawai\u02bbi",  # okina, which looks like an apostrophe
+        "na\u02bcwe",  # modifier letter apostrophe
+        "\ua4f9",  # Lisu tone letter that looks like ','
+    ],
+)
+def test_a_letter_that_looks_like_other_punctuation_is_allowed_in_a_table_name(name: str) -> None:
+    """Only `.`, `/`, a backslash and `:` read as a separator (#789, option A)."""
+    check_new_name(name, what="Table name")
     check_new_column_name(name)
 
 
