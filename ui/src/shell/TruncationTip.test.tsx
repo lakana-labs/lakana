@@ -77,6 +77,8 @@ describe("TruncationTip", () => {
       link.focus();
     });
 
+    fireEvent.keyDown(document, { key: "a" });
+    expect(tip()).not.toBeNull();
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(tip()).toBeNull();
@@ -91,5 +93,54 @@ describe("TruncationTip", () => {
     fireEvent.pointerMove(link, { clientX: 50, clientY: 30 });
 
     expect(tip()).toBeNull();
+  });
+
+  it("stays open while the pointer moves onto it, and on a second move over the name", () => {
+    const link = renderRow(true);
+    fireEvent.pointerMove(link, { clientX: 50, clientY: 30 });
+    fireEvent.pointerMove(link, { clientX: 60, clientY: 30 });
+
+    const shown = tip();
+    expect(shown).not.toBeNull();
+    fireEvent.pointerMove(shown as Element, { clientX: 50, clientY: 40 });
+
+    expect(tip()).toHaveTextContent("fact_sales_by_store_and_day");
+  });
+
+  it("stays open for the focused name when the pointer leaves it, and closes on a scroll", () => {
+    const link = renderRow(true);
+    act(() => {
+      link.focus();
+    });
+
+    fireEvent.pointerMove(document.body, { clientX: 500, clientY: 500 });
+    expect(tip()).not.toBeNull();
+
+    fireEvent.scroll(window);
+    expect(tip()).toBeNull();
+  });
+
+  it("ignores a move over no element, and focus on something that is not cut", () => {
+    renderRow(true);
+    fireEvent.pointerMove(document, { clientX: 50, clientY: 30 });
+    expect(tip()).toBeNull();
+
+    const button = document.createElement("button");
+    document.body.append(button);
+    act(() => {
+      button.focus();
+    });
+    expect(tip()).toBeNull();
+    button.remove();
+  });
+
+  it("stops listening when it goes", () => {
+    const { unmount } = render(<TruncationTip />);
+    unmount();
+
+    expect(() => {
+      fireEvent.keyDown(document, { key: "Escape" });
+      fireEvent.scroll(window);
+    }).not.toThrow();
   });
 });
