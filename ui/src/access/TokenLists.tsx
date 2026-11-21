@@ -146,6 +146,20 @@ function RevokeDialog({ onConfirm, onClose, onDone, what, also }: RevokeDialogPr
   );
 }
 
+/**
+ * Reads a list again in place whenever `round` changes after the first render, so its rows and
+ * its count stay on screen until the answer is in.
+ *
+ * @param round - Changes when the list must be read again.
+ * @param reload - Reads the list again.
+ */
+function useReloadOn(round: number, reload: () => void): void {
+  const first = useRef(round);
+  useEffect(() => {
+    if (round !== first.current) reload();
+  }, [round, reload]);
+}
+
 /** Properties of {@link PersonalTokens}. */
 export interface PersonalTokensProps {
   /** Only this principal's tokens; null for everyone's. */
@@ -154,6 +168,8 @@ export interface PersonalTokensProps {
   readonly heading: RefObject<HTMLHeadingElement | null>;
   /** Told the rows shown and the state of the read, for the panel's toolbar. */
   readonly onState: (state: ListState) => void;
+  /** Changes when Refresh asks for the list again; it is read again in place. */
+  readonly round: number;
   /** Called after a token was revoked, as the task tokens it minted ended with it. */
   readonly onRevoked: () => void;
 }
@@ -168,6 +184,7 @@ export interface PersonalTokensProps {
  * @param props.heading - The section's heading.
  * @param props.onRevoked - Called after a token was revoked.
  * @param props.onState - Told the rows shown and the state of the read.
+ * @param props.round - Changes when Refresh asks for the list again.
  * @returns The list.
  */
 export function PersonalTokens({
@@ -175,11 +192,13 @@ export function PersonalTokens({
   heading,
   onRevoked,
   onState,
+  round,
 }: PersonalTokensProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const load = useCallback((cursor: string | null) => listAllTokens(owner, cursor), [owner]);
   const pages = useCursorPages(owner ?? "", load);
+  useReloadOn(round, pages.reload);
   const arm = useFocusOnRead(heading, pages.items);
   const [revoking, setRevoking] = useState<TokenOut | null>(null);
   const rows = pages.items ?? [];
@@ -312,6 +331,8 @@ export interface TaskTokensProps {
   readonly heading: RefObject<HTMLHeadingElement | null>;
   /** Told the rows shown and the state of the read, for the panel's toolbar. */
   readonly onState: (state: ListState) => void;
+  /** Changes when Refresh asks for the list again; it is read again in place. */
+  readonly round: number;
 }
 
 /**
@@ -324,9 +345,10 @@ export interface TaskTokensProps {
  * @param props.environment - Only this environment's; null for every environment's.
  * @param props.heading - The section's heading.
  * @param props.onState - Told the rows shown and the state of the read.
+ * @param props.round - Changes when Refresh asks for the list again.
  * @returns The list.
  */
-export function TaskTokens({ environment, heading, onState }: TaskTokensProps): JSX.Element {
+export function TaskTokens({ environment, heading, onState, round }: TaskTokensProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const load = useCallback(
@@ -334,6 +356,7 @@ export function TaskTokens({ environment, heading, onState }: TaskTokensProps): 
     [environment],
   );
   const pages = useCursorPages(environment ?? "", load);
+  useReloadOn(round, pages.reload);
   const arm = useFocusOnRead(heading, pages.items);
   const [revoking, setRevoking] = useState<TaskTokenOut | null>(null);
   const rows = pages.items ?? [];

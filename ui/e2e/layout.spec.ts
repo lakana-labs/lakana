@@ -372,6 +372,7 @@ const TOOLBARS: readonly [string, (page: Page) => Promise<unknown>, string, bool
   ["Secrets", admin(stubTokensSecrets), "/settings/access/secrets?environment=prod", true],
   ["Row filters & masks", admin(stubPolicies), "/settings/access/filters-and-masks", true],
   ["Invites", admin(stubSignInAndConfiguration), "/settings/sign-in/invites", true],
+  ["Recovery links", admin(stubSignInAndConfiguration), "/settings/sign-in/recovery-links", true],
   ["Configuration", admin(stubSignInAndConfiguration), "/settings/configuration", true],
 ];
 
@@ -411,8 +412,19 @@ for (const [name, stub, path, counted] of TOOLBARS) {
   });
 }
 
-// The jobs stub answers Deploys with no row at its plain address, so there is nothing to measure.
-for (const [name, stub, path] of TOOLBARS.filter(([screen]) => screen !== "Deploys")) {
+/** The list screens whose rows open their object, so end in a `›`. */
+const WITH_CHEVRON = new Set([
+  "Connections",
+  "Jobs",
+  "Runs",
+  "Environments",
+  "Repositories",
+  "People",
+  "Groups",
+  "Recovery links",
+]);
+
+for (const [name, stub, path] of TOOLBARS.filter(([screen]) => WITH_CHEVRON.has(screen))) {
   test(`${name}: each row's › ends at the list's right edge`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await stub(page);
@@ -427,8 +439,37 @@ for (const [name, stub, path] of TOOLBARS.filter(([screen]) => screen !== "Deplo
       }),
     );
     // Within the cell's 12 px padding of the edge, in every list that has the mark.
+    expect(gaps.length, "rows with a ›").toBeGreaterThan(0);
     for (const gap of gaps) {
       expect(gap).toBeLessThanOrEqual(12.5);
     }
+  });
+}
+
+for (const width of [1280, 1440]) {
+  test(`Row filters & masks at ${String(width)} px: who, the column and the time stay on one line`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 900 });
+    await signInAsAdmin(page);
+    await stubPolicies(page);
+    await page.goto("/settings/access/filters-and-masks");
+    await expect(page.locator(".policies-scroll tbody tr").first()).toBeVisible();
+    // The expression is code and wraps by design; the names and the time beside it never do.
+    const tall = await page
+      .locator(".policies-scroll .policy-who, .policies-scroll .row-name, .policies-scroll time")
+      .evaluateAll((cells) =>
+        cells
+          // A service account's second line is meant to be there.
+          .filter((cell) => cell.querySelector(".second") === null)
+          .filter((cell) => cell.getBoundingClientRect().height > 0)
+          .filter(
+            (cell) =>
+              cell.getBoundingClientRect().height >
+              Number.parseFloat(getComputedStyle(cell).lineHeight) * 1.5,
+          )
+          .map((cell) => cell.textContent),
+      );
+    expect(tall).toEqual([]);
   });
 }

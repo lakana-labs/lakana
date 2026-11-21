@@ -6,7 +6,7 @@
  */
 import "./connections.css";
 
-import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
+import { type JSX, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
 
@@ -61,6 +61,7 @@ interface ConnectionRowsProps {
  * @param props.first - The first environment's name.
  * @param props.filter - The environment filtered by, or null.
  * @param props.onState - Told the rows shown and the state of the read, for the toolbar.
+ * @param props.round - Changes when Refresh asks for the list again.
  * @returns The table, or the words for a filter with no connection.
  */
 function ConnectionTable({
@@ -68,13 +69,22 @@ function ConnectionTable({
   first,
   filter,
   onState,
+  round,
 }: Omit<ConnectionRowsProps, "onFilter"> & {
   /** Told the rows shown and the state of the read, for the toolbar above the table. */
   readonly onState: (state: ListState) => void;
+  /** Changes when Refresh asks for the list again. */
+  readonly round: number;
 }): JSX.Element {
   const { t } = useTranslation();
   const now = useNow();
   const pages = useCursorPages(filter ?? "", (cursor) => listConnections(filter, cursor));
+  // Refresh reads the list again in place: the rows and the count stay until the answer is in.
+  const { reload } = pages;
+  const firstRound = useRef(round);
+  useEffect(() => {
+    if (round !== firstRound.current) reload();
+  }, [round, reload]);
   // The latest of each connection a Test, Test all or read of the follower handed over.
   const [answers, setAnswers] = useState<ReadonlyMap<string, ConnectionOut>>(new Map());
   const replace = useCallback((row: ConnectionOut) => {
@@ -280,7 +290,7 @@ function ConnectionRows({
 }: ConnectionRowsProps): JSX.Element {
   const { t } = useTranslation();
   const [list, report] = useListState();
-  // Refresh mounts the table again, so it reads its first page afresh.
+  // Refresh reads the table's list again in place (ConnectionTable's `round`).
   const [round, setRound] = useState(0);
   return (
     <>
@@ -301,7 +311,8 @@ function ConnectionRows({
         refreshing={list.busy}
       />
       <ConnectionTable
-        key={`${filter ?? ""}\n${String(round)}`}
+        key={filter ?? ""}
+        round={round}
         environments={environments}
         first={first}
         filter={filter}

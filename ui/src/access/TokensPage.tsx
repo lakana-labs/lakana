@@ -104,7 +104,8 @@ export function TokensPage(): JSX.Element {
           <Text slot="description">{t("tokens.personal.filterHelp")}</Text>
         </TextField>
         <PersonalTokens
-          key={`${owner ?? ""}\n${String(personalRound)}`}
+          key={owner ?? ""}
+          round={personalRound}
           owner={owner}
           heading={personalHeading}
           onState={reportPersonal}
@@ -138,7 +139,8 @@ export function TokensPage(): JSX.Element {
           refreshing={task.busy}
         />
         <TaskTokens
-          key={`${environment ?? ""}\n${String(taskRound)}`}
+          key={environment ?? ""}
+          round={taskRound}
           environment={environment}
           heading={taskHeading}
           onState={reportTask}

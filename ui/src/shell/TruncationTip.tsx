@@ -145,7 +145,13 @@ export function TruncationTip(): JSX.Element | null {
     markCutStops();
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("focusin", onFocusIn);
-    document.addEventListener("focusout", hide);
+    // A name that fit again while it had the focus gives its stop back once the focus has moved
+    // on (after this event, when the focus is where it went).
+    const onFocusOut = (): void => {
+      hide();
+      setTimeout(markCutStops, 0);
+    };
+    document.addEventListener("focusout", onFocusOut);
     document.addEventListener("keydown", onKeyDown);
     window.addEventListener("scroll", hide, { capture: true, passive: true });
     window.addEventListener("resize", onChange);
@@ -154,7 +160,7 @@ export function TruncationTip(): JSX.Element | null {
       window.removeEventListener("resize", onChange);
       document.removeEventListener("pointermove", onPointerMove);
       document.removeEventListener("focusin", onFocusIn);
-      document.removeEventListener("focusout", hide);
+      document.removeEventListener("focusout", onFocusOut);
       document.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("scroll", hide, { capture: true });
     };

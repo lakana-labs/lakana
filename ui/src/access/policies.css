@@ -5,6 +5,13 @@
   min-width: 720px;
 }
 
+/* Who and when stay on one line, as a name does, so the expression (code, which wraps) takes the
+   squeeze of a narrow panel. */
+.policies-scroll .policy-who,
+.policies-scroll time {
+  white-space: nowrap;
+}
+
 .list-scroll.policies-scroll .access-name,
 .list-scroll.policies-scroll .row-name {
   overflow-wrap: normal;

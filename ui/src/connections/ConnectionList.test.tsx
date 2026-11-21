@@ -418,6 +418,40 @@ describe("ConnectionList", () => {
     expect(await screen.findByRole("link", { name: "files" })).toBeInTheDocument();
   });
 
+  it("keeps the rows and the count on screen while Refresh reads them again", async () => {
+    const routes = connectionRoutes(
+      [aConnection(), aConnection({ name: "files", environment: "dev" })],
+      MANAGER,
+    );
+    const answer = routes["GET /api/v1/connections"];
+    let holding = false;
+    const server = fakeServer({
+      ...routes,
+      "GET /api/v1/connections": (request) =>
+        holding || typeof answer !== "function"
+          ? new Promise<never>(() => undefined)
+          : answer(request),
+    });
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole("link", { name: "files" });
+    const refresh = await screen.findByRole("button", { name: "Refresh" });
+    const before = server.sent.length;
+    holding = true;
+
+    await user.click(refresh);
+
+    await waitFor(() => {
+      expect(
+        server.sent
+          .slice(before)
+          .some((request) => request.path.startsWith("/api/v1/connections?")),
+      ).toBe(true);
+    });
+    expect(screen.getByRole("link", { name: "files" })).toBeInTheDocument();
+    expect(screen.getByText("2 connections")).toBeInTheDocument();
+  });
+
   it("starts from the remembered environment", async () => {
     window.localStorage.setItem("lakana.connections.kim.lee", "dev");
     const server = fakeServer(

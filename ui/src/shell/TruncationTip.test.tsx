@@ -285,12 +285,16 @@ describe("TruncationTip", () => {
 
     expect(name).toHaveAttribute("tabindex", "0");
     expect(name).toHaveFocus();
-    act(() => {
-      name.blur();
-    });
+    // Once the focus leaves, the stop goes at once, with no other change to the page (the tip was
+    // already closed with Escape, so closing it changes nothing either).
+    fireEvent.keyDown(document, { key: "Escape" });
     await act(async () => {
-      window.dispatchEvent(new Event("resize"));
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(name).toHaveAttribute("tabindex", "0");
+    await act(async () => {
+      name.blur();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(name).not.toHaveAttribute("tabindex");
     table.remove();

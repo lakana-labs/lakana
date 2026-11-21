@@ -171,7 +171,9 @@ export function PolicyList({
           return (
             <tr key={policy.id}>
               <td>
-                <SubjectName subject={policy} link={admin} />
+                <span className="policy-who">
+                  <SubjectName subject={policy} link={admin} />
+                </span>
               </td>
               <td>
                 <Link
@@ -184,7 +186,8 @@ export function PolicyList({
               {policy.column !== null && (
                 <td>
                   <span className="row-name">
-                    <VisibleText text={policy.column} breakable />
+                    {/* Cut, never wrapped: no break opportunities in a list's name. */}
+                    <VisibleText text={policy.column} />
                   </span>
                 </td>
               )}
