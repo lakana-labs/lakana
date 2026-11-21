@@ -27,8 +27,8 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.catalog.service import CatalogService
 from lakana_core.catalog.tombstones import drop_row
 from lakana_core.db import db_now
-from lakana_core.errors import ConflictError
-from lakana_core.identifiers import TableRef
+from lakana_core.errors import ConflictError, ValidationError
+from lakana_core.identifiers import TableRef, check_new_name
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.models import AuditEventType, RunKind, TableType
 from lakana_core.projects.definition import defining_ref
@@ -71,6 +71,13 @@ REBUILD_SELECTION_MISMATCH = (
     "dropped. Deploy the project again, then rebuild again."
 )
 """The refusal when the selection of a rebuild does not resolve to exactly its own asset."""
+
+REBUILD_STORED_NAME = (
+    "`{name}` was not dropped: its name is kept only while the catalog holds the dropped "
+    "table, which it does not for {kind}, and a new name must meet today's rules. {problem} "
+    "Rename the asset's file in git and deploy, so the run creates the table under the new name."
+)
+"""The refusal of a rebuild whose run could not create the table again (#609)."""
 
 
 def _literal(dotted: str) -> str:
@@ -148,6 +155,40 @@ class TableRebuild:
         self._undo_days = undo_days
         self._guard = ProtectedWriteGuard(session, authz)
 
+    def _refuse_a_name_the_run_cannot_create(self, ref: TableRef, kind: TableType) -> None:
+        """Refuse a rebuild whose run could not create the table under its stored name (#609).
+
+        The run creates the table as a new one. A table's drop leaves a tombstone for the undo
+        period, and `CatalogService._prepare_table` lets a name a tombstone holds pass the rules
+        for new names. A view or an external table leaves none, and with an undo period of 0
+        days the tombstone may be purged before the run, so a stored name such as ``v$`` that
+        today's rules refuse is refused here, before anything is dropped.
+
+        Parameters
+        ----------
+        ref
+            The table.
+        kind
+            Its row's kind.
+
+        Raises
+        ------
+        ConflictError
+            `REBUILD_STORED_NAME`, naming what is wrong with the name.
+        """
+        keeps_its_name = kind is TableType.ICEBERG and self._undo_days > 0
+        if keeps_its_name:
+            return
+        try:
+            check_new_name(ref.name, what="Table name")
+        except ValidationError as exc:
+            what = {TableType.VIEW: "a view", TableType.EXTERNAL: "an external table"}.get(
+                kind, "a table dropped without an undo period"
+            )
+            raise ConflictError(
+                REBUILD_STORED_NAME.format(name=ref.dotted(), kind=what, problem=str(exc))
+            ) from None
+
     def rebuild(self, p: PrincipalRef, ref: TableRef, *, reason: str) -> RebuildResult:
         """Drop `ref` and queue a run of the asset that declares it.
 
@@ -189,7 +230,9 @@ class TableRebuild:
         ConflictError
             If it is an artifact (`REBUILD_ARTIFACT`), no current deployment declares it
             (`NOT_BUILT_BY_A_PROJECT`), another run of the project is active
-            (`REBUILD_RUN_ACTIVE`), a protected environment has no usable run principal, or
+            (`REBUILD_RUN_ACTIVE`), a view, an external table or a table without an undo
+            period has a stored name the run could not create again (`REBUILD_STORED_NAME`), a
+            protected environment has no usable run principal, or
             the selection does not resolve to exactly its asset
             (`REBUILD_SELECTION_MISMATCH`). Nothing is written.
         """
@@ -207,6 +250,7 @@ class TableRebuild:
             raise ConflictError(
                 NOT_BUILT_BY_A_PROJECT.format(name=ref.dotted(), environment=ref.environment)
             )
+        self._refuse_a_name_the_run_cannot_create(ref, row.table_type)
         table_id = row.id
         # Decided now: the drop revokes the table's own grants and deletes its row, after which
         # a read granted on the table itself no longer counts.

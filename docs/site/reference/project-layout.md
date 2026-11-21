@@ -14,7 +14,8 @@ deploy creates may not hold a control character, a format character (such as U+2
 zero-width space) or a line or paragraph separator, may not start or end with a space or hold
 another space than the plain one, and must be in Unicode NFC. A table or namespace may moreover
 hold only letters, decimal digits, `_`, `-` and the plain space; a column may hold symbols, such
-as `count(*)`. One that already exists keeps its name. Each SQL file holds exactly one query (`SELECT`, `WITH … SELECT` or a set operation). A table produced by another
+as `count(*)`. The deploy checks the file names of the tables and namespaces it would create, so
+`assets/gold/price$.sql` fails there, not at run time. One that already exists keeps its name. Each SQL file holds exactly one query (`SELECT`, `WITH … SELECT` or a set operation). A table produced by another
 asset of the same repository is a DAG edge; anything else is an external input and must exist in
 the environment (readable by whoever deploys) or be produced by another repository's current
 deployment.

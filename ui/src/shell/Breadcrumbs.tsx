@@ -43,7 +43,7 @@ export function Breadcrumbs({ trail, current }: BreadcrumbsProps): JSX.Element {
         {trail.map((crumb) => (
           <li key={`${crumb.label} ${crumb.to}`}>
             <Link to={crumb.to}>
-              <VisibleText text={crumb.label} />
+              <VisibleText text={crumb.label} name />
             </Link>
             <span className="breadcrumb-separator" aria-hidden="true">
               ›
@@ -52,7 +52,7 @@ export function Breadcrumbs({ trail, current }: BreadcrumbsProps): JSX.Element {
         ))}
         <li>
           <span aria-current="page">
-            <VisibleText text={current} />
+            <VisibleText text={current} name />
           </span>
         </li>
       </ol>

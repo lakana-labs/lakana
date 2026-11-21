@@ -7,7 +7,7 @@ import { type JSX, type ReactNode, type Ref, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
-import { markedText, VisibleText } from "./VisibleText";
+import { markedName, VisibleText } from "./VisibleText";
 
 /** Properties of {@link Page}. */
 export interface PageProps {
@@ -43,14 +43,14 @@ export interface PageProps {
 export function Page({ title, children, action, headingRef, trail }: PageProps): JSX.Element {
   const { t } = useTranslation();
   useEffect(() => {
-    document.title = t("shell.documentTitle", { page: markedText(title) });
+    document.title = t("shell.documentTitle", { page: markedName(title) });
   }, [t, title]);
   return (
     <div className="page">
       {trail !== undefined && <Breadcrumbs trail={trail} current={title} />}
       <div className="page-head">
         <h1 className="page-title" tabIndex={-1} ref={headingRef}>
-          <VisibleText text={title} />
+          <VisibleText text={title} name />
         </h1>
         {action}
       </div>

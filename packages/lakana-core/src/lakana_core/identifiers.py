@@ -13,6 +13,7 @@ import re
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Final
 
 from lakana_core.errors import ValidationError
@@ -368,15 +369,74 @@ _DRAWN_AS_NOTHING: Final[tuple[tuple[int, int], ...]] = (
     (0xFEFF, 0xFEFF),
     (0xFFA0, 0xFFA0),
     (0xFFF0, 0xFFF8),
+    (0x16FE4, 0x16FE4),
     (0x1BCA0, 0x1BCA3),
+    (0x1D159, 0x1D159),
     (0x1D173, 0x1D17A),
     (0xE0000, 0xE0FFF),
 )
 """Unicode's default-ignorable code points (`DerivedCoreProperties.txt`, Unicode 16), which a
 font draws as nothing whatever their category: the combining grapheme joiner U+034F, the
 variation selectors, the Mongolian free variation selectors, the Hangul fillers U+115F, U+1160,
-U+3164 and U+FFA0 (letters, ``Lo``) and the format characters. U+2800 BRAILLE PATTERN BLANK, a
-symbol, is drawn as nothing too and added here. NFC keeps every one of them."""
+U+3164 and U+FFA0 (letters, ``Lo``) and the format characters. Added to them, three characters
+designed as a blank glyph that are not default-ignorable: U+2800 BRAILLE PATTERN BLANK and
+U+1D159 MUSICAL SYMBOL NULL NOTEHEAD (symbols, ``So``) and U+16FE4 KHITAN SMALL SCRIPT FILLER
+(a mark, ``Mn``). NFC keeps every one of them."""
+
+MAX_COMBINING_MARKS: Final[int] = 4
+"""The most combining marks a letter of a new name may carry (UTS #39, section 5.4, suggests
+limiting a run of them); five or more overprint in most fonts."""
+
+DOT_LIKE_DIGITS: Final[frozenset[str]] = frozenset({"\u0660", "\u06f0"})
+"""The decimal digits Unicode's `confusables.txt` (version of 2026-08-06) maps to a
+punctuation mark: U+0660 ARABIC-INDIC DIGIT ZERO and U+06F0 EXTENDED ARABIC-INDIC DIGIT ZERO,
+both confusable with ``.`` FULL STOP. They are drawn as a dot on the baseline, so
+``sales\u0660daily`` reads as the dotted path ``sales.daily``. No other ``Nd`` has a skeleton
+that holds anything but letters, marks and digits. A new namespace, table or view name may not
+hold them (`character_outside_name_allowlist`); a column name may."""
+
+
+class LookAlike(Enum):
+    """What `look_alike_character` found; each has its own sentence in a refusal."""
+
+    DRAWN_AS_NOTHING = "drawn as nothing"
+    OTHER_SPACE = "a space other than the plain space"
+    LOOSE_MARK = "a combining mark with no letter before it"
+    REPEATED_MARK = "the same combining mark twice in a row"
+    TOO_MANY_MARKS = "too many combining marks on one letter"
+    UNASSIGNED = "an unassigned code point"
+    PRIVATE_USE = "a private-use character"
+
+
+_LOOK_ALIKE_SENTENCES: Final[dict[LookAlike, str]] = {
+    LookAlike.DRAWN_AS_NOTHING: (
+        "a character drawn as nothing, so the name could look like another one or look empty. "
+        "Remove it."
+    ),
+    LookAlike.OTHER_SPACE: (
+        "a space other than the plain space, so the name looks like one with a plain space but "
+        "is a different name. Type a plain space (U+0020) instead."
+    ),
+    LookAlike.LOOSE_MARK: (
+        "a combining mark with no letter before it, so it is drawn on the character before it "
+        "or on nothing. Put the mark right after a letter, or remove it."
+    ),
+    LookAlike.REPEATED_MARK: (
+        "the same combining mark a second time in a row, so it is drawn over the first and the "
+        "name looks like one with a single mark. Remove the repeated mark."
+    ),
+    LookAlike.TOO_MANY_MARKS: (
+        f"a combining mark beyond the {MAX_COMBINING_MARKS} one letter may carry, so the marks "
+        "overprint and the name could look like another one. Use fewer marks on the letter."
+    ),
+    LookAlike.UNASSIGNED: (
+        "a code point Unicode has not assigned (or a noncharacter), which has no agreed glyph and "
+        "may be drawn as nothing or as a box. Remove it."
+    ),
+    LookAlike.PRIVATE_USE: (
+        "a private-use character, which each font draws differently or as nothing. Remove it."
+    ),
+}
 
 
 def _drawn_as_nothing(character: str) -> bool:
@@ -396,12 +456,41 @@ def _drawn_as_nothing(character: str) -> bool:
     return any(low <= code <= high for low, high in _DRAWN_AS_NOTHING)
 
 
-def look_alike_character(name: str) -> tuple[int, str, str] | None:
+def _blank_kind(character: str, category: str) -> LookAlike | None:
+    """Say whether a character is blank or has no agreed glyph, whatever comes around it.
+
+    Parameters
+    ----------
+    character
+        One character.
+    category
+        Its Unicode general category.
+
+    Returns
+    -------
+    LookAlike or None
+        `DRAWN_AS_NOTHING`, `OTHER_SPACE`, `UNASSIGNED` (``Cn``, which holds the
+        noncharacters) or `PRIVATE_USE` (``Co``); `None` for any other character.
+    """
+    if _drawn_as_nothing(character):
+        return LookAlike.DRAWN_AS_NOTHING
+    if category == "Zs" and character != " ":
+        return LookAlike.OTHER_SPACE
+    if category == "Cn":
+        return LookAlike.UNASSIGNED
+    if category == "Co":
+        return LookAlike.PRIVATE_USE
+    return None
+
+
+def look_alike_character(name: str) -> tuple[int, str, LookAlike] | None:
     """Find the first character that is drawn as nothing or passes for another one.
 
     Refused: a character `_DRAWN_AS_NOTHING`, whatever its category (the Hangul fillers are
-    letters, the variation selectors marks); every space but U+0020; and a combining mark
-    (``M*``) that does not follow a letter or another such mark. NFC composes what it can
+    letters, the variation selectors marks); every space but U+0020; an unassigned code point
+    or noncharacter (``Cn``) and a private-use character (``Co``); a combining mark (``M*``)
+    that does not follow a letter or another such mark; the same nonspacing mark twice in a
+    row; and more than `MAX_COMBINING_MARKS` marks on one letter. NFC composes what it can
     (``e`` and U+0301 become ``é``), and the marks it leaves belong to letters of scripts such
     as Devanagari or Arabic, so a mark on a letter is allowed. Every other character, a visible
     symbol such as ``(`` or ``$`` included, passes.
@@ -413,21 +502,31 @@ def look_alike_character(name: str) -> tuple[int, str, str] | None:
 
     Returns
     -------
-    tuple of (int, str, str) or None
-        The character's 1-based position, the character and the words for what it is; `None`
-        when there is none.
+    tuple of (int, str, LookAlike) or None
+        The character's 1-based position, the character and what it is; `None` when there is
+        none.
     """
     after_letter = False
+    # The marks the current letter carries so far, counting those composed into it by NFC
+    # (``é`` carries U+0301), so ``é`` + U+0301 is a repeated mark like ``e`` + U+0301 + U+0301.
+    marks: list[str] = []
     for position, character in enumerate(name, start=1):
         category = unicodedata.category(character)
-        if _drawn_as_nothing(character):
-            problem: str | None = "a character drawn as nothing"
-        elif category == "Zs" and character != " ":
-            problem = "a space other than the plain space"
-        elif category.startswith("M") and not after_letter:
-            problem = "a combining mark with no letter before it"
+        problem = _blank_kind(character, category)
+        if problem is None and category.startswith("M"):
+            if not after_letter:
+                problem = LookAlike.LOOSE_MARK
+            elif category == "Mn" and marks and marks[-1] == character:
+                problem = LookAlike.REPEATED_MARK
+            elif len(marks) >= MAX_COMBINING_MARKS:
+                problem = LookAlike.TOO_MANY_MARKS
+            marks.append(character)
         else:
-            problem = None
+            marks = [
+                part
+                for part in unicodedata.normalize("NFD", character)
+                if unicodedata.category(part).startswith("M")
+            ]
         if problem is not None:
             return position, character, problem
         after_letter = category.startswith(("L", "M"))
@@ -453,16 +552,15 @@ def refuse_look_alike_characters(name: str, *, what: str) -> None:
     ------
     ValidationError
         If `look_alike_character` finds a character (the message names it as ``U+XXXX`` with
-        its position) or, failing that, the name is not in NFC (the message names its NFC
-        form).
+        its position, and has a sentence for each `LookAlike`) or, failing that, the name is not
+        in NFC (the message names its NFC form).
     """
     found = look_alike_character(name)
     if found is not None:
         position, character, problem = found
         raise ValidationError(
             f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, "
-            f"{problem}, so the name could look like another one. Choose a name without it: "
-            "retype the name, and put a combining mark only after a letter."
+            f"{_LOOK_ALIKE_SENTENCES[problem]}"
         )
     # Checked second, so the composed spelling it suggests holds only allowed characters.
     if not unicodedata.is_normalized("NFC", name):
@@ -477,8 +575,9 @@ def character_outside_name_allowlist(name: str) -> tuple[int, str] | None:
     """Find the first character a new namespace, table or view name may not hold.
 
     Such a name may hold letters (``L*``), combining marks (``M*``), decimal digits (``Nd``)
-    and `NAME_SYMBOLS`. A character drawn as nothing and a space are left to
-    `look_alike_character`, which names them more exactly.
+    but `DOT_LIKE_DIGITS`, and `NAME_SYMBOLS`. A character `look_alike_character` judges
+    whatever comes around it (drawn as nothing, a space, unassigned, private use) is left to
+    it, which names it more exactly.
 
     Parameters
     ----------
@@ -492,11 +591,13 @@ def character_outside_name_allowlist(name: str) -> tuple[int, str] | None:
     """
     for position, character in enumerate(name, start=1):
         category = unicodedata.category(character)
+        if character in DOT_LIKE_DIGITS:
+            return position, character
         if (
             category.startswith(("L", "M"))
-            or category in ("Nd", "Zs")
+            or category == "Nd"
             or character in NAME_SYMBOLS
-            or _drawn_as_nothing(character)
+            or _blank_kind(character, category) is not None
         ):
             continue
         return position, character
@@ -526,6 +627,12 @@ def refuse_characters_outside_name_allowlist(name: str, *, what: str) -> None:
     if found is None:
         return
     position, character = found
+    if character in DOT_LIKE_DIGITS:
+        raise ValidationError(
+            f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, a "
+            "digit zero drawn as a dot on the baseline, so the name would read as a dotted path "
+            "of two names. Use '0' or another name."
+        )
     raise ValidationError(
         f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, which is "
         "neither a letter nor a decimal digit. A new namespace, table or view name may hold only "

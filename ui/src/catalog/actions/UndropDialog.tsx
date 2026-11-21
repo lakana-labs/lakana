@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import { ApiError, type TableOut } from "../../api";
 import { type DroppedTableOut, undropTable } from "../../api/manage";
 import { ActionDialog } from "../../shell/ActionDialog";
-import { markedText } from "../../shell/VisibleText";
+import { markedName, markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import "./actionStrings";
 import { ConfirmRow, useConfirm } from "./ConfirmRow";
@@ -94,7 +94,7 @@ export function UndropDialog({
   return (
     <ActionDialog onClose={onCancel}>
       <Heading slot="title">
-        {t("table.actions.undrop.title", { table: markedText(`${row.namespace}.${row.name}`) })}
+        {t("table.actions.undrop.title", { table: markedName(`${row.namespace}.${row.name}`) })}
       </Heading>
       {taken === null ? (
         <p>{t("table.actions.undrop.text")}</p>
@@ -105,7 +105,7 @@ export function UndropDialog({
             <Label>{t("table.actions.undrop.restoreAs")}</Label>
             <Input />
             <Text slot="description">
-              {t("table.actions.undrop.restoreAsHelp", { namespace: markedText(row.namespace) })}
+              {t("table.actions.undrop.restoreAsHelp", { namespace: markedName(row.namespace) })}
             </Text>
           </TextField>
         </>

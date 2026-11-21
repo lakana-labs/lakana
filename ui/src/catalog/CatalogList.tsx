@@ -21,7 +21,7 @@ import { PendingButton } from "../shell/PendingButton";
 import { REDIRECT } from "../shell/redirect";
 import { useAddressParams } from "../shell/useAddressParams";
 import { useResource } from "../shell/useResource";
-import { markedText } from "../shell/VisibleText";
+import { markedName, markedText } from "../shell/VisibleText";
 import { CatalogSearch } from "./CatalogSearch";
 import { CatalogTree } from "./CatalogTree";
 import { ListSkeleton } from "./ListSkeleton";
@@ -246,7 +246,7 @@ export function CatalogList(): JSX.Element {
 
   const narrowed = environment !== null;
   // A name may hide characters; the words for all namespaces have none to mark.
-  const place = markedText(namespace ?? environment ?? t("catalog.place.allNamespaces"));
+  const place = markedName(namespace ?? environment ?? t("catalog.place.allNamespaces"));
   let result = "";
   if (slow) {
     result = t("catalog.loading");
@@ -266,11 +266,11 @@ export function CatalogList(): JSX.Element {
   let unknown: string | null = null;
   if (root !== null && environment !== null && !fromMemory) {
     if (findNode(root, environment, null) === null) {
-      unknown = t("catalog.unknown.environment", { environment: markedText(environment) });
+      unknown = t("catalog.unknown.environment", { environment: markedName(environment) });
     } else if (namespace !== null && findNode(root, environment, namespace) === null) {
       unknown = t("catalog.unknown.namespace", {
-        namespace: markedText(namespace),
-        environment: markedText(environment),
+        namespace: markedName(namespace),
+        environment: markedName(environment),
       });
     }
   }

@@ -187,32 +187,56 @@ sequence, so it can forge a log record or recolour a terminal.
 
 A new namespace, table, view or column name is shown in every list, breadcrumb, grant and query,
 so two that look alike but differ let one person's table pass for another's. The decision (#609,
-option A, refined on #789): every new name gets the look-alike protection, and namespace, table
-and view names also an allowlist; a column name keeps its visible symbols. In order:
+option A, refined on #789 and its security review): every new name gets the look-alike
+protection, and namespace, table and view names also an allowlist; a column name keeps its
+visible symbols. In order:
 
 | Check | `check_new_name` (namespaces, tables, views, rename and undrop targets) | `check_new_column_name` (columns of `catalog.metadata`, `create_or_replace_view`, `create_external_table`) |
 |---|---|---|
 | `refuse_percent_in_new_name`: no `%` | yes | no |
 | `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
 | `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
-| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
-| `refuse_look_alike_characters` (#609): no character drawn as nothing, no space but U+0020, no combining mark without a letter before it; then NFC | yes | yes |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) but `DOT_LIKE_DIGITS`, and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
+| `refuse_look_alike_characters` (#609): see below; then NFC | yes | yes |
 
-**Drawn as nothing** (`_DRAWN_AS_NOTHING`): Unicode's default-ignorable code points, refused
-whatever their category (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F
-and U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
-U+3164, U+FFA0, which are `Lo`), and U+2800 BRAILLE PATTERN BLANK. NFC keeps all of them. The
-allowlist leaves these and the spaces to the look-alike check, which names them more exactly.
+`look_alike_character` refuses, each with its own sentence (`LookAlike`):
 
-**NFC** (`unicodedata.is_normalized`): the message names the NFC form to use. It is checked
-last, after every character check, so the suggested form never holds a character a check refuses
-(U+2000 EN QUAD normalises to U+2002, which is refused as a space).
+- **Drawn as nothing** (`_DRAWN_AS_NOTHING`): Unicode's default-ignorable code points, whatever
+  their category (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F and
+  U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
+  U+3164, U+FFA0, which are `Lo`), and the blank glyphs that are not default-ignorable: U+2800
+  BRAILLE PATTERN BLANK and U+1D159 MUSICAL SYMBOL NULL NOTEHEAD (`So`), U+16FE4 KHITAN SMALL
+  SCRIPT FILLER (`Mn`). NFC keeps all of them. The list was checked against
+  `Default_Ignorable_Code_Point` (Unicode 17); the blank glyphs come from the known lists of
+  invisible characters.
+- **Another space**: every `Zs` but U+0020.
+- **Unassigned and private use**: `Cn` (unassigned code points and the 66 noncharacters, such as
+  U+FDD0 and U+FFFF) and `Co`. A browser draws them as nothing or as a box, and a later Unicode
+  version may assign a `Cn` anything. `Cn` is the running Python's: a character newer than its
+  Unicode version (3.11 has 14.0) is refused until the server runs a newer one.
+- **A loose mark**: a combining mark (`M*`) with no letter (or mark of a letter) before it, at
+  the start, on a digit (keycap U+20E3) or on a symbol.
+- **A repeated mark**: the same nonspacing mark twice in a row, counting the marks NFC composed
+  into the letter (`é` + U+0301 is refused like `e` + U+0301 + U+0301), as UTS #39 (5.4) suggests.
+- **Too many marks**: more than `MAX_COMBINING_MARKS` (4) marks on one letter, counted the same
+  way.
+
+The allowlist leaves to `look_alike_character` what it judges whatever comes around it (drawn as
+nothing, spaces, `Cn`, `Co`), which names it more exactly.
+
+**NFC** (`unicodedata.is_normalized`) is checked last, after every character check, so the
+suggested form never holds a character a check refuses (U+2000 EN QUAD normalises to U+2002,
+which is refused as a space).
+
+**Dot-like digits** (`DOT_LIKE_DIGITS`): U+0660 ARABIC-INDIC DIGIT ZERO and U+06F0 EXTENDED
+ARABIC-INDIC DIGIT ZERO are drawn as a dot on the baseline, so `sales٠daily` would read as the
+dotted path `sales.daily`. They are the only `Nd` whose skeleton in Unicode's `confusables.txt`
+(2026-08-06) is a punctuation mark (`.`); every other digit's skeleton is letters, marks or
+digits. Refused in namespace, table and view names, allowed in a column name.
 
 **Why marks are allowed:** NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
 Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
-`M*` would refuse those scripts. A mark NFC leaves is therefore allowed only on a letter or after
-another such mark; a mark with nothing before it, on a digit (a keycap U+20E3) or on a symbol is
-refused, and the marks drawn as nothing are refused whatever comes before them.
+`M*` would refuse those scripts.
 
 **Why U+0020 stays:** #652 decided that a space inside a name stays allowed, and CSV headers such
 as `Order ID` are common column names; once every other space is refused, a plain space cannot
@@ -225,17 +249,53 @@ U+2010 HYPHEN and U+2212 MINUS SIGN, which look like it, are refused (`Pd`, `Sm`
 its table, and visible symbols do not hide or impersonate anything. So a column may hold `(`,
 `*`, `$`, `#`, `\`, `%`, U+2212 and the like; only the look-alike check applies.
 
-**Not covered, accepted:** letters of different scripts that look alike (Latin `o` and Cyrillic
-`о`) and compatibility forms (fullwidth `ｏ`): both are letters in NFC. Names are compared
-exactly, so such twins are two names; the web interface does not mark them.
+**Stored names.** Existing names are never judged: lookups, listings, `NamespacePath.parse`,
+renames away and drops take any stored name, and a child namespace may be created under a stored
+one. A table re-created under the name of a dropped table the catalog still holds (a
+tombstone: a rebuild's re-create, or any create within the undo period) is not a new name:
+`CatalogService._stored_dropped_names` reads the tombstones only when a rule refuses the name or
+a column, and then lets the name and the dropped table's top-level columns (`dropped_columns`)
+pass; `ResolvedStorage.table_location(stored_name=True)` still applies
+`validate_path_component`. This opens no way to a new bad name: only a name the catalog already
+held passes. A rebuild of a view or an external table (no tombstone) or with an undo period of 0
+days, whose stored name `check_new_name` refuses, is refused before anything is dropped
+(`REBUILD_STORED_NAME`, naming the problem and the way out: rename the asset's file).
 
-Existing names are never judged: lookups, listings, `NamespacePath.parse`, renames away and drops
-take any stored name, and a child namespace may be created under a stored one (pins in
-`test_look_alike_characters_in_names.py`). The web interface marks every character drawn as
-nothing, every space but U+0020, and every `Cf`, control and separator as `U+XXXX`
-(`ui/src/shell/VisibleText.tsx`, `INVISIBLE`), so a stored name holding one shows it. The CLI
-escapes only the #593 set. Other names (repositories, groups, tokens, secrets, package indexes,
-artifacts) keep the #593 and #652 checks only.
+**Deploy** (`DeployService._new_name_issues`, in `validate_against_environment`): an asset whose
+table does not exist and whose name no tombstone holds has its table name and each namespace
+component that does not exist checked with `check_new_name`, so `price$.sql` fails the deploy
+with the run's sentence and an NFD file name is told its NFC form; artifact assets are left out.
+Existence is read from the rows, whoever may read them, so a deployer learns that a table with a
+name today's rules refuse exists (or was dropped within the undo period); accepted, since only
+such names give a different answer.
+
+**The web interface** marks the wider set (`NAME_INVISIBLE` in `ui/src/shell/VisibleText.tsx`:
+default-ignorable, U+2800, U+16FE4, U+1D159, every space but U+0020, `Cn`, `Co`, besides
+`INVISIBLE`) only where a namespace, table, view or column name is shown (the `name` mode of
+`VisibleText` and `VisibleTspan`, `markedName`): the Catalog's tree, list places, dropped and
+expiring views, breadcrumbs, page titles, the table header and page, columns, references,
+lineage, the dialogs that name a table, the result grid's column names and the editor's
+completion and hover. Free text (descriptions, labels, snippets, reasons, display names,
+expressions, messages) and file names keep `INVISIBLE`, so French spacing, a pasted no-break
+space and emoji with U+FE0F show as they are, and `Monthly revenue` with a no-break space still
+saves as `Monthly-revenue-….csv`.
+
+**Not covered, accepted:**
+
+- Letters of different scripts that look alike (Latin `o` and Cyrillic `о`) and compatibility
+  forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so such twins are
+  two names; the web interface does not mark them.
+- Non-Latin decimal digits (Devanagari `१`, Arabic-Indic `١`, which looks like `1` or `l`), but
+  the two dot-like zeros.
+- A single mark on a letter that reads as another letter: `pri̇ce` (`i` + U+0307 COMBINING DOT
+  ABOVE) reads as `price` in most fonts.
+- The CLI escapes only the #593 set, so it shows a stored name holding U+3164 or U+2800 as blank,
+  and a no-break space as a space.
+- A rebuild of an Iceberg table whose drop leaves no tombstone (two legacy tables sharing a
+  directory), and a stored name inside a nested column of a re-created table, are still judged
+  as new.
+- Other names (repositories, groups, tokens, secrets, package indexes, artifacts) keep the #593
+  and #652 checks only.
 
 ## Request bodies: a JSON limit, authentication first, a limit per streamed route
 

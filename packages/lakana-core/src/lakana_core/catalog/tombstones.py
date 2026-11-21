@@ -642,6 +642,43 @@ def find_tombstone(
     return None
 
 
+def dropped_columns(
+    session: Session, environment_id: uuid.UUID, namespace: NamespacePath, name: str
+) -> frozenset[str] | None:
+    """Say whether a dropped table of a name is still held, and which columns it had.
+
+    A table re-created under the name of a dropped one the catalog still holds (a rebuild's,
+    or one within its undo period) does not take a new name, so the rules for new names
+    (`lakana_core.identifiers.check_new_name`, `check_new_column_name`) do not judge the
+    name or these columns (#609).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    environment_id
+        The environment.
+    namespace
+        The namespace the table was dropped from.
+    name
+        Its name when it was dropped, compared exactly.
+
+    Returns
+    -------
+    frozenset of str or None
+        The newest such tombstone's top-level column names (``columns`` of its snapshot);
+        `None` when no tombstone has that name.
+    """
+    for _record, snapshot in _tombstones(session, environment_id, namespace):
+        if snapshot["row"]["name"] == name:
+            return frozenset(
+                str(column["name"])
+                for column in snapshot.get("columns", [])
+                if isinstance(column, dict) and "name" in column
+            )
+    return None
+
+
 def _known_principals(session: Session, ids: Iterable[object]) -> set[str]:
     """Return which of some principal ids still exist.
 

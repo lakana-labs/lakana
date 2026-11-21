@@ -456,21 +456,30 @@ A new namespace, table or view name may now hold only letters of any script, dec
 to its letters. A symbol or punctuation mark such as `$`, `#` or `(` is refused, for example
 `Table name 'price$' holds U+0024 at character 6, which is neither a letter nor a decimal digit. A
 new namespace, table or view name may hold only letters, decimal digits, '_', '-' and the plain
-space.` Column names keep their symbols: `count(*)` and `price ($)` work as before.
+space.` So are the Arabic-Indic zeros U+0660 and U+06F0, which are drawn as a dot, so a name with
+one would read as two. Column names keep their symbols: `count(*)` and `price ($)` work as before.
 
 Every new name, a column's included, must also be in Unicode NFC, the composed spelling: `cafe`
 followed by U+0301 COMBINING ACUTE ACCENT looks like `café` but is another name, and the refusal
-names the spelling to use (`… Use 'caf\xe9' instead.`). Characters drawn as nothing (the
-combining grapheme joiner U+034F, the variation selectors, the Hangul fillers U+3164 and others,
-the braille blank U+2800), a space other than the plain one (such as the no-break space U+00A0)
-and an accent with no letter before it are refused in every new name too.
+names the spelling to use (`… Use 'caf\xe9' instead.`). Refused in every new name too, each with
+a sentence that says what to do: a character drawn as nothing (the combining grapheme joiner
+U+034F, the variation selectors, the Hangul fillers such as U+3164, the braille blank U+2800), a
+space other than the plain one (such as the no-break space U+00A0), an unassigned or private-use
+code point, an accent with no letter before it, the same accent twice in a row, and more than four
+accents on one letter.
 
 Earlier releases accepted such names (422 from the REST API now, a refused commit from an Iceberg
-client, a failed task for a deploy or load). To migrate, rename the asset file or choose another
-name. Existing names are not touched: they stay readable and writable and can be renamed or
-dropped. The web interface now marks the characters drawn as nothing and the spaces other than
-the plain one as `U+XXXX`, wherever it already marked invisible characters. Repository, group,
-token, secret, package index and artifact names are not judged by this rule.
+client, a failed load). A project's deploy now refuses an asset whose new table or namespace name
+breaks the rule, with the same sentence, for example for `assets/gold/price$.sql`; rename the file.
+Existing names are not touched: they stay readable and writable, can be renamed or dropped, and an
+asset whose table exists keeps deploying. A rebuild of such a table works: a table re-created
+under the name of a dropped one the catalog still holds (during the undo period) keeps its name and
+columns. A view or external table with such a name, or any such table when the undo period is 0
+days, cannot be rebuilt under it: the rebuild says so before dropping anything; rename the asset's
+file in git and deploy. The web interface now marks these characters as `U+XXXX` in names (the
+Catalog, the table pages, the result grid's columns, the editor's completions); descriptions,
+labels and other free text show them as they are. Repository, group, token, secret, package index
+and artifact names are not judged by this rule.
 
 ### The same name rules for repositories, groups, tokens, secrets, package indexes, principals and passkeys (breaking)
 

@@ -232,6 +232,7 @@ from lakana_core.catalog.metadata import (
     check_requirements,
     next_metadata_location,
     read_metadata,
+    refuse_hidden_column_names,
     write_metadata,
 )
 from lakana_core.catalog.model_metadata import (
@@ -298,6 +299,7 @@ from lakana_core.catalog.tombstones import (
     PURGE_STARTED_MESSAGE,
     DroppedTable,
     drop_row,
+    dropped_columns,
     find_tombstone,
     list_environment_tombstones,
     list_tombstones,
@@ -3338,7 +3340,10 @@ class CatalogService:
         # call is needed here the way one was while `location=` could
         # bypass it.
         table_id = uuid.uuid4()
-        table_location = resolved.table_location(ref.namespace, ref.name, table_id)
+        stored = self._stored_dropped_names(env, ref, schema)
+        table_location = resolved.table_location(
+            ref.namespace, ref.name, table_id, stored_name=stored is not None
+        )
         metadata = build_table_metadata(
             schema=schema,
             location=table_location,
@@ -3346,6 +3351,7 @@ class CatalogService:
             sort_order=sort_order,
             properties=dict(properties or {}),
             table_uuid=table_id,
+            stored_columns=stored or frozenset(),
         )
         claim_location(
             self._session,
@@ -3728,6 +3734,48 @@ class CatalogService:
                 "the write failed for a reason other than a name collision."
             ) from exc
         return row
+
+    def _stored_dropped_names(
+        self, env: Environment, ref: TableRef, schema: Schema
+    ) -> frozenset[str] | None:
+        """Find out whether a new table takes a name the catalog still holds for a dropped one.
+
+        A table re-created under the name of a dropped table the catalog still holds (a
+        rebuild's re-create, or one within its undo period) does not take a new name, and
+        neither do that table's columns (#609). The tombstones are read only when a rule for
+        new names refuses the name or a column; a refusal stands when there is none.
+
+        Parameters
+        ----------
+        env
+            The environment.
+        ref
+            The new table.
+        schema
+            Its schema.
+
+        Returns
+        -------
+        frozenset of str or None
+            The dropped table's column names; `None` when the name and the columns meet the
+            rules for new names.
+
+        Raises
+        ------
+        ValidationError
+            From `validate_path_component`, or from `check_new_name` or
+            `refuse_hidden_column_names` when no dropped table holds the name.
+        """
+        validate_path_component(ref.name, what="Table name")
+        try:
+            check_new_name(ref.name, what="Table name")
+            refuse_hidden_column_names(schema)
+        except ValidationError:
+            stored = dropped_columns(self._session, env.id, ref.namespace, ref.name)
+            if stored is None:
+                raise
+            return stored
+        return None
 
     def _lookup_table(self, ns: Namespace, name: str) -> Table | None:
         """Look up a table row within a namespace, without authorizing.

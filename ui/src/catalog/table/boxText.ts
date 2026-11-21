@@ -9,7 +9,7 @@ import type { TFunction } from "i18next";
 import { useEffect, useState } from "react";
 
 import type { GraphNodeOut } from "../../api";
-import { markedText } from "../../shell/VisibleText";
+import { markedName, markedText } from "../../shell/VisibleText";
 import { splitDotted } from "../paths";
 import { jobLabel } from "./layout";
 import { kindName } from "./lineageStrings";
@@ -174,7 +174,7 @@ export function boxLines(t: TFunction, box: BoxContent): [string, string | null]
             .join(", ")}`;
     const repository = node.repository ?? null;
     // One pass, so a name holding the text "<repository/>" stays as it is, as Trans draws it.
-    const name = markedText(node.name);
+    const name = markedName(node.name);
     const where = markedText(repository ?? "");
     const second = t(repository === null ? "table.lineage.asset" : "table.lineage.assetIn").replace(
       /<name\/>|<repository\/>/g,
@@ -184,12 +184,12 @@ export function boxLines(t: TFunction, box: BoxContent): [string, string | null]
   }
   if (node.kind === "connection") {
     const kind = kindName(t, node.connection_kind);
-    return [markedText(node.name), "word" in kind ? kind.word : markedText(kind.raw)];
+    return [markedName(node.name), "word" in kind ? kind.word : markedText(kind.raw)];
   }
   const place = splitDotted(node.name);
   return place === null
-    ? [markedText(node.name), null]
-    : [markedText(place.name), markedText(place.namespace)];
+    ? [markedName(node.name), null]
+    : [markedName(place.name), markedName(place.namespace)];
 }
 
 /**

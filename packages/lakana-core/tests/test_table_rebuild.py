@@ -23,6 +23,8 @@ from core_test_helpers import (
     deploy_assets,
     store_version,
 )
+from pyiceberg.schema import Schema
+from pyiceberg.types import LongType, NestedField
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
@@ -53,6 +55,7 @@ from lakana_core.models import (
     PrincipalType,
     Run,
     Table,
+    TableColumn,
     TableLocation,
     TableLocationState,
     TaskRun,
@@ -425,6 +428,72 @@ def test_a_selection_of_more_than_its_asset_drops_nothing(
     assert str(refused.value) == REBUILD_SELECTION_MISMATCH.format(name="silver.c*", assets=2)
     _assert_intact(session, starred_id)
     assert session.scalars(select(Run)).all() == []
+
+
+def test_a_dropped_tables_stored_name_and_columns_may_be_created_again(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A tombstone keeps `c*` and its column from counting as new, as a rebuild's run needs."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    session.execute(
+        update(TableColumn)
+        .where(TableColumn.table_id == catalog.load_table(principal, starred).uuid)
+        .values(name="amount\xa0eur")
+    )
+    session.commit()
+    catalog.drop_table(principal, starred)
+    schema = Schema(NestedField(1, "amount\xa0eur", LongType(), required=False))
+
+    created = catalog.create_table(principal, starred, schema=schema)
+
+    assert created.ref == starred
+    with pytest.raises(ValidationError, match="U\\+0024"):
+        catalog.create_table(principal, TableRef("dev", _SILVER, "cost$"), schema=schema)
+    with pytest.raises(ValidationError, match="U\\+00A0"):
+        catalog.create_table(principal, TableRef("dev", _SILVER, "fresh"), schema=schema)
+
+
+def test_a_rebuild_of_a_view_with_a_stored_symbol_name_drops_nothing(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A view leaves no tombstone, so its run could not create `v$` again: refused first."""
+    catalog = _catalog(session, tmp_path)
+    view = TableRef("dev", _SILVER, "vx")
+    catalog.create_or_replace_view(principal, view, sql="SELECT 1 AS id", references=[], columns=[])
+    session.execute(update(Table).where(Table.name == "vx").values(name="v$"))
+    session.commit()
+    stored = TableRef("dev", _SILVER, "v$")
+    view_id = session.scalars(select(Table.id).where(Table.name == "v$")).one()
+    deploy_assets(session, "dev", "analytics", {"silver.v$": {"materialize": "view"}})
+
+    with pytest.raises(ConflictError) as refused:
+        _rebuild(session, catalog).rebuild(principal, stored, reason=_REASON)
+
+    message = str(refused.value)
+    assert message.startswith("`silver.v$` was not dropped")
+    assert "a view" in message
+    assert "U+0024" in message
+    assert "Rename the asset's file in git and deploy" in message
+    assert session.scalars(select(Table.id).where(Table.name == "v$")).one() == view_id
+    assert session.scalars(select(Run)).all() == []
+
+
+def test_a_rebuild_without_an_undo_period_of_a_stored_symbol_name_drops_nothing(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """With 0 days the tombstone may be purged before the run, so the same refusal applies."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    starred_id = catalog.load_table(principal, starred).uuid
+    deploy_assets(session, "dev", "analytics", {"silver.c*": {}})
+    authz = AllowAllAuthorization()
+    rebuild = TableRebuild(session, catalog, RunService(session, authz), authz, undo_days=0)
+
+    with pytest.raises(ConflictError, match="a table dropped without an undo period"):
+        rebuild.rebuild(principal, starred, reason=_REASON)
+
+    _assert_intact(session, starred_id)
 
 
 def test_a_row_gone_after_the_run_is_inserted_leaves_no_run(

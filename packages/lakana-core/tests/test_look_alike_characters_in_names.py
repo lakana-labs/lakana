@@ -33,6 +33,8 @@ from lakana_core.catalog.metadata import apply_updates
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import (
+    DOT_LIKE_DIGITS,
+    MAX_COMBINING_MARKS,
     NAME_SYMBOLS,
     NamespacePath,
     TableRef,
@@ -85,6 +87,10 @@ def catalog(session: Session, principal: PrincipalRef, tmp_path: Path) -> Catalo
         "\uac00\ub098",  # Hangul syllables
         "\u0645\u064e\u0631\u0652\u062d\u064e\u0628\u064b\u0627",  # Arabic with its vowel marks
         "\u0661\u0662\u0663",  # Arabic-Indic digits are decimal digits
+        "\u06f1\u06f9",  # the extended ones too, but for the dot-like zero
+        "\u0967\u0968",  # Devanagari digits
+        "pri\u0307ce",  # i with a dot above: it reads as price, an accepted look-alike
+        "q\u0300\u0301\u0302\u0303",  # four marks on one letter is the limit
     ],
 )
 def test_names_of_letters_digits_and_the_allowed_symbols_are_accepted(name: str) -> None:
@@ -248,7 +254,13 @@ def test_every_way_of_creating_a_name_refuses_a_look_alike(
 ) -> None:
     """A table, an external table, a view, a namespace, a rename target and an undrop target."""
     catalog.create_table(principal, _ref("gold.orders"), schema=_schema())
-    for bad, match in ((f"n{_CGJ}", "U\\+034F"), (_NFD_CAFE, "NFC"), ("a\u3164", "U\\+3164")):
+    for bad, match in (
+        (f"n{_CGJ}", "U\\+034F"),
+        (_NFD_CAFE, "NFC"),
+        ("a\u3164", "U\\+3164"),
+        ("n$", "U\\+0024.*neither a letter nor a decimal digit"),
+        ("sales\u0660daily", "U\\+0660.*drawn as a dot"),
+    ):
         new = _ref(f"gold.{bad}")
         attempts = [
             lambda new=new: catalog.create_table(principal, new, schema=_schema()),
@@ -355,3 +367,130 @@ def test_an_added_schema_refuses_a_new_look_alike_column_and_keeps_a_stored_one(
     )
     with pytest.raises(ValidationError, match=r"Column name 'new\\u2800' holds U\+2800"):
         apply_updates(base, [AddSchemaUpdate(schema_=added)])
+
+
+@pytest.mark.parametrize("digit", ["\u0660", "\u06f0"])
+def test_a_digit_drawn_as_a_dot_is_refused_in_a_table_name_but_not_in_a_column(digit: str) -> None:
+    """``sales`` + U+0660 + ``daily`` reads as the dotted path ``sales.daily``."""
+    assert digit in DOT_LIKE_DIGITS
+    with pytest.raises(ValidationError) as refused:
+        check_new_name(f"sales{digit}daily", what="Table name")
+    message = str(refused.value)
+    assert f"holds U+{ord(digit):04X} at character 6" in message
+    assert "drawn as a dot on the baseline" in message
+    check_new_column_name(f"sales{digit}daily")
+
+
+def test_the_dot_like_digits_are_every_digit_unicode_confuses_with_punctuation() -> None:
+    """The two zeros; every other decimal digit of the running Unicode stays a digit."""
+    digits = [chr(code) for code in range(0x110000) if unicodedata.category(chr(code)) == "Nd"]
+    refused = [digit for digit in digits if character_outside_name_allowlist(digit) is not None]
+    assert refused == sorted(DOT_LIKE_DIGITS)
+
+
+@pytest.mark.parametrize(
+    ("character", "code", "words"),
+    [
+        ("\U0001d159", "U+1D159", "drawn as nothing"),  # musical symbol null notehead
+        ("\U00016fe4", "U+16FE4", "drawn as nothing"),  # Khitan small script filler
+        ("\u0378", "U+0378", "has not assigned"),
+        ("\ufdd0", "U+FDD0", "has not assigned"),  # a noncharacter
+        ("\U0003fffd", "U+3FFFD", "has not assigned"),
+        ("\uffff", "U+FFFF", "has not assigned"),
+        ("\ue000", "U+E000", "private-use character"),
+        ("\U000f0000", "U+F0000", "private-use character"),
+    ],
+)
+def test_a_column_that_could_look_empty_is_refused(character: str, code: str, words: str) -> None:
+    """Blank glyphs, unassigned code points and private use, in a column name as in any."""
+    for name in (character, f"a{character}"):
+        with pytest.raises(ValidationError) as refused:
+            check_new_column_name(name)
+        assert f"holds {code}" in str(refused.value)
+        assert words in str(refused.value)
+        with pytest.raises(ValidationError, match=words):
+            check_new_name(name, what="Table name")
+
+
+def test_the_same_nonspacing_mark_twice_in_a_row_is_refused() -> None:
+    """An e with an acute and U+0301 draw a second acute over the first."""
+    for name in (f"{_NFC_CAFE}\u0301", "\u0628\u064e\u064e"):
+        with pytest.raises(ValidationError) as refused:
+            refuse_look_alike_characters(name, what="Column name")
+        assert "the same combining mark a second time in a row" in str(refused.value)
+    refuse_look_alike_characters("q\u0301\u0300", what="Column name")
+
+
+def test_more_marks_than_the_limit_on_one_letter_are_refused() -> None:
+    """Five marks on a letter; four pass, and the count starts again at the next letter."""
+    marks = "\u0300\u0301\u0302\u0303\u0304"
+    assert len(marks) == MAX_COMBINING_MARKS + 1
+    with pytest.raises(ValidationError) as refused:
+        refuse_look_alike_characters(f"q{marks}", what="Column name")
+    assert "holds U+0304 at character 6" in str(refused.value)
+    assert "beyond the 4 one letter may carry" in str(refused.value)
+    refuse_look_alike_characters(f"q{marks[:4]}q{marks[:4]}", what="Column name")
+
+
+@pytest.mark.parametrize(
+    ("name", "sentence"),
+    [
+        (
+            "a\u3164",
+            "drawn as nothing, so the name could look like another one or look empty. Remove it.",
+        ),
+        ("a\xa0b", "Type a plain space (U+0020) instead."),
+        ("\u0301a", "Put the mark right after a letter, or remove it."),
+        (f"{_NFC_CAFE}\u0301", "Remove the repeated mark."),
+        ("q\u0300\u0301\u0302\u0303\u0304", "Use fewer marks on the letter."),
+        ("a\u0378", "may be drawn as nothing or as a box. Remove it."),
+        ("a\ue000", "which each font draws differently or as nothing. Remove it."),
+        (_NFD_CAFE, "Use 'caf\\xe9' instead."),
+    ],
+)
+def test_each_problem_has_its_own_sentence(name: str, sentence: str) -> None:
+    """The next step fits the problem: a space is retyped, a filler removed, a mark moved."""
+    with pytest.raises(ValidationError) as refused:
+        check_new_column_name(name)
+    message = str(refused.value)
+    assert message.endswith(sentence)
+    assert message.count(". ") <= 2
+
+
+@pytest.mark.parametrize("mode", [WriteMode.APPEND, WriteMode.REPLACE])
+def test_a_write_that_evolves_the_schema_refuses_a_look_alike_column(
+    catalog: CatalogService, principal: PrincipalRef, mode: WriteMode
+) -> None:
+    """An append or a replace that adds a column judges the new name, and keeps a symbol."""
+    _write(catalog, principal, "gold.daily", WriteMode.CREATE, pa.table({"id": [1]}))
+    with pytest.raises(ValidationError, match=r"Column name 'x\\u3164' holds U\+3164"):
+        _write(
+            catalog,
+            principal,
+            "gold.daily",
+            mode,
+            pa.table({"id": [2], "x\u3164": [1]}),
+            evolve_schema=True,
+        )
+    with pytest.raises(ValidationError, match="NFC"):
+        _write(
+            catalog,
+            principal,
+            "gold.daily",
+            mode,
+            pa.table({"id": [2], _NFD_CAFE: [1]}),
+            evolve_schema=True,
+        )
+    _write(
+        catalog,
+        principal,
+        "gold.daily",
+        mode,
+        pa.table({"id": [2], "count(*)": [1]}),
+        evolve_schema=True,
+    )
+    columns = [
+        field.name
+        for field in catalog.load_table(principal, _ref("gold.daily")).metadata.schema().fields
+    ]
+    assert columns == ["id", "count(*)"]

@@ -46,10 +46,10 @@ interface TableNameProps {
 function TableName({ node, environment }: TableNameProps): JSX.Element {
   const place = node.distance > 0 ? splitDotted(node.name) : null;
   return place === null ? (
-    <VisibleText text={node.name} />
+    <VisibleText text={node.name} name />
   ) : (
     <Link to={tablePath(environment, place.namespace, place.name)}>
-      <VisibleText text={node.name} />
+      <VisibleText text={node.name} name />
     </Link>
   );
 }
@@ -98,7 +98,7 @@ interface BuilderProps {
  */
 function Builder({ box, reads, uses, environment }: BuilderProps): JSX.Element {
   const { t } = useTranslation();
-  const asset = <VisibleText text={box.node.name} />;
+  const asset = <VisibleText text={box.node.name} name />;
   const jobs = joined(
     box.jobs.map((job) => ({ key: job.id, shown: <VisibleText text={jobLabel(job).job} /> })),
   );

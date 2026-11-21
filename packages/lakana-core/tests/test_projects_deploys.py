@@ -644,6 +644,56 @@ def test_cross_repository_inputs_and_ownership(
     ]
 
 
+def test_a_new_name_the_run_would_refuse_fails_the_deploy_and_a_stored_one_deploys(
+    session: Session, env: None, principal: PrincipalRef
+) -> None:
+    """`price$.sql` fails at deploy with the run's sentence; existing and dropped names pass."""
+    repo = _repo(session)
+    catalog = CatalogService(session, StorageResolver(session), AllowAllAuthorization())
+    for plain, stored in (("oldx", "old$"), ("gonex", "gone$")):
+        catalog.create_table(
+            principal,
+            TableRef("dev", _SILVER, plain),
+            schema=Schema(NestedField(1, "id", LongType(), required=False)),
+        )
+        session.execute(update(Table).where(Table.name == plain).values(name=stored))
+    session.commit()
+    catalog.drop_table(principal, TableRef("dev", _SILVER, "gone$"))
+    service = DeployService(session, AllowAllAuthorization())
+    assets = [
+        make_asset("silver.old$", ("bronze.events",)),
+        make_asset("silver.gone$", ("bronze.events",)),
+        make_asset("silver.price$", ("bronze.events",)),
+        make_asset("silver.cafe\u0301", ("bronze.events",)),
+        make_asset("silver.da$h.orders", ("bronze.events",)),
+        make_asset("silver.plain", ("bronze.events",)),
+    ]
+
+    issues = service.validate_against_environment(
+        principal, "dev", repo.id, assets, build_graph(assets)
+    )
+
+    assert [(i.path, i.message) for i in issues] == [
+        (
+            "assets/silver/cafe\u0301.sql",
+            "Table name 'cafe\\u0301' is not in Unicode NFC, the composed spelling, so it looks "
+            "like 'caf\\xe9' but is a different name. Use 'caf\\xe9' instead.",
+        ),
+        (
+            "assets/silver/da$h/orders.sql",
+            "Namespace component 'da$h' holds U+0024 at character 3, which is neither a letter "
+            "nor a decimal digit. A new namespace, table or view name may hold only letters, "
+            "decimal digits, '_', '-' and the plain space.",
+        ),
+        (
+            "assets/silver/price$.sql",
+            "Table name 'price$' holds U+0024 at character 6, which is neither a letter nor a "
+            "decimal digit. A new namespace, table or view name may hold only letters, decimal "
+            "digits, '_', '-' and the plain space.",
+        ),
+    ]
+
+
 def test_existing_unowned(session: Session, env: None, principal: PrincipalRef) -> None:
     """A readable table no current project version produces is 'unowned'; a produced one is not."""
     repo = _repo(session)
