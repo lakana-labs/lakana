@@ -107,7 +107,7 @@ def test_create_with_sql_longer_than_the_statement_limit_is_422(client: TestClie
 
     assert created.status_code == updated.status_code == 422
     assert "LAKANA_QUERY_LIMITS__MAX_STATEMENT_CHARS" in created.json()["detail"]
-    assert client.get(_ENV_URL, headers=bob).json()["items"][0]["sql"] == "SELECT 1"
+    assert client.get(f"{_ENV_URL}/{saved['id']}", headers=bob).json()["sql"] == "SELECT 1"
 
 
 def test_a_name_is_checked_after_stripping_with_the_s4_sentence(client: TestClient) -> None:
@@ -239,6 +239,23 @@ def test_an_admin_reads_a_private_query_without_its_sql_key(client: TestClient) 
         assert (body["name"], body["owner"], body["environment"]) == ("Revenue", "bob", "dev")
         assert body["actions"] == ["delete"]
         assert set(body) == _OUT_KEYS - {"sql"}
+
+
+def test_the_lists_show_no_sql_even_to_the_owner_and_reading_one_does(
+    client: TestClient,
+) -> None:
+    """A list item has no `sql` key, for its owner too; `GET` of the saved query has it (#692)."""
+    bob = _analyst(client)
+    saved = _save(client, bob, sql="SELECT 42")
+
+    lists = [client.get(url, headers=bob) for url in (_ENV_URL, _ALL_URL)]
+
+    for listed in lists:
+        assert listed.status_code == 200
+        (item,) = listed.json()["items"]
+        assert set(item) == _OUT_KEYS - {"sql"}
+        assert item["actions"] == ["update", "delete"]
+    assert client.get(f"{_ENV_URL}/{saved['id']}", headers=bob).json()["sql"] == "SELECT 42"
 
 
 def test_an_admin_deletes_a_private_query_and_it_is_gone(client: TestClient) -> None:
