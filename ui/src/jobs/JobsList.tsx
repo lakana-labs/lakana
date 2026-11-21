@@ -54,7 +54,7 @@ function JobsSections({ listed }: JobsSectionsProps): JSX.Element {
       </div>
       {/* A new filter mounts the sections afresh: no row, count or control of the previous
           filter stays while the new read is open, and a failed first read says so at once. */}
-      <div className="jobs-panels">
+      <div className="panel-stack">
         <RunningNow
           key={`running:${filter.environment ?? ""}`}
           environment={filter.environment}

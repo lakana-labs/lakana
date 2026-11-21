@@ -329,9 +329,9 @@ describe("JobPage", () => {
     renderShell(PAGE, { routes: jobRoutes() });
 
     await screen.findByRole("heading", { level: 2, name: `Run of ${when(NEWEST.created_at)}` });
-    const panels = document.querySelectorAll(".jobs-panels > .flat-panel");
+    const panels = document.querySelectorAll(".panel-stack > .flat-panel");
     expect(panels).toHaveLength(3);
     expect(document.querySelector(".jobs-head-actions")).not.toBeNull();
-    expect(document.querySelectorAll(".jobs-panels .list-scroll")).toHaveLength(2);
+    expect(document.querySelectorAll(".panel-stack .list-scroll")).toHaveLength(2);
   });
 });

@@ -1,12 +1,6 @@
 /* The environment picker's rules, which the Queries, Jobs and Connections screens share. */
 @import "../shell/environment.css";
 
-/* The area's three tab pages: wider than a detail page, as the Catalog's list is, so that their
-   tables fit beside the sidebar from a 1280 px window on instead of scrolling. */
-.jobs-tab-page .page {
-  max-width: 1280px;
-}
-
 /* The Jobs screen's own rules: a cron expression shown as it is. */
 .jobs-verbatim {
   font-family: var(--font-mono);
@@ -19,22 +13,13 @@
   font-size: var(--type-code-size);
 }
 
-/* The job page: the facts, the runs and the selected run, one panel under the other, 24 px apart.
-   Each is a flat panel; a table in it scrolls in its own region, so 320 px never scrolls sideways. */
-.jobs-panels {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-  min-width: 0;
-}
-
 /* The list's environment filter and its search, side by side; under one another when narrow. */
 .jobs-find {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2) var(--space-4);
-  margin: 0 0 var(--space-5);
+  gap: var(--control-gap) var(--space-4);
+  margin: 0 0 var(--space-3);
 }
 
 .jobs-find .field {
@@ -47,7 +32,7 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--control-gap);
 }
 
 .jobs-list .jobs-code,
@@ -78,7 +63,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--control-gap);
 }
 
 /* A control with its refusal under it. */
@@ -115,12 +100,12 @@
   margin: 0;
 }
 
-/* A panel's heading: the title step. */
+/* A panel's heading: the section step, as every panel's title. */
 .jobs-panel-heading {
   margin: 0 0 var(--space-3);
-  font-size: var(--type-title-size);
-  line-height: var(--type-title-line);
-  font-weight: var(--type-title-weight);
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
 }
 
 .jobs-panel-heading:focus-visible {
@@ -167,6 +152,7 @@
 .jobs-fact {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: var(--space-1) var(--space-3);
   padding: var(--space-2) 0;
   border-bottom: 1px solid var(--color-line);
@@ -189,7 +175,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--space-2);
+  gap: var(--control-gap);
   margin-bottom: var(--space-3);
 }
 
@@ -367,7 +353,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--control-gap);
 }
 
 .list-scroll.jobs-attempts-scroll .list {

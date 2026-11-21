@@ -61,7 +61,7 @@
 
 /* The file field's own button, drawn like the interface's buttons in both themes. */
 .person-file::file-selector-button {
-  min-height: 32px;
+  min-height: var(--control-height);
   margin-right: var(--space-2);
   padding: 0 var(--space-3);
   border: 1px solid var(--color-edge);

@@ -150,4 +150,39 @@ describe("AppShell", () => {
     await screen.findByText("Probe");
     expect(seen).toEqual([screen.getByRole("heading", { level: 1, name: "Probed" })]);
   });
+
+  it("goes back with Alt+Left, as the browser does, so a breadcrumb's page is left by keyboard", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/");
+  });
+
+  it("leaves Alt+Left to a text field, where it moves the cursor, and to a widget that used it", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    field.remove();
+    const used = (event: KeyboardEvent): void => {
+      event.preventDefault();
+    };
+    document.body.addEventListener("keydown", used);
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+    document.body.removeEventListener("keydown", used);
+    // With another modifier it is not the shortcut either.
+    await user.keyboard("{Alt>}{Shift>}{ArrowLeft}{/Shift}{/Alt}");
+
+    expect(router.state.location.pathname).toBe("/catalog");
+  });
 });

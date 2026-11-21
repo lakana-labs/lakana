@@ -50,16 +50,17 @@
   overflow-wrap: normal;
 }
 
-/* Each part of a page is a flat panel (Still Water), 24 px from the next. */
+/* Each part of a page is a flat panel (Still Water), --panel-gap from the next, its heading the
+   section step as every panel's title. */
 .access-section {
-  margin: 0 0 var(--space-5);
+  margin: 0 0 var(--panel-gap);
 }
 
 .access-section h2 {
   margin: 0 0 var(--space-3);
-  font-size: var(--type-title-size);
-  font-weight: var(--type-title-weight);
-  line-height: var(--type-title-line);
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+  line-height: var(--type-section-line);
 }
 
 .access-section h2:focus-visible {
@@ -81,8 +82,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-3) var(--space-5);
-  margin: 0 0 var(--space-4);
+  gap: var(--control-gap) var(--space-4);
+  margin: 0 0 var(--space-3);
 }
 
 .access-filters .field {
@@ -93,7 +94,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-3);
+  gap: var(--control-gap);
 }
 
 .access-add-member .field {
@@ -102,9 +103,9 @@
 
 .access-section h3 {
   margin: var(--space-4) 0 var(--space-2);
-  font-size: var(--type-section-size);
-  font-weight: var(--type-section-weight);
-  line-height: var(--type-section-line);
+  font-size: var(--type-body-size);
+  font-weight: 500;
+  line-height: var(--type-body-line);
 }
 
 /* Links that name something with a page (a group, a person) or lead on (Manage grants): the

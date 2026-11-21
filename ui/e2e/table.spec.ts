@@ -135,152 +135,149 @@ function panelLooks(page: Page): Promise<PanelLook[]> {
 }
 
 for (const theme of ["light", "dark"] as const) {
-  for (const density of ["roomy", "compact"] as const) {
-    test.describe(`the table page, ${theme}, ${density}`, () => {
-      test.beforeEach(async ({ page }) => {
-        await signInAsAdmin(page);
-        await page.addInitScript(
-          ([key, value]) => {
-            if (window.localStorage.getItem(key ?? "") === null) {
-              window.localStorage.setItem(key ?? "", value ?? "");
-            }
-          },
-          [KEY, JSON.stringify({ theme, density, language: "en" })],
-        );
-      });
-
-      test("axe finds nothing on Overview, Columns, Preview, the editor and the file dialog", async ({
-        page,
-      }) => {
-        for (const tab of ["", "/columns", "/preview"]) {
-          await openTable(page, tab);
-          if (tab === "/preview") {
-            const grid = await previewGrid(page);
-            // The Value panel, with a long note that scrolls in it.
-            await grid.getByText(/Delivered to the back door/).click();
-            await expect(page.getByRole("region", { name: "note, row 1" })).toBeVisible();
+  test.describe(`the table page, ${theme}`, () => {
+    test.beforeEach(async ({ page }) => {
+      await signInAsAdmin(page);
+      await page.addInitScript(
+        ([key, value]) => {
+          if (window.localStorage.getItem(key ?? "") === null) {
+            window.localStorage.setItem(key ?? "", value ?? "");
           }
-          expect(await violations(page), `the table page${tab}`).toEqual([]);
-        }
-
-        for (const entry of NEW_TABS) {
-          await openNewTab(page, entry);
-          expect(await violations(page), `the table page${entry[0]}`).toEqual([]);
-        }
-
-        await openTable(page);
-        await page.getByRole("button", { name: "Edit", exact: true }).click();
-        await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
-        expect(await violations(page), "the editor on Overview").toEqual([]);
-        await page.keyboard.press("Escape");
-        await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeFocused();
-
-        await openTable(page, "/columns");
-        await page.getByRole("button", { name: "Edit store_id" }).click();
-        await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
-        expect(await violations(page), "the editor under a column").toEqual([]);
-        await page.keyboard.press("Escape");
-        await expect(page.getByRole("button", { name: "Edit store_id" })).toBeFocused();
-
-        await openTable(page);
-        const path = page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ });
-        await path.click();
-        const dialog = page.getByRole("dialog", { name: "Where fact_sales is defined" });
-        await expect(dialog.getByRole("region", { name: "The file's text" })).toBeVisible();
-        expect(await violations(page), "the file dialog").toEqual([]);
-        await page.keyboard.press("Escape");
-        await expect(dialog).toBeHidden();
-        await expect(path).toBeFocused();
-      });
-
-      test("the seven tabs wrap at 320 px and every tab fits and passes axe", async ({ page }) => {
-        await page.setViewportSize({ width: 320, height: 640 });
-        await openTable(page);
-        const tabs = page.getByRole("navigation", { name: "Sections of the table" });
-        const boxes = await tabs
-          .getByRole("link")
-          .evaluateAll((links) => links.map((link) => link.getBoundingClientRect()));
-        expect(boxes).toHaveLength(7);
-        // Wrapped: more than one line, and every tab inside the window.
-        expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBeGreaterThan(1);
-        expect(Math.max(...boxes.map((box) => box.right))).toBeLessThanOrEqual(320);
-        expect(Math.min(...boxes.map((box) => box.left))).toBeGreaterThanOrEqual(0);
-        for (const entry of NEW_TABS) {
-          await openNewTab(page, entry);
-          expect(await sidewaysOverflow(page), `${entry[0]} sideways`).toBeLessThanOrEqual(0);
-          expect(await violations(page), `${entry[0]} at 320 px`).toEqual([]);
-        }
-      });
-
-      test("the sections of Overview, Lineage, References, Health and Access are flat panels; Columns has none", async ({
-        page,
-      }) => {
-        await page.setViewportSize({ width: 1920, height: 1080 });
-        await openTable(page);
-        await expect(page.getByText("Check unique_sale_id failed")).toBeVisible();
-        const looks = [...(await panelLooks(page))];
-        for (const entry of NEW_TABS) {
-          await openNewTab(page, entry);
-          const found = await panelLooks(page);
-          expect(found.length, entry[0]).toBeGreaterThan(0);
-          looks.push(...found);
-          if (entry[0] === "/health") {
-            // The Checks panel ends with a command and its empty copy hint: no more room below
-            // the command than the panel's padding and the command line's own margin.
-            const below = await page.evaluate(() => {
-              const panel = document.querySelector(".health-section");
-              const line = panel?.querySelector(".copy-line");
-              const pad = panel === null ? 0 : parseFloat(getComputedStyle(panel).paddingBottom);
-              return {
-                gap:
-                  (panel?.getBoundingClientRect().bottom ?? 0) -
-                  (line?.getBoundingClientRect().bottom ?? 0),
-                allowed: pad + 1 + 12,
-              };
-            });
-            expect(below.gap, JSON.stringify(below)).toBeLessThanOrEqual(below.allowed);
-          }
-        }
-        expect(looks.length).toBeGreaterThanOrEqual(9);
-        for (const look of looks) {
-          const said = JSON.stringify(look);
-          expect(look.background, said).not.toBe(look.ground);
-          expect(look.background, said).not.toBe("rgba(0, 0, 0, 0)");
-          expect(look.border, said).toBe("1px solid");
-          expect(look.shadow, said).toBe("none");
-          expect(look.headingSize - look.bodySize, said).toBeGreaterThanOrEqual(4);
-          if (look.gapAfter !== null) {
-            expect(look.gapAfter, said).toBeGreaterThan(look.innerGap);
-            expect(look.gapAfter, said).toBeGreaterThanOrEqual(24);
-          }
-        }
-
-        await openTable(page, "/columns");
-        const list = page.locator(".table-tab .list").first();
-        await expect(list).toBeVisible();
-        const framed = await list.evaluate((node) => node.closest(".flat-panel") !== null);
-        expect(framed).toBe(false);
-      });
-
-      // Since the flat panels (decided 2026-11-14) Overview needs about 130 px more than 800, and a
-      // 1280 × 800 window may scroll it; it must still fit a 1920 × 1080 window.
-      test("Overview fits 1920 × 1080 without scrolling for the typical table", async ({
-        page,
-      }) => {
-        await page.setViewportSize({ width: 1920, height: 1080 });
-        await openTable(page);
-        await expect(
-          page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ }),
-        ).toBeVisible();
-        await expect(page.getByText("Check unique_sale_id failed")).toBeVisible();
-        const room = await page.evaluate(() => {
-          const scrolling = [document.documentElement, ...document.querySelectorAll("main, body")];
-          return scrolling.map((node) => node.scrollHeight - node.clientHeight);
-        });
-        expect(Math.max(...room), JSON.stringify(room)).toBeLessThanOrEqual(0);
-      });
+        },
+        [KEY, JSON.stringify({ theme, language: "en" })],
+      );
     });
-  }
+
+    test("axe finds nothing on Overview, Columns, Preview, the editor and the file dialog", async ({
+      page,
+    }) => {
+      for (const tab of ["", "/columns", "/preview"]) {
+        await openTable(page, tab);
+        if (tab === "/preview") {
+          const grid = await previewGrid(page);
+          // The Value panel, with a long note that scrolls in it.
+          await grid.getByText(/Delivered to the back door/).click();
+          await expect(page.getByRole("region", { name: "note, row 1" })).toBeVisible();
+        }
+        expect(await violations(page), `the table page${tab}`).toEqual([]);
+      }
+
+      for (const entry of NEW_TABS) {
+        await openNewTab(page, entry);
+        expect(await violations(page), `the table page${entry[0]}`).toEqual([]);
+      }
+
+      await openTable(page);
+      await page.getByRole("button", { name: "Edit", exact: true }).click();
+      await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
+      expect(await violations(page), "the editor on Overview").toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeFocused();
+
+      await openTable(page, "/columns");
+      await page.getByRole("button", { name: "Edit store_id" }).click();
+      await expect(page.getByRole("textbox", { name: "Label" })).toBeFocused();
+      expect(await violations(page), "the editor under a column").toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("button", { name: "Edit store_id" })).toBeFocused();
+
+      await openTable(page);
+      const path = page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ });
+      await path.click();
+      const dialog = page.getByRole("dialog", { name: "Where fact_sales is defined" });
+      await expect(dialog.getByRole("region", { name: "The file's text" })).toBeVisible();
+      expect(await violations(page), "the file dialog").toEqual([]);
+      await page.keyboard.press("Escape");
+      await expect(dialog).toBeHidden();
+      await expect(path).toBeFocused();
+    });
+
+    test("the seven tabs wrap at 320 px and every tab fits and passes axe", async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 640 });
+      await openTable(page);
+      const tabs = page.getByRole("navigation", { name: "Sections of the table" });
+      const boxes = await tabs
+        .getByRole("link")
+        .evaluateAll((links) => links.map((link) => link.getBoundingClientRect()));
+      expect(boxes).toHaveLength(7);
+      // Wrapped: more than one line, and every tab inside the window.
+      expect(new Set(boxes.map((box) => Math.round(box.top))).size).toBeGreaterThan(1);
+      expect(Math.max(...boxes.map((box) => box.right))).toBeLessThanOrEqual(320);
+      expect(Math.min(...boxes.map((box) => box.left))).toBeGreaterThanOrEqual(0);
+      for (const entry of NEW_TABS) {
+        await openNewTab(page, entry);
+        expect(await sidewaysOverflow(page), `${entry[0]} sideways`).toBeLessThanOrEqual(0);
+        expect(await violations(page), `${entry[0]} at 320 px`).toEqual([]);
+      }
+    });
+
+    test("the sections of Overview, Lineage, References, Health and Access are flat panels; Columns has none", async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      await openTable(page);
+      await expect(page.getByText("Check unique_sale_id failed")).toBeVisible();
+      const looks = [...(await panelLooks(page))];
+      for (const entry of NEW_TABS) {
+        await openNewTab(page, entry);
+        const found = await panelLooks(page);
+        expect(found.length, entry[0]).toBeGreaterThan(0);
+        looks.push(...found);
+        if (entry[0] === "/health") {
+          // The Checks panel ends with a command and its empty copy hint: no more room below
+          // the command than the panel's padding and the command line's own margin.
+          const below = await page.evaluate(() => {
+            const panel = document.querySelector(".health-section");
+            const line = panel?.querySelector(".copy-line");
+            const pad = panel === null ? 0 : parseFloat(getComputedStyle(panel).paddingBottom);
+            return {
+              gap:
+                (panel?.getBoundingClientRect().bottom ?? 0) -
+                (line?.getBoundingClientRect().bottom ?? 0),
+              allowed: pad + 1 + 12,
+            };
+          });
+          expect(below.gap, JSON.stringify(below)).toBeLessThanOrEqual(below.allowed);
+        }
+      }
+      expect(looks.length).toBeGreaterThanOrEqual(9);
+      for (const look of looks) {
+        const said = JSON.stringify(look);
+        expect(look.background, said).not.toBe(look.ground);
+        expect(look.background, said).not.toBe("rgba(0, 0, 0, 0)");
+        expect(look.border, said).toBe("1px solid");
+        expect(look.shadow, said).toBe("none");
+        // The section step (15 px, weight 500) over the 14 px body, as every panel's title (#782).
+        expect(look.headingSize - look.bodySize, said).toBeGreaterThanOrEqual(1);
+        if (look.gapAfter !== null) {
+          expect(look.gapAfter, said).toBeGreaterThan(look.innerGap);
+          expect(look.gapAfter, said).toBeGreaterThanOrEqual(16);
+        }
+      }
+
+      await openTable(page, "/columns");
+      const list = page.locator(".table-tab .list").first();
+      await expect(list).toBeVisible();
+      const framed = await list.evaluate((node) => node.closest(".flat-panel") !== null);
+      expect(framed).toBe(false);
+    });
+
+    // Since the flat panels (decided 2026-11-14) Overview needs about 130 px more than 800, and a
+    // 1280 × 800 window may scroll it; it must still fit a 1920 × 1080 window.
+    test("Overview fits 1920 × 1080 without scrolling for the typical table", async ({ page }) => {
+      await page.setViewportSize({ width: 1920, height: 1080 });
+      await openTable(page);
+      await expect(
+        page.getByRole("button", { name: /models\/gold\/fact_sales\.sql/ }),
+      ).toBeVisible();
+      await expect(page.getByText("Check unique_sale_id failed")).toBeVisible();
+      const room = await page.evaluate(() => {
+        const scrolling = [document.documentElement, ...document.querySelectorAll("main, body")];
+        return scrolling.map((node) => node.scrollHeight - node.clientHeight);
+      });
+      expect(Math.max(...room), JSON.stringify(room)).toBeLessThanOrEqual(0);
+    });
+  });
 }
 
 test.describe("the table page in real Chromium", () => {
@@ -390,7 +387,7 @@ test.describe("the table page in real Chromium", () => {
     expect(Math.abs(look.space - look.margin), `${String(look.space)} px`).toBeLessThanOrEqual(1);
   });
 
-  test("Preview and Lineage use the whole window; the other tabs keep the reading width", async ({
+  test("every tab takes the whole width of the working area, Preview and Lineage too", async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
@@ -401,21 +398,19 @@ test.describe("the table page in real Chromium", () => {
     }
     await openNewTab(page, NEW_TABS[1]);
     widths["/health"] = (await page.locator(".page").boundingBox())?.width ?? 0;
-    for (const width of Object.values(widths)) {
-      expect(width).toBeLessThanOrEqual(1040);
+    const area = (await page.locator(".shell-main").boundingBox())?.width ?? 0;
+    for (const [tab, width] of Object.entries(widths)) {
+      expect(width, tab).toBeGreaterThan(area - 2 * 24 - 2);
     }
     await openTable(page, "/preview");
     await previewGrid(page);
     const preview = page.getByRole("region", { name: "Preview of fact_sales", exact: true });
     const main = (await page.locator(".shell-main").boundingBox())?.width ?? 0;
-    // The window less the sidebar and the main area's own padding on both sides.
-    expect((await preview.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
+    // The window less the sidebar and the main area's own 24 px gutter on both sides.
+    expect((await preview.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 24 - 2);
     await openNewTab(page, NEW_TABS[0]);
     const drawing = page.getByRole("region", { name: "Lineage of fact_sales", exact: true });
-    expect((await drawing.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 32 - 2);
-    // The list under the drawing keeps the reading width.
-    const list = page.locator(".lineage-list-section");
-    expect((await list.boundingBox())?.width ?? 0).toBeLessThanOrEqual(1040);
+    expect((await drawing.boundingBox())?.width ?? 0).toBeGreaterThan(main - 2 * 24 - 2);
   });
 
   test("the preview grid is dense, aligns numbers, keeps its header in view and numbers its rows", async ({
@@ -451,28 +446,20 @@ test.describe("the table page in real Chromium", () => {
           },
         }),
     );
-    const heights: Record<string, number> = {};
     await openTable(page);
-    for (const density of ["roomy", "compact"] as const) {
-      await page.evaluate(
-        ([key, value]) => {
-          window.localStorage.setItem(key ?? "", value ?? "");
-        },
-        [KEY, JSON.stringify({ theme: "dark", density, language: "en" })],
-      );
-      await openTable(page, "/preview");
-      await expect(page.locator("html")).toHaveAttribute("data-density", density);
-      const grid = await previewGrid(page);
-      await expect(grid.getByRole("rowheader")).toHaveCount(60);
-      heights[density] = (await grid.locator("tbody tr").first().boundingBox())?.height ?? 0;
-    }
-    expect(Math.abs((heights.roomy ?? 0) - 32), `roomy ${String(heights.roomy)}`).toBeLessThan(1.5);
-    expect(
-      Math.abs((heights.compact ?? 0) - 26),
-      `compact ${String(heights.compact)}`,
-    ).toBeLessThan(1.5);
-
+    await page.evaluate(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme: "dark", density: "roomy", language: "en" })],
+    );
+    await openTable(page, "/preview");
     const grid = await previewGrid(page);
+    await expect(grid.getByRole("rowheader")).toHaveCount(60);
+    // One density: 24 px rows, whatever an older version stored.
+    const height = (await grid.locator("tbody tr").first().boundingBox())?.height ?? 0;
+    expect(Math.abs(height - 24), `row ${String(height)}`).toBeLessThan(1.5);
+
     // Numbers: right-aligned in tabular figures, the header too; text stays on the left.
     const looks = await grid.evaluate((node) => {
       const look = (cell: Element | null | undefined): string[] => {
@@ -668,7 +655,7 @@ test.describe("the table page in real Chromium", () => {
     expect(await violations(page), "Health at 320 px").toEqual([]);
   });
 
-  test("compact rows of Columns, Health and Access are lower than roomy rows", async ({ page }) => {
+  test("rows of Columns, Health and Access are compact: one row height", async ({ page }) => {
     const heights: Record<string, number[]> = {};
     /**
      * Records the height of the first row of the tab's first list.
@@ -680,26 +667,23 @@ test.describe("the table page in real Chromium", () => {
       (heights[name] ??= []).push(box?.height ?? 0);
     };
     await openTable(page);
-    for (const density of ["roomy", "compact"] as const) {
-      await page.evaluate(
-        ([key, value]) => {
-          window.localStorage.setItem(key ?? "", value ?? "");
-        },
-        [KEY, JSON.stringify({ theme: "light", density, language: "en" })],
-      );
-      await openTable(page, "/columns");
-      await expect(page.locator("html")).toHaveAttribute("data-density", density);
-      await measure("Columns");
-      for (const entry of NEW_TABS.slice(1, 3)) {
-        await openNewTab(page, entry);
-        await measure(entry[0]);
-      }
+    await page.evaluate(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme: "light", language: "en" })],
+    );
+    await openTable(page, "/columns");
+    await measure("Columns");
+    for (const entry of NEW_TABS.slice(1, 3)) {
+      await openNewTab(page, entry);
+      await measure(entry[0]);
     }
     expect(Object.keys(heights)).toHaveLength(3);
-    for (const [name, [roomy, compact]] of Object.entries(heights)) {
-      expect(compact, `${name}: ${String(compact)} against ${String(roomy)}`).toBeLessThan(
-        roomy ?? 0,
-      );
+    // At least the 32 px row; a second line adds two dense lines' worth at most.
+    for (const [name, [height]] of Object.entries(heights)) {
+      expect(height ?? 0, name).toBeGreaterThanOrEqual(31.5);
+      expect(height ?? 0, name).toBeLessThan(44);
     }
   });
 
