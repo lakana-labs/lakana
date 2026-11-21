@@ -143,7 +143,7 @@ ingestion helpers and named connections shipped before the web interface.
    failure is announced.
 2. **The move to DuckDB 2 (built, 0.19.0).** Lakana runs on DuckDB 2.0, a long-term-support
    release supported until at least October 2027. It was a migration, not a milestone, tracked in
-   #96. The worker requires `duckdb>=2.0,<3`; what changed for SQL is in
+   #96. The worker requires `duckdb>=2.0.1,<3`; what changed for SQL is in
    [Upgrade policy](upgrades.md).
 3. **M7b, task isolation (built, 0.20.0).** Each Python task runs in a container of its own,
    started by a launcher that alone holds the Docker socket, so a task cannot read the worker's

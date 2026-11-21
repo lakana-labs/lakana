@@ -102,6 +102,8 @@ def test_the_worker_requires_the_duckdb_release_its_query_process_is_written_for
 
     `extension_directories`, `allow_extension_repositories` and `async_threads` fail on 1.x, so
     a lower bound below 2.0 would let a fresh install pick a DuckDB the worker cannot configure.
+    2.0.1 refuses a dot segment in a literal URL that 2.0.0 let through to the store
+    (`test_a_literal_dotdot_is_refused_and_reaches_no_server`), so the bound is 2.0.1.
     """
     (requirement,) = (r for r in _requirements("lakana-worker") if re.match(r"duckdb\b", r))
-    assert requirement == "duckdb>=2.0,<3"
+    assert requirement == "duckdb>=2.0.1,<3"

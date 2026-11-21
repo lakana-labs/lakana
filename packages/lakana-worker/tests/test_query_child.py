@@ -472,6 +472,10 @@ def test_local_mode_may_spill_up_to_the_configured_size(tmp_path: Path) -> None:
         "PRAGMA memory_limit = '64GB'",
         "SET GLOBAL threads = 8",
         "SET SESSION memory_limit = '64GB'",
+        # DuckDB 2.0.1's default is 'hosts', which lets a repository named by its host be added.
+        "SET allow_extension_repositories = 'hosts'",
+        "SET allow_extension_repositories = 'allowed'",
+        "CREATE EXTENSION REPOSITORY example.com",
     ],
 )
 def test_no_setting_can_be_changed_once_configured(tmp_path: Path, statement: str) -> None:
@@ -483,6 +487,60 @@ def test_no_setting_can_be_changed_once_configured(tmp_path: Path, statement: st
         assert _settings_of(connection) == before
     finally:
         connection.close()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT * FROM add_grammar_extension('x')",
+        "SELECT * FROM remove_grammar_extension('x')",
+    ],
+)
+def test_a_grammar_extension_cannot_be_switched_once_configured(
+    tmp_path: Path, statement: str
+) -> None:
+    """DuckDB 2.0.1's grammar-extension functions write a setting, which the lock refuses.
+
+    They write ``active_grammar_extensions``; the lock refuses that before DuckDB looks the
+    extension up, so the refusal is the lock's and not "does not exist".
+    """
+    connection, before = _configured(_request(temp_directory=str(tmp_path)))
+    try:
+        with pytest.raises(duckdb.Error, match="the configuration has been locked"):
+            connection.execute(statement)
+        assert _settings_of(connection) == before
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "CREATE EXTENSION REPOSITORY example.com",
+        "CREATE OR REPLACE EXTENSION REPOSITORY example.com",
+    ],
+)
+def test_forbidden_alone_refuses_an_extension_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    """``allow_extension_repositories = 'forbidden'`` refuses a repository on its own.
+
+    On the configured connection external access is off and the configuration locked, and
+    DuckDB 2.0.1 refuses the statement there first (it cannot open the repository file under
+    ``HOME``). This pins the setting itself, on a connection with external access on and no
+    lock. Under DuckDB 2.0.1's default, ``hosts``, the statement installs ``httpfs`` and asks
+    ``https://<host>/.well-known/duckdb-extension-repo.json`` for the repository; under
+    ``forbidden`` nothing is fetched or written.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    connection = duckdb.connect(":memory:")
+    try:
+        connection.execute("SET allow_extension_repositories = 'forbidden'")
+        with pytest.raises(duckdb.PermissionException, match="is 'forbidden'"):
+            connection.execute(statement)
+    finally:
+        connection.close()
+    assert list(tmp_path.rglob("*")) == []
 
 
 def test_a_variable_can_still_be_set_once_configured(tmp_path: Path) -> None:
@@ -580,7 +638,9 @@ def test_a_query_over_the_limit_without_spill_is_out_of_memory_with_the_setting_
         "Query failed: the query ran out of memory and cannot spill to disk. "
         f"{MEMORY_LIMIT_ADVICE}",
     )
-    assert list(tmp_path.iterdir()) == []
+    # Nothing spilled. DuckDB 2.0.1 also writes the profile of a failed statement (2.0.0 only of
+    # one that succeeded): the child's own file, which holds the bytes read and nothing else.
+    assert [path.name for path in tmp_path.iterdir()] in ([], [query_child.PROFILE_FILE])
 
 
 def test_a_query_over_the_limit_with_spill_returns_its_result(tmp_path: Path) -> None:
