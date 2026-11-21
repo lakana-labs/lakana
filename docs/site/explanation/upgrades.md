@@ -478,8 +478,8 @@ instead, …`.
 
 Environment and connection names already met both rules: an environment name must be printable
 without a blank at either end, and a connection name is lower-case letters, digits and `-`. A job
-name in `lakana.yaml` already refused these characters at deploy; a space at either end of a job
-name is still accepted there, because a project that has one would fail its next deploy.
+name in `lakana.yaml` already refused the hidden characters at deploy; for a space at either end,
+see [A job name with a space at either end](#a-job-name-with-a-space-at-either-end-breaking).
 
 Earlier releases accepted such names, so a script that still creates one now gets 422 where it
 worked before; choose a name without the character or the outer space. Existing names are not
@@ -487,6 +487,39 @@ touched: such a repository, group, package index, secret or token stays readable
 changed and can be deleted or revoked as before. To find one, search the JSON output of the list
 commands (`lakana --output json repo list`, `group list`, `token list NAME`) with the `grep`
 above.
+
+### A job name with a space at either end (breaking)
+
+A job name in `lakana.yaml` may no longer start or end with a space (any Unicode space), unless
+the environment's current deployed version of that repository's project already has a job of
+exactly that name. The deploy compares the names with that version only, so a job deployed in
+another environment or by another repository does not excuse the name, and after a rollback to a
+version without the job, or a deploy that dropped it, the name counts as new and is refused. The
+refusal uses the sentence of the other names, for example `lakana.yaml:3: Job name 'daily ' ends
+with a space, so it would look like 'daily' in every list but be a different name. Use 'daily'
+instead, or another name without a space at either end.`
+
+A project that has such a job keeps deploying where it is deployed, so nothing fails at the
+upgrade, and a failed deploy leaves the exception as it was. To end the exception, rename the job
+in git (`daily ` to `daily`); a renamed job is a new name, so a new name with a space is refused.
+The first deploy of such a project to another environment, such as a new staging environment, is
+refused until the job is renamed. To find the jobs, run this in the project; it needs only
+Python 3 and prints the line and name of every key written as `"name":`, `'name':` or bare that
+starts or ends with a space, no-break spaces included:
+
+<!-- source: docs/examples/find-outer-space-job-names.sh#find -->
+```bash
+python3 - <<'PY'
+import re
+
+key = re.compile(r"""[ \t]+(?:"([^"]*)"|'([^']*)'|([^ \t:#][^:#]*)):\s*(?:#.*)?$""")
+for number, line in enumerate(open("lakana.yaml", encoding="utf-8"), 1):
+    found = key.match(line.rstrip("\n"))
+    name = next((g for g in found.groups() if g is not None), "") if found else ""
+    if name and (name[0].isspace() or name[-1].isspace()):
+        print(number, repr(name))
+PY
+```
 
 ### Control characters in asset files are refused (breaking)
 
