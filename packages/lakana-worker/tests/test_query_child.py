@@ -489,6 +489,60 @@ def test_no_setting_can_be_changed_once_configured(tmp_path: Path, statement: st
         connection.close()
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT * FROM add_grammar_extension('x')",
+        "SELECT * FROM remove_grammar_extension('x')",
+    ],
+)
+def test_a_grammar_extension_cannot_be_switched_once_configured(
+    tmp_path: Path, statement: str
+) -> None:
+    """DuckDB 2.0.1's grammar-extension functions write a setting, which the lock refuses.
+
+    They write ``active_grammar_extensions``; the lock refuses that before DuckDB looks the
+    extension up, so the refusal is the lock's and not "does not exist".
+    """
+    connection, before = _configured(_request(temp_directory=str(tmp_path)))
+    try:
+        with pytest.raises(duckdb.Error, match="the configuration has been locked"):
+            connection.execute(statement)
+        assert _settings_of(connection) == before
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "CREATE EXTENSION REPOSITORY example.com",
+        "CREATE OR REPLACE EXTENSION REPOSITORY example.com",
+    ],
+)
+def test_forbidden_alone_refuses_an_extension_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, statement: str
+) -> None:
+    """``allow_extension_repositories = 'forbidden'`` refuses a repository on its own.
+
+    On the configured connection external access is off and the configuration locked, and
+    DuckDB 2.0.1 refuses the statement there first (it cannot open the repository file under
+    ``HOME``). This pins the setting itself, on a connection with external access on and no
+    lock. Under DuckDB 2.0.1's default, ``hosts``, the statement installs ``httpfs`` and asks
+    ``https://<host>/.well-known/duckdb-extension-repo.json`` for the repository; under
+    ``forbidden`` nothing is fetched or written.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    connection = duckdb.connect(":memory:")
+    try:
+        connection.execute("SET allow_extension_repositories = 'forbidden'")
+        with pytest.raises(duckdb.PermissionException, match="is 'forbidden'"):
+            connection.execute(statement)
+    finally:
+        connection.close()
+    assert list(tmp_path.rglob("*")) == []
+
+
 def test_a_variable_can_still_be_set_once_configured(tmp_path: Path) -> None:
     connection, _settings = _configured(_request(temp_directory=str(tmp_path)))
     try:

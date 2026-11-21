@@ -1923,6 +1923,11 @@ _NAMED_READERS = [
     "iceberg_partition_stats",
     "iceberg_refs",
     "iceberg_snapshots",
+    # Added by the 2.0.1 sweep with the extensions loaded: Iceberg metadata, and an AWS
+    # system table read through `iceberg_scan`.
+    "iceberg_partitions",
+    "iceberg_schemas",
+    "aws_system_table",
     # Another database.
     "sqlite_attach",
     "sqlite_query",
@@ -1934,10 +1939,10 @@ _NAMED_READERS = [
     "glob",
     "sniff_csv",
 ]
-"""DuckDB 2.0.0's table functions that read a file, a URL or another database by a name that
-neither starts with ``read_`` nor ends with ``_scan``, and ``parquet_page_index``, which 2.0.1
-adds (``duckdb_functions()``, with the parquet,
-json, httpfs, iceberg, delta, sqlite, postgres, mysql, avro and ducklake extensions loaded)."""
+"""DuckDB's table functions that read a file, a URL or another database by a name that neither
+starts with ``read_`` nor ends with ``_scan``: 2.0.0's (``duckdb_functions()`` with the parquet,
+json, httpfs, iceberg, delta, sqlite, postgres, mysql, avro and ducklake extensions loaded) and
+the four 2.0.1 adds (the same extensions and glue, aws, azure, spatial, fts, vortex and excel)."""
 
 
 @pytest.mark.parametrize("function", _NAMED_READERS)

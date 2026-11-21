@@ -252,7 +252,12 @@ diffed 2.0.0 against 2.0.1 the same way: 5 names new, all refused, `parquet_page
 left to `_ALLOWED_TABLE_FUNCTIONS` like 2.0.0's external-resource functions, and the
 `pg_catalog` macro `map_type_id_to_pg_oid`, a `CASE` over type ids, allowed; the other changed
 rows are new `TIMESTAMP_NS`/`TIMESTAMPTZ_NS` overloads, stability labels and reader options,
-no new lambda-taking function): DuckDB adds table
+no new lambda-taking function; swept again with the iceberg, delta, ducklake, glue, aws, azure,
+avro, sqlite, postgres, mysql, spatial, fts, vortex and excel extensions loaded: their new
+table functions are refused by `_ALLOWED_TABLE_FUNCTIONS`, the `__aws__*` ones also by the `__`
+prefix, the new readers are in `_READER_NAMES`, and their four new scalars, `ST_AsGrid`,
+`fts_analyze_pattern`, `fts_near_tf` and `ducklake_unreadable_macro_default`, belong to
+extensions the query process never loads): DuckDB adds table
 functions across releases, and a future one in any of these
 categories needs adding here as it's found, the same way this residual
 round found two the initial pass missed. This blacklist is deliberately
@@ -879,6 +884,10 @@ _READER_NAMES = frozenset(
         "iceberg_partition_stats",
         "iceberg_refs",
         "iceberg_snapshots",
+        "iceberg_partitions",
+        "iceberg_schemas",
+        # An AWS system table, read through `iceberg_scan` (aws extension, 2.0.1).
+        "aws_system_table",
         # Another database: read, run statements in (`_execute`) or attach.
         "sqlite_attach",
         "sqlite_query",
@@ -888,8 +897,12 @@ _READER_NAMES = frozenset(
         "mysql_execute",
     }
 )
-"""The table functions of DuckDB 2.0.0 and 2.0.1 that read a file or a URL, or read, run
-statements in or attach another database, by a name the prefix and suffix above miss. Only the
+"""The table functions that read a file or a URL, or read, run statements in or attach another
+database, by a name the prefix and suffix above miss. Swept on 2.0.0 with the parquet, json,
+httpfs, iceberg, delta, sqlite, postgres, mysql, avro and ducklake extensions loaded, and on 2.0.1
+with those and glue, aws, azure, spatial, fts, vortex and excel. Functions that write or manage
+(`iceberg_expire_snapshots`, `glue_repair_table`, `s3_create_bucket`, the `s3tables_*` and other
+`glue_*` functions) are not listed: they keep the message that asks to check the name. Only the
 refusal's message uses it: every table function outside the generator allow-list is refused
 either way."""
 

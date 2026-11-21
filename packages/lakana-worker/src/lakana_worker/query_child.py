@@ -48,7 +48,10 @@ Why each configuration statement is there, and why their order matters:
 2. ``allow_community_extensions = false`` and ``allow_extension_repositories = 'forbidden'``
    (the default, ``undecided`` on 2.0.0 and ``hosts`` on 2.0.1, may still be loosened or, on
    2.0.1, lets ``CREATE EXTENSION REPOSITORY <host>`` add a repository; ``forbidden`` may not
-   change, and refuses ``CREATE EXTENSION REPOSITORY`` in every form); then
+   change, and refuses ``CREATE EXTENSION REPOSITORY`` in every form). On the configured
+   connection the statement meets two other layers first: with external access off DuckDB
+   cannot open the repository file under ``HOME`` (a ``Permission Error``), and the lock
+   refuses adding or dropping a repository; ``forbidden`` is the third; then
    ``INSTALL``/``LOAD httpfs``, which need the extension directory, before external access is
    switched off.
 3. ``s3_access_key_id``, ``s3_secret_access_key`` and ``s3_session_token`` are cleared.
@@ -261,8 +264,9 @@ off) and are listed should one ever be loaded. Left out:
 ``aggregate``/``list_aggregate`` call an aggregate by name, not SQL; the ``pragma_*`` table
 functions read settings and metadata, which the guard governs. Of 2.0.1's new functions,
 ``add_grammar_extension`` and ``remove_grammar_extension`` switch a grammar extension of the
-parser on or off for later statements; the child runs one statement and loads no extension that
-registers one (``duckdb_grammar_extensions()`` is empty), and ``duckdb_live_query_metrics``
+parser on or off for later statements by writing the setting ``active_grammar_extensions``,
+which the lock refuses (step 10); besides, the child runs one statement and loads no extension
+that registers one (``duckdb_grammar_extensions()`` is empty). ``duckdb_live_query_metrics``
 only reads counters."""
 
 NO_SPILL = (

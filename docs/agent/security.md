@@ -4295,8 +4295,16 @@ own process opens no DuckDB connection and imports no `duckdb`.
   REPOSITORY <host>`, new syntax in 2.0.1, adds a repository by its host name) can be loosened
   or used, `forbidden` cannot change and refuses `CREATE EXTENSION REPOSITORY` in every form
   (2.0.1: "allow_extension_repositories is 'forbidden', which does not allow adding any
-  repository"; `test_no_setting_can_be_changed_once_configured` pins the host form and the
-  move back to `hosts` or `allowed`). All
+  repository"). On the configured connection that check is the third layer, and DuckDB 2.0.1
+  never reaches it: external access is off, so it first fails to open the repository file under
+  `HOME` (`Permission Error: Cannot access file ".../extension_repositories/<host>.duckdb_extension.repo.json"`),
+  and behind that the lock refuses adding or dropping a repository.
+  `test_no_setting_can_be_changed_once_configured` pins that the configured connection refuses
+  the host form and the move back to `hosts` or `allowed` (whichever layer answers);
+  `test_forbidden_alone_refuses_an_extension_repository` pins `forbidden` by itself, on a
+  connection with external access on and no lock, by its message, with nothing written under
+  `HOME` (under the default `hosts` the statement installs `httpfs` and fetches
+  `https://<host>/.well-known/duckdb-extension-repo.json`). All
   three read back in `test_the_connection_holds_no_credential_and_loads_nothing_by_itself`, and
   in a real child in `test_a_child_reads_back_the_settings_duckdb_2_names_differently`.
   `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`, `duckdb` or `none`) changes
@@ -4445,7 +4453,12 @@ own process opens no DuckDB connection and imports no `duckdb`.
     request, reported as `invalid` with the fixed text, and the worker requires
     `duckdb>=2.0.1` for it. Pinned by `test_a_literal_dotdot_is_refused_and_reaches_no_server`
     (red on 2.0.0; it replaced `test_known_residual_a_literal_dotdot_reaches_the_same_server`).
-    Not in DuckDB's release notes; found when the pinned residual failed on 2.0.1.
+    Not in DuckDB's release notes; found when the pinned residual failed on 2.0.1. "Dot
+    segment" is meant as RFC 3986 says: `..;` (`t1/..;/t2/a.parquet`) is no dot segment, passes
+    2.0.1, and reaches the store unchanged. S3 and SeaweedFS take the path literally, so it stays
+    inside the prefix there; a front end that strips `;` path parameters before normalising (as
+    Tomcat-style servers do) would resolve it to `t2`. Not a concern for the stores Lakana
+    supports, but an operator who puts such a proxy in front of the store reopens the residual.
   - **Unsigned requests to the allowed prefixes**: objects of a table nested in another's
     location; the same 403 limit.
   - **Redirects are followed.** httpfs follows a 3xx from an allowed URL to another host
@@ -4564,8 +4577,12 @@ versions, each with `httpfs` loaded, were diffed. Functions: 3,233 rows on 2.0.0
 `_BLACKLISTED_FUNCTIONS` and `_READER_NAMES`, with the metadata family), `duckdb_live_query_metrics`
 (the connection's I/O and memory counters; listed with the introspection functions), and
 `add_grammar_extension`/`remove_grammar_extension` (switch a parser grammar extension on or off
-for later statements; left to the allow-list like 2.0.0's external-resource functions: the child
-runs one statement and registers no grammar extension). The fifth, the `pg_catalog` macro
+for later statements; left to the allow-list like 2.0.0's external-resource functions). Past the
+guard the lock is the layer that holds: both write the setting `active_grammar_extensions`, and
+on the configured connection DuckDB refuses them with "Cannot change configuration option
+"active_grammar_extensions" - the configuration has been locked" before it looks the extension
+up (`test_a_grammar_extension_cannot_be_switched_once_configured`); besides, the child runs one
+statement and registers no grammar extension. The fifth, the `pg_catalog` macro
 `map_type_id_to_pg_oid`, is a `CASE` over type ids and stays allowed. The other changed rows are
 new `TIMESTAMP_S`/`_MS`/`_NS`/`TIMESTAMPTZ_NS` overloads, stability labels
 (`CONSISTENT_WITHIN_QUERY` on time-zone arithmetic), `fmod` turned from a macro into a scalar,
@@ -4585,7 +4602,20 @@ Otherwise as on 2.0.0: with external access off,
 `parquet_page_index` of a file outside the allowed paths is a `Permission Error`, `LOAD` of
 `glue` or `legacy_parser` (new default extensions in 2.0.1) is refused, and `CREATE SECRET (TYPE
 http, HTTP_PROXY …)` still succeeds on 2.0.1 (DuckDB reverted a change that would have refused it
-before the release; the child refuses it as a statement that is not one `SELECT`). One behaviour
+before the release; the child refuses it as a statement that is not one `SELECT`). The function diff was
+repeated with the iceberg, delta, ducklake, glue, aws, azure, avro, sqlite, postgres, mysql,
+spatial, fts, vortex and excel extensions installed and loaded in a scratch environment (3,665
+rows on 2.0.0, 3,816 on 2.0.1). Their new table functions (Iceberg `iceberg_partitions`,
+`iceberg_schemas`, `iceberg_expire_snapshots`; Glue `glue_get_partition_response`,
+`glue_repair_table`, `glue_requests`; the aws extension's `s3_*`, `s3tables_*`,
+`aws_system_table(s)`, `aws_system_table_families` and `__aws__*`; `read_single_avro_file`) are
+refused by the allow-list (`__aws__*` also by the `__` prefix). The readers among them,
+`iceberg_partitions`, `iceberg_schemas` and `aws_system_table` (an Iceberg scan), went into
+`_READER_NAMES` so the refusal says they reach data; the writing and managing ones keep the
+"check the name" message, as 2.0.0's `iceberg_rewrite_data_files` and `glue_*` did. Their new
+scalars (`ST_AsGrid`, `fts_analyze_pattern`, `fts_near_tf`, `ducklake_unreadable_macro_default`)
+and the window functions `ST_ClusterDBSCAN`/`ST_ClusterKMeans` belong to extensions the query
+process never loads; none matches the `SQL_RUNNING_FUNCTIONS` criterion. One behaviour
 change touched a test: 2.0.1's profiler writes `profile.json` for a failed statement too (2.0.0
 only for one that succeeded), so a query that ran out of memory without spilling leaves that file,
 and nothing else, in its temp directory.
