@@ -14,19 +14,20 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 from home_test_helpers import grant, person
 from saved_query_test_helpers import LIMITS, LISTS, build_world, new_pages, old_pages
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import Action, AllowAllAuthorization, PrincipalRef
-from lakana_core.catalog.saved_queries import SavedQueryService
+from lakana_core.catalog.saved_queries import SavedQueryService, by_code_point
 from lakana_core.catalog.service import CatalogService
 from lakana_core.config import StorageConfig
 from lakana_core.errors import ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
-from lakana_core.models import SavedQuery
+from lakana_core.models import Environment, SavedQuery
 from lakana_core.pagination import BAD_CURSOR, encode_tuple_cursor
 from lakana_core.storage.resolver import StorageResolver
 
@@ -233,3 +234,23 @@ def test_a_rename_moves_the_query_in_the_list_order(session: Session, tmp_path: 
     assert [v.name for v in service.list_page(bob).items] == ["Alpha", "Beta"]
     one = service.list_page(bob, environment="dev", limit=1)
     assert one.next_cursor == encode_tuple_cursor("saved-queries", ("alpha", "dev", str(zeta.id)))
+
+
+@pytest.mark.parametrize(
+    ("url", "collated"),
+    [("sqlite://", False), ("postgresql+pg8000://lakana@localhost/lakana", True)],
+    ids=["sqlite", "postgres"],
+)
+def test_environment_names_compare_by_code_point_on_each_database(url: str, collated: bool) -> None:
+    """Postgres is told ``"C"``; SQLite compares UTF-8 bytes, code-point order, already.
+
+    No connection is opened: the dialect alone decides, and the expression is compiled for it.
+    """
+    engine = sa.create_engine(url)
+    try:
+        column = by_code_point(engine.dialect.name, Environment.name.expression)
+        compiled = str(column.compile(dialect=engine.dialect))
+    finally:
+        engine.dispose()
+    assert compiled.endswith('COLLATE "C"') is collated
+    assert compiled.startswith("environments.name")

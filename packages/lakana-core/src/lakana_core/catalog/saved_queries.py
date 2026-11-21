@@ -222,8 +222,8 @@ class _Reader:
     queryable
         The ids of the environments where the caller holds `SUBMIT_QUERY`.
     reads_text
-        Asks whether the caller holds `READ_QUERY_TEXT` on the instance; asked at most once,
-        and only for a private query of someone else.
+        Asks whether the caller holds `READ_QUERY_TEXT` on the instance; asked only when a
+        read of one saved query (a list shows no SQL) is someone else's private one.
     """
 
     def __init__(
@@ -238,7 +238,6 @@ class _Reader:
         self.admin = admin
         self.queryable = queryable
         self._reads_text = reads_text
-        self._text: bool | None = None
 
     def visible(self) -> ColumnElement[bool]:
         """Keep the saved queries the caller sees, as one SQL condition.
@@ -322,7 +321,7 @@ class _Reader:
         shows_sql = sql is not None and (
             own
             or row.visibility == SavedQueryVisibility.EVERYONE
-            or (self.admin and self._text_right())
+            or (self.admin and self._reads_text())
         )
         if own:
             actions = _OWNER_ACTIONS if row.environment_id in self.queryable else _DELETE_ONLY
@@ -340,18 +339,6 @@ class _Reader:
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
-
-    def _text_right(self) -> bool:
-        """Ask once whether the caller holds `READ_QUERY_TEXT` on the instance.
-
-        Returns
-        -------
-        bool
-            The answer, remembered for the rest of the request.
-        """
-        if self._text is None:
-            self._text = self._reads_text()
-        return self._text
 
 
 def _checked_name(name: str) -> str:
@@ -417,6 +404,29 @@ def _checked_fields(name: str, sql: str, visibility: str) -> tuple[str, SavedQue
             f"visibility is 'private' or 'everyone', not {visibility!r}."
         ) from None
     return stripped, chosen
+
+
+def by_code_point(dialect: str, column: ColumnElement[str]) -> ColumnElement[str]:
+    """Compare a text column by code point, as Python does and the lists' cursors hold.
+
+    SQLite compares text by its UTF-8 bytes already, which is code-point order; Postgres
+    compares under the database's collation unless told ``"C"``.
+
+    Parameters
+    ----------
+    dialect
+        The name of the database's dialect (``sqlite``, ``postgresql``).
+    column
+        The column.
+
+    Returns
+    -------
+    ColumnElement
+        It, collated ``"C"`` on Postgres.
+    """
+    if dialect == "postgresql":
+        return column.collate("C")
+    return column
 
 
 def _position(kind: str, cursor: str) -> SortedPosition:
@@ -730,7 +740,10 @@ class SavedQueryService:
         check_list_limit(limit)
         kind = _EVERY_ENVIRONMENT if environment is None else _ONE_ENVIRONMENT
         at = None if cursor is None else _position(kind, cursor)
-        keys = [SavedQuery.name_key.expression, self._by_code_point(Environment.name.expression)]
+        keys = [
+            SavedQuery.name_key.expression,
+            by_code_point(self._session.get_bind().dialect.name, Environment.name.expression),
+        ]
         row_id = SavedQuery.id.expression
         rows = self._session.execute(
             select(*_LISTED, SavedQuery.name_key, Environment.name, Principal.name)
@@ -761,26 +774,6 @@ class SavedQueryService:
                     limit=limit,
                 )
         return page
-
-    def _by_code_point(self, column: ColumnElement[str]) -> ColumnElement[str]:
-        """Compare a text column by code point, as Python does and the lists' cursors hold.
-
-        SQLite compares text by its UTF-8 bytes already, which is code-point order; Postgres
-        compares under the database's collation unless told ``"C"``.
-
-        Parameters
-        ----------
-        column
-            The column.
-
-        Returns
-        -------
-        ColumnElement
-            It, collated ``"C"`` on Postgres.
-        """
-        if self._session.get_bind().dialect.name == "postgresql":
-            return column.collate("C")
-        return column
 
     def _audit_view(
         self,
