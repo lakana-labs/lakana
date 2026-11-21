@@ -99,7 +99,7 @@ storage is reached, do not set it: the role is that lookup.
 
 | Part | What we found | If you want to be sure |
 |---|---|---|
-| DuckDB 2.0.0 | No telemetry setting. The only traffic we know is the extension download above. Starting it and running `SELECT 42` made no network connection. | `LAKANA_WORKER__EXTENSION_SOURCE=none` |
+| DuckDB 2.0.1 | No telemetry setting. The only traffic we know is the extension download above. Starting it and running `SELECT 42` made no network connection. | `LAKANA_WORKER__EXTENSION_SOURCE=none` |
 | `pyiceberg`, `fsspec`, `s3fs`, `aiobotocore`, `botocore` | No telemetry or update check in their source. `botocore` and the AWS C++ library of `pyarrow` look for credentials as the section above says; nothing else. | `AWS_EC2_METADATA_DISABLED=true` |
 | `pyarrow` | The installed wheel is built with OpenTelemetry support (`pyarrow.is_opentelemetry_enabled()` is `True`). We found no exporter that starts on its own: reading and writing a Parquet file in memory made no network connection. The library names an environment variable, `ARROW_TRACING_BACKEND`, for choosing an exporter; Lakana sets none. | Do not set `ARROW_TRACING_BACKEND` or `OTEL_*` variables on the server or the worker. |
 | `httpx`, `fastapi`, `starlette`, `uvicorn`, `pydantic`, `sqlalchemy`, `alembic`, `pg8000`, `sqlglot`, `cryptography`, `typer`, `rich` | No telemetry in their source. | |
@@ -132,8 +132,8 @@ ran the import under `strace` and looked for `connect` calls to an IP address.
 ## How we checked
 
 We read and searched the source of the four Lakana packages (`packages/*/src`) and the
-libraries in the lock file, and ran two small tests against DuckDB 1.5.5 and again against
-DuckDB 2.0.0, the version in the lock file.
+libraries in the lock file, and ran two small tests against DuckDB 1.5.5, again against
+DuckDB 2.0.0, and again against DuckDB 2.0.1, the version in the lock file.
 
 - **Our code.** We listed every module of the four packages that imports a network client, with
 
@@ -200,13 +200,16 @@ DuckDB 2.0.0, the version in the lock file.
   (`extension_install_info.hpp`): `http://extensions.duckdb.org`, with
   `http://extensions.duckdb-backup.org` tried only when the first answers with a server error.
   On a machine without network access, `INSTALL httpfs` failed naming
-  `http://extensions.duckdb.org/v2.0.0/linux_amd64/httpfs.duckdb_extension.gz`. We did not
-  watch the request on the wire.
+  `http://extensions.duckdb.org/v2.0.0/linux_amd64/httpfs.duckdb_extension.gz`. On DuckDB 2.0.1
+  we traced the system calls of `INSTALL httpfs` into an empty extension directory with `strace`:
+  it connected to port 80 and sent `GET /v2.0.1/linux_amd64/httpfs.duckdb_extension.gz` with
+  `Host: extensions.duckdb.org`; run again, with the extension installed, it made no connection.
+  We did not capture the traffic on the network itself.
 - **Switching the download off.** `LAKANA_WORKER__EXTENSION_SOURCE` is `duckdb` by default,
   DuckDB's server as above, contacted only when the extension is not already in the worker's
   extension directory. With `none` the worker never downloads: at start it loads `httpfs` from
   `~/.duckdb/extensions` of the worker's user and refuses to start if it is not there, naming the
-  exact file (for example `~/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension`, with
+  exact file (for example `~/.duckdb/extensions/v2.0.1/linux_amd64/httpfs.duckdb_extension`, with
   the version and platform of that worker) and what to do: run the worker from the container
   image, which bundles the extension, or copy that file there. A mirror URL is not supported.
   Other extensions are never installed or loaded automatically.
