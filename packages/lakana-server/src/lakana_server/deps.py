@@ -40,6 +40,7 @@ from lakana_core.identity.groups import GroupService
 from lakana_core.identity.interface_state import InterfaceStateService
 from lakana_core.identity.links import LinkService
 from lakana_core.identity.notices import NoticeService
+from lakana_core.identity.oidc_links import OidcLinkService
 from lakana_core.identity.passkeys import PasskeyService, needs_passkey
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.pictures import PictureService
@@ -300,6 +301,35 @@ def get_link_service(
     )
 
 
+def get_oidc_link_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> OidcLinkService:
+    """Build an OidcLinkService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the settings and the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service.
+
+    Returns
+    -------
+    OidcLinkService
+        A service using real authorization, the app's clock and `LAKANA_BOOTSTRAP_ADMIN`.
+    """
+    return OidcLinkService(
+        session,
+        authz,
+        clock=get_clock(request),
+        bootstrap_name=request.app.state.settings.bootstrap_admin,
+    )
+
+
 def get_notice_service(request: Request, session: Session = Depends(get_session)) -> NoticeService:
     """Build a NoticeService for the current request.
 
@@ -355,7 +385,7 @@ def get_passkey_service(
     )
 
 
-def record_failed_passkey(request: Request, session: Session) -> None:
+def record_failed_passkey(request: Request, session: Session, reason: str | None = None) -> None:
     """Record a refused passkey sign-in, if the per-address limit admits it.
 
     The same limiter as a failed token or link. Neither the browser's answer nor the challenge
@@ -368,9 +398,15 @@ def record_failed_passkey(request: Request, session: Session) -> None:
     session
         The current request's database session; rolled back first, so nothing the refused
         attempt left pending is committed with the row.
+    reason
+        Why, when the passkey verified and was refused anyway (``provider_only``: its person
+        signs in through the identity provider).
     """
     session.rollback()
-    _record_failure(request, AuditService(session), None, {"credential": "passkey"})
+    detail: dict[str, str | int] = {"credential": "passkey"}
+    if reason is not None:
+        detail["reason"] = reason
+    _record_failure(request, AuditService(session), None, detail)
 
 
 def record_refused_oidc(

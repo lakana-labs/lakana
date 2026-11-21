@@ -183,6 +183,172 @@ sequence, so it can forge a log record or recolour a terminal.
   human-readable `message` of `done` without a result object is the same sentence as in table mode,
   so its names are escaped.
 
+## New names that could look like another (#593, #609)
+
+A new namespace, table, view or column name is shown in every list, breadcrumb, grant and query,
+so two that look alike but differ let one person's table pass for another's. The decision (#609,
+option A, refined on #789 and its security review): every new name gets the look-alike
+protection, and namespace, table and view names also an allowlist; a column name keeps its
+visible symbols. In order:
+
+| Check | `check_new_name` (namespaces, tables, views, rename and undrop targets) | `check_new_column_name` (columns of `catalog.metadata`, `create_or_replace_view`, `create_external_table`) |
+|---|---|---|
+| `refuse_percent_in_new_name`: no `%` | yes | no |
+| `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
+| `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020), but none of `SEPARATOR_LIKE_CHARACTERS` | yes | no |
+| `refuse_look_alike_characters` (#609): see below; then NFC | yes | yes |
+
+`look_alike_character` refuses, each with its own sentence (`LookAlike`):
+
+- **Drawn as nothing** (`_DRAWN_AS_NOTHING`): Unicode's default-ignorable code points, whatever
+  their category (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F and
+  U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
+  U+3164, U+FFA0, which are `Lo`), and the blank glyphs that are not default-ignorable: U+2800
+  BRAILLE PATTERN BLANK and U+1D159 MUSICAL SYMBOL NULL NOTEHEAD (`So`), U+16FE4 KHITAN SMALL
+  SCRIPT FILLER (`Mn`). NFC keeps all of them. The list was checked against
+  `Default_Ignorable_Code_Point` (Unicode 17); the blank glyphs come from the known lists of
+  invisible characters.
+- **Another space**: every `Zs` but U+0020.
+- **Unassigned and private use**: `Cn` (unassigned code points and the 66 noncharacters, such as
+  U+FDD0 and U+FFFF) and `Co`. A browser draws them as nothing or as a box, and a later Unicode
+  version may assign a `Cn` anything. `Cn` is the running Python's: a character newer than its
+  Unicode version (3.11 has 14.0) is refused as unassigned. On a newer Python it is judged by
+  its category; a newer letter that looks like a separator is still refused, because
+  `SEPARATOR_LIKE_CHARACTERS` is generated with unknown characters as candidates (see below),
+  and a Python whose Unicode is newer than the table's fails a test until the table is
+  regenerated.
+- **A loose mark**: a combining mark (`M*`) with no letter (or mark of a letter) before it, at
+  the start, on a digit (keycap U+20E3) or on a symbol.
+- **A repeated mark**: the same nonspacing mark twice in a row, counting the marks NFC composed
+  into the letter (`é` + U+0301 is refused like `e` + U+0301 + U+0301), as UTS #39 (5.4) suggests.
+- **Too many marks**: more than `MAX_COMBINING_MARKS` (4) marks on one letter, counted the same
+  way.
+
+The allowlist leaves to `look_alike_character` what it judges whatever comes around it (drawn as
+nothing, spaces, `Cn`, `Co`), which names it more exactly.
+
+**NFC** (`unicodedata.is_normalized`) is checked last, after every character check, and the NFC
+form is run through every rule of the caller (`composed_check`: `check_new_name` or
+`check_new_column_name`) before it is suggested. When it would be refused, that refusal is given
+instead, so a suggestion is always a name that would be accepted (`a` + U+0301 + U+0323 + U+0301
+composes to `ạ` with the acute twice and is refused as a repeated mark).
+
+**Separator-like characters** (`SEPARATOR_LIKE_CHARACTERS`, `lakana_core/separator_like.py`):
+every letter, mark or digit the allowlist would accept whose skeleton in Unicode's
+`confusables.txt` holds `.`, `/`, `\` or `:` (#789, option A). U+A4F8 LISU LETTER TONE MYA TI
+(`Lm`), U+1D16D MUSICAL SYMBOL COMBINING AUGMENTATION DOT (`Mc`) and the Arabic-Indic zeros
+U+0660 and U+06F0 look like `.`, so `sales` + U+A4F8 + `daily` would read as the dotted path
+`sales.daily`; U+30CE KATAKANA LETTER NO and its halfwidth form look like `/`, U+4E36 like `\`,
+the visarga of Devanagari and seven other scripts and U+11DD9 TOLONG SIKI SIGN SELA like `:`.
+The table is generated, never edited: `scripts/separator_like_characters.py CONFUSABLES_TXT`
+writes it from a local copy of the file (version 18.0.0 of 2026-08-06, 25 characters). The
+script takes categories from the running Python but counts a source character that Python does
+not know (`Cn`) as a candidate, so the table is the same on every supported Python: U+11DD9, a
+letter of Unicode 17, is in it although Python 3.14 runs Unicode 16 (an older Python refuses it
+as `Cn` anyway). `--check` compares the entries and the date, not the text, and passes on 3.11
+to 3.14. The module records the Unicode version it was written under (`UNICODE_VERSION`,
+16.0.0); `test_this_pythons_unicode_is_not_newer_than_the_table` fails on a Python whose Unicode
+is newer (3.15 and later), asking for a regeneration from a `confusables.txt` at least as new
+and a review of the new entries.
+`scripts/tests/test_separator_like_characters.py` regenerates it from the checked-in excerpt
+`scripts/tests/confusables-excerpt.txt` (every line behind an entry, and lines that must make
+none) and compares, without the network. The file has no line whose source is a sequence; a
+test of its own pins that such a line is skipped. Refused in namespace, table and view names with their
+own sentence (`… which looks like '.', a separator, so the name could read as a path of two
+names`); allowed in a column name, since they are visible and a column is shown only inside its
+table. A letter whose skeleton holds other punctuation is allowed: `ð`, `ŀ`, `ʔ`, `ʼ`, `ʻ`, `正`,
+the Lisu comma tone letter U+A4F9 and the Canadian syllabics with a middle dot.
+
+**Accepted casualties of the separator rule:** real letters that still look like a separator are
+refused in table names: Japanese `ノ` (U+30CE) and `ﾉ` (U+FF89), the CJK ideographs `丶` and `丿`,
+Coptic old esh, the vertical kana repeat mark, the IPA length mark `ː` (U+02D0), the visarga in Devanagari, Gujarati, Brahmi,
+Kaithi, Sharada, Siddham, Takri and Dogra, the Tolong Siki sign sela, the Meetei Mayek lum iyek and the Lisu tone letters
+that look like `.`, `..`, `.,` or `:`. None of the Canadian syllabics maps to a separator. Such a
+word needs another spelling in a table name; a column name keeps it.
+
+**Why marks are allowed:** NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
+Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
+`M*` would refuse those scripts.
+
+**Why U+0020 stays:** #652 decided that a space inside a name stays allowed, and CSV headers such
+as `Order ID` are common column names; once every other space is refused, a plain space cannot
+pass for another character. `-` is kept for names such as `daily-orders`; in a table name
+U+2010 HYPHEN and U+2212 MINUS SIGN, which look like it, are refused (`Pd`, `Sm`), as are `$`,
+`#`, `(`, `²`, `Ⅻ` and every other symbol or punctuation mark.
+
+**Why columns keep their symbols:** a column name comes from a query's unaliased expression
+(`count(*)`) or a file's header (`price ($)`) as often as from a person, it is shown only inside
+its table, and visible symbols do not hide or impersonate anything. So a column may hold `(`,
+`*`, `$`, `#`, `\`, `%`, U+2212 and the like; only the look-alike check applies.
+
+**Stored names.** Existing names are never judged: lookups, listings, `NamespacePath.parse`,
+renames away and drops take any stored name, and a child namespace may be created under a stored
+one. A table re-created under the name of a dropped table the catalog still holds (a
+tombstone: a rebuild's re-create, or any create within the undo period) is not a new name:
+`CatalogService._stored_dropped_names` reads the tombstones only when a rule refuses the name or
+a column, and then lets the name and the dropped table's top-level columns (`dropped_columns`)
+pass; `ResolvedStorage.table_location(stored_name=True)` still applies
+`validate_path_component`. This opens no way to a new bad name: only a name the catalog already
+held passes. A rebuild of a view or an external table (no tombstone) or with an undo period of 0
+days, whose stored name `check_new_name` refuses, is refused before anything is dropped
+(`REBUILD_STORED_NAME`, naming the problem and the way out: rename the asset's file). An Iceberg
+table whose drop turns out to leave no tombstone (`drop_row` returns `None`: two legacy tables
+sharing a directory) is refused the same way inside the rebuild's transaction, which rolls the
+drop back.
+
+**The same existence leak on create.** A person with `CREATE_TABLE` in a namespace who creates a
+table under a name today's rules refuse learns whether a dropped table of exactly that name has a
+tombstone there: the create succeeds instead of answering 422. Accepted, like the deploy's: it
+tells only that a name refused today existed at that path within the undo period, and the name
+is in the request, so nothing about other tables is learnt. That person can also take the name
+before its owner undrops the table, as with any dropped name: the undrop is then refused with
+`silver.c* cannot be restored as 'c*': a table of that name exists in silver now. Restore it
+under another name with lakana table undrop silver.c* --as NEW_NAME …`, and `--as` gives a name
+that meets today's rules (pin:
+`test_a_dropped_name_taken_again_makes_its_undrop_say_so_and_offer_another_name`). The boundary
+of the rule is pinned by
+`test_the_tombstone_rule_lets_only_the_dropped_tables_own_spelling_and_columns_through`: an
+extra new look-alike column, the same name in another namespace, and another spelling (a case
+change, an added mark) are all judged as new.
+
+**Deploy** (`DeployService._new_name_issues`, in `validate_against_environment`): an asset whose
+table does not exist and whose name no tombstone holds has its table name and each namespace
+component that does not exist checked with `check_new_name`, so `price$.sql` fails the deploy
+with the run's sentence and an NFD file name is told its NFC form; artifact assets are left out.
+Existence is read from the rows, whoever may read them, so a deployer learns that a table with a
+name today's rules refuse exists (or was dropped within the undo period); accepted, since only
+such names give a different answer.
+
+**The web interface** marks the wider set (`NAME_INVISIBLE` in `ui/src/shell/VisibleText.tsx`:
+default-ignorable, U+2800, U+16FE4, U+1D159, every space but U+0020, `Cn`, `Co`, besides
+`INVISIBLE`) only where a namespace, table, view or column name is shown (the `name` mode of
+`VisibleText` and `VisibleTspan`, `markedName`): the Catalog's tree, list places, dropped and
+expiring views, breadcrumbs, page titles, the table header and page, columns, references,
+lineage, the orphans and table lists, the namespace dialogs, notes and actions, the access and
+health tabs' column names, row-filter and mask columns, the task rows' assets, the dialogs that
+name a table, the preview, the result grid's column names and the editor's completion and
+hover. Free text (descriptions, labels, snippets, reasons, display names,
+expressions, messages) and file names keep `INVISIBLE`, so French spacing, a pasted no-break
+space and emoji with U+FE0F show as they are, and `Monthly revenue` with a no-break space still
+saves as `Monthly-revenue-….csv`.
+
+**Not covered, accepted:**
+
+- Letters of different scripts that look alike (Latin `o` and Cyrillic `о`) and compatibility
+  forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so such twins are
+  two names; the web interface does not mark them.
+- Non-Latin decimal digits (Devanagari `१`, Arabic-Indic `١`, which looks like `1` or `l`) and
+  every letter whose skeleton holds no separator: `SEPARATOR_LIKE_CHARACTERS` covers only
+  skeletons with `.`, `/`, `\` or `:`, so `ð`, `ʔ` (`?`), `ʼ` (`'`) and U+A4F9 (`,`) pass.
+- A single mark on a letter that reads as another letter: `pri̇ce` (`i` + U+0307 COMBINING DOT
+  ABOVE) reads as `price` in most fonts.
+- The CLI escapes only the #593 set, so it shows a stored name holding U+3164 or U+2800 as blank,
+  and a no-break space as a space.
+- A stored name inside a nested column of a re-created table is still judged as new.
+- Other names (repositories, groups, tokens, secrets, package indexes, artifacts) keep the #593
+  and #652 checks only.
+
 ## Request bodies: a JSON limit, authentication first, a limit per streamed route
 
 Every body is one of two kinds.
@@ -4147,15 +4313,19 @@ is the only way to change access there, so that what was reviewed in git is what
   that question, and a count that relies on the member must then wait for the removal); and an
   apply's own last check (`AccessService._recheck_lockout`). Under READ COMMITTED the second change
   waits for the first's commit, counts what it left and is refused with `LAST_ADMIN_MESSAGE`.
-  Changes that raise the count (a grant, a new member, a reactivation) take no lock: a count never
-  sees them before they commit, so on an instance with an administrator they can only make a check
-  refuse, never let one through. (On an instance with no administrator at all,
-  `assert_admin_headroom` lets every change through anyway.) Deleting a group needs no lock, since
-  it is refused while the group holds any active grant. Removing a passkey does not count
-  administrators today. The order is the access lock first, then this one: an apply holds the access
-  lock alone and takes this one inside it. A later rule of the same kind (the unlinked
-  administrators of OIDC sign-in) counts under this lock too. On SQLite nothing is taken, as with
-  the access lock. `packages/lakana-core/tests/test_admin_count_postgres_integration.py` races two
+  For this count alone, changes that raise it (a grant, a new member, a reactivation) need no lock:
+  a count never sees them before they commit, so on an instance with an administrator they can only
+  make a check refuse, never let one through. (On an instance with no administrator at all,
+  `assert_admin_headroom` lets every change through anyway.) The break-glass rule can be broken by
+  raising, though, so a grant of instance ADMIN and a new member of a group that holds it take the
+  lock as well (#32, below); `test_a_member_removal_decides_under_the_lock_while_its_group_gains_admin`
+  now sees the removal wait for the grant. Deleting a group needs no lock, since
+  it is refused while the group holds any active grant. The order is the access lock first, then
+  this one: an apply holds the access lock alone and takes this one inside it. The break-glass count
+  of OIDC sign-in (the unlinked administrators, #32 PR 2) counts under this lock too: linking a
+  person, removing a passkey (`PasskeyService.remove` takes the lock before it counts) and every
+  change `assert_admin_headroom` guards; see "OIDC sign-in (#32, PR 2)". On SQLite nothing is
+  taken, as with the access lock. `packages/lakana-core/tests/test_admin_count_postgres_integration.py` races two
   removals per pair on a real Postgres, and a grant to a group against the removal of its member and
   the revoke of the other administrator; each test commits the first change only once
   `pg_stat_activity` shows the second waiting on the lock, or finished.
@@ -7094,8 +7264,146 @@ in; linking, the token window and `lakana login` are the next pull requests of #
   required `auth_time` (maintainer decision 5), is PR 2's; until then a linked person confirms
   step-up with a passkey (`test_linked_person_is_signed_in`,
   `test_a_provider_sign_in_is_no_step_up_touch`).
-- **Residuals:** a person's passkeys still sign them in after a provider sign-in (one way in per
-  linked person is PR 2); provider-initiated logout does not end a Lakana session (a non-goal).
+- **Residuals:** provider-initiated logout does not end a Lakana session (a non-goal). One way in
+  per linked person and provider step-up landed with PR 2 (below).
+
+## OIDC sign-in (#32, PR 2)
+
+People Lakana knows link their provider identity; nobody is created by the provider. A linked
+person signs in only through it, steps up there, and uses their personal tokens only within the
+token window. Threat model: "OIDC sign-in (#32)".
+
+- **L1, flow purposes** (`FlowPurpose`: `sign_in`, `invite`, `recovery`, `link`, `step_up`).
+  `invite` and `recovery` start from the open `start` with the link's `link_id` and `secret`: the
+  link is checked without being used (`LinkService.check_open`, a wrong secret answers like an
+  unknown link, `test_start_with_a_wrong_secret_is_like_unknown`) and the flow keeps only its row
+  id; the secret is never stored, logged or audited
+  (`test_invite_through_the_provider_signs_in_and_links`). Every flow that links (`invite`,
+  `recovery`, `link`) sends `prompt=login`, so the person sees the identity they bind, never one a
+  shared browser's provider session answers silently
+  (`test_every_link_flow_asks_the_provider_for_a_fresh_sign_in`). The finish uses the link by id with
+  `redeem`'s conditional update, in the transaction that links and starts the session, so a link
+  withdrawn or used meanwhile is `link_unusable` and creates nobody
+  (`test_invite_withdrawn_after_start_creates_nobody`, `test_invite_used_twice_one_wins`). `link`
+  (`/link/start`, a session with a fresh step-up) and `step_up` (`/step-up/start`, a linked person's
+  session) keep the principal and the session; they finish at `/finish-in-session` only in that
+  same session (`test_link_finish_from_another_session_is_refused`). The callback sends them to the
+  fixed page `/sign-in/oidc/confirmed`, the others to `/sign-in/oidc`
+  (`test_callback_redirects_link_flows_to_confirmed`); `finish` and `finish-in-session` answer 409
+  for each other's flows and leave them usable
+  (`test_finish_and_finish_in_session_refuse_the_other_purposes`).
+- **L2, refusal reasons:** `identity_taken` (the sentence names neither account,
+  `test_identity_taken_names_no_account`), `identity_mismatch`, `link_unusable`,
+  `last_unlinked_admin`, `cannot_link_operator` (the bootstrap principal and service accounts,
+  `test_bootstrap_principal_can_never_be_linked`), `already_linked`, `auth_too_old`. Each is a 403
+  `OidcSignInRefused` with one rate-limited `SIGN_IN_OIDC_REFUSED` row carrying `iss` and `sub`.
+- **One identity per account.** `OidcLinkService.link` updates the row only while it is unlinked
+  (`oidc_subject IS NULL`), so a second finish for one person never overwrites a link made
+  meanwhile and is refused `already_linked` (`test_a_link_made_meanwhile_is_not_overwritten`, on
+  Postgres `test_two_finishes_linking_one_person_at_once`). It looks the identity up and refuses
+  `identity_taken`; the unique constraint on `(oidc_issuer, oidc_subject)` decides a race, in a
+  nested transaction, and the loser gets the refusal, never a 500
+  (`test_two_accounts_linking_one_identity_one_wins`, and on Postgres
+  `test_two_accounts_linking_one_identity_concurrently`).
+- **L3, break-glass** (`lakana_core.grants.break_glass`), an invariant: whenever at least one
+  active administrator is linked, at least one *unlinked administrator* remains, an active principal
+  who holds ADMIN directly or through a group, is not linked and has a passkey that is not disabled,
+  for the relying party the server records at start-up (`sign_in.rp_id`): a passkey of an earlier
+  public address is no way in (`test_admin_through_a_group_counts`,
+  `test_admin_without_a_working_passkey_does_not_count`, `test_only_passkeys_of_this_address_count`).
+  Every change that can break it is refused when it would, under `lock_admin_count` (not row
+  locks), after the access lock where one is taken. On the lowering side: linking the last one
+  (`last_unlinked_admin`, `test_last_unlinked_admin_is_refused`), and with
+  `LAST_UNLINKED_ADMIN_MESSAGE` (409) deactivating them, revoking their ADMIN, removing them from
+  the group that holds it and deleting their last working passkey
+  (`test_deactivating_the_last_unlinked_admin_is_refused`,
+  `test_revoking_the_last_unlinked_admins_role_is_refused`,
+  `test_removing_the_last_unlinked_admin_from_the_admins_group_is_refused`,
+  `test_deleting_the_last_unlinked_admins_last_passkey_is_refused`). On the raising side
+  (`assert_break_glass_on_raise`, review of #780): granting instance ADMIN to a linked person or to
+  a group with a linked member, and adding a linked person to a group that holds it, so the order
+  of two changes does not matter (`test_the_reviewers_counterexample_deactivate_then_grant`,
+  `test_the_reviewers_counterexample_grant_then_deactivate`,
+  `test_adding_a_linked_person_to_the_admins_group_is_refused`,
+  `test_granting_admin_to_a_group_with_a_linked_member_is_refused`). An access apply checks the
+  rule once, on the state it leaves (`test_an_apply_that_leaves_only_linked_administrators_is_refused`).
+  Only the bootstrap principal is ever reactivated, and it is never linked. A change is refused
+  only when the rule held before it: an instance that links nobody keeps today's rules, and one
+  where it is already broken (a copy disabled) is not frozen
+  (`test_lowering_the_count_is_allowed_while_no_administrator_is_linked`,
+  `test_a_rule_already_broken_blocks_nothing`). On Postgres,
+  `test_oidc_links_postgres_integration.py` races the last two linking at once, a link against a
+  deactivation of the other, and a grant of ADMIN to a linked person against the deactivation of
+  the last unlinked administrator, and a grant of ADMIN to a group against a new linked member in
+  both orders (the grant reads the members only under the lock); the second waits on the lock and
+  is refused. A change of the public address is recounted at start-up and logged while anyone is
+  linked (`test_a_changed_address_with_people_linked_is_logged_at_start_up`).
+- **Locks of a finish.** A provider finish that uses a link takes the administrator-count lock
+  before the link's row lock, the order a withdrawal of the link keeps
+  (`test_a_provider_finish_takes_the_admin_lock_before_the_links_row`). A provider sign-in, a
+  recovery through the provider and an unlink lock the person's row and read it afresh before they
+  decide (`locked_principal`), so no session started during an unlink survives it
+  (`test_a_provider_sign_in_waits_for_an_unlink_and_gets_no_session`,
+  `test_an_unlink_waits_for_a_provider_sign_in_and_ends_its_session`,
+  `test_a_recovery_through_the_provider_waits_for_an_unlink`). `_complete` refuses an
+  administrator's recovery link of a person who linked since `redeem` looked
+  (`test_an_admins_recovery_link_of_someone_linked_meanwhile_needs_the_provider`). Link flows send
+  `max_age=0` with `prompt=login` and need a fresh `auth_time`, as provider step-up does
+  (`test_a_link_without_a_fresh_provider_sign_in_is_refused`).
+- **L4, linking keeps passkeys stored and ends no session**
+  (`test_link_from_profile_links_and_keeps_passkeys_stored`).
+- **L5, recovery links.** An administrator's recovery link of a linked person answers 403
+  `ProviderSignInRequired` at `/links/redeem`, stays usable, and works through the provider only as
+  the same identity (`test_admin_recovery_link_for_linked_person_needs_the_provider`,
+  `test_recovery_of_a_linked_person_needs_the_same_identity`); `/links/describe` says
+  `provider_only`. Of an unlinked person it may link them
+  (`test_recovery_of_an_unlinked_person_may_link`).
+  A recovery through the provider ends the sessions and notifies as a passkey recovery does, and
+  deletes no passkey. The operator's recovery link of a linked administrator unlinks them on the
+  passkey path (`PRINCIPAL_OIDC_UNLINKED`, reason `operator_recovery`, an `oidc_unlinked` notice to
+  every administrator) and then registers a passkey: the break-glass path, whatever the provider
+  says (`test_operator_recovery_unlinks_and_registers_a_passkey`). It revokes the person's personal
+  tokens as L6 does (`PAT_REVOKED`, `source: operator_recovery`, attributed to the operator), so no
+  token outside the window works again once its person is unlinked
+  (`test_operator_recovery_revokes_the_linked_persons_tokens`).
+- **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN through
+  `authorize_admin_only` with `MANAGE_TOKEN`, as it revokes tokens, and step-up; `OidcLinkService`
+  is in the admin-only call-site check) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
+  oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`),
+  withdraws every open sign-in link of theirs (`test_unlink_withdraws_the_persons_open_links`) and
+  clears the identity, in one transaction (`test_unlink_deletes_passkeys_revokes_tokens_ends_sessions`,
+  `test_unlink_needs_step_up_and_admin`). Unlinking oneself is 409 (`test_unlinking_oneself_is_refused`).
+- **L7, the token window** (`sign_in.token_provider_window_days`, default 30, 1 to 365, changed with
+  the session lengths and audited in `SIGN_IN_SETTINGS_CHANGED`). `PatService.verify` accepts a
+  linked person's personal token only while `now < last_provider_sign_in_at + window`; otherwise 401
+  with the next step, and the token is not revoked
+  (`test_token_outside_the_window_is_401_and_not_revoked`, `test_a_provider_sign_in_reopens_the_window`,
+  `test_window_change_applies_at_once`). Task and CI tokens are not personal tokens and are untouched
+  (`test_a_task_token_an_administrator_minted_ignores_the_window`,
+  `test_ci_trust_tokens_ignore_the_window`); the bootstrap principal is never linked. What a linked
+  person's own personal token made stops with the window too (review of #780): a task token minted
+  with it, and a session a local link started with it, which ends as `token_window`
+  (`within_token_window`; `test_a_task_token_minted_with_a_linked_persons_token_ends_with_the_window`,
+  `test_a_local_link_session_ends_with_the_window`).
+- **L8, one way in.** A passkey sign-in of a linked person verifies and then answers 403
+  `ProviderSignInRequired`, audited through the refusal limiter (an unknown passkey still reads as
+  today's 401); registering a passkey is refused the same way, also with a challenge issued before
+  the link; passkey step-up answers 409 `ProviderStepUpRequired`
+  (`test_linked_person_passkey_sign_in_is_refused`, `test_linked_person_cannot_add_a_passkey`,
+  `test_linked_person_step_up_options_is_409_provider`). Provider step-up asks `prompt=login` and
+  `max_age=0`, needs the person's own identity and an `auth_time` no earlier than the flow's start
+  less 60 s (without one, as Entra ID does unless it is configured, it is refused), and then writes
+  the session's `last_touch_at`, which `require_step_up` reads as before
+  (`test_step_up_start_asks_prompt_login_and_max_age_zero`, `test_provider_step_up_sets_the_touch`,
+  `test_provider_step_up_with_old_auth_time_is_refused`,
+  `test_provider_step_up_as_someone_else_is_refused`). Every operation of `STEP_UP_ROUTES` goes
+  through for a linked administrator after a provider step-up
+  (`test_a_linked_administrator_steps_up_through_the_provider`). `SessionOut.provider_linked` tells
+  the interface which ceremony to offer.
+- **Residuals:** a passkey disabled as a copy can take the last unlinked administrator (a security
+  response, never refused); the operator's recovery is then the way in. A local sign-in link
+  (`lakana server start --local`) still signs a linked person in, but only with their own personal
+  token, within the window, and its session ends with it.
 
 ## Git fetch hardening (M5b)
 

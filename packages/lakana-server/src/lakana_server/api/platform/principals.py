@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from lakana_core.auth import PrincipalRef, Securable
 from lakana_core.grants.admin import ineffective_note
 from lakana_core.grants.service import GrantService, scope_filter
+from lakana_core.identity.oidc_links import OidcLinkService, ProviderLink
 from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import Principal, PrincipalType
@@ -20,12 +21,14 @@ from lakana_server.api.platform.schemas import (
     PermissionsOut,
     PrincipalCreate,
     PrincipalOut,
+    ProviderLinkOut,
 )
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
 from lakana_server.deps import (
     get_grant_service,
     get_managed_write_principal,
+    get_oidc_link_service,
     get_picture_service,
     get_principal,
     get_principal_service,
@@ -56,7 +59,8 @@ def principals_out(
     service
         The principal service, asked which of them hold or have held ADMIN.
     principal
-        The caller: `held_admin` is filled in only for an administrator.
+        The caller: `held_admin` is filled in only for an administrator, `provider_link` for an
+        administrator or the person.
 
     Returns
     -------
@@ -66,15 +70,41 @@ def principals_out(
     found = list(rows)
     etags = pictures.etags_of(row.id for row in found)
     held = service.held_admin_of(principal, found)
+    links = service.provider_links_of(principal, found)
     return [
         PrincipalOut.model_validate(row).model_copy(
             update={
                 "picture": etags.get(row.id),
                 "held_admin": None if held is None else held[row.id],
+                "provider_link": _link_out(links[row.id]),
             }
         )
         for row in found
     ]
+
+
+def _link_out(link: ProviderLink | None) -> ProviderLinkOut | None:
+    """Describe a person's link to the identity provider.
+
+    Parameters
+    ----------
+    link
+        The link, or `None`.
+
+    Returns
+    -------
+    ProviderLinkOut or None
+        Its body.
+    """
+    if link is None:
+        return None
+    return ProviderLinkOut(
+        issuer=link.issuer,
+        email=link.email,
+        name=link.name,
+        last_sign_in_at=link.last_sign_in_at,
+        token_window_ends_at=link.token_window_ends_at,
+    )
 
 
 @router.post("", response_model=PrincipalOut, status_code=201, responses=errors(403, 409))
@@ -338,3 +368,31 @@ def deactivate_principal(
         Mapped to 404 by `install_exception_handlers`.
     """
     service.deactivate_principal(principal, name)
+
+
+@router.delete("/{name}/oidc-link", status_code=204, responses=errors(403, 404, 409))
+def unlink_provider(
+    name: str,
+    principal: PrincipalRef = Depends(get_principal),
+    links: OidcLinkService = Depends(get_oidc_link_service),
+) -> None:
+    """Unlink a person from the identity provider.
+
+    Deletes the person's stored passkeys, revokes all their personal API tokens, ends their
+    sessions and withdraws their open sign-in links (an earlier recovery link too), in one step;
+    they come back with a new recovery link (`lakana recovery create`), and
+    then sign in with a passkey again until they link once more. To offboard someone, deactivate
+    them instead. Needs the ADMIN role on the instance and, from the web interface, a passkey
+    touch (or provider step-up) within the last 15 minutes (403 `StepUpRequired`). Answers 404
+    for an unknown name and 409 for yourself or a person who is not linked.
+
+    Parameters
+    ----------
+    name
+        The person's principal name.
+    principal
+        The authenticated caller.
+    links
+        The link service for this request.
+    """
+    links.unlink(principal, name)

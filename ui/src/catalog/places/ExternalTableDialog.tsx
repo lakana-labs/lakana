@@ -20,7 +20,7 @@ import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { createExternalTable, type ExternalFormat } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
-import { markedText } from "../../shell/VisibleText";
+import { markedName } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
@@ -185,7 +185,7 @@ export default function ExternalTableDialog({
   return (
     <ActionDialog onClose={close}>
       <Heading slot="title">
-        {t("catalog.places.external.title", { namespace: markedText(namespace) })}
+        {t("catalog.places.external.title", { namespace: markedName(namespace) })}
       </Heading>
       <LineField
         label={t("catalog.places.external.name")}

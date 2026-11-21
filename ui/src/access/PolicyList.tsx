@@ -174,7 +174,7 @@ export function PolicyList({
               {policy.column !== null && (
                 <td>
                   <span className="row-name">
-                    <VisibleText text={policy.column} breakable />
+                    <VisibleText text={policy.column} breakable name />
                   </span>
                 </td>
               )}
@@ -252,7 +252,7 @@ export function PolicyList({
                 ),
                 ...(deleting.column === null
                   ? {}
-                  : { column: <VisibleText text={deleting.column} /> }),
+                  : { column: <VisibleText text={deleting.column} name /> }),
               }}
             />
           </p>

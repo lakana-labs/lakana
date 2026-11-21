@@ -8,7 +8,7 @@ import { Heading, Input, Label, Text, TextField } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { createNamespace } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
-import { markedText } from "../../shell/VisibleText";
+import { markedName } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
@@ -77,7 +77,7 @@ export function NewNamespaceDialog({
   return (
     <ActionDialog onClose={close}>
       <Heading slot="title">
-        {t("catalog.places.create.title", { place: markedText(parent ?? environment) })}
+        {t("catalog.places.create.title", { place: markedName(parent ?? environment) })}
       </Heading>
       <TextField
         className="field"

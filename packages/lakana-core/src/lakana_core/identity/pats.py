@@ -16,7 +16,12 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError, PermissionDenied
 from lakana_core.grants.admin import authorize_admin_only, may_manage_tokens
 from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
-from lakana_core.identity.sessions import require_step_up
+from lakana_core.identity.sessions import (
+    TOKEN_WINDOW_MESSAGE,
+    require_step_up,
+    token_window_days,
+    token_window_ends_at,
+)
 from lakana_core.identity.task_tokens import revoke_task_tokens_of_pat
 from lakana_core.identity.tokens import generate_token, hash_secret, verify_secret
 from lakana_core.models import AuditEventType, PersonalAccessToken, Principal
@@ -508,7 +513,9 @@ class PatService:
         ------
         AuthenticationError
             If `key_id` is unknown, the secret does not match, the PAT is
-            expired or revoked, or its principal is deactivated.
+            expired or revoked, or its principal is deactivated; with
+            `TOKEN_WINDOW_MESSAGE` when its principal is linked to the identity provider and has
+            not signed in there within the token window (the token stays unrevoked).
         """
         pat = self._session.execute(
             select(PersonalAccessToken).where(PersonalAccessToken.key_id == key_id)
@@ -522,7 +529,13 @@ class PatService:
         principal = self._session.get(Principal, pat.principal_id)
         if principal is None or not principal.is_active:
             raise AuthenticationError("This principal is not active.")
-        pat.last_used_at = datetime.now(UTC)
+        now = datetime.now(UTC)
+        days = token_window_days(self._session)
+        ends = token_window_ends_at(self._session, principal, days=days)
+        if ends is not None and now >= ends:
+            # Not revoked: a provider sign-in opens the window again.
+            raise AuthenticationError(TOKEN_WINDOW_MESSAGE.format(days=days))
+        pat.last_used_at = now
         self._session.commit()
         return PrincipalRef(
             id=principal.id,

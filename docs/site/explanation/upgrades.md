@@ -460,6 +460,40 @@ namespace's path and an undrop's new name without their outer spaces; it now sen
 so it and the CLI create the same names and refuse the same ones with the same sentence. Existing
 names are not touched: they stay readable and writable, and can be renamed or dropped.
 
+### New table names hold only letters, digits, `_`, `-` and spaces (breaking)
+
+A new namespace, table or view name may now hold only letters of any script, decimal digits, `_`,
+`-` and the plain space (inside the name, as before), with the accents and vowel signs that belong
+to its letters. A symbol or punctuation mark such as `$`, `#` or `(` is refused, for example
+`Table name 'price$' holds U+0024 at character 6, which is neither a letter nor a decimal digit. A
+new namespace, table or view name may hold only letters, decimal digits, '_', '-' and the plain
+space.` So is a letter, accent or digit that Unicode lists as looking like `.`, `/`, `\` or `:`,
+such as the Lisu tone letter U+A4F8 or the Arabic-Indic zero U+0660 (both look like `.`, so a
+name with one would read as two), the Japanese `ノ` (`/`) and the Devanagari visarga (`:`).
+Letters that look like other punctuation, such as `ð`, `ʔ` or `ʼ`, stay allowed. Column names keep their symbols: `count(*)` and `price ($)` work as before.
+
+Every new name, a column's included, must also be in Unicode NFC, the composed spelling: `cafe`
+followed by U+0301 COMBINING ACUTE ACCENT looks like `café` but is another name, and the refusal
+names the spelling to use (`… Use 'caf\xe9' instead.`). Refused in every new name too, each with
+a sentence that says what to do: a character drawn as nothing (the combining grapheme joiner
+U+034F, the variation selectors, the Hangul fillers such as U+3164, the braille blank U+2800), a
+space other than the plain one (such as the no-break space U+00A0), an unassigned or private-use
+code point, an accent with no letter before it, the same accent twice in a row, and more than four
+accents on one letter.
+
+Earlier releases accepted such names (422 from the REST API now, a refused commit from an Iceberg
+client, a failed load). A project's deploy now refuses an asset whose new table or namespace name
+breaks the rule, with the same sentence, for example for `assets/gold/price$.sql`; rename the file.
+Existing names are not touched: they stay readable and writable, can be renamed or dropped, and an
+asset whose table exists keeps deploying. A rebuild of such a table works: a table re-created
+under the name of a dropped one the catalog still holds (during the undo period) keeps its name and
+columns. A view or external table with such a name, or any such table when the undo period is 0
+days, cannot be rebuilt under it: the rebuild says so before dropping anything; rename the asset's
+file in git and deploy. The web interface now marks these characters as `U+XXXX` in names (the
+Catalog, the table pages, the result grid's columns, the editor's completions); descriptions,
+labels and other free text show them as they are. Repository, group, token, secret, package index
+and artifact names are not judged by this rule.
+
 ### The same name rules for repositories, groups, tokens, secrets, package indexes, principals and passkeys (breaking)
 
 The two rules above now hold for more of the names you choose. A new repository, group, package
@@ -828,6 +862,27 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
 - Going back drops the columns: **every person linked to the identity provider is unlinked**, and
   after a new upgrade each of them has to be linked again. Sign-in flows open during the
   downgrade are lost; their people start the sign-in again.
+- People link their identity through an invite, from their profile or with a recovery link; an
+  administrator unlinks them with `lakana principal unlink-provider`, which also withdraws their
+  open sign-in links. A linked person signs in only through the provider: their passkeys stop
+  signing them in (they stay stored), and their
+  personal API tokens work only within 30 days of their last provider sign-in (`lakana sign-in
+  settings --token-window-days`, 1 to 365). Unlinking someone, by an administrator or by the
+  server operator's recovery link, revokes their personal tokens. Nothing changes for anyone who
+  is not linked.
+- While any administrator is linked, at least one administrator who signs in with a passkey at
+  this address must remain: linking the last one, deactivating them, taking their ADMIN role away
+  or deleting their last passkey answers 409 and says so, and so does giving the ADMIN role to a
+  linked person (directly, through a group or in an access file) when no such administrator is
+  left. A task token minted with a linked person's own token, and a local sign-in's session, end
+  with that person's token window.
+- Changing the public address (`LAKANA_UI__PUBLIC_URL`) while people are linked: passkeys made for
+  the old address no longer count as a way in, as they no longer sign in. The server's start-up log
+  says how many administrators can still sign in with a passkey; at none, issue one a recovery
+  link with the bootstrap token (`lakana recovery create NAME`) and have them register a passkey at
+  the new address. Run every server of one database with the same public address.
+- `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
+  from now on.
 
 ### A run records the connection it failed on
 

@@ -616,4 +616,9 @@ def _whoami_from_json(body: dict[str, Any]) -> Whoami:
             used=bool(ci["used"]),
         ),
         language=body.get("language"),
+        token_window_ends_at=(
+            datetime.fromisoformat(body["token_window_ends_at"])
+            if body.get("token_window_ends_at")
+            else None
+        ),
     )

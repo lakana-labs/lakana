@@ -7,7 +7,7 @@ import type { Extension } from "@codemirror/state";
 import { type HoverTooltipSource, hoverTooltip } from "@codemirror/view";
 
 import type { ColumnOut } from "../../api/table";
-import { markedText } from "../../shell/VisibleText";
+import { markedName, markedText } from "../../shell/VisibleText";
 import type { CompletionCatalog } from "./catalog";
 import { columnsRead, tableOf } from "./completion";
 import { statementAt } from "./fromClause";
@@ -39,7 +39,7 @@ function line(text: string, className: string): HTMLElement {
 function explained(column: ColumnOut): HTMLElement {
   const dom = document.createElement("div");
   dom.className = "cm-column-hover";
-  dom.append(line(`${markedText(column.name)} · ${markedText(column.type)}`, "cm-column-name"));
+  dom.append(line(`${markedName(column.name)} · ${markedText(column.type)}`, "cm-column-name"));
   if (column.description !== null) {
     dom.append(line(markedText(column.description), "cm-column-description"));
   }

@@ -36,7 +36,7 @@ from pyiceberg.types import ListType, MapType, NestedField, StructType
 
 from lakana_core.errors import ConflictError, LakanaError
 from lakana_core.errors import ValidationError as LakanaValidationError
-from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
+from lakana_core.identifiers import check_new_column_name
 
 
 def parse_metadata_version(location: str | None) -> int:
@@ -124,7 +124,7 @@ def _field_names(fields: Iterable[NestedField]) -> Iterator[str]:
 
 
 def refuse_hidden_column_names(schema: Schema, *, stored: frozenset[str] = frozenset()) -> None:
-    """Refuse a new column name that holds an invisible character or starts or ends with a space.
+    """Refuse a new column name that breaks a rule of `check_new_column_name`.
 
     Parameters
     ----------
@@ -136,13 +136,13 @@ def refuse_hidden_column_names(schema: Schema, *, stored: frozenset[str] = froze
     Raises
     ------
     LakanaValidationError
-        From `refuse_hidden_characters` or `refuse_outer_whitespace`, for the first new name
-        that breaks either rule.
+        From `check_new_column_name` (an invisible character, a space at either end, a
+        character drawn as nothing or another look-alike, or a name not in NFC), for the first
+        new name that breaks a rule.
     """
     for name in _field_names(schema.fields):
         if name not in stored:
-            refuse_hidden_characters(name, what="Column name")
-            refuse_outer_whitespace(name, what="Column name")
+            check_new_column_name(name)
 
 
 def build_table_metadata(
@@ -153,6 +153,7 @@ def build_table_metadata(
     sort_order: SortOrder | None,
     properties: Mapping[str, str],
     table_uuid: uuid_module.UUID | None = None,
+    stored_columns: frozenset[str] = frozenset(),
 ) -> TableMetadata:
     """Construct metadata for a new table.
 
@@ -180,6 +181,9 @@ def build_table_metadata(
         ``table-uuid`` must be the same value. `None` lets pyiceberg
         generate a fresh one, which is only exercised where a caller has no
         such id to thread through (`test_metadata.py`).
+    stored_columns
+        Column names a dropped table of the same name held; they are not new and are not
+        judged (`refuse_hidden_column_names`), so a rebuild can re-create them.
 
     Returns
     -------
@@ -193,7 +197,7 @@ def build_table_metadata(
         If a column name holds an invisible or line-breaking character
         (`refuse_hidden_column_names`).
     """
-    refuse_hidden_column_names(schema)
+    refuse_hidden_column_names(schema, stored=stored_columns)
     return _new_table_metadata(
         schema=schema,
         partition_spec=partition_spec or UNPARTITIONED_PARTITION_SPEC,

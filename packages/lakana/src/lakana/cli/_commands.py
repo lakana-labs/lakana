@@ -109,6 +109,7 @@ COMMANDS: dict[str, tuple[str, ...]] = {
     "principal list": ("principals.list", "principals.list_page", "principals.iter"),
     "principal get": ("principals.get",),
     "principal deactivate": ("principals.deactivate",),
+    "principal unlink-provider": ("principals.unlink_provider",),
     "group create": ("groups.create",),
     "group list": ("groups.list", "groups.list_page", "groups.iter"),
     "group delete": ("groups.delete",),

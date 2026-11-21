@@ -31,6 +31,8 @@ from lakana_core.errors import (
     NotFoundError,
     PasskeyRefused,
     PermissionDenied,
+    ProviderSignInRequired,
+    ProviderStepUpRequired,
     SessionEndedError,
     StepUpRequired,
     ValidationError,
@@ -40,6 +42,8 @@ from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.passkeys import (
     CHALLENGE_LIFETIME,
     FIRST_PASSKEY_WINDOW,
+    ONE_WAY_IN_MESSAGE,
+    PROVIDER_STEP_UP_MESSAGE,
     PasskeyService,
     _cross_origin,
     _registration_client_data,
@@ -1155,3 +1159,83 @@ def test_unreadable_registration_answer_gives_empty_client_data_which_is_refused
     for broken in ("not json", "{}", '{"response": {}}'):
         assert _registration_client_data(broken) == b""
     assert _cross_origin(b"") is True
+
+
+# -- one way in for a person linked to the identity provider (#32, PR 2) ------------------------
+
+
+def _linked(world: World, row: Principal) -> None:
+    """Link a person to a provider identity directly.
+
+    Parameters
+    ----------
+    world
+        The instance.
+    row
+        The person.
+    """
+    row.oidc_issuer, row.oidc_subject = "https://idp.example.com", row.name
+    world.session.commit()
+
+
+def test_linked_person_passkey_sign_in_is_refused(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    """The passkey verifies, then the sign-in is refused: no session; the counter is kept."""
+    alice, auth, stored = enrolled
+    _linked(world, alice.row)
+    before = world.session.scalar(select(func.count()).select_from(BrowserSession))
+    with pytest.raises(ProviderSignInRequired) as refused:
+        world.sign_in(auth)
+    assert str(refused.value) == ONE_WAY_IN_MESSAGE
+    assert world.session.scalar(select(func.count()).select_from(BrowserSession)) == before
+    world.session.refresh(stored)
+    assert stored.sign_count == 1
+
+
+def test_linked_person_cannot_add_a_passkey(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    alice, _, _ = enrolled
+    touched = world.start(alice.row, via="passkey", touched=True)
+    ceremony, options = world.passkeys.registration_options(world.ref(touched))
+    _linked(world, alice.row)
+    with pytest.raises(ProviderSignInRequired):
+        world.passkeys.registration_options(world.ref(touched))
+    # A challenge issued before the link no longer adds one either.
+    with pytest.raises(ProviderSignInRequired):
+        world.passkeys.register(
+            world.ref(touched),
+            ceremony,
+            SoftAuthenticator(origin=ORIGIN).create(options),
+            name=None,
+            user_agent="u",
+        )
+    assert len(world.passkeys.list_passkeys(world.ref(touched), "alice")) == 1
+
+
+def test_linked_person_step_up_options_is_409_provider(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    alice, auth, _ = enrolled
+    world.clock.now += timedelta(minutes=30)
+    before = world.ref(alice).session
+    ceremony, options = world.passkeys.step_up_options(world.ref(alice))
+    _linked(world, alice.row)
+    with pytest.raises(ProviderStepUpRequired) as refused:
+        world.passkeys.step_up_options(world.ref(alice))
+    assert str(refused.value) == PROVIDER_STEP_UP_MESSAGE
+    with pytest.raises(ProviderStepUpRequired):
+        world.passkeys.step_up(world.ref(alice), ceremony, auth.get(options))
+    session = world.ref(alice).session
+    assert session is not None and before is not None
+    assert session.last_touch_at == before.last_touch_at
+
+
+def test_unlinked_people_keep_passkeys(
+    world: World, enrolled: tuple[Signed, SoftAuthenticator, Passkey]
+) -> None:
+    alice, auth, _ = enrolled
+    assert world.sign_in(auth).principal.name == "alice"
+    world.clock.now += timedelta(minutes=30)
+    assert world.step_up(alice, auth) == world.clock.now

@@ -21,6 +21,8 @@ from lakana_core.ci_oidc.verification import IdTokenVerifier
 from lakana_core.config import warn_about_tokens_in_url_paths
 from lakana_core.db import create_engine
 from lakana_core.grants.admin import ineffective_grants_warning
+from lakana_core.grants.break_glass import address_change_warning, record_rp_id
+from lakana_core.identity.oidc_links import linked_count, unlinked_admin_count
 from lakana_core.identity.sessions import utc_now
 from lakana_core.oidc.provider import OidcProvider
 from lakana_core.readiness import probe_storage, read_database
@@ -182,6 +184,31 @@ ROUTERS = (
 """Every router the application includes, in the order they are included."""
 
 
+def _record_relying_party(session: Session, rp_id: str) -> None:
+    """Record the address passkeys sign in at, and warn when it changed while people are linked.
+
+    The break-glass count (`lakana_core.grants.break_glass`) counts only passkeys of this
+    address, and is recounted here after the change rather than trusted from before it.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    rp_id
+        The host of the public address.
+    """
+    before = record_rp_id(session, rp_id)
+    session.commit()
+    warning = address_change_warning(
+        before,
+        rp_id,
+        linked=linked_count(session),
+        unlinked_admins=unlinked_admin_count(session),
+    )
+    if warning is not None:
+        logger.warning(warning)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the Lakana control-plane application.
 
@@ -319,6 +346,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                     token_file=resolved_settings.bootstrap_token_file,
                 )
+                if resolved_settings.ui.enabled or resolved_settings.ui.public_url is not None:
+                    _record_relying_party(session, resolved_settings.public_origin().host)
             if token is not None:
                 configured_key_id = resolved_settings.bootstrap_pat_key_id
                 if configured_key_id is not None and (bootstrap_secret is not None):
