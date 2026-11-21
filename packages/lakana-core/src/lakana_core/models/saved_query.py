@@ -5,10 +5,16 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import CheckConstraint, ForeignKey, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, TimestampMixin
+
+NAME_KEY_MAX = 600
+"""The most characters of a name's `str.casefold`: 200, each folding to at most three."""
+
+NAME_KEY_TYPE = String(NAME_KEY_MAX).with_variant(String(NAME_KEY_MAX, collation="C"), "postgresql")
+"""The type of `SavedQuery.name_key`: by code point on Postgres too, as in Python and SQLite."""
 
 
 class SavedQueryVisibility(enum.StrEnum):
@@ -40,6 +46,10 @@ class SavedQuery(Base, TimestampMixin):
         Its environment, fixed at creation; the query goes when the environment is purged.
     name : str
         Its name: one line of 1 to 200 visible characters, unique per environment and owner.
+    name_key : str
+        `str.casefold` of the name, set with it: the lists order by it in the database, and their
+        cursors hold it. Collated by code point on Postgres (`NAME_KEY_TYPE`), so the database's
+        order is Python's.
     sql_text : str
         The SQL, stored as sent.
     visibility : str
@@ -61,6 +71,13 @@ class SavedQuery(Base, TimestampMixin):
             "OR (visibility = 'everyone' AND private_owner_id IS NULL)",
             name="private_owner",
         ),
+        # The shared queries of the environments a caller may query, in the lists' order.
+        Index(
+            "ix_saved_queries_environment_visibility_name_key",
+            "environment_id",
+            "visibility",
+            "name_key",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -68,6 +85,7 @@ class SavedQuery(Base, TimestampMixin):
         ForeignKey("environments.id", ondelete="CASCADE"), index=True
     )
     name: Mapped[str] = mapped_column(String(200))
+    name_key: Mapped[str] = mapped_column(NAME_KEY_TYPE)
     sql_text: Mapped[str] = mapped_column(Text)
     visibility: Mapped[str] = mapped_column(String(16))
     owner_id: Mapped[uuid.UUID | None] = mapped_column(

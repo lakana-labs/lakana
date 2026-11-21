@@ -73,15 +73,15 @@ bring the file in yourself and forbid the download:
    ```
 
    The file is `~/.duckdb/extensions/v<DuckDB version>/<platform>/httpfs.duckdb_extension`
-   (for DuckDB 2.0.0 on Linux: `v2.0.0/linux_amd64`); the folder holds a second small file,
-   `httpfs.duckdb_extension.info`. Copy the version folder (`v2.0.0`) to the isolated machine.
+   (for DuckDB 2.0.1 on Linux: `v2.0.1/linux_amd64`); the folder holds a second small file,
+   `httpfs.duckdb_extension.info`. Copy the version folder (`v2.0.1`) to the isolated machine.
 2. Put it in `.duckdb/extensions/` in the home directory of the user the **worker** runs as,
    keeping the `v…/<platform>/` folders.
 3. Set `LAKANA_WORKER__EXTENSION_SOURCE=none` for the worker (the setting is `duckdb` by default).
    With `none` the worker never downloads, and if the file is missing it stops at start instead of
    trying. The worker's start-up message names the exact path it looked for, for example (a query that finds the file gone later fails with the same text, which begins `Query failed:` and says `Tell the operator:` where this says `To fix it:`):
 
-   > the worker cannot load DuckDB's httpfs extension: /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension is missing and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. To fix it: run the worker from the Lakana container image, which bundles it, or copy httpfs.duckdb_extension to /home/lakana/.duckdb/extensions/v2.0.0/linux_amd64/httpfs.duckdb_extension (inside /home/lakana/.duckdb/extensions), or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it.
+   > the worker cannot load DuckDB's httpfs extension: /home/lakana/.duckdb/extensions/v2.0.1/linux_amd64/httpfs.duckdb_extension is missing and LAKANA_WORKER__EXTENSION_SOURCE=none forbids downloading it. To fix it: run the worker from the Lakana container image, which bundles it, or copy httpfs.duckdb_extension to /home/lakana/.duckdb/extensions/v2.0.1/linux_amd64/httpfs.duckdb_extension (inside /home/lakana/.duckdb/extensions), or unset LAKANA_WORKER__EXTENSION_SOURCE to let DuckDB download it.
 
    Use the path in that message, not this one. A new DuckDB release needs its own file: after you
    upgrade Lakana to a release with a new DuckDB, repeat steps 1 and 2.
