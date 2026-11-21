@@ -76,9 +76,13 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   heads are small muted labels (the label step) on one line, a row high. A name never wraps:
   `.list .row-name` (and `.truncate` elsewhere) stays on one line and ends with an ellipsis past
   `--name-width`; `TruncationTip` (`ui/src/shell/TruncationTip.tsx`, mounted once in the shell)
-  shows it whole on hover and on focus. Never add a tooltip of your own for a cut name.
+  shows it whole on hover and on focus; a cut name without a page (`span.row-name`) is made a Tab
+  stop while it is cut, so the keyboard reaches its tooltip. Never add a tooltip of your own for
+  a cut name.
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
-  own list or tab.
+  own list or tab. Alt+Left goes back from any page (the shell's, global as in the browser); it
+  does nothing while a dialog, a menu or a popover is shown, from a text field inside it too, and
+  outside an overlay a text field keeps the key.
 - **State** uses `StatusGlyph`/`StatusLabel` (shape + word, never colour alone). `StatusLabel` is
   a small pill (`.pill`): the 12 px glyph and the word in the label step, sentence case, on the
   state's tint (`.pill-ok`, `-bad`, `-warn`, `-accent`; a hairline for states without a colour).
@@ -101,6 +105,25 @@ Every screen, every time (the end-to-end test `ui/e2e/layout.spec.ts` measures m
   `--control-height`; adjacent controls stand `--control-gap` apart (`.button-row`; a toolbar is
   `.toolbar`, its search on the left and the rest in `.toolbar-end` on the right). Never let two
   buttons touch.
+- **A list has its toolbar** (`ListToolbar`, `ui/src/shell/ListToolbar.tsx`, or `ViewList`'s
+  `toolbar`): the count as the section's title on the left ("5 connections", "The first 100
+  grants" while more can be read; `countWords` with the list's `count` and `countFirst` plural
+  strings), then the search; the filters and Refresh on the right. A list whose page renders
+  the toolbar above a list that remounts per filter passes `onState` (`useListState`), so the
+  search and the pickers keep their focus. A list that already counts in its sections' headings
+  (Jobs) leaves the count out. Filters that are a form of their own (Grants, Row filters &
+  masks, the Runs tab, a token's owner) keep their own row under the toolbar. While a list is
+  read again, its count keeps saying "The first …" if the last read had more (`useSteadyMore`),
+  and Refresh shows that it waits (`refreshing`, from the read's `busy`).
+- **A panel that holds one list** has no heading of its own: the toolbar's count is the panel's
+  `h2` (`ListToolbar`'s `heading`: an id for the panel's `aria-labelledby`, a ref for the focus,
+  and the panel's name to say until the count is known). Tokens' two panels and Row filters &
+  masks' two are the examples.
+- **The row's `›` sits at the list's right edge**: its column is only as wide as the mark
+  (`.list td:has(> .chevron)`), so the spare width goes to the data.
+- **A state column names every row's state.** Never a blank cell: a state with no colour to
+  claim is a quiet pill (`.pill-neutral`, "Active"), one that needs attention a tinted one
+  ("Deactivated", `.pill-warn`); run states use `StatusLabel`.
 - **Left edges line up** from the title to the toolbar to the table; nothing is indented by a
   one-off margin.
 - **Labels and values share a baseline**: facts are `.fact-list` (a `dl`, names muted, one baseline),

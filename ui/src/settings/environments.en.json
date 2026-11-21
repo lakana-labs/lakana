@@ -1,4 +1,8 @@
 {
+  "count_one": "{{count}} environment",
+  "count_other": "{{count}} environments",
+  "countFirst_one": "The first {{count}} environment",
+  "countFirst_other": "The first {{count}} environments",
   "intro": "Where each environment's tables are stored, and how long they are kept.",
   "region": "Environments",
   "protectionHead": "Protection",

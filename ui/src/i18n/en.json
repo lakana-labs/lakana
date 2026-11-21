@@ -466,7 +466,8 @@
     "expires": "Expires",
     "state": "State",
     "actions": "Actions",
-    "open": "Open"
+    "open": "Open",
+    "refresh": "Refresh"
   },
   "dialog": {
     "cancel": "Cancel",
@@ -478,15 +479,24 @@
     "copyLink": "Copy link",
     "shownTitle": "Send this link to {{name}}",
     "people": {
+      "count_one": "{{count}} person",
+      "count_other": "{{count}} people",
+      "countFirst_one": "The first {{count}} person",
+      "countFirst_other": "The first {{count}} people",
       "find": "Find people",
       "none": "Nobody matches.",
       "person": "Person",
       "service": "Service account",
+      "active": "Active",
       "deactivated": "Deactivated",
       "capped": "Showing the first {{count}}. Type part of a name to find someone who is not listed.",
       "serviceNote": "{{name}} is a service account: it signs in with its API token, not a passkey, so it needs no recovery link. Issue it a new token instead."
     },
     "invites": {
+      "count_one": "{{count}} open invite",
+      "count_other": "{{count}} open invites",
+      "countFirst_one": "The first {{count}} open invite",
+      "countFirst_other": "The first {{count}} open invites",
       "action": "Invite someone",
       "intro": "An invite is a link that creates a person's account, with no rights, the first time it is used. It works once, for 7 days.",
       "none": "No invite is open. Invite someone with the button above, or from the command line:",
@@ -501,6 +511,10 @@
       "confirm": "The link creates the account with no rights. Before you grant any role, confirm outside Lakana that the person who signed up is {{name}}: ask them in person, by phone or in your team chat."
     },
     "recovery": {
+      "count_one": "{{count}} open recovery link",
+      "count_other": "{{count}} open recovery links",
+      "countFirst_one": "The first {{count}} open recovery link",
+      "countFirst_other": "The first {{count}} open recovery links",
       "action": "Issue a recovery link",
       "intro": "A recovery link lets a person who lost their passkeys back in. It works once, for 1 hour; using it replaces their passkeys, ends their sessions and tells every administrator.",
       "none": "No recovery link is open. Issue one with the button above when someone has lost their passkeys.",

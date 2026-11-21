@@ -6,7 +6,7 @@
  */
 import "./connections.css";
 
-import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
+import { type JSX, useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
 
@@ -17,6 +17,7 @@ import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import { countWords, ListToolbar, type ListState, useListState } from "../shell/ListToolbar";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useMe } from "../shell/me";
@@ -59,16 +60,31 @@ interface ConnectionRowsProps {
  * @param props.environments - The environments the person may read.
  * @param props.first - The first environment's name.
  * @param props.filter - The environment filtered by, or null.
+ * @param props.onState - Told the rows shown and the state of the read, for the toolbar.
+ * @param props.round - Changes when Refresh asks for the list again.
  * @returns The table, or the words for a filter with no connection.
  */
 function ConnectionTable({
   environments,
   first,
   filter,
-}: Omit<ConnectionRowsProps, "onFilter">): JSX.Element {
+  onState,
+  round,
+}: Omit<ConnectionRowsProps, "onFilter"> & {
+  /** Told the rows shown and the state of the read, for the toolbar above the table. */
+  readonly onState: (state: ListState) => void;
+  /** Changes when Refresh asks for the list again. */
+  readonly round: number;
+}): JSX.Element {
   const { t } = useTranslation();
   const now = useNow();
   const pages = useCursorPages(filter ?? "", (cursor) => listConnections(filter, cursor));
+  // Refresh reads the list again in place: the rows and the count stay until the answer is in.
+  const { reload } = pages;
+  const firstRound = useRef(round);
+  useEffect(() => {
+    if (round !== firstRound.current) reload();
+  }, [round, reload]);
   // The latest of each connection a Test, Test all or read of the follower handed over.
   const [answers, setAnswers] = useState<ReadonlyMap<string, ConnectionOut>>(new Map());
   const replace = useCallback((row: ConnectionOut) => {
@@ -111,6 +127,9 @@ function ConnectionTable({
     .filter(({ name }) => filter === null || name === filter)
     .some(({ actions }) => actions.includes("test"));
   const none = pages.items?.length === 0 && !pages.busy && !pages.hasMore;
+  useEffect(() => {
+    if (none) onState({ shown: 0, more: false, busy: false });
+  }, [none, onState]);
   if (none) {
     return (
       <div className="empty">
@@ -137,6 +156,7 @@ function ConnectionTable({
         regionRef={region.target}
         rowsOpen
         scroll="connections-scroll"
+        onState={onState}
         head={
           <tr>
             <th scope="col">{t("connections.list.name")}</th>
@@ -269,22 +289,34 @@ function ConnectionRows({
   onFilter,
 }: ConnectionRowsProps): JSX.Element {
   const { t } = useTranslation();
+  const [list, report] = useListState();
+  // Refresh reads the table's list again in place (ConnectionTable's `round`).
+  const [round, setRound] = useState(0);
   return (
     <>
-      <div className="toolbar">
-        <EnvironmentPicker
-          environments={environments}
-          value={filter}
-          label={t("connections.list.environment")}
-          all={t("connections.list.all")}
-          onChange={onFilter}
-        />
-      </div>
+      <ListToolbar
+        count={countWords(t, "connections.list", list.shown, list.more)}
+        filters={
+          <EnvironmentPicker
+            environments={environments}
+            value={filter}
+            label={t("connections.list.environment")}
+            all={t("connections.list.all")}
+            onChange={onFilter}
+          />
+        }
+        onRefresh={() => {
+          setRound((previous) => previous + 1);
+        }}
+        refreshing={list.busy}
+      />
       <ConnectionTable
         key={filter ?? ""}
+        round={round}
         environments={environments}
         first={first}
         filter={filter}
+        onState={report}
       />
     </>
   );

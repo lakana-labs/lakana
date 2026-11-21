@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useState } from "react";
+import { type JSX, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -37,6 +37,7 @@ import { useListPoll } from "./useListPoll";
  * @param props.query - The words searched for.
  * @param props.reloadKey - Changes when the section must be read again.
  * @param props.onChanged - Told that a control acted.
+ * @param props.onBusy - Told whether a read the person waits for is on its way.
  * @returns The section.
  */
 export function FailedRuns({
@@ -44,11 +45,16 @@ export function FailedRuns({
   query,
   reloadKey,
   onChanged,
+  onBusy,
 }: SectionProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const load = useCallback(() => listFailedRuns(environment), [environment]);
   const poll = useListPoll(load, reloadKey);
+  const { busy } = poll;
+  useEffect(() => {
+    onBusy?.(busy);
+  }, [onBusy, busy]);
   const [note, setNote] = useState<ControlNoteValue | null>(null);
   const rows = (poll.data?.items ?? []).filter((row) =>
     matchesSearch(query, row.run.job, row.run.repository),

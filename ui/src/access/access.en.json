@@ -90,6 +90,10 @@
     "environmentsFailed": "Lakana could not read the environments: {{sentence}}"
   },
   "groups": {
+    "count_one": "{{count}} group",
+    "count_other": "{{count}} groups",
+    "countFirst_one": "The first {{count}} group",
+    "countFirst_other": "The first {{count}} groups",
     "find": "Find groups",
     "create": "Create group",
     "none": "No group yet.",
@@ -129,6 +133,10 @@
     "firstOnly": "Showing the first {{count}}. Manage these grants lists them all."
   },
   "grants": {
+    "count_one": "{{count}} grant",
+    "count_other": "{{count}} grants",
+    "countFirst_one": "The first {{count}} grant",
+    "countFirst_other": "The first {{count}} grants",
     "add": "Add grant",
     "granted": "Granted.",
     "removed": "Removed the grant.",

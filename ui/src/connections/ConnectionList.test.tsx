@@ -151,6 +151,30 @@ describe("ConnectionList", () => {
     ).toHaveClass("test-status-muted");
   });
 
+  it("counts the connections in the toolbar, with the filter and Refresh on its right", async () => {
+    const server = fakeServer(
+      connectionRoutes(
+        [aConnection(), aConnection({ name: "files", environment: "dev" })],
+        MANAGER,
+      ),
+    );
+    renderList();
+
+    expect(await screen.findByText("2 connections")).toHaveClass("toolbar-count");
+    const end = document.querySelector(".list-toolbar .toolbar-end");
+    expect(end).toContainElement(screen.getByRole("button", { name: /Environment/ }));
+    const reads = server.sent.filter((sent) => sent.path.includes("/connections")).length;
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(
+        server.sent.filter((sent) => sent.path.includes("/connections")).length,
+      ).toBeGreaterThan(reads);
+    });
+    expect(await screen.findByText("2 connections")).toBeInTheDocument();
+  });
+
   it("shows under the status the newest run that failed on a connection, linked to its task", async () => {
     fakeServer(
       connectionRoutes(
@@ -340,6 +364,92 @@ describe("ConnectionList", () => {
     await user.click(screen.getByRole("option", { name: "All environments" }));
     await screen.findByRole("link", { name: "crm" });
     expect(window.localStorage.getItem("lakana.connections.kim.lee")).toBeNull();
+  });
+
+  it("keeps the focus on the filter when the list is read for the environment chosen", async () => {
+    fakeServer(
+      connectionRoutes(
+        [aConnection(), aConnection({ name: "files", environment: "dev" })],
+        MANAGER,
+      ),
+    );
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole("link", { name: "files" });
+
+    await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
+    await user.click(screen.getByRole("option", { name: "dev" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "crm" })).not.toBeInTheDocument();
+    });
+    // The popover hands the focus back to its button once it has closed.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Environment: dev" })).toHaveFocus();
+    });
+  });
+
+  it("keeps the environment on Refresh", async () => {
+    const server = fakeServer(
+      connectionRoutes(
+        [aConnection(), aConnection({ name: "files", environment: "dev" })],
+        MANAGER,
+      ),
+    );
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole("link", { name: "files" });
+    await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
+    await user.click(screen.getByRole("option", { name: "dev" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "crm" })).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(
+        server.sent.filter(
+          (request) => request.path === "/api/v1/connections?limit=100&environment=dev",
+        ),
+      ).toHaveLength(2);
+    });
+    expect(screen.getByRole("button", { name: "Environment: dev" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "files" })).toBeInTheDocument();
+  });
+
+  it("keeps the rows and the count on screen while Refresh reads them again", async () => {
+    const routes = connectionRoutes(
+      [aConnection(), aConnection({ name: "files", environment: "dev" })],
+      MANAGER,
+    );
+    const answer = routes["GET /api/v1/connections"];
+    let holding = false;
+    const server = fakeServer({
+      ...routes,
+      "GET /api/v1/connections": (request) =>
+        holding || typeof answer !== "function"
+          ? new Promise<never>(() => undefined)
+          : answer(request),
+    });
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole("link", { name: "files" });
+    const refresh = await screen.findByRole("button", { name: "Refresh" });
+    const before = server.sent.length;
+    holding = true;
+
+    await user.click(refresh);
+
+    await waitFor(() => {
+      expect(
+        server.sent
+          .slice(before)
+          .some((request) => request.path.startsWith("/api/v1/connections?")),
+      ).toBe(true);
+    });
+    expect(screen.getByRole("link", { name: "files" })).toBeInTheDocument();
+    expect(screen.getByText("2 connections")).toBeInTheDocument();
   });
 
   it("starts from the remembered environment", async () => {

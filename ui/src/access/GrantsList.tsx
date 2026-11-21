@@ -15,6 +15,7 @@ import type { GrantOut } from "../api/table";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { Avatar } from "../profile/Avatar";
+import type { ListState } from "../shell/ListToolbar";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
@@ -39,6 +40,8 @@ export interface GrantsListProps {
   readonly onClear: () => void;
   /** The page's heading, which takes the focus once a removed grant has left the list. */
   readonly headingRef: RefObject<HTMLHeadingElement | null>;
+  /** Told the rows shown and the state of the read, for the page's toolbar; none by default. */
+  readonly onState?: ((state: ListState) => void) | undefined;
 }
 
 /**
@@ -111,6 +114,7 @@ function Who({ grant }: WhoProps): JSX.Element {
  * @param props.onRemoved - Called once a grant is removed.
  * @param props.onClear - Goes back to every grant.
  * @param props.headingRef - The page's heading.
+ * @param props.onState - Told the rows shown and the state of the read.
  * @returns The list.
  */
 export function GrantsList({
@@ -120,6 +124,7 @@ export function GrantsList({
   onRemoved,
   onClear,
   headingRef,
+  onState,
 }: GrantsListProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
@@ -159,6 +164,7 @@ export function GrantsList({
         empty={filtered ? t("access.grants.noMatch") : t("access.grants.none")}
         region={t("access.grants.region")}
         scroll="grants-scroll"
+        onState={onState}
         head={
           <tr>
             <th scope="col">{t("access.grants.who")}</th>

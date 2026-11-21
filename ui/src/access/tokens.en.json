@@ -37,6 +37,10 @@
     "command": "lakana login --url {{- origin}}"
   },
   "personal": {
+    "count_one": "{{count}} personal token",
+    "count_other": "{{count}} personal tokens",
+    "countFirst_one": "The first {{count}} personal token",
+    "countFirst_other": "The first {{count}} personal tokens",
     "title": "Personal tokens",
     "filter": "Owner",
     "filterHelp": "A person's or service account's name; press Enter to apply.",
@@ -48,6 +52,10 @@
     "region": "Live personal tokens"
   },
   "task": {
+    "count_one": "{{count}} task token",
+    "count_other": "{{count}} task tokens",
+    "countFirst_one": "The first {{count}} task token",
+    "countFirst_other": "The first {{count}} task tokens",
     "title": "Task tokens",
     "environment": "Environment",
     "all": "All environments",

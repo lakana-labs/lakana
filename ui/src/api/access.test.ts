@@ -82,7 +82,7 @@ describe("access", () => {
   it("lists people, filtered by the words searched for", async () => {
     const server = fakeServer({ "GET /api/v1/principals": { status: 200, body: [] } });
 
-    await listPeople("");
+    expect(await listPeople("")).toEqual({ people: [], more: false });
     await listPeople("a&b");
 
     expect(server.sent.map((request) => request.path)).toEqual([

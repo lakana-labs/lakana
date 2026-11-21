@@ -153,7 +153,9 @@ export function TaskRow({ environment, run, task }: TaskRowProps): JSX.Element {
         </td>
         <td>
           <Link className="row-name" to={taskPath(environment, run.id, task.asset)}>
-            <VisibleText text={task.asset} breakable name />
+            {/* Not breakable: a list's name is cut, never wrapped (Chromium would break at a <wbr>
+                even under nowrap). */}
+            <VisibleText text={task.asset} name />
           </Link>
         </td>
         <td className="number">

@@ -1,4 +1,8 @@
 {
+  "count_one": "{{count}} run",
+  "count_other": "{{count}} runs",
+  "countFirst_one": "The first {{count}} run",
+  "countFirst_other": "The first {{count}} runs",
   "state": "State",
   "trigger": "Trigger",
   "job": "Job",

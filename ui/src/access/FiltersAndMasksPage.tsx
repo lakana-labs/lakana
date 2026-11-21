@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, Suspense, useCallback, useRef, useState } from "react";
+import { type JSX, lazy, Suspense, useCallback, useRef, useState, useId } from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
@@ -71,15 +71,14 @@ function PolicySection({
   onDeleted,
   onClear,
 }: PolicySectionProps): JSX.Element {
-  const { t } = useTranslation();
   const heading = useRef<HTMLHeadingElement>(null);
+  const headingId = useId();
   return (
-    // Not a region of its own: the list's scrolling region carries the section's name.
-    <section className="flat-panel access-section">
-      <h2 ref={heading} tabIndex={-1}>
-        {t(`policies.${kind}.title`)}
-      </h2>
+    // Not a region of its own (the list's scrolling region carries the list's name), but a named
+    // group: the list's count ("3 row filters") is the panel's heading (PolicyList's toolbar).
+    <div className="flat-panel access-section" role="group" aria-labelledby={headingId}>
       <PolicyList
+        headingId={headingId}
         key={policyFilterKey(filter)}
         kind={kind}
         filter={filter}
@@ -89,7 +88,7 @@ function PolicySection({
         onDeleted={onDeleted}
         onClear={onClear}
       />
-    </section>
+    </div>
   );
 }
 
