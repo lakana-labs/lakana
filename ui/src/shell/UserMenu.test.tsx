@@ -103,7 +103,7 @@ describe("UserMenu", () => {
     await user.click(screen.getByRole("menuitemradio", { name: "Dark" }));
 
     expect(root.getAttribute("data-theme")).toBe("dark");
-    expect(stored(storage)).toEqual({ theme: "dark", density: "roomy", language: "en" });
+    expect(stored(storage)).toEqual({ theme: "dark", language: "en" });
     await user.click(screen.getByRole("button", { name: "Signed in as admin" }));
     expect(await screen.findByRole("menuitemradio", { name: "Dark" })).toHaveAttribute(
       "aria-checked",
@@ -114,13 +114,12 @@ describe("UserMenu", () => {
     expect(root.hasAttribute("data-theme")).toBe(false);
   });
 
-  it("switches the density and remembers it", async () => {
-    const { user, storage } = await openMenu();
+  it("offers no density: there is one, compact", async () => {
+    await openMenu();
 
-    await user.click(screen.getByRole("menuitemradio", { name: "Compact" }));
-
-    expect(root.getAttribute("data-density")).toBe("compact");
-    expect(stored(storage)).toEqual({ theme: "system", density: "compact", language: "en" });
+    expect(screen.queryByRole("group", { name: "Density" })).toBeNull();
+    expect(screen.queryByRole("menuitemradio", { name: "Compact" })).toBeNull();
+    expect(screen.queryByRole("menuitemradio", { name: "Roomy" })).toBeNull();
   });
 
   it("offers English as the only language", async () => {
@@ -148,10 +147,7 @@ describe("UserMenu", () => {
       "aria-checked",
       "true",
     );
-    expect(screen.getByRole("menuitemradio", { name: "Compact" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    expect(root.hasAttribute("data-density")).toBe(false);
   });
 
   it("shows the signed-in name in the user menu", async () => {

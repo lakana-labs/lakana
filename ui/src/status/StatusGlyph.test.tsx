@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { StatusGlyph } from "./StatusGlyph";
-import { StatusLabel } from "./StatusLabel";
+import { PILL_TONES, StatusLabel } from "./StatusLabel";
 import { STATUS_KINDS } from "./status";
 
 const WORDS = {
@@ -45,6 +45,14 @@ describe("StatusGlyph", () => {
     render(<StatusLabel kind={kind} />);
 
     expect(screen.getByText(WORDS[kind])).toBeInTheDocument();
+  });
+
+  it.each(STATUS_KINDS)("StatusLabel draws %s as a small pill with the 12 px glyph", (kind) => {
+    const { container } = render(<StatusLabel kind={kind} />);
+    const pill = container.querySelector(".pill");
+
+    expect(pill).toHaveClass(`pill-${PILL_TONES[kind]}`);
+    expect(pill?.querySelector("svg")).toHaveAttribute("width", "12");
   });
 
   it("only the running glyph carries the pulse class", () => {
