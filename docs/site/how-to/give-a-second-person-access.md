@@ -148,13 +148,14 @@ lakana sql "SELECT count(*) AS visits FROM silver.visits"
 
 <!-- output: give-access#first -->
 ```text
-┌────────────┬───────┐
-│ name       │ alice │
-│ type       │ USER  │
-│ task_token │       │
-│ ci_token   │       │
-│ language   │       │
-└────────────┴───────┘
+┌──────────────────────┬───────┐
+│ name                 │ alice │
+│ type                 │ USER  │
+│ task_token           │       │
+│ ci_token             │       │
+│ language             │       │
+│ token_window_ends_at │       │
+└──────────────────────┴───────┘
 ┏━━━━━━━━┓
 ┃ visits ┃
 ┡━━━━━━━━┩
