@@ -196,7 +196,7 @@ visible symbols. In order:
 | `refuse_percent_in_new_name`: no `%` | yes | no |
 | `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
 | `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
-| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS`, but none of `SEPARATOR_LIKE_CHARACTERS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020), but none of `SEPARATOR_LIKE_CHARACTERS` | yes | no |
 | `refuse_look_alike_characters` (#609): see below; then NFC | yes | yes |
 
 `look_alike_character` refuses, each with its own sentence (`LookAlike`):
@@ -213,7 +213,11 @@ visible symbols. In order:
 - **Unassigned and private use**: `Cn` (unassigned code points and the 66 noncharacters, such as
   U+FDD0 and U+FFFF) and `Co`. A browser draws them as nothing or as a box, and a later Unicode
   version may assign a `Cn` anything. `Cn` is the running Python's: a character newer than its
-  Unicode version (3.11 has 14.0) is refused until the server runs a newer one.
+  Unicode version (3.11 has 14.0) is refused as unassigned. On a newer Python it is judged by
+  its category; a newer letter that looks like a separator is still refused, because
+  `SEPARATOR_LIKE_CHARACTERS` is generated with unknown characters as candidates (see below),
+  and a Python whose Unicode is newer than the table's fails a test until the table is
+  regenerated.
 - **A loose mark**: a combining mark (`M*`) with no letter (or mark of a letter) before it, at
   the start, on a digit (keycap U+20E3) or on a symbol.
 - **A repeated mark**: the same nonspacing mark twice in a row, counting the marks NFC composed
@@ -236,12 +240,21 @@ every letter, mark or digit the allowlist would accept whose skeleton in Unicode
 (`Lm`), U+1D16D MUSICAL SYMBOL COMBINING AUGMENTATION DOT (`Mc`) and the Arabic-Indic zeros
 U+0660 and U+06F0 look like `.`, so `sales` + U+A4F8 + `daily` would read as the dotted path
 `sales.daily`; U+30CE KATAKANA LETTER NO and its halfwidth form look like `/`, U+4E36 like `\`,
-the visarga of Devanagari and six other scripts like `:`. The table is generated, never edited:
-`scripts/separator_like_characters.py CONFUSABLES_TXT` writes it from a local copy of the file
-(version 18.0.0 of 2026-08-06, 24 characters, with Python 3.14's Unicode 16 categories).
+the visarga of Devanagari and seven other scripts and U+11DD9 TOLONG SIKI SIGN SELA like `:`.
+The table is generated, never edited: `scripts/separator_like_characters.py CONFUSABLES_TXT`
+writes it from a local copy of the file (version 18.0.0 of 2026-08-06, 25 characters). The
+script takes categories from the running Python but counts a source character that Python does
+not know (`Cn`) as a candidate, so the table is the same on every supported Python: U+11DD9, a
+letter of Unicode 17, is in it although Python 3.14 runs Unicode 16 (an older Python refuses it
+as `Cn` anyway). `--check` compares the entries and the date, not the text, and passes on 3.11
+to 3.14. The module records the Unicode version it was written under (`UNICODE_VERSION`,
+16.0.0); `test_this_pythons_unicode_is_not_newer_than_the_table` fails on a Python whose Unicode
+is newer (3.15 and later), asking for a regeneration from a `confusables.txt` at least as new
+and a review of the new entries.
 `scripts/tests/test_separator_like_characters.py` regenerates it from the checked-in excerpt
 `scripts/tests/confusables-excerpt.txt` (every line behind an entry, and lines that must make
-none) and compares, without the network. Refused in namespace, table and view names with their
+none) and compares, without the network. The file has no line whose source is a sequence; a
+test of its own pins that such a line is skipped. Refused in namespace, table and view names with their
 own sentence (`… which looks like '.', a separator, so the name could read as a path of two
 names`); allowed in a column name, since they are visible and a column is shown only inside its
 table. A letter whose skeleton holds other punctuation is allowed: `ð`, `ŀ`, `ʔ`, `ʼ`, `ʻ`, `正`,
@@ -250,7 +263,7 @@ the Lisu comma tone letter U+A4F9 and the Canadian syllabics with a middle dot.
 **Accepted casualties of the separator rule:** real letters that still look like a separator are
 refused in table names: Japanese `ノ` (U+30CE) and `ﾉ` (U+FF89), the CJK ideographs `丶` and `丿`,
 Coptic old esh, the vertical kana repeat mark, the IPA length mark `ː` (U+02D0), the visarga in Devanagari, Gujarati, Brahmi,
-Kaithi, Sharada, Siddham, Takri and Dogra, the Meetei Mayek lum iyek and the Lisu tone letters
+Kaithi, Sharada, Siddham, Takri and Dogra, the Tolong Siki sign sela, the Meetei Mayek lum iyek and the Lisu tone letters
 that look like `.`, `..`, `.,` or `:`. None of the Canadian syllabics maps to a separator. Such a
 word needs another spelling in a table name; a column name keeps it.
 

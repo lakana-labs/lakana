@@ -11,8 +11,13 @@ one of `SEPARATORS` (``.``, ``/``, ``\``, ``:``), and writes them, with their sk
 whose skeleton holds other punctuation (U+00F0 eth, U+0294 glottal stop) stays allowed (#789,
 option A).
 
-Categories come from the running Python's `unicodedata`. Run it with the newest Python the
-project supports.
+Categories come from the running Python's `unicodedata`, but a source character that Python does
+not know yet (``Cn``) is a candidate too, so the table does not depend on the Python that writes
+it: U+11DD9 TOLONG SIKI SIGN SELA, a letter of Unicode 17 that looks like ``:``, is in it even when
+Python 3.14 (Unicode 16) writes it, and an older Python refuses it as ``Cn`` anyway. The module
+records the Unicode version it was written under (`UNICODE_VERSION`); a test fails on a Python
+whose Unicode is newer, asking for a newer `confusables.txt` and a review. ``--check`` compares
+the entries and the data's date, so it passes on every supported Python.
 
 Usage: ``uv run --python 3.14 python scripts/separator_like_characters.py CONFUSABLES_TXT``
 (``--check`` writes nothing and fails when the module differs). The file is
@@ -22,6 +27,7 @@ https://www.unicode.org/Public/security/latest/confusables.txt; the script never
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 import sys
 import unicodedata
@@ -53,14 +59,19 @@ def allowed(character: str) -> bool:
     Returns
     -------
     bool
-        `True` for a letter, a combining mark, a decimal digit and a `NAME_SYMBOLS` character.
+        `True` for a letter, a combining mark, a decimal digit and a `NAME_SYMBOLS` character,
+        and for a character this Python does not know (``Cn``): a newer Unicode may make it a
+        letter.
     """
     category = unicodedata.category(character)
-    return category[0] in "LM" or category == "Nd" or character in NAME_SYMBOLS
+    return category[0] in "LM" or category in ("Nd", "Cn") or character in NAME_SYMBOLS
 
 
 def skeletons(lines: Iterable[str]) -> dict[str, str]:
     """Pick the allowed single characters whose skeleton holds one of `SEPARATORS`.
+
+    A line whose source is a sequence of characters is skipped: the rule judges one character
+    at a time.
 
     Parameters
     ----------
@@ -154,8 +165,7 @@ def render(table: dict[str, str], date: str) -> str:
         '"""Letters, marks and digits that look like a separator (#609); generated, do not edit.\n'
         "\n"
         "Written by `scripts/separator_like_characters.py` from Unicode's `confusables.txt` of\n"
-        f"{date}, with Python {sys.version_info[0]}.{sys.version_info[1]}'s `unicodedata` "
-        f"(Unicode {unicodedata.unidata_version}).\n"
+        f"{date}.\n"
         "Each key is a character the table-name allowlist would accept, and its value the\n"
         "skeleton `confusables.txt` gives it, which holds `.`, `/`, a backslash or `:`.\n"
         '"""\n'
@@ -164,6 +174,10 @@ def render(table: dict[str, str], date: str) -> str:
         "\n"
         f'CONFUSABLES_DATE: Final[str] = "{date}"\n'
         '"""The date of the `confusables.txt` the table was generated from."""\n'
+        "\n"
+        f'UNICODE_VERSION: Final[str] = "{unicodedata.unidata_version}"\n'
+        '"""The Unicode version of the categories it was generated with; a newer Python asks for\n'
+        'a regeneration (`test_separator_like_characters.py`)."""\n'
         "\n"
         "SEPARATOR_LIKE_CHARACTERS: Final[dict[str, str]] = {\n"
         f"{rows}"
@@ -191,12 +205,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check", action="store_true", help="fail when the module differs")
     args = parser.parse_args(argv)
     lines = args.confusables.read_text(encoding="utf-8-sig").splitlines()
-    text = render(skeletons(lines), data_date(lines))
+    table, date = skeletons(lines), data_date(lines)
     if args.check:
-        if MODULE.read_text(encoding="utf-8") != text:
+        spec = importlib.util.spec_from_file_location("separator_like", MODULE)
+        assert spec is not None and spec.loader is not None
+        written = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(written)
+        if table != written.SEPARATOR_LIKE_CHARACTERS or date != written.CONFUSABLES_DATE:
             print(f"{MODULE} differs; run scripts/separator_like_characters.py to regenerate it")
             return 1
         return 0
+    text = render(table, date)
     MODULE.write_text(text, encoding="utf-8")
     return 0
 

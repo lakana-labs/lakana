@@ -1,7 +1,7 @@
 """Letters, marks and digits that look like a separator (#609); generated, do not edit.
 
 Written by `scripts/separator_like_characters.py` from Unicode's `confusables.txt` of
-2026-08-06, with Python 3.14's `unicodedata` (Unicode 16.0.0).
+2026-08-06.
 Each key is a character the table-name allowlist would accept, and its value the
 skeleton `confusables.txt` gives it, which holds `.`, `/`, a backslash or `:`.
 """
@@ -10,6 +10,10 @@ from typing import Final
 
 CONFUSABLES_DATE: Final[str] = "2026-08-06"
 """The date of the `confusables.txt` the table was generated from."""
+
+UNICODE_VERSION: Final[str] = "16.0.0"
+"""The Unicode version of the categories it was generated with; a newer Python asks for
+a regeneration (`test_separator_like_characters.py`)."""
 
 SEPARATOR_LIKE_CHARACTERS: Final[dict[str, str]] = {
     "\u02d0": ":",  # MODIFIER LETTER TRIANGULAR COLON
@@ -35,6 +39,7 @@ SEPARATOR_LIKE_CHARACTERS: Final[dict[str, str]] = {
     "\U000115be": ":",  # SIDDHAM SIGN VISARGA
     "\U000116ac": ":",  # TAKRI SIGN VISARGA
     "\U00011838": ":",  # DOGRA SIGN VISARGA
+    "\U00011dd9": ":",  # U+11DD9
     "\U0001d16d": ".",  # MUSICAL SYMBOL COMBINING AUGMENTATION DOT
 }
 """Character to skeleton; `lakana_core.identifiers.character_outside_name_allowlist`
