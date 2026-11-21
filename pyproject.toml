@@ -68,7 +68,7 @@ fuzz = [
 ]
 # The documentation site (docs/site), built in CI.
 docs = [
-    "zensical>=0.1.1",
+    "zensical>=0.1.2",
 ]
 
 [tool.ruff]
