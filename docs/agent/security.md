@@ -183,6 +183,172 @@ sequence, so it can forge a log record or recolour a terminal.
   human-readable `message` of `done` without a result object is the same sentence as in table mode,
   so its names are escaped.
 
+## New names that could look like another (#593, #609)
+
+A new namespace, table, view or column name is shown in every list, breadcrumb, grant and query,
+so two that look alike but differ let one person's table pass for another's. The decision (#609,
+option A, refined on #789 and its security review): every new name gets the look-alike
+protection, and namespace, table and view names also an allowlist; a column name keeps its
+visible symbols. In order:
+
+| Check | `check_new_name` (namespaces, tables, views, rename and undrop targets) | `check_new_column_name` (columns of `catalog.metadata`, `create_or_replace_view`, `create_external_table`) |
+|---|---|---|
+| `refuse_percent_in_new_name`: no `%` | yes | no |
+| `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
+| `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020), but none of `SEPARATOR_LIKE_CHARACTERS` | yes | no |
+| `refuse_look_alike_characters` (#609): see below; then NFC | yes | yes |
+
+`look_alike_character` refuses, each with its own sentence (`LookAlike`):
+
+- **Drawn as nothing** (`_DRAWN_AS_NOTHING`): Unicode's default-ignorable code points, whatever
+  their category (U+034F COMBINING GRAPHEME JOINER, the variation selectors U+FE00–U+FE0F and
+  U+E0100–U+E01EF, the Mongolian ones, U+17B4/U+17B5, the Hangul fillers U+115F, U+1160,
+  U+3164, U+FFA0, which are `Lo`), and the blank glyphs that are not default-ignorable: U+2800
+  BRAILLE PATTERN BLANK and U+1D159 MUSICAL SYMBOL NULL NOTEHEAD (`So`), U+16FE4 KHITAN SMALL
+  SCRIPT FILLER (`Mn`). NFC keeps all of them. The list was checked against
+  `Default_Ignorable_Code_Point` (Unicode 17); the blank glyphs come from the known lists of
+  invisible characters.
+- **Another space**: every `Zs` but U+0020.
+- **Unassigned and private use**: `Cn` (unassigned code points and the 66 noncharacters, such as
+  U+FDD0 and U+FFFF) and `Co`. A browser draws them as nothing or as a box, and a later Unicode
+  version may assign a `Cn` anything. `Cn` is the running Python's: a character newer than its
+  Unicode version (3.11 has 14.0) is refused as unassigned. On a newer Python it is judged by
+  its category; a newer letter that looks like a separator is still refused, because
+  `SEPARATOR_LIKE_CHARACTERS` is generated with unknown characters as candidates (see below),
+  and a Python whose Unicode is newer than the table's fails a test until the table is
+  regenerated.
+- **A loose mark**: a combining mark (`M*`) with no letter (or mark of a letter) before it, at
+  the start, on a digit (keycap U+20E3) or on a symbol.
+- **A repeated mark**: the same nonspacing mark twice in a row, counting the marks NFC composed
+  into the letter (`é` + U+0301 is refused like `e` + U+0301 + U+0301), as UTS #39 (5.4) suggests.
+- **Too many marks**: more than `MAX_COMBINING_MARKS` (4) marks on one letter, counted the same
+  way.
+
+The allowlist leaves to `look_alike_character` what it judges whatever comes around it (drawn as
+nothing, spaces, `Cn`, `Co`), which names it more exactly.
+
+**NFC** (`unicodedata.is_normalized`) is checked last, after every character check, and the NFC
+form is run through every rule of the caller (`composed_check`: `check_new_name` or
+`check_new_column_name`) before it is suggested. When it would be refused, that refusal is given
+instead, so a suggestion is always a name that would be accepted (`a` + U+0301 + U+0323 + U+0301
+composes to `ạ` with the acute twice and is refused as a repeated mark).
+
+**Separator-like characters** (`SEPARATOR_LIKE_CHARACTERS`, `lakana_core/separator_like.py`):
+every letter, mark or digit the allowlist would accept whose skeleton in Unicode's
+`confusables.txt` holds `.`, `/`, `\` or `:` (#789, option A). U+A4F8 LISU LETTER TONE MYA TI
+(`Lm`), U+1D16D MUSICAL SYMBOL COMBINING AUGMENTATION DOT (`Mc`) and the Arabic-Indic zeros
+U+0660 and U+06F0 look like `.`, so `sales` + U+A4F8 + `daily` would read as the dotted path
+`sales.daily`; U+30CE KATAKANA LETTER NO and its halfwidth form look like `/`, U+4E36 like `\`,
+the visarga of Devanagari and seven other scripts and U+11DD9 TOLONG SIKI SIGN SELA like `:`.
+The table is generated, never edited: `scripts/separator_like_characters.py CONFUSABLES_TXT`
+writes it from a local copy of the file (version 18.0.0 of 2026-08-06, 25 characters). The
+script takes categories from the running Python but counts a source character that Python does
+not know (`Cn`) as a candidate, so the table is the same on every supported Python: U+11DD9, a
+letter of Unicode 17, is in it although Python 3.14 runs Unicode 16 (an older Python refuses it
+as `Cn` anyway). `--check` compares the entries and the date, not the text, and passes on 3.11
+to 3.14. The module records the Unicode version it was written under (`UNICODE_VERSION`,
+16.0.0); `test_this_pythons_unicode_is_not_newer_than_the_table` fails on a Python whose Unicode
+is newer (3.15 and later), asking for a regeneration from a `confusables.txt` at least as new
+and a review of the new entries.
+`scripts/tests/test_separator_like_characters.py` regenerates it from the checked-in excerpt
+`scripts/tests/confusables-excerpt.txt` (every line behind an entry, and lines that must make
+none) and compares, without the network. The file has no line whose source is a sequence; a
+test of its own pins that such a line is skipped. Refused in namespace, table and view names with their
+own sentence (`… which looks like '.', a separator, so the name could read as a path of two
+names`); allowed in a column name, since they are visible and a column is shown only inside its
+table. A letter whose skeleton holds other punctuation is allowed: `ð`, `ŀ`, `ʔ`, `ʼ`, `ʻ`, `正`,
+the Lisu comma tone letter U+A4F9 and the Canadian syllabics with a middle dot.
+
+**Accepted casualties of the separator rule:** real letters that still look like a separator are
+refused in table names: Japanese `ノ` (U+30CE) and `ﾉ` (U+FF89), the CJK ideographs `丶` and `丿`,
+Coptic old esh, the vertical kana repeat mark, the IPA length mark `ː` (U+02D0), the visarga in Devanagari, Gujarati, Brahmi,
+Kaithi, Sharada, Siddham, Takri and Dogra, the Tolong Siki sign sela, the Meetei Mayek lum iyek and the Lisu tone letters
+that look like `.`, `..`, `.,` or `:`. None of the Canadian syllabics maps to a separator. Such a
+word needs another spelling in a table name; a column name keeps it.
+
+**Why marks are allowed:** NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
+Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
+`M*` would refuse those scripts.
+
+**Why U+0020 stays:** #652 decided that a space inside a name stays allowed, and CSV headers such
+as `Order ID` are common column names; once every other space is refused, a plain space cannot
+pass for another character. `-` is kept for names such as `daily-orders`; in a table name
+U+2010 HYPHEN and U+2212 MINUS SIGN, which look like it, are refused (`Pd`, `Sm`), as are `$`,
+`#`, `(`, `²`, `Ⅻ` and every other symbol or punctuation mark.
+
+**Why columns keep their symbols:** a column name comes from a query's unaliased expression
+(`count(*)`) or a file's header (`price ($)`) as often as from a person, it is shown only inside
+its table, and visible symbols do not hide or impersonate anything. So a column may hold `(`,
+`*`, `$`, `#`, `\`, `%`, U+2212 and the like; only the look-alike check applies.
+
+**Stored names.** Existing names are never judged: lookups, listings, `NamespacePath.parse`,
+renames away and drops take any stored name, and a child namespace may be created under a stored
+one. A table re-created under the name of a dropped table the catalog still holds (a
+tombstone: a rebuild's re-create, or any create within the undo period) is not a new name:
+`CatalogService._stored_dropped_names` reads the tombstones only when a rule refuses the name or
+a column, and then lets the name and the dropped table's top-level columns (`dropped_columns`)
+pass; `ResolvedStorage.table_location(stored_name=True)` still applies
+`validate_path_component`. This opens no way to a new bad name: only a name the catalog already
+held passes. A rebuild of a view or an external table (no tombstone) or with an undo period of 0
+days, whose stored name `check_new_name` refuses, is refused before anything is dropped
+(`REBUILD_STORED_NAME`, naming the problem and the way out: rename the asset's file). An Iceberg
+table whose drop turns out to leave no tombstone (`drop_row` returns `None`: two legacy tables
+sharing a directory) is refused the same way inside the rebuild's transaction, which rolls the
+drop back.
+
+**The same existence leak on create.** A person with `CREATE_TABLE` in a namespace who creates a
+table under a name today's rules refuse learns whether a dropped table of exactly that name has a
+tombstone there: the create succeeds instead of answering 422. Accepted, like the deploy's: it
+tells only that a name refused today existed at that path within the undo period, and the name
+is in the request, so nothing about other tables is learnt. That person can also take the name
+before its owner undrops the table, as with any dropped name: the undrop is then refused with
+`silver.c* cannot be restored as 'c*': a table of that name exists in silver now. Restore it
+under another name with lakana table undrop silver.c* --as NEW_NAME …`, and `--as` gives a name
+that meets today's rules (pin:
+`test_a_dropped_name_taken_again_makes_its_undrop_say_so_and_offer_another_name`). The boundary
+of the rule is pinned by
+`test_the_tombstone_rule_lets_only_the_dropped_tables_own_spelling_and_columns_through`: an
+extra new look-alike column, the same name in another namespace, and another spelling (a case
+change, an added mark) are all judged as new.
+
+**Deploy** (`DeployService._new_name_issues`, in `validate_against_environment`): an asset whose
+table does not exist and whose name no tombstone holds has its table name and each namespace
+component that does not exist checked with `check_new_name`, so `price$.sql` fails the deploy
+with the run's sentence and an NFD file name is told its NFC form; artifact assets are left out.
+Existence is read from the rows, whoever may read them, so a deployer learns that a table with a
+name today's rules refuse exists (or was dropped within the undo period); accepted, since only
+such names give a different answer.
+
+**The web interface** marks the wider set (`NAME_INVISIBLE` in `ui/src/shell/VisibleText.tsx`:
+default-ignorable, U+2800, U+16FE4, U+1D159, every space but U+0020, `Cn`, `Co`, besides
+`INVISIBLE`) only where a namespace, table, view or column name is shown (the `name` mode of
+`VisibleText` and `VisibleTspan`, `markedName`): the Catalog's tree, list places, dropped and
+expiring views, breadcrumbs, page titles, the table header and page, columns, references,
+lineage, the orphans and table lists, the namespace dialogs, notes and actions, the access and
+health tabs' column names, row-filter and mask columns, the task rows' assets, the dialogs that
+name a table, the preview, the result grid's column names and the editor's completion and
+hover. Free text (descriptions, labels, snippets, reasons, display names,
+expressions, messages) and file names keep `INVISIBLE`, so French spacing, a pasted no-break
+space and emoji with U+FE0F show as they are, and `Monthly revenue` with a no-break space still
+saves as `Monthly-revenue-….csv`.
+
+**Not covered, accepted:**
+
+- Letters of different scripts that look alike (Latin `o` and Cyrillic `о`) and compatibility
+  forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so such twins are
+  two names; the web interface does not mark them.
+- Non-Latin decimal digits (Devanagari `१`, Arabic-Indic `١`, which looks like `1` or `l`) and
+  every letter whose skeleton holds no separator: `SEPARATOR_LIKE_CHARACTERS` covers only
+  skeletons with `.`, `/`, `\` or `:`, so `ð`, `ʔ` (`?`), `ʼ` (`'`) and U+A4F9 (`,`) pass.
+- A single mark on a letter that reads as another letter: `pri̇ce` (`i` + U+0307 COMBINING DOT
+  ABOVE) reads as `price` in most fonts.
+- The CLI escapes only the #593 set, so it shows a stored name holding U+3164 or U+2800 as blank,
+  and a no-break space as a space.
+- A stored name inside a nested column of a re-created table is still judged as new.
+- Other names (repositories, groups, tokens, secrets, package indexes, artifacts) keep the #593
+  and #652 checks only.
+
 ## Request bodies: a JSON limit, authentication first, a limit per streamed route
 
 Every body is one of two kinds.

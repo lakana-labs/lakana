@@ -37,7 +37,7 @@ interface TableNameProps {
  */
 function TableName({ environment, dotted, exists }: TableNameProps): JSX.Element {
   const parts = splitDotted(dotted);
-  const name = <VisibleText text={dotted} breakable />;
+  const name = <VisibleText text={dotted} breakable name />;
   return exists && parts !== null ? (
     <Link to={tablePath(environment, parts.namespace, parts.name)}>{name}</Link>
   ) : (
@@ -105,13 +105,13 @@ function Panel({ heading, rows, hidden, hiddenText, direction }: PanelProps): JS
               <tr key={row.id}>
                 {outgoing ? (
                   <td>
-                    <VisibleText text={row.column} breakable /> →{" "}
+                    <VisibleText text={row.column} breakable name /> →{" "}
                     <TableName
                       environment={ref.environment}
                       dotted={row.target}
                       exists={row.target_exists}
                     />
-                    <VisibleText text={`.${row.target_column}`} breakable />
+                    <VisibleText text={`.${row.target_column}`} breakable name />
                   </td>
                 ) : (
                   <>
@@ -119,8 +119,8 @@ function Panel({ heading, rows, hidden, hiddenText, direction }: PanelProps): JS
                       <TableName environment={ref.environment} dotted={row.table} exists />
                     </td>
                     <td>
-                      <VisibleText text={row.column} breakable /> →{" "}
-                      <VisibleText text={row.target_column} breakable />
+                      <VisibleText text={row.column} breakable name /> →{" "}
+                      <VisibleText text={row.target_column} breakable name />
                     </td>
                   </>
                 )}

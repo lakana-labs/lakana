@@ -33,7 +33,9 @@ The path is dotted, such as `gold.sales`. A namespace that exists already is ref
 `Namespace gold.sales already exists in 'dev'.` A new part of the path may not start or end with
 a space: `" gold"` would look like `gold` in every list, so it is refused with
 `Namespace component ' gold' starts with a space, so it would look like 'gold' in every list but
-be a different name. Use 'gold' instead, or another name without a space at either end.` Properties, free-form `key=value` pairs, are set with `--property` on the
+be a different name. Use 'gold' instead, or another name without a space at either end.` A new part
+may hold only letters, decimal digits, `_`, `-` and the plain space, in Unicode NFC (see
+[the upgrade note](../explanation/upgrades.md#notes-for-the-next-release)). Properties, free-form `key=value` pairs, are set with `--property` on the
 command line.
 
 **In the web interface,** open **Catalog** and choose the environment, or the namespace to create

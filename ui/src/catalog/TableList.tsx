@@ -12,7 +12,7 @@ import { Link } from "react-router";
 import { TABLE_SORTS } from "../api";
 import type { TableListItemOut, TableSort } from "../api";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
-import { markedText, VisibleText } from "../shell/VisibleText";
+import { markedName, VisibleText } from "../shell/VisibleText";
 import { kindWord, openFromCell, OwnerName, RowCount, Unknown, When } from "./cells";
 import { formatBytes } from "./format";
 import { HealthWord } from "./HealthWord";
@@ -103,7 +103,7 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
             >
               <td>
                 <Link className="row-name" to={tablePath(row.environment, row.namespace, row.name)}>
-                  <VisibleText text={row.name} />
+                  <VisibleText text={row.name} name />
                 </Link>
                 <span className="second">
                   {row.match !== null && showsMatch(row.match) ? (
@@ -111,7 +111,7 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
                   ) : (
                     t("catalog.secondLine", {
                       kind: kindWord(t, row.kind, row.model_kind),
-                      namespace: markedText(row.namespace),
+                      namespace: markedName(row.namespace),
                     })
                   )}{" "}
                   <EnvironmentLabel environment={row.environment} />

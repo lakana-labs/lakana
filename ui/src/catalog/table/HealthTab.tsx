@@ -170,7 +170,7 @@ function SignalRow({ signal }: { readonly signal: Signal }): JSX.Element {
         {signal.column === null ? (
           t("table.healthTab.signals.wholeTable")
         ) : (
-          <VisibleText text={signal.column} breakable />
+          <VisibleText text={signal.column} breakable name />
         )}
       </td>
       <td>
