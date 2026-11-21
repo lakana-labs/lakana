@@ -147,6 +147,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "language",
         # the sign-in link a browser session began with (`lakana_core.identity.sessions`)
         "link_id",
+        # how many open sign-in links an unlink from the identity provider withdrew (#32)
+        "links_withdrawn",
         "location",
         "locations",
         # a deploy key Lakana made: environment -> fingerprint of the new public key, never a key

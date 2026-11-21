@@ -161,7 +161,8 @@ def unlink_provider(
     confirm(
         state,
         f"Unlink {name!r} from the identity provider? Their passkeys are deleted, their personal "
-        "API tokens revoked and their sessions ended; they come back with a recovery link.",
+        "API tokens revoked, their sessions ended and their open sign-in links withdrawn; they "
+        "come back with a new recovery link.",
         yes,
     )
     state.client().principals.unlink_provider(name)

@@ -441,6 +441,7 @@ def test_unlink_deletes_passkeys_revokes_tokens_ends_sessions(world: World) -> N
         "passkeys_deleted": 1,
         "tokens_revoked": 1,
         "sessions_ended": 1,
+        "links_withdrawn": 0,
     }
     [revoked] = world.events(AuditEventType.PAT_REVOKED)
     assert (revoked["subject"], revoked["source"]) == ("carol", "oidc_unlinked")
@@ -832,3 +833,32 @@ def test_a_changed_address_is_reported_with_the_count_at_the_new_one(world: Worl
     assert kept is not None and "1 administrator(s)" in kept and "recovery" not in kept
     lost = address_change_warning("a", "b", linked=2, unlinked_admins=0)
     assert lost is not None and "lakana recovery create" in lost
+
+
+def test_unlink_withdraws_the_persons_open_links(world: World) -> None:
+    """Review of #780: an earlier recovery link does not bind an identity again after an unlink."""
+    from lakana_core.identity.links import LinkService
+    from lakana_core.models import SignInLink
+
+    _, ann = _linked_with_everything(world)
+    links = LinkService(
+        world.session,
+        world.authz,
+        world.sessions,
+        origin="http://localhost:8000",
+        local_mode=False,
+        bootstrap_name="admin",
+        clock=world.clock,
+    )
+    link = links.issue_recovery(ann, principal_name="carol")
+    world.links.unlink(ann, "carol")
+    row = world.session.get(SignInLink, link.id)
+    assert row is not None and row.withdrawn_at == START and row.used_at is None
+    withdrawn = [
+        e
+        for e in world.events(AuditEventType.SIGN_IN_LINK_WITHDRAWN)
+        if e.get("reason") == "oidc_unlinked"
+    ]
+    assert withdrawn == [{"kind": "recovery", "link_id": str(link.id), "reason": "oidc_unlinked"}]
+    [event] = world.events(AuditEventType.PRINCIPAL_OIDC_UNLINKED)
+    assert event["links_withdrawn"] == 1

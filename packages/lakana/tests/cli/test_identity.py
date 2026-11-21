@@ -327,7 +327,8 @@ def test_cli_unlink_provider_asks_then_unlinks(tmp_path: Path) -> None:
     asked = invoke(make_state(tmp_path, api), "principal", "unlink-provider", "carol")
     assert asked.exit_code == 2
     prompt = " ".join(asked.stderr.split())
-    assert all(word in prompt for word in ("passkeys", "tokens", "sessions", "recovery link"))
+    words = ("passkeys", "tokens", "sessions", "sign-in links", "recovery link")
+    assert all(word in prompt for word in words)
     assert api.requests == []
     done = invoke(make_state(tmp_path, api), "principal", "unlink-provider", "carol", "--yes")
     assert done.exit_code == 0, done.stderr

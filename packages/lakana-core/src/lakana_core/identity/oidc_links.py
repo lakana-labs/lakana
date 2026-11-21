@@ -38,6 +38,7 @@ from lakana_core.grants.admin import authorize_admin_only
 from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.break_glass import breaks, unlinked_admin_ids
 from lakana_core.grants.service import active_instance_admin_ids
+from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
 from lakana_core.identity.sessions import (
@@ -112,7 +113,9 @@ def locked_principal(session: Session, principal_id: uuid.UUID) -> Principal:
     return session.execute(
         select(Principal)
         .where(Principal.id == principal_id)
-        .with_for_update()
+        # FOR NO KEY UPDATE: it orders these three against each other, and still lets other
+        # transactions insert rows that refer to the person (an audit event, a passkey).
+        .with_for_update(key_share=True)
         .execution_options(populate_existing=True)
     ).scalar_one()
 
@@ -429,8 +432,9 @@ class OidcLinkService:
 
         In one transaction: the person's passkeys are deleted, every personal API token of theirs
         is revoked (with the task tokens minted from it), every session of theirs ends
-        (``oidc_unlinked``) and the provider identity is cleared. They come back with a recovery
-        link. To offboard someone, deactivate them instead.
+        (``oidc_unlinked``), every open sign-in link bound to them is withdrawn (an earlier
+        recovery link would bind an identity again) and the provider identity is cleared. They
+        come back with a new recovery link. To offboard someone, deactivate them instead.
 
         Parameters
         ----------
@@ -454,6 +458,9 @@ class OidcLinkService:
         # Unlinking revokes the person's tokens: administering tokens, an administrator's alone.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         require_step_up(p, now=self._clock())
+        # The administrator lock first, then the person's row, then their links: the order of
+        # a link's use (`lakana_core.grants.admin_lock`), so an unlink and a redeem take turns.
+        lock_admin_count(self._session)
         target = locked_principal(self._session, principal_named(self._session, name).id)
         if target.id == p.id:
             raise ConflictError(
@@ -475,6 +482,10 @@ class OidcLinkService:
         ended = SessionService(self._session, self._authz, clock=self._clock).end_for_principal(
             target.id, "oidc_unlinked", commit=False
         )
+        # An open recovery link would bind an identity again: they come back with a new one.
+        links = withdraw_open_links(
+            self._session, target.id, now=self._clock(), reason="oidc_unlinked"
+        )
         issuer, subject = self._clear(target)
         audit.record(
             p.id,
@@ -488,6 +499,7 @@ class OidcLinkService:
                 "passkeys_deleted": len(passkeys),
                 "tokens_revoked": revoked,
                 "sessions_ended": ended,
+                "links_withdrawn": links,
             },
         )
         self._session.commit()

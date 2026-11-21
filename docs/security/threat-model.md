@@ -705,7 +705,9 @@ their tokens only within the token window. `lakana login` follows.
   each other's record at every start: give them one address.
 - **Sign-in against unlink.** A provider sign-in, a recovery through the provider and an unlink
   lock the person's row before they decide, so a sign-in racing an unlink either starts its session
-  before the unlink ends every session, or finds the person unlinked. The operator's recovery link unlinks a linked administrator
+  before the unlink ends every session, or finds the person unlinked. An unlink also withdraws the
+  person's open sign-in links: an earlier recovery link would otherwise bind an identity again,
+  possibly the very one the unlink was for. They come back with a new recovery link. The operator's recovery link unlinks a linked administrator
   whatever the provider says, and revokes their personal tokens, so none outside the window comes
   back to life.
 - **Session fixation.** The session starts in `finish`, a same-origin POST, with a fresh id; a

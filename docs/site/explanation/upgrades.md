@@ -818,8 +818,9 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   after a new upgrade each of them has to be linked again. Sign-in flows open during the
   downgrade are lost; their people start the sign-in again.
 - People link their identity through an invite, from their profile or with a recovery link; an
-  administrator unlinks them with `lakana principal unlink-provider`. A linked person signs in
-  only through the provider: their passkeys stop signing them in (they stay stored), and their
+  administrator unlinks them with `lakana principal unlink-provider`, which also withdraws their
+  open sign-in links. A linked person signs in only through the provider: their passkeys stop
+  signing them in (they stay stored), and their
   personal API tokens work only within 30 days of their last provider sign-in (`lakana sign-in
   settings --token-window-days`, 1 to 365). Unlinking someone, by an administrator or by the
   server operator's recovery link, revokes their personal tokens. Nothing changes for anyone who

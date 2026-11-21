@@ -69,6 +69,7 @@ from lakana_core.grants.service import (
     lapsed_issuer_reason,
 )
 from lakana_core.identifiers import HIDDEN_CHARACTER_CATEGORIES
+from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity
 from lakana_core.identity.oidc_links import OidcLinkService, is_linked, locked_principal
@@ -535,48 +536,6 @@ def name_unavailable(session: Session, name: str, *, now: datetime) -> str | Non
             "choose another name."
         )
     return None
-
-
-def withdraw_open_links(
-    session: Session, principal_id: uuid.UUID, *, now: datetime, reason: str
-) -> int:
-    """Withdraw every open link bound to a person, each with one audit event; the caller commits.
-
-    Parameters
-    ----------
-    session
-        Database session.
-    principal_id
-        The person.
-    now
-        The withdrawal time.
-    reason
-        Why, for the audit log (``deactivated``, ``reactivated``).
-
-    Returns
-    -------
-    int
-        How many links this call withdrew.
-    """
-    withdrawn = session.execute(
-        update(SignInLink)
-        .where(
-            SignInLink.principal_id == principal_id,
-            SignInLink.used_at.is_(None),
-            SignInLink.withdrawn_at.is_(None),
-        )
-        .values(withdrawn_at=now, reserved_name=None)
-        .returning(SignInLink.id, SignInLink.kind)
-        .execution_options(synchronize_session="fetch")
-    ).all()
-    audit = AuditService(session)
-    for link_id, kind in sorted(withdrawn, key=lambda r: str(r[0])):
-        audit.record(
-            principal_id,
-            AuditEventType.SIGN_IN_LINK_WITHDRAWN,
-            detail={"kind": kind, "link_id": str(link_id), "reason": reason},
-        )
-    return len(withdrawn)
 
 
 def _state(row: SignInLink, now: datetime) -> LinkState:
@@ -1175,6 +1134,10 @@ class LinkService:
             # Not used: the same link still works through the provider.
             raise ProviderSignInRequired(PROVIDER_RECOVERY_MESSAGE)
         now = self._clock()
+        # Before the link's row lock, as `claim_for_provider` takes it: a deactivation of the
+        # link's person locks their row and then withdraws the link under this lock, and
+        # `_complete` locks the person's row after the claim (review of #780).
+        lock_admin_count(self._session)
         if not self._claim(row.id, now, peer=peer, user_agent=user_agent):
             self._session.rollback()
             self._session.refresh(row)

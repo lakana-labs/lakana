@@ -28,12 +28,20 @@ under this lock too, so that every such check sees the others' commits.
 Order: a change takes the access lock (`lakana_core.access.managed.lock_access`) first, when it
 takes it at all, and this lock second, before it counts. An apply holds the access lock alone and
 takes this one inside it; taking them the other way round could deadlock against an apply.
-This lock also comes before the row lock of a sign-in link: a deactivation or a revoke withdraws
-its issuer's open links under it, so a provider finish that uses a link
-(`lakana_core.identity.links.LinkService.claim_for_provider`) takes it before it claims the link
-(review of #780). A principal's own row is locked last, by a provider sign-in, a recovery through
-the provider and an unlink (`lakana_core.identity.oidc_links.locked_principal`), none of which
-waits for this lock while holding that row.
+This lock also comes before the row locks of a sign-in link and of a principal, wherever both are
+taken (review of #780):
+
+- a deactivation takes it, then locks the person's row (`is_active`), then withdraws their open
+  links;
+- an unlink (`lakana_core.identity.oidc_links.OidcLinkService.unlink`) takes it, then locks the
+  person's row (`locked_principal`), then withdraws their open links;
+- using a link (`lakana_core.identity.links.LinkService.redeem` and `claim_for_provider`) takes
+  it, then claims the link's row, then locks its person's row in `_complete` or
+  `_complete_for_provider`.
+
+The link and the person are locked in different orders there, which is safe only because each of
+these holds this lock first, so they never wait on each other's rows. A provider sign-in locks only
+the person's row, and a passkey removal takes this lock before it reads the passkey.
 """
 
 from __future__ import annotations

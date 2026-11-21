@@ -7129,7 +7129,8 @@ token window. Threat model: "OIDC sign-in (#32)".
 - **L6, an administrator's unlink** (`DELETE /api/v1/principals/{name}/oidc-link`, ADMIN through
   `authorize_admin_only` with `MANAGE_TOKEN`, as it revokes tokens, and step-up; `OidcLinkService`
   is in the admin-only call-site check) deletes the passkeys, revokes every personal token (each `PAT_REVOKED` with `source:
-  oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`) and
+  oidc_unlinked`, and the task tokens minted from it), ends every session (`oidc_unlinked`),
+  withdraws every open sign-in link of theirs (`test_unlink_withdraws_the_persons_open_links`) and
   clears the identity, in one transaction (`test_unlink_deletes_passkeys_revokes_tokens_ends_sessions`,
   `test_unlink_needs_step_up_and_admin`). Unlinking oneself is 409 (`test_unlinking_oneself_is_refused`).
 - **L7, the token window** (`sign_in.token_provider_window_days`, default 30, 1 to 365, changed with

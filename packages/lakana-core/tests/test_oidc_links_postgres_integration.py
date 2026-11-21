@@ -25,19 +25,22 @@ from lakana_core import migrate
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, SecurableKind
 from lakana_core.config import DatabaseConfig
 from lakana_core.db import create_engine
-from lakana_core.errors import ConflictError, OidcSignInRefused
+from lakana_core.errors import ConflictError, LinkUnusableError, NotFoundError, OidcSignInRefused
 from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService, active_instance_admin_ids
 from lakana_core.identity.groups import GroupService
+from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.links import LinkService
+from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity
 from lakana_core.identity.oidc_links import (
     OidcLinkService,
     linked_principal_for_sign_in,
     unlinked_admin_count,
 )
+from lakana_core.identity.passkeys import PasskeyService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.identity.sessions import SessionService
 from lakana_core.models import (
@@ -259,6 +262,14 @@ class _Second:
             except OidcSignInRefused as refused:
                 session.rollback()
                 self.outcome = refused.reason
+                return
+            except LinkUnusableError as refused:
+                session.rollback()
+                self.outcome = f"link {refused.state}"
+                return
+            except NotFoundError as refused:
+                session.rollback()
+                self.outcome = f"not found: {refused}"
                 return
             except ConflictError as refused:
                 session.rollback()
@@ -847,10 +858,10 @@ def test_an_unlink_waits_for_a_provider_sign_in_and_ends_its_session(
 def test_a_recovery_through_the_provider_waits_for_an_unlink(
     engine: Engine, actor: PrincipalRef
 ) -> None:
-    """Review of #780: a recovery's finish reads the person afresh under the row lock.
+    """Review of #780: a recovery's finish waits for an unlink, which withdrew its link.
 
-    After the unlink it finds them unlinked and links them with the recovery link, so no session
-    of an unlinked person survives.
+    The unlink holds the administrator lock and the person's row; the finish takes that lock
+    first, so it waits, and then finds the link withdrawn: no session, and nobody linked again.
     """
     admin, alice, subject = _admin_and_linked(engine, actor)
     with Session(engine) as session:
@@ -874,8 +885,91 @@ def test_a_recovery_through_the_provider_waits_for_an_unlink(
     racing.blocked_or_done(wait_event=None)
     Session.commit(unlinking)
     unlinking.close()
-    assert racing.finish() == _DONE
+    assert racing.finish() == "link_unusable"
     with Session(engine) as session:
         row = session.get(Principal, alice.id)
-        assert row is not None and row.oidc_subject == subject
-    assert _open_sessions(engine, alice.id) == 1
+        assert row is not None and row.oidc_subject is None
+    assert _open_sessions(engine, alice.id) == 0
+
+
+# -- round 3 of the review of #780 ---------------------------------------------------------------
+
+
+def test_a_redeem_takes_the_admin_lock_before_the_links_row(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: using a recovery link against a deactivation of its person.
+
+    The deactivation holds the administrator-count lock, locks the person's row, and then
+    withdraws their links. The redeem takes that lock before it claims the link, so it waits and
+    then finds the link withdrawn, instead of holding the link's row while it waits for the
+    person's (a deadlock).
+    """
+    with Session(engine) as session:
+        admin = _person(session, actor, admin=True)
+        dana = _person(session, actor, admin=False)
+        admin_ref = PrincipalRef(id=admin.id, name=admin.name, type=PrincipalType.USER)
+        issued = _links(session).issue_recovery(admin_ref, principal_name=dana.name)
+        dana_id, link_id = dana.id, issued.id
+        public_id, secret = issued.url.split("#", 1)[1].split("&")
+        public_id, secret = public_id.split("=", 1)[1], secret.split("=", 1)[1]
+
+    def redeem(other: Session) -> None:
+        """Use the recovery link on the passkey path in `other`.
+
+        Parameters
+        ----------
+        other
+            The redeem's own session.
+        """
+        _links(other).redeem(
+            public_id, secret, replacing=None, peer="p", user_agent="u", has_session=False
+        )
+
+    with Session(engine) as session:
+        # The deactivation's first steps: the administrator lock, then the person's row.
+        lock_admin_count(session)
+        session.execute(update(Principal).where(Principal.id == dana_id).values(is_active=False))
+        racing = _Second(engine, redeem)
+        racing.blocked_or_done(wait_event=None)
+        withdraw_open_links(session, dana_id, now=datetime.now(UTC), reason="deactivated")
+        session.commit()
+    assert racing.finish() == "link withdrawn"
+    with Session(engine) as session:
+        row = session.get(SignInLink, link_id)
+        assert row is not None and row.used_at is None and row.withdrawn_at is not None
+
+
+def test_removing_a_passkey_while_its_person_is_unlinked(
+    engine: Engine, actor: PrincipalRef
+) -> None:
+    """Review of #780: the removal waits for the unlink, then finds the passkey gone (no 500)."""
+    admin, alice, _ = _admin_and_linked(engine, actor)
+    with Session(engine) as session:
+        [passkey_id] = session.execute(
+            select(Passkey.id).where(Passkey.principal_id == alice.id)
+        ).scalars()
+    unlinking = _uncommitted_unlink(engine, admin, alice.name)
+
+    def remove(other: Session) -> None:
+        """Remove the passkey as an administrator in `other`.
+
+        Parameters
+        ----------
+        other
+            The removal's own session.
+        """
+        PasskeyService(
+            other,
+            AllowAllAuthorization(),
+            SessionService(other, AllowAllAuthorization()),
+            NoticeService(other),
+            rp_id="localhost",
+            origin="http://localhost:8000",
+        ).remove(admin, alice.name, passkey_id)
+
+    racing = _Second(engine, remove)
+    racing.blocked_or_done()
+    Session.commit(unlinking)
+    unlinking.close()
+    assert racing.finish().startswith("not found: ")
