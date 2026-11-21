@@ -145,7 +145,7 @@ function JobView({ env, repository, job }: JobViewProps): JSX.Element {
       {shown === undefined ? (
         poll.error === null && <Reading label={t("jobs.loadingJob")} />
       ) : (
-        <div className="jobs-panels">
+        <div className="panel-stack">
           <JobFacts environment={env} job={shown} />
           <JobRuns
             environment={env}

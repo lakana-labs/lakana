@@ -140,7 +140,7 @@ function TaskView({ environment, runId, asset }: TaskViewProps): JSX.Element {
     body = <Gone message={log.error} />;
   } else if (!isGone(poll)) {
     body = (
-      <div className="jobs-panels">
+      <div className="panel-stack">
         <Panel heading={t("jobs.facts.heading")}>
           {run === undefined
             ? poll.error === null && <Reading label={t("jobs.loadingTask")} />

@@ -7,6 +7,10 @@ The report is refused if it is older than any source file it claims to cover:
 running ``pytest`` without ``--cov`` leaves the previous run's ``coverage.json``
 in place, and a ratchet that reads it reports a number for code it never
 measured.
+
+A failure names every file of the report with a missing line or branch, and shows the two
+percentages with as many decimals as it takes for them to differ: a shortfall of one line in
+80,000 is 99.999%, which two decimals round to the 100.00% of the baseline.
 """
 
 from __future__ import annotations
@@ -190,13 +194,145 @@ def check(*, current: float, baseline: float, floor: float) -> str | None:
         An error message, or ``None`` when coverage is acceptable.
     """
     if current < floor:
-        return f"Coverage {current:.2f}% is below the floor of {floor:.2f}%."
+        digits = _digits(current, floor)
+        return f"Coverage {current:.{digits}f}% is below the floor of {floor:.{digits}f}%."
     if current < baseline:
+        digits = _digits(current, baseline)
         return (
-            f"Coverage {current:.2f}% is below the baseline of {baseline:.2f}%. "
+            f"Coverage {current:.{digits}f}% is below the baseline of {baseline:.{digits}f}%. "
             "Coverage may rise but never fall."
         )
     return None
+
+
+_MOST_DIGITS = 12
+"""The most decimals a failure shows; two percentages closer than that print as equal."""
+
+
+def _digits(current: float, bar: float) -> int:
+    """Give the fewest decimals, at least two, at which two percentages print differently.
+
+    Parameters
+    ----------
+    current
+        Coverage from this run.
+    bar
+        The baseline or the floor it is compared with.
+
+    Returns
+    -------
+    int
+        2 when two decimals already tell them apart, else more, up to `_MOST_DIGITS`.
+    """
+    for digits in range(2, _MOST_DIGITS + 1):
+        if f"{current:.{digits}f}" != f"{bar:.{digits}f}":
+            return digits
+    return _MOST_DIGITS
+
+
+def _ranges(lines: Sequence[int]) -> str:
+    """Write sorted line numbers as ranges.
+
+    Parameters
+    ----------
+    lines
+        The line numbers.
+
+    Returns
+    -------
+    str
+        For example ``3-5, 9``.
+    """
+    parts: list[str] = []
+    ordered = sorted(set(lines))
+    start = previous = ordered[0]
+    for line in [*ordered[1:], None]:
+        if line is not None and line == previous + 1:
+            previous = line
+            continue
+        parts.append(str(start) if start == previous else f"{start}-{previous}")
+        if line is not None:
+            start = previous = line
+    return ", ".join(parts)
+
+
+def _arc(arc: Sequence[int]) -> str:
+    """Write a branch arc of coverage.py as ``from->to``; a negative target is the exit.
+
+    Parameters
+    ----------
+    arc
+        The two line numbers.
+
+    Returns
+    -------
+    str
+        For example ``352->354`` or ``400->exit``.
+    """
+    source, target = arc
+    return f"{source}->{'exit' if target < 0 else target}"
+
+
+def _numbers(value: object) -> list[int] | None:
+    """Read a list of line numbers, refusing anything else.
+
+    Parameters
+    ----------
+    value
+        A value of the report.
+
+    Returns
+    -------
+    list of int or None
+        The numbers, or `None` when `value` is not a list of integers.
+    """
+    if isinstance(value, list) and all(
+        isinstance(n, int) and not isinstance(n, bool) for n in value
+    ):
+        return value
+    return None
+
+
+def uncovered(text: str) -> list[str]:
+    """Name the files of a ``coverage.json`` with a missing line or branch.
+
+    Parameters
+    ----------
+    text
+        Contents of the report.
+
+    Returns
+    -------
+    list of str
+        One line per such file, by path: ``PATH: lines 3-5, 9; branches 352->354``. Empty when
+        no file misses anything, or the report holds no readable ``files``.
+    """
+    try:
+        files = json.loads(text)["files"]
+    except (ValueError, KeyError, TypeError):
+        return []
+    if not isinstance(files, dict):
+        return []
+    found: list[str] = []
+    for path in sorted(files):
+        data = files[path]
+        if not isinstance(data, dict):
+            continue
+        lines = _numbers(data.get("missing_lines", [])) or []
+        branches = data.get("missing_branches", [])
+        arcs = [
+            arc
+            for arc in (branches if isinstance(branches, list) else [])
+            if _numbers(arc) is not None and len(arc) == 2
+        ]
+        parts: list[str] = []
+        if lines:
+            parts.append(f"lines {_ranges(lines)}")
+        if arcs:
+            parts.append("branches " + ", ".join(_arc(arc) for arc in arcs))
+        if parts:
+            found.append(f"{path}: {'; '.join(parts)}")
+    return found
 
 
 def _report_percentage(text: str) -> float | None:
@@ -297,6 +433,17 @@ def main() -> int:
     error = check(current=current, baseline=baseline, floor=args.floor)
     if error is not None:
         print(error, file=sys.stderr)
+        misses = uncovered(text)
+        if misses:
+            print("Missing lines or branches:", file=sys.stderr)
+            for miss in misses:
+                print(f"  {miss}", file=sys.stderr)
+        else:
+            print(
+                f"No file in {args.coverage_json} lists a missing line or branch; check what "
+                "[tool.coverage] omits and measures, and that the report covers every shard.",
+                file=sys.stderr,
+            )
         return 1
 
     print(f"Coverage {current:.2f}% (baseline {baseline:.2f}%).")

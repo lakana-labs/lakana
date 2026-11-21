@@ -154,7 +154,7 @@ export function ConnectionPage({ environment, name }: ConnectionPageProps): JSX.
         </div>
       }
     >
-      <div className="connection-page">
+      <div className="panel-stack">
         {note !== null && <ConnectionNote note={note} />}
         <ConnectionFacts connection={connection} />
         <div ref={regionRef} tabIndex={-1}>

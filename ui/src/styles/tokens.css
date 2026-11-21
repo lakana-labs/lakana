@@ -63,12 +63,23 @@
   --space-7: 48px;
   --space-8: 64px;
 
-  --row-height: 44px;
+  /* One density, compact (#782): a list's row, a data grid's row, the line in a list's cell. */
+  --row-height: 32px;
   /* A data grid's rows (shell/data-grid.css): denser than a list's, for scanning data. */
-  --grid-row-height: 32px;
-  /* The line height in a list's cells: a cell with a second line grows past --row-height, and
-     the tighter compact line keeps such a row lower than a roomy one too. */
-  --cell-line: var(--type-body-line);
+  --grid-row-height: 24px;
+  /* The line height in a list's cells: a cell with a second line grows past --row-height. */
+  --cell-line: var(--type-dense-line);
+  /* Every control in a row (button, field, select, search) has this height, and adjacent
+     controls stand this far apart. */
+  --control-height: 32px;
+  --control-gap: var(--space-2);
+  /* The room around the working area, and between the panels of a page. */
+  --page-gutter: var(--space-5);
+  --panel-gap: var(--space-4);
+  /* Screens and tables take the full width; only running text keeps this line length. */
+  --reading-width: 720px;
+  /* A name in a list cell stops here and ends with an ellipsis; the tooltip shows it whole. */
+  --name-width: 360px;
   --radius-control: 4px;
   --radius-panel: 6px;
   --radius-round: 50%;
@@ -135,13 +146,6 @@
   --color-float: #1c2a33;
   --shadow-float: none;
   --color-scrim: rgba(0, 0, 0, 0.5);
-}
-
-/* The compact density is a preference; roomy is the default. */
-:root[data-density="compact"] {
-  --row-height: 36px;
-  --grid-row-height: 26px;
-  --cell-line: var(--type-dense-line);
 }
 
 @media (prefers-reduced-motion: reduce) {

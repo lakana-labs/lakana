@@ -7,8 +7,9 @@ its tests, and the checklist `docs/agent/still-water.md`, which every pull reque
 that changes a screen is checked against.
 
 **Short answer.** The interface should feel calm and familiar after ten minutes: few
-colours, roomy rows, one way of doing each thing, and nothing that moves unless you or a
-run caused it. Colour is kept for state, and state never depends on colour alone.
+colours, compact rows that use the whole width, one way of doing each thing, and nothing that
+moves unless you or a run caused it. Colour is kept for state, and state never depends on
+colour alone.
 
 ## Still Water
 
@@ -46,15 +47,18 @@ control edges 3:1.
 
 | Step | Size and line | Weight | Used for |
 |---|---|---|---|
-| Title | 20 / 28 px | 500 | the page heading, a panel's heading |
-| Section | 15 / 22 px | 500 | a section heading, the product name |
+| Title | 20 / 28 px | 500 | the page heading |
+| Section | 15 / 22 px | 500 | a panel's or a section's heading, the product name |
 | Body | 14 / 22 px | 400 | running text |
 | Dense | 13 / 18 px | 400 | secondary lines |
 | Data | 12.5 / 18 px | 400 | numbers and values in tables |
 | Code | 12.5 / 20 px | 400 | code, in Plex Mono |
 | Label | 12 / 16 px | 500 | field labels, column heads |
 
-**Spacing.** Eight steps: 4, 8, 12, 16, 24, 32, 48 and 64 px. Corners are 4 px on controls
+**Spacing.** Eight steps: 4, 8, 12, 16, 24, 32, 48 and 64 px, so everything sits on one
+4/8 px grid. A few layout tokens are built on them: every control is 32 px high, controls side
+by side stand 8 px apart, the working area keeps 24 px from the window's edges, and panels
+stand 16 px apart. Corners are 4 px on controls
 and 6 px on panels; only a person is round: their picture, or their initials in the accent on
 its pale ground, in a circle beside their name.
 
@@ -77,7 +81,10 @@ Every state has its own shape, so that colour is never the only signal:
 | Cancelled | a ring with a slash |
 
 A glyph always sits beside its word (Succeeded, Failed, ...), except where it stands alone
-and carries the word as its accessible name. The glyphs are tested at 12 px, the smallest
+and carries the word as its accessible name. In a list the two form a small pill on a pale tint
+of the state's colour (green, red, amber, or the accent for running); the three ring states
+have no colour to claim and get a hairline instead. The tint only repeats what the shape and
+the word say, and each glyph keeps at least 3:1 against its tint under every simulation below. The glyphs are tested at 12 px, the smallest
 size in use, in light and dark and in greyscale. In the system's high-contrast mode (forced
 colours) they take the system's text colour.
 
@@ -111,21 +118,34 @@ apart at 16 px. It is the favicon and sits beside the product name in the sideba
 colour. The source is `ui/src/shell/lakana-mark.svg`; it is covered by the same terms as the
 logo (see `docs/legal/TRADEMARK.md` in the repository).
 
-## Density
+## Density and width
 
-Roomy is the default: 44 px rows, few columns, and the kind and last change of an object as a
-quiet second line under its name. Compact, with 36 px rows and tighter lines (so a row with a
-second line is lower too), is a personal setting in the menu under your name; it applies to
-every list, the Catalog's and those on a table's page included. Roomy is the default because
-the interface is for people who do not live in it all day; someone who does can choose compact
-for themselves.
+There is one density, compact: 32 px rows with a hairline between them, small muted column
+heads, and the kind and last change of an object as a quiet second line under its name. An
+earlier version offered a roomy choice in the menu under your name; it is gone, and a choice
+stored by that version is ignored. One density means every screen is designed and checked in
+one form, and the lists show enough rows to compare without scrolling.
 
-Rows of data, such as a table's Preview, are scanned rather than read, so they get a denser grid
-of their own: 32 px rows in roomy and 26 px in compact, less space in each cell, numbers aligned
-right in figures of one width, the column names staying in view while the rows scroll, and the
-row numbers in a muted gutter that is not part of the data. A tab that shows data or a drawing,
-such as Preview and the Lineage drawing, takes the whole width of the window; text to read keeps
-a narrower width that is easier on the eye. Menus and lists keep their rows.
+Every screen takes the whole width of the window beside the sidebar, its tables too, so a list
+of connections or environments shows all its columns from a 1280 px window on without scrolling
+sideways. Only running text, such as a paragraph that explains a page, keeps a narrower width
+that is easier on the eye. A name in a list never wraps: a long one ends with an ellipsis, and
+pointing at it or moving the focus to it shows the whole name in a small tooltip. A screen
+reader always reads the whole name.
+
+Rows of data, such as a table's Preview or a query's result, are scanned rather than read, so
+they get a denser grid of their own: 24 px rows, less space in each cell, numbers aligned right
+in figures of one width, the column names staying in view while the rows scroll, and the row
+numbers in a muted gutter that is not part of the data.
+
+## Alignment
+
+Small misalignments make an interface look unfinished, so a few rules hold on every screen:
+the title sits at the top left and the one primary action at the top right, on the title's
+line; controls in a row are one height, 8 px apart; left edges line up from the title down to
+the table; a label and its value share a baseline; and a state is a small pill, its shape and
+its word on a pale tint of its colour. The checklist names the shared classes that carry these
+rules, and an end-to-end test measures them.
 
 ## One pattern for every area
 
@@ -142,7 +162,8 @@ Every object has the same detail page: its name, one row of tabs, Overview first
 at most two levels, the area and then the object with its tabs. Once you know one area, you
 know them all. A tab with several blocks, such as a table's Overview, Lineage list, Health and
 Access, shows each block as a flat panel under its own heading, with more space between the
-panels than inside them; a tab that is one list, such as Columns or Preview, has no panel.
+panels than inside them; a tab that is one list, such as Columns or Preview, has no panel. A
+panel's title sits at its top left and its own actions, such as Refresh, at its top right.
 
 **Rows open their object.** Every row of every list opens its object, and something without a
 detail page is not shown as a row. You can see this before you point at it: the name is in the
@@ -165,7 +186,7 @@ The interface fails, even if every feature works, when it:
 - has menus with many levels;
 - makes things hard to find;
 - asks for workflows that are too complex;
-- looks full or dense.
+- looks crowded: dense is fine where it helps comparing rows, clutter is not.
 
 The checklist lists the patterns that make an interface look generated, such as purple
 and blue gradients, frosted glass, emoji as icons, and shadowed rounded cards for everything.

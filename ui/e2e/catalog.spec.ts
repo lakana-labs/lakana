@@ -45,148 +45,144 @@ function where(page: Page): string {
 }
 
 for (const theme of ["light", "dark"] as const) {
-  for (const density of ["roomy", "compact"] as const) {
-    test.describe(`${theme}, ${density}`, () => {
-      test.beforeEach(async ({ page }) => {
-        await signInAsAdmin(page);
-        await page.addInitScript(
-          ([key, value]) => {
-            if (window.localStorage.getItem(key ?? "") === null) {
-              window.localStorage.setItem(key ?? "", value ?? "");
-            }
-          },
-          [KEY, JSON.stringify({ theme, density, language: "en" })],
-        );
-      });
-
-      test("axe finds nothing on the list, the open Sort by, a search with matches, no hits and an empty namespace", async ({
-        page,
-      }) => {
-        await openCatalog(page);
-        await expect(page.getByRole("row")).not.toHaveCount(0);
-        expect(await violations(page), "the list").toEqual([]);
-
-        await sortMenu(page, 0).click();
-        await expect(page.getByRole("listbox")).toBeVisible();
-        expect(await violations(page), "Sort by open").toEqual([]);
-        await page.keyboard.press("Escape");
-
-        await openCatalog(page, "/catalog?q=store_id");
-        await expect(page.getByText("Column store_id")).toBeVisible();
-        expect(await violations(page), "a search with matches").toEqual([]);
-
-        await openCatalog(page, "/catalog?q=nothing", page.getByText(/No table in .* matches/));
-        expect(await violations(page), "no hits").toEqual([]);
-
-        await openCatalog(
-          page,
-          "/catalog?env=prod&ns=bronze",
-          page.getByText("No tables in bronze yet", { exact: false }),
-        );
-        expect(await violations(page), "an empty namespace").toEqual([]);
-      });
-
-      test("axe finds nothing on the Dropped view, with the choice of an environment, and on the Undrop dialog", async ({
-        page,
-      }) => {
-        await openCatalog(page, "/catalog?view=dropped", page.getByText(/listed per environment/));
-        expect(await violations(page), "no environment chosen").toEqual([]);
-
-        await openCatalog(
-          page,
-          "/catalog?view=dropped&env=prod",
-          page.getByRole("region", { name: "Dropped tables" }),
-        );
-        await expect(page.getByText("No longer restorable")).toBeVisible();
-        expect(await violations(page), "the Dropped view").toEqual([]);
-
-        await page.route("**/tables/fact_returns/undrop", (route) =>
-          route.fulfill({
-            status: 409,
-            json: {
-              type: "AlreadyExistsError",
-              detail: "A table fact_returns already exists in gold.sales. Choose another name.",
-            },
-          }),
-        );
-        await page.getByRole("button", { name: "Undrop gold.sales.fact_returns" }).click();
-        await expect(page.getByRole("dialog")).toBeVisible();
-        await expect(page.getByRole("textbox", { name: "Restore as" })).toBeVisible();
-        expect(await violations(page), "the Undrop dialog").toEqual([]);
-
-        await page.keyboard.press("Escape");
-        await page.route("**/api/v1/environments/prod", (route) =>
-          route.fulfill({ json: { name: "prod", is_protected: true } }),
-        );
-        await page.reload();
-        await expect(page.getByRole("region", { name: "Dropped tables" })).toBeVisible();
-        await page.getByRole("button", { name: /^Undrop gold\.sales\.fact_returns/ }).click();
-        await expect(
-          page.getByRole("textbox", { name: /Why you break the protection of prod/ }),
-        ).toBeVisible();
-        expect(await violations(page), "the reason dialog of a protected environment").toEqual([]);
-      });
-
-      test("at least 24 px between the content of every two neighbouring cells", async ({
-        page,
-      }) => {
-        await page.setViewportSize({ width: 1280, height: 800 });
-        await openCatalog(page);
-        const body = page.locator("tbody tr");
-        await expect(body).toHaveCount(3);
-        // The visible content of a cell is its text and its pictures; what is hidden for the eye
-        // (the words for a screen reader) does not count. Each row gives the gaps between the
-        // cells that hold content.
-        const gaps = await page.evaluate(() => {
-          const out: { row: number; cell: number; gap: number }[] = [];
-          document.querySelectorAll("tbody tr").forEach((tr, row) => {
-            const spans = [...tr.querySelectorAll("td")].map((td) => {
-              const rects: DOMRect[] = [];
-              const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
-              for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-                const parent = node.parentElement;
-                if (
-                  (node.textContent ?? "").trim() !== "" &&
-                  parent?.closest(".visually-hidden") === null
-                ) {
-                  const range = document.createRange();
-                  range.selectNodeContents(node);
-                  rects.push(range.getBoundingClientRect());
-                }
-              }
-              td.querySelectorAll("svg, img").forEach((picture) => {
-                rects.push(picture.getBoundingClientRect());
-              });
-              return rects.length === 0
-                ? null
-                : {
-                    left: Math.min(...rects.map((rect) => rect.left)),
-                    right: Math.max(...rects.map((rect) => rect.right)),
-                  };
-            });
-            for (let cell = 0; cell + 1 < spans.length; cell += 1) {
-              const here = spans[cell];
-              const next = spans[cell + 1];
-              if (here && next) {
-                out.push({ row, cell, gap: next.left - here.right });
-              }
-            }
-          });
-          return out;
-        });
-        // Seven columns and the chevron: rows have cells with content in all but the last.
-        expect(gaps.length).toBeGreaterThanOrEqual(3 * 6);
-        const tightest = Math.min(...gaps.map((entry) => entry.gap));
-        expect(
-          tightest,
-          JSON.stringify(gaps.filter((entry) => entry.gap < 24)),
-        ).toBeGreaterThanOrEqual(24);
-        // The rows hold "1.2M" and "83.9 MB", the widest numbers to sit against their neighbours.
-        await expect(page.getByText("1.2M")).toBeVisible();
-        await expect(page.getByText("83.9 MB")).toBeVisible();
-      });
+  test.describe(theme, () => {
+    test.beforeEach(async ({ page }) => {
+      await signInAsAdmin(page);
+      await page.addInitScript(
+        ([key, value]) => {
+          if (window.localStorage.getItem(key ?? "") === null) {
+            window.localStorage.setItem(key ?? "", value ?? "");
+          }
+        },
+        [KEY, JSON.stringify({ theme, language: "en" })],
+      );
     });
-  }
+
+    test("axe finds nothing on the list, the open Sort by, a search with matches, no hits and an empty namespace", async ({
+      page,
+    }) => {
+      await openCatalog(page);
+      await expect(page.getByRole("row")).not.toHaveCount(0);
+      expect(await violations(page), "the list").toEqual([]);
+
+      await sortMenu(page, 0).click();
+      await expect(page.getByRole("listbox")).toBeVisible();
+      expect(await violations(page), "Sort by open").toEqual([]);
+      await page.keyboard.press("Escape");
+
+      await openCatalog(page, "/catalog?q=store_id");
+      await expect(page.getByText("Column store_id")).toBeVisible();
+      expect(await violations(page), "a search with matches").toEqual([]);
+
+      await openCatalog(page, "/catalog?q=nothing", page.getByText(/No table in .* matches/));
+      expect(await violations(page), "no hits").toEqual([]);
+
+      await openCatalog(
+        page,
+        "/catalog?env=prod&ns=bronze",
+        page.getByText("No tables in bronze yet", { exact: false }),
+      );
+      expect(await violations(page), "an empty namespace").toEqual([]);
+    });
+
+    test("axe finds nothing on the Dropped view, with the choice of an environment, and on the Undrop dialog", async ({
+      page,
+    }) => {
+      await openCatalog(page, "/catalog?view=dropped", page.getByText(/listed per environment/));
+      expect(await violations(page), "no environment chosen").toEqual([]);
+
+      await openCatalog(
+        page,
+        "/catalog?view=dropped&env=prod",
+        page.getByRole("region", { name: "Dropped tables" }),
+      );
+      await expect(page.getByText("No longer restorable")).toBeVisible();
+      expect(await violations(page), "the Dropped view").toEqual([]);
+
+      await page.route("**/tables/fact_returns/undrop", (route) =>
+        route.fulfill({
+          status: 409,
+          json: {
+            type: "AlreadyExistsError",
+            detail: "A table fact_returns already exists in gold.sales. Choose another name.",
+          },
+        }),
+      );
+      await page.getByRole("button", { name: "Undrop gold.sales.fact_returns" }).click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expect(page.getByRole("textbox", { name: "Restore as" })).toBeVisible();
+      expect(await violations(page), "the Undrop dialog").toEqual([]);
+
+      await page.keyboard.press("Escape");
+      await page.route("**/api/v1/environments/prod", (route) =>
+        route.fulfill({ json: { name: "prod", is_protected: true } }),
+      );
+      await page.reload();
+      await expect(page.getByRole("region", { name: "Dropped tables" })).toBeVisible();
+      await page.getByRole("button", { name: /^Undrop gold\.sales\.fact_returns/ }).click();
+      await expect(
+        page.getByRole("textbox", { name: /Why you break the protection of prod/ }),
+      ).toBeVisible();
+      expect(await violations(page), "the reason dialog of a protected environment").toEqual([]);
+    });
+
+    test("at least 24 px between the content of every two neighbouring cells", async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await openCatalog(page);
+      const body = page.locator("tbody tr");
+      await expect(body).toHaveCount(3);
+      // The visible content of a cell is its text and its pictures; what is hidden for the eye
+      // (the words for a screen reader) does not count. Each row gives the gaps between the
+      // cells that hold content.
+      const gaps = await page.evaluate(() => {
+        const out: { row: number; cell: number; gap: number }[] = [];
+        document.querySelectorAll("tbody tr").forEach((tr, row) => {
+          const spans = [...tr.querySelectorAll("td")].map((td) => {
+            const rects: DOMRect[] = [];
+            const walker = document.createTreeWalker(td, NodeFilter.SHOW_TEXT);
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+              const parent = node.parentElement;
+              if (
+                (node.textContent ?? "").trim() !== "" &&
+                parent?.closest(".visually-hidden") === null
+              ) {
+                const range = document.createRange();
+                range.selectNodeContents(node);
+                rects.push(range.getBoundingClientRect());
+              }
+            }
+            td.querySelectorAll("svg, img").forEach((picture) => {
+              rects.push(picture.getBoundingClientRect());
+            });
+            return rects.length === 0
+              ? null
+              : {
+                  left: Math.min(...rects.map((rect) => rect.left)),
+                  right: Math.max(...rects.map((rect) => rect.right)),
+                };
+          });
+          for (let cell = 0; cell + 1 < spans.length; cell += 1) {
+            const here = spans[cell];
+            const next = spans[cell + 1];
+            if (here && next) {
+              out.push({ row, cell, gap: next.left - here.right });
+            }
+          }
+        });
+        return out;
+      });
+      // Seven columns and the chevron: rows have cells with content in all but the last.
+      expect(gaps.length).toBeGreaterThanOrEqual(3 * 6);
+      const tightest = Math.min(...gaps.map((entry) => entry.gap));
+      expect(
+        tightest,
+        JSON.stringify(gaps.filter((entry) => entry.gap < 24)),
+      ).toBeGreaterThanOrEqual(24);
+      // The rows hold "1.2M" and "83.9 MB", the widest numbers to sit against their neighbours.
+      await expect(page.getByText("1.2M")).toBeVisible();
+      await expect(page.getByText("83.9 MB")).toBeVisible();
+    });
+  });
 }
 
 test.describe("the Catalog in real Chromium", () => {
@@ -367,22 +363,24 @@ test.describe("the Catalog in real Chromium", () => {
     }
   });
 
-  test("compact rows are lower than roomy rows", async ({ page }) => {
-    const heights: number[] = [];
+  test("one compact density: a stored roomy choice is ignored, the column heads are one row high", async ({
+    page,
+  }) => {
     await openCatalog(page);
-    for (const density of ["roomy", "compact"] as const) {
-      await page.evaluate(
-        ([key, value]) => {
-          window.localStorage.setItem(key ?? "", value ?? "");
-        },
-        [KEY, JSON.stringify({ theme: "light", density, language: "en" })],
-      );
-      await openCatalog(page);
-      await expect(page.locator("html")).toHaveAttribute("data-density", density);
-      const row = await page.locator("tbody tr").first().boundingBox();
-      heights.push(row?.height ?? 0);
-    }
-    expect(heights[1], heights.join(" against ")).toBeLessThan(heights[0] ?? 0);
+    await page.evaluate(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme: "light", density: "roomy", language: "en" })],
+    );
+    await openCatalog(page);
+    await expect(page.locator("html")).not.toHaveAttribute("data-density", /.*/);
+    const head = await page.locator("thead tr").first().boundingBox();
+    expect(Math.abs((head?.height ?? 0) - 32), `head ${String(head?.height)}`).toBeLessThan(1.5);
+    // A row with its quiet second line is two dense lines and its padding, lower than before.
+    const row = await page.locator("tbody tr").first().boundingBox();
+    expect(row?.height ?? 0).toBeGreaterThanOrEqual(31.5);
+    expect(row?.height ?? 0).toBeLessThan(48);
   });
 
   test("no horizontal scroll at 320 px; the list scrolls in its own focusable region", async ({
