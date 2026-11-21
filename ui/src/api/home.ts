@@ -8,6 +8,7 @@ import { api } from "./client";
 /** What a row of Needs your attention is about. */
 export type AttentionKind =
   | "run_failed"
+  | "deploy_failed"
   | "table_late"
   | "check_failed"
   | "query_failed"
@@ -15,17 +16,27 @@ export type AttentionKind =
   | "worker_lost";
 
 /** One row of Needs your attention. */
-interface AttentionItemOut {
+export interface AttentionItemOut {
   /** What happened. */
   readonly kind: AttentionKind;
   /** The environment's name; null for a recovery link and a worker. */
   readonly environment: string | null;
-  /** The object's name, such as a job, a dotted table name or a worker's host. */
+  /**
+   * The object's name, such as a job, the repository of a failed deploy, a dotted table name or
+   * a worker's host.
+   */
   readonly title: string;
-  /** The object the row opens: a run's, query's, link's or worker's id, or a table name. */
+  /**
+   * The object the row opens: a run's, deploy's, query's, link's or worker's id, or a table
+   * name; for a failure in a row, the newest.
+   */
   readonly ref: string;
-  /** When it happened. */
+  /** When it happened; for a failure in a row, when the newest ended. */
   readonly at: string;
+  /** How many times in a row the job, deploy or check failed; 1 for every other kind. */
+  readonly count: number;
+  /** When the first of those failures ended; null when `count` is 1. */
+  readonly since: string | null;
 }
 
 /** Needs your attention, as `GET /api/v1/home/attention` answers it. */

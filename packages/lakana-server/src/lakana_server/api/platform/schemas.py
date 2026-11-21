@@ -3357,21 +3357,29 @@ class AttentionItemOut(BaseModel):
     Parameters
     ----------
     kind
-        `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal
+        `run_failed` (a job's newest finished run failed), `deploy_failed` (a repository's
+        newest finished deploy or rollback there failed), `table_late` (its freshness signal
         fired), `check_failed` (a check's newest result failed or errored), `query_failed`
         (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two
-        only for administrators, failed runs for everyone who may read the environment.
+        only for administrators, failed runs and deploys for everyone who may read the
+        environment.
     environment
         The environment's name; `null` for a recovery link and a worker.
     title
-        The object's name: a job, a dotted table name, a check, `Query` and the first eight
-        characters of its id, the person a recovery link signs in, a worker's host. Never a
-        value, an error text or SQL.
+        The object's name: a job, the repository of a failed deploy, a dotted table name, a
+        check, `Query` and the first eight characters of its id, the person a recovery link
+        signs in, a worker's host. Never a value, an error text or SQL.
     ref
-        The object the row opens: a run's id (a failed run or check), a dotted table name, a
-        query's id, a recovery link's id or a worker's id.
+        The object the row opens: a run's id (a failed run or check), a deploy's id, a dotted
+        table name, a query's id, a recovery link's id or a worker's id. For a failure in a
+        row, the newest.
     at
-        When it happened.
+        When it happened; for a failure in a row, when the newest ended.
+    count
+        How many times in a row the job, deploy or check failed in the last seven days; 1 for
+        every other kind.
+    since
+        When the first of those failures ended; `null` when `count` is 1.
     """
 
     kind: AttentionKind
@@ -3379,6 +3387,8 @@ class AttentionItemOut(BaseModel):
     title: str
     ref: str
     at: datetime
+    count: int
+    since: datetime | None
 
 
 class AttentionOut(BaseModel):

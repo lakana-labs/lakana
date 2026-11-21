@@ -164,3 +164,9 @@
   font-size: var(--type-dense-size);
   line-height: var(--type-dense-line);
 }
+
+/* Needs your attention: a dashboard panel (shell/screen.css), as far from the next section as
+   the sections are from each other. */
+.home-attention {
+  margin: 0 0 var(--space-5);
+}
