@@ -173,10 +173,11 @@
     "attention": {
       "title": "Needs your attention",
       "subtitle": "Newest first · top {{count}}",
-      "region": "The newest failures",
+      "region": "Needs attention",
       "none": "Nothing needs your attention.",
       "showAll": "Show all {{count}}",
       "showAllMore": "Show all {{count}}+",
+      "showFewer": "Show fewer",
       "repeated": "Failed {{count}} times since {{since}}",
       "kinds": {
         "run_failed": "Run failed",

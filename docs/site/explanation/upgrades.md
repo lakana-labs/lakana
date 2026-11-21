@@ -242,7 +242,7 @@ Its `title` is the repository and its `ref` the deploy's id. Each row has two ne
 how many times in a row the job, deploy or check failed in those 7 days (1 for every other kind),
 and `since`, when the first of them ended (`null` when `count` is 1); `ref` and `at` are the
 newest failure's. A client that handles every kind must accept `deploy_failed`. Home shows the
-newest five rows and **Show all N** on to the failed runs. The route serves the web interface;
+newest five rows and **Show all N** for the rest, in place. The route serves the web interface;
 programs read the same facts from `GET /api/v1/runs/failed` and the deploys lists.
 
 ### An audit event shows its stored type

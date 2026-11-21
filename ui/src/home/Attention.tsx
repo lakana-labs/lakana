@@ -1,19 +1,16 @@
 /**
  * Home's Needs your attention: what failed, is late or waits for the person, as a dashboard
- * panel of the newest five rows that each open the failure, and a link on to every failed run.
+ * panel of the newest five rows that each open the failure, and Show all N for the rest.
  *
  * @packageDocumentation
  */
-import { type JSX, useId } from "react";
+import { type JSX, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
 
 import { type AttentionItemOut, type AttentionKind, getAttention } from "../api";
-import { runsTabPath } from "../jobs/paths";
 import { Loaded } from "../shell/Loaded";
 import { useWhen } from "../shell/useWhen";
-import { StatusGlyph } from "../status/StatusGlyph";
-import { PILL_TONES } from "../status/StatusLabel";
+import { StatusLabel } from "../status/StatusLabel";
 import type { StatusKind } from "../status/status";
 import { attentionPath } from "./links";
 import { ObjectRow, ObjectTable } from "./ObjectRows";
@@ -74,30 +71,6 @@ function useSince(): (iso: string) => string {
   };
 }
 
-/** Properties of {@link State}. */
-interface StateProps {
-  /** What the row reports. */
-  readonly kind: AttentionKind;
-}
-
-/**
- * A row's state as a small pill: the glyph of its kind and the kind in words.
- *
- * @param props - The kind.
- * @param props.kind - What the row reports.
- * @returns The pill.
- */
-function State({ kind }: StateProps): JSX.Element {
-  const { t } = useTranslation();
-  const glyph = GLYPHS[kind];
-  return (
-    <span className={`status-label pill pill-${PILL_TONES[glyph]}`}>
-      <StatusGlyph kind={glyph} size={12} />
-      <span>{t(`home.attention.kinds.${kind}`)}</span>
-    </span>
-  );
-}
-
 /** Properties of {@link Rows}. */
 interface RowsProps {
   /** Every row the server sent, newest first. */
@@ -108,7 +81,8 @@ interface RowsProps {
 
 /**
  * The newest five rows, each opening its failure; under them, when there are more, Show all N
- * on to the Runs tab filtered to failed runs.
+ * shows the rest in place and moves the focus to the first of them, and Show fewer hides them
+ * again with the focus left on the button.
  *
  * @param props - The rows and whether more were left out.
  * @param props.items - The rows.
@@ -119,6 +93,19 @@ function Rows({ items, truncated }: RowsProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const since = useSince();
+  const table = useId();
+  const [expanded, setExpanded] = useState(false);
+  const opened = useRef(false);
+  const toggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!opened.current) {
+      return;
+    }
+    opened.current = false;
+    const first = document.getElementById(table)?.querySelectorAll("tbody tr")[SHOWN];
+    (first?.querySelector<HTMLElement>("a") ?? toggle.current)?.focus();
+  }, [expanded, table]);
+  const shown = expanded ? items : items.slice(0, SHOWN);
   return (
     <>
       <div
@@ -129,8 +116,8 @@ function Rows({ items, truncated }: RowsProps): JSX.Element {
         // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
       >
-        <ObjectTable column={t("list.state")}>
-          {items.slice(0, SHOWN).map((item) => (
+        <ObjectTable column={t("list.state")} id={table}>
+          {shown.map((item) => (
             <ObjectRow
               key={`${item.kind} ${item.ref} ${item.title}`}
               to={attentionPath(item)}
@@ -141,18 +128,34 @@ function Rows({ items, truncated }: RowsProps): JSX.Element {
                   ? t("home.attention.repeated", { count: item.count, since: since(item.since) })
                   : when(item.at)
               }
-              aside={<State kind={item.kind} />}
+              aside={
+                <StatusLabel
+                  kind={GLYPHS[item.kind]}
+                  label={t(`home.attention.kinds.${item.kind}`)}
+                />
+              }
             />
           ))}
         </ObjectTable>
       </div>
       {items.length > SHOWN && (
         <p className="panel-foot">
-          <Link to={runsTabPath({ status: ["failed"] })}>
-            {t(truncated ? "home.attention.showAllMore" : "home.attention.showAll", {
-              count: items.length,
-            })}
-          </Link>
+          <button
+            ref={toggle}
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={table}
+            onClick={() => {
+              opened.current = !expanded;
+              setExpanded(!expanded);
+            }}
+          >
+            {expanded
+              ? t("home.attention.showFewer")
+              : t(truncated ? "home.attention.showAllMore" : "home.attention.showAll", {
+                  count: items.length,
+                })}
+          </button>
         </p>
       )}
     </>

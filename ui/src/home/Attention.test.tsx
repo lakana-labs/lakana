@@ -95,16 +95,17 @@ describe("Attention", () => {
     },
   );
 
-  it("shows the newest five, then Show all N to the failed runs", async () => {
+  it("shows the newest five, then Show all N that opens the rest in place", async () => {
     const { user, router } = renderShell("/", { routes: answering(ITEMS) });
 
     const list = await region();
     await within(list).findByRole("link", { name: "daily_sales" });
-    const names = within(list)
-      .getAllByRole("row")
-      .slice(1)
-      .map((row) => within(row).getAllByRole("link")[0]?.textContent);
-    expect(names).toEqual([
+    const names = (): (string | null | undefined)[] =>
+      within(list)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("link")[0]?.textContent);
+    expect(names()).toEqual([
       "daily_sales",
       "analytics",
       "gold.station_ranking",
@@ -112,13 +113,32 @@ describe("Attention", () => {
       "Query 3f9c2a1b",
     ]);
     expect(within(list).getByText("Newest first · top 5")).toHaveClass("panel-subtitle");
+    expect(within(list).getByRole("region", { name: "Needs attention" })).toBeVisible();
 
-    await user.click(within(list).getByRole("link", { name: "Show all 7" }));
-    await waitFor(() => {
-      expect(router.state.location.pathname + router.state.location.search).toBe(
-        "/jobs/runs?status=failed",
-      );
-    });
+    const toggle = within(list).getByRole("button", { name: "Show all 7" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+
+    expect(names()).toEqual([
+      "daily_sales",
+      "analytics",
+      "gold.station_ranking",
+      "not_null_station_id",
+      "Query 3f9c2a1b",
+      "sam",
+      "worker-2.internal",
+    ]);
+    expect(within(list).getByRole("link", { name: "sam" })).toHaveFocus();
+    const fewer = within(list).getByRole("button", { name: "Show fewer" });
+    expect(fewer).toHaveAttribute("aria-expanded", "true");
+    expect(fewer.getAttribute("aria-controls")).toBe(
+      within(list).getByRole("table").getAttribute("id"),
+    );
+    expect(router.state.location.pathname).toBe("/");
+
+    await user.click(fewer);
+    expect(names()).toHaveLength(5);
+    expect(within(list).getByRole("button", { name: "Show all 7" })).toHaveFocus();
   });
 
   it("offers no Show all for five rows or fewer", async () => {
@@ -126,16 +146,18 @@ describe("Attention", () => {
 
     const list = await region();
     await within(list).findByRole("link", { name: "daily_sales" });
-    expect(within(list).queryByRole("link", { name: /^Show all/ })).toBeNull();
+    expect(within(list).queryByRole("button", { name: /^Show all/ })).toBeNull();
   });
 
   it("says Show all 50+ when the server cut the list", async () => {
     const many = Array.from({ length: 50 }, (_, index) =>
       once("run_failed", "prod", `job_${String(index)}`, `run-${String(index)}`),
     );
-    renderShell("/", { routes: answering(many, true) });
+    const { user } = renderShell("/", { routes: answering(many, true) });
 
-    expect(await within(await region()).findByRole("link", { name: "Show all 50+" })).toBeVisible();
+    const list = await region();
+    await user.click(await within(list).findByRole("button", { name: "Show all 50+" }));
+    expect(within(list).getAllByRole("row")).toHaveLength(51);
   });
 
   it.each([

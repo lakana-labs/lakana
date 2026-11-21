@@ -135,3 +135,49 @@ def test_failures_in_a_row_are_counted_on_postgres(engine: Engine) -> None:
             since=now - timedelta(hours=30),
         ),
     ]
+
+
+def test_two_jobs_of_one_repository_count_their_own_failures_on_postgres(engine: Engine) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    with Session(engine) as session:
+        admin = person(session, "bo")
+        grant(session, admin, role=Role.ADMIN)
+        repo, version = deployed_job(session, "stage", "shop", "daily_orders")
+        plan = (
+            ("daily_orders", RunStatus.FAILED, 30),
+            ("weekly_ledger", RunStatus.FAILED, 25),
+            ("daily_orders", RunStatus.FAILED, 20),
+            ("weekly_ledger", RunStatus.SUCCEEDED, 15),
+            (None, RunStatus.FAILED, 12),
+            ("daily_orders", RunStatus.FAILED, 10),
+            ("weekly_ledger", RunStatus.FAILED, 5),
+        )
+        ids = {}
+        for job, status, hours in plan:
+            run = finished_run(
+                session,
+                repo,
+                version,
+                job=job,
+                status=status,
+                finished_at=now - timedelta(hours=hours),
+            )
+            ids[job] = str(run.id)
+        service = AttentionService(session, GrantAuthorization(session), lease_seconds=60)
+        items, _ = service.for_caller(admin)
+    stage = [item for item in items if item.environment == "stage"]
+    assert stage == [
+        AttentionItem(
+            "run_failed", "stage", "weekly_ledger", ids["weekly_ledger"], now - timedelta(hours=5)
+        ),
+        AttentionItem(
+            "run_failed",
+            "stage",
+            "daily_orders",
+            ids["daily_orders"],
+            now - timedelta(hours=10),
+            count=3,
+            since=now - timedelta(hours=30),
+        ),
+        AttentionItem("run_failed", "stage", "shop", ids[None], now - timedelta(hours=12)),
+    ]

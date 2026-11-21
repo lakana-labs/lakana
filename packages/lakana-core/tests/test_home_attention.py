@@ -953,3 +953,40 @@ def test_repeated_failures_of_a_check_are_one_row_with_their_count(
             "check_failed", "dev", name, str(newest.id), _ago(hours=1), count=3, since=_ago(hours=6)
         )
     ]
+
+
+def test_two_jobs_of_one_repository_count_their_own_failures(
+    svc: AttentionService, admin: PrincipalRef, session: Session
+) -> None:
+    """The streaks of objects that share a partition prefix never mix."""
+    repo, version = deployed_job(session, "dev", "shop", "nightly_ranking")
+    plan = (
+        ("nightly_ranking", RunStatus.FAILED, 30),
+        ("hourly_stock", RunStatus.FAILED, 25),
+        ("nightly_ranking", RunStatus.FAILED, 20),
+        ("hourly_stock", RunStatus.SUCCEEDED, 15),
+        (None, RunStatus.FAILED, 12),
+        ("nightly_ranking", RunStatus.FAILED, 10),
+        ("hourly_stock", RunStatus.FAILED, 5),
+    )
+    runs = {}
+    for job, status, hours in plan:
+        runs[job] = finished_run(
+            session, repo, version, job=job, status=status, finished_at=_ago(hours=hours)
+        )
+    items, _ = svc.for_caller(admin)
+    assert items == [
+        AttentionItem(
+            "run_failed", "dev", "hourly_stock", str(runs["hourly_stock"].id), _ago(hours=5)
+        ),
+        AttentionItem(
+            "run_failed",
+            "dev",
+            "nightly_ranking",
+            str(runs["nightly_ranking"].id),
+            _ago(hours=10),
+            count=3,
+            since=_ago(hours=30),
+        ),
+        AttentionItem("run_failed", "dev", "shop", str(runs[None].id), _ago(hours=12)),
+    ]

@@ -18,6 +18,8 @@ export interface ObjectTableProps {
   readonly column: string;
   /** The rows. */
   readonly children: ReactNode;
+  /** The table's id, for a control that changes its rows (`aria-controls`). */
+  readonly id?: string;
 }
 
 /**
@@ -26,12 +28,13 @@ export interface ObjectTableProps {
  * @param props - The column and the rows.
  * @param props.column - The heading of the second column.
  * @param props.children - The rows.
+ * @param props.id - The table's id, if a control refers to it.
  * @returns The table.
  */
-export function ObjectTable({ column, children }: ObjectTableProps): JSX.Element {
+export function ObjectTable({ column, children, id }: ObjectTableProps): JSX.Element {
   const { t } = useTranslation();
   return (
-    <table className="list">
+    <table className="list" id={id}>
       <ListHead columns={[t("list.name"), column]} hidden={[t("list.open")]} />
       <tbody>{children}</tbody>
     </table>

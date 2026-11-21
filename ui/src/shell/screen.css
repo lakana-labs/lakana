@@ -416,6 +416,27 @@ tr:hover .chevron {
   text-decoration: underline;
 }
 
+/* A foot that changes the panel in place (Show all N, Show fewer) is a button that reads as the
+   footer link does; its padding keeps the target above 24 px. */
+.panel-foot button {
+  padding: var(--space-1) 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel-foot button:hover {
+  color: var(--color-accent-hover);
+  text-decoration: underline;
+}
+
+.panel-foot button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 /* Facts as name and value: the name muted, both on one baseline, the names in one column. */
 .fact-list {
   display: grid;

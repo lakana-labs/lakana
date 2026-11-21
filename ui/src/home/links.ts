@@ -83,8 +83,8 @@ export function objectPath(
 
 /**
  * The path a row of Needs your attention opens: a failed run's or check's run, a failed
- * deploy's repository on the Deploys tab of its environment (where the newest deploy, the
- * failed one, comes first with why it failed), or the object's place.
+ * deploy's repository on the Deploys tab of its environment (where its deploys are listed,
+ * newest first, each failed one with why it failed), or the object's place.
  *
  * @param item - The row.
  * @returns The interface path; null when the object has no place.
