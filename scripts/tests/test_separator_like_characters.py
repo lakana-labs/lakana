@@ -9,8 +9,13 @@ of that branch writes its own. The test never reads the network.
 
 from __future__ import annotations
 
+import importlib.util
 import unicodedata
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 from lakana_core.identifiers import NAME_SYMBOLS as CORE_NAME_SYMBOLS
 from lakana_core.separator_like import (
@@ -18,7 +23,7 @@ from lakana_core.separator_like import (
     SEPARATOR_LIKE_CHARACTERS,
     UNICODE_VERSION,
 )
-from scripts.separator_like_characters import NAME_SYMBOLS, data_date, skeletons
+from scripts.separator_like_characters import NAME_SYMBOLS, data_date, main, skeletons
 
 _EXCERPT = Path(__file__).with_name("confusables-excerpt.txt")
 
@@ -102,3 +107,69 @@ def test_a_character_whose_skeleton_holds_no_separator_is_left_out() -> None:
 def test_the_script_and_the_core_agree_on_the_allowed_symbols() -> None:
     """The script repeats `NAME_SYMBOLS` so it runs without the package; the two must agree."""
     assert NAME_SYMBOLS == CORE_NAME_SYMBOLS
+
+
+def _load(path: Path) -> ModuleType:
+    """Import a generated module from a file.
+
+    Parameters
+    ----------
+    path
+        The module's file.
+
+    Returns
+    -------
+    ModuleType
+        The module.
+    """
+    spec = importlib.util.spec_from_file_location("written", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_main_writes_a_module_with_the_table(tmp_path: Path) -> None:
+    """The written module imports and holds the table, a backslash skeleton escaped."""
+    output = tmp_path / "separator_like.py"
+
+    assert main([str(_EXCERPT), "--output", str(output)]) == 0
+
+    written = _load(output)
+    assert written.SEPARATOR_LIKE_CHARACTERS == SEPARATOR_LIKE_CHARACTERS
+    assert written.CONFUSABLES_DATE == CONFUSABLES_DATE
+    assert unicodedata.unidata_version == written.UNICODE_VERSION
+    assert '"\\u4e36": "\\\\",' in output.read_text(encoding="utf-8")
+
+
+def test_check_passes_on_the_repositorys_module() -> None:
+    """``--check`` against the checked-in module and the excerpt finds no difference."""
+    assert main([str(_EXCERPT), "--check"]) == 0
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda text: text.replace('"\\u30ce": "/",', ""),
+        lambda text: text.replace(
+            'CONFUSABLES_DATE: Final[str] = "', 'CONFUSABLES_DATE: Final[str] = "1'
+        ),
+    ],
+    ids=["an entry missing", "another date"],
+)
+def test_check_fails_when_the_module_differs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], change: Callable[[str], str]
+) -> None:
+    """A module without an entry, or of another date, fails ``--check`` with the way to fix it."""
+    output = tmp_path / "separator_like.py"
+    main([str(_EXCERPT), "--output", str(output)])
+    output.write_text(change(output.read_text(encoding="utf-8")), encoding="utf-8")
+
+    assert main([str(_EXCERPT), "--check", "--output", str(output)]) == 1
+    assert "differs; run scripts/separator_like_characters.py" in capsys.readouterr().out
+
+
+def test_a_file_without_a_date_line_is_refused() -> None:
+    """The date pins the table, so a file without one cannot make it."""
+    with pytest.raises(ValueError, match="no '# Date:' line"):
+        data_date(["# confusables.txt", "A4F8 ;\t002E ;\tMA\t#"])

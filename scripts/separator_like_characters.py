@@ -203,20 +203,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("confusables", type=Path, help="a local copy of confusables.txt")
     parser.add_argument("--check", action="store_true", help="fail when the module differs")
+    parser.add_argument(
+        "--output", type=Path, default=MODULE, help=f"the module to write or check ({MODULE})"
+    )
     args = parser.parse_args(argv)
     lines = args.confusables.read_text(encoding="utf-8-sig").splitlines()
     table, date = skeletons(lines), data_date(lines)
     if args.check:
-        spec = importlib.util.spec_from_file_location("separator_like", MODULE)
+        spec = importlib.util.spec_from_file_location("separator_like", args.output)
         assert spec is not None and spec.loader is not None
         written = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(written)
         if table != written.SEPARATOR_LIKE_CHARACTERS or date != written.CONFUSABLES_DATE:
-            print(f"{MODULE} differs; run scripts/separator_like_characters.py to regenerate it")
+            print(
+                f"{args.output} differs; run scripts/separator_like_characters.py to regenerate it"
+            )
             return 1
         return 0
     text = render(table, date)
-    MODULE.write_text(text, encoding="utf-8")
+    args.output.write_text(text, encoding="utf-8")
     return 0
 
 
