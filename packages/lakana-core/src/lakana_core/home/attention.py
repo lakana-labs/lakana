@@ -2,7 +2,11 @@
 
 Everyone sees the jobs whose newest finished run failed in the environments they may read
 (`READ_ENVIRONMENT`), by the one rule the failed runs list also uses
-(`lakana_core.runs.failed`), so Home and that list never disagree. An administrator
+(`lakana_core.runs.failed`), so Home and that list never disagree, and there too the
+repositories whose newest finished deploy or rollback failed (a dry run changes nothing, so it
+counts neither way). A job, a deploy or a check that failed several times in a row is one row:
+its newest failure, with how many there were and when the first ended
+(`lakana_core.runs.failed.failure_streaks`). An administrator
 (`holds_instance_admin`), who may read every environment, also sees the late tables, the checks
 whose newest result failed or errored, the open recovery links, the lost workers and their own
 failed ad-hoc queries. Anyone else also sees the late tables and failed checks among the tables
@@ -25,7 +29,7 @@ import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Literal, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -49,18 +53,22 @@ from lakana_core.models import (
     LIVE_ENVIRONMENT,
     CheckOutcome,
     CheckResult,
+    DeployKind,
+    DeployRun,
+    DeployStatus,
     Environment,
     Namespace,
     Principal,
     QueryRun,
     QueryRunStatus,
     RecentOpen,
+    Repository,
     Table,
     TableHealthSignal,
     TableRead,
     Worker,
 )
-from lakana_core.runs.failed import failed_runs
+from lakana_core.runs.failed import failed_runs, failure_streaks, run_environments
 from lakana_core.runs.hidden_checks import ReferenceCheckFilter
 from lakana_core.runs.instance_status import replaced_by_restart
 from lakana_core.runs.workers import alive_ids
@@ -75,11 +83,19 @@ CANDIDATE_LIMIT = 200
 """The most rows read from one source before filtering."""
 
 AttentionKind = Literal[
-    "run_failed", "table_late", "check_failed", "query_failed", "recovery_link_open", "worker_lost"
+    "run_failed",
+    "deploy_failed",
+    "table_late",
+    "check_failed",
+    "query_failed",
+    "recovery_link_open",
+    "worker_lost",
 ]
 """What a row reports."""
 
 _CHECK_FAILED = (CheckOutcome.FAILED, CheckOutcome.ERRORED)
+
+_DEPLOY_FINISHED = (DeployStatus.SUCCEEDED, DeployStatus.FAILED)
 
 
 @dataclass(frozen=True)
@@ -93,15 +109,21 @@ class AttentionItem:
     environment
         The environment's name; `None` for a recovery link and a worker.
     title
-        The object's name: a job (or the repository, for a run of the whole repository), a
-        dotted table name, a check, ``Query <first 8 of id>``, the person a recovery link
-        signs in, a worker's host.
+        The object's name: a job (or the repository, for a run of the whole repository), the
+        repository of a failed deploy, a dotted table name, a check, ``Query <first 8 of id>``,
+        the person a recovery link signs in, a worker's host.
     ref
-        The object the row opens: a run's id (for a failed run and a failed check), a dotted
-        table name, a query's id, a recovery link's id, a worker's id.
+        The object the row opens: a run's id (for a failed run and a failed check), a deploy's
+        id, a dotted table name, a query's id, a recovery link's id, a worker's id. For a
+        repeated failure, the newest.
     at
-        When it happened: the run or check ended, the table was found late, the query was
-        submitted, the link was issued, the worker last reported.
+        When it happened: the run, deploy or check ended, the table was found late, the query
+        was submitted, the link was issued, the worker last reported.
+    count
+        How many times in a row the job, deploy or check failed within the window; 1 for
+        everything else.
+    since
+        When the first of those failures ended; `None` when `count` is 1.
     """
 
     kind: AttentionKind
@@ -109,6 +131,44 @@ class AttentionItem:
     title: str
     ref: str
     at: datetime
+    count: int = 1
+    since: datetime | None = None
+
+
+def _repeated(
+    kind: AttentionKind,
+    environment: str,
+    title: str,
+    ref: str,
+    at: datetime,
+    count: int,
+    since: datetime | None,
+) -> AttentionItem:
+    """Build the row of a failure that may have happened several times in a row.
+
+    Parameters
+    ----------
+    kind
+        What it reports.
+    environment
+        The environment's name.
+    title
+        The object's name.
+    ref
+        The newest failure.
+    at
+        When the newest failure ended.
+    count
+        How many failures in a row.
+    since
+        When the first of them ended.
+
+    Returns
+    -------
+    AttentionItem
+        The row; `since` only for more than one failure.
+    """
+    return AttentionItem(kind, environment, title, ref, at, count, since if count > 1 else None)
 
 
 @dataclass(frozen=True)
@@ -171,9 +231,11 @@ class AttentionService:
         self._asked = {}
         now = db_now(self._session)
         since = now - ATTENTION_WINDOW
+        environments = run_environments(self._session, self._authz, p)
         if holds_instance_admin(self._session, p.id):
             items = [
-                *self._failed_runs(p, since),
+                *self._failed_runs(p, since, environments),
+                *self._failed_deploys(since, environments),
                 *self._late_tables(None),
                 *self._failed_checks(p, since, None),
                 *self._recovery_links(now),
@@ -183,7 +245,8 @@ class AttentionService:
         else:
             tables = self._readable_tables(p, since)
             items = [
-                *self._failed_runs(p, since),
+                *self._failed_runs(p, since, environments),
+                *self._failed_deploys(since, environments),
                 *self._late_tables(tables),
                 *self._failed_checks(p, since, tables),
                 *self._failed_queries(p, since),
@@ -399,28 +462,23 @@ class AttentionService:
         Yields
         ------
         AttentionItem
-            A ``check_failed`` row per check; its ref is the run that checked.
+            A ``check_failed`` row per check; its ref is the run that checked last, its count
+            the failed or errored results in a row.
         """
         if tables is not None and not tables:
             return
-        ranked = (
-            select(
-                CheckResult.id,
-                func.row_number()
-                .over(
-                    partition_by=(CheckResult.environment_id, CheckResult.check_name),
-                    order_by=(CheckResult.finished_at.desc(), CheckResult.id.desc()),
-                )
-                .label("position"),
-            )
-            .where(CheckResult.finished_at >= since)
-            .subquery()
+        streaks = failure_streaks(
+            CheckResult.id,
+            CheckResult.finished_at,
+            CheckResult.outcome.in_(_CHECK_FAILED),
+            (CheckResult.environment_id, CheckResult.check_name),
+            (CheckResult.finished_at >= since,),
         )
         query = (
-            select(CheckResult, Environment.name)
-            .join(ranked, ranked.c.id == CheckResult.id)
+            select(CheckResult, Environment.name, streaks.c.failures, streaks.c.first_failed_at)
+            .join(streaks, streaks.c.id == CheckResult.id)
             .join(Environment, Environment.id == CheckResult.environment_id)
-            .where(ranked.c.position == 1, CheckResult.outcome.in_(_CHECK_FAILED), LIVE_ENVIRONMENT)
+            .where(LIVE_ENVIRONMENT)
         )
         if tables is not None:
             query = query.where(CheckResult.table_id.in_(list(tables)))
@@ -430,7 +488,7 @@ class AttentionService:
             )
         ).all()
         withheld: dict[str, ReferenceCheckFilter] = {}
-        for result, env in rows:
+        for result, env, failures, first in rows:
             if tables is not None:
                 if not self._permits(p, Action.READ_ENVIRONMENT, env):
                     continue
@@ -438,11 +496,19 @@ class AttentionService:
                     withheld[env] = ReferenceCheckFilter(self._session, self._authz, p, env)
                 if withheld[env].hides(result.run_id, result.check_name, result.generated):
                     continue
-            yield AttentionItem(
-                "check_failed", env, result.check_name, str(result.run_id), result.finished_at
+            yield _repeated(
+                "check_failed",
+                env,
+                result.check_name,
+                str(result.run_id),
+                result.finished_at,
+                failures,
+                first,
             )
 
-    def _failed_runs(self, p: PrincipalRef, since: datetime) -> Iterator[AttentionItem]:
+    def _failed_runs(
+        self, p: PrincipalRef, since: datetime, environments: dict[uuid.UUID, str]
+    ) -> Iterator[AttentionItem]:
         """List the jobs whose newest finished run within the window failed.
 
         The rule is `lakana_core.runs.failed.failed_runs`, shared with the failed runs list, in
@@ -454,19 +520,89 @@ class AttentionService:
             The caller.
         since
             The window's start.
+        environments
+            The environments the caller may read (`run_environments`), by id.
 
         Yields
         ------
         AttentionItem
-            A ``run_failed`` row per job (or per repository, for its runs of no job).
+            A ``run_failed`` row per job (or per repository, for its runs of no job), with its
+            failed runs in a row.
         """
-        for run in failed_runs(self._session, self._authz, p, since=since):
-            yield AttentionItem(
+        for run in failed_runs(
+            self._session, self._authz, p, since=since, environment_ids=environments
+        ):
+            yield _repeated(
                 "run_failed",
                 run.environment,
                 run.job or run.repository,
                 str(run.run_id),
                 run.finished_at,
+                run.failures,
+                run.first_failed_at,
+            )
+
+    def _failed_deploys(
+        self, since: datetime, environments: dict[uuid.UUID, str]
+    ) -> Iterator[AttentionItem]:
+        """List the repositories whose newest finished deploy or rollback within the window failed.
+
+        A dry run deploys nothing, so it neither fails a repository nor clears it. Only the
+        environments the caller may read count, as the deploy history needs `READ_ENVIRONMENT`.
+
+        Parameters
+        ----------
+        since
+            The window's start.
+        environments
+            The environments the caller may read (`run_environments`), by id.
+
+        Yields
+        ------
+        AttentionItem
+            A ``deploy_failed`` row per repository and environment, titled with the repository,
+            its ref the newest failed deploy, with its failed deploys in a row.
+        """
+        if not environments:
+            return
+        streaks = failure_streaks(
+            DeployRun.id,
+            DeployRun.finished_at,
+            DeployRun.status == DeployStatus.FAILED,
+            (DeployRun.environment_id, DeployRun.repository_id),
+            (
+                DeployRun.finished_at >= since,
+                DeployRun.status.in_(_DEPLOY_FINISHED),
+                DeployRun.kind != DeployKind.DRY_RUN,
+                DeployRun.environment_id.in_(list(environments)),
+            ),
+        )
+        rows = self._session.execute(
+            select(
+                DeployRun.id,
+                Environment.name,
+                Repository.name,
+                DeployRun.finished_at,
+                streaks.c.failures,
+                streaks.c.first_failed_at,
+            )
+            .join(streaks, streaks.c.id == DeployRun.id)
+            .join(Repository, Repository.id == DeployRun.repository_id)
+            .join(Environment, Environment.id == DeployRun.environment_id)
+            .where(LIVE_ENVIRONMENT)
+            .order_by(DeployRun.finished_at.desc(), DeployRun.id.desc())
+            .limit(CANDIDATE_LIMIT)
+        ).all()
+        for deploy_id, env, repository, finished_at, failures, first in rows:
+            # The window's condition holds only for a deploy with an end.
+            yield _repeated(
+                "deploy_failed",
+                env,
+                repository,
+                str(deploy_id),
+                cast("datetime", finished_at),
+                failures,
+                first,
             )
 
     def _failed_queries(self, p: PrincipalRef, since: datetime) -> Iterator[AttentionItem]:

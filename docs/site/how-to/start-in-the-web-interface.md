@@ -122,12 +122,15 @@ The order is the same for everyone; what you may do changes what is inside the b
 2. **Get started**, while it has an open step and you have not hidden it. See
    [Get started](#get-started).
 3. **Status**: whether the instance works. See [Healthy, Degraded, Down](#healthy-degraded-down).
-4. **Needs your attention**: what failed, is late or waits for you, newest first. Everyone sees
-   the jobs whose last run failed in the environments they may read. An administrator also sees
-   late tables, failed checks, open recovery links and workers that are down. Everyone else also
-   sees failed checks and late tables among the tables they read or opened recently, and their
-   own failed queries. With nothing to report it says
-   "Nothing needs your attention."
+4. **Needs your attention**: what failed, is late or waits for you, newest first, five at most.
+   Everyone sees the jobs whose last run failed and the repositories whose last deploy failed, in
+   the environments they may read. An administrator also sees late tables, failed checks, open
+   recovery links and workers that are down. Everyone else also sees failed checks and late
+   tables among the tables they read or opened recently, and their own failed queries. A job, a
+   deploy or a check that failed several times in a row is one row, such as "nightly_ranking:
+   Failed 3 times since Tuesday", and opens the newest failure. With more than five rows,
+   **Show all N** opens the Runs tab under Jobs, filtered to failed runs. With nothing to report
+   it says "Nothing needs your attention."
 5. **Recently opened**: the tables you opened, kept on the server so the list follows you to
    another browser. A table's row opens its page, a query's its run on the Queries screen, and a
    job's or a run's its page under Jobs.
@@ -136,7 +139,8 @@ The order is the same for everyone; what you may do changes what is inside the b
 
 A row opens its object when you click anywhere on it. A table opens its page, and a query its run
 on the Queries screen; a table whose environment or namespace is not known shows its name without
-a link. A job opens its page under Jobs, and a failed run the run's page.
+a link. A job opens its page under Jobs, a failed run or check the run's page, and a failed deploy
+its repository on the Deploys tab, where the failed deploy comes first with why it failed.
 
 Home reads the status every 30 seconds and Needs your attention every minute, and only while
 its browser tab is visible. These reads do not count as activity, so a Home left open does not

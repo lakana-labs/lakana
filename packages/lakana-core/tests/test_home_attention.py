@@ -13,6 +13,7 @@ from home_test_helpers import (
     check_result,
     deployed_job,
     environment,
+    finished_deploy,
     finished_run,
     fired_freshness,
     grant,
@@ -39,6 +40,8 @@ from lakana_core.home.attention import (
 from lakana_core.models import (
     AuditEvent,
     CheckOutcome,
+    DeployKind,
+    DeployStatus,
     Environment,
     Grant,
     QueryRunStatus,
@@ -775,3 +778,178 @@ def test_attention_lists_the_newest_open_recovery_links(
     )
     session.commit()
     assert [item.ref for item in svc.for_caller(admin)[0]] == [str(newer)]
+
+
+def test_repeated_failures_of_a_job_are_one_row_with_their_count(
+    svc: AttentionService, admin: PrincipalRef, session: Session
+) -> None:
+    repo, version = deployed_job(session, "dev", "shop", "nightly_ranking")
+    for hours, status in ((50, RunStatus.FAILED), (40, RunStatus.SUCCEEDED)):
+        finished_run(
+            session,
+            repo,
+            version,
+            job="nightly_ranking",
+            status=status,
+            finished_at=_ago(hours=hours),
+        )
+    for hours in (30, 20):
+        finished_run(
+            session,
+            repo,
+            version,
+            job="nightly_ranking",
+            status=RunStatus.FAILED,
+            finished_at=_ago(hours=hours),
+        )
+    newest = finished_run(
+        session,
+        repo,
+        version,
+        job="nightly_ranking",
+        status=RunStatus.FAILED,
+        finished_at=_ago(hours=10),
+    )
+    items, _ = svc.for_caller(admin)
+    assert items == [
+        AttentionItem(
+            "run_failed",
+            "dev",
+            "nightly_ranking",
+            str(newest.id),
+            _ago(hours=10),
+            count=3,
+            since=_ago(hours=30),
+        )
+    ]
+
+
+def test_a_failure_streak_counts_only_within_the_window(
+    svc: AttentionService, admin: PrincipalRef, session: Session
+) -> None:
+    repo, version = deployed_job(session, "dev", "shop", "nightly")
+    for days in (9, 8):
+        finished_run(
+            session,
+            repo,
+            version,
+            job="nightly",
+            status=RunStatus.FAILED,
+            finished_at=_ago(days=days),
+        )
+    newest = finished_run(
+        session, repo, version, job="nightly", status=RunStatus.FAILED, finished_at=_ago(hours=1)
+    )
+    items, _ = svc.for_caller(admin)
+    assert [(item.ref, item.count, item.since) for item in items] == [(str(newest.id), 1, None)]
+
+
+def test_a_failed_deploy_is_a_row_that_names_its_repository_and_deploy(
+    svc: AttentionService, admin: PrincipalRef, session: Session
+) -> None:
+    repo, version = deployed_job(session, "prod", "analytics", "nightly")
+    finished_deploy(session, repo, version, status=DeployStatus.SUCCEEDED, finished_at=_ago(days=2))
+    finished_deploy(session, repo, version, status=DeployStatus.FAILED, finished_at=_ago(hours=5))
+    newest = finished_deploy(
+        session, repo, version, status=DeployStatus.FAILED, finished_at=_ago(hours=3)
+    )
+    finished_deploy(
+        session,
+        repo,
+        version,
+        status=DeployStatus.SUCCEEDED,
+        finished_at=_ago(hours=1),
+        kind=DeployKind.DRY_RUN,
+    )
+    items, _ = svc.for_caller(admin)
+    assert items == [
+        AttentionItem(
+            "deploy_failed",
+            "prod",
+            "analytics",
+            str(newest.id),
+            _ago(hours=3),
+            count=2,
+            since=_ago(hours=5),
+        )
+    ]
+
+
+def test_a_deploy_that_succeeded_after_a_failure_hides_it(
+    svc: AttentionService, admin: PrincipalRef, session: Session
+) -> None:
+    repo, version = deployed_job(session, "dev", "shop", "nightly")
+    finished_deploy(session, repo, version, status=DeployStatus.FAILED, finished_at=_ago(hours=3))
+    finished_deploy(
+        session,
+        repo,
+        version,
+        status=DeployStatus.SUCCEEDED,
+        finished_at=_ago(hours=1),
+        kind=DeployKind.ROLLBACK,
+    )
+    old, elsewhere = deployed_job(session, "prod", "books", "nightly")
+    finished_deploy(session, old, elsewhere, status=DeployStatus.FAILED, finished_at=_ago(days=8))
+    dry, preview = deployed_job(session, "test", "maps", "nightly")
+    finished_deploy(
+        session,
+        dry,
+        preview,
+        status=DeployStatus.FAILED,
+        finished_at=_ago(hours=1),
+        kind=DeployKind.DRY_RUN,
+    )
+    assert svc.for_caller(admin) == ([], False)
+
+
+def test_a_reader_sees_failed_deploys_only_where_they_may_read_the_environment(
+    svc: AttentionService, session: Session
+) -> None:
+    reader = person(session, "rita")
+    grant(session, reader, action=Action.READ_ENVIRONMENT, environment_name="dev")
+    repo, version = deployed_job(session, "dev", "shop", "nightly")
+    seen = finished_deploy(
+        session, repo, version, status=DeployStatus.FAILED, finished_at=_ago(hours=1)
+    )
+    other, elsewhere = deployed_job(session, "prod", "analytics", "nightly")
+    finished_deploy(
+        session, other, elsewhere, status=DeployStatus.FAILED, finished_at=_ago(hours=1)
+    )
+    assert svc.for_caller(reader) == (
+        [AttentionItem("deploy_failed", "dev", "shop", str(seen.id), _ago(hours=1))],
+        False,
+    )
+
+
+def test_repeated_failures_of_a_check_are_one_row_with_their_count(
+    svc: AttentionService, admin: PrincipalRef, session: Session
+) -> None:
+    _, table_id = ensure_table(session, "dev", "gold", "station_ranking")
+    repo, version = deployed_job(session, "dev", "shop", "nightly")
+    name = "gold.station_ranking/not_null_station_id"
+    newest = None
+    for hours, outcome in (
+        (9, CheckOutcome.PASSED),
+        (6, CheckOutcome.FAILED),
+        (3, CheckOutcome.ERRORED),
+        (1, CheckOutcome.FAILED),
+    ):
+        run = finished_run(
+            session,
+            repo,
+            version,
+            job="nightly",
+            status=RunStatus.SUCCEEDED,
+            finished_at=_ago(hours=hours),
+        )
+        check_result(
+            session, run, table_id, name=name, outcome=outcome, finished_at=_ago(hours=hours)
+        )
+        newest = run
+    assert newest is not None
+    items, _ = svc.for_caller(admin)
+    assert items == [
+        AttentionItem(
+            "check_failed", "dev", name, str(newest.id), _ago(hours=1), count=3, since=_ago(hours=6)
+        )
+    ]

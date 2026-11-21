@@ -4,9 +4,9 @@
  *
  * @packageDocumentation
  */
-import type { AttentionKind } from "../api";
+import type { AttentionItemOut, AttentionKind } from "../api";
 import { splitDotted, tablePath } from "../catalog/paths";
-import { jobPath, jobRunPath, splitJobRef } from "../jobs/paths";
+import { deploysPath, jobPath, jobRunPath, splitJobRef } from "../jobs/paths";
 import { runPath } from "../queries/paths";
 
 /** Where the release notes of each version are. */
@@ -46,8 +46,11 @@ const PLACES: Record<ObjectKind, (environment: string | null, ref: string) => st
   recovery_link: () => "/settings/sign-in/recovery-links",
 };
 
-/** The object each kind of Needs your attention row opens. */
-export const ATTENTION_OBJECTS: Record<AttentionKind, ObjectKind> = {
+/**
+ * The object each kind of Needs your attention row opens; a failed deploy has no page of its
+ * own and opens its repository's deploys instead (see {@link attentionPath}).
+ */
+const ATTENTION_OBJECTS: Record<Exclude<AttentionKind, "deploy_failed">, ObjectKind> = {
   run_failed: "run",
   table_late: "table",
   check_failed: "check",
@@ -76,6 +79,21 @@ export function objectPath(
   ref: string,
 ): string | null {
   return PLACES[kind](environment, ref);
+}
+
+/**
+ * The path a row of Needs your attention opens: a failed run's or check's run, a failed
+ * deploy's repository on the Deploys tab of its environment (where the newest deploy, the
+ * failed one, comes first with why it failed), or the object's place.
+ *
+ * @param item - The row.
+ * @returns The interface path; null when the object has no place.
+ */
+export function attentionPath(item: AttentionItemOut): string | null {
+  if (item.kind === "deploy_failed") {
+    return deploysPath(item.environment, item.title);
+  }
+  return objectPath(ATTENTION_OBJECTS[item.kind], item.environment, item.ref);
 }
 
 /**
