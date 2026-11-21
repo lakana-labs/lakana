@@ -227,6 +227,9 @@ environments:
   deploy through a CI token whose trust rule does not opt in (`start_on_deploy_jobs`). [Start a job after each deploy](../how-to/run-a-job-on-a-schedule.md#start-a-job-after-each-deploy)
   has the rest.
 - A job name follows the rules of a segment of an asset name: no dot, no slash, not empty.
+  A new job name may not start or end with a space; a job that the environment's current deployed version
+  already has under such a name keeps deploying until you rename it (after a rollback or a deploy
+  that dropped it, the name counts as new) ([upgrade note](../explanation/upgrades.md#a-job-name-with-a-space-at-either-end-breaking)).
 - An environment can change a job the file declares, with the same keys (`on_deploy` too); the rest
   of the job is kept, and `schedule: null` or `notify: null` removes its schedule or its
   notification there.
