@@ -17,12 +17,20 @@ _ASSETS = [
 
 
 def _issues(
-    text: str, assets: list[ParsedAsset] | None = None, environment: str = "prod"
+    text: str,
+    assets: list[ParsedAsset] | None = None,
+    environment: str = "prod",
+    deployed: frozenset[str] = frozenset(),
 ) -> list[ProjectIssue]:
     assets = _ASSETS if assets is None else assets
     config = parse_project_config(text).resolved_for(environment)
     return job_issues(
-        config, assets, build_graph(assets), config_text=text, environment=environment
+        config,
+        assets,
+        build_graph(assets),
+        config_text=text,
+        environment=environment,
+        deployed_jobs=deployed,
     )
 
 
@@ -67,3 +75,31 @@ def test_the_selection_is_checked_as_the_environment_resolves_it() -> None:
     (issue,) = _issues(text, environment="dev")
     assert issue.line == 7
     assert "'nope.*'" in issue.message
+
+
+_SPACED = 'jobs:\n  "nightly ":\n    select: ["gold.*"]\n'
+
+
+def test_a_new_job_name_with_an_outer_space_is_refused_with_the_sentence_of_other_names() -> None:
+    (issue,) = _issues(_SPACED)
+    assert (issue.path, issue.line) == ("lakana.yaml", 2)
+    assert issue.message == (
+        "Job name 'nightly ' ends with a space, so it would look like 'nightly' in every list "
+        "but be a different name. Use 'nightly' instead, or another name without a space at "
+        "either end."
+    )
+
+
+def test_a_job_name_with_an_outer_space_that_the_environment_deployed_keeps_deploying() -> None:
+    assert _issues(_SPACED, deployed=frozenset({"nightly "})) == []
+
+
+def test_a_renamed_job_with_an_outer_space_is_refused() -> None:
+    text = 'jobs:\n  " weekly":\n    select: ["gold.*"]\n'
+    (issue,) = _issues(text, deployed=frozenset({"nightly "}))
+    assert "Job name ' weekly' starts with a space" in issue.message
+
+
+def test_a_deployed_job_can_be_renamed_to_a_name_without_the_space() -> None:
+    text = 'jobs:\n  nightly:\n    select: ["gold.*"]\n'
+    assert _issues(text, deployed=frozenset({"nightly "})) == []
