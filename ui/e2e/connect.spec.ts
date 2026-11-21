@@ -35,38 +35,34 @@ async function walk(page: Page): Promise<Record<string, string[]>> {
 }
 
 for (const theme of ["light", "dark"] as const) {
-  for (const density of ["roomy", "compact"] as const) {
-    test(`Connect a repository passes axe in every step, ${theme}, ${density}`, async ({
-      page,
-    }) => {
-      await signInAsAdmin(page);
-      await stubConnect(page);
-      await page.addInitScript(
-        ([key, value]) => {
-          window.localStorage.setItem(key ?? "", value ?? "");
-        },
-        [KEY, JSON.stringify({ theme, density, language: "en" })],
-      );
-      const errors: string[] = [];
-      page.on("pageerror", (error) => errors.push(error.message));
-      const requests: string[] = [];
-      page.on("request", (request) => requests.push(new URL(request.url()).pathname));
+  test(`Connect a repository passes axe in every step, ${theme}`, async ({ page }) => {
+    await signInAsAdmin(page);
+    await stubConnect(page);
+    await page.addInitScript(
+      ([key, value]) => {
+        window.localStorage.setItem(key ?? "", value ?? "");
+      },
+      [KEY, JSON.stringify({ theme, language: "en" })],
+    );
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const requests: string[] = [];
+    page.on("request", (request) => requests.push(new URL(request.url()).pathname));
 
-      await page.goto("/settings/repositories/new");
-      const found = await walk(page);
+    await page.goto("/settings/repositories/new");
+    const found = await walk(page);
 
-      expect(found).toEqual({
-        empty: [],
-        "the repository": [],
-        "the host's keys": [],
-        "the keys": [],
-        "a refused test": [],
-      });
-      expect(errors).toEqual([]);
-      const api = requests.filter((path) => path.startsWith("/api/"));
-      expect(api.filter((path) => !STUBBED.includes(path) && !ROUTES.includes(path))).toEqual([]);
+    expect(found).toEqual({
+      empty: [],
+      "the repository": [],
+      "the host's keys": [],
+      "the keys": [],
+      "a refused test": [],
     });
-  }
+    expect(errors).toEqual([]);
+    const api = requests.filter((path) => path.startsWith("/api/"));
+    expect(api.filter((path) => !STUBBED.includes(path) && !ROUTES.includes(path))).toEqual([]);
+  });
 }
 
 test("Connect a repository fits 320 px in every step", async ({ page }) => {

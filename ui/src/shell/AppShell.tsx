@@ -43,6 +43,7 @@ import { InterfaceStateProvider } from "./InterfaceState";
 import { MeContext } from "./me";
 import { isRedirect } from "./redirect";
 import { Sidebar } from "./Sidebar";
+import { TruncationTip } from "./TruncationTip";
 
 /**
  * Resolves a link's address for React Aria's links: one inside the interface through the router,
@@ -67,6 +68,22 @@ export interface AppShellProps {
   readonly access: AreaAccess;
   /** What the person may do, for the screens that change with it. */
   readonly me: AccessOut;
+}
+
+/**
+ * Whether a key press lands where text is typed: an input, a text area, a select or editable
+ * content (the SQL editor's, inside its shadow root).
+ *
+ * @param target - The innermost element of the key press.
+ * @returns True when it does.
+ */
+function isTextEntry(target: EventTarget | undefined): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
 }
 
 /**
@@ -144,6 +161,32 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
     };
   }, []);
 
+  // Alt+Left goes back, as in the browser, which a headless or embedded browser may not do on its
+  // own; doing it here also makes it one behaviour everywhere. A text field keeps it (it moves the
+  // cursor there on a Mac), and so does a widget that used the key itself (defaultPrevented: this
+  // listener bubbles, after theirs). Prevented here, so the browser does not go back a second time.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (
+        event.defaultPrevented ||
+        event.key !== "ArrowLeft" ||
+        !event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        isTextEntry(event.composedPath()[0])
+      ) {
+        return;
+      }
+      event.preventDefault();
+      void navigate(-1);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [navigate]);
+
   return (
     <MeContext value={me}>
       <InterfaceStateProvider name={me.name}>
@@ -182,6 +225,7 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
                 onOpenChange={setPaletteOpen}
                 onShortcuts={openShortcuts}
               />
+              <TruncationTip />
               {shortcutsOpen && (
                 <Suspense fallback={null}>
                   <ShortcutsDialog

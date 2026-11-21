@@ -1,6 +1,6 @@
 /* Home: sections under plain headings, separated by space and hairlines, never cards. */
 .home-section {
-  margin: 0 0 var(--space-6);
+  margin: 0 0 var(--space-5);
 }
 
 .home-section h2 {
@@ -72,8 +72,8 @@
 }
 
 .home-update-hide {
-  width: 32px;
-  min-height: 32px;
+  width: var(--control-height);
+  min-height: var(--control-height);
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius-control);

@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { shortcutLabel } from "./shortcut";
 
 /** The shortcuts, in the order a person meets them; each `shortcuts.<id>` in `en.json`. */
-const SHORTCUTS = ["search", "escape", "tab", "enter"] as const;
+const SHORTCUTS = ["search", "escape", "tab", "enter", "back"] as const;
 
 /** Properties of {@link ShortcutsDialog}. */
 export interface ShortcutsDialogProps {

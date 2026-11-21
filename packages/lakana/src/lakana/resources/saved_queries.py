@@ -63,9 +63,9 @@ class SavedQueries:
         """List one page of the saved queries you see, by name.
 
         You see your own, the shared ones (``everyone``) of an environment where you may submit
-        queries, and, as an instance administrator, every one; an administrator sees the SQL of
-        someone else's private query only with `READ_QUERY_TEXT`. Without `environment`, the
-        list spans every environment you may query.
+        queries, and, as an instance administrator, every one. The items carry no SQL (their
+        `sql` is `None`); `get` reads it. Without `environment`, the list spans every environment
+        you may query.
 
         Parameters
         ----------
