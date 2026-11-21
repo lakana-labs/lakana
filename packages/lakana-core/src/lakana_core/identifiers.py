@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final
 
 from lakana_core.errors import ValidationError
+from lakana_core.punctuation_like import PUNCTUATION_LIKE_CHARACTERS
 
 NAMESPACE_SEPARATOR: Final[str] = "\x1f"
 """ASCII unit separator, matching the Iceberg REST namespace encoding."""
@@ -387,14 +388,6 @@ MAX_COMBINING_MARKS: Final[int] = 4
 """The most combining marks a letter of a new name may carry (UTS #39, section 5.4, suggests
 limiting a run of them); five or more overprint in most fonts."""
 
-DOT_LIKE_DIGITS: Final[frozenset[str]] = frozenset({"\u0660", "\u06f0"})
-"""The decimal digits Unicode's `confusables.txt` (version of 2026-08-06) maps to a
-punctuation mark: U+0660 ARABIC-INDIC DIGIT ZERO and U+06F0 EXTENDED ARABIC-INDIC DIGIT ZERO,
-both confusable with ``.`` FULL STOP. They are drawn as a dot on the baseline, so
-``sales\u0660daily`` reads as the dotted path ``sales.daily``. No other ``Nd`` has a skeleton
-that holds anything but letters, marks and digits. A new namespace, table or view name may not
-hold them (`character_outside_name_allowlist`); a column name may."""
-
 
 class LookAlike(Enum):
     """What `look_alike_character` found; each has its own sentence in a refusal."""
@@ -533,13 +526,18 @@ def look_alike_character(name: str) -> tuple[int, str, LookAlike] | None:
     return None
 
 
-def refuse_look_alike_characters(name: str, *, what: str) -> None:
+def refuse_look_alike_characters(
+    name: str, *, what: str, composed_check: Callable[[str], None] | None = None
+) -> None:
     """Refuse a new namespace, table, view or column name that could look like another (#609).
 
     The name may hold no character `look_alike_character` finds, and must be in Unicode NFC,
     since an NFD spelling looks the same but compares unequal. `check_new_name` and
     `check_new_column_name` call this last, so the earlier checks keep their own messages and
-    the NFC spelling it suggests holds no character they refuse. A stored name is never judged.
+    the earlier checks keep their own messages. Before the NFC spelling is suggested it is run
+    through `composed_check`, so a spelling that would be refused (``a`` + U+0301 + U+0323 +
+    U+0301 composes to a repeated mark) is never suggested: its refusal is given instead. A
+    stored name is never judged.
 
     Parameters
     ----------
@@ -547,6 +545,8 @@ def refuse_look_alike_characters(name: str, *, what: str) -> None:
         The new name.
     what
         Noun describing it, such as ``"Table name"`` or ``"Column name"``.
+    composed_check
+        Every rule the caller applies, run on the NFC spelling; this check alone when `None`.
 
     Raises
     ------
@@ -562,9 +562,13 @@ def refuse_look_alike_characters(name: str, *, what: str) -> None:
             f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, "
             f"{_LOOK_ALIKE_SENTENCES[problem]}"
         )
-    # Checked second, so the composed spelling it suggests holds only allowed characters.
     if not unicodedata.is_normalized("NFC", name):
         composed = unicodedata.normalize("NFC", name)
+        # The spelling to suggest must pass every rule; when it does not, its refusal stands.
+        if composed_check is None:
+            refuse_look_alike_characters(composed, what=what)
+        else:
+            composed_check(composed)
         raise ValidationError(
             f"{what} '{shown(name)}' is not in Unicode NFC, the composed spelling, so it looks "
             f"like '{shown(composed)}' but is a different name. Use '{shown(composed)}' instead."
@@ -575,9 +579,11 @@ def character_outside_name_allowlist(name: str) -> tuple[int, str] | None:
     """Find the first character a new namespace, table or view name may not hold.
 
     Such a name may hold letters (``L*``), combining marks (``M*``), decimal digits (``Nd``)
-    but `DOT_LIKE_DIGITS`, and `NAME_SYMBOLS`. A character `look_alike_character` judges
-    whatever comes around it (drawn as nothing, a space, unassigned, private use) is left to
-    it, which names it more exactly.
+    and `NAME_SYMBOLS`, but none of `PUNCTUATION_LIKE_CHARACTERS` (generated from Unicode's
+    `confusables.txt`: U+A4F8 LISU LETTER TONE MYA TI and U+0660 ARABIC-INDIC DIGIT ZERO look
+    like ``.``, so ``sales`` + U+A4F8 + ``daily`` would read as the dotted path
+    ``sales.daily``). A character `look_alike_character` judges whatever comes around it (drawn
+    as nothing, a space, unassigned, private use) is left to it, which names it more exactly.
 
     Parameters
     ----------
@@ -591,7 +597,7 @@ def character_outside_name_allowlist(name: str) -> tuple[int, str] | None:
     """
     for position, character in enumerate(name, start=1):
         category = unicodedata.category(character)
-        if character in DOT_LIKE_DIGITS:
+        if character in PUNCTUATION_LIKE_CHARACTERS:
             return position, character
         if (
             category.startswith(("L", "M"))
@@ -627,11 +633,11 @@ def refuse_characters_outside_name_allowlist(name: str, *, what: str) -> None:
     if found is None:
         return
     position, character = found
-    if character in DOT_LIKE_DIGITS:
+    if character in PUNCTUATION_LIKE_CHARACTERS:
         raise ValidationError(
-            f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, a "
-            "digit zero drawn as a dot on the baseline, so the name would read as a dotted path "
-            "of two names. Use '0' or another name."
+            f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, which "
+            f"looks like '{shown(PUNCTUATION_LIKE_CHARACTERS[character])}', so the name could read "
+            "as another one or as a dotted path. Use another character, such as '_'."
         )
     raise ValidationError(
         f"{what} '{shown(name)}' holds U+{ord(character):04X} at character {position}, which is "
@@ -659,7 +665,7 @@ def check_new_column_name(name: str) -> None:
     """
     refuse_hidden_characters(name, what="Column name")
     refuse_outer_whitespace(name, what="Column name")
-    refuse_look_alike_characters(name, what="Column name")
+    refuse_look_alike_characters(name, what="Column name", composed_check=check_new_column_name)
 
 
 def check_new_name(component: str, *, what: str) -> None:
@@ -683,7 +689,9 @@ def check_new_name(component: str, *, what: str) -> None:
     refuse_hidden_characters(component, what=what)
     refuse_outer_whitespace(component, what=what)
     refuse_characters_outside_name_allowlist(component, what=what)
-    refuse_look_alike_characters(component, what=what)
+    refuse_look_alike_characters(
+        component, what=what, composed_check=lambda composed: check_new_name(composed, what=what)
+    )
 
 
 @dataclass(frozen=True)

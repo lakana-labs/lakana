@@ -456,8 +456,10 @@ A new namespace, table or view name may now hold only letters of any script, dec
 to its letters. A symbol or punctuation mark such as `$`, `#` or `(` is refused, for example
 `Table name 'price$' holds U+0024 at character 6, which is neither a letter nor a decimal digit. A
 new namespace, table or view name may hold only letters, decimal digits, '_', '-' and the plain
-space.` So are the Arabic-Indic zeros U+0660 and U+06F0, which are drawn as a dot, so a name with
-one would read as two. Column names keep their symbols: `count(*)` and `price ($)` work as before.
+space.` So is a letter, accent or digit that Unicode lists as looking like punctuation, such as
+the Lisu tone letter U+A4F8 or the Arabic-Indic zero U+0660 (both look like `.`, so a name with
+one would read as two), the Japanese `ノ` (`/`), the Devanagari visarga (`:`), `ð` and many
+Canadian syllabics. Column names keep their symbols: `count(*)` and `price ($)` work as before.
 
 Every new name, a column's included, must also be in Unicode NFC, the composed spelling: `cafe`
 followed by U+0301 COMBINING ACUTE ACCENT looks like `café` but is another name, and the refusal

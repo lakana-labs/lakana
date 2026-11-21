@@ -33,7 +33,6 @@ from lakana_core.catalog.metadata import apply_updates
 from lakana_core.catalog.service import CatalogService
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import (
-    DOT_LIKE_DIGITS,
     MAX_COMBINING_MARKS,
     NAME_SYMBOLS,
     NamespacePath,
@@ -259,7 +258,8 @@ def test_every_way_of_creating_a_name_refuses_a_look_alike(
         (_NFD_CAFE, "NFC"),
         ("a\u3164", "U\\+3164"),
         ("n$", "U\\+0024.*neither a letter nor a decimal digit"),
-        ("sales\u0660daily", "U\\+0660.*drawn as a dot"),
+        ("sales\u0660daily", "U\\+0660.*dotted path"),
+        ("sales\ua4f8daily", "U\\+A4F8.*dotted path"),
     ):
         new = _ref(f"gold.{bad}")
         attempts = [
@@ -369,23 +369,48 @@ def test_an_added_schema_refuses_a_new_look_alike_column_and_keeps_a_stored_one(
         apply_updates(base, [AddSchemaUpdate(schema_=added)])
 
 
-@pytest.mark.parametrize("digit", ["\u0660", "\u06f0"])
-def test_a_digit_drawn_as_a_dot_is_refused_in_a_table_name_but_not_in_a_column(digit: str) -> None:
-    """``sales`` + U+0660 + ``daily`` reads as the dotted path ``sales.daily``."""
-    assert digit in DOT_LIKE_DIGITS
+@pytest.mark.parametrize(
+    ("character", "code", "looks_like"),
+    [
+        ("\ua4f8", "U+A4F8", "."),  # Lisu letter tone mya ti, a letter (Lm)
+        ("\U0001d16d", "U+1D16D", "."),  # musical symbol combining augmentation dot, a mark
+        ("\u0660", "U+0660", "."),  # Arabic-Indic digit zero
+        ("\u06f0", "U+06F0", "."),  # extended Arabic-Indic digit zero
+        ("\ua4f9", "U+A4F9", ","),  # Lisu letter tone na po
+        ("\u30ce", "U+30CE", "/"),  # katakana letter no
+    ],
+)
+def test_a_character_that_looks_like_punctuation_is_refused_in_a_table_name_only(
+    character: str, code: str, looks_like: str
+) -> None:
+    """``sales`` + U+A4F8 + ``daily`` reads as ``sales.daily``; a column name may hold it."""
+    name = f"sales{character}daily"
     with pytest.raises(ValidationError) as refused:
-        check_new_name(f"sales{digit}daily", what="Table name")
+        check_new_name(name, what="Table name")
     message = str(refused.value)
-    assert f"holds U+{ord(digit):04X} at character 6" in message
-    assert "drawn as a dot on the baseline" in message
-    check_new_column_name(f"sales{digit}daily")
+    assert f"holds {code} at character 6, which looks like '{looks_like}'" in message
+    assert "could read as another one or as a dotted path" in message
+    # Visible, so a column, which shows only inside its table, may hold it.
+    check_new_column_name(name)
 
 
-def test_the_dot_like_digits_are_every_digit_unicode_confuses_with_punctuation() -> None:
-    """The two zeros; every other decimal digit of the running Unicode stays a digit."""
-    digits = [chr(code) for code in range(0x110000) if unicodedata.category(chr(code)) == "Nd"]
-    refused = [digit for digit in digits if character_outside_name_allowlist(digit) is not None]
-    assert refused == sorted(DOT_LIKE_DIGITS)
+def test_a_suggested_nfc_spelling_is_judged_before_it_is_suggested() -> None:
+    """``a`` + U+0301 + U+0323 + U+0301 composes to a letter with the acute twice: refused."""
+    name = "a\u0301\u0323\u0301"
+    assert look_alike_character(name) is None
+    for check in (
+        lambda: check_new_name(name, what="Table name"),
+        lambda: check_new_column_name(name),
+    ):
+        with pytest.raises(ValidationError) as refused:
+            check()
+        message = str(refused.value)
+        assert "the same combining mark a second time in a row" in message
+        assert "Use '" not in message
+    # A table-name rule on the composed form is applied too: U+212B composes to a letter, but a
+    # spelling that composes to a refused character would be refused under its own rule.
+    with pytest.raises(ValidationError, match="Use '\\\\xc5' instead"):
+        check_new_name("\u212b", what="Table name")
 
 
 @pytest.mark.parametrize(

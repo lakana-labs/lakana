@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 
 import type { QueryRunStatus, ResultPageOut } from "../../api";
 import { pageCells, ResultGrid, ResultNotes } from "../../shell/ResultGrid";
-import { markedText, VisibleText } from "../../shell/VisibleText";
+import { markedName, markedText, VisibleText } from "../../shell/VisibleText";
 import { StatusGlyph } from "../../status/StatusGlyph";
 import { useTableData } from "./TableContext";
 import { statusGlyph, usePreview } from "./usePreview";
@@ -135,7 +135,7 @@ export function PreviewTab(): JSX.Element {
             <ResultGrid
               page={shown}
               cells={cells}
-              label={t("table.preview.label", { name: markedText(ref.name) })}
+              label={t("table.preview.label", { name: markedName(ref.name) })}
             />
           )}
         </>

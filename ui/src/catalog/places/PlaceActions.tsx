@@ -9,7 +9,7 @@ import { Button, Menu, MenuItem, MenuTrigger, Popover, Separator } from "react-a
 import { useTranslation } from "react-i18next";
 import type { PlaceAction } from "../../api";
 import { useFocusAfter } from "../../shell/useFocusAfter";
-import { markedText } from "../../shell/VisibleText";
+import { markedName } from "../../shell/VisibleText";
 import type { CatalogNode } from "../tree";
 import { DeleteNamespaceDialog } from "./DeleteNamespaceDialog";
 import { NewNamespaceDialog } from "./NewNamespaceDialog";
@@ -135,7 +135,7 @@ export default function PlaceActions({
           className="button"
           ref={actionsButton}
           aria-label={t("catalog.places.menu.name", {
-            place: markedText(namespace ?? environment),
+            place: markedName(namespace ?? environment),
           })}
         >
           {t("catalog.places.menu.button")} <span aria-hidden="true">▾</span>

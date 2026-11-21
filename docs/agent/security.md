@@ -196,7 +196,7 @@ visible symbols. In order:
 | `refuse_percent_in_new_name`: no `%` | yes | no |
 | `refuse_hidden_characters` (#593): no `Cc`, `Cf`, `Cs`, `Zl`, `Zp` | yes | yes |
 | `refuse_outer_whitespace` (#652): no space at either end | yes | yes |
-| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) but `DOT_LIKE_DIGITS`, and `NAME_SYMBOLS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
+| `refuse_characters_outside_name_allowlist` (#609): only letters (`L*`), combining marks (`M*`), decimal digits (`Nd`) and `NAME_SYMBOLS`, but none of `PUNCTUATION_LIKE_CHARACTERS` (`_`, `-` U+002D, the plain space U+0020) | yes | no |
 | `refuse_look_alike_characters` (#609): see below; then NFC | yes | yes |
 
 `look_alike_character` refuses, each with its own sentence (`LookAlike`):
@@ -224,15 +224,30 @@ visible symbols. In order:
 The allowlist leaves to `look_alike_character` what it judges whatever comes around it (drawn as
 nothing, spaces, `Cn`, `Co`), which names it more exactly.
 
-**NFC** (`unicodedata.is_normalized`) is checked last, after every character check, so the
-suggested form never holds a character a check refuses (U+2000 EN QUAD normalises to U+2002,
-which is refused as a space).
+**NFC** (`unicodedata.is_normalized`) is checked last, after every character check, and the NFC
+form is run through every rule of the caller (`composed_check`: `check_new_name` or
+`check_new_column_name`) before it is suggested. When it would be refused, that refusal is given
+instead, so a suggestion is always a name that would be accepted (`a` + U+0301 + U+0323 + U+0301
+composes to `ạ` with the acute twice and is refused as a repeated mark).
 
-**Dot-like digits** (`DOT_LIKE_DIGITS`): U+0660 ARABIC-INDIC DIGIT ZERO and U+06F0 EXTENDED
-ARABIC-INDIC DIGIT ZERO are drawn as a dot on the baseline, so `sales٠daily` would read as the
-dotted path `sales.daily`. They are the only `Nd` whose skeleton in Unicode's `confusables.txt`
-(2026-08-06) is a punctuation mark (`.`); every other digit's skeleton is letters, marks or
-digits. Refused in namespace, table and view names, allowed in a column name.
+**Punctuation-like characters** (`PUNCTUATION_LIKE_CHARACTERS`, `lakana_core/punctuation_like.py`):
+every letter, mark or digit the allowlist would accept whose skeleton in Unicode's
+`confusables.txt` holds a character the allowlist refuses. U+A4F8 LISU LETTER TONE MYA TI
+(`Lm`), U+1D16D MUSICAL SYMBOL COMBINING AUGMENTATION DOT (`Mc`) and the Arabic-Indic zeros
+U+0660 and U+06F0 look like `.`, so `sales` + U+A4F8 + `daily` would read as the dotted path
+`sales.daily`; U+30CE KATAKANA LETTER NO looks like `/`, the Devanagari visarga like `:`. The
+table is generated, never edited: `scripts/punctuation_like_characters.py CONFUSABLES_TXT`
+writes it from a local copy of the file (version 18.0.0 of 2026-08-06, 307 characters, with
+Python 3.14's Unicode 16 categories; a skeleton character that Python does not know counts as
+allowed). `scripts/tests/test_punctuation_like_characters.py` regenerates it from the checked-in
+excerpt `scripts/tests/confusables-excerpt.txt` (every line behind an entry, and lines that must
+make none) and compares, without the network. Refused in namespace, table and view names with
+their own sentence (`… which looks like '.', so the name could read as another one or as a
+dotted path`); allowed in a column name, since they are visible and a column is shown only
+inside its table. The rule is broad by design and refuses real letters in table names:
+207 Canadian syllabics (the ones with a dot, such as `ᐧ`-forms), `ð` (`∂̵`), `ŀ` (`l·`),
+`ʔ` (`?`), `ʼ` and `ʻ` (`'`), the visarga `ः` (`:`), Japanese `ノ` (`/`) and Chinese `正`
+(a counting rod). Such a word needs another spelling in a table name; a column name keeps it.
 
 **Why marks are allowed:** NFC composes what it can (`e` + U+0301 is `é`), but Devanagari, Arabic,
 Thai and others write vowels and viramas as marks that have no precomposed form, so refusing
@@ -259,7 +274,25 @@ pass; `ResolvedStorage.table_location(stored_name=True)` still applies
 `validate_path_component`. This opens no way to a new bad name: only a name the catalog already
 held passes. A rebuild of a view or an external table (no tombstone) or with an undo period of 0
 days, whose stored name `check_new_name` refuses, is refused before anything is dropped
-(`REBUILD_STORED_NAME`, naming the problem and the way out: rename the asset's file).
+(`REBUILD_STORED_NAME`, naming the problem and the way out: rename the asset's file). An Iceberg
+table whose drop turns out to leave no tombstone (`drop_row` returns `None`: two legacy tables
+sharing a directory) is refused the same way inside the rebuild's transaction, which rolls the
+drop back.
+
+**The same existence leak on create.** A person with `CREATE_TABLE` in a namespace who creates a
+table under a name today's rules refuse learns whether a dropped table of exactly that name has a
+tombstone there: the create succeeds instead of answering 422. Accepted, like the deploy's: it
+tells only that a name refused today existed at that path within the undo period, and the name
+is in the request, so nothing about other tables is learnt. That person can also take the name
+before its owner undrops the table, as with any dropped name: the undrop is then refused with
+`silver.c* cannot be restored as 'c*': a table of that name exists in silver now. Restore it
+under another name with lakana table undrop silver.c* --as NEW_NAME …`, and `--as` gives a name
+that meets today's rules (pin:
+`test_a_dropped_name_taken_again_makes_its_undrop_say_so_and_offer_another_name`). The boundary
+of the rule is pinned by
+`test_the_tombstone_rule_lets_only_the_dropped_tables_own_spelling_and_columns_through`: an
+extra new look-alike column, the same name in another namespace, and another spelling (a case
+change, an added mark) are all judged as new.
 
 **Deploy** (`DeployService._new_name_issues`, in `validate_against_environment`): an asset whose
 table does not exist and whose name no tombstone holds has its table name and each namespace
@@ -274,8 +307,10 @@ default-ignorable, U+2800, U+16FE4, U+1D159, every space but U+0020, `Cn`, `Co`,
 `INVISIBLE`) only where a namespace, table, view or column name is shown (the `name` mode of
 `VisibleText` and `VisibleTspan`, `markedName`): the Catalog's tree, list places, dropped and
 expiring views, breadcrumbs, page titles, the table header and page, columns, references,
-lineage, the dialogs that name a table, the result grid's column names and the editor's
-completion and hover. Free text (descriptions, labels, snippets, reasons, display names,
+lineage, the orphans and table lists, the namespace dialogs, notes and actions, the access and
+health tabs' column names, row-filter and mask columns, the task rows' assets, the dialogs that
+name a table, the preview, the result grid's column names and the editor's completion and
+hover. Free text (descriptions, labels, snippets, reasons, display names,
 expressions, messages) and file names keep `INVISIBLE`, so French spacing, a pasted no-break
 space and emoji with U+FE0F show as they are, and `Monthly revenue` with a no-break space still
 saves as `Monthly-revenue-….csv`.
@@ -285,15 +320,14 @@ saves as `Monthly-revenue-….csv`.
 - Letters of different scripts that look alike (Latin `o` and Cyrillic `о`) and compatibility
   forms (fullwidth `ｏ`): both are letters in NFC. Names are compared exactly, so such twins are
   two names; the web interface does not mark them.
-- Non-Latin decimal digits (Devanagari `१`, Arabic-Indic `١`, which looks like `1` or `l`), but
-  the two dot-like zeros.
+- Non-Latin decimal digits (Devanagari `१`, Arabic-Indic `١`, which looks like `1` or `l`) and
+  every letter whose skeleton is letters and digits only: `PUNCTUATION_LIKE_CHARACTERS` covers
+  only skeletons with a refused character.
 - A single mark on a letter that reads as another letter: `pri̇ce` (`i` + U+0307 COMBINING DOT
   ABOVE) reads as `price` in most fonts.
 - The CLI escapes only the #593 set, so it shows a stored name holding U+3164 or U+2800 as blank,
   and a no-break space as a space.
-- A rebuild of an Iceberg table whose drop leaves no tombstone (two legacy tables sharing a
-  directory), and a stored name inside a nested column of a re-created table, are still judged
-  as new.
+- A stored name inside a nested column of a re-created table is still judged as new.
 - Other names (repositories, groups, tokens, secrets, package indexes, artifacts) keep the #593
   and #652 checks only.
 

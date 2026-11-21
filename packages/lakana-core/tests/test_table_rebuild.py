@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
@@ -44,7 +46,14 @@ from lakana_core.catalog.rebuild import (
     TableRebuild,
 )
 from lakana_core.catalog.service import CatalogService
-from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
+from lakana_core.catalog.tombstones import drop_row
+from lakana_core.errors import (
+    AlreadyExistsError,
+    ConflictError,
+    NotFoundError,
+    PermissionDenied,
+    ValidationError,
+)
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.identifiers import NamespacePath, TableRef
@@ -454,6 +463,51 @@ def test_a_dropped_tables_stored_name_and_columns_may_be_created_again(
         catalog.create_table(principal, TableRef("dev", _SILVER, "fresh"), schema=schema)
 
 
+def test_the_tombstone_rule_lets_only_the_dropped_tables_own_spelling_and_columns_through(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """An extra look-alike column, another namespace, another spelling: all judged as new."""
+    catalog = _catalog(session, tmp_path)
+    gold = NamespacePath.from_parts(["gold"])
+    starred = _stored_starred(session, catalog, principal)
+    catalog.drop_table(principal, starred)
+    plain = NestedField(1, "id", LongType(), required=False)
+
+    with pytest.raises(ValidationError, match="Column name 'x\\\\u3164' holds U\\+3164"):
+        catalog.create_table(
+            principal,
+            starred,
+            schema=Schema(plain, NestedField(2, "x\u3164", LongType(), required=False)),
+        )
+    with pytest.raises(ValidationError, match="U\\+002A"):
+        catalog.create_table(principal, TableRef("dev", gold, "c*"), schema=Schema(plain))
+    for spelling in ("C*", "c*\u0301"):
+        with pytest.raises(ValidationError, match="U\\+002A"):
+            catalog.create_table(
+                principal, TableRef("dev", _SILVER, spelling), schema=Schema(plain)
+            )
+    assert catalog.create_table(principal, starred, schema=Schema(plain)).ref == starred
+
+
+def test_a_dropped_name_taken_again_makes_its_undrop_say_so_and_offer_another_name(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """Whoever re-creates `c*` first keeps it; the undrop is refused with the way out."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    catalog.drop_table(principal, starred)
+    catalog.create_table(principal, starred, schema=_minimal_schema())
+
+    with pytest.raises(AlreadyExistsError) as refused:
+        catalog.undrop_table(principal, starred)
+
+    assert str(refused.value).startswith(
+        "silver.c* cannot be restored as 'c*': a table of that name exists in silver now. "
+        "Restore it under another name with `lakana table undrop silver.c* --as NEW_NAME`"
+    )
+    assert catalog.undrop_table(principal, starred, new_name="c_restored").ref.name == "c_restored"
+
+
 def test_a_rebuild_of_a_view_with_a_stored_symbol_name_drops_nothing(
     session: Session, tmp_path: Path, principal: PrincipalRef
 ) -> None:
@@ -476,6 +530,63 @@ def test_a_rebuild_of_a_view_with_a_stored_symbol_name_drops_nothing(
     assert "U+0024" in message
     assert "Rename the asset's file in git and deploy" in message
     assert session.scalars(select(Table.id).where(Table.name == "v$")).one() == view_id
+    assert session.scalars(select(Run)).all() == []
+
+
+def test_a_rebuild_whose_drop_keeps_no_tombstone_of_a_stored_name_rolls_the_drop_back(
+    session: Session, tmp_path: Path, principal: PrincipalRef
+) -> None:
+    """A table whose drop leaves no tombstone cannot keep `c*`: refused, and nothing changes."""
+    catalog = _catalog(session, tmp_path)
+    starred = _stored_starred(session, catalog, principal)
+    starred_id = catalog.load_table(principal, starred).uuid
+    deploy_assets(session, "dev", "analytics", {"silver.c*": {}})
+
+    def no_tombstone(
+        session: Session,
+        actor: PrincipalRef | None,
+        ref: TableRef,
+        row: Table,
+        *,
+        now: datetime,
+        purge_after: datetime,
+        reason: str,
+        detail: Mapping[str, object] | None = None,
+    ) -> None:
+        """Drop as the real code does, then report that no tombstone was left.
+
+        Parameters
+        ----------
+        session
+            The drop's session.
+        actor
+            Who drops.
+        ref
+            The table.
+        row
+            Its row.
+        now
+            The drop's time.
+        purge_after
+            When the files may go.
+        reason
+            Why.
+        detail
+            More facts for the audit event.
+        """
+        drop_row(
+            session, actor, ref, row, now=now, purge_after=purge_after, reason=reason, detail=detail
+        )
+
+    with (
+        mock.patch("lakana_core.catalog.rebuild.drop_row", no_tombstone),
+        pytest.raises(ConflictError) as refused,
+    ):
+        _rebuild(session, catalog).rebuild(principal, starred, reason=_REASON)
+
+    assert "a table whose drop keeps no record of it" in str(refused.value)
+    assert "U+002A" in str(refused.value)
+    _assert_intact(session, starred_id)
     assert session.scalars(select(Run)).all() == []
 
 

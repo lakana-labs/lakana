@@ -162,7 +162,9 @@ class TableRebuild:
         period, and `CatalogService._prepare_table` lets a name a tombstone holds pass the rules
         for new names. A view or an external table leaves none, and with an undo period of 0
         days the tombstone may be purged before the run, so a stored name such as ``v$`` that
-        today's rules refuse is refused here, before anything is dropped.
+        today's rules refuse is refused here, before anything is dropped. A table whose drop
+        turns out to leave no tombstone is refused after the drop, which the rebuild then rolls
+        back.
 
         Parameters
         ----------
@@ -179,14 +181,32 @@ class TableRebuild:
         keeps_its_name = kind is TableType.ICEBERG and self._undo_days > 0
         if keeps_its_name:
             return
+        what = {TableType.VIEW: "a view", TableType.EXTERNAL: "an external table"}.get(
+            kind, "a table dropped without an undo period"
+        )
+        self._refuse_a_new_name(ref, what)
+
+    @staticmethod
+    def _refuse_a_new_name(ref: TableRef, kind: str) -> None:
+        """Refuse the rebuild when today's rules refuse `ref`'s name as a new one.
+
+        Parameters
+        ----------
+        ref
+            The table.
+        kind
+            What it is, for the sentence, such as ``"a view"``.
+
+        Raises
+        ------
+        ConflictError
+            `REBUILD_STORED_NAME`, naming what is wrong with the name.
+        """
         try:
             check_new_name(ref.name, what="Table name")
         except ValidationError as exc:
-            what = {TableType.VIEW: "a view", TableType.EXTERNAL: "an external table"}.get(
-                kind, "a table dropped without an undo period"
-            )
             raise ConflictError(
-                REBUILD_STORED_NAME.format(name=ref.dotted(), kind=what, problem=str(exc))
+                REBUILD_STORED_NAME.format(name=ref.dotted(), kind=kind, problem=str(exc))
             ) from None
 
     def rebuild(self, p: PrincipalRef, ref: TableRef, *, reason: str) -> RebuildResult:
@@ -294,7 +314,7 @@ class TableRebuild:
         try:
             row = self._catalog._lock_table_row(ref, table_id)
             now = db_now(self._session)
-            drop_row(
+            kept = drop_row(
                 self._session,
                 p,
                 ref,
@@ -304,6 +324,10 @@ class TableRebuild:
                 reason="rebuild",
                 detail={"rebuild_reason": reason},
             )
+            if kept is None:
+                # No tombstone (a table sharing an old location): the run would take the name
+                # as a new one, so a name today's rules refuse rolls the drop back.
+                self._refuse_a_new_name(ref, "a table whose drop keeps no record of it")
             # No repository and no path in the event: the audit log is read with
             # `READ_AUDIT_LOG` alone, and a file is named only to a caller who may read the
             # table. The run's own `RUN_STARTED` names the repository and the project version.
