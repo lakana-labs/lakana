@@ -41,6 +41,25 @@ describe("useLivePoll", () => {
     expect(load).toHaveBeenCalledTimes(3);
   });
 
+  it("is busy for its first read and for one after reload, not for the calm polls", async () => {
+    const load = vi.fn(() => Promise.resolve("a"));
+    const { result } = renderHook(() => useLivePoll(load, { everyMs: 1000, active: true }));
+    expect(result.current.busy).toBe(true);
+    await tick(0);
+    expect(result.current.busy).toBe(false);
+
+    await tick(1000);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(result.current.busy).toBe(false);
+
+    act(() => {
+      result.current.reload();
+    });
+    expect(result.current.busy).toBe(true);
+    await tick(0);
+    expect(result.current.busy).toBe(false);
+  });
+
   it("does not overlap a slow read with the next one", async () => {
     let finish: (value: string) => void = () => undefined;
     const load = vi.fn(

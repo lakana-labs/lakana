@@ -124,7 +124,8 @@ for (const theme of ["light", "dark"] as const) {
       expect(await violations(page), "the Delete dialog").toEqual([]);
       await press(page, confirm.getByRole("button", { name: "Delete the row filter" }));
       await expect(confirm).toBeHidden();
-      await expect(page.getByRole("heading", { level: 2, name: "Row filters" })).toBeFocused();
+      // The panel's heading is its list's count (#782).
+      await expect(page.getByRole("heading", { level: 2, name: /row filters?$/ })).toBeFocused();
       await expect(filters.getByText("region = 'EU'")).toBeHidden();
       expect(filtersSent).toEqual([
         "POST /api/v1/sign-in/step-up/options",

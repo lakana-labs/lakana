@@ -300,7 +300,8 @@ describe("FiltersAndMasksPage", () => {
 
     expect(await screen.findByText("No column mask yet.")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 2, name: "Column masks" })).toHaveFocus();
+      // The list's count is the panel's heading, and takes the focus.
+      expect(screen.getByRole("heading", { level: 2, name: "0 column masks" })).toHaveFocus();
     });
   });
 
@@ -384,5 +385,28 @@ describe("FiltersAndMasksPage", () => {
     expect(router.state.location.search).toBe("");
     expect(screen.getByRole("heading", { level: 1, name: "Row filters & masks" })).toHaveFocus();
     expect(await screen.findByText("No column mask yet.")).toBeInTheDocument();
+  });
+
+  it("reads the row filters again on Refresh, keeping the filter", async () => {
+    const { server, user } = renderShell(`${PATH}?group=analysts&environment=dev`, {
+      routes: policyRoutes(),
+    });
+    await screen.findByRole("region", { name: "Row filters" });
+    const reads = (): number =>
+      server.sent.filter(
+        (request) =>
+          request.method === "GET" &&
+          request.path === "/api/v1/row-filters?group_name=analysts&environment=dev&limit=50",
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
   });
 });

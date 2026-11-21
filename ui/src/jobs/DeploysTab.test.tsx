@@ -85,6 +85,23 @@ describe("DeploysTab", () => {
     });
   });
 
+  it("counts the deploys and reads them and the current versions again on Refresh", async () => {
+    const { server, user } = renderTab(list([NOW, aDeploy()]));
+    await screen.findByRole("region", { name: "Deploys of dev" });
+    expect(await screen.findByText(/^(\d+ deploys?|The first \d+ deploys?)$/)).toHaveClass(
+      "toolbar-count",
+    );
+    const reads = (): number =>
+      server.sent.filter((request) => request.path.includes("/deploys")).length;
+    const before = reads();
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
+
   it("starts from the shared filter's environment and pages with Show more", async () => {
     const { server, user } = renderTab(
       (request) =>

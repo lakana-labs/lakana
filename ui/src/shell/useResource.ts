@@ -19,6 +19,8 @@ export interface Resource<T> {
   readonly failure: ApiError | null;
   /** Reads it again. */
   readonly reload: () => void;
+  /** Whether a read is on its way: the first, or one after `reload` or a new `load`. */
+  readonly busy: boolean;
 }
 
 /**
@@ -27,22 +29,25 @@ export interface Resource<T> {
  *
  * @template T - What is read.
  * @param load - Reads it; keep it stable (`useCallback`) so that it is not read on every render.
- * @returns The answer, the error, the typed failure and `reload`.
+ * @returns The answer, the error, the typed failure, `reload` and whether a read is on its way.
  */
 export function useResource<T>(load: () => Promise<T>): Resource<T> {
   const { t } = useTranslation();
+  const [round, setRound] = useState(0);
+  // Which read the answer belongs to: a newer round or `load` means one is on its way.
   const [state, setState] = useState<{
     data: T | undefined;
     error: string | null;
     failure: ApiError | null;
-  }>({ data: undefined, error: null, failure: null });
-  const [round, setRound] = useState(0);
+    round: number;
+    load: (() => Promise<T>) | null;
+  }>({ data: undefined, error: null, failure: null, round: -1, load: null });
   useEffect(() => {
     let latest = true;
     load().then(
       (data) => {
         if (latest) {
-          setState({ data, error: null, failure: null });
+          setState({ data, error: null, failure: null, round, load });
         }
       },
       (failure: unknown) => {
@@ -51,6 +56,8 @@ export function useResource<T>(load: () => Promise<T>): Resource<T> {
             data: previous.data,
             error: problemText(t, failure),
             failure: failure instanceof ApiError ? failure : null,
+            round,
+            load,
           }));
         }
       },
@@ -62,5 +69,11 @@ export function useResource<T>(load: () => Promise<T>): Resource<T> {
   const reload = useCallback(() => {
     setRound((previous) => previous + 1);
   }, []);
-  return { data: state.data, error: state.error, failure: state.failure, reload };
+  return {
+    data: state.data,
+    error: state.error,
+    failure: state.failure,
+    reload,
+    busy: state.round !== round || state.load !== load,
+  };
 }

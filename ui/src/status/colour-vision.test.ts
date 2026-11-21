@@ -6,7 +6,7 @@ import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
 import { MACHADO_2009, simulate, type Vision, VISIONS } from "../test/colour-vision";
-import { luminanceOf, PALETTES, ratio } from "../test/palette";
+import { contrast, luminanceOf, PALETTES, ratio } from "../test/palette";
 import { StatusGlyph } from "./StatusGlyph";
 import { PILL_TONES } from "./StatusLabel";
 import { STATUS_KINDS, type StatusKind } from "./status";
@@ -31,6 +31,18 @@ function pillGround(kind: StatusKind): string | null {
   const rule =
     new RegExp(`\\.pill-${PILL_TONES[kind]}\\s*\\{([^}]*)\\}`).exec(screenCss)?.[1] ?? "";
   return /background:\s*var\((--[\w-]+)\)/.exec(rule)?.[1] ?? null;
+}
+
+/**
+ * The colour of a state's word in its pill, as screen.css's `.pill-<tone>` sets it.
+ *
+ * @param kind - The state.
+ * @returns The text colour token.
+ */
+function pillWord(kind: StatusKind): string {
+  const rule =
+    new RegExp(`\\.pill-${PILL_TONES[kind]}\\s*\\{([^}]*)\\}`).exec(screenCss)?.[1] ?? "";
+  return /(?:^|[\s;])color:\s*var\((--[\w-]+)\)/.exec(rule)?.[1] ?? "";
 }
 
 /** The surfaces a glyph is drawn on. */
@@ -229,4 +241,22 @@ describe("the status glyphs through simulated colour vision", () => {
       expect(shapes.get(first), `${first} and ${second}`).not.toBe(shapes.get(second));
     }
   });
+
+  it.each(Object.keys(PALETTES))(
+    "each pill's word reaches 4.5:1 on its tint, or on every surface without one (%s)",
+    (mode) => {
+      const palette = PALETTES[mode] ?? {};
+      for (const kind of STATUS_KINDS) {
+        const word = pillWord(kind);
+        expect(word, kind).toMatch(/^--color-/);
+        const ground = pillGround(kind);
+        for (const background of ground === null ? BACKGROUNDS : [ground]) {
+          expect(
+            contrast(palette, word, background),
+            `${kind}: ${word} on ${background}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    },
+  );
 });

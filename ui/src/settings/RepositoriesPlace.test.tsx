@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { areasFor } from "../shell/areas";
@@ -276,5 +276,26 @@ describe("RepositoriesPlace", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Repositories" })).toHaveFocus();
     expect(await screen.findByRole("link", { name: "analytics" })).toBeInTheDocument();
+  });
+
+  it("counts the repositories and reads them again on Refresh", async () => {
+    const { server, user } = renderShell("/settings/repositories", {
+      routes: listed([ANALYTICS, DBT, LOCAL]),
+    });
+    expect(await screen.findByText("3 repositories")).toBeInTheDocument();
+    const reads = (): number =>
+      server.sent.filter(
+        (request) => request.method === "GET" && request.path.startsWith("/api/v1/repositories"),
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
   });
 });

@@ -72,18 +72,56 @@ export interface AppShellProps {
 
 /**
  * Whether a key press lands where text is typed: an input, a text area, a select or editable
- * content (the SQL editor's, inside its shadow root).
+ * content in any of its forms (`contenteditable`, `="true"`, `="plaintext-only"`; the SQL
+ * editor's, inside its shadow root), but not inside an element marked `contenteditable="false"`.
  *
  * @param target - The innermost element of the key press.
  * @returns True when it does.
  */
 function isTextEntry(target: EventTarget | undefined): boolean {
-  return (
+  if (
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  );
+    target instanceof HTMLSelectElement
+  ) {
+    return true;
+  }
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  // The nearest element that says whether its content is editable decides, as the browser does.
+  const nearest = target.closest("[contenteditable]");
+  return nearest !== null && nearest.getAttribute("contenteditable") !== "false";
+}
+
+/**
+ * Whether an element is shown: not inside something hidden, inert or hidden from assistive
+ * technology, nor left out of the layout.
+ *
+ * @param element - The element.
+ * @returns True when it is shown.
+ */
+function shown(element: Element): boolean {
+  if (element.closest('[hidden], [inert], [aria-hidden="true"]') !== null) {
+    return false;
+  }
+  // Where the browser can say (not every test environment can), `display: none` and the like too.
+  return typeof element.checkVisibility === "function" ? element.checkVisibility() : true;
+}
+
+/**
+ * Whether a modal dialog, a menu or a popover is open and shown: React Aria marks each popover
+ * with the trigger that opened it (`data-trigger`), and a dialog or a menu has its role. One that
+ * is hidden or inert (a dialog kept in the page while closed) does not count.
+ *
+ * @returns True when one is.
+ */
+function overlayOpen(): boolean {
+  return [
+    ...document.querySelectorAll(
+      '[data-trigger], [role="dialog"], [role="alertdialog"], [role="menu"]',
+    ),
+  ].some(shown);
 }
 
 /**
@@ -161,10 +199,12 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
     };
   }, []);
 
-  // Alt+Left goes back, as in the browser, which a headless or embedded browser may not do on its
-  // own; doing it here also makes it one behaviour everywhere. A text field keeps it (it moves the
-  // cursor there on a Mac), and so does a widget that used the key itself (defaultPrevented: this
-  // listener bubbles, after theirs). Prevented here, so the browser does not go back a second time.
+  // Alt+Left goes back from any page, as in the browser, which a headless or embedded browser may
+  // not do on its own; doing it here also makes it one behaviour everywhere. A widget that used the
+  // key itself keeps it (defaultPrevented: this listener bubbles, after theirs). While a dialog, a
+  // menu or a popover is open it does nothing, a text field inside one included, and the browser
+  // is stopped too, so the page behind the overlay is never left. Otherwise a text field keeps it
+  // (it moves the cursor there on a Mac) and the browser does what it does there.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (
@@ -173,9 +213,15 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
         !event.altKey ||
         event.ctrlKey ||
         event.metaKey ||
-        event.shiftKey ||
-        isTextEntry(event.composedPath()[0])
+        event.shiftKey
       ) {
+        return;
+      }
+      if (overlayOpen()) {
+        event.preventDefault();
+        return;
+      }
+      if (isTextEntry(event.composedPath()[0])) {
         return;
       }
       event.preventDefault();

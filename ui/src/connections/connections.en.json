@@ -111,6 +111,10 @@
     "justNow": "just now"
   },
   "list": {
+    "count_one": "{{count}} connection",
+    "count_other": "{{count}} connections",
+    "countFirst_one": "The first {{count}} connection",
+    "countFirst_other": "The first {{count}} connections",
     "add": "Add connection",
     "environment": "Environment",
     "all": "All environments",

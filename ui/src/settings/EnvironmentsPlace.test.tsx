@@ -384,4 +384,27 @@ describe("EnvironmentsPlace", () => {
     renderShell("/settings/environments/dev/nothing", asReader(lists([DEV])));
     expect(await screen.findByText("This page does not exist")).toBeInTheDocument();
   });
+
+  it("counts the environments and reads them again on Refresh", async () => {
+    const { server, user } = renderShell("/settings/environments", asReader(lists([DEV, PROD])));
+    expect(await screen.findByText("2 environments")).toBeInTheDocument();
+    const reads = (): number =>
+      server.sent.filter(
+        (request) =>
+          request.method === "GET" &&
+          request.path.startsWith("/api/v1/environments") &&
+          !request.path.includes("deleted") &&
+          !request.path.includes("/usage"),
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
 });

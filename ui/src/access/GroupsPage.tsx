@@ -14,6 +14,7 @@ import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
+import { countWords, ListToolbar, type ListState, useListState } from "../shell/ListToolbar";
 import { useFocusAfter } from "../shell/useFocusAfter";
 import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
@@ -29,6 +30,8 @@ const SEARCH_PAUSE_MS = 250;
 
 /** Properties of {@link GroupList}. */
 interface GroupListProps {
+  /** Told the rows shown and the state of the read, for the page's toolbar. */
+  readonly onState: (state: ListState) => void;
   /** The words searched for. */
   readonly words: string;
   /** Changes when the list must be read again. */
@@ -41,9 +44,10 @@ interface GroupListProps {
  * @param props - The words and the reading round.
  * @param props.words - The words searched for.
  * @param props.round - Changes when the list must be read again.
+ * @param props.onState - Told the rows shown and the state of the read.
  * @returns The list.
  */
-function GroupList({ words, round }: GroupListProps): JSX.Element {
+function GroupList({ words, round, onState }: GroupListProps): JSX.Element {
   const { t } = useTranslation();
   const load = useCallback(
     (cursor: string | null) => listGroups({ words, member: null }, cursor),
@@ -67,6 +71,7 @@ function GroupList({ words, round }: GroupListProps): JSX.Element {
         region={t("access.groups.region")}
         rowsOpen
         scroll="groups-scroll"
+        onState={onState}
         head={
           <tr>
             <th scope="col">{t("list.name")}</th>
@@ -110,6 +115,7 @@ export function GroupsPage(): JSX.Element {
   const [round, setRound] = useState(0);
   const [creating, setCreating] = useState(false);
   const [note, setNote] = useState("");
+  const [list, report] = useListState();
   const status = useAccessStatus();
   const { target: headingRef, arm } = useFocusAfter<HTMLHeadingElement>(round);
   useEffect(() => {
@@ -151,14 +157,23 @@ export function GroupsPage(): JSX.Element {
       {managed !== undefined && managed !== null && (
         <ManagedNote scope={managed} commands={[t("access.managed.groupsCommand")]} />
       )}
-      <SearchField className="field" value={typed} onChange={setTyped}>
-        <Label className="visually-hidden">{t("access.groups.find")}</Label>
-        <Input placeholder={t("access.groups.find")} />
-      </SearchField>
+      <ListToolbar
+        count={countWords(t, "access.groups", list.shown, list.more)}
+        search={
+          <SearchField className="field" value={typed} onChange={setTyped}>
+            <Label className="visually-hidden">{t("access.groups.find")}</Label>
+            <Input placeholder={t("access.groups.find")} />
+          </SearchField>
+        }
+        onRefresh={() => {
+          setRound((previous) => previous + 1);
+        }}
+        refreshing={list.busy}
+      />
       <p className="step-status" role="status">
         {note}
       </p>
-      <GroupList key={words} words={words} round={round} />
+      <GroupList key={words} words={words} round={round} onState={report} />
       {creating && (
         <CreateGroupDialog
           onClose={() => {

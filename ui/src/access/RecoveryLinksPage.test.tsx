@@ -322,4 +322,25 @@ describe("RecoveryLinksPage", () => {
     expect(within(row).getByRole("button", { name: /kU\+202Eim/u })).toBeInTheDocument();
     expect(row.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
+
+  it("reads the open recovery links again on Refresh", async () => {
+    const { server, user } = renderShell("/settings/sign-in/recovery-links", {
+      routes: { "GET /api/v1/recovery-links": { status: 200, body: [OPEN] } },
+    });
+    expect(await screen.findByText("1 open recovery link")).toBeInTheDocument();
+    const reads = (): number =>
+      server.sent.filter(
+        (request) => request.method === "GET" && request.path.startsWith("/api/v1/recovery-links"),
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
 });

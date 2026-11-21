@@ -93,6 +93,45 @@ function sentTo(shell: ReturnType<typeof renderShell>, prefix: string): string[]
 }
 
 describe("TokensPage", () => {
+  it("keeps both panels' rows and headings while their Refresh reads them again", async () => {
+    let personal = 0;
+    let task = 0;
+    const routes = tokenRoutes();
+    const shell = renderShell(PATH, {
+      routes: {
+        ...routes,
+        "GET /api/v1/tokens": () => {
+          personal += 1;
+          return personal === 1
+            ? (routes["GET /api/v1/tokens"] as { status: number; body: unknown })
+            : new Promise<never>(() => undefined);
+        },
+        "GET /api/v1/task-tokens": () => {
+          task += 1;
+          return task === 1
+            ? (routes["GET /api/v1/task-tokens"] as { status: number; body: unknown })
+            : new Promise<never>(() => undefined);
+        },
+      },
+    });
+    const personalHeading = await screen.findByRole("heading", {
+      level: 2,
+      name: "2 personal tokens",
+    });
+    const taskHeading = await screen.findByRole("heading", { level: 2, name: "2 task tokens" });
+    const [personalRefresh, taskRefresh] = screen.getAllByRole("button", { name: "Refresh" });
+
+    await shell.user.click(personalRefresh as HTMLElement);
+    await shell.user.click(taskRefresh as HTMLElement);
+
+    await waitFor(() => {
+      expect([personal, task]).toEqual([2, 2]);
+    });
+    expect(personalHeading).toHaveTextContent("2 personal tokens");
+    expect(taskHeading).toHaveTextContent("2 task tokens");
+    expect(screen.getByRole("region", { name: "Live personal tokens" })).toBeInTheDocument();
+  });
+
   it("lists everyone's live tokens and the task tokens", async () => {
     renderShell(PATH, { routes: tokenRoutes() });
 
@@ -262,7 +301,8 @@ describe("TokensPage", () => {
 
     expect(await screen.findByText("No live personal token.")).toBeVisible();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 2, name: "Personal tokens" })).toHaveFocus();
+      // The list's count is the panel's heading.
+      expect(screen.getByRole("heading", { level: 2, name: "0 personal tokens" })).toHaveFocus();
     });
     const index = shell.server.sent.findIndex((request) => request.method === "DELETE");
     expect(shell.server.sent[index]?.path).toBe("/api/v1/principals/maria/tokens/k1");
@@ -333,7 +373,7 @@ describe("TokensPage", () => {
 
     expect(await screen.findByText("No live task token.")).toBeVisible();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { level: 2, name: "Task tokens" })).toHaveFocus();
+      expect(screen.getByRole("heading", { level: 2, name: "0 task tokens" })).toHaveFocus();
     });
   });
 
@@ -388,5 +428,48 @@ describe("TokensPage", () => {
           request.path.startsWith("/api/v1/task-tokens"),
       ),
     ).toEqual([]);
+  });
+
+  it("reads the personal tokens again on their panel's Refresh, the count its heading", async () => {
+    const { server, user } = renderShell(PATH, { routes: tokenRoutes() });
+    await screen.findByRole("region", { name: "Live personal tokens" });
+    expect(
+      screen.getByRole("heading", { level: 2, name: /personal tokens?$/ }),
+    ).toBeInTheDocument();
+    const reads = (): number =>
+      server.sent.filter(
+        (request) => request.method === "GET" && request.path.startsWith("/api/v1/tokens"),
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
+
+  it("reads the task tokens again on their panel's Refresh, keeping the environment", async () => {
+    const { server, user } = renderShell(`${PATH}?environment=dev`, { routes: tokenRoutes() });
+    await screen.findByRole("region", { name: "Live personal tokens" });
+    const reads = (): number =>
+      server.sent.filter((request) => request.path.startsWith("/api/v1/task-tokens")).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+    const buttons = await screen.findAllByRole("button", { name: "Refresh" });
+
+    await user.click(buttons[1] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+    expect(
+      server.sent.filter((request) => request.path.startsWith("/api/v1/task-tokens")).at(-1)?.path,
+    ).toContain("environment=dev");
   });
 });

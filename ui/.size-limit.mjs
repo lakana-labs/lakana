@@ -489,8 +489,9 @@ const NAMED_LIMITS = [
   // Measured 239 B (focus after a control removes itself; Settings' Access pages (People, Invites,
   // Recovery links) and the table page share it, 2026-11-13) + 10 %.
   { name: "focus after a change", prefix: "useFocusAfter-", limit: "0.27 kB" },
-  // Measured 357 B (reading and reading again, now with the typed failure, 2026-11-13) + 10 %.
-  { name: "reading for a screen", prefix: "useResource-", limit: "0.39 kB" },
+  // Measured 408 B (reading and reading again, the typed failure, and whether a read is on its
+  // way for Refresh, 2026-11-21) + 10 %.
+  { name: "reading for a screen", prefix: "useResource-", limit: "0.45 kB" },
 ];
 
 /**
