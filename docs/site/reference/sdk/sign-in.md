@@ -220,16 +220,17 @@ Returns: `SignInSettings`. The lengths in force for new sessions.
 
 ### `client.sign_in_settings.update`
 
-Signature: `client.sign_in_settings.update(idle_timeout_minutes: int | None = None, absolute_lifetime_minutes: int | None = None) -> SignInSettings`
+Signature: `client.sign_in_settings.update(idle_timeout_minutes: int | None = None, absolute_lifetime_minutes: int | None = None, token_provider_window_days: int | None = None) -> SignInSettings`
 
-Change how long new browser sessions last; open sessions keep their lengths.
+Change how long new browser sessions last, or the token window of linked people.
 
-Needs the ADMIN role. Recorded in the audit log.
+Open sessions keep their lengths; a new token window applies to the next request with a token. Needs the ADMIN role. Recorded in the audit log.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `idle_timeout_minutes` | `int | None` | `None` | The idle timeout, 15 to 1440 minutes (24 hours); `None` keeps it. |
 | `absolute_lifetime_minutes` | `int | None` | `None` | The absolute lifetime, 60 to 43200 minutes (30 days), not shorter than the idle timeout; `None` keeps it. |
+| `token_provider_window_days` | `int | None` | `None` | How long a person linked to the identity provider may use their personal tokens after their last sign-in there, 1 to 365 days; `None` keeps it. |
 
 Returns: `SignInSettings`. The lengths now in force for new sessions.
 

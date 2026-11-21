@@ -666,8 +666,9 @@ OIDC exchange and CI tokens (#15)"; the user's view is
 People sign in to the web interface through the organisation's identity provider
 (`/api/v1/sign-in/oidc/*`, the authorization-code flow with PKCE, off without
 `LAKANA_OIDC__ISSUER`). The details and the tests that pin them are in `docs/agent/security.md`,
-"OIDC sign-in (#32, PR 1)". The first pull request signs in people who are already linked; linking,
-one way in per linked person, the token window and `lakana login` follow.
+"OIDC sign-in (#32, PR 1)" and "(#32, PR 2)". People Lakana knows link their identity (an invite, their
+profile or a recovery link); a linked person signs in and steps up only through the provider and uses
+their tokens only within the token window. `lakana login` follows.
 
 ### What is defended
 
@@ -675,8 +676,40 @@ one way in per linked person, the token window and `lakana login` follow.
   name the same open flow; the callback itself never starts a session. A `state` from another
   browser's flow, or a callback without the cookie, finds nothing.
 - **Step-up by a silent sign-in.** A provider sign-in is no step-up touch, since the provider
-  may answer from its own session without the person present; provider step-up with
-  `prompt=login` and `auth_time` comes with PR 2.
+  may answer from its own session without the person present. Provider step-up asks
+  `prompt=login` and `max_age=0` and needs an `auth_time` from the step-up's start on, of the
+  person's own identity.
+- **Takeover by linking.** Only a person Lakana knows links: through an invite (the link is used
+  in the transaction that links, so one withdrawn meanwhile creates nobody), from their profile
+  (with a fresh step-up, finished only in the same session) or with a recovery link (a linked
+  person's only as the same identity). One identity links one account: the unique constraint
+  decides a race, and the refusal names neither account. The server operator's account and
+  service accounts are never linked.
+- **A way back in after offboarding.** A linked person's passkeys no longer sign them in, no
+  passkey can be added, and an administrator's recovery link works only through the provider.
+  Their personal tokens work only within the token window (30 days by default) after their last
+  provider sign-in; outside it they answer 401, unrevoked, so someone disabled at the provider loses
+  token access within the window.
+- **Lock-out.** An invariant: whenever at least one active administrator is linked, at least one
+  active administrator remains who is not linked and has a working passkey for this address. Every
+  change that would break it is refused, under the administrator-count lock, so two at once take
+  turns: linking the last such administrator, deactivating them, revoking their ADMIN, removing
+  them from the admins group or deleting their last passkey, and as well granting ADMIN to a linked
+  person (directly or through a group), adding one to the admins group, or an access apply that
+  does either. A change is refused only when the invariant held before it.
+- **A changed public address.** Passkeys work only at the address they were made for, so the count
+  is taken for the address the server records at start-up, and recounted there, never carried
+  over. When the address changes while anyone is linked, the start-up log says how many
+  administrators can sign in with a passkey at the new address and, at none, points to the
+  operator's recovery link. Two servers with different public addresses on one database overwrite
+  each other's record at every start: give them one address.
+- **Sign-in against unlink.** A provider sign-in, a recovery through the provider and an unlink
+  lock the person's row before they decide, so a sign-in racing an unlink either starts its session
+  before the unlink ends every session, or finds the person unlinked. An unlink also withdraws the
+  person's open sign-in links: an earlier recovery link would otherwise bind an identity again,
+  possibly the very one the unlink was for. They come back with a new recovery link. The operator's recovery link unlinks a linked administrator
+  whatever the provider says, and revokes their personal tokens, so none outside the window comes
+  back to life.
 - **Session fixation.** The session starts in `finish`, a same-origin POST, with a fresh id; a
   session the browser presented ends as `replaced`. The flow cookie, the flow row and the session
   id are all new after the callback.
@@ -697,13 +730,18 @@ one way in per linked person, the token window and `lakana login` follow.
 
 ### Residuals, stated as such
 
-1. **A linked person's passkeys still sign them in** until one way in per linked person lands
-   (#32, PR 2).
+1. **A token works until the window ends.** Someone disabled at the provider keeps their
+   personal tokens for up to the window (30 days by default; an administrator may shorten it to
+   one day, or unlink or deactivate the person at once). What their own token made (a task token,
+   a local sign-in's session) stops with it; task tokens an administrator minted and CI tokens act
+   for a run or a service account and are not under it.
 2. **Signing out at the provider does not end a Lakana session** (a non-goal of #32).
 3. **The audit row's per-client bucket trusts `request.client.host`**, as for the other refused
    sign-ins.
 4. **A reverse proxy's own access log** records the callback's query (the single-use, PKCE-bound
    code and the state); Lakana's access log writes it as `?…`.
+5. **A passkey disabled as a copy** can take the last administrator who signs in with a passkey;
+   that is never refused, and the operator's recovery link is then the way in.
 
 ## Explicitly not defended
 

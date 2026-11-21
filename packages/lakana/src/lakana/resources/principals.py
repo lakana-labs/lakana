@@ -14,6 +14,7 @@ from lakana._models import (
     PermissionVia,
     Principal,
     PrincipalPage,
+    ProviderLink,
     Scope,
 )
 from lakana._routes import ROUTES
@@ -33,11 +34,51 @@ def _principal_from_json(data: dict[str, Any]) -> Principal:
     Principal
         The parsed principal.
     """
+    link = data.get("provider_link")
     return Principal(
         name=data["name"],
         type=data["type"],
         is_active=data["is_active"],
         held_admin=data.get("held_admin"),
+        provider_link=None if link is None else _provider_link_from_json(link),
+    )
+
+
+def _when(value: str | None) -> datetime | None:
+    """Read an optional time of the platform API.
+
+    Parameters
+    ----------
+    value
+        An ISO 8601 time, or `None`.
+
+    Returns
+    -------
+    datetime or None
+        The time.
+    """
+    return None if value is None else datetime.fromisoformat(value)
+
+
+def _provider_link_from_json(data: dict[str, Any]) -> ProviderLink:
+    """Build a `ProviderLink` from the platform API's `ProviderLinkOut` JSON.
+
+    Parameters
+    ----------
+    data
+        The decoded body.
+
+    Returns
+    -------
+    ProviderLink
+        The link.
+    """
+    return ProviderLink(
+        issuer=data["issuer"],
+        email=data.get("email"),
+        name=data.get("name"),
+        last_sign_in_at=_when(data.get("last_sign_in_at")),
+        token_window_ends_at=_when(data.get("token_window_ends_at")),
     )
 
 
@@ -371,3 +412,25 @@ class Principals:
             params=override_params(override_reason),
             path_params={"name": name},
         )
+
+    def unlink_provider(self, name: str) -> None:
+        """Unlink a person from the organisation's identity provider.
+
+        Deletes their stored passkeys, revokes all their personal API tokens, ends their
+        sessions and withdraws their open sign-in links; they come back with a new recovery
+        link. Needs the `ADMIN` role on the instance. To offboard someone, deactivate them
+        instead.
+
+        Parameters
+        ----------
+        name
+            The person's principal name.
+
+        Raises
+        ------
+        lakana.errors.NotFound
+            If no principal of this name exists.
+        lakana.errors.Conflict
+            For yourself, or a person who is not linked.
+        """
+        self._transport.request(ROUTES["principals.unlink_provider"], path_params={"name": name})

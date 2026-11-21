@@ -20,6 +20,8 @@ from lakana_core.errors import (
     NotFoundError,
     NotPublishedError,
     PermissionDenied,
+    ProviderSignInRequired,
+    ProviderStepUpRequired,
     StorageRefusedError,
     ValidationError,
 )
@@ -155,3 +157,17 @@ def test_a_storage_refusal_does_not_ask_the_client_to_retry() -> None:
         response = client.get("/boom")
     assert response.status_code == 502
     assert "Retry-After" not in response.headers
+
+
+def test_provider_sign_in_required_is_403() -> None:
+    """A linked person's passkey sign-in or recovery is refused as a permission (#32)."""
+    response = _client_raising(ProviderSignInRequired("through the provider")).get("/boom")
+    assert response.status_code == 403
+    assert response.json()["type"] == "ProviderSignInRequired"
+
+
+def test_provider_step_up_required_is_409() -> None:
+    """A linked person asking for passkey step-up is told to confirm at the provider (#32)."""
+    response = _client_raising(ProviderStepUpRequired("at the provider")).get("/boom")
+    assert response.status_code == 409
+    assert response.json()["type"] == "ProviderStepUpRequired"

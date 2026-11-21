@@ -43,8 +43,18 @@ PURGE_AFTER = timedelta(days=1)
 MAX_RETURN_TO = 2048
 """The longest app path kept."""
 
-FlowPurpose = Literal["sign_in"]
-"""What a flow is for."""
+FlowPurpose = Literal["sign_in", "invite", "recovery", "link", "step_up"]
+"""What a flow is for: signing in; using an invite or a recovery link through the provider;
+linking a signed-in person (their profile); confirming a linked person's session (step-up)."""
+
+LINK_PURPOSES: frozenset[str] = frozenset({"invite", "recovery"})
+"""The purposes that use a sign-in link at their finish."""
+
+SIGN_IN_PURPOSES: frozenset[str] = frozenset({"sign_in", *LINK_PURPOSES})
+"""The purposes that start a session: finished without one (`finish`)."""
+
+IN_SESSION_PURPOSES: frozenset[str] = frozenset({"link", "step_up"})
+"""The purposes that act on a signed-in person's session: finished in it."""
 
 
 @dataclass(frozen=True)
@@ -356,8 +366,8 @@ class OidcFlowStore:
             .execution_options(synchronize_session="fetch")
         )
 
-    def finish(self, cookie_value: str) -> OidcFlow | None:
-        """Take the flow of this browser that was called back, once.
+    def _waiting(self, cookie_value: str) -> list[ColumnElement[bool]]:
+        """Name this browser's flow that was called back and not finished.
 
         Parameters
         ----------
@@ -366,19 +376,58 @@ class OidcFlowStore:
 
         Returns
         -------
+        list of ColumnElement
+            The conditions on `OidcFlow`.
+        """
+        return [
+            OidcFlow.browser_hash == hash_secret(cookie_value),
+            OidcFlow.called_back_at.is_not(None),
+            OidcFlow.finished_at.is_(None),
+        ]
+
+    def pending_purpose(self, cookie_value: str) -> str | None:
+        """Read the purpose of this browser's flow waiting to be finished, without taking it.
+
+        Parameters
+        ----------
+        cookie_value
+            The flow cookie the browser presented.
+
+        Returns
+        -------
+        str or None
+            The purpose; `None` when there is no such unexpired flow.
+        """
+        if not cookie_value:
+            return None
+        return self._session.execute(
+            select(OidcFlow.purpose).where(
+                *self._waiting(cookie_value), OidcFlow.expires_at > self._clock()
+            )
+        ).scalar_one_or_none()
+
+    def finish(
+        self, cookie_value: str, *, purposes: frozenset[str] = SIGN_IN_PURPOSES
+    ) -> OidcFlow | None:
+        """Take the flow of this browser that was called back, once.
+
+        Parameters
+        ----------
+        cookie_value
+            The flow cookie the browser presented.
+        purposes
+            The purposes the caller finishes; a flow of another purpose is left alone.
+
+        Returns
+        -------
         OidcFlow or None
             The flow, now marked finished, with its outcome; `None` when this browser has no
-            called-back, unfinished, unexpired flow.
+            called-back, unfinished, unexpired flow of those purposes.
         """
         if not cookie_value:
             return None
         return self._claim(
-            [
-                OidcFlow.browser_hash == hash_secret(cookie_value),
-                OidcFlow.called_back_at.is_not(None),
-                OidcFlow.finished_at.is_(None),
-            ],
-            "finished_at",
+            [*self._waiting(cookie_value), OidcFlow.purpose.in_(purposes)], "finished_at"
         )
 
     def purge(self, now: datetime) -> int:

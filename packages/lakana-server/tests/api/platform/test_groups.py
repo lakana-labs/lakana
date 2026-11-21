@@ -40,7 +40,7 @@ def test_list_members_returns_principals_sorted_by_name(client: TestClient) -> N
     response = client.get("/api/v1/groups/engineers/members", headers=AUTH_HEADER)
 
     assert response.status_code == 200, response.text
-    member = {"type": "USER", "is_active": True, "picture": None}
+    member = {"type": "USER", "is_active": True, "picture": None, "provider_link": None}
     assert response.json() == [
         {"name": "admin", **member, "held_admin": True},
         {"name": "alice", **member, "held_admin": False},

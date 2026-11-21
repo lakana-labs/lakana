@@ -16,6 +16,7 @@ _WHOAMI = {
     "task_token": None,
     "ci_token": None,
     "language": None,
+    "token_window_ends_at": None,
 }
 _ENVS: list[dict[str, object]] = [
     {
@@ -468,3 +469,14 @@ def test_whoami_renders_table_and_json(tmp_path: Path) -> None:
     assert table.exit_code == 0, table.stderr
     assert "alice" in table.stdout
     assert json.loads(as_json.stdout) == _WHOAMI
+
+
+def test_cli_whoami_shows_the_window(tmp_path: Path) -> None:
+    """A linked person's `whoami` says when their tokens' window ends."""
+    api = FakeApi()
+    api.on(
+        "GET", "/api/v1/whoami", json={**_WHOAMI, "token_window_ends_at": "2026-12-20T09:00:00Z"}
+    )
+    result = invoke(make_state(tmp_path, api), "whoami")
+    assert result.exit_code == 0, result.stderr
+    assert "token_window_ends_at" in result.stdout and "2026-12-20" in result.stdout

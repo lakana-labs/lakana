@@ -143,3 +143,20 @@ Sets `is_active = False` rather than deleting the principal, preserving every gr
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If no principal of this name exists. |
+
+### `client.principals.unlink_provider`
+
+Signature: `client.principals.unlink_provider(name: str) -> None`
+
+Unlink a person from the organisation's identity provider.
+
+Deletes their stored passkeys, revokes all their personal API tokens, ends their sessions and withdraws their open sign-in links; they come back with a new recovery link. Needs the `ADMIN` role on the instance. To offboard someone, deactivate them instead.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | The person's principal name. |
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | If no principal of this name exists. |
+| `lakana.Conflict` | For yourself, or a person who is not linked. |

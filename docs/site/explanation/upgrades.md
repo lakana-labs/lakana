@@ -817,6 +817,27 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
 - Going back drops the columns: **every person linked to the identity provider is unlinked**, and
   after a new upgrade each of them has to be linked again. Sign-in flows open during the
   downgrade are lost; their people start the sign-in again.
+- People link their identity through an invite, from their profile or with a recovery link; an
+  administrator unlinks them with `lakana principal unlink-provider`, which also withdraws their
+  open sign-in links. A linked person signs in only through the provider: their passkeys stop
+  signing them in (they stay stored), and their
+  personal API tokens work only within 30 days of their last provider sign-in (`lakana sign-in
+  settings --token-window-days`, 1 to 365). Unlinking someone, by an administrator or by the
+  server operator's recovery link, revokes their personal tokens. Nothing changes for anyone who
+  is not linked.
+- While any administrator is linked, at least one administrator who signs in with a passkey at
+  this address must remain: linking the last one, deactivating them, taking their ADMIN role away
+  or deleting their last passkey answers 409 and says so, and so does giving the ADMIN role to a
+  linked person (directly, through a group or in an access file) when no such administrator is
+  left. A task token minted with a linked person's own token, and a local sign-in's session, end
+  with that person's token window.
+- Changing the public address (`LAKANA_UI__PUBLIC_URL`) while people are linked: passkeys made for
+  the old address no longer count as a way in, as they no longer sign in. The server's start-up log
+  says how many administrators can still sign in with a passkey; at none, issue one a recovery
+  link with the bootstrap token (`lakana recovery create NAME`) and have them register a passkey at
+  the new address. Run every server of one database with the same public address.
+- `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
+  from now on.
 
 ### A run records the connection it failed on
 

@@ -150,7 +150,13 @@ def test_principal_create_says_what_comes_next(tmp_path: Path) -> None:
 def test_principal_create_json_has_no_next_step(tmp_path: Path) -> None:
     """`--output json` stays one document."""
     api = FakeApi()
-    created = {"name": "alice", "type": "USER", "is_active": True, "held_admin": False}
+    created = {
+        "name": "alice",
+        "type": "USER",
+        "is_active": True,
+        "held_admin": False,
+        "provider_link": None,
+    }
     api.on("POST", "/api/v1/principals", status=201, json=created)
 
     result = invoke(

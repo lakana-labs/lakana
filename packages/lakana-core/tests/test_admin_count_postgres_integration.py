@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import text, update
+from sqlalchemy import event, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from testcontainers.postgres import PostgresContainer
@@ -40,6 +40,21 @@ _WAIT_LIMIT = 30.0
 """Seconds the test waits at most for the second change to block or finish."""
 
 
+def _bounded_lock_waits(connection: object, _record: object) -> None:
+    """Make every lock wait of a new connection give up after 60 seconds.
+
+    Parameters
+    ----------
+    connection
+        The DBAPI connection.
+    _record
+        The pool's record, unused.
+    """
+    cursor = connection.cursor()  # ty: ignore[missing-attribute]
+    cursor.execute("SET lock_timeout = '60s'")
+    cursor.close()
+
+
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
     """Start one Postgres, migrated to head.
@@ -53,6 +68,9 @@ def engine() -> Iterator[Engine]:
         url = pg.get_connection_url()
         migrate.upgrade(url)
         engine = create_engine(DatabaseConfig(url=url))
+        # A wait on a lock that never comes fails the test within a minute instead of hanging
+        # the run: the races wait on the advisory lock only briefly.
+        event.listen(engine, "connect", _bounded_lock_waits)
         yield engine
         engine.dispose()
 
@@ -319,9 +337,10 @@ def test_a_member_removal_decides_under_the_lock_while_its_group_gains_admin(
     """Review of #760: grant ADMIN to a group, remove its one member, revoke the other admin.
 
     A holds ADMIN directly; group G has no grant and one member, X. T1 grants ADMIN to G. T2
-    removes X from G while T1 is uncommitted, so it sees no ADMIN on G. T1 commits. T3 revokes
-    A's grant while T2 is uncommitted and would count X through G. T3 must wait for T2 and be
-    refused, or the instance ends with no administrator.
+    removes X from G while T1 is uncommitted. A grant of instance ADMIN takes the
+    administrator-count lock too since #32 (the break-glass rule counts on its raising side), so
+    T2 waits for T1 and then sees ADMIN on G. T3 then revokes A's grant: with X gone, A is the
+    last administrator and T3 is refused.
     """
     allow = AllowAllAuthorization()
     suffix = uuid.uuid4().hex[:8]
@@ -336,14 +355,26 @@ def test_a_member_removal_decides_under_the_lock_while_its_group_gains_admin(
         groups.add_member(actor, group, member)
         session.commit()
     assert _admin_count(engine) == 1
-    with Session(engine) as granting, Session(engine) as removing:
+
+    def remove(other: Session) -> None:
+        """Remove X from G in `other` without committing.
+
+        Parameters
+        ----------
+        other
+            The change's own session.
+        """
+        GroupService(other, allow).remove_member(actor, group, member, commit=False)
+
+    with Session(engine) as granting:
         GrantService(granting, allow).grant(
             actor, group=group, role=Role.ADMIN, kind=SecurableKind.INSTANCE, commit=False
         )
-        GroupService(removing, allow).remove_member(actor, group, member, commit=False)
+        removing = _Second(engine, remove)
+        removing.blocked_or_done()
         granting.commit()
-        racing = _Second(engine, _removal("revoke", direct, actor))
-        racing.blocked_or_done()
-        removing.commit()
-    assert racing.finish() == LAST_ADMIN_MESSAGE
+    assert removing.finish() == _DONE
+    revoking = _Second(engine, _removal("revoke", direct, actor))
+    revoking.blocked_or_done()
+    assert revoking.finish() == LAST_ADMIN_MESSAGE
     assert _admin_count(engine) == 1

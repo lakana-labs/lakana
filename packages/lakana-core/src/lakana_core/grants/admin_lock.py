@@ -12,10 +12,15 @@ The lock comes before any read of something another change may alter that decide
 at all (a grant's role and kind never change, and an early return lowers nothing).
 `GroupService.remove_member` asks whether the group holds ADMIN only after taking it, and takes it
 for every group: a grant to the group may commit right after that question, and a count that relies
-on the member must then wait for the removal's commit. Changes that raise the count (a grant, a new
-member, a reactivation) take no lock: a count never sees them before they commit, so on an instance
-with an administrator they can only make a check refuse, never let one through. On an instance with
-none, `assert_admin_headroom` lets every change through anyway.
+on the member must then wait for the removal's commit. For the administrator count alone, changes
+that raise it (a grant, a new member, a reactivation) need no lock: a count never sees them before
+they commit, so on an instance with an administrator they can only make a check refuse, never let
+one through. On an instance with none, `assert_admin_headroom` lets every change through anyway.
+The break-glass rule (`lakana_core.grants.break_glass`, #32) can be broken by raising, though: a
+linked person who becomes an administrator. So a grant of instance ADMIN and a new member of a
+group that holds it take this lock as well
+(`lakana_core.grants.service.assert_break_glass_on_raise`), and two such changes, or one and a
+removal, take turns.
 
 Any later rule of the same kind, a count a change may lower and must never bring to zero, counts
 under this lock too, so that every such check sees the others' commits.
@@ -23,6 +28,20 @@ under this lock too, so that every such check sees the others' commits.
 Order: a change takes the access lock (`lakana_core.access.managed.lock_access`) first, when it
 takes it at all, and this lock second, before it counts. An apply holds the access lock alone and
 takes this one inside it; taking them the other way round could deadlock against an apply.
+This lock also comes before the row locks of a sign-in link and of a principal, wherever both are
+taken (review of #780):
+
+- a deactivation takes it, then locks the person's row (`is_active`), then withdraws their open
+  links;
+- an unlink (`lakana_core.identity.oidc_links.OidcLinkService.unlink`) takes it, then locks the
+  person's row (`locked_principal`), then withdraws their open links;
+- using a link (`lakana_core.identity.links.LinkService.redeem` and `claim_for_provider`) takes
+  it, then claims the link's row, then locks its person's row in `_complete` or
+  `_complete_for_provider`.
+
+The link and the person are locked in different orders there, which is safe only because each of
+these holds this lock first, so they never wait on each other's rows. A provider sign-in locks only
+the person's row, and a passkey removal takes this lock before it reads the passkey.
 """
 
 from __future__ import annotations

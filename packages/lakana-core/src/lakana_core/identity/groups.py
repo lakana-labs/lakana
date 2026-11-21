@@ -16,6 +16,7 @@ from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import (
     assert_admin_headroom,
+    assert_break_glass_on_raise,
     mark_admin_holders,
     withdraw_links_of_lapsed_issuers,
 )
@@ -338,6 +339,9 @@ class GroupService:
             (`MANAGE_GROUP` works only with it).
         StepUpRequired
             In a browser session whose last passkey touch is older than 15 minutes.
+        ConflictError
+            For a group that holds instance ADMIN, when the new member would leave only
+            administrators linked to the identity provider (`assert_break_glass_on_raise`).
         """
         # jscpd:ignore-start -- every public method calls the guard itself, then step-up
         # (test_admin_only_call_sites.py enumerates the calls), so this pair repeats by design.
@@ -357,6 +361,10 @@ class GroupService:
         guard_change(
             self._session, p, environment=None, change=f"add {principal_name} to {group_name}"
         )
+        # Lock before asking whether the group holds ADMIN, as `remove_member` does.
+        lock_admin_count(self._session)
+        if self._grants_instance_admin(group.id):
+            assert_break_glass_on_raise(self._session, principal_id=principal.id)
         self._session.add(GroupMembership(group_id=group.id, principal_id=principal.id))
         mark_admin_holders(self._session)
         AuditService(self._session).record(

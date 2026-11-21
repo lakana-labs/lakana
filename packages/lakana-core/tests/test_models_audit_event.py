@@ -108,3 +108,19 @@ def test_detail_defaults_to_an_empty_dict(session: Session) -> None:
     session.commit()
     session.refresh(event)
     assert event.detail == {}
+
+
+def test_oidc_link_events_are_known(session: Session) -> None:
+    """Linking and unlinking a provider identity are audit event types of their own (#32)."""
+    principal = _add_principal(session, "alice")
+    for kind in ("PRINCIPAL_OIDC_LINKED", "PRINCIPAL_OIDC_UNLINKED"):
+        session.add(
+            AuditEvent(
+                id=uuid.uuid4(),
+                occurred_at=datetime.now(UTC),
+                principal_id=principal.id,
+                event_type=AuditEventType(kind),
+                detail={"iss": "https://idp.example.com", "sub": "1"},
+            )
+        )
+    session.commit()
