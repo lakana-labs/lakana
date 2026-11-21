@@ -62,8 +62,11 @@ export function useListState(): [ListState, (state: ListState) => void] {
 
 /** Properties of {@link ListToolbar}. */
 export interface ListToolbarProps {
-  /** How many rows the list has, in words ("5 connections"); null while it is read. */
-  readonly count: string | null;
+  /**
+   * How many rows the list has, in words ("5 connections"); null while it is read, which keeps
+   * the count's place. Left out for a list whose sections count their own rows (Jobs).
+   */
+  readonly count?: string | null;
   /** The list's search field, after the count; none by default. */
   readonly search?: ReactNode;
   /** The list's filters, on the right before Refresh; none by default. */
@@ -97,7 +100,7 @@ export function ListToolbar({
   const { t } = useTranslation();
   return (
     <div className="toolbar list-toolbar">
-      <p className="toolbar-count">{count}</p>
+      {count !== undefined && <p className="toolbar-count">{count}</p>}
       {search}
       <div className="toolbar-end">
         {filters}

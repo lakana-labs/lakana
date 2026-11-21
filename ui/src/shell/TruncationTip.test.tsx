@@ -230,4 +230,27 @@ describe("TruncationTip", () => {
 
     expect(tip()).toBeNull();
   });
+
+  it("closes when a name it shows leaves the page outside React", async () => {
+    render(<TruncationTip />);
+    const table = document.createElement("table");
+    table.className = "list";
+    const name = document.createElement("span");
+    name.className = "row-name";
+    name.textContent = "gold.sales.fact_returns_dropped_last_week";
+    Object.defineProperty(name, "scrollWidth", { value: 400 });
+    Object.defineProperty(name, "clientWidth", { value: 100 });
+    name.getBoundingClientRect = () => new DOMRect(10, 20, 100, 18);
+    table.append(name);
+    document.body.append(table);
+    fireEvent.pointerMove(name, { clientX: 50, clientY: 30 });
+    expect(tip()).not.toBeNull();
+
+    await act(async () => {
+      table.remove();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(tip()).toBeNull();
+  });
 });

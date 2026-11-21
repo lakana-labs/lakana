@@ -65,6 +65,19 @@ describe("GrantsPage", () => {
     expect(screen.getByRole("button", { name: /^ANALYST/ })).toBeInTheDocument();
   });
 
+  it("counts the grants and reads them again on Refresh", async () => {
+    const { server, user } = renderShell(PATH, { routes: grantRoutes() });
+    await screen.findByRole("region", { name: "Grants" });
+    expect(await screen.findByText(/^\d+ grants?$/)).toHaveClass("toolbar-count");
+    const before = listReads(server.sent).length;
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(listReads(server.sent).length).toBeGreaterThan(before);
+    });
+  });
+
   it("a new filter drops the old rows and the old error at once", async () => {
     const anyone = held();
     const { user, server, router } = renderShell(`${PATH}?principal=nobody`, {

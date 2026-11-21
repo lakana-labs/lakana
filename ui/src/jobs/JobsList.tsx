@@ -45,7 +45,6 @@ function JobsSections({ listed }: JobsSectionsProps): JSX.Element {
     <>
       {/* Each section's heading carries its own count, so the toolbar has none. */}
       <ListToolbar
-        count={null}
         search={<JobsSearch query={filter.query} onSearch={filter.setQuery} />}
         filters={
           <EnvironmentPicker

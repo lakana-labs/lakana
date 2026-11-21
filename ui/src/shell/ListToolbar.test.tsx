@@ -35,6 +35,12 @@ describe("ListToolbar", () => {
     expect(container.querySelector(".toolbar-count")).toBeEmptyDOMElement();
   });
 
+  it("has no count at all for a list whose sections count their own rows", () => {
+    const { container } = render(<ListToolbar search={<input aria-label="Search jobs" />} />);
+
+    expect(container.querySelector(".toolbar-count")).toBeNull();
+  });
+
   it("says the count in words, or the first rows while more can be read", () => {
     const { result } = renderHook(() => useTranslation());
     const { t } = result.current;

@@ -39,6 +39,21 @@ describe("GroupsPage", () => {
     expect(within(region).getAllByText("›")).toHaveLength(2);
   });
 
+  it("counts the groups and reads them again on Refresh", async () => {
+    const { server, user } = renderShell(PATH, { routes: groupRoutes() });
+    await screen.findByRole("region", { name: "Groups" });
+    expect(await screen.findByText("2 groups")).toHaveClass("toolbar-count");
+    const reads = (): number =>
+      server.sent.filter((request) => request.path.startsWith("/api/v1/groups?")).length;
+    const before = reads();
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
+
   it("a new search drops the old rows at once", async () => {
     const answer = held();
     const { user, router, server } = renderShell(PATH, {

@@ -379,7 +379,7 @@ for (const [name, stub, path, counted] of TOOLBARS) {
     if (counted) {
       await expect(count).toHaveText(/^(\d[\d,]* \S|The first \d)/);
     } else {
-      await expect(count).toBeEmpty();
+      await expect(count).toHaveCount(0);
     }
     // The list's search, filters and Refresh: one height.
     const heights = await bar
