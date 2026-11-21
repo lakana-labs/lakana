@@ -10,7 +10,15 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from lakana_core.db import db_now
-from lakana_core.models import Environment, Worker
+from lakana_core.models import (
+    DeployKind,
+    DeployRun,
+    DeployStatus,
+    Environment,
+    Repository,
+    RepositoryKind,
+    Worker,
+)
 from tests.api.platform.test_runs import _failed_run
 from tests.api.platform.test_whoami import _new_person, _task_token_header
 from tests.conftest import AUTH_HEADER
@@ -37,6 +45,47 @@ def test_an_administrator_sees_a_lost_worker(client: TestClient) -> None:
         (item["kind"], item["environment"], item["title"], item["ref"]) for item in body["items"]
     ] == [("worker_lost", None, "box", "w-1")]
     assert body["items"][0]["at"]
+    assert (body["items"][0]["count"], body["items"][0]["since"]) == (1, None)
+
+
+def test_failed_deploys_in_a_row_are_one_row_with_their_count(client: TestClient) -> None:
+    with Session(client.app.state.engine) as session:
+        env_id, repo_id = uuid.uuid4(), uuid.uuid4()
+        session.add(
+            Environment(id=env_id, name="prod", storage_root="file:///dev/null", storage_options={})
+        )
+        session.add(
+            Repository(
+                id=repo_id,
+                name="analytics",
+                kind=RepositoryKind.HTTPS,
+                url="https://git.example.com/analytics.git",
+            )
+        )
+        session.flush()
+        now = db_now(session)
+        deploys = []
+        for hours in (3, 1):
+            deploy = DeployRun(
+                id=uuid.uuid4(),
+                environment_id=env_id,
+                repository_id=repo_id,
+                kind=DeployKind.DEPLOY,
+                status=DeployStatus.FAILED,
+                error_message="lakana.yaml: line 3: unknown key",
+                created_at=now - timedelta(hours=hours),
+                finished_at=now - timedelta(hours=hours),
+            )
+            session.add(deploy)
+            deploys.append(deploy)
+        session.commit()
+        newest = str(deploys[-1].id)
+    body = client.get(_ATTENTION, headers=AUTH_HEADER).json()
+    assert [
+        (item["kind"], item["environment"], item["title"], item["ref"], item["count"])
+        for item in body["items"]
+    ] == [("deploy_failed", "prod", "analytics", newest, 2)]
+    assert body["items"][0]["since"] is not None
 
 
 def test_a_person_without_access_has_nothing_to_attend_to_and_no_work(

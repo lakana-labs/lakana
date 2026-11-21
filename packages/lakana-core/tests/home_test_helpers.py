@@ -16,6 +16,9 @@ from lakana_core.grants.roles import Role
 from lakana_core.models import (
     CheckOutcome,
     CheckResult,
+    DeployKind,
+    DeployRun,
+    DeployStatus,
     Environment,
     EnvironmentDeployment,
     Grant,
@@ -312,6 +315,54 @@ def finished_run(
     session.add(run)
     session.commit()
     return run
+
+
+def finished_deploy(
+    session: Session,
+    repo: Repository,
+    version: JobVersion,
+    *,
+    status: DeployStatus,
+    finished_at: datetime,
+    kind: DeployKind = DeployKind.DEPLOY,
+) -> DeployRun:
+    """Persist a finished deploy of a repository to its version's environment.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    repo
+        The repository.
+    version
+        Its version, for the environment.
+    status
+        How it ended.
+    finished_at
+        When it ended.
+    kind
+        A deploy, a dry run or a rollback.
+
+    Returns
+    -------
+    DeployRun
+        The row.
+    """
+    deploy = DeployRun(
+        id=uuid.uuid4(),
+        environment_id=version.environment_id,
+        repository_id=repo.id,
+        kind=kind,
+        requested_ref="main",
+        status=status,
+        error_message="lakana.yaml: line 3: unknown key" if status == DeployStatus.FAILED else None,
+        created_at=finished_at,
+        started_at=finished_at,
+        finished_at=finished_at,
+    )
+    session.add(deploy)
+    session.commit()
+    return deploy
 
 
 def fired_freshness(

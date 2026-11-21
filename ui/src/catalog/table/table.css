@@ -257,18 +257,8 @@
   color: var(--color-accent);
 }
 
-/* Defined in: the path is a button that opens the file; the file scrolls in its own region. */
-.link-button {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-accent);
-  font: inherit;
-  text-align: start;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
+/* Defined in: the path is a button that opens the file (`.link-button`, shell/screen.css); the
+   file scrolls in its own region. */
 .dialog.source-dialog {
   width: min(960px, 100%);
 }

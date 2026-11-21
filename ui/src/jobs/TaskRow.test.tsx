@@ -57,7 +57,7 @@ describe("TaskRow", () => {
       "href",
       `/jobs/prod/runs/${JOB_RUN_ID}/tasks/gold.sales`,
     );
-    // A button among buttons: the Catalog's link-button style is not loaded on the Jobs screen.
+    // A button among buttons, not a link-button: it stands beside Log and Open table.
     expect(line.getByRole("button", { name: "Show source gold.sales" })).toHaveClass("button");
     expect(line.getByRole("link", { name: "Open table gold.sales" })).toHaveAttribute(
       "href",

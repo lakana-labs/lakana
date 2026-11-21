@@ -26813,7 +26813,7 @@
           "home"
         ],
         "summary": "Show what needs your attention",
-        "description": "Everyone sees the jobs whose newest finished run failed in the last seven days, in every environment they may read (`READ_ENVIRONMENT`), by the rule of `GET /api/v1/runs/failed`. An administrator also sees the late tables, the checks whose newest result failed or errored, the open recovery links, the lost workers and their own queries that failed in that time. Anyone else also sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first. A task or CI token is refused with 403: this is a person's list.",
+        "description": "Everyone sees the jobs whose newest finished run failed in the last seven days, in every environment they may read (`READ_ENVIRONMENT`), by the rule of `GET /api/v1/runs/failed`, and there the repositories whose newest finished deploy or rollback failed (dry runs do not count). A job, deploy or check that failed several times in a row is one row: the newest failure, with `count` and `since` saying how many and since when. An administrator also sees the late tables, the checks whose newest result failed or errored, the open recovery links, the lost workers and their own queries that failed in that time. Anyone else also sees the late tables and failed checks among the tables they read in the last seven days or opened, and their own queries that failed in that time. A row you may no longer read is left out, never refused. At most 50 rows, newest first. A task or CI token is refused with 403: this is a person's list.",
         "operationId": "read_attention_api_v1_home_attention_get",
         "parameters": [
           {
@@ -28134,6 +28134,7 @@
             "type": "string",
             "enum": [
               "run_failed",
+              "deploy_failed",
               "table_late",
               "check_failed",
               "query_failed",
@@ -28165,6 +28166,22 @@
             "type": "string",
             "format": "date-time",
             "title": "At"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
           }
         },
         "type": "object",
@@ -28173,10 +28190,12 @@
           "environment",
           "title",
           "ref",
-          "at"
+          "at",
+          "count",
+          "since"
         ],
         "title": "AttentionItemOut",
-        "description": "One row of Needs your attention on Home.\n\nParameters\n----------\nkind\n    `run_failed` (a job's newest finished run failed), `table_late` (its freshness signal\n    fired), `check_failed` (a check's newest result failed or errored), `query_failed`\n    (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two\n    only for administrators, failed runs for everyone who may read the environment.\nenvironment\n    The environment's name; `null` for a recovery link and a worker.\ntitle\n    The object's name: a job, a dotted table name, a check, `Query` and the first eight\n    characters of its id, the person a recovery link signs in, a worker's host. Never a\n    value, an error text or SQL.\nref\n    The object the row opens: a run's id (a failed run or check), a dotted table name, a\n    query's id, a recovery link's id or a worker's id.\nat\n    When it happened."
+        "description": "One row of Needs your attention on Home.\n\nParameters\n----------\nkind\n    `run_failed` (a job's newest finished run failed), `deploy_failed` (a repository's\n    newest finished deploy or rollback there failed), `table_late` (its freshness signal\n    fired), `check_failed` (a check's newest result failed or errored), `query_failed`\n    (one of your own queries failed), `recovery_link_open` or `worker_lost`; the last two\n    only for administrators, failed runs and deploys for everyone who may read the\n    environment.\nenvironment\n    The environment's name; `null` for a recovery link and a worker.\ntitle\n    The object's name: a job, the repository of a failed deploy, a dotted table name, a\n    check, `Query` and the first eight characters of its id, the person a recovery link\n    signs in, a worker's host. Never a value, an error text or SQL.\nref\n    The object the row opens: a run's id (a failed run or check), a deploy's id, a dotted\n    table name, a query's id, a recovery link's id or a worker's id. For a failure in a\n    row, the newest.\nat\n    When it happened; for a failure in a row, when the newest ended.\ncount\n    How many times in a row the job, deploy or check failed in the last seven days; 1 for\n    every other kind.\nsince\n    When the first of those failures ended; `null` when `count` is 1."
       },
       "AttentionOut": {
         "properties": {

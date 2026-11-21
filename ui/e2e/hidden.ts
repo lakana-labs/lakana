@@ -100,7 +100,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   '["asset","attempt","checks","failure","finished_at","kind","max_attempts","rows_written","started_at","status","waiting_for"]':
     "TaskRunOut",
   '["at","column","id","table","target","target_column","target_exists"]': "ModelReferenceOut",
-  '["at","environment","kind","ref","title"]': "AttentionItemOut",
+  '["at","count","environment","kind","ref","since","title"]': "AttentionItemOut",
   '["asset","repository"]': "ConnectionOut.declared_by",
   '["attempt","bytes_read","cpu_seconds","error_message","failure","finished_at","outcome","peak_memory_bytes","rows_written","started_at","worker"]':
     "TaskAttemptOut",

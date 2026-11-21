@@ -18,6 +18,8 @@ export interface ObjectTableProps {
   readonly column: string;
   /** The rows. */
   readonly children: ReactNode;
+  /** The table's id, for a control that changes its rows (`aria-controls`). */
+  readonly id?: string;
 }
 
 /**
@@ -26,12 +28,13 @@ export interface ObjectTableProps {
  * @param props - The column and the rows.
  * @param props.column - The heading of the second column.
  * @param props.children - The rows.
+ * @param props.id - The table's id, if a control refers to it.
  * @returns The table.
  */
-export function ObjectTable({ column, children }: ObjectTableProps): JSX.Element {
+export function ObjectTable({ column, children, id }: ObjectTableProps): JSX.Element {
   const { t } = useTranslation();
   return (
-    <table className="list">
+    <table className="list" id={id}>
       <ListHead columns={[t("list.name"), column]} hidden={[t("list.open")]} />
       <tbody>{children}</tbody>
     </table>
@@ -50,6 +53,11 @@ export interface ObjectRowProps {
   readonly second: string;
   /** The second column. */
   readonly aside: ReactNode;
+  /**
+   * Whether the row itself may take the focus from a script (`tabIndex` -1), as a row with no
+   * link must when a list moves the focus to it; never a tab stop.
+   */
+  readonly focusable?: boolean;
 }
 
 /**
@@ -61,11 +69,19 @@ export interface ObjectRowProps {
  * @param props.environment - The object's environment, or null.
  * @param props.second - The line under the name.
  * @param props.aside - The second column.
+ * @param props.focusable - Whether a script may move the focus to the row.
  * @returns The row.
  */
-export function ObjectRow({ to, name, environment, second, aside }: ObjectRowProps): JSX.Element {
+export function ObjectRow({
+  to,
+  name,
+  environment,
+  second,
+  aside,
+  focusable = false,
+}: ObjectRowProps): JSX.Element {
   return (
-    <tr>
+    <tr tabIndex={focusable ? -1 : undefined}>
       <td>
         {to === null ? (
           <span className="row-name">
