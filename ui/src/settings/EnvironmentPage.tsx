@@ -243,7 +243,7 @@ function Overview({
   return (
     <section className="flat-panel settings-panel">
       <h2>{t(`${P}.overview`)}</h2>
-      <dl className="settings-facts">
+      <dl className="fact-list">
         <dt>{t(`${P}.storage`)}</dt>
         <dd className="environment-storage">{storageSummary(t, environment)}</dd>
         {manages && (

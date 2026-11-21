@@ -1,18 +1,10 @@
 /* The Catalog: the tree of places beside the list, the search above it, the bar with the result
    line and the sort, the table that scrolls on its own, the health word and the skeleton shown
    while the first page loads. */
-/* Wider than other pages, so the list takes the width beside the tree: its seven columns fit
-   without scrolling from a 1280 px window on, where only a long name or owner wraps. Wider than a
-   table's page (1040 px), whose facts read as one block; past 1280 px the columns would only
-   drift apart. */
-.catalog-page .page {
-  max-width: 1280px;
-}
-
 .catalog {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
-  gap: var(--space-5);
+  gap: var(--space-4);
   align-items: start;
 }
 
@@ -31,7 +23,7 @@
 }
 
 .catalog-search {
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
 }
 
 .catalog-result-line {
@@ -45,14 +37,15 @@
 .catalog-tree {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: 2px;
 }
 
 .react-aria-NavigationTreeItem {
+  box-sizing: border-box;
   display: flex;
   align-items: flex-start;
   gap: var(--space-1);
-  min-height: 32px;
+  min-height: var(--control-height);
   padding: var(--space-1) var(--space-2);
   padding-left: calc(var(--space-2) + (var(--tree-item-level) - 1) * var(--space-4));
   border-radius: var(--radius-control);
@@ -142,10 +135,10 @@
 .catalog-bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
-  margin: 0 0 var(--space-4);
+  gap: var(--control-gap) var(--space-3);
+  margin: 0 0 var(--space-3);
 }
 
 .catalog-result {
@@ -157,7 +150,7 @@
 .sort-control {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--control-gap) var(--space-4);
   margin-left: auto;
 }
 

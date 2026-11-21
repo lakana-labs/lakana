@@ -395,7 +395,7 @@ export function ChangeStorageDialog({
         }}
       >
         <Heading slot="title">{t(`${s}.title`, { name: markedText(environment.name) })}</Heading>
-        <dl className="settings-facts">
+        <dl className="fact-list">
           <dt>{t(`${s}.root`)}</dt>
           <dd className="environment-storage">
             <VisibleText text={environment.storage_root} />

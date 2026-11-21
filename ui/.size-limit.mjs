@@ -272,9 +272,9 @@ const NAMED_LIMITS = [
     prefix: "TreeDropTargetDelegate-",
     limit: "7.73 kB",
   },
-  // Measured 242 B (2026-11-17) + 10 %: the status glyph with its word, which the Queries screen
-  // shares with the screens that show a state.
-  { name: "the status label", prefix: "StatusLabel-", limit: "0.27 kB" },
+  // Measured 321 B (2026-11-21) + 10 %: the status glyph with its word as a pill, with the map of
+  // each state's tint (#782), which the Queries screen shares with the screens that show a state.
+  { name: "the status label", prefix: "StatusLabel-", limit: "0.36 kB" },
   // Measured 125.08 kB (2026-11-17) + 10 %: the SQL editor, almost all of it CodeMirror 6 (state,
   // view, commands, language, lang-sql's grammar and keywords, autocomplete, lint) with the
   // Still Water theme, the run keys, the error mark and the sources' registry. It loads only when

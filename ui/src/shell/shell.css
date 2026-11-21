@@ -40,7 +40,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-2);
+  gap: var(--control-gap);
 }
 
 .sidebar-toggle {
@@ -73,13 +73,14 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 32px;
+  min-height: var(--control-height);
   padding: 0 var(--space-3);
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-control);
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
+  line-height: var(--type-body-line);
   text-decoration: none;
   cursor: pointer;
 }
@@ -152,7 +153,7 @@ a.button:hover {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  min-height: calc(var(--row-height) - 8px);
+  min-height: var(--control-height);
   padding: 0 var(--space-3);
   border-left: 3px solid transparent;
   border-radius: var(--radius-control);
@@ -250,7 +251,7 @@ a.button:hover {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 32px;
+  min-height: var(--control-height);
   padding: 0 var(--space-3);
   border-radius: var(--radius-control);
   color: inherit;
@@ -345,7 +346,7 @@ a.button:hover {
 .palette-input {
   box-sizing: border-box;
   width: 100%;
-  min-height: var(--row-height);
+  min-height: calc(var(--control-height) + var(--space-2));
   padding: 0 var(--space-4);
   border: 0;
   border-bottom: 1px solid var(--color-line);
@@ -379,7 +380,7 @@ a.button:hover {
 /* Working area */
 .shell-main {
   min-width: 0;
-  padding: var(--space-6) var(--space-6) var(--space-7);
+  padding: var(--page-gutter) var(--page-gutter) var(--space-6);
 }
 
 /* The skip link's target is focused by script; its own outline would frame the whole page. */
@@ -387,19 +388,25 @@ a.button:hover {
   outline: none;
 }
 
+/* A page takes the full width of the working area; only running text keeps a readable line. */
 .page {
-  max-width: 720px;
+  min-width: 0;
+}
+
+.page :where(p) {
+  max-width: var(--reading-width);
 }
 
 .page-title {
-  margin: 0 0 var(--space-2);
+  min-width: 0;
+  margin: 0;
   font-size: var(--type-title-size);
   line-height: var(--type-title-line);
   font-weight: var(--type-title-weight);
 }
 
 .page-purpose {
-  margin: 0 0 var(--space-5);
+  margin: 0 0 var(--space-4);
   color: var(--color-text-muted);
 }
 
@@ -407,15 +414,20 @@ a.button:hover {
   margin: 0 0 var(--space-2);
 }
 
+/* A command and its Copy button: one height, 8 px apart. */
 .copy-line {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-gap);
   margin: var(--space-3) 0;
 }
 
 .copy-line code {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control-height);
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-control);
@@ -457,7 +469,7 @@ a.button:hover {
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
-    min-height: 32px;
+    min-height: var(--control-height);
     padding: 0 var(--space-3);
     border: 1px solid var(--color-edge);
     border-radius: var(--radius-control);
@@ -513,4 +525,16 @@ a.button:hover {
   color: var(--color-warn);
   font-family: var(--font-mono);
   font-size: var(--type-code-size);
+}
+
+/* The tooltip that shows a cut name whole (TruncationTip): right under the name, on the floating
+   surface, wrapping a very long name. */
+.truncation-tip {
+  position: fixed;
+  z-index: 20;
+  max-width: min(480px, 100vw);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+  overflow-wrap: anywhere;
 }

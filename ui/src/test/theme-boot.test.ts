@@ -27,18 +27,17 @@ describe("theme-boot.js", () => {
     expect(SOURCE).toContain(`"${PREFERENCES_KEY}"`);
   });
 
-  it("sets data-theme and data-density before React from stored light/dark, ignores anything else", () => {
+  it("sets data-theme before React from stored light/dark, ignores anything else and any density", () => {
     window.localStorage.setItem(PREFERENCES_KEY, '{"theme":"dark","density":"compact"}');
     boot();
     expect(root.getAttribute("data-theme")).toBe("dark");
-    expect(root.getAttribute("data-density")).toBe("compact");
+    expect(root.hasAttribute("data-density")).toBe(false);
 
     root.removeAttribute("data-theme");
-    root.removeAttribute("data-density");
     window.localStorage.setItem(PREFERENCES_KEY, '{"theme":"light","density":"roomy"}');
     boot();
     expect(root.getAttribute("data-theme")).toBe("light");
-    expect(root.getAttribute("data-density")).toBe("roomy");
+    expect(root.hasAttribute("data-density")).toBe(false);
 
     for (const stored of [
       '{"theme":"system"}',
