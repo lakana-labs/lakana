@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { ColumnOut, ModelReferenceOut, TableOut } from "../../api";
-import { markedText, VisibleText } from "../../shell/VisibleText";
+import { markedName, VisibleText } from "../../shell/VisibleText";
 import { Unknown } from "../cells";
 import { splitDotted, tablePath } from "../paths";
 import { editLanguage, languageName } from "./language";
@@ -126,7 +126,7 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
     <>
       <tr tabIndex={-1} ref={row}>
         <td className="column-name">
-          <VisibleText text={column.name} />
+          <VisibleText text={column.name} name />
           {column.label !== null && (
             <span className="second column-label">
               <VisibleText text={column.label} />
@@ -181,7 +181,7 @@ function ColumnRow({ column, full, editing, blocked, onEditing }: ColumnRowProps
             )}
             {!editing && edited && (
               <BackToGit
-                name={markedText(column.name)}
+                name={markedName(column.name)}
                 reset={() =>
                   saveColumn(column.name, {
                     ...(column.description_source === "edited" ? { description: null } : {}),

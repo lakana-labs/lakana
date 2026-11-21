@@ -37,7 +37,7 @@ from fastapi import Request
 from sqlalchemy.orm import Session
 
 from lakana_core.errors import OidcRefusal, OidcSignInRefused
-from lakana_core.identity.oidc_flows import OidcFlowStore
+from lakana_core.identity.oidc_flows import IN_SESSION_PURPOSES, OidcFlowStore
 from lakana_core.net.https_json import FetchFailed
 from lakana_core.oidc.config import OidcSignInConfig
 from lakana_core.oidc.errors import IdTokenRefused
@@ -50,7 +50,20 @@ CALLBACK_PATH = "/api/v1/sign-in/oidc/callback"
 """Where the provider sends the browser back; registered with the provider as the redirect URI."""
 
 LANDING_PATH = "/sign-in/oidc"
-"""The interface's page that finishes a sign-in; every callback redirects there."""
+"""The interface's page that finishes a sign-in, an invite or a recovery link."""
+
+CONFIRMED_PATH = "/sign-in/oidc/confirmed"
+"""The interface's page that finishes a link from the profile or a provider step-up."""
+
+LINK_PARAMETERS: dict[str, str] = {"prompt": "login", "max_age": "0"}
+"""What a flow that links an identity adds to the authorization request (an invite, a recovery
+link, a link from the profile): a fresh sign-in at the provider, so the person sees which
+identity they bind, never one a shared browser's provider session answers silently. A provider
+may ignore the request, so the finish checks ``auth_time`` as provider step-up does."""
+
+STEP_UP_PARAMETERS: dict[str, str] = {"prompt": "login", "max_age": "0"}
+"""What a provider step-up adds to the authorization request: a fresh sign-in at the provider,
+never one its own session answers silently; the finish checks ``auth_time``."""
 
 MAX_PARAMETER = 4096
 """The longest ``code``, ``state`` or ``error`` the callback reads; a longer one is absent."""
@@ -77,19 +90,24 @@ def redirect_uri(origin: PublicOrigin) -> str:
     return origin.origin + CALLBACK_PATH
 
 
-def landing_url(origin: PublicOrigin) -> str:
-    """Name the interface's page every callback redirects to.
+def landing_url(origin: PublicOrigin, purpose: str | None = None) -> str:
+    """Name the interface's page a callback redirects to.
 
     Parameters
     ----------
     origin
         The public address.
+    purpose
+        The flow's purpose, when the callback found one.
 
     Returns
     -------
     str
-        ``<public_url>/sign-in/oidc``, never anything the request named.
+        ``<public_url>/sign-in/oidc/confirmed`` for a link or a step-up, otherwise
+        ``<public_url>/sign-in/oidc``: either a constant, never anything the request named.
     """
+    if purpose in IN_SESSION_PURPOSES:
+        return origin.origin + CONFIRMED_PATH
     return origin.origin + LANDING_PATH
 
 
@@ -352,7 +370,7 @@ def complete_callback(
     code: str | None,
     state: str | None,
     error: str | None,
-) -> None:
+) -> str | None:
     """Run the callback's checks and write the outcome on the flow.
 
     Parameters
@@ -367,10 +385,16 @@ def complete_callback(
         The ``state`` parameter.
     error
         The ``error`` parameter, when the provider refused.
+
+    Returns
+    -------
+    str or None
+        The purpose of the flow called back, for the page to send the browser to; `None` when
+        no flow matched.
     """
     provider: OidcProvider | None = request.app.state.oidc_provider
     if provider is None:
-        return
+        return None
     origin = request.app.state.settings.public_origin()
     clock = get_clock(request)
     store = OidcFlowStore(session, clock=clock)
@@ -378,7 +402,8 @@ def complete_callback(
     flow = store.called_back(_parameter(state), browser[:MAX_PARAMETER])
     if flow is None:
         record_refused_oidc(request, session, "flow_expired")
-        return
+        return None
+    purpose = flow.purpose
     session.commit()
     given = _parameter(code)
     if _parameter(error) or not given:
@@ -396,3 +421,4 @@ def complete_callback(
     session.commit()
     if not outcome["ok"]:
         record_refused_oidc(request, session, outcome["reason"])
+    return purpose

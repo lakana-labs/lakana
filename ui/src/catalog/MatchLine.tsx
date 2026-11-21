@@ -24,20 +24,29 @@ export interface MatchLineProps {
  * @param props - The text and the search text.
  * @param props.text - The text.
  * @param props.q - The search text.
+ * @param props.name - Whether the text is a name, which marks more characters.
  * @returns The text, with the match marked.
  */
-function Marked({ text, q }: { readonly text: string; readonly q: string }): JSX.Element {
+function Marked({
+  text,
+  q,
+  name = false,
+}: {
+  readonly text: string;
+  readonly q: string;
+  readonly name?: boolean;
+}): JSX.Element {
   const at = q === "" ? -1 : text.toLowerCase().indexOf(q.toLowerCase());
   if (at < 0) {
-    return <VisibleText text={text} />;
+    return <VisibleText text={text} name={name} />;
   }
   return (
     <>
-      <VisibleText text={text.slice(0, at)} />
+      <VisibleText text={text.slice(0, at)} name={name} />
       <mark className="match">
-        <VisibleText text={text.slice(at, at + q.length)} />
+        <VisibleText text={text.slice(at, at + q.length)} name={name} />
       </mark>
-      <VisibleText text={text.slice(at + q.length)} />
+      <VisibleText text={text.slice(at + q.length)} name={name} />
     </>
   );
 }
@@ -68,7 +77,7 @@ export function MatchLine({ match, q }: MatchLineProps): JSX.Element {
   if (match.kind === "column") {
     parts.push(
       <span key="column">
-        {t("catalog.match.column")} <Marked text={match.column ?? ""} q={q} />
+        {t("catalog.match.column")} <Marked text={match.column ?? ""} q={q} name />
       </span>,
     );
     if (match.column_type !== null) {

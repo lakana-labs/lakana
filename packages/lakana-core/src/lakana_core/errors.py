@@ -109,6 +109,11 @@ _SESSION_ENDED = {
         "Your account is deactivated, so your session ended. Ask an administrator to "
         "reactivate it, then sign in again."
     ),
+    "token_window": (  # nosec B105 -- a reason label and its message, not a credential
+        "This session was started with an API token of an account that signs in through your "
+        "organisation's identity provider, and nobody has signed in there as you within the "
+        "token window, so the session ended. Sign in through the identity provider."
+    ),
     "token_revoked": (  # nosec B105 -- a reason label and its message, not a credential
         "The token this session was created with was revoked or expired, so the session ended. "
         "Sign in again."
@@ -172,6 +177,22 @@ class NoPasskeyError(ConflictError):
     """
 
 
+class ProviderSignInRequired(PermissionDenied):
+    """A person linked to the identity provider tried a passkey way in (#32); mapped to 403.
+
+    Raised by a passkey sign-in, a passkey registration and an administrator's recovery link of
+    a linked person: they sign in only through the provider ("One way in").
+    """
+
+
+class ProviderStepUpRequired(ConflictError):
+    """A linked person asked for a passkey step-up; mapped to 409 (#32).
+
+    Raised by `lakana_core.identity.passkeys.PasskeyService.step_up_options`: a linked person
+    confirms by signing in at the provider again (`POST /api/v1/sign-in/oidc/step-up/start`).
+    """
+
+
 class PasskeyRefused(AuthenticationError):
     """A passkey ceremony inside a browser session failed: a registration or a step-up touch.
 
@@ -230,6 +251,13 @@ OidcRefusal = Literal[
     "provider_unreachable",
     "provider_refused",
     "flow_expired",
+    "identity_taken",
+    "identity_mismatch",
+    "link_unusable",
+    "last_unlinked_admin",
+    "cannot_link_operator",
+    "already_linked",
+    "auth_too_old",
 ]
 """Why an OIDC sign-in was refused; the values are stable."""
 
@@ -254,6 +282,37 @@ _OIDC_REFUSED: dict[str, str] = {
     "flow_expired": (
         "This sign-in was already used or took longer than 10 minutes. Start the sign-in again."
     ),
+    "identity_taken": (
+        "This account at the identity provider is already linked to another Lakana account, and "
+        "one identity signs in as one account only. Sign in at the provider with your own "
+        "account, or ask an administrator."
+    ),
+    "identity_mismatch": (
+        "You signed in at the identity provider as someone else than the person this is for. "
+        "Sign out at the provider, then sign in there with your own account and try again."
+    ),
+    "link_unusable": (
+        "This link was used, withdrawn or expired while you were at the identity provider, so "
+        "nothing was changed. Ask an administrator for a new link."
+    ),
+    "last_unlinked_admin": (
+        "You are the last administrator who signs in with a passkey. Linking you would leave "
+        "only administrators who need the identity provider, so an outage there would lock "
+        "everyone out. Another administrator needs a passkey and no link first."
+    ),
+    "cannot_link_operator": (
+        "This account cannot sign in through the identity provider: the server operator's "
+        "account and service accounts never do."
+    ),
+    "already_linked": (
+        "Your account is already linked to the identity provider. Sign in there; to link another "
+        "identity, ask an administrator to unlink this one first."
+    ),
+    "auth_too_old": (
+        "The identity provider did not confirm a fresh sign-in (it sent no auth_time, or an "
+        "older one), so this was not confirmed. Try again; if it keeps happening, tell your "
+        "administrator that the provider must send auth_time."
+    ),
 }
 
 
@@ -264,7 +323,9 @@ class OidcSignInRefused(PermissionDenied):
     ----------
     reason
         ``not_linked``, ``deactivated``, ``token_invalid``, ``provider_unreachable``,
-        ``provider_refused`` or ``flow_expired``.
+        ``provider_refused``, ``flow_expired``; while linking or confirming (#32, PR 2)
+        ``identity_taken``, ``identity_mismatch``, ``link_unusable``, ``last_unlinked_admin``,
+        ``cannot_link_operator``, ``already_linked`` or ``auth_too_old``.
     """
 
     def __init__(self, reason: OidcRefusal) -> None:

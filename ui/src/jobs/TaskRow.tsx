@@ -73,7 +73,7 @@ function Label({
         <>
           {" "}
           <span className="visually-hidden">
-            <VisibleText text={asset} />
+            <VisibleText text={asset} name />
           </span>
         </>
       )}
@@ -155,7 +155,7 @@ export function TaskRow({ environment, run, task }: TaskRowProps): JSX.Element {
           <Link className="row-name" to={taskPath(environment, run.id, task.asset)}>
             {/* Not breakable: a list's name is cut, never wrapped (Chromium would break at a <wbr>
                 even under nowrap). */}
-            <VisibleText text={task.asset} />
+            <VisibleText text={task.asset} name />
           </Link>
         </td>
         <td className="number">

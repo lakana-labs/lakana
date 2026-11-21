@@ -8,7 +8,7 @@ import { Heading } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { deleteNamespace } from "../../api";
 import { ActionDialog } from "../../shell/ActionDialog";
-import { markedText } from "../../shell/VisibleText";
+import { markedName } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import { ConfirmRow, useConfirm } from "../actions/ConfirmRow";
 import { ProtectedReason } from "../actions/ProtectedReason";
@@ -75,7 +75,7 @@ export function DeleteNamespaceDialog({
   return (
     <ActionDialog onClose={close}>
       <Heading slot="title">
-        {t("catalog.places.delete.title", { namespace: markedText(namespace) })}
+        {t("catalog.places.delete.title", { namespace: markedName(namespace) })}
       </Heading>
       <p>{t("catalog.places.delete.text")}</p>
       {needsReason && (

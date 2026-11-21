@@ -13,7 +13,7 @@ import { ActionDialog } from "../../shell/ActionDialog";
 import { CopyLine } from "../../shell/CopyLine";
 import { useFocusAfter } from "../../shell/useFocusAfter";
 import { shellQuote } from "../../shell/shellQuote";
-import { markedText } from "../../shell/VisibleText";
+import { markedName, markedText } from "../../shell/VisibleText";
 import { useAttempt } from "../../sign-in/Attempt";
 import { catalogPath } from "../paths";
 import { DEFAULT_VIEW } from "../view";
@@ -53,7 +53,7 @@ export function RebuildDialog({ place, onClose }: RebuildDialogProps): JSX.Eleme
   const [rebuilt, setRebuilt] = useState<TableRebuildOut | null>(null);
   const { target: doneLine, arm: armFocus } = useFocusAfter<HTMLParagraphElement>(rebuilt);
   const { environment, namespace, name } = place;
-  const table = markedText(`${namespace}.${name}`);
+  const table = markedName(`${namespace}.${name}`);
   const toCatalog = (): void => {
     void navigate(catalogPath({ ...DEFAULT_VIEW, environment, namespace }));
   };

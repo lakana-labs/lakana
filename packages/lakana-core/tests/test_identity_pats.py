@@ -33,11 +33,17 @@ from lakana_core.grants.admin import admin_only_message, may_manage_tokens
 from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.identity.pats import OWN_TOKEN_FROM_BROWSER, ListedPat, PatService
+from lakana_core.identity.sessions import (
+    TOKEN_WINDOW_KEY,
+    TOKEN_WINDOW_MESSAGE,
+    token_window_ends_at,
+)
 from lakana_core.identity.tokens import GeneratedToken, hash_secret, parse_token
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
     Grant,
+    InstanceSetting,
     PersonalAccessToken,
     Principal,
     PrincipalType,
@@ -787,3 +793,104 @@ def test_list_returns_each_token_with_its_owner(session: Session) -> None:
     assert isinstance(listed, ListedPat)
     assert listed.owner == "bob"
     assert listed.token.name == "laptop"
+
+
+# -- the provider window of a linked person's tokens (#32, PR 2) --------------------------------
+
+
+def _linked_with_token(session: Session, *, signed_in_ago: timedelta) -> tuple[Principal, str, str]:
+    """Make a person linked to the provider, with a token, who signed in there a while ago.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    signed_in_ago
+        How long ago their last provider sign-in was.
+
+    Returns
+    -------
+    tuple of (Principal, str, str)
+        The person, and their token's key id and secret.
+    """
+    carol = _add_principal(session, "carol")
+    issued = PatService(session, AllowAllAuthorization()).issue(
+        PrincipalRef(id=carol.id, name="carol", type=PrincipalType.USER), "carol", name="laptop"
+    )
+    carol.oidc_issuer, carol.oidc_subject = "https://idp.example.com", "carol"
+    carol.last_provider_sign_in_at = datetime.now(UTC) - signed_in_ago
+    session.commit()
+    parsed = parse_token(issued.token, "lakana_pat")
+    assert parsed is not None
+    return carol, *parsed
+
+
+def test_token_outside_the_window_is_401_and_not_revoked(session: Session) -> None:
+    _, key_id, secret = _linked_with_token(session, signed_in_ago=timedelta(days=30, seconds=1))
+    with pytest.raises(AuthenticationError) as refused:
+        PatService(session, AllowAllAuthorization()).verify(key_id, secret)
+    assert str(refused.value) == TOKEN_WINDOW_MESSAGE.format(days=30)
+    assert "Sign in to Lakana in the browser" in str(refused.value)
+    pat = session.execute(
+        select(PersonalAccessToken).where(PersonalAccessToken.key_id == key_id)
+    ).scalar_one()
+    assert pat.revoked_at is None and pat.last_used_at is None
+
+
+def test_token_inside_the_window_works(session: Session) -> None:
+    _, key_id, secret = _linked_with_token(session, signed_in_ago=timedelta(days=29))
+    assert PatService(session, AllowAllAuthorization()).verify(key_id, secret).name == "carol"
+
+
+def test_a_provider_sign_in_reopens_the_window(session: Session) -> None:
+    carol, key_id, secret = _linked_with_token(session, signed_in_ago=timedelta(days=40))
+    service = PatService(session, AllowAllAuthorization())
+    with pytest.raises(AuthenticationError):
+        service.verify(key_id, secret)
+    carol.last_provider_sign_in_at = datetime.now(UTC)
+    session.commit()
+    assert service.verify(key_id, secret).name == "carol"
+
+
+def test_window_change_applies_at_once(session: Session) -> None:
+    _, key_id, secret = _linked_with_token(session, signed_in_ago=timedelta(days=8))
+    service = PatService(session, AllowAllAuthorization())
+    assert service.verify(key_id, secret).name == "carol"
+    session.add(InstanceSetting(key=TOKEN_WINDOW_KEY, value=7, updated_at=datetime.now(UTC)))
+    session.commit()
+    with pytest.raises(AuthenticationError) as refused:
+        service.verify(key_id, secret)
+    assert "7 days" in str(refused.value)
+
+
+def test_a_linked_person_who_never_signed_in_there_is_outside(session: Session) -> None:
+    carol, key_id, secret = _linked_with_token(session, signed_in_ago=timedelta(0))
+    carol.last_provider_sign_in_at = None
+    session.commit()
+    with pytest.raises(AuthenticationError):
+        PatService(session, AllowAllAuthorization()).verify(key_id, secret)
+
+
+def test_a_task_token_an_administrator_minted_ignores_the_window(session: Session) -> None:
+    from lakana_core.bootstrap import ensure_bootstrap_admin_grant
+    from lakana_core.identity.task_tokens import TaskTokenService
+
+    carol, _, _ = _linked_with_token(session, signed_in_ago=timedelta(days=90))
+    admin = _admin(session)
+    ensure_bootstrap_admin_grant(session, admin, AllowAllAuthorization())
+    minted = TaskTokenService(session, AllowAllAuthorization()).mint(
+        admin, "carol", environment="dev", asset_scope=["gold.sales"], ttl_seconds=300
+    )
+    parsed = parse_token(minted.token, "lakana_task")
+    assert parsed is not None
+    scope = TaskTokenService(session, AllowAllAuthorization()).verify(*parsed)
+    assert scope.principal.id == carol.id
+
+
+def test_unlinked_person_has_no_window(session: Session) -> None:
+    alice = _add_principal(session, "alice")
+    assert token_window_ends_at(session, alice) is None
+    alice.oidc_issuer, alice.oidc_subject = "https://idp.example.com", "alice"
+    alice.last_provider_sign_in_at = datetime(2026, 11, 1, tzinfo=UTC)
+    session.commit()
+    assert token_window_ends_at(session, alice) == datetime(2026, 12, 1, tzinfo=UTC)

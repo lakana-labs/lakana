@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -25,7 +26,14 @@ from lakana_core.identity.links import (
     name_unavailable,
     withdraw_open_links,
 )
-from lakana_core.identity.sessions import SessionService, require_step_up, utc_now
+from lakana_core.identity.oidc_links import ProviderLink, provider_link_of
+from lakana_core.identity.sessions import (
+    SessionService,
+    require_step_up,
+    token_window_days,
+    token_window_ends_at,
+    utc_now,
+)
 from lakana_core.languages import canonical_language, language_problem
 from lakana_core.models import AuditEventType, Principal, PrincipalType
 from lakana_core.pagination import Page, name_contains, newest_first
@@ -315,6 +323,51 @@ class PrincipalService:
         found = list(rows)
         held = held_admin_ids(self._session, found)
         return {row.id: row.id in held for row in found}
+
+    def provider_links_of(
+        self, p: PrincipalRef, rows: Iterable[Principal]
+    ) -> dict[uuid.UUID, ProviderLink | None]:
+        """Describe the links to the identity provider an administrator, or the person, may see.
+
+        Read-only. Someone who may only manage principals sees no one's link but their own.
+
+        Parameters
+        ----------
+        p
+            The acting principal, already allowed to read `rows`.
+        rows
+            The principals.
+
+        Returns
+        -------
+        dict of uuid.UUID to ProviderLink or None
+            Each principal's link (`lakana_core.identity.oidc_links.provider_link_of`); `None`
+            for one who is not linked, or whose link `p` may not see.
+        """
+        admin = acts_as_instance_admin(self._session, self._authz, p)
+        days = token_window_days(self._session)
+        return {
+            row.id: (
+                provider_link_of(self._session, row, days=days) if admin or row.id == p.id else None
+            )
+            for row in rows
+        }
+
+    def own_token_window_ends_at(self, p: PrincipalRef) -> datetime | None:
+        """Say until when the caller's personal tokens work, if the identity provider limits them.
+
+        Parameters
+        ----------
+        p
+            The caller.
+
+        Returns
+        -------
+        datetime or None
+            The end of the caller's token window; `None` when they are not linked.
+        """
+        row = self._session.get(Principal, p.id)
+        return token_window_ends_at(self._session, row) if row is not None else None
 
     def set_own_language(self, p: PrincipalRef, language: str | None) -> str | None:
         """Set or reset the caller's own preferred language for catalog texts.

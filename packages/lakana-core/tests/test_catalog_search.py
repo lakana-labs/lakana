@@ -377,7 +377,10 @@ def test_percent_and_underscore_and_backslash_in_the_query_match_only_themselves
     # New names may not hold `%`; one stored by an older release still must not widen a search.
     world.session.execute(update(Table).where(Table.name == "100x").values(name="100%"))
     world.session.commit()
-    catalog.create_table(admin, TableRef("dev", _GOLD, "back\\slash"), schema=_schema("id", "x"))
+    # Nor `\` (#609); a stored one must match only itself.
+    catalog.create_table(admin, TableRef("dev", _GOLD, "backslash"), schema=_schema("id", "x"))
+    world.session.execute(update(Table).where(Table.name == "backslash").values(name="back\\slash"))
+    world.session.commit()
 
     assert world.names(world.root, "a_b") == ["table:gold.a_b"]
     assert world.names(world.root, "%") == ["table:gold.100%"]

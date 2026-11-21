@@ -2235,6 +2235,31 @@ class PrincipalCreate(BaseModel):
     type: Literal["USER", "SERVICE_ACCOUNT"]
 
 
+class ProviderLinkOut(BaseModel):
+    """A person's link to the organisation's identity provider (#32).
+
+    Parameters
+    ----------
+    issuer
+        The provider's issuer the person is linked to.
+    email
+        The e-mail address of their last provider sign-in, for showing only: Lakana never
+        matches by it.
+    name
+        The name of their last provider sign-in, for showing only.
+    last_sign_in_at
+        When they last signed in through the provider.
+    token_window_ends_at
+        Until when their personal API tokens work without another provider sign-in.
+    """
+
+    issuer: str
+    email: str | None
+    name: str | None
+    last_sign_in_at: datetime | None
+    token_window_ends_at: datetime | None
+
+
 class PrincipalOut(BaseModel):
     """Response body for a principal.
 
@@ -2253,6 +2278,9 @@ class PrincipalOut(BaseModel):
         Whether the principal holds or has ever held the `ADMIN` role on the instance, directly
         or through a group. Such a person is recovered only by the server operator. `null`
         unless the caller is an administrator (the `ADMIN` role on the instance).
+    provider_link
+        The person's link to the identity provider; `null` when they are not linked, or for a
+        caller who is neither an administrator nor the person.
     """
 
     name: str
@@ -2260,6 +2288,7 @@ class PrincipalOut(BaseModel):
     is_active: bool
     picture: str | None = None
     held_admin: bool | None = None
+    provider_link: ProviderLinkOut | None = None
 
     model_config = {"from_attributes": True}
 
@@ -3187,6 +3216,10 @@ class WhoamiOut(BaseModel):
         exactly these. It describes you only.
     picture
         The etag of your profile picture, or `null` without one.
+    token_window_ends_at
+        For a person linked to the identity provider: until when your personal API tokens work
+        without another sign-in there (the token window, `token_provider_window_days` after your
+        last provider sign-in). `null` when your tokens have no such window.
     """
 
     name: str
@@ -3203,6 +3236,7 @@ class WhoamiOut(BaseModel):
     instance_actions: list[str] = []
     managed_environments: list[str] = []
     picture: str | None = None
+    token_window_ends_at: datetime | None = None
 
 
 class ProfileIn(BaseModel):
@@ -7106,6 +7140,9 @@ class SessionOut(BaseModel):
         on an account without one).
     absolute_expires_at
         When the session ends at the latest, however active.
+    provider_linked
+        Whether the person signs in through the identity provider: their step-up is a fresh
+        sign-in there (`POST /api/v1/sign-in/oidc/step-up/start`), not a passkey touch.
     """
 
     name: str
@@ -7116,6 +7153,7 @@ class SessionOut(BaseModel):
     needs_passkey: bool
     offer_passkey: bool
     absolute_expires_at: datetime
+    provider_linked: bool = False
 
 
 class BrowserSessionOut(BaseModel):
@@ -7170,12 +7208,40 @@ class SignInBoundsOut(BaseModel):
         The shortest absolute lifetime, in minutes.
     absolute_lifetime_minutes_max
         The longest absolute lifetime, in minutes.
+    token_provider_window_days_min
+        The shortest token window, in days.
+    token_provider_window_days_max
+        The longest token window, in days.
     """
 
     idle_timeout_minutes_min: int
     idle_timeout_minutes_max: int
     absolute_lifetime_minutes_min: int
     absolute_lifetime_minutes_max: int
+    token_provider_window_days_min: int = 1
+    token_provider_window_days_max: int = 365
+
+
+class SignInProviderOut(BaseModel):
+    """The identity provider people sign in through, in the sign-in settings (administrators only).
+
+    Parameters
+    ----------
+    display_name
+        The name on the sign-in button.
+    issuer
+        The provider's issuer (`LAKANA_OIDC__ISSUER`).
+    linked_people
+        How many active people are linked to it.
+    unlinked_admins
+        How many administrators can sign in without it (not linked, with a working passkey):
+        the way in when the provider is down. At 1, the last of them cannot be linked.
+    """
+
+    display_name: str
+    issuer: str
+    linked_people: int
+    unlinked_admins: int
 
 
 class SignInSettingsOut(BaseModel):
@@ -7188,12 +7254,20 @@ class SignInSettingsOut(BaseModel):
     absolute_lifetime_minutes
         How long a session lasts at most, in minutes.
     bounds
-        The limits both may be chosen between.
+        The limits each may be chosen between.
+    token_provider_window_days
+        How long a linked person's personal API tokens work after their last sign-in through
+        the identity provider, in days (default 30).
+    provider
+        The identity provider and its counts, for an administrator while OIDC sign-in is on;
+        `null` otherwise.
     """
 
     idle_timeout_minutes: int
     absolute_lifetime_minutes: int
     bounds: SignInBoundsOut
+    token_provider_window_days: int = 30
+    provider: SignInProviderOut | None = None
 
 
 class SignInSettingsIn(BaseModel):
@@ -7208,12 +7282,16 @@ class SignInSettingsIn(BaseModel):
     absolute_lifetime_minutes
         The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than
         the idle timeout.
+    token_provider_window_days
+        The new token window of people linked to the identity provider, in days (1 to 365). It
+        applies to the next request with a token.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     idle_timeout_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
     absolute_lifetime_minutes: int | None = Field(default=None, ge=1, le=10_000_000)
+    token_provider_window_days: int | None = Field(default=None, ge=0, le=10_000_000)
 
 
 class LinkIdIn(BaseModel):
@@ -7260,12 +7338,22 @@ class LinkDescriptionOut(BaseModel):
         The person's display name, if one is known.
     state
         Always ``open`` here; a link that cannot be used answers 410 with its state.
+    provider_only
+        Whether this link can be used only through the identity provider: an administrator's
+        recovery link for a person linked to it. `/links/redeem` then answers 403
+        `ProviderSignInRequired`; start the provider's sign-in with the link instead
+        (`POST /api/v1/sign-in/oidc/start`, `purpose: recovery`).
+    offers_provider
+        Whether the sign-in page offers "Sign in with <provider>" for this link: an invite or a
+        recovery link while OIDC sign-in is on.
     """
 
     kind: str
     name: str
     display_name: str | None
     state: str
+    provider_only: bool = False
+    offers_provider: bool = False
 
 
 class SignInOut(BaseModel):
@@ -7318,11 +7406,56 @@ class OidcStartIn(BaseModel):
         The page of the interface to open after signing in, as a path such as
         ``/catalog/prod``. Anything that is not a path inside the interface (another site, a
         sign-in page, more than 2048 characters) is replaced by ``/``.
+    purpose
+        ``sign_in`` (the default) for a person already linked; ``invite`` to accept an invite,
+        or ``recovery`` to use a recovery link, through the provider: both need `link_id` and
+        `secret`.
+    link_id
+        The link's public id (``l=`` after the ``#``), with `purpose` ``invite`` or
+        ``recovery``.
+    secret
+        The link's secret (``s=``), with `link_id`. Checked here and never stored, logged or
+        audited: the flow keeps only the link's row id, and the link is used at the finish.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     return_to: str | None = Field(default=None, max_length=4096)
+    purpose: Literal["sign_in", "invite", "recovery"] = "sign_in"
+    link_id: str | None = Field(default=None, min_length=1, max_length=64)
+    secret: str | None = Field(default=None, min_length=1, max_length=128, repr=False)
+
+
+class OidcInSessionStartIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/oidc/link/start` and `/step-up/start`.
+
+    Parameters
+    ----------
+    return_to
+        The page of the interface to open afterwards, as a path; anything else becomes ``/``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    return_to: str | None = Field(default=None, max_length=4096)
+
+
+class OidcInSessionOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/oidc/finish-in-session`.
+
+    The session stays the same, so its page keeps its CSRF token.
+
+    Parameters
+    ----------
+    return_to
+        The page to open now: the path the start was given, checked, or ``/``.
+    step_up_until
+        Until when actions that need step-up are allowed without confirming again; `null`
+        when the session has no fresh confirmation.
+    """
+
+    return_to: str
+    step_up_until: datetime | None
 
 
 class OidcStartOut(BaseModel):

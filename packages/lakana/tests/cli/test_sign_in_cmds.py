@@ -284,3 +284,34 @@ def test_json_output_has_the_whole_answer(tmp_path: Path) -> None:
 
     assert json.loads(link.stdout)["url"] == _LINK
     assert json.loads(settings.stdout)["bounds"]["idle_timeout_minutes_max"] == 1440
+
+
+def test_cli_sets_the_token_window(tmp_path: Path) -> None:
+    """`--token-window-days` PATCHes the window and the answer shows it."""
+    api = FakeApi()
+    api.on(
+        "PATCH",
+        "/api/v1/settings/sign-in",
+        json={**_SETTINGS, "token_provider_window_days": 7},
+    )
+    result = invoke(make_state(tmp_path, api), "sign-in", "settings", "--token-window-days", "7")
+
+    assert result.exit_code == 0, result.stderr
+    assert json.loads(api.requests[0].content) == {"token_provider_window_days": 7}
+    assert "Token window: 7 days (1 to 365)" in _one_line(result.stdout)
+    assert "next request" in _one_line(result.stderr)
+
+
+def test_cli_settings_show_the_provider_to_an_administrator(tmp_path: Path) -> None:
+    """With the provider in the answer, its name and counts are shown."""
+    api = FakeApi()
+    provider = {
+        "display_name": "Keycloak",
+        "issuer": "https://idp.example.com",
+        "linked_people": 3,
+        "unlinked_admins": 1,
+    }
+    api.on("GET", "/api/v1/settings/sign-in", json={**_SETTINGS, "provider": provider})
+    out = _one_line(invoke(make_state(tmp_path, api), "sign-in", "settings").stdout)
+    assert "Identity provider: Keycloak (https://idp.example.com)" in out
+    assert "3 linked people, 1 administrator who signs in with a passkey" in out

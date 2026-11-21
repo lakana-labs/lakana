@@ -28,6 +28,7 @@ def test_whoami_describes_a_pat_caller(client: TestClient) -> None:
         "instance_actions": [a.value for a in Action if a is not Action.READ_QUERY_TEXT],
         "managed_environments": [],
         "picture": None,
+        "token_window_ends_at": None,
     }
 
 
@@ -65,6 +66,7 @@ def test_whoami_describes_a_task_token_callers_scope(client: TestClient) -> None
         "instance_actions": [],
         "managed_environments": [],
         "picture": None,
+        "token_window_ends_at": None,
     }
 
 

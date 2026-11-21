@@ -12,7 +12,7 @@ import type { TableRef } from "../../api";
 import { type OrphanOut, listOrphans } from "../../api/manage";
 import "../actions/actionStrings";
 import { PendingButton } from "../../shell/PendingButton";
-import { markedText, VisibleText } from "../../shell/VisibleText";
+import { markedName, VisibleText } from "../../shell/VisibleText";
 import { DropDialog } from "../actions/DropDialog";
 import { kindWord, Unknown } from "../cells";
 import { catalogPath, splitDotted } from "../paths";
@@ -61,7 +61,7 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
   }, [dropped]);
 
   const rows = pages.items ?? [];
-  const shownEnvironment = markedText(environment);
+  const shownEnvironment = markedName(environment);
   return (
     <div className="orphans-view">
       <p className="page-purpose">
@@ -72,11 +72,11 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
           ? t("catalog.views.orphans.inEnvironment", { environment: shownEnvironment })
           : t("catalog.views.orphans.wholeEnvironment", {
               environment: shownEnvironment,
-              namespace: markedText(namespace),
+              namespace: markedName(namespace),
             })}
       </p>
       <p className="catalog-result" role="status" tabIndex={-1} ref={status}>
-        {dropped !== null && t("catalog.views.dropped.droppedNow", { table: markedText(dropped) })}
+        {dropped !== null && t("catalog.views.dropped.droppedNow", { table: markedName(dropped) })}
       </p>
       {hidden > 0 && <p>{t("catalog.views.orphans.hidden", { count: hidden })}</p>}
       <ViewList
@@ -101,11 +101,11 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
             <tr key={`${row.repository}\u0000${row.table}`}>
               <td>
                 <span className="row-name">
-                  <VisibleText text={parts?.name ?? row.table} />
+                  <VisibleText text={parts?.name ?? row.table} name />
                 </span>
                 {parts !== null && (
                   <span className="second">
-                    <VisibleText text={parts.namespace} />
+                    <VisibleText text={parts.namespace} name />
                   </span>
                 )}
               </td>
@@ -131,7 +131,7 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
                         view: "dropped",
                       })}
                       aria-label={t("catalog.views.orphans.restoreFor", {
-                        table: markedText(row.table),
+                        table: markedName(row.table),
                       })}
                     >
                       {t("catalog.views.orphans.restore")}
@@ -142,7 +142,7 @@ export function OrphansView({ environment, namespace, onChanged }: OrphansViewPr
                   <PendingButton
                     className="button"
                     aria-label={t("catalog.views.orphans.dropFor", {
-                      table: markedText(row.table),
+                      table: markedName(row.table),
                     })}
                     pending={false}
                     onPress={() => {

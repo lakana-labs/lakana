@@ -26,6 +26,7 @@ from lakana._models import (
     Passkey,
     RecoveryLink,
     SignInBounds,
+    SignInProvider,
     SignInSettings,
 )
 from lakana._routes import ROUTES
@@ -452,6 +453,7 @@ def _settings(data: dict[str, Any]) -> SignInSettings:
         The settings.
     """
     bounds = data["bounds"]
+    provider = data.get("provider")
     return SignInSettings(
         idle_timeout_minutes=data["idle_timeout_minutes"],
         absolute_lifetime_minutes=data["absolute_lifetime_minutes"],
@@ -460,6 +462,17 @@ def _settings(data: dict[str, Any]) -> SignInSettings:
             idle_timeout_minutes_max=bounds["idle_timeout_minutes_max"],
             absolute_lifetime_minutes_min=bounds["absolute_lifetime_minutes_min"],
             absolute_lifetime_minutes_max=bounds["absolute_lifetime_minutes_max"],
+            token_provider_window_days_min=bounds.get("token_provider_window_days_min", 1),
+            token_provider_window_days_max=bounds.get("token_provider_window_days_max", 365),
+        ),
+        token_provider_window_days=data.get("token_provider_window_days", 30),
+        provider=None
+        if provider is None
+        else SignInProvider(
+            display_name=provider["display_name"],
+            issuer=provider["issuer"],
+            linked_people=provider["linked_people"],
+            unlinked_admins=provider["unlinked_admins"],
         ),
     )
 
@@ -490,10 +503,12 @@ class SignInSettingsResource:
         self,
         idle_timeout_minutes: int | None = None,
         absolute_lifetime_minutes: int | None = None,
+        token_provider_window_days: int | None = None,
     ) -> SignInSettings:
-        """Change how long new browser sessions last; open sessions keep their lengths.
+        """Change how long new browser sessions last, or the token window of linked people.
 
-        Needs the ADMIN role. Recorded in the audit log.
+        Open sessions keep their lengths; a new token window applies to the next request with a
+        token. Needs the ADMIN role. Recorded in the audit log.
 
         Parameters
         ----------
@@ -502,6 +517,9 @@ class SignInSettingsResource:
         absolute_lifetime_minutes
             The absolute lifetime, 60 to 43200 minutes (30 days), not shorter than the idle
             timeout; `None` keeps it.
+        token_provider_window_days
+            How long a person linked to the identity provider may use their personal tokens
+            after their last sign-in there, 1 to 365 days; `None` keeps it.
 
         Returns
         -------
@@ -518,6 +536,8 @@ class SignInSettingsResource:
             body["idle_timeout_minutes"] = idle_timeout_minutes
         if absolute_lifetime_minutes is not None:
             body["absolute_lifetime_minutes"] = absolute_lifetime_minutes
+        if token_provider_window_days is not None:
+            body["token_provider_window_days"] = token_provider_window_days
         return _settings(
             self._transport.request(ROUTES["sign_in_settings.update"], json=body).json()
         )

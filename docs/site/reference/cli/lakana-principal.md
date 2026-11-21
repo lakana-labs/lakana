@@ -58,3 +58,14 @@ Deactivate principal NAME; its credentials stop working.
 | `--yes` | flag | off | Don't ask for confirmation. |
 | `--override-managed` | flag | off | Change access in a scope an access file manages anyway, in an emergency (needs ADMIN on the instance; audited; the next apply reverts it). |
 | `--reason` | text | none | Why, 10-500 characters on one line (with --override-managed). |
+
+## `lakana principal unlink-provider`
+
+Usage: `lakana principal unlink-provider [OPTIONS] {name}`
+
+Unlink person NAME from the identity provider; they come back with a recovery link.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `NAME` | text | required |  |
+| `--yes` | flag | off | Don't ask for confirmation. |

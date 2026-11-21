@@ -105,7 +105,8 @@ saved the `team` profile.
 - To turn the interface on in an existing bundle, set `LAKANA_UI__ENABLED=true` and
   `LAKANA_UI__PUBLIC_URL` in `.env`, then `docker compose up -d --wait`.
 - Sessions last 12 hours without use and 7 days at most; see and change both with
-  `lakana sign-in settings` (in minutes).
+  `lakana sign-in settings` (in minutes). The same command sets how long people linked to an
+  identity provider may use their API tokens after their last sign-in there (30 days by default).
 
 ## Local repositories
 

@@ -187,7 +187,7 @@ export function PolicyList({
                 <td>
                   <span className="row-name">
                     {/* Cut, never wrapped: no break opportunities in a list's name. */}
-                    <VisibleText text={policy.column} />
+                    <VisibleText text={policy.column} name />
                   </span>
                 </td>
               )}
@@ -265,7 +265,7 @@ export function PolicyList({
                 ),
                 ...(deleting.column === null
                   ? {}
-                  : { column: <VisibleText text={deleting.column} /> }),
+                  : { column: <VisibleText text={deleting.column} name /> }),
               }}
             />
           </p>

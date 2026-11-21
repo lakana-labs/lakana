@@ -6,7 +6,7 @@
  */
 import { type JSX, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { markedText } from "../../shell/VisibleText";
+import { markedName, markedText } from "../../shell/VisibleText";
 import "./placeStrings";
 
 /** What the location state carries after a namespace was created or deleted, or an artifact dropped. */
@@ -52,8 +52,8 @@ export function PlaceNote({ note }: PlaceNoteProps): JSX.Element {
   return (
     <p className="catalog-result" role="status" tabIndex={-1} ref={line}>
       {t(`catalog.places.note.${placeNote}`, {
-        namespace: markedText(namespace),
-        environment: markedText(environment),
+        namespace: markedName(namespace),
+        environment: markedName(environment),
         artifact: markedText(artifact ?? ""),
       })}
     </p>

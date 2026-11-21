@@ -20,6 +20,14 @@ describe("resultFileName", () => {
 
   it.each([
     ["Monthly revenue", DONE, "csv", "Monthly-revenue-2026-11-16.csv"],
+    // A no-break space is a space here, not a character to drop (#609 marks it only in names).
+    ["Monthly\u00A0revenue", DONE, "csv", "Monthly-revenue-2026-11-16.csv"],
+    [
+      "Monthly\u202Frevenue \u2764\uFE0F",
+      DONE,
+      "csv",
+      "Monthly-revenue-\u2764\uFE0F-2026-11-16.csv",
+    ],
     [null, DONE, "csv", `query-${ID}-2026-11-16.csv`],
     ["a/b\\c", DONE, "xlsx", "a-b-c-2026-11-16.xlsx"],
     ["\u200B", DONE, "csv", `query-${ID}-2026-11-16.csv`],

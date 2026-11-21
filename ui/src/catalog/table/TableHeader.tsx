@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 
 import { EnvironmentLabel } from "../../shell/EnvironmentLabel";
 import { SectionTabs } from "../../shell/SectionTabs";
-import { markedText, VisibleText } from "../../shell/VisibleText";
+import { markedName, VisibleText } from "../../shell/VisibleText";
 import { kindWord } from "../cells";
 import { tablePath, tabsFor } from "../paths";
 import { useTableData } from "./TableContext";
@@ -33,7 +33,7 @@ export function TableHeader(): JSX.Element {
       <p className="table-line">
         {t("catalog.secondLine", {
           kind: kindWord(t, table.kind, table.model?.kind ?? null),
-          namespace: markedText(table.namespace),
+          namespace: markedName(table.namespace),
         })}{" "}
         <EnvironmentLabel environment={ref.environment} />
       </p>

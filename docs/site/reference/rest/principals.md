@@ -49,6 +49,7 @@ Answer fields: `PrincipalOut`
 | `is_active` | true or false | yes |  |
 | `picture` | text or null | no |  |
 | `held_admin` | true or false or null | no |  |
+| `provider_link` | `ProviderLinkOut` or null | no |  |
 
 ## `GET /api/v1/principals`
 
@@ -106,6 +107,7 @@ Answer fields: `PrincipalOut`
 | `is_active` | true or false | yes |  |
 | `picture` | text or null | no |  |
 | `held_admin` | true or false or null | no |  |
+| `provider_link` | `ProviderLinkOut` or null | no |  |
 
 ## `DELETE /api/v1/principals/{name}`
 
@@ -194,6 +196,30 @@ Answers:
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+## `DELETE /api/v1/principals/{name}/oidc-link`
+
+Unlink a person from the identity provider
+
+Deletes the person's stored passkeys, revokes all their personal API tokens, ends their sessions and withdraws their open sign-in links (an earlier recovery link too), in one step; they come back with a new recovery link (`lakana recovery create`), and then sign in with a passkey again until they link once more. To offboard someone, deactivate them instead. Needs the ADMIN role on the instance and, from the web interface, a passkey touch (or provider step-up) within the last 15 minutes (403 `StepUpRequired`). Answers 404 for an unknown name and 409 for yourself or a person who is not linked.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `name` | path | yes | text | The person's principal name. |
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `204` | Successful Response | none |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `404` | What the request names does not exist, or the caller may not know that it does. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
 ## `GET /api/v1/principals/{name}/sessions`
@@ -313,7 +339,7 @@ Answer fields: `PasskeyOut`
 
 Start adding a passkey to your own account
 
-From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. After those 15 minutes, a session from a link or a local sign-in without a usable passkey gets a 403 that names `lakana server start --local` or a recovery link, since a touch cannot help it. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.
+From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. After those 15 minutes, a session from a link or a local sign-in without a usable passkey gets a 403 that names `lakana server start --local` or a recovery link, since a touch cannot help it. A person linked to the identity provider signs in only there and gets 403 `ProviderSignInRequired`. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.
 
 Parameters:
 

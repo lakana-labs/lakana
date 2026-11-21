@@ -48,7 +48,11 @@ from lakana_core.catalog.graph_service import GraphService
 from lakana_core.catalog.identity import live_table, resolve_table_id
 from lakana_core.catalog.model_metadata import clear_health_effects, clear_removed_models
 from lakana_core.catalog.row_actions import ORPHAN_ACTIONS, drop_actions_each
-from lakana_core.catalog.tombstones import DroppedTable, list_environment_tombstones
+from lakana_core.catalog.tombstones import (
+    DroppedTable,
+    find_tombstone,
+    list_environment_tombstones,
+)
 from lakana_core.catalog.warning_text import named as _named
 from lakana_core.catalog.warning_text import typed as _typed
 from lakana_core.ci_oidc.exchange import ci_scope_for_run
@@ -63,7 +67,7 @@ from lakana_core.ci_oidc.scope import (
 from lakana_core.connections.service import missing_connections
 from lakana_core.db import db_now
 from lakana_core.errors import ConflictError, GraphBusyError, NotFoundError, ValidationError
-from lakana_core.identifiers import TableRef, shown
+from lakana_core.identifiers import NamespacePath, TableRef, check_new_name, shown
 from lakana_core.identity.sessions import require_step_up
 from lakana_core.jobs.audit import start_detail
 from lakana_core.jobs.cron import next_fire_after
@@ -77,6 +81,7 @@ from lakana_core.models import (
     JobFire,
     JobSchedule,
     JobVersion,
+    Namespace,
     Principal,
     PrincipalType,
     ProjectFile,
@@ -3552,6 +3557,67 @@ class DeployService:
         own = {asset.table for asset in assets if asset.output == "artifact"}
         for asset in ordered:
             issues.extend(self._kind_issues(p, environment, asset, artifacts, own))
+        issues.extend(self._new_name_issues(env, ordered))
+        return issues
+
+    def _new_name_issues(
+        self, env: Environment, assets: Sequence[ParsedAsset]
+    ) -> list[ProjectIssue]:
+        """Refuse at deploy a table or namespace name the run would refuse to create (#609).
+
+        A run creates the table of an asset, and the namespaces above it, as new names, which
+        must meet `check_new_name`. An asset whose table exists, or whose name a dropped table
+        the catalog still holds has (`find_tombstone`, a rebuild's), keeps deploying: its name
+        is not new. The sentence is the one the run would give, so ``price$.sql`` fails here
+        and an NFD file name is told its NFC form. Existence is read from the rows, whoever
+        may read them: a deployer learns only that a name today's rules refuse exists.
+        Artifact names follow their own rules and are left out.
+
+        Parameters
+        ----------
+        env
+            The environment.
+        assets
+            The parsed assets, in a stable order.
+
+        Returns
+        -------
+        list of ProjectIssue
+            One issue per asset whose new table or namespace name is refused.
+        """
+        issues: list[ProjectIssue] = []
+        namespaces = set(
+            self._session.scalars(
+                select(Namespace.path).where(Namespace.environment_id == env.id)
+            ).all()
+        )
+        for asset in assets:
+            if asset.output == "artifact":
+                continue
+            *parts, name = asset.table.split(".")
+            try:
+                namespace = NamespacePath.from_parts(parts, allow_dots=True)
+                if namespace.joined() in namespaces:
+                    taken = self._session.scalar(
+                        select(Table.id)
+                        .join(Namespace, Table.namespace_id == Namespace.id)
+                        .where(
+                            Namespace.environment_id == env.id,
+                            Namespace.path == namespace.joined(),
+                            Table.name == name,
+                        )
+                    )
+                    if (
+                        taken is not None
+                        or find_tombstone(self._session, env.id, namespace, name) is not None
+                    ):
+                        continue
+                for depth, part in enumerate(parts, start=1):
+                    if NamespacePath(tuple(parts[:depth])).joined() not in namespaces:
+                        check_new_name(part, what="Namespace component")
+                check_new_name(name, what="Table name")
+            except ValidationError as exc:
+                issues.append(ProjectIssue(asset.path, None, str(exc)))
         return issues
 
     def validate_glossary(

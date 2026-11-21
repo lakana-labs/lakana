@@ -11,7 +11,7 @@
 import { type Completion, type CompletionSource, ifNotIn } from "@codemirror/autocomplete";
 
 import type { ColumnOut } from "../../api/table";
-import { markedText } from "../../shell/VisibleText";
+import { markedName, markedText } from "../../shell/VisibleText";
 import type { CompletionCatalog } from "./catalog";
 import {
   placeAfter,
@@ -105,7 +105,7 @@ export function tableOf(
  * @returns The option.
  */
 function named(name: string, type: string): Completion {
-  return { label: name, displayLabel: markedText(name), type };
+  return { label: name, displayLabel: markedName(name), type };
 }
 
 /**
@@ -152,7 +152,7 @@ async function bareColumns(
       const type = markedText(column.type);
       return (tablesOf.get(column.name) as number) > 1
         ? {
-            ...columnOption(column, `${markedText(qualifier)} · ${type}`),
+            ...columnOption(column, `${markedName(qualifier)} · ${type}`),
             apply: `${qualifier}.${column.name}`,
           }
         : columnOption(column, type);
