@@ -7174,9 +7174,14 @@ sign-in (#32)".
   own). The poll answers `pending`, `approved` with the token once, `denied` or `expired`, and 429
   `slow_down` sooner than 5 seconds (1 second of jitter allowed) after the last poll
   (`test_poll_slow_down_is_429`, `test_denied_grant_never_yields_a_token`). Polls have buckets of
-  their own at 12 times the start rate (`test_polls_have_buckets_of_their_own`), and the SDK reads
-  any 429 as `slow_down`, the CLI waiting 5 seconds more and at least `Retry-After`. A denial is
-  audited as `SIGN_IN_CLI_DENIED`.
+  their own at 120 times the start rate (`POLL_RATE`, the polls of 10 minutes of starts at the full
+  rate: at the default rates 600 waiting sign-ins per address and 2,400 per network;
+  `test_polls_have_buckets_of_their_own`), and the SDK reads any 429 as `slow_down`, the CLI waiting
+  5 seconds more and at least `Retry-After` (whole seconds, at most 60, the SDK's capped parser).
+  The CLI stops at the code's expiry even if every poll is refused
+  (`test_device_stops_at_the_codes_expiry_when_every_poll_is_refused`). The age on the page is the
+  server's (`age_seconds`, never below 0), not the browser clock's. A denial is audited as
+  `SIGN_IN_CLI_DENIED`.
 - **C5, the token.** Issued at the exchange or the approved poll through `PatService.issue`, for the
   person who approved, with their browser session as the actor: the session is read again
   (`SessionService.verify_by_id`), so a session that ended, idled out or whose person was
@@ -7187,10 +7192,13 @@ sign-in (#32)".
   `test_a_loopback_exchange_that_loses_the_race_gets_no_token`). Every refused exchange answers one
   sentence (`test_every_exchange_refusal_says_the_same_sentence`); one of a grant that exists is
   audited as `SIGN_IN_CLI_REFUSED` with `reason` `wrong_verifier`, `used`, `expired` or
-  `session_ended`, an unknown code not (only a holder of a real code reaches a grant, so the rows
-  cannot be flooded). Named `lakana login on <host>`, the host stripped of control, format
-  and line-separator characters, cut to 64 characters, `?` when empty
-  (`test_host_label_is_cleaned`); a name the person already uses for a live token gets ` (2)`,
+  `session_ended`, at most once per grant: a conditional `UPDATE` sets `refused_at`, so a used or
+  expired code replayed any number of times writes one row (`test_a_replayed_code_is_audited_once`),
+  and an unknown code none. Named `lakana login on <host>`; the host must be 1 to 64 characters of
+  `A-Z a-z 0-9 . _ -`, or the start and the approval answer 422 with a sentence, so the name the
+  command line sends cannot write a sentence into the confirmation
+  (`test_a_host_that_is_no_host_name_is_refused`); the CLI turns any other run of characters of
+  the system's host name into `-`. A name the person already uses for a live token gets ` (2)`,
   ` (3)` (`test_taken_name_gets_a_number`). It works for 90 days (maintainer, 2026-11-20,
   `test_token_lives_ninety_days`); a new `lakana login` makes a new token and revokes none. A linked
   person's token stays bound by the token window (PR 2). Audited as `SIGN_IN_CLI_APPROVED` and
@@ -7199,8 +7207,10 @@ sign-in (#32)".
   verifier or token reaches a log, an audit row or the terminal
   (`test_routes_never_log_the_code_or_verifier`, `test_the_token_is_never_printed`).
 - **C6, the confirmation page** names the token and the person ("Create the API token “lakana
-  login on laptop-7” for kim?") as text, with hidden characters of the host marked
-  (`marks hidden characters in the host`, and the walk of `hidden-characters.spec.ts`), says that
+  login on laptop-7” for kim?") as text, says "“laptop-7” is the name the computer gave itself;
+  Lakana cannot check it.", refuses a link whose host is no host name (`refuses a host that is no
+  host name`), marks hidden characters in anything the server sent (the walk of
+  `hidden-characters.spec.ts`), says that
   the command line can then do everything the person can for 90 days (and for a linked person only
   while they keep signing in through the provider), and warns to continue only for a sign-in the
   person started a moment ago. The loopback page shows no requesting address: the browser itself

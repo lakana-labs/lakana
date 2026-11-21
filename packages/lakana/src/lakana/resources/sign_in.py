@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from lakana._http import HttpTransport
+from lakana._http import HttpTransport, retry_after_seconds
 from lakana._models import (
     BrowserSession,
     DeviceSignIn,
@@ -37,7 +37,7 @@ from lakana._models import (
     SignInSettings,
 )
 from lakana._routes import ROUTES
-from lakana.errors import LakanaError
+from lakana.errors import InvalidResponse, LakanaError
 
 
 def _when(value: str) -> datetime:
@@ -56,23 +56,14 @@ def _when(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
-def _seconds(value: str | None) -> float | None:
-    """Read a `Retry-After` that names seconds.
+POLL_RETRY_CAP_SECONDS = 60.0
+"""The longest `Retry-After` a device poll honours."""
 
-    Parameters
-    ----------
-    value
-        The header as sent, or `None`.
-
-    Returns
-    -------
-    float or None
-        The seconds; `None` without the header or for an HTTP date.
-    """
-    try:
-        return None if value is None else float(value)
-    except ValueError:
-        return None
+_ODD_INFO = (
+    "The server at this address did not answer like a Lakana server: its sign-in information is "
+    "not a JSON object with a true or false 'enabled'. Check the URL; a proxy or a portal may be "
+    "in the way."
+)
 
 
 def _issued_link(data: dict[str, Any]) -> IssuedLink:
@@ -161,9 +152,21 @@ class SignIn:
             From a server older than sign-in through a provider.
         lakana.errors.Conflict
             If the server's web interface is off.
+        lakana.errors.InvalidResponse
+            If the answer is not a JSON object with a boolean `enabled` (a proxy's or a portal's
+            page, say).
         """
-        data = self._transport.request(ROUTES["sign_in.oidc_info"], authenticated=False).json()
-        return OidcInfo(enabled=data["enabled"], display_name=data["display_name"])
+        response = self._transport.request(ROUTES["sign_in.oidc_info"], authenticated=False)
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+        if not isinstance(data, dict) or not isinstance(data.get("enabled"), bool):
+            raise InvalidResponse(_ODD_INFO)
+        shown = data.get("display_name")
+        return OidcInfo(
+            enabled=data["enabled"], display_name=shown if isinstance(shown, str) else None
+        )
 
     def exchange_code(self, code: str, code_verifier: str) -> IssuedToken:
         """Exchange the one-time code of a sign-in confirmed in a browser for a new token.
@@ -252,7 +255,8 @@ class SignIn:
             ).json()
         except LakanaError as exc:
             if exc.status == 429:
-                return DeviceSignInPoll(state="slow_down", retry_after=_seconds(exc.retry_after))
+                wait = retry_after_seconds(exc.retry_after, POLL_RETRY_CAP_SECONDS)
+                return DeviceSignInPoll(state="slow_down", retry_after=wait)
             raise
         token = data["token"]
         return DeviceSignInPoll(

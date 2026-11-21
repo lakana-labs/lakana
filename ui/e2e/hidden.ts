@@ -48,7 +48,7 @@ export const STRING_CODES: Readonly<Record<string, readonly string[]>> = {
  * serves.
  */
 export const READ_AS: Readonly<Record<string, string>> = {
-  '["host","requested_at","requested_from"]': "CliDeviceHostOut",
+  '["age_seconds","host","requested_at","requested_from"]': "CliDeviceHostOut",
   '["active_runs","heartbeat_at","holder","pending","ready","running"]': "SchedulerOut",
   '["created_at","created_by","credential_secret","credential_username","default_ref","deploy_keys","host_keys","id","kind","name","ssh_known_hosts","updated_at","url"]':
     "RepositoryOut",

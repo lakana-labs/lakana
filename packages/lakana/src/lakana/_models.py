@@ -1965,8 +1965,8 @@ class DeviceSignInPoll:
     token
         The new token, only with ``approved``.
     retry_after
-        With ``slow_down``, the seconds the server asked to wait (its `Retry-After`), when it
-        named them.
+        With ``slow_down``, the whole seconds the server asked to wait (its `Retry-After`, at
+        most 60), when it named them.
     """
 
     state: Literal["pending", "approved", "denied", "expired", "slow_down"]

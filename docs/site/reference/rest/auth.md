@@ -77,7 +77,7 @@ Answer fields: `TokenIssueOut`
 
 Start a sign-in of `lakana login --device`, for a computer without a browser
 
-Needs no credential. Show `user_code` and `verification_url` to the person, who confirms in a browser where they are signed in; poll `POST /api/v1/auth/cli/device/token` every `interval` seconds. The codes work for 10 minutes. 429 past the rate.
+Needs no credential. `host` is 1 to 64 characters of `A-Z a-z 0-9 . _ -` (422 with a sentence otherwise). Show `user_code` and `verification_url` to the person, who confirms in a browser where they are signed in; poll `POST /api/v1/auth/cli/device/token` every `interval` seconds. The codes work for 10 minutes. 429 past the rate.
 
 Request body (application/json, required): `CliDeviceIn`
 

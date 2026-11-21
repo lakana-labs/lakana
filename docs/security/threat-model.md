@@ -754,6 +754,11 @@ What is defended:
   to continue only for a sign-in the person started a moment ago and never to enter a code
   someone sent them. A wrong code is answered as such; 5 of them in 10 minutes block the person's
   device routes.
+- **A computer name that reads as a sentence.** The name the command line sends must be a host
+  name (`A-Z a-z 0-9 . _ -`, at most 64), and the page labels it as the name the computer gave
+  itself.
+- **A replayed code flooding the audit log.** A refused exchange is audited at most once per
+  grant.
 - **Guessing a user code.** 8 letters of 20 (about 2.6·10¹⁰ values), 10 minutes, stored only as a
   hash; starting and polling are rate limited per address and network.
 - **The token in a log, the audit log, the terminal or the shell history.** It is never printed,
@@ -764,6 +769,9 @@ Residuals, stated as such:
 1. **Phishing still works on someone who ignores the warning.** The address and the time help a
    person who looks; a person who confirms a code someone sent them gives that someone a 90-day
    token that acts as them. Revoking it (`lakana token revoke`) or deactivating the person ends it.
+   Behind a reverse proxy that is not in `LAKANA_TRUSTED_PROXIES`, every sign-in reads "Requested
+   from" the proxy's address (often an internal one such as `172.18.0.1`), which tells the
+   person's own request from nobody's; the deploy how-to says to list the proxy.
 2. **The loopback `state` is no secret on a shared computer.** It is on the terminal and on the
    browser launcher's command line, which other local users can read (`/proc/<pid>/cmdline`
    without `hidepid`). One of them can confirm the same challenge in their own session and race

@@ -39,7 +39,7 @@ from lakana_core.identity.cli_grants import (
     DeviceDescription,
     DevicePoll,
     DeviceStart,
-    clean_host,
+    check_host,
     normalize_user_code,
     s256,
     token_name_for,
@@ -366,14 +366,35 @@ def test_the_touch_is_measured_at_the_approval(world: World) -> None:
     assert world.grants.exchange_loopback(code, VERIFIER).name == "lakana login on laptop-7"
 
 
-def test_host_label_is_cleaned(world: World) -> None:
+@pytest.mark.parametrize(
+    "host",
+    [
+        "lap\u202etop",
+        "kim-laptop” for kim, started by you just now. Create",
+        "laptop 7",
+        "",
+        "x" * 65,
+        "laptöp",
+    ],
+)
+def test_a_host_that_is_no_host_name_is_refused(world: World, host: str) -> None:
     kim = world.signed_in(world.person("kim"))
-    code = _approve(world, kim, host=" lap‮top\n7 ")
 
-    assert world.grants.exchange_loopback(code, VERIFIER).name == "lakana login on laptop7"
-    assert clean_host("x" * 100) == "x" * 64
-    assert clean_host("​\n ") == "?"
-    assert clean_host("a" * 63 + " b") == "a" * 63
+    with pytest.raises(ValidationError, match="A-Z, a-z, 0-9"):
+        world.grants.approve_loopback(kim, port=49152, code_challenge=CHALLENGE, host=host)
+    with pytest.raises(ValidationError, match="A-Z, a-z, 0-9"):
+        world.grants.start_device(host, peer="203.0.113.7")
+    assert world.session.execute(select(CliGrant)).first() is None
+
+
+def test_a_host_name_of_64_characters_is_kept(world: World) -> None:
+    kim = world.signed_in(world.person("kim"))
+    host = "build-runner.eu_west." + "x" * 43
+
+    code = world.grants.approve_loopback(kim, port=49152, code_challenge=CHALLENGE, host=host)
+
+    assert world.grants.exchange_loopback(code, VERIFIER).name == f"lakana login on {host}"
+    assert check_host(host) is None
 
 
 def test_taken_name_gets_a_number(world: World) -> None:
@@ -470,7 +491,7 @@ def test_device_grant_pending_then_approved_then_used(world: World) -> None:
     assert started.expires_at == START + DEVICE_LIFETIME
     assert _poll(world, started.device_code) == DevicePoll(state="pending")
     assert world.grants.describe_device(kim, started.user_code) == DeviceDescription(
-        host="build-box", requested_from="203.0.113.7", requested_at=START
+        host="build-box", requested_from="203.0.113.7", requested_at=START, age_seconds=5
     )
     world.grants.approve_device(kim, started.user_code)
     approved = _poll(world, started.device_code)
@@ -718,3 +739,42 @@ def test_a_loopback_exchange_that_loses_the_race_gets_no_token(
     with pytest.raises(CliGrantRefused):
         world.grants.exchange_loopback(code, VERIFIER)
     assert world.tokens(kim_row) == []
+
+
+def test_a_replayed_code_is_audited_once(world: World) -> None:
+    code = _approve(world, world.signed_in(world.person("kim")))
+    world.grants.exchange_loopback(code, VERIFIER)
+
+    for _ in range(5):
+        with pytest.raises(CliGrantRefused):
+            world.grants.exchange_loopback(code, VERIFIER)
+
+    assert [e["reason"] for e in world.events(AuditEventType.SIGN_IN_CLI_REFUSED)] == ["used"]
+    assert world.session.execute(select(CliGrant.refused_at)).scalar_one() is not None
+
+
+def test_a_wrong_verifier_then_replays_are_audited_once(world: World) -> None:
+    code = _approve(world, world.signed_in(world.person("kim")))
+
+    for verifier in ("w" * 43, VERIFIER, VERIFIER):
+        with pytest.raises(CliGrantRefused):
+            world.grants.exchange_loopback(code, verifier)
+
+    reasons = [e["reason"] for e in world.events(AuditEventType.SIGN_IN_CLI_REFUSED)]
+    assert reasons == ["wrong_verifier"]
+
+
+def test_the_age_of_a_device_sign_in_is_counted_by_the_server(world: World) -> None:
+    kim = world.signed_in(world.person("kim"))
+    started = world.grants.start_device("box", peer="203.0.113.7")
+    world.clock.now = START + timedelta(seconds=150)
+
+    assert world.grants.describe_device(kim, started.user_code).age_seconds == 150
+
+
+def test_the_age_is_never_below_zero(world: World) -> None:
+    kim = world.signed_in(world.person("kim"))
+    started = world.grants.start_device("box", peer="203.0.113.7")
+    world.clock.now = START - timedelta(seconds=30)
+
+    assert world.grants.describe_device(kim, started.user_code).age_seconds == 0

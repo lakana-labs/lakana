@@ -7713,8 +7713,8 @@ class CliApprovalIn(BaseModel):
     code_challenge
         The S256 challenge of its PKCE verifier: 43 characters of ``A-Z a-z 0-9 - _``.
     host
-        Its computer's name, as `lakana login` sent it; the server keeps at most 64 visible
-        characters of it for the token's name.
+        Its computer's name: 1 to 64 characters of ``A-Z a-z 0-9 . _ -`` (422 otherwise), shown
+        in the confirmation and kept in the token's name.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -7763,7 +7763,8 @@ class CliDeviceIn(BaseModel):
     Parameters
     ----------
     host
-        The command line's computer name; at most 64 visible characters of it are kept.
+        The command line's computer name: 1 to 64 characters of ``A-Z a-z 0-9 . _ -`` (422
+        otherwise).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -7821,11 +7822,15 @@ class CliDeviceHostOut(BaseModel):
         tell their own request from someone else's.
     requested_at
         When it was started.
+    age_seconds
+        How long ago it was started, by the server's clock, never below 0: show this, not a
+        difference with the browser's clock.
     """
 
     host: str
     requested_from: str
     requested_at: datetime
+    age_seconds: int
 
 
 class CliDevicePollIn(BaseModel):

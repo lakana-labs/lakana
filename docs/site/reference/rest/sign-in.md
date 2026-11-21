@@ -574,6 +574,7 @@ Answer fields: `CliDeviceHostOut`
 | `host` | text | yes |  |
 | `requested_from` | text | yes |  |
 | `requested_at` | text (date-time) | yes |  |
+| `age_seconds` | whole number | yes |  |
 
 ## `POST /api/v1/sign-in/cli/device/approve`
 

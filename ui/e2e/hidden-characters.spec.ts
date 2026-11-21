@@ -605,15 +605,14 @@ walk("lakana login's confirmations mark hidden characters", async ({ page }) => 
   await signInAsAdmin(stub);
   await stub.route("**/api/v1/sign-in/cli/device/describe", (route) =>
     route.fulfill({
-      json: { host: "build-box", requested_from: "203.0.113.7", requested_at: AT },
+      json: { host: "build-box", requested_from: "203.0.113.7", requested_at: AT, age_seconds: 90 },
     }),
   );
   const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
-  await visit(
-    page,
-    `/sign-in/cli?port=49152&state=s-1&challenge=${challenge}&host=${n("laptop")}`,
-    ["laptop", "admin"],
-  );
+  // The page refuses a host that is no host name, so the link's own text carries no override.
+  await visit(page, `/sign-in/cli?port=49152&state=s-1&challenge=${challenge}&host=laptop`, [
+    "admin",
+  ]);
   await page.goto("/sign-in/device");
   await page.getByRole("textbox", { name: "Code" }).fill("BCDF-GHJK");
   await page.keyboard.press("Enter");

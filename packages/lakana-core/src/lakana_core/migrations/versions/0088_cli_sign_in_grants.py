@@ -1,7 +1,7 @@
 """cli_sign_in_grants: the one-time grants of `lakana login` through a browser (#32).
 
 One row per loopback or device sign-in of the command line: the SHA-256 of its codes, the PKCE
-challenge, the loopback port, the cleaned host name, the address a device grant was started
+challenge, the loopback port, the host name, the address a device grant was started
 from, who approved it from which browser session, and the token it was exchanged for. A row
 works once and expires after 2 minutes (loopback) or 10 minutes (device).
 
@@ -49,6 +49,7 @@ def upgrade() -> None:
         sa.Column("denied_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_polled_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("refused_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("pat_id", sa.Uuid(), nullable=True),
         sa.ForeignKeyConstraint(
             ["principal_id"],

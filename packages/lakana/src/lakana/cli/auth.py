@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import sys
 from dataclasses import dataclass
@@ -106,11 +107,32 @@ LOGIN_TIMEOUT_HINT = (
 )
 """The error of a loopback sign-in that timed out."""
 
+CODE_EXPIRED = "The code expired before it was confirmed. Run lakana login --device again."
+"""The error of a device sign-in nobody confirmed in time."""
+
 NO_BROWSER = (
     "No browser could be opened here. Open the address above in a browser on this computer, or "
     "press Ctrl+C and run lakana login --device to confirm on another one."
 )
 """What `lakana login` says when the browser did not start."""
+
+
+def _host_name(state: CliState) -> str:
+    """Name this computer as the server takes it: host-name characters, at most 64.
+
+    Parameters
+    ----------
+    state
+        The CLI state, for the system's host name.
+
+    Returns
+    -------
+    str
+        The host name with every run of other characters as one ``-``, cut to 64 characters;
+        ``computer`` when nothing is left.
+    """
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", state.hostname()).strip("-")[:64].strip("-")
+    return name or "computer"
 
 
 def _uses_oidc(state: CliState, base_url: str) -> bool:
@@ -167,7 +189,7 @@ def _browser_login(state: CliState, base_url: str) -> str:
                 "port": server.port,
                 "state": expected,
                 "challenge": s256(verifier),
-                "host": state.hostname(),
+                "host": _host_name(state),
             }
         )
         page = f"{base_url.rstrip('/')}/sign-in/cli?{query}"
@@ -216,15 +238,18 @@ def _device_login(state: CliState, base_url: str) -> str:
         When the sign-in was refused in the browser or the code expired (exit 1).
     """
     with state.login_client_factory(base_url, "") as client:
-        started = client.sign_in.start_device(state.hostname())
+        started = client.sign_in.start_device(_host_name(state))
         sys.stderr.write(
             f"To sign in, open {_output.inline(started.verification_url)} in a browser and enter "
             f"the code {_output.inline(started.user_code)}\n"
             "Waiting for you to confirm… (Ctrl+C to stop)\n"
         )
         interval = float(started.interval)
+        deadline = state.clock() + started.expires_in
         while True:
             state.sleep(interval)
+            if state.clock() >= deadline:
+                raise CliError(CODE_EXPIRED, exit_code=1, kind="LoginTimeout")
             polled = client.sign_in.poll_device(started.device_code)
             if polled.state == "slow_down":
                 interval = max(interval + 5.0, polled.retry_after or 0.0)
@@ -237,11 +262,7 @@ def _device_login(state: CliState, base_url: str) -> str:
                     kind="LoginCancelled",
                 )
             elif polled.state != "pending":
-                raise CliError(
-                    "The code expired before it was confirmed. Run lakana login --device again.",
-                    exit_code=1,
-                    kind="LoginTimeout",
-                )
+                raise CliError(CODE_EXPIRED, exit_code=1, kind="LoginTimeout")
 
 
 def login(

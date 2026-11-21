@@ -73,9 +73,10 @@ TOO_MANY_WRONG_CODES = (
 )
 """The 429 detail of the device routes past `WRONG_CODES`."""
 
-POLL_RATE = 12
-"""How many times the start rate the device polls may use: one poll every 5 seconds is 12 a
-minute, so as many sign-ins may wait at once behind one address as may start there."""
+POLL_RATE = int(DEVICE_LIFETIME / POLL_INTERVAL)
+"""How many times the start rate the device polls may use: 120. A grant waits up to 10 minutes and
+is polled every 5 seconds, so the sign-ins started at the full start rate over 10 minutes may all
+poll at once: at the default rates, 600 waiting sign-ins per address and 2,400 per network."""
 
 TOO_MANY_REQUESTS = "Too many command-line sign-in requests from this address; wait a minute."
 """The 429 detail of the command line's routes past their rate."""
@@ -335,6 +336,7 @@ def describe_cli_device(
         host=described.host,
         requested_from=described.requested_from,
         requested_at=described.requested_at,
+        age_seconds=described.age_seconds,
     )
 
 
@@ -443,7 +445,8 @@ def start_cli_device(
 ) -> CliDeviceOut:
     """Start a sign-in of `lakana login --device`, for a computer without a browser.
 
-    Needs no credential. Show `user_code` and `verification_url` to the person, who confirms
+    Needs no credential. `host` is 1 to 64 characters of `A-Z a-z 0-9 . _ -` (422 with a sentence
+    otherwise). Show `user_code` and `verification_url` to the person, who confirms
     in a browser where they are signed in; poll `POST /api/v1/auth/cli/device/token` every
     `interval` seconds. The codes work for 10 minutes. 429 past the rate.
 

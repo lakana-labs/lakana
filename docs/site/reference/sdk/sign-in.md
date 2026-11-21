@@ -53,6 +53,7 @@ Returns: `OidcInfo`. Whether it is on, and the provider's name.
 |---|---|
 | `lakana.NotFound` | From a server older than sign-in through a provider. |
 | `lakana.Conflict` | If the server's web interface is off. |
+| `lakana.InvalidResponse` | If the answer is not a JSON object with a boolean `enabled` (a proxy's or a portal's page, say). |
 
 ### `client.sign_in.exchange_code`
 

@@ -9,7 +9,7 @@
   "sent": "The token is on its way to the command line. You can close this tab.",
   "badLink": {
     "title": "This sign-in link does not work",
-    "body": "The link lakana login opened is incomplete or changed: its port must be between 1024 and 65535. Run lakana login again."
+    "body": "The link lakana login opened is incomplete or changed: its port must be between 1024 and 65535, and the computer's name may hold only A-Z, a-z, 0-9, '.', '_' and '-'. Run lakana login again."
   },
   "device": {
     "title": "Sign in a command line elsewhere",
@@ -28,5 +28,6 @@
     "requestedNow": "Requested from <address/>, less than a minute ago."
   },
   "effectLinked": "The command line on that computer can then do everything you can, for 90 days, and only while you keep signing in to Lakana through your identity provider.",
-  "warning": "Continue only if you ran lakana login on this computer yourself, a moment ago. If a link or a message brought you here, close this tab."
+  "warning": "Continue only if you ran lakana login on this computer yourself, a moment ago. If a link or a message brought you here, close this tab.",
+  "hostNote": "“<host/>” is the name the computer gave itself; Lakana cannot check it."
 }

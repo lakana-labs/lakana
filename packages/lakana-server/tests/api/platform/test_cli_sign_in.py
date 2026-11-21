@@ -366,6 +366,7 @@ def test_device_flow_end_to_end(client: TestClient, program: TestClient) -> None
     assert pending.json() == {"state": "pending", "token": None}
     assert described.json()["host"] == "build-box"
     assert described.json()["requested_from"] == "testclient"
+    assert 0 <= described.json()["age_seconds"] < 60
     requested = datetime.fromisoformat(described.json()["requested_at"])
     assert abs(datetime.now(UTC) - requested) < timedelta(minutes=1)
     assert approved.status_code == 204, approved.text
@@ -526,3 +527,19 @@ def test_a_denied_sign_in_and_a_refused_exchange_are_audited(
     refused = _events(client, AuditEventType.SIGN_IN_CLI_REFUSED)
     assert [event["reason"] for event in refused] == ["wrong_verifier"]
     assert code not in str(refused)
+
+
+@pytest.mark.parametrize("host", ["kim-laptop” for kim. Create", "lap top", "x" * 65])
+def test_a_host_that_is_no_host_name_is_refused_at_the_start(
+    client: TestClient, program: TestClient, host: str
+) -> None:
+    started = program.post(DEVICE, json={"host": host})
+    body = {"port": 49152, "code_challenge": CHALLENGE.decode(), "host": host}
+    approved = client.post(APPROVALS, headers=_browser(client), json=body)
+
+    assert (started.status_code, approved.status_code) == (422, 422)
+    assert "A-Z, a-z, 0-9" in started.json()["detail"]
+
+
+def test_the_poll_rate_covers_every_sign_in_that_may_wait() -> None:
+    assert cli_sign_in.POLL_RATE == 120

@@ -24991,7 +24991,7 @@
           "auth"
         ],
         "summary": "Start a sign-in of `lakana login --device`, for a computer without a browser",
-        "description": "Needs no credential. Show `user_code` and `verification_url` to the person, who confirms in a browser where they are signed in; poll `POST /api/v1/auth/cli/device/token` every `interval` seconds. The codes work for 10 minutes. 429 past the rate.",
+        "description": "Needs no credential. `host` is 1 to 64 characters of `A-Z a-z 0-9 . _ -` (422 with a sentence otherwise). Show `user_code` and `verification_url` to the person, who confirms in a browser where they are signed in; poll `POST /api/v1/auth/cli/device/token` every `interval` seconds. The codes work for 10 minutes. 429 past the rate.",
         "operationId": "start_cli_device_api_v1_auth_cli_device_post",
         "requestBody": {
           "content": {
@@ -30087,7 +30087,7 @@
           "host"
         ],
         "title": "CliApprovalIn",
-        "description": "Request body of `POST /api/v1/sign-in/cli/approvals`: the confirmation of `lakana login`.\n\nParameters\n----------\nport\n    The port `lakana login` listens on at ``127.0.0.1``, 1024 to 65535.\ncode_challenge\n    The S256 challenge of its PKCE verifier: 43 characters of ``A-Z a-z 0-9 - _``.\nhost\n    Its computer's name, as `lakana login` sent it; the server keeps at most 64 visible\n    characters of it for the token's name."
+        "description": "Request body of `POST /api/v1/sign-in/cli/approvals`: the confirmation of `lakana login`.\n\nParameters\n----------\nport\n    The port `lakana login` listens on at ``127.0.0.1``, 1024 to 65535.\ncode_challenge\n    The S256 challenge of its PKCE verifier: 43 characters of ``A-Z a-z 0-9 - _``.\nhost\n    Its computer's name: 1 to 64 characters of ``A-Z a-z 0-9 . _ -`` (422 otherwise), shown\n    in the confirmation and kept in the token's name."
       },
       "CliApprovalOut": {
         "properties": {
@@ -30122,16 +30122,21 @@
             "type": "string",
             "format": "date-time",
             "title": "Requested At"
+          },
+          "age_seconds": {
+            "type": "integer",
+            "title": "Age Seconds"
           }
         },
         "type": "object",
         "required": [
           "host",
           "requested_from",
-          "requested_at"
+          "requested_at",
+          "age_seconds"
         ],
         "title": "CliDeviceHostOut",
-        "description": "Response body of `POST /api/v1/sign-in/cli/device/describe`.\n\nParameters\n----------\nhost\n    The name the command line gave its computer, for the confirmation.\nrequested_from\n    The client address that started the sign-in, as the server saw it, so the person can\n    tell their own request from someone else's.\nrequested_at\n    When it was started."
+        "description": "Response body of `POST /api/v1/sign-in/cli/device/describe`.\n\nParameters\n----------\nhost\n    The name the command line gave its computer, for the confirmation.\nrequested_from\n    The client address that started the sign-in, as the server saw it, so the person can\n    tell their own request from someone else's.\nrequested_at\n    When it was started.\nage_seconds\n    How long ago it was started, by the server's clock, never below 0: show this, not a\n    difference with the browser's clock."
       },
       "CliDeviceIn": {
         "properties": {
@@ -30147,7 +30152,7 @@
           "host"
         ],
         "title": "CliDeviceIn",
-        "description": "Request body of `POST /api/v1/auth/cli/device`.\n\nParameters\n----------\nhost\n    The command line's computer name; at most 64 visible characters of it are kept."
+        "description": "Request body of `POST /api/v1/auth/cli/device`.\n\nParameters\n----------\nhost\n    The command line's computer name: 1 to 64 characters of ``A-Z a-z 0-9 . _ -`` (422\n    otherwise)."
       },
       "CliDeviceOut": {
         "properties": {

@@ -691,6 +691,61 @@ def test_any_other_answer_of_the_info_route_prompts(tmp_path: Path, status: int)
     assert browser.opened == []
 
 
+def test_an_answer_that_is_no_lakana_answer_prompts(tmp_path: Path) -> None:
+    api = _api()
+    api.on("GET", "/api/v1/sign-in/oidc", content=b"<html>Sign in to the guest network</html>")
+    browser = _Browser(None)
+    state = _browser_state(tmp_path, api, browser, interactive=True)
+
+    result = invoke(state, "login", "--url", "http://p", input=f"{TOKEN}\n\n")
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.endswith(_TODAY)
+    assert browser.opened == []
+
+
+@pytest.mark.parametrize(
+    ("system", "sent"),
+    [
+        ("laptop-7", "laptop-7"),
+        ("Kims MacBook Pro (2)", "Kims-MacBook-Pro-2"),
+        ("ラップトップ", "computer"),
+        ("a" * 70, "a" * 64),
+    ],
+)
+def test_the_computer_is_named_with_host_name_characters(
+    tmp_path: Path, system: str, sent: str
+) -> None:
+    api = _device_api({"state": "approved", "token": _ISSUED})
+    state = _browser_state(tmp_path, api, _Browser(None))
+    state.hostname = lambda: system
+    state.sleep = lambda seconds: None
+
+    result = invoke(state, "login", "--url", "http://p", "--device")
+
+    assert result.exit_code == 0, result.stderr
+    start = next(r for r in api.requests if r.url.path == "/api/v1/auth/cli/device")
+    assert json.loads(start.content) == {"host": sent}
+
+
+def test_device_stops_at_the_codes_expiry_when_every_poll_is_refused(tmp_path: Path) -> None:
+    api = _device_api(*([430] * 50))
+    state = _browser_state(tmp_path, api, _Browser(None))
+    now = [0.0]
+    state.clock = lambda: now[0]
+
+    def wait(seconds: float) -> None:
+        now[0] += seconds
+
+    state.sleep = wait
+
+    result = invoke(state, "login", "--url", "http://p", "--device")
+
+    assert result.exit_code == 1
+    assert "The code expired before it was confirmed" in result.stderr
+    assert 600.0 <= now[0] < 700.0
+
+
 def test_an_unreachable_info_route_prompts(tmp_path: Path) -> None:
     api = _api()
 

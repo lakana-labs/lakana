@@ -346,6 +346,8 @@ class CliState:
         Names this computer, for the token `login` creates; `socket.gethostname` by default.
     login_timeout
         Seconds `login` waits for the browser's answer: 10 minutes.
+    clock
+        A monotonic clock, for the deadline of `login --device`; `time.monotonic` by default.
     config_path
         The profile file; `None` means the SDK's default location.
     timeout
@@ -366,6 +368,7 @@ class CliState:
     sleep: Callable[[float], None] = time.sleep
     hostname: Callable[[], str] = socket.gethostname
     login_timeout: float = 600.0
+    clock: Callable[[], float] = time.monotonic
     config_path: Path | None = None
     timeout: float = 30.0
     version_deadline: float = 3.0

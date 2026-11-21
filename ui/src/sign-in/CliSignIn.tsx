@@ -38,8 +38,8 @@ const CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
 /** A state the command line made: URL-safe, not empty, not long. */
 const STATE = /^[A-Za-z0-9_-]{1,512}$/;
 
-/** The longest host name read from a link. */
-const MAX_HOST = 256;
+/** A host name as the server takes one: 1 to 64 characters of `A-Z a-z 0-9 . _ -`. */
+const HOST_NAME = /^[A-Za-z0-9._-]{1,64}$/;
 
 /** Sends the browser to another address; `window.location.assign` in the browser. */
 type Navigate = (url: string) => void;
@@ -110,23 +110,22 @@ function TokenEffect(): JSX.Element {
 interface RequestedProps {
   /** The address that started the sign-in. */
   readonly from: string;
-  /** When, as the server answered it. */
-  readonly at: string;
+  /** How many seconds ago, by the server's clock. */
+  readonly ageSeconds: number;
 }
 
 /**
  * "Requested from <address>, <n> minutes ago.", so the person can tell their own request from
- * someone else's.
+ * someone else's. The age is the server's, so a browser clock that is off cannot shorten it.
  *
- * @param props - The address and the time.
+ * @param props - The address and the age.
  * @param props.from - The address that started the sign-in.
- * @param props.at - When.
+ * @param props.ageSeconds - How many seconds ago.
  * @returns The line.
  */
-function Requested({ from, at }: RequestedProps): JSX.Element {
+function Requested({ from, ageSeconds }: RequestedProps): JSX.Element {
   const { t } = useTranslation();
-  const [now] = useState(() => Date.now());
-  const minutes = Math.floor((now - Date.parse(at)) / 60_000);
+  const minutes = Math.floor(Math.max(0, ageSeconds) / 60);
   const address = { address: <VisibleText text={from} /> };
   return (
     <p className="step-who">
@@ -135,6 +134,32 @@ function Requested({ from, at }: RequestedProps): JSX.Element {
       ) : (
         <Trans t={t} i18nKey="cliSignIn.device.requestedNow" components={address} />
       )}
+    </p>
+  );
+}
+
+/** Properties of {@link HostNote}. */
+interface HostNoteProps {
+  /** The name the command line gave its computer. */
+  readonly host: string;
+}
+
+/**
+ * Says that the computer's name is its own word, which Lakana cannot check.
+ *
+ * @param props - The host.
+ * @param props.host - The name the command line gave its computer.
+ * @returns The line.
+ */
+function HostNote({ host }: HostNoteProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <p className="step-who">
+      <Trans
+        t={t}
+        i18nKey="cliSignIn.hostNote"
+        components={{ host: <VisibleText text={host} /> }}
+      />
     </p>
   );
 }
@@ -163,7 +188,7 @@ function loopbackRequest(params: URLSearchParams): LoopbackRequest | null {
     !isLoopbackPort(port) ||
     !STATE.test(state) ||
     !CHALLENGE.test(challenge) ||
-    host.length > MAX_HOST
+    !HOST_NAME.test(host)
   ) {
     return null;
   }
@@ -215,6 +240,7 @@ export function CliSignInPage({ navigate = assign }: CliSignInProps): JSX.Elemen
   };
   return (
     <Step title={t("cliSignIn.title")} heading={<TokenQuestion host={request.host} />}>
+      <HostNote host={request.host} />
       <TokenEffect />
       <p className="step-warning">{t("cliSignIn.warning")}</p>
       {sent ? (
@@ -285,7 +311,8 @@ export function CliDevicePage(): JSX.Element {
     };
     return (
       <Step title={t("cliSignIn.title")} heading={<TokenQuestion host={phase.found.host} />}>
-        <Requested from={phase.found.requested_from} at={phase.found.requested_at} />
+        <HostNote host={phase.found.host} />
+        <Requested from={phase.found.requested_from} ageSeconds={phase.found.age_seconds} />
         <TokenEffect />
         <p className="step-warning">{t("cliSignIn.device.warning")}</p>
         <div className="step-actions">

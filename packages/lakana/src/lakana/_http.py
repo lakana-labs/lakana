@@ -70,12 +70,32 @@ def retry_wait(exc: LakanaError) -> float:
         else `BUSY_BACKOFF_SECONDS`: the header is absent, not a number, negative, fractional or
         an HTTP date.
     """
-    text = (exc.retry_after or "").strip()
+    seconds = retry_after_seconds(exc.retry_after, RETRY_AFTER_CAP_SECONDS)
+    return BUSY_BACKOFF_SECONDS if seconds is None else seconds
+
+
+def retry_after_seconds(value: str | None, cap: float) -> float | None:
+    """Read a `Retry-After` that names whole seconds, capped.
+
+    Parameters
+    ----------
+    value
+        The header as sent, or `None`.
+    cap
+        The most seconds answered.
+
+    Returns
+    -------
+    float or None
+        The seconds, at most `cap`; `None` when the header is absent, not a number, negative,
+        fractional or an HTTP date.
+    """
+    text = (value or "").strip()
     if not re.fullmatch(r"[0-9]+", text):
-        return BUSY_BACKOFF_SECONDS
+        return None
     digits = text.lstrip("0") or "0"
-    seconds = float(int(digits)) if len(digits) <= 9 else RETRY_AFTER_CAP_SECONDS
-    return min(seconds, RETRY_AFTER_CAP_SECONDS)
+    seconds = float(int(digits)) if len(digits) <= 9 else cap
+    return min(seconds, cap)
 
 
 def _undecodable(url: str, exc: httpx.DecodingError) -> InvalidResponse:

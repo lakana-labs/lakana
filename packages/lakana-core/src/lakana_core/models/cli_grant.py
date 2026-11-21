@@ -30,7 +30,7 @@ class CliGrant(Base):
     kind: Mapped[str] = mapped_column(String(16))
     """``loopback`` or ``device``."""
     host: Mapped[str] = mapped_column(String(64))
-    """The command line's computer, cleaned (`lakana_core.identity.cli_grants.clean_host`)."""
+    """The command line's computer: a host name (`lakana_core.identity.cli_grants.check_host`)."""
     code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
     code_challenge: Mapped[str | None] = mapped_column(String(64), nullable=True)
     """The S256 PKCE challenge of a loopback grant: public, so stored as it is."""
@@ -54,6 +54,8 @@ class CliGrant(Base):
     denied_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_polled_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    refused_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    """The first refused exchange, audited once (`SIGN_IN_CLI_REFUSED`); later ones are not."""
     pat_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("personal_access_tokens.id", ondelete="SET NULL"), nullable=True
     )

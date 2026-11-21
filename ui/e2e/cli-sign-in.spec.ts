@@ -60,6 +60,7 @@ async function stub(page: Page): Promise<string[]> {
         host: "build-box",
         requested_from: "203.0.113.7",
         requested_at: new Date(Date.now() - 60_000).toISOString(),
+        age_seconds: 60,
       },
     }),
   );

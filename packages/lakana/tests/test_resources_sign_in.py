@@ -32,7 +32,7 @@ from lakana._models import (
     SignInSettings,
 )
 from lakana.client import Client
-from lakana.errors import LakanaError
+from lakana.errors import InvalidResponse, LakanaError
 from lakana.resources.sign_in import (
     Invites,
     Passkeys,
@@ -457,7 +457,16 @@ def test_poll_device_too_soon_is_slow_down() -> None:
 
 
 @pytest.mark.parametrize(
-    ("retry_after", "seconds"), [("60", 60.0), ("Wed, 21 Oct 2026 07:28:00 GMT", None)]
+    ("retry_after", "seconds"),
+    [
+        ("20", 20.0),
+        ("99999", 60.0),
+        ("inf", None),
+        ("1e9", None),
+        ("nan", None),
+        ("-5", None),
+        ("Wed, 21 Oct 2026 07:28:00 GMT", None),
+    ],
 )
 def test_poll_device_past_the_rate_is_slow_down_with_the_wait(
     retry_after: str, seconds: float | None
@@ -480,3 +489,23 @@ def test_poll_device_raises_any_other_refusal() -> None:
     with pytest.raises(LakanaError, match="not known") as raised:
         SignIn(_transport(_recording([], 400, body))).poll_device("d")
     assert raised.value.status == 400
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(200, text="<html>Sign in to the guest network</html>"),
+        httpx.Response(200, json=[True]),
+        httpx.Response(200, json={"display_name": "Keycloak"}),
+        httpx.Response(200, json={"enabled": "yes", "display_name": None}),
+    ],
+)
+def test_oidc_info_refuses_an_answer_of_another_shape(answer: httpx.Response) -> None:
+    with pytest.raises(InvalidResponse, match="did not answer like a Lakana server"):
+        SignIn(_transport(lambda request: answer)).oidc_info()
+
+
+def test_oidc_info_reads_a_missing_name_as_none() -> None:
+    info = SignIn(_transport(_recording([], 200, {"enabled": False}))).oidc_info()
+
+    assert info == OidcInfo(enabled=False, display_name=None)

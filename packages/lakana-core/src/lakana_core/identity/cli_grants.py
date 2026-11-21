@@ -32,7 +32,6 @@ import hashlib
 import hmac
 import re
 import secrets
-import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -54,7 +53,6 @@ from lakana_core.errors import (
     PermissionDenied,
     ValidationError,
 )
-from lakana_core.identifiers import HIDDEN_CHARACTER_CATEGORIES
 from lakana_core.identity.pats import IssuedPat, PatService
 from lakana_core.identity.sessions import SessionService, require_step_up, utc_now
 from lakana_core.identity.tokens import hash_secret
@@ -85,13 +83,16 @@ USER_CODE_LENGTH = 8
 """The letters of a user code, shown as ``XXXX-XXXX``."""
 
 HOST_LENGTH = 64
-"""The longest host name kept."""
+"""The longest host name taken."""
 
 MIN_PORT, MAX_PORT = 1024, 65535
 """The loopback ports a confirmation may send the browser back to."""
 
 CHALLENGE = re.compile(r"^[A-Za-z0-9_-]{43}$")
 """An S256 PKCE challenge: the unpadded base64url of 32 bytes."""
+
+HOST_NAME = re.compile(r"[A-Za-z0-9._-]{1,64}")
+"""A host name as `socket.gethostname` gives one: the only names a grant takes."""
 
 FROM_A_BROWSER = (
     "A command-line sign-in is confirmed in the web interface, in your browser: an API token "
@@ -167,11 +168,14 @@ class DeviceDescription:
         The client address that started the grant, as the server saw it.
     requested_at
         When it was started.
+    age_seconds
+        How long ago, by the server's clock, never below 0.
     """
 
     host: str
     requested_from: str
     requested_at: datetime
+    age_seconds: int
 
 
 @dataclass(frozen=True)
@@ -190,24 +194,29 @@ class DevicePoll:
     token: IssuedPat | None = field(default=None, repr=False)
 
 
-def clean_host(host: str) -> str:
-    """Make the command line's host name safe to show and to put in a token's name.
+def check_host(host: str) -> None:
+    """Refuse a host name that is not one.
+
+    The name is the command line's own word about its computer, shown in the confirmation's
+    question and kept in the token's name; only host-name characters may make it up, so it
+    cannot write a sentence into the page.
 
     Parameters
     ----------
     host
         The name the command line sent.
 
-    Returns
-    -------
-    str
-        `host` without control, format or line-separator characters, without outer spaces, cut
-        to `HOST_LENGTH` characters; ``?`` when nothing is left.
+    Raises
+    ------
+    ValidationError
+        Unless it is 1 to `HOST_LENGTH` characters of ``A-Z a-z 0-9 . _ -``.
     """
-    visible = "".join(
-        char for char in host if unicodedata.category(char) not in HIDDEN_CHARACTER_CATEGORIES
-    )
-    return visible.strip()[:HOST_LENGTH].strip() or "?"
+    if not HOST_NAME.fullmatch(host):
+        raise ValidationError(
+            f"The computer's name must be 1 to {HOST_LENGTH} characters of A-Z, a-z, 0-9, '.', "
+            "'_' and '-', as a host name is. lakana login sends this computer's name; set "
+            "another one with the HOSTNAME of the system, or ask your administrator."
+        )
 
 
 def token_name_for(host: str, taken: Callable[[str], bool]) -> str:
@@ -216,7 +225,7 @@ def token_name_for(host: str, taken: Callable[[str], bool]) -> str:
     Parameters
     ----------
     host
-        The cleaned host name (`clean_host`).
+        The host name (`check_host`).
     taken
         Says whether the person already has a working token of a name.
 
@@ -410,7 +419,7 @@ class CliGrantService:
         code_challenge
             The S256 challenge of the command line's PKCE verifier.
         host
-            The command line's host name; cleaned here (`clean_host`).
+            The command line's host name (`check_host`).
 
         Returns
         -------
@@ -424,7 +433,8 @@ class CliGrantService:
         StepUpRequired
             Without a passkey or provider touch from the last 15 minutes.
         ValidationError
-            For a port outside 1024 to 65535 or a challenge that is no S256 challenge.
+            For a port outside 1024 to 65535, a challenge that is no S256 challenge, or a host
+            that is no host name (`check_host`).
         """
         context = self._approver(p)
         require_step_up(p)
@@ -433,6 +443,7 @@ class CliGrantService:
                 f"The port must be between {MIN_PORT} and {MAX_PORT} (got {port}): lakana login "
                 "listens on such a port of 127.0.0.1."
             )
+        check_host(host)
         if not CHALLENGE.match(code_challenge):
             raise ValidationError(
                 "code_challenge must be the S256 challenge of a PKCE verifier: 43 characters of "
@@ -444,7 +455,7 @@ class CliGrantService:
         grant = CliGrant(
             id=uuid.uuid4(),
             kind="loopback",
-            host=clean_host(host),
+            host=host,
             code_hash=hash_secret(code),
             code_challenge=code_challenge,
             port=port,
@@ -505,7 +516,10 @@ class CliGrantService:
         return self._issue(claimed, refusal=EXCHANGE_REFUSED)
 
     def _audit_refusal(self, grant: CliGrant, reason: str) -> None:
-        """Record a refused exchange of a grant that exists, and commit.
+        """Record the first refused exchange of a grant that exists, and commit.
+
+        One conditional ``UPDATE ... WHERE refused_at IS NULL`` decides, so a code replayed any
+        number of times writes one row: the first refusal is the signal; the rest are noise.
 
         Parameters
         ----------
@@ -514,14 +528,24 @@ class CliGrantService:
         reason
             ``wrong_verifier``, ``used``, ``expired`` or ``session_ended``.
         """
-        principal = grant.principal_id
-        self._audit(principal, AuditEventType.SIGN_IN_CLI_REFUSED, grant, reason=reason)
+        first = self._session.execute(
+            update(CliGrant)
+            .where(CliGrant.id == grant.id, CliGrant.refused_at.is_(None))
+            .values(refused_at=self._clock())
+            .returning(CliGrant.id)
+            .execution_options(synchronize_session="fetch")
+        ).scalar_one_or_none()
+        if first is not None:
+            self._audit(
+                grant.principal_id, AuditEventType.SIGN_IN_CLI_REFUSED, grant, reason=reason
+            )
         self._session.commit()
 
     def _refused_code(self, code: str) -> None:
         """Record why a code that names a grant could not be exchanged; an unknown one is not.
 
-        Only someone who holds a real code reaches a grant, so these rows cannot be flooded.
+        At most one row per grant (`_audit_refusal`): replaying a used or expired code writes
+        nothing more, and an unknown code nothing at all.
 
         Parameters
         ----------
@@ -636,7 +660,7 @@ class CliGrantService:
         Parameters
         ----------
         host
-            The command line's host name; cleaned here (`clean_host`).
+            The command line's host name (`check_host`).
         peer
             The client address that asks, as the server sees it; kept for the confirmation, cut
             to `PEER_LENGTH` characters.
@@ -648,9 +672,12 @@ class CliGrantService:
 
         Raises
         ------
+        ValidationError
+            For a host that is no host name (`check_host`).
         ConflictError
             When three user codes in a row were taken (astronomically rare).
         """
+        check_host(host)
         now = self._clock()
         self.purge(now)
         self._session.commit()
@@ -660,7 +687,7 @@ class CliGrantService:
                 CliGrant(
                     id=uuid.uuid4(),
                     kind="device",
-                    host=clean_host(host),
+                    host=host,
                     device_code_hash=hash_secret(device_code),
                     user_code_hash=hash_secret(user_code),
                     requested_from=peer[:PEER_LENGTH],
@@ -728,10 +755,12 @@ class CliGrantService:
         ).scalar_one_or_none()
         if grant is None:
             raise NotFoundError(WRONG_USER_CODE)
+        age = self._clock() - grant.created_at
         return DeviceDescription(
             host=grant.host,
             requested_from=grant.requested_from or "?",
             requested_at=grant.created_at,
+            age_seconds=max(0, int(age.total_seconds())),
         )
 
     def approve_device(self, p: PrincipalRef, user_code: str) -> None:

@@ -203,7 +203,7 @@ describe("CliSignInPage", () => {
     [{ state: "" }],
     [{ state: "a b" }],
     [{ challenge: "short" }],
-    [{ host: "h".repeat(257) }],
+    [{ host: "h".repeat(65) }],
   ])("refuses a changed link (%o)", (overrides) => {
     server();
     renderAt(<CliSignInPage navigate={vi.fn()} />, link(overrides));
@@ -265,14 +265,26 @@ describe("CliSignInPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("marks hidden characters in the host", () => {
-    server();
-    renderAt(<CliSignInPage navigate={vi.fn()} />, link({ host: "lap\u202etop\u200b7" }));
+  it.each([["lap\u202etop"], ["kim-laptop” for kim. Create"], ["lap top"], ["x".repeat(65)]])(
+    "refuses a host that is no host name (%s)",
+    (host) => {
+      server();
+      renderAt(<CliSignInPage navigate={vi.fn()} />, link({ host }));
 
-    const heading = screen.getByRole("heading", { level: 1 });
-    expect(heading).toHaveTextContent(/U\+202E/);
-    expect(heading).toHaveTextContent(/U\+200B/);
-    expect(heading.textContent).not.toContain("\u202e");
+      expect(
+        screen.getByRole("heading", { level: 1, name: "This sign-in link does not work" }),
+      ).toBeInTheDocument();
+      expect(screen.getByText(/may hold only A-Z, a-z, 0-9/)).toBeInTheDocument();
+    },
+  );
+
+  it("says the host is the computer's own word", () => {
+    server();
+    renderAt(<CliSignInPage navigate={vi.fn()} />, link());
+
+    expect(
+      screen.getByText("“laptop-7” is the name the computer gave itself; Lakana cannot check it."),
+    ).toBeInTheDocument();
   });
 });
 
@@ -291,7 +303,8 @@ describe("CliDevicePage", () => {
         body: {
           host: "build-box",
           requested_from: "203.0.113.7",
-          requested_at: new Date(Date.now() - 3 * 60_000).toISOString(),
+          requested_at: "2026-11-20T09:00:00Z",
+          age_seconds: 180,
         },
       },
       "POST /api/v1/sign-in/cli/device/approve": { status: 204 },
@@ -359,16 +372,19 @@ describe("CliDevicePage", () => {
   });
 
   it.each([
-    [30_000, "Requested from 203.0.113.7, less than a minute ago."],
-    [90_000, "Requested from 203.0.113.7, 1 minute ago."],
-  ])("device: names the address and the age (%s ms)", async (age, line) => {
+    [30, "Requested from 203.0.113.7, less than a minute ago."],
+    [90, "Requested from 203.0.113.7, 1 minute ago."],
+    [-40, "Requested from 203.0.113.7, less than a minute ago."],
+  ])("device: names the address and the server's age (%s s)", async (age, line) => {
     deviceServer({
       "POST /api/v1/sign-in/cli/device/describe": {
         status: 200,
         body: {
           host: "build-box",
           requested_from: "203.0.113.7",
-          requested_at: new Date(Date.now() - age).toISOString(),
+          // A browser clock far off changes nothing: the page shows the server's age.
+          requested_at: "1999-01-01T00:00:00Z",
+          age_seconds: age,
         },
       },
     });
@@ -377,6 +393,9 @@ describe("CliDevicePage", () => {
     await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
 
     expect(await screen.findByText(/^Requested from/)).toHaveTextContent(line);
+    expect(screen.getByText(/is the name the computer gave itself/)).toHaveTextContent(
+      "“build-box” is the name the computer gave itself; Lakana cannot check it.",
+    );
   });
 
   it("device: cancel refuses the sign-in", async () => {

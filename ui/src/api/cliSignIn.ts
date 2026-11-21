@@ -31,6 +31,8 @@ export interface CliDeviceHostOut {
   readonly requested_from: string;
   /** When it was started. */
   readonly requested_at: string;
+  /** How many seconds ago, by the server's clock, never below 0. */
+  readonly age_seconds: number;
 }
 
 /**
