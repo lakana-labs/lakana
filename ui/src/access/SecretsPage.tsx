@@ -113,7 +113,7 @@ function SecretList({
   const secrets = useResource(load);
   const { reload } = secrets;
   const shown = secrets.data?.length;
-  const busy = secrets.data === undefined && secrets.error === null;
+  const { busy } = secrets;
   useEffect(() => {
     onState({ shown, more: false, busy });
   }, [onState, shown, busy]);

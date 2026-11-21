@@ -166,6 +166,9 @@ describe("TruncationTip", () => {
       name.focus();
     });
     expect(tip()).toHaveTextContent("gold.sales.fact_returns_dropped_last_week");
+    act(() => {
+      name.blur();
+    });
 
     wide = 100;
     await act(async () => {
@@ -252,5 +255,44 @@ describe("TruncationTip", () => {
     });
 
     expect(tip()).toBeNull();
+  });
+
+  it("keeps the stop of a name that fits again while it has the focus", async () => {
+    render(<TruncationTip />);
+    const table = document.createElement("table");
+    table.className = "list";
+    const name = document.createElement("span");
+    name.className = "row-name";
+    name.textContent = "gold.sales.fact_returns_dropped_last_week";
+    let wide = 400;
+    Object.defineProperty(name, "scrollWidth", { get: () => wide });
+    Object.defineProperty(name, "clientWidth", { value: 100 });
+    name.getBoundingClientRect = () => new DOMRect(10, 20, 100, 18);
+    table.append(name);
+    await act(async () => {
+      document.body.append(table);
+      await Promise.resolve();
+    });
+    act(() => {
+      name.focus();
+    });
+
+    wide = 100;
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await Promise.resolve();
+    });
+
+    expect(name).toHaveAttribute("tabindex", "0");
+    expect(name).toHaveFocus();
+    act(() => {
+      name.blur();
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("resize"));
+      await Promise.resolve();
+    });
+    expect(name).not.toHaveAttribute("tabindex");
+    table.remove();
   });
 });

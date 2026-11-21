@@ -11,7 +11,7 @@ import { listDeployments, listDeploys } from "../api/jobs";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
-import { countWords, ListToolbar } from "../shell/ListToolbar";
+import { countWords, ListToolbar, useSteadyMore } from "../shell/ListToolbar";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { settingParam, useAddressParams } from "../shell/useAddressParams";
@@ -121,10 +121,11 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     }
   }, [pages.items, deployments.data]);
   const rows = pages.items ?? [];
+  const steadyMore = useSteadyMore(pages.hasMore, pages.busy);
   return (
     <div ref={area}>
       <ListToolbar
-        count={countWords(t, "jobs.deploys", pages.items?.length, pages.hasMore)}
+        count={countWords(t, "jobs.deploys", pages.items?.length, steadyMore)}
         filters={
           <ChoiceMenu
             className="jobs-filter"

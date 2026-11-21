@@ -143,6 +143,7 @@ export function InvitesPage(): JSX.Element {
       <ListToolbar
         count={countWords(t, "access.invites", invites.data?.length)}
         onRefresh={invites.reload}
+        refreshing={invites.busy}
       />
       <Loaded resource={invites}>
         {(open) =>

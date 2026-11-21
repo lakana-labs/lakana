@@ -7,7 +7,13 @@
 import { type JSX, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { countWords, ListToolbar, type ListState } from "../../shell/ListToolbar";
+import {
+  countWords,
+  ListToolbar,
+  type ListState,
+  type ListToolbarProps,
+  useSteadyMore,
+} from "../../shell/ListToolbar";
 import { PendingButton } from "../../shell/PendingButton";
 import { ReadFailed } from "../ReadFailed";
 import { ListSkeleton } from "../ListSkeleton";
@@ -50,6 +56,12 @@ export interface ViewListProps {
     readonly search?: ReactNode;
     /** The filters, on the right before Refresh. */
     readonly filters?: ReactNode;
+    /** Where a panel holds only this list: the count is its heading (`ListToolbar`'s `heading`). */
+    readonly heading?: ListToolbarProps["heading"];
+    /** That heading's id. */
+    readonly headingId?: ListToolbarProps["headingId"];
+    /** A ref to that heading. */
+    readonly headingRef?: ListToolbarProps["headingRef"];
   };
   /** Told the rows shown and the state of the read, for a toolbar the page renders itself. */
   readonly onState?: ((state: ListState) => void) | undefined;
@@ -111,25 +123,24 @@ export function ViewList({
   });
 
   const shown = pages.items === undefined ? undefined : rowCount;
+  const more = useSteadyMore(pages.hasMore, pages.busy);
   useEffect(() => {
-    onState?.({ shown, more: pages.hasMore, busy: pages.busy });
-  }, [onState, shown, pages.hasMore, pages.busy]);
+    onState?.({ shown, more, busy: pages.busy });
+  }, [onState, shown, more, pages.busy]);
 
   useImperativeHandle(regionRef, () => own.current as HTMLDivElement);
   return (
     <>
       {toolbar !== undefined && (
         <ListToolbar
-          count={countWords(
-            t,
-            toolbar.count,
-            pages.items === undefined ? undefined : rowCount,
-            pages.hasMore,
-          )}
+          count={countWords(t, toolbar.count, shown, more)}
           search={toolbar.search}
           filters={toolbar.filters}
           onRefresh={pages.reload}
           refreshing={pages.busy}
+          heading={toolbar.heading}
+          headingId={toolbar.headingId}
+          headingRef={toolbar.headingRef}
         />
       )}
       {pages.items === undefined && pages.error === null && <ListSkeleton />}

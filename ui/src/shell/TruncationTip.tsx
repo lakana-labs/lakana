@@ -29,7 +29,9 @@ function markCutStops(): void {
     if (cut && !ours) {
       element.setAttribute("tabindex", "0");
       element.setAttribute(OWN_STOP, "");
-    } else if (!cut && ours) {
+    } else if (!cut && ours && element !== document.activeElement) {
+      // A name that fits again keeps its stop while it has the focus, so the focus never drops
+      // to the page; the next change after the focus has left takes the stop back.
       element.removeAttribute("tabindex");
       element.removeAttribute(OWN_STOP);
     }

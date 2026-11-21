@@ -46,12 +46,7 @@ export function PeoplePage(): JSX.Element {
   return (
     <SettingsFrame title={t("settings.places.people")}>
       <ListToolbar
-        count={countWords(
-          t,
-          "access.people",
-          people.data?.length,
-          people.data?.length === PEOPLE_LIMIT,
-        )}
+        count={countWords(t, "access.people", people.data?.people.length, people.data?.more)}
         search={
           <SearchField className="field" value={words} onChange={setWords}>
             <Label className="visually-hidden">{t("access.people.find")}</Label>
@@ -59,14 +54,15 @@ export function PeoplePage(): JSX.Element {
           </SearchField>
         }
         onRefresh={people.reload}
+        refreshing={people.busy}
       />
       <Loaded resource={people}>
-        {(found) =>
+        {({ people: found, more }) =>
           found.length === 0 ? (
             <p className="empty">{t("access.people.none")}</p>
           ) : (
             <>
-              {found.length === PEOPLE_LIMIT && (
+              {more && (
                 <p className="page-purpose">{t("access.people.capped", { count: PEOPLE_LIMIT })}</p>
               )}
               <table className="list">
@@ -93,7 +89,14 @@ export function PeoplePage(): JSX.Element {
                           </span>
                         </div>
                       </td>
-                      <td>{person.is_active ? "" : t("access.people.deactivated")}</td>
+                      <td>
+                        {/* Every row names its state: a blank cell would read as missing. */}
+                        <span className={`pill ${person.is_active ? "pill-neutral" : "pill-warn"}`}>
+                          {person.is_active
+                            ? t("access.people.active")
+                            : t("access.people.deactivated")}
+                        </span>
+                      </td>
                       <td>
                         <span className="chevron" aria-hidden="true">
                           ›

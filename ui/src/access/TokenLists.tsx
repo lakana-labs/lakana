@@ -22,6 +22,7 @@ import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { jobRunPath } from "../jobs/paths";
 import { Avatar } from "../profile/Avatar";
+import type { ListState } from "../shell/ListToolbar";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useWhen } from "../shell/useWhen";
@@ -151,6 +152,8 @@ export interface PersonalTokensProps {
   readonly owner: string | null;
   /** The section's heading, which takes the focus after a revoke. */
   readonly heading: RefObject<HTMLHeadingElement | null>;
+  /** Told the rows shown and the state of the read, for the panel's toolbar. */
+  readonly onState: (state: ListState) => void;
   /** Called after a token was revoked, as the task tokens it minted ended with it. */
   readonly onRevoked: () => void;
 }
@@ -164,9 +167,15 @@ export interface PersonalTokensProps {
  * @param props.owner - Only this principal's tokens; null for everyone's.
  * @param props.heading - The section's heading.
  * @param props.onRevoked - Called after a token was revoked.
+ * @param props.onState - Told the rows shown and the state of the read.
  * @returns The list.
  */
-export function PersonalTokens({ owner, heading, onRevoked }: PersonalTokensProps): JSX.Element {
+export function PersonalTokens({
+  owner,
+  heading,
+  onRevoked,
+  onState,
+}: PersonalTokensProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const load = useCallback((cursor: string | null) => listAllTokens(owner, cursor), [owner]);
@@ -189,7 +198,7 @@ export function PersonalTokens({ owner, heading, onRevoked }: PersonalTokensProp
         }
         region={t("tokens.personal.region")}
         scroll="tokens-scroll"
-        toolbar={{ count: "tokens.personal" }}
+        onState={onState}
         head={
           <HeadRow
             columns={[
@@ -301,6 +310,8 @@ export interface TaskTokensProps {
   readonly environment: string | null;
   /** The section's heading, which takes the focus after a revoke. */
   readonly heading: RefObject<HTMLHeadingElement | null>;
+  /** Told the rows shown and the state of the read, for the panel's toolbar. */
+  readonly onState: (state: ListState) => void;
 }
 
 /**
@@ -312,9 +323,10 @@ export interface TaskTokensProps {
  * @param props - The environment and the heading.
  * @param props.environment - Only this environment's; null for every environment's.
  * @param props.heading - The section's heading.
+ * @param props.onState - Told the rows shown and the state of the read.
  * @returns The list.
  */
-export function TaskTokens({ environment, heading }: TaskTokensProps): JSX.Element {
+export function TaskTokens({ environment, heading, onState }: TaskTokensProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const load = useCallback(
@@ -341,7 +353,7 @@ export function TaskTokens({ environment, heading }: TaskTokensProps): JSX.Eleme
         empty={t("tokens.task.none")}
         region={t("tokens.task.region")}
         scroll="tokens-scroll"
-        toolbar={{ count: "tokens.task" }}
+        onState={onState}
         head={
           <HeadRow
             columns={[

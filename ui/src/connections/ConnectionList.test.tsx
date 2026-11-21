@@ -366,6 +366,58 @@ describe("ConnectionList", () => {
     expect(window.localStorage.getItem("lakana.connections.kim.lee")).toBeNull();
   });
 
+  it("keeps the focus on the filter when the list is read for the environment chosen", async () => {
+    fakeServer(
+      connectionRoutes(
+        [aConnection(), aConnection({ name: "files", environment: "dev" })],
+        MANAGER,
+      ),
+    );
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole("link", { name: "files" });
+
+    await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
+    await user.click(screen.getByRole("option", { name: "dev" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "crm" })).not.toBeInTheDocument();
+    });
+    // The popover hands the focus back to its button once it has closed.
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Environment: dev" })).toHaveFocus();
+    });
+  });
+
+  it("keeps the environment on Refresh", async () => {
+    const server = fakeServer(
+      connectionRoutes(
+        [aConnection(), aConnection({ name: "files", environment: "dev" })],
+        MANAGER,
+      ),
+    );
+    const user = userEvent.setup();
+    renderList();
+    await screen.findByRole("link", { name: "files" });
+    await user.click(screen.getByRole("button", { name: "Environment: All environments" }));
+    await user.click(screen.getByRole("option", { name: "dev" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("link", { name: "crm" })).not.toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(
+        server.sent.filter(
+          (request) => request.path === "/api/v1/connections?limit=100&environment=dev",
+        ),
+      ).toHaveLength(2);
+    });
+    expect(screen.getByRole("button", { name: "Environment: dev" })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "files" })).toBeInTheDocument();
+  });
+
   it("starts from the remembered environment", async () => {
     window.localStorage.setItem("lakana.connections.kim.lee", "dev");
     const server = fakeServer(

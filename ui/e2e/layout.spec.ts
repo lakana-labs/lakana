@@ -67,6 +67,15 @@ const SCREENS: readonly Screen[] = [
     loaded: (page) => page.locator(".list tbody tr").first(),
   },
   {
+    name: "Row filters & masks",
+    stub: async (page) => {
+      await signInAsAdmin(page);
+      await stubPolicies(page);
+    },
+    path: "/settings/access/filters-and-masks",
+    loaded: (page) => page.locator(".policies-scroll tbody tr").first(),
+  },
+  {
     name: "Access › Grants",
     stub: async (page) => {
       await signInAsAdmin(page);
@@ -398,6 +407,28 @@ for (const [name, stub, path, counted] of TOOLBARS) {
       expect(
         Math.abs((box?.x ?? 0) + (box?.width ?? 0) - ((own?.x ?? 0) + (own?.width ?? 0))),
       ).toBeLessThanOrEqual(1);
+    }
+  });
+}
+
+// The jobs stub answers Deploys with no row at its plain address, so there is nothing to measure.
+for (const [name, stub, path] of TOOLBARS.filter(([screen]) => screen !== "Deploys")) {
+  test(`${name}: each row's › ends at the list's right edge`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await stub(page);
+    await page.goto(path);
+    await expect(page.locator(".list tbody tr").first()).toBeVisible();
+    const gaps = await page.locator(".list").evaluateAll((lists) =>
+      lists.flatMap((list) => {
+        const right = list.getBoundingClientRect().right;
+        return [...list.querySelectorAll(".chevron")]
+          .filter((mark) => mark.getClientRects().length > 0)
+          .map((mark) => right - mark.getBoundingClientRect().right);
+      }),
+    );
+    // Within the cell's 12 px padding of the edge, in every list that has the mark.
+    for (const gap of gaps) {
+      expect(gap).toBeLessThanOrEqual(12.5);
     }
   });
 }

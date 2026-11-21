@@ -3,11 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { useTranslation } from "react-i18next";
 import { describe, expect, it, vi } from "vitest";
 
-import { countWords, ListToolbar, useListState } from "./ListToolbar";
+import { expectPending } from "../test/pending";
+
+import { countWords, ListToolbar, useListState, useSteadyMore } from "./ListToolbar";
 
 describe("ListToolbar", () => {
-  it("puts the count and the search on the left, the filters and Refresh on the right", async () => {
+  it("reads the count first, then the search, the filters and Refresh, in that order", async () => {
     const refresh = vi.fn();
+    const user = userEvent.setup();
     render(
       <ListToolbar
         count="5 connections"
@@ -16,29 +19,43 @@ describe("ListToolbar", () => {
         onRefresh={refresh}
       />,
     );
+    const count = screen.getByText("5 connections");
+    const search = screen.getByRole("textbox", { name: "Find connections" });
+    expect(count.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-    const bar = screen.getByText("5 connections").parentElement;
-    expect(bar).toHaveClass("toolbar");
-    const end = bar?.querySelector(".toolbar-end");
-    expect(end).toContainElement(screen.getByRole("button", { name: "All environments" }));
-    expect(end).toContainElement(screen.getByRole("button", { name: "Refresh" }));
-    expect(end).not.toContainElement(screen.getByRole("textbox", { name: "Find connections" }));
-
-    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await user.tab();
+    expect(search).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "All environments" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Refresh" })).toHaveFocus();
+    await user.keyboard("{Enter}");
     expect(refresh).toHaveBeenCalledOnce();
   });
 
-  it("offers no Refresh without a way to read again, and keeps an empty count's place", () => {
-    const { container } = render(<ListToolbar count={null} />);
+  it("shows that Refresh waits while the list is read, and takes no second press", async () => {
+    const refresh = vi.fn();
+    const user = userEvent.setup();
+    render(<ListToolbar count="5 connections" onRefresh={refresh} refreshing />);
+    const button = screen.getByRole("button", { name: /^Refresh/ });
+
+    expectPending(button);
+    await user.click(button);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("offers no Refresh without a way to read again, and says no count while it is read", () => {
+    render(<ListToolbar count={null} search={<input aria-label="Find people" />} />);
 
     expect(screen.queryByRole("button")).toBeNull();
-    expect(container.querySelector(".toolbar-count")).toBeEmptyDOMElement();
+    expect(screen.queryByText(/\d/)).toBeNull();
   });
 
   it("has no count at all for a list whose sections count their own rows", () => {
     const { container } = render(<ListToolbar search={<input aria-label="Search jobs" />} />);
 
-    expect(container.querySelector(".toolbar-count")).toBeNull();
+    expect(container.querySelector("p")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Search jobs" })).toBeInTheDocument();
   });
 
   it("says the count in words, or the first rows while more can be read", () => {
@@ -65,5 +82,18 @@ describe("ListToolbar", () => {
       result.current[1]({ shown: 3, more: true, busy: false });
     });
     expect(result.current[0]).toEqual({ shown: 3, more: true, busy: false });
+  });
+
+  it("keeps the last finished read's answer about more rows while a read is on its way", () => {
+    const { result, rerender } = renderHook(({ more, busy }) => useSteadyMore(more, busy), {
+      initialProps: { more: true, busy: false },
+    });
+    expect(result.current).toBe(true);
+
+    rerender({ more: false, busy: true });
+    expect(result.current).toBe(true);
+
+    rerender({ more: false, busy: false });
+    expect(result.current).toBe(false);
   });
 });

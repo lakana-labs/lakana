@@ -244,4 +244,108 @@ describe("AppShell", () => {
     expect(pressed.defaultPrevented).toBe(true);
     expect(router.state.location.pathname).toBe("/catalog");
   });
+
+  it("stops Alt+Left in a text field of an open dialog too, so the page behind it stays", async () => {
+    const { router } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const field = document.createElement("input");
+    dialog.append(field);
+    document.body.append(dialog);
+    field.focus();
+    const pressed = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    field.dispatchEvent(pressed);
+
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(router.state.location.pathname).toBe("/catalog");
+    dialog.remove();
+  });
+
+  it("ignores a dialog kept hidden or inert in the page, and goes back", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const hidden = document.createElement("div");
+    hidden.setAttribute("role", "dialog");
+    hidden.hidden = true;
+    const inert = document.createElement("div");
+    inert.setAttribute("data-trigger", "MenuTrigger");
+    inert.setAttribute("inert", "");
+    document.body.append(hidden, inert);
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    hidden.remove();
+    inert.remove();
+  });
+
+  it.each(["plaintext-only", "true", ""])(
+    "leaves Alt+Left to content editable as %j, and takes it inside contenteditable=false",
+    async (value) => {
+      const { router, user } = renderShell("/");
+      await screen.findByRole("heading", { level: 1, name: "Home" });
+      await act(() => router.navigate("/catalog"));
+      await screen.findByRole("heading", { level: 1, name: "Catalog" });
+      const editable = document.createElement("div");
+      editable.setAttribute("contenteditable", value);
+      editable.setAttribute("tabindex", "0");
+      document.body.append(editable);
+      editable.focus();
+
+      await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+      expect(router.state.location.pathname).toBe("/catalog");
+
+      const fixed = document.createElement("span");
+      fixed.setAttribute("contenteditable", "false");
+      fixed.setAttribute("tabindex", "0");
+      editable.append(fixed);
+      fixed.focus();
+      await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+      expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+      editable.remove();
+    },
+  );
+
+  it("goes back when the key reaches the window itself, outside any element", async () => {
+    const { router } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", altKey: true, cancelable: true }),
+      );
+    });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+  });
+
+  it("asks the browser whether an overlay is shown, where it can tell", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const closed = document.createElement("div");
+    closed.setAttribute("role", "dialog");
+    // A dialog left in the page with display: none, which only the browser's layout knows.
+    Object.defineProperty(closed, "checkVisibility", { value: () => false });
+    document.body.append(closed);
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    closed.remove();
+  });
 });

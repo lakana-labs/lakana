@@ -487,6 +487,7 @@
       "none": "Nobody matches.",
       "person": "Person",
       "service": "Service account",
+      "active": "Active",
       "deactivated": "Deactivated",
       "capped": "Showing the first {{count}}. Type part of a name to find someone who is not listed.",
       "serviceNote": "{{name}} is a service account: it signs in with its API token, not a passkey, so it needs no recovery link. Issue it a new token instead."

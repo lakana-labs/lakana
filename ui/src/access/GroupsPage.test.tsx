@@ -76,6 +76,35 @@ describe("GroupsPage", () => {
     expect(server.sent.at(-1)?.path).toBe("/api/v1/groups?q=zz&limit=50");
   });
 
+  it("keeps the focus in the search while the list is read again for its words", async () => {
+    const { user, router } = renderShell(PATH, { routes: groupRoutes() });
+    await screen.findByRole("link", { name: "analysts" });
+    const search = screen.getByRole("searchbox", { name: "Find groups" });
+
+    await user.type(search, "op");
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe("?q=op");
+    });
+    await screen.findByText(/^\d+ groups?$/);
+    expect(search).toHaveFocus();
+    expect(search).toBeInTheDocument();
+  });
+
+  it("keeps the words on Refresh", async () => {
+    const { server, user } = renderShell(`${PATH}?q=ops`, { routes: groupRoutes() });
+    await screen.findByRole("link", { name: "ops" });
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(
+        server.sent.filter((request) => request.path === "/api/v1/groups?q=ops&limit=50"),
+      ).toHaveLength(2);
+    });
+    expect(screen.getByRole("searchbox", { name: "Find groups" })).toHaveValue("ops");
+  });
+
   it("starts from the words in the address", async () => {
     const { server } = renderShell(`${PATH}?q=ops`, { routes: groupRoutes() });
 

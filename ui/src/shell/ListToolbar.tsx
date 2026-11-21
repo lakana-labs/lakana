@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import type { TFunction } from "i18next";
-import { type JSX, type ReactNode, useCallback, useState } from "react";
+import { type JSX, type ReactNode, type Ref, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PendingButton } from "./PendingButton";
@@ -30,6 +30,24 @@ export function countWords(
     return null;
   }
   return t(more ? `${key}.countFirst` : `${key}.count`, { count: shown });
+}
+
+/**
+ * Whether more rows can be read, as the last finished read said: a list read again (Refresh)
+ * knows no next page until its first page is back, and its count would turn from "The first
+ * 100 grants" to "100 grants" and back for the length of the read.
+ *
+ * @param more - Whether more rows can be read now.
+ * @param busy - Whether a read is on its way.
+ * @returns The last answer of a finished read while one is on its way, else `more`.
+ */
+export function useSteadyMore(more: boolean, busy: boolean): boolean {
+  const [last, setLast] = useState(more);
+  // Derived from the props during render, as React allows for state that follows them.
+  if (!busy && last !== more) {
+    setLast(more);
+  }
+  return busy ? last : more;
 }
 
 /** What a list tells the toolbar above it, when the toolbar sits outside the list's own frame. */
@@ -68,13 +86,23 @@ export interface ListToolbarProps {
    */
   readonly count?: string | null;
   /** The list's search field, after the count; none by default. */
-  readonly search?: ReactNode;
+  readonly search?: ReactNode | undefined;
   /** The list's filters, on the right before Refresh; none by default. */
-  readonly filters?: ReactNode;
+  readonly filters?: ReactNode | undefined;
   /** Reads the list again; no Refresh without it. */
   readonly onRefresh?: (() => void) | undefined;
   /** Whether a read is on its way, which Refresh shows; no by default. */
   readonly refreshing?: boolean;
+  /**
+   * Where a panel holds this one list, the count is the panel's heading (an `h2`), and this is
+   * what it says until the count is known (the panel's name, such as "Personal tokens"). None by
+   * default: the count is plain text.
+   */
+  readonly heading?: string | undefined;
+  /** The heading's id, for the panel's `aria-labelledby`. */
+  readonly headingId?: string | undefined;
+  /** A ref to the heading, for a page that moves the focus there. */
+  readonly headingRef?: Ref<HTMLHeadingElement> | undefined;
 }
 
 /**
@@ -88,6 +116,9 @@ export interface ListToolbarProps {
  * @param props.filters - The filters.
  * @param props.onRefresh - Reads the list again.
  * @param props.refreshing - Whether a read is on its way.
+ * @param props.heading - Where the count is a panel's heading: what it says until it is known.
+ * @param props.headingId - The heading's id.
+ * @param props.headingRef - A ref to the heading.
  * @returns The toolbar.
  */
 export function ListToolbar({
@@ -96,11 +127,21 @@ export function ListToolbar({
   filters,
   onRefresh,
   refreshing = false,
+  heading,
+  headingId,
+  headingRef,
 }: ListToolbarProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <div className="toolbar list-toolbar">
-      {count !== undefined && <p className="toolbar-count">{count}</p>}
+      {heading === undefined ? (
+        count !== undefined && <p className="toolbar-count">{count}</p>
+      ) : (
+        // The focus target after a change in the panel, hence tabIndex -1.
+        <h2 className="toolbar-count" id={headingId} ref={headingRef} tabIndex={-1}>
+          {count ?? heading}
+        </h2>
+      )}
       {search}
       <div className="toolbar-end">
         {filters}

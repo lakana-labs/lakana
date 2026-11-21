@@ -19,6 +19,7 @@ function aPoll(over: Partial<LivePoll<string>> = {}): LivePoll<string> {
     error: null,
     failure: null,
     reload: vi.fn(),
+    busy: false,
     stale: false,
     failures: 0,
     ...over,

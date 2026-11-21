@@ -58,6 +58,7 @@ export function RecoveryLinksPage(): JSX.Element {
       <ListToolbar
         count={countWords(t, "access.recovery", links.data?.length)}
         onRefresh={links.reload}
+        refreshing={links.busy}
       />
       <Loaded resource={links}>
         {(open) =>

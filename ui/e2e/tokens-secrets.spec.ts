@@ -167,7 +167,10 @@ for (const theme of ["light", "dark"] as const) {
       expect(await violations(page), "the Revoke dialog").toEqual([]);
       await press(page, dialog.getByRole("button", { name: "Revoke the token" }));
       await expect(dialog).toBeHidden();
-      await expect(page.getByRole("heading", { level: 2, name: "Personal tokens" })).toBeFocused();
+      // The panel's heading is its list's count (#782).
+      await expect(
+        page.getByRole("heading", { level: 2, name: /personal tokens?$/ }),
+      ).toBeFocused();
       await expect(personal.getByText("laptop")).toBeHidden();
 
       await press(
@@ -179,7 +182,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(dialog).toBeVisible();
       await press(page, dialog.getByRole("button", { name: "Revoke the token" }));
       await expect(dialog).toBeHidden();
-      await expect(page.getByRole("heading", { level: 2, name: "Task tokens" })).toBeFocused();
+      await expect(page.getByRole("heading", { level: 2, name: /task tokens?$/ })).toBeFocused();
       await expectFocusKept(page, "after the task token's revoke");
       expectOnlyStubbed(paths);
       expect(errors).toEqual([]);
