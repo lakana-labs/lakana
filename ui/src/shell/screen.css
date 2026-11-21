@@ -155,7 +155,8 @@ a.row-name {
 .list .row-name,
 .truncate {
   display: inline-block;
-  max-width: var(--name-width);
+  /* Half the window at most, so a narrow screen (320 px) cuts a name inside its panel too. */
+  max-width: min(var(--name-width), 50vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -450,10 +451,15 @@ tr:hover .chevron {
   min-height: 0;
 }
 
-/* Narrow screens: less padding, so a table inside keeps its words whole. */
+/* Narrow screens: less padding, so a table inside keeps its words whole, and a column head may
+   wrap, so a list that does not scroll in its own region stays inside its panel at 320 px. */
 @media (max-width: 639.98px) {
   .flat-panel {
     padding: var(--space-3);
+  }
+
+  .list th {
+    white-space: normal;
   }
 }
 

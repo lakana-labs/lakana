@@ -90,7 +90,7 @@ it("centres the primary action on the title's line", () => {
 
 it("keeps a list's names on one line, cut with an ellipsis at --name-width", () => {
   expect(screen).toMatch(
-    /\.list \.row-name,\s*\.truncate\s*{[^}]*max-width:\s*var\(--name-width\);[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
+    /\.list \.row-name,\s*\.truncate\s*{[^}]*max-width:\s*min\(var\(--name-width\), 50vw\);[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
   );
   expect(screen).not.toMatch(/\.row-name\s*{[^}]*overflow-wrap:\s*anywhere/);
 });

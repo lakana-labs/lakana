@@ -247,10 +247,11 @@ for (const theme of ["light", "dark"] as const) {
         expect(look.background, said).not.toBe("rgba(0, 0, 0, 0)");
         expect(look.border, said).toBe("1px solid");
         expect(look.shadow, said).toBe("none");
-        expect(look.headingSize - look.bodySize, said).toBeGreaterThanOrEqual(4);
+        // The section step (15 px, weight 500) over the 14 px body, as every panel's title (#782).
+        expect(look.headingSize - look.bodySize, said).toBeGreaterThanOrEqual(1);
         if (look.gapAfter !== null) {
           expect(look.gapAfter, said).toBeGreaterThan(look.innerGap);
-          expect(look.gapAfter, said).toBeGreaterThanOrEqual(24);
+          expect(look.gapAfter, said).toBeGreaterThanOrEqual(16);
         }
       }
 

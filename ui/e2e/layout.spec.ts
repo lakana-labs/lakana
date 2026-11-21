@@ -108,12 +108,17 @@ for (const width of [1280, 1440]) {
       }
 
       // The page fills its place: the working area less its gutter, or beside Settings' list.
-      const [content, place] = await page
-        .locator(".page")
-        .evaluate((node) => [
-          node.getBoundingClientRect().width,
-          node.parentElement?.getBoundingClientRect().width ?? 0,
-        ]);
+      const [content, place] = await page.locator(".page").evaluate((node) => {
+        const parent = node.parentElement;
+        const style = parent === null ? null : getComputedStyle(parent);
+        const inner =
+          parent === null || style === null
+            ? 0
+            : parent.clientWidth -
+              Number.parseFloat(style.paddingLeft) -
+              Number.parseFloat(style.paddingRight);
+        return [node.getBoundingClientRect().width, inner];
+      });
       expect(content).toBeGreaterThan(place - 1);
       const area = (await page.locator(".shell-main").boundingBox())?.width ?? 0;
       expect(place).toBeGreaterThan(area / 2);
