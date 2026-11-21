@@ -376,7 +376,9 @@ export async function stubQueries(page: Page): Promise<string[]> {
       const environment = new URL(route.request().url()).searchParams.get("environment");
       const items = saved
         .filter((one) => environment === null || one.environment === environment)
-        .sort((a, b) => a.name.localeCompare(b.name));
+        .sort((a, b) => a.name.localeCompare(b.name))
+        // A list item carries no SQL, as the server's lists do.
+        .map((one) => Object.fromEntries(Object.entries(one).filter(([key]) => key !== "sql")));
       return route.fulfill({ json: { items, next_cursor: null } });
     },
   );

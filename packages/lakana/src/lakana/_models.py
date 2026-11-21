@@ -1411,8 +1411,9 @@ class SavedQuery:
     name
         Its name; unique among its owner's saved queries in the environment.
     sql
-        Its SQL; `None` when the server left it out because you may not read it (an
-        administrator without `READ_QUERY_TEXT` on someone else's private query).
+        Its SQL; always `None` in the items of `list` and `iter`, which carry no SQL (read it
+        with `get`), and `None` from `get` when you may not read it (an administrator without
+        `READ_QUERY_TEXT` on someone else's private query).
     visibility
         ``private`` (only the owner) or ``everyone`` (whoever may query the environment).
     owner
