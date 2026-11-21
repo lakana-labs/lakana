@@ -860,6 +860,15 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   one request and so gets only the first 100 row filters or column masks of a list, without a
   sign that more exist.
 
+### One density in the web interface
+
+- The web interface has one density, compact: 32 px rows in lists and 24 px rows in data grids.
+  The Density choice (Roomy or Compact) is gone from the menu under your name. A choice an
+  earlier release stored in the browser is ignored, and nobody needs to do anything.
+- Screens and their tables use the full width of the window; a long name in a list ends with
+  an ellipsis and shows whole in a tooltip. A state in a list is a small pill.
+- Alt+Left goes back from any page, as in the browser, unless the focus is in a text field.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

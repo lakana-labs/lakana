@@ -33,152 +33,151 @@ function consoleErrors(page: Page): string[] {
 }
 
 for (const theme of ["light", "dark"] as const) {
-  for (const density of ["roomy", "compact"] as const) {
-    test.describe(`${theme}, ${density}`, () => {
-      test.beforeEach(async ({ page }) => {
-        await signInAsAdmin(page);
-        await page.addInitScript(
-          ([key, value]) => {
-            if (window.localStorage.getItem(key ?? "") === null) {
-              window.localStorage.setItem(key ?? "", value ?? "");
-            }
-          },
-          [KEY, JSON.stringify({ theme, density, language: "en" })],
-        );
-      });
-
-      test("every area has no axe violations", async ({ page }) => {
-        for (const [, path, heading] of AREAS) {
-          await page.goto(path);
-          await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
-          // An administrator has access: Home never tells them to ask for it.
-          await expect(page.getByText(/no access yet/)).toHaveCount(0);
-          expect(await violations(page), path).toEqual([]);
-        }
-        await page.getByRole("button", { name: "Signed in as admin" }).click();
-        await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
-        expect(await violations(page), "user menu").toEqual([]);
-        await page.getByRole("menuitem", { name: "Profile picture…" }).click();
-        await expect(page.getByRole("dialog", { name: "Profile picture" })).toBeVisible();
-        expect(await violations(page), "profile picture").toEqual([]);
-        await page.keyboard.press("Escape");
-        await page.getByRole("button", { name: "Search" }).click();
-        await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
-        expect(await violations(page), "palette").toEqual([]);
-      });
-
-      test("a deep link loads styled", async ({ page }) => {
-        await page.goto("/catalog/prod/gold.sales/fact_sales");
-
-        const heading = page.getByRole("heading", { level: 1, name: "fact_sales" });
-        await expect(heading).toBeVisible();
-        const font = await heading.evaluate((node) => getComputedStyle(node).fontFamily);
-        expect(font).toMatch(/^"?IBM Plex Sans/);
-        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
-      });
-
-      test("the shell asks the API only for the stubbed session routes", async ({ page }) => {
-        const requests: string[] = [];
-        page.on("request", (request) => requests.push(request.url()));
-
-        await page.goto("/");
-        for (const [name, , heading] of AREAS) {
-          await page.getByRole("link", { name, exact: true }).click();
-          await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
-        }
-        await page.waitForLoadState("networkidle");
-
-        const api = requests
-          .filter((url) => url.includes("/api/") || url.includes("/v1/"))
-          .map((url) => new URL(url).pathname);
-        expect(api.length).toBeGreaterThan(0);
-        expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
-      });
-
-      test("no console error on any area", async ({ page }) => {
-        // A violation of the content security policy shows up here.
-        const errors = consoleErrors(page);
-
-        for (const [, path, heading] of AREAS) {
-          await page.goto(path);
-          await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
-        }
-        // The picture is read with the CSRF header and shown from a blob: URL, which the policy
-        // allows; a blocked one would not load and would show up as an error.
-        const picture = page.getByRole("button", { name: "Signed in as admin" }).locator("img");
-        await expect(picture).toHaveAttribute("src", /^blob:/);
-        await expect
-          .poll(() => picture.evaluate((image: HTMLImageElement) => image.naturalWidth))
-          .toBeGreaterThan(0);
-        // The floating surfaces: React Aria inserts its own styles for them.
-        await page.getByRole("button", { name: "Signed in as admin" }).click();
-        await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
-        await page.keyboard.press("Escape");
-        await page.getByRole("button", { name: "Search" }).click();
-        await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
-        await page.keyboard.press("Escape");
-        await page.waitForLoadState("networkidle");
-
-        expect(errors).toEqual([]);
-      });
-
-      test("Ctrl+K and Meta+K open the palette; Escape closes it", async ({ page }) => {
-        await page.goto("/");
-        await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-        const dialog = page.getByRole("dialog", { name: "Search" });
-
-        for (const chord of ["Control+k", "Meta+k"]) {
-          await page.keyboard.press(chord);
-          await expect(dialog).toBeVisible();
-          await expect(page.getByRole("searchbox")).toBeFocused();
-          await page.keyboard.press("Escape");
-          await expect(dialog).toBeHidden();
-        }
-
-        await page.keyboard.press("Control+k");
-        await page.keyboard.type("jobs");
-        await page.keyboard.press("ArrowDown");
-        await page.keyboard.press("Enter");
-        await expect(page).toHaveURL(/\/jobs$/);
-        await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeFocused();
-      });
-
-      test("the theme survives a reload without a flash", async ({ page }) => {
-        await page.goto("/");
-        await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
-        const other = theme === "dark" ? "Light" : "Dark";
-        await page.getByRole("button", { name: "Signed in as admin" }).click();
-        // The check mark is not part of the name of the selected choice.
-        const chosen = density === "roomy" ? "Roomy" : "Compact";
-        await expect(page.getByRole("menuitemradio", { name: chosen, exact: true })).toBeChecked();
-        await page.getByRole("menuitemradio", { name: other, exact: true }).click();
-        await expect(page.locator("html")).toHaveAttribute("data-theme", other.toLowerCase());
-
-        // Without the interface's own script, only theme-boot.js can set the attributes.
-        await page.route("**/assets/*.js", (route) => route.abort());
-        await page.reload();
-
-        await expect(page.locator("html")).toHaveAttribute("data-theme", other.toLowerCase());
-        await expect(page.locator("html")).toHaveAttribute("data-density", density);
-        const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-        expect(ground).toBe(other === "Dark" ? "rgb(15, 23, 28)" : "rgb(232, 238, 241)");
-      });
-
-      test("no horizontal scroll at 768 px and at 1280 px", async ({ page }) => {
-        for (const width of [768, 1280]) {
-          await page.setViewportSize({ width, height: 800 });
-          for (const [, path, heading] of AREAS) {
-            await page.goto(path);
-            await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
-            const overflow = await page.evaluate(
-              () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-            );
-            expect(overflow, `${path} at ${String(width)} px`).toBeLessThanOrEqual(0);
+  test.describe(theme, () => {
+    test.beforeEach(async ({ page }) => {
+      await signInAsAdmin(page);
+      await page.addInitScript(
+        ([key, value]) => {
+          if (window.localStorage.getItem(key ?? "") === null) {
+            window.localStorage.setItem(key ?? "", value ?? "");
           }
-        }
-      });
+        },
+        [KEY, JSON.stringify({ theme, language: "en" })],
+      );
     });
-  }
+
+    test("every area has no axe violations", async ({ page }) => {
+      for (const [, path, heading] of AREAS) {
+        await page.goto(path);
+        await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
+        // An administrator has access: Home never tells them to ask for it.
+        await expect(page.getByText(/no access yet/)).toHaveCount(0);
+        expect(await violations(page), path).toEqual([]);
+      }
+      await page.getByRole("button", { name: "Signed in as admin" }).click();
+      await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
+      expect(await violations(page), "user menu").toEqual([]);
+      await page.getByRole("menuitem", { name: "Profile picture…" }).click();
+      await expect(page.getByRole("dialog", { name: "Profile picture" })).toBeVisible();
+      expect(await violations(page), "profile picture").toEqual([]);
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Search" }).click();
+      await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
+      expect(await violations(page), "palette").toEqual([]);
+    });
+
+    test("a deep link loads styled", async ({ page }) => {
+      await page.goto("/catalog/prod/gold.sales/fact_sales");
+
+      const heading = page.getByRole("heading", { level: 1, name: "fact_sales" });
+      await expect(heading).toBeVisible();
+      const font = await heading.evaluate((node) => getComputedStyle(node).fontFamily);
+      expect(font).toMatch(/^"?IBM Plex Sans/);
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    });
+
+    test("the shell asks the API only for the stubbed session routes", async ({ page }) => {
+      const requests: string[] = [];
+      page.on("request", (request) => requests.push(request.url()));
+
+      await page.goto("/");
+      for (const [name, , heading] of AREAS) {
+        await page.getByRole("link", { name, exact: true }).click();
+        await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
+      }
+      await page.waitForLoadState("networkidle");
+
+      const api = requests
+        .filter((url) => url.includes("/api/") || url.includes("/v1/"))
+        .map((url) => new URL(url).pathname);
+      expect(api.length).toBeGreaterThan(0);
+      expect(api.filter((path) => !STUBBED.includes(path))).toEqual([]);
+    });
+
+    test("no console error on any area", async ({ page }) => {
+      // A violation of the content security policy shows up here.
+      const errors = consoleErrors(page);
+
+      for (const [, path, heading] of AREAS) {
+        await page.goto(path);
+        await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
+      }
+      // The picture is read with the CSRF header and shown from a blob: URL, which the policy
+      // allows; a blocked one would not load and would show up as an error.
+      const picture = page.getByRole("button", { name: "Signed in as admin" }).locator("img");
+      await expect(picture).toHaveAttribute("src", /^blob:/);
+      await expect
+        .poll(() => picture.evaluate((image: HTMLImageElement) => image.naturalWidth))
+        .toBeGreaterThan(0);
+      // The floating surfaces: React Aria inserts its own styles for them.
+      await page.getByRole("button", { name: "Signed in as admin" }).click();
+      await expect(page.getByRole("menu", { name: "Preferences and account" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "Search" }).click();
+      await expect(page.getByRole("dialog", { name: "Search" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await page.waitForLoadState("networkidle");
+
+      expect(errors).toEqual([]);
+    });
+
+    test("Ctrl+K and Meta+K open the palette; Escape closes it", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+      const dialog = page.getByRole("dialog", { name: "Search" });
+
+      for (const chord of ["Control+k", "Meta+k"]) {
+        await page.keyboard.press(chord);
+        await expect(dialog).toBeVisible();
+        await expect(page.getByRole("searchbox")).toBeFocused();
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+      }
+
+      await page.keyboard.press("Control+k");
+      await page.keyboard.type("jobs");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await expect(page).toHaveURL(/\/jobs$/);
+      await expect(page.getByRole("heading", { level: 1, name: "Jobs" })).toBeFocused();
+    });
+
+    test("the theme survives a reload without a flash", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
+      const other = theme === "dark" ? "Light" : "Dark";
+      await page.getByRole("button", { name: "Signed in as admin" }).click();
+      // One density: the menu offers none.
+      await expect(page.getByRole("menuitemradio", { name: "Compact", exact: true })).toHaveCount(
+        0,
+      );
+      await page.getByRole("menuitemradio", { name: other, exact: true }).click();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", other.toLowerCase());
+
+      // Without the interface's own script, only theme-boot.js can set the attributes.
+      await page.route("**/assets/*.js", (route) => route.abort());
+      await page.reload();
+
+      await expect(page.locator("html")).toHaveAttribute("data-theme", other.toLowerCase());
+      await expect(page.locator("html")).not.toHaveAttribute("data-density", /.*/);
+      const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+      expect(ground).toBe(other === "Dark" ? "rgb(15, 23, 28)" : "rgb(232, 238, 241)");
+    });
+
+    test("no horizontal scroll at 768 px and at 1280 px", async ({ page }) => {
+      for (const width of [768, 1280]) {
+        await page.setViewportSize({ width, height: 800 });
+        for (const [, path, heading] of AREAS) {
+          await page.goto(path);
+          await expect(page.getByRole("heading", { level: 1, name: heading })).toBeVisible();
+          const overflow = await page.evaluate(
+            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          );
+          expect(overflow, `${path} at ${String(width)} px`).toBeLessThanOrEqual(0);
+        }
+      }
+    });
+  });
 }
 
 for (const theme of ["light", "dark"] as const) {
@@ -191,7 +190,7 @@ for (const theme of ["light", "dark"] as const) {
         ([key, value]) => {
           window.localStorage.setItem(key ?? "", value ?? "");
         },
-        [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+        [KEY, JSON.stringify({ theme, language: "en" })],
       );
     });
 
@@ -326,7 +325,7 @@ for (const theme of ["light", "dark"] as const) {
           ([key, value]) => {
             window.localStorage.setItem(key ?? "", value ?? "");
           },
-          [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+          [KEY, JSON.stringify({ theme, language: "en" })],
         );
       });
 
@@ -442,7 +441,7 @@ test.describe("the theme switch", () => {
       ([key, value]) => {
         window.localStorage.setItem(key ?? "", value ?? "");
       },
-      [KEY, JSON.stringify({ theme: "dark", density: "roomy", language: "en" })],
+      [KEY, JSON.stringify({ theme: "dark", language: "en" })],
     );
   });
 
@@ -536,7 +535,7 @@ for (const [system, theme, expected] of [
       ([key, value]) => {
         window.localStorage.setItem(key ?? "", value ?? "");
       },
-      [KEY, JSON.stringify({ theme, density: "roomy", language: "en" })],
+      [KEY, JSON.stringify({ theme, language: "en" })],
     );
     await page.goto("/");
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();

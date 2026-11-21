@@ -20,14 +20,14 @@
 
 /* The deleted environments, one section below the list. */
 .environments-deleted {
-  margin: var(--space-6) 0 0;
+  margin: var(--space-5) 0 0;
 }
 
 .environments-deleted h2 {
   margin: 0 0 var(--space-2);
-  font-size: var(--type-title-size);
-  font-weight: var(--type-title-weight);
-  line-height: var(--type-title-line);
+  font-size: var(--type-section-size);
+  font-weight: var(--type-section-weight);
+  line-height: var(--type-section-line);
 }
 
 .environments-deleted h2:focus-visible {
@@ -43,6 +43,7 @@
 .environment-properties div {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: var(--space-2);
 }
 
@@ -60,7 +61,7 @@
 .environment-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2);
+  gap: var(--control-gap);
 }
 
 /* Leftover directories: the age beside Find, wrapping on a narrow screen; the directories scroll
@@ -69,7 +70,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--space-3);
+  gap: var(--control-gap);
 }
 
 .list-scroll.leftover-scroll .list {

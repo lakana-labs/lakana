@@ -49,7 +49,8 @@ describe("PreferencesProvider", () => {
 
     expect(screen.getByText("child")).toBeInTheDocument();
     expect(root.getAttribute("data-theme")).toBe("dark");
-    expect(root.getAttribute("data-density")).toBe("compact");
+    // One density only: a stored one is ignored and nothing marks the page with it.
+    expect(root.hasAttribute("data-density")).toBe(false);
   });
 
   it("uses the browser's storage by default", () => {

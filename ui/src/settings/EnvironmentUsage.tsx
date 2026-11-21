@@ -72,7 +72,7 @@ export function EnvironmentUsage({ name, paused = false }: EnvironmentUsageProps
         )
       ) : (
         <>
-          <dl className="settings-facts">
+          <dl className="fact-list">
             {PARTS.map((part) => (
               <Fragment key={part}>
                 <dt>{t(`${P}.parts.${part}`)}</dt>
