@@ -11651,6 +11651,101 @@
         }
       }
     },
+    "/api/v1/principals/{name}/oidc-link": {
+      "delete": {
+        "tags": [
+          "principals"
+        ],
+        "summary": "Unlink a person from the identity provider",
+        "description": "Deletes the person's stored passkeys, revokes all their personal API tokens, ends their sessions and withdraws their open sign-in links (an earlier recovery link too), in one step; they come back with a new recovery link (`lakana recovery create`), and then sign in with a passkey again until they link once more. To offboard someone, deactivate them instead. Needs the ADMIN role on the instance and, from the web interface, a passkey touch (or provider step-up) within the last 15 minutes (403 `StepUpRequired`). Answers 404 for an unknown name and 409 for yourself or a person who is not linked.",
+        "operationId": "unlink_provider_api_v1_principals__name__oidc_link_delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            },
+            "description": "The person's principal name."
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "What the request names does not exist, or the caller may not know that it does.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/groups": {
       "post": {
         "tags": [
@@ -22977,7 +23072,7 @@
           "whoami"
         ],
         "summary": "Show who is calling",
-        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), `instance_actions` the actions it may take on the instance with it, and `managed_environments` the environments it may manage with it (deleted ones too, until their files are deleted): the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, the instance-wide actions of Settings and each environment's own, from these eight. `picture` is the etag of your profile picture, or `null` without one.",
+        "description": "Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), `instance_actions` the actions it may take on the instance with it, and `managed_environments` the environments it may manage with it (deleted ones too, until their files are deleted): the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, the instance-wide actions of Settings and each environment's own, from these eight. `picture` is the etag of your profile picture, or `null` without one. `token_window_ends_at` is, for a person linked to the identity provider, until when their personal tokens work without another sign-in there.",
         "operationId": "whoami_api_v1_whoami_get",
         "parameters": [
           {
@@ -23254,7 +23349,7 @@
           "sign-in"
         ],
         "summary": "Describe a sign-in link before it is used",
-        "description": "Needs no credential and never uses the link: the sign-in page shows \"Sign in as X\" (or \"Join as X\") from this, so a link preview or a mail scanner opening the page cannot use it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired, withdrawn or unknown link answers 410 with `state` and what to do next.",
+        "description": "Needs no credential and never uses the link: the sign-in page shows \"Sign in as X\" (or \"Join as X\") from this, so a link preview or a mail scanner opening the page cannot use it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired, withdrawn or unknown link answers 410 with `state` and what to do next. With OIDC sign-in on, `offers_provider` says to offer \"Sign in with <provider>\" for an invite or a recovery link, and `provider_only` that a recovery link of a linked person works only that way.",
         "operationId": "describe_link_api_v1_sign_in_links_describe_post",
         "requestBody": {
           "content": {
@@ -23572,7 +23667,7 @@
           "sign-in"
         ],
         "summary": "Start confirming your browser session with a passkey touch (step-up)",
-        "description": "Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A token has no browser session, so it gets 409: step-up never applies to a token's requests.",
+        "description": "Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A person linked to the identity provider gets 409 `ProviderStepUpRequired`: confirm by signing in there again (`POST /api/v1/sign-in/oidc/step-up/start`). A token has no browser session, so it gets 409: step-up never applies to a token's requests.",
         "operationId": "step_up_options_api_v1_sign_in_step_up_options_post",
         "parameters": [
           {
@@ -23788,7 +23883,7 @@
           "sign-in"
         ],
         "summary": "Sign in with a passkey",
-        "description": "Send the browser's `credential.toJSON()` for the ceremony the options route started. A passkey that verifies starts a browser session with a fresh id (a session the browser had is ended), sets its cookie, and counts as a passkey touch for 15 minutes of step-up actions. An unknown, disabled or copied passkey, an answer from another address or without user verification, or a used or expired challenge answers 401 and is recorded in the audit log. A passkey whose signature counter went backwards is disabled (it may have been copied) and the person and every administrator are told.",
+        "description": "Send the browser's `credential.toJSON()` for the ceremony the options route started. A passkey that verifies starts a browser session with a fresh id (a session the browser had is ended), sets its cookie, and counts as a passkey touch for 15 minutes of step-up actions. An unknown, disabled or copied passkey, an answer from another address or without user verification, or a used or expired challenge answers 401 and is recorded in the audit log. A passkey whose signature counter went backwards is disabled (it may have been copied) and the person and every administrator are told. A person linked to the identity provider signs in only there: their passkey, once it verifies, answers 403 `ProviderSignInRequired`, recorded in the audit log too.",
         "operationId": "passkey_sign_in_api_v1_sign_in_passkey_post",
         "requestBody": {
           "content": {
@@ -23833,6 +23928,16 @@
           },
           "401": {
             "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -23892,7 +23997,7 @@
           "sign-in"
         ],
         "summary": "Come back from the identity provider",
-        "description": "The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow is called back once.",
+        "description": "The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow that links a signed-in person or confirms their session goes to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed` instead, which finishes it with `POST /api/v1/sign-in/oidc/finish-in-session`. Both are fixed pages of the public address. A flow is called back once.",
         "operationId": "oidc_callback_api_v1_sign_in_oidc_callback_get",
         "parameters": [
           {
@@ -23949,10 +24054,276 @@
         ],
         "responses": {
           "303": {
-            "description": "Always to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`."
+            "description": "To `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, or `/sign-in/oidc/confirmed` for a link from the profile or a provider step-up."
           },
           "409": {
             "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/link/start": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Start linking your account to the identity provider, from your profile",
+        "description": "Needs a browser session with a passkey touch from the last 15 minutes (403 `StepUpRequired`). Answers the provider's sign-in page: send the browser there; the provider sends it back to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed`, which finishes with `POST /api/v1/sign-in/oidc/finish-in-session`. Once linked you sign in only through the provider: your passkeys stay stored, unused, and no session ends. 403 `OidcSignInRefused` with `reason` `already_linked`, `cannot_link_operator` (the server operator's account) or `last_unlinked_admin` (the last administrator who signs in with a passkey, who keeps the way in when the provider is down); 409 for a token.",
+        "operationId": "start_oidc_link_api_v1_sign_in_oidc_link_start_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcInSessionStartIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcStartOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/step-up/start": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Start confirming your browser session at the identity provider (provider step-up)",
+        "description": "For a person linked to the provider, who signs in only there: it stands in for the passkey touch that actions such as creating a token ask for (403 `StepUpRequired`). The provider is asked for a fresh sign-in (`prompt=login`, `max_age=0`), and the finish checks the `auth_time` it reports. Then press the action again: for 15 minutes it needs no other confirmation. 409 for a token, or for a person who is not linked (confirm with a passkey, `POST /api/v1/sign-in/step-up/options`).",
+        "operationId": "start_oidc_step_up_api_v1_sign_in_oidc_step_up_start_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcInSessionStartIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcStartOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sign-in/oidc/finish-in-session": {
+      "post": {
+        "tags": [
+          "sign-in"
+        ],
+        "summary": "Finish a link from the profile or a provider step-up, in the session that started it",
+        "description": "The interface's page at `/sign-in/oidc/confirmed` calls this once, with the session's CSRF token: the session stays, and so does its token. A link links the caller to the identity the provider verified (403 `OidcSignInRefused` `identity_taken` when another account holds it, `last_unlinked_admin`). A step-up needs the caller's own identity (`identity_mismatch` otherwise) and an `auth_time` no earlier than the start, less 60 seconds (`auth_too_old`, also when the provider sent none); it then counts as the session's step-up touch, and as a provider sign-in for the token window. Also 403 `flow_expired` for a flow of another session, and the callback's refusals. 409 for a token and for a sign-in flow, which finishes at `/finish`.",
+        "operationId": "finish_oidc_in_session_api_v1_sign_in_oidc_finish_in_session_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead.",
+              "title": "Authorization"
+            },
+            "description": "The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcInSessionOut"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state; the message says what to change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Signed in, but not allowed to do this; the message says why and what to do next.",
             "content": {
               "application/json": {
                 "schema": {
@@ -23980,7 +24351,7 @@
           "sign-in"
         ],
         "summary": "Start signing in through the identity provider",
-        "description": "Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.",
+        "description": "Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. With `purpose` ``invite`` or ``recovery`` and the link's `link_id` and `secret`, the flow accepts that invite or uses that recovery link: the link is checked here (410 with `state` as `/links/redeem` answers, a wrong secret like an unknown link) and used only at the finish. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, 422 for a link of another kind, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.",
         "operationId": "start_oidc_sign_in_api_v1_sign_in_oidc_start_post",
         "requestBody": {
           "content": {
@@ -24033,6 +24404,16 @@
               }
             }
           },
+          "410": {
+            "description": "The sign-in link cannot be used: `state` says whether it was used, expired, withdrawn or is not known; ask for a new link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorOut"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Too many attempts from this address; ask again after the time in `Retry-After`.",
             "content": {
@@ -24062,7 +24443,7 @@
           "sign-in"
         ],
         "summary": "Finish signing in through the identity provider, after the callback",
-        "description": "Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended) and its cookie. A provider sign-in is no passkey touch: an action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes). A flow is finished once, whatever the answer.",
+        "description": "Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended) and its cookie. A flow started with an invite creates the account and links it; one started with a recovery link signs its person in (a linked person only as the same identity, `identity_mismatch` otherwise) and links an unlinked one. The link is used here, so one withdrawn or used since the start answers `link_unusable` and changes nothing. A provider sign-in is no passkey touch: an action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes), or when linking `identity_taken`, `last_unlinked_admin` or `link_unusable`. A flow is finished once, whatever the answer. 409 for a flow that links or confirms a signed-in person: that one finishes at `/finish-in-session`.",
         "operationId": "finish_oidc_sign_in_api_v1_sign_in_oidc_finish_post",
         "responses": {
           "200": {
@@ -25217,7 +25598,7 @@
           "principals"
         ],
         "summary": "Start adding a passkey to your own account",
-        "description": "From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. After those 15 minutes, a session from a link or a local sign-in without a usable passkey gets a 403 that names `lakana server start --local` or a recovery link, since a touch cannot help it. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.",
+        "description": "From the web interface only (a token gets 409). The first passkey may be added within 15 minutes of signing in with a setup, invite or recovery link; every later one needs a passkey touch within the last 15 minutes (403 `StepUpRequired`). A session from a local sign-in link may add only the first passkey. After those 15 minutes, a session from a link or a local sign-in without a usable passkey gets a 403 that names `lakana server start --local` or a recovery link, since a touch cannot help it. A person linked to the identity provider signs in only there and gets 403 `ProviderSignInRequired`. The options ask for a discoverable passkey with user verification (a PIN, fingerprint or face) and no attestation.",
         "operationId": "passkey_registration_options_api_v1_principals__name__passkeys_options_post",
         "parameters": [
           {
@@ -25415,7 +25796,7 @@
           "settings"
         ],
         "summary": "Show how long browser sessions last",
-        "description": "The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days, 10080 minutes), in minutes, with the bounds an administrator may choose between. Anyone signed in may read them.",
+        "description": "The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days, 10080 minutes), in minutes, with the bounds an administrator may choose between, and the token window of people linked to the identity provider (default 30 days). Anyone signed in may read them. An administrator also gets `provider`, while OIDC sign-in is on: its name and issuer, how many people are linked and how many administrators can sign in without it.",
         "operationId": "get_sign_in_settings_api_v1_settings_sign_in_get",
         "parameters": [
           {
@@ -25475,7 +25856,7 @@
           "settings"
         ],
         "summary": "Change how long browser sessions last",
-        "description": "Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; a value outside answers 422 naming the bound. Sessions already open keep their lengths. Recorded in the audit log.",
+        "description": "Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; the token window of people linked to the identity provider 1 to 365 days. A value outside answers 422 naming the bound. Sessions already open keep their lengths; a new token window applies to the next request with a token. Recorded in the audit log.",
         "operationId": "set_sign_in_settings_api_v1_settings_sign_in_patch",
         "parameters": [
           {
@@ -27857,6 +28238,8 @@
           "TASK_TOKEN_REVOKED",
           "PRINCIPAL_CREATED",
           "PRINCIPAL_DEACTIVATED",
+          "PRINCIPAL_OIDC_LINKED",
+          "PRINCIPAL_OIDC_UNLINKED",
           "ENVIRONMENT_CREATED",
           "ENVIRONMENT_DELETED",
           "ENVIRONMENT_STORAGE_UPDATED",
@@ -28108,6 +28491,8 @@
           "TASK_TOKEN_REVOKED",
           "PRINCIPAL_CREATED",
           "PRINCIPAL_DEACTIVATED",
+          "PRINCIPAL_OIDC_LINKED",
+          "PRINCIPAL_OIDC_UNLINKED",
           "ENVIRONMENT_CREATED",
           "ENVIRONMENT_DELETED",
           "ENVIRONMENT_STORAGE_UPDATED",
@@ -33086,6 +33471,16 @@
           "state": {
             "type": "string",
             "title": "State"
+          },
+          "provider_only": {
+            "type": "boolean",
+            "title": "Provider Only",
+            "default": false
+          },
+          "offers_provider": {
+            "type": "boolean",
+            "title": "Offers Provider",
+            "default": false
           }
         },
         "type": "object",
@@ -33096,7 +33491,7 @@
           "state"
         ],
         "title": "LinkDescriptionOut",
-        "description": "Response body of `POST /api/v1/sign-in/links/describe`: what the sign-in page shows.\n\nParameters\n----------\nkind\n    ``setup``, ``invite``, ``recovery`` or ``local``.\nname\n    The principal name the link signs in as (an invite: the account it creates).\ndisplay_name\n    The person's display name, if one is known.\nstate\n    Always ``open`` here; a link that cannot be used answers 410 with its state."
+        "description": "Response body of `POST /api/v1/sign-in/links/describe`: what the sign-in page shows.\n\nParameters\n----------\nkind\n    ``setup``, ``invite``, ``recovery`` or ``local``.\nname\n    The principal name the link signs in as (an invite: the account it creates).\ndisplay_name\n    The person's display name, if one is known.\nstate\n    Always ``open`` here; a link that cannot be used answers 410 with its state.\nprovider_only\n    Whether this link can be used only through the identity provider: an administrator's\n    recovery link for a person linked to it. `/links/redeem` then answers 403\n    `ProviderSignInRequired`; start the provider's sign-in with the link instead\n    (`POST /api/v1/sign-in/oidc/start`, `purpose: recovery`).\noffers_provider\n    Whether the sign-in page offers \"Sign in with <provider>\" for this link: an invite or a\n    recovery link while OIDC sign-in is on."
       },
       "LinkIdIn": {
         "properties": {
@@ -33662,6 +34057,53 @@
         "title": "NotifyTestOut",
         "description": "The test of a webhook, queued.\n\nParameters\n----------\ndelivery_id\n    The delivery to read with ``GET /environments/{env}/notifications/{delivery_id}``."
       },
+      "OidcInSessionOut": {
+        "properties": {
+          "return_to": {
+            "type": "string",
+            "title": "Return To"
+          },
+          "step_up_until": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step Up Until"
+          }
+        },
+        "type": "object",
+        "required": [
+          "return_to",
+          "step_up_until"
+        ],
+        "title": "OidcInSessionOut",
+        "description": "Response body of `POST /api/v1/sign-in/oidc/finish-in-session`.\n\nThe session stays the same, so its page keeps its CSRF token.\n\nParameters\n----------\nreturn_to\n    The page to open now: the path the start was given, checked, or ``/``.\nstep_up_until\n    Until when actions that need step-up are allowed without confirming again; `null`\n    when the session has no fresh confirmation."
+      },
+      "OidcInSessionStartIn": {
+        "properties": {
+          "return_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return To"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "OidcInSessionStartIn",
+        "description": "Request body of `POST /api/v1/sign-in/oidc/link/start` and `/step-up/start`.\n\nParameters\n----------\nreturn_to\n    The page of the interface to open afterwards, as a path; anything else becomes ``/``."
+      },
       "OidcInfoOut": {
         "properties": {
           "enabled": {
@@ -33725,12 +34167,48 @@
               }
             ],
             "title": "Return To"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "sign_in",
+              "invite",
+              "recovery"
+            ],
+            "title": "Purpose",
+            "default": "sign_in"
+          },
+          "link_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Id"
+          },
+          "secret": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secret"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "OidcStartIn",
-        "description": "Request body of `POST /api/v1/sign-in/oidc/start`.\n\nParameters\n----------\nreturn_to\n    The page of the interface to open after signing in, as a path such as\n    ``/catalog/prod``. Anything that is not a path inside the interface (another site, a\n    sign-in page, more than 2048 characters) is replaced by ``/``."
+        "description": "Request body of `POST /api/v1/sign-in/oidc/start`.\n\nParameters\n----------\nreturn_to\n    The page of the interface to open after signing in, as a path such as\n    ``/catalog/prod``. Anything that is not a path inside the interface (another site, a\n    sign-in page, more than 2048 characters) is replaced by ``/``.\npurpose\n    ``sign_in`` (the default) for a person already linked; ``invite`` to accept an invite,\n    or ``recovery`` to use a recovery link, through the provider: both need `link_id` and\n    `secret`.\nlink_id\n    The link's public id (``l=`` after the ``#``), with `purpose` ``invite`` or\n    ``recovery``.\nsecret\n    The link's secret (``s=``), with `link_id`. Checked here and never stored, logged or\n    audited: the flow keeps only the link's row id, and the link is used at the finish."
       },
       "OidcStartOut": {
         "properties": {
@@ -34523,6 +35001,16 @@
               }
             ],
             "title": "Held Admin"
+          },
+          "provider_link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderLinkOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -34532,7 +35020,7 @@
           "is_active"
         ],
         "title": "PrincipalOut",
-        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance)."
+        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance).\nprovider_link\n    The person's link to the identity provider; `null` when they are not linked, or for a\n    caller who is neither an administrator nor the person."
       },
       "ProfileIn": {
         "properties": {
@@ -34619,6 +35107,70 @@
         ],
         "title": "ProjectVersionOut",
         "description": "A project version with its manifest filtered for the caller.\n\nParameters\n----------\nid\n    The project version's id.\nenvironment\n    Environment name.\nrepository\n    Repository name.\ncommit_sha\n    The commit.\ncode_uri\n    Code tarball location.\ncode_sha256\n    Its digest.\ndeployed_by\n    Who first deployed it.\ncreated_at\n    When.\nmanifest\n    Assets, DAG edges, external inputs, resolved config; SQL withheld\n    where the caller cannot read every referenced table."
+      },
+      "ProviderLinkOut": {
+        "properties": {
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "last_sign_in_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sign In At"
+          },
+          "token_window_ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Window Ends At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "issuer",
+          "email",
+          "name",
+          "last_sign_in_at",
+          "token_window_ends_at"
+        ],
+        "title": "ProviderLinkOut",
+        "description": "A person's link to the organisation's identity provider (#32).\n\nParameters\n----------\nissuer\n    The provider's issuer the person is linked to.\nemail\n    The e-mail address of their last provider sign-in, for showing only: Lakana never\n    matches by it.\nname\n    The name of their last provider sign-in, for showing only.\nlast_sign_in_at\n    When they last signed in through the provider.\ntoken_window_ends_at\n    Until when their personal API tokens work without another provider sign-in."
       },
       "QueryEnvironmentOut": {
         "properties": {
@@ -37267,6 +37819,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Absolute Expires At"
+          },
+          "provider_linked": {
+            "type": "boolean",
+            "title": "Provider Linked",
+            "default": false
           }
         },
         "type": "object",
@@ -37281,7 +37838,7 @@
           "absolute_expires_at"
         ],
         "title": "SessionOut",
-        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie, nor the CSRF token, nor any hash of them.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or\n    ``oidc`` (the organisation's identity provider).\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active."
+        "description": "Response body for `GET /api/v1/sign-in/session`: the browser session of the caller.\n\nCarries no secret: neither the cookie, nor the CSRF token, nor any hash of them.\n\nParameters\n----------\nname\n    The signed-in person's principal name.\ndisplay_name\n    The person's display name; `null` for none.\ntype\n    The principal type (always ``USER``: service accounts cannot sign in).\nvia\n    How the session began: ``setup``, ``invite``, ``recovery``, ``local``, ``passkey`` or\n    ``oidc`` (the organisation's identity provider).\nstep_up_until\n    Until when actions that need a fresh passkey touch are allowed without another touch;\n    `null` when the session has no touch.\nneeds_passkey\n    Whether the person must register a passkey before going on (a session from a setup,\n    invite or recovery link on an account without a usable passkey).\noffer_passkey\n    Whether the interface offers, without forcing, to register a passkey (a local sign-in\n    on an account without one).\nabsolute_expires_at\n    When the session ends at the latest, however active.\nprovider_linked\n    Whether the person signs in through the identity provider: their step-up is a fresh\n    sign-in there (`POST /api/v1/sign-in/oidc/step-up/start`), not a passkey touch."
       },
       "SignInBoundsOut": {
         "properties": {
@@ -37300,6 +37857,16 @@
           "absolute_lifetime_minutes_max": {
             "type": "integer",
             "title": "Absolute Lifetime Minutes Max"
+          },
+          "token_provider_window_days_min": {
+            "type": "integer",
+            "title": "Token Provider Window Days Min",
+            "default": 1
+          },
+          "token_provider_window_days_max": {
+            "type": "integer",
+            "title": "Token Provider Window Days Max",
+            "default": 365
           }
         },
         "type": "object",
@@ -37310,7 +37877,7 @@
           "absolute_lifetime_minutes_max"
         ],
         "title": "SignInBoundsOut",
-        "description": "The limits an administrator may choose the session lengths between.\n\nParameters\n----------\nidle_timeout_minutes_min\n    The shortest idle timeout, in minutes.\nidle_timeout_minutes_max\n    The longest idle timeout, in minutes.\nabsolute_lifetime_minutes_min\n    The shortest absolute lifetime, in minutes.\nabsolute_lifetime_minutes_max\n    The longest absolute lifetime, in minutes."
+        "description": "The limits an administrator may choose the session lengths between.\n\nParameters\n----------\nidle_timeout_minutes_min\n    The shortest idle timeout, in minutes.\nidle_timeout_minutes_max\n    The longest idle timeout, in minutes.\nabsolute_lifetime_minutes_min\n    The shortest absolute lifetime, in minutes.\nabsolute_lifetime_minutes_max\n    The longest absolute lifetime, in minutes.\ntoken_provider_window_days_min\n    The shortest token window, in days.\ntoken_provider_window_days_max\n    The longest token window, in days."
       },
       "SignInNoticeOut": {
         "properties": {
@@ -37379,6 +37946,35 @@
         "title": "SignInOut",
         "description": "Response body of `POST /api/v1/sign-in/links/redeem`; the session comes as a cookie.\n\nParameters\n----------\nname\n    The principal name now signed in.\nneeds_passkey\n    Whether the person must register a passkey now (setup, invite and recovery links on an\n    account without one).\noffer_passkey\n    Whether the interface offers, never forces, a passkey (a local link on an account\n    without one).\ncsrf_token\n    The session's CSRF token, shown here only: send it in `X-Lakana-CSRF` with every\n    request that carries the session cookie, reads too. Keep it in the page's own storage;\n    the server keeps only its hash and never returns it again."
       },
+      "SignInProviderOut": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "linked_people": {
+            "type": "integer",
+            "title": "Linked People"
+          },
+          "unlinked_admins": {
+            "type": "integer",
+            "title": "Unlinked Admins"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "issuer",
+          "linked_people",
+          "unlinked_admins"
+        ],
+        "title": "SignInProviderOut",
+        "description": "The identity provider people sign in through, in the sign-in settings (administrators only).\n\nParameters\n----------\ndisplay_name\n    The name on the sign-in button.\nissuer\n    The provider's issuer (`LAKANA_OIDC__ISSUER`).\nlinked_people\n    How many active people are linked to it.\nunlinked_admins\n    How many administrators can sign in without it (not linked, with a working passkey):\n    the way in when the provider is down. At 1, the last of them cannot be linked."
+      },
       "SignInSettingsIn": {
         "properties": {
           "idle_timeout_minutes": {
@@ -37406,12 +38002,25 @@
               }
             ],
             "title": "Absolute Lifetime Minutes"
+          },
+          "token_provider_window_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Provider Window Days"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "title": "SignInSettingsIn",
-        "description": "Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.\n\nA change applies to sessions that begin afterwards; open sessions keep their lengths.\n\nParameters\n----------\nidle_timeout_minutes\n    The new idle timeout, in minutes (15 to 1440).\nabsolute_lifetime_minutes\n    The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than\n    the idle timeout."
+        "description": "Request body of `PATCH /api/v1/settings/sign-in`; a field left out keeps its value.\n\nA change applies to sessions that begin afterwards; open sessions keep their lengths.\n\nParameters\n----------\nidle_timeout_minutes\n    The new idle timeout, in minutes (15 to 1440).\nabsolute_lifetime_minutes\n    The new absolute lifetime, in minutes (60 to 43200, which is 30 days); not shorter than\n    the idle timeout.\ntoken_provider_window_days\n    The new token window of people linked to the identity provider, in days (1 to 365). It\n    applies to the next request with a token."
       },
       "SignInSettingsOut": {
         "properties": {
@@ -37425,6 +38034,21 @@
           },
           "bounds": {
             "$ref": "#/components/schemas/SignInBoundsOut"
+          },
+          "token_provider_window_days": {
+            "type": "integer",
+            "title": "Token Provider Window Days",
+            "default": 30
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SignInProviderOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -37434,7 +38058,7 @@
           "bounds"
         ],
         "title": "SignInSettingsOut",
-        "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits both may be chosen between."
+        "description": "Response body of `GET` and `PATCH /api/v1/settings/sign-in`.\n\nParameters\n----------\nidle_timeout_minutes\n    How long a session lasts without a request the person started, in minutes.\nabsolute_lifetime_minutes\n    How long a session lasts at most, in minutes.\nbounds\n    The limits each may be chosen between.\ntoken_provider_window_days\n    How long a linked person's personal API tokens work after their last sign-in through\n    the identity provider, in days (default 30).\nprovider\n    The identity provider and its counts, for an administrator while OIDC sign-in is on;\n    `null` otherwise."
       },
       "StatusDetailOut": {
         "properties": {
@@ -40440,6 +41064,18 @@
               }
             ],
             "title": "Picture"
+          },
+          "token_window_ends_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Window Ends At"
           }
         },
         "type": "object",
@@ -40449,7 +41085,7 @@
           "task_token"
         ],
         "title": "WhoamiOut",
-        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\nreads_environments\n    Whether you may read environments with this credential (`READ_ENVIRONMENT` on the\n    instance or on at least one environment that is not deleted, directly, through a role or\n    a group), which lets you read the repositories. The web interface lists Settings,\n    Repositories from it.\ninstance_actions\n    The actions you may take on the instance with this credential (such as\n    `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the\n    order of the action list; empty for a task or CI token. It describes you only.\nmanaged_environments\n    The environments, by name and sorted, that you may manage with this credential\n    (`MANAGE_ENVIRONMENT` on the environment, directly, through a role or a group),\n    including deleted ones whose files are not deleted yet; empty for a task or CI token.\n    The web interface offers an environment's usage, retention, deletion and restore for\n    exactly these. It describes you only.\npicture\n    The etag of your profile picture, or `null` without one."
+        "description": "Response body for `GET /api/v1/whoami`.\n\nParameters\n----------\nname\n    The caller's principal name.\ntype\n    The caller's principal type.\ntask_token\n    The task token's scope when the caller authenticated with one;\n    `None` for a PAT.\nci_token\n    The CI token's scope when the caller authenticated with one; `None` otherwise.\nlanguage\n    Your preferred language for catalog texts; `null` for none.\nadmin\n    Whether you act as the instance administrator with this credential: you hold the\n    `ADMIN` role on the instance (directly or through a group) and the credential may use\n    the administrator routes. A personal token or a browser session of an administrator is;\n    a task or CI token never is, whoever its principal.\nhas_access\n    Whether you have any grant at all, at any scope, directly or through a group; `false`\n    for a new person nobody has granted anything yet.\nmay_deploy\n    Whether you may deploy in at least one environment (`DEPLOY`, directly, through a role\n    or a group); the web interface shows the deploy steps and Your work from it.\nsecret_environments\n    The environments, by name and sorted, where you may manage secrets with this credential\n    (`MANAGE_SECRET`, directly, through a role or a group); empty for a task or CI token.\n    The web interface offers its Secrets page for exactly these.\nmanage_policy\n    Whether you may manage row filters and column masks with this credential\n    (`MANAGE_POLICY` on the instance, directly, through a role or a group); `false` for a task\n    or CI token. The web interface offers Row filters & masks from it.\nreads_environments\n    Whether you may read environments with this credential (`READ_ENVIRONMENT` on the\n    instance or on at least one environment that is not deleted, directly, through a role or\n    a group), which lets you read the repositories. The web interface lists Settings,\n    Repositories from it.\ninstance_actions\n    The actions you may take on the instance with this credential (such as\n    `MANAGE_REPOSITORY` or `MANAGE_ENVIRONMENT`, directly, through a role or a group), in the\n    order of the action list; empty for a task or CI token. It describes you only.\nmanaged_environments\n    The environments, by name and sorted, that you may manage with this credential\n    (`MANAGE_ENVIRONMENT` on the environment, directly, through a role or a group),\n    including deleted ones whose files are not deleted yet; empty for a task or CI token.\n    The web interface offers an environment's usage, retention, deletion and restore for\n    exactly these. It describes you only.\npicture\n    The etag of your profile picture, or `null` without one.\ntoken_window_ends_at\n    For a person linked to the identity provider: until when your personal API tokens work\n    without another sign-in there (the token window, `token_provider_window_days` after your\n    last provider sign-in). `null` when your tokens have no such window."
       },
       "WorkEnvironmentOut": {
         "properties": {

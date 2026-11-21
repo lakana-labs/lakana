@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import cast
 
 import httpx
 import pytest
@@ -23,6 +24,7 @@ from lakana._models import (
     OpenRecoveryLink,
     Passkey,
     SignInBounds,
+    SignInProvider,
     SignInSettings,
 )
 from lakana.client import Client
@@ -342,3 +344,38 @@ def test_the_client_exposes_every_sign_in_resource() -> None:
         assert isinstance(client.sessions, Sessions)
         assert isinstance(client.passkeys, Passkeys)
         assert isinstance(client.sign_in_settings, SignInSettingsResource)
+
+
+def test_sign_in_settings_carry_the_token_window_and_the_provider() -> None:
+    """`update` sends the token window; the answer parses it and an administrator's provider."""
+    seen: list[httpx.Request] = []
+    answer = {
+        **_SETTINGS,
+        "bounds": {
+            **cast(dict[str, int], _SETTINGS["bounds"]),
+            "token_provider_window_days_min": 1,
+            "token_provider_window_days_max": 365,
+        },
+        "token_provider_window_days": 7,
+        "provider": {
+            "display_name": "Keycloak",
+            "issuer": "https://idp.example.com",
+            "linked_people": 3,
+            "unlinked_admins": 1,
+        },
+    }
+    resource = SignInSettingsResource(_transport(_recording(seen, 200, answer)))
+
+    settings = resource.update(token_provider_window_days=7)
+
+    assert _sent(seen[0]) == {"token_provider_window_days": 7}
+    assert settings.token_provider_window_days == 7
+    assert settings.bounds.token_provider_window_days_max == 365
+    assert settings.provider == SignInProvider(
+        display_name="Keycloak",
+        issuer="https://idp.example.com",
+        linked_people=3,
+        unlinked_admins=1,
+    )
+    # An older server answers neither: the defaults stand in.
+    assert _PARSED.token_provider_window_days == 30 and _PARSED.provider is None

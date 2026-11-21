@@ -227,6 +227,7 @@ ROUTES: dict[str, Route] = {
     "principals.permissions": Route("GET", "/api/v1/principals/{name}/permissions"),
     "principals.grants": Route("GET", "/api/v1/principals/{name}/grants"),
     "principals.deactivate": Route("DELETE", "/api/v1/principals/{name}"),
+    "principals.unlink_provider": Route("DELETE", "/api/v1/principals/{name}/oidc-link"),
     "groups.create": Route("POST", "/api/v1/groups"),
     "groups.list": Route("GET", "/api/v1/groups"),
     "groups.delete": Route("DELETE", "/api/v1/groups/{name}"),

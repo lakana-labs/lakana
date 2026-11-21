@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 Show who is calling
 
-Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), `instance_actions` the actions it may take on the instance with it, and `managed_environments` the environments it may manage with it (deleted ones too, until their files are deleted): the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, the instance-wide actions of Settings and each environment's own, from these eight. `picture` is the etag of your profile picture, or `null` without one.
+Answers with the name and type of the principal the credential signs in as and, for a task or CI token, the scope of that token. Any valid credential may ask. `admin` says whether the caller holds the `ADMIN` role on the instance and may use the administrator routes with this credential (never with a task or CI token), `has_access` whether it has any grant at all (any scope, directly or through a group), `may_deploy` whether it may deploy in at least one environment with this credential, `secret_environments` the environments where it may manage secrets with it, `manage_policy` whether it may manage row filters and column masks with it, `reads_environments` whether it may read environments with it, on the instance or in at least one (and so the repositories), `instance_actions` the actions it may take on the instance with it, and `managed_environments` the environments it may manage with it (deleted ones too, until their files are deleted): the web interface shows the administration areas, tells a new person to ask for access, shows the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages, the instance-wide actions of Settings and each environment's own, from these eight. `picture` is the etag of your profile picture, or `null` without one. `token_window_ends_at` is, for a person linked to the identity provider, until when their personal tokens work without another sign-in there.
 
 Parameters:
 
@@ -43,6 +43,7 @@ Answer fields: `WhoamiOut`
 | `instance_actions` | list of text | no |  |
 | `managed_environments` | list of text | no |  |
 | `picture` | text or null | no |  |
+| `token_window_ends_at` | text (date-time) or null | no |  |
 
 ## `PATCH /api/v1/whoami`
 
@@ -89,3 +90,4 @@ Answer fields: `WhoamiOut`
 | `instance_actions` | list of text | no |  |
 | `managed_environments` | list of text | no |  |
 | `picture` | text or null | no |  |
+| `token_window_ends_at` | text (date-time) or null | no |  |

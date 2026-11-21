@@ -135,6 +135,8 @@
 "principal deactivate": { class: ui, part: 7 }
 "principal get": { class: ui, part: 7 }
 "principal list": { class: ui, part: 7 }
+"principal unlink-provider":
+  { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink" }
 "profile list": { class: git, reason: "local CLI credential file" }
 "profile remove": { class: git, reason: "local CLI credential file" }
 "profile use": { class: git, reason: "local CLI credential file" }
@@ -276,6 +278,8 @@
 "DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1, done: true }
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
+"DELETE /api/v1/principals/{name}/oidc-link":
+  { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink" }
 "DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
@@ -608,7 +612,13 @@
   { class: git, reason: "local tooling: server start --local signs the browser in" }
 "POST /api/v1/sign-in/oidc/finish":
   { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc" }
+"POST /api/v1/sign-in/oidc/finish-in-session":
+  { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc/confirmed" }
+"POST /api/v1/sign-in/oidc/link/start":
+  { class: ui, part: 1, note: "OIDC sign-in (#32): the profile's Use <provider> to sign in" }
 "POST /api/v1/sign-in/oidc/start": { class: ui, part: 1, note: "OIDC sign-in (#32)" }
+"POST /api/v1/sign-in/oidc/step-up/start":
+  { class: ui, part: 1, note: "OIDC sign-in (#32): step-up of a linked person" }
 "POST /api/v1/sign-in/passkey": { class: ui, part: 1 }
 "POST /api/v1/sign-in/passkey/options": { class: ui, part: 1 }
 "POST /api/v1/sign-in/setup-link":

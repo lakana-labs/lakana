@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError
 from lakana_core.identity.links import has_passkey
+from lakana_core.identity.oidc_links import is_linked
 from lakana_core.identity.passkeys import needs_passkey
 from lakana_core.identity.sessions import STEP_UP_WINDOW, SessionService
 from lakana_core.models import BrowserSession, Principal
@@ -118,6 +119,7 @@ def describe_session(
         needs_passkey=needs_passkey(session, principal, rp_id),
         offer_passkey=not usable and context.via == "local",
         absolute_expires_at=row.absolute_expires_at,
+        provider_linked=person is not None and is_linked(person),
     )
 
 

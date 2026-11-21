@@ -12,14 +12,18 @@ import shutil
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from scripts.test_support.webauthn_test_helpers import SoftAuthenticator
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 import lakana_server.ui
 from lakana_core.config import DatabaseConfig, SecretsConfig
+from lakana_core.models import AuditEvent, AuditEventType, Principal
 from lakana_server.api.platform.sign_in import client_bucket, network_bucket
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
@@ -181,6 +185,31 @@ def test_a_refused_passkey_sign_in_answers_401(client: TestClient, alice: dict[s
     options = client.post("/api/v1/sign-in/passkey/options").json()
     r = client.post("/api/v1/sign-in/passkey", json=_answer(auth, options, forge=True))
     assert r.status_code == 401 and "set-cookie" not in r.headers
+
+
+def test_a_linked_persons_passkey_sign_in_is_403_and_audited(
+    client: TestClient, alice: dict[str, str]
+) -> None:
+    """Once linked to the identity provider, a passkey that verifies still signs nobody in."""
+    auth, _ = _register(client, "alice", alice)
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        person = session.execute(select(Principal).where(Principal.name == "alice")).scalar_one()
+        person.oidc_issuer, person.oidc_subject = "https://idp.example.com", "alice"
+        session.commit()
+    options = client.post("/api/v1/sign-in/passkey/options").json()
+    r = client.post("/api/v1/sign-in/passkey", json=_answer(auth, options))
+    assert (r.status_code, r.json()["type"]) == (403, "ProviderSignInRequired"), r.text
+    assert "set-cookie" not in r.headers
+    with Session(app.state.engine) as session:
+        details = session.execute(
+            select(AuditEvent.detail).where(
+                AuditEvent.event_type == AuditEventType.AUTHENTICATION_FAILED
+            )
+        ).scalars()
+        assert {"credential": "passkey", "reason": "provider_only"} in [
+            {k: v for k, v in d.items() if k in ("credential", "reason")} for d in details
+        ]
 
 
 def test_adding_a_passkey_without_step_up_is_refused(

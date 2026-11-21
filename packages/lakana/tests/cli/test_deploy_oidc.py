@@ -313,7 +313,10 @@ def test_whoami_shows_what_a_ci_token_may_do(tmp_path: Path) -> None:
     table = " ".join(invoke(state, "whoami").stdout.split())
     for shown in ("ci_token", "00000000-0000-0000-0000-000000000001", _SHA, '"used": false'):
         assert shown in table
-    assert json.loads(invoke(state, "--output", "json", "whoami").stdout) == body
+    assert json.loads(invoke(state, "--output", "json", "whoami").stdout) == {
+        **body,
+        "token_window_ends_at": None,
+    }
 
 
 def test_a_ci_client_without_a_reported_scope_deploys_without_the_scope_line(

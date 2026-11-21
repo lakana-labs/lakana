@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 Show how long browser sessions last
 
-The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days, 10080 minutes), in minutes, with the bounds an administrator may choose between. Anyone signed in may read them.
+The idle timeout (default 12 hours, 720 minutes) and the absolute lifetime (default 7 days, 10080 minutes), in minutes, with the bounds an administrator may choose between, and the token window of people linked to the identity provider (default 30 days). Anyone signed in may read them. An administrator also gets `provider`, while OIDC sign-in is on: its name and issuer, how many people are linked and how many administrators can sign in without it.
 
 Parameters:
 
@@ -32,12 +32,14 @@ Answer fields: `SignInSettingsOut`
 | `idle_timeout_minutes` | whole number | yes |  |
 | `absolute_lifetime_minutes` | whole number | yes |  |
 | `bounds` | `SignInBoundsOut` | yes |  |
+| `token_provider_window_days` | whole number | no |  |
+| `provider` | `SignInProviderOut` or null | no |  |
 
 ## `PATCH /api/v1/settings/sign-in`
 
 Change how long browser sessions last
 
-Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; a value outside answers 422 naming the bound. Sessions already open keep their lengths. Recorded in the audit log.
+Needs the ADMIN role on the instance and, from the web interface, a passkey touch within the last 15 minutes. Both are in minutes: the idle timeout 15 to 1440 (24 hours), the absolute lifetime 60 (1 hour) to 43200 (30 days) and not shorter than the idle timeout; the token window of people linked to the identity provider 1 to 365 days. A value outside answers 422 naming the bound. Sessions already open keep their lengths; a new token window applies to the next request with a token. Recorded in the audit log.
 
 Parameters:
 
@@ -51,6 +53,7 @@ Request body (application/json, required): `SignInSettingsIn`
 |---|---|---|---|
 | `idle_timeout_minutes` | whole number or null | no |  |
 | `absolute_lifetime_minutes` | whole number or null | no |  |
+| `token_provider_window_days` | whole number or null | no |  |
 
 Answers:
 
@@ -68,6 +71,8 @@ Answer fields: `SignInSettingsOut`
 | `idle_timeout_minutes` | whole number | yes |  |
 | `absolute_lifetime_minutes` | whole number | yes |  |
 | `bounds` | `SignInBoundsOut` | yes |  |
+| `token_provider_window_days` | whole number | no |  |
+| `provider` | `SignInProviderOut` or null | no |  |
 
 ## `GET /api/v1/settings/configuration`
 

@@ -147,6 +147,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "language",
         # the sign-in link a browser session began with (`lakana_core.identity.sessions`)
         "link_id",
+        # how many open sign-in links an unlink from the identity provider withdrew (#32)
+        "links_withdrawn",
         "location",
         "locations",
         # a deploy key Lakana made: environment -> fingerprint of the new public key, never a key
@@ -161,6 +163,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "owner",
         # a passkey's id (`lakana_core.identity.passkeys`), never its key or credential id
         "passkey_id",
+        # how many passkeys an unlink from the identity provider deleted (#32)
+        "passkeys_deleted",
         # the personal token a task token was minted with: its public key id, never a secret
         "pat_key_id",
         "path",
@@ -171,6 +175,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "principal_id",
         "probe_id",
         "project_version_id",
+        # what an OIDC sign-in was for, when not a sign-in (``step_up``, #32)
+        "purpose",
         "query_id",
         "ref",
         "repository",
@@ -324,6 +330,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "tables_without_tombstone",
         "tags_removed",
         "tasks",
+        # how many personal tokens an unlink from the identity provider revoked (#32)
+        "tokens_revoked",
         "versions",
         "versions_closed",
         "versions_opened",

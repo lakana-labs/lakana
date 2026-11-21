@@ -171,6 +171,8 @@ def test_redeem_sets_the_cookie_and_returns_no_secret(ui_client: TestClient) -> 
         "name": "admin",
         "display_name": None,
         "state": "open",
+        "provider_only": False,
+        "offers_provider": False,
     }
     r = _redeem(ui_client, url)
     assert r.status_code == 200, r.text

@@ -144,7 +144,7 @@ route with its parameters, its request body and its answers.
 - [Glossary](rest/glossary.md): 2 routes
 - [Graph](rest/graph.md): 4 routes
 - [Artifacts](rest/artifacts.md): 12 routes
-- [Principals](rest/principals.md): 15 routes
+- [Principals](rest/principals.md): 16 routes
 - [Groups](rest/groups.md): 6 routes
 - [Tokens](rest/tokens.md): 4 routes
 - [Task tokens](rest/task-tokens.md): 3 routes
@@ -163,7 +163,7 @@ route with its parameters, its request body and its answers.
 - [Access](rest/access.md): 5 routes
 - [Auth](rest/auth.md): 1 route
 - [Whoami](rest/whoami.md): 2 routes
-- [Sign in](rest/sign-in.md): 22 routes
+- [Sign in](rest/sign-in.md): 25 routes
 - [Settings](rest/settings.md): 3 routes
 - [Info](rest/info.md): 1 route
 - [Status](rest/status.md): 1 route

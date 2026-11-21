@@ -38,6 +38,7 @@ Answer fields: `SessionOut`
 | `needs_passkey` | true or false | yes |  |
 | `offer_passkey` | true or false | yes |  |
 | `absolute_expires_at` | text (date-time) | yes |  |
+| `provider_linked` | true or false | no |  |
 
 ## `DELETE /api/v1/sign-in/session`
 
@@ -64,7 +65,7 @@ Answers:
 
 Describe a sign-in link before it is used
 
-Needs no credential and never uses the link: the sign-in page shows "Sign in as X" (or "Join as X") from this, so a link preview or a mail scanner opening the page cannot use it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired, withdrawn or unknown link answers 410 with `state` and what to do next.
+Needs no credential and never uses the link: the sign-in page shows "Sign in as X" (or "Join as X") from this, so a link preview or a mail scanner opening the page cannot use it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired, withdrawn or unknown link answers 410 with `state` and what to do next. With OIDC sign-in on, `offers_provider` says to offer "Sign in with &lt;provider&gt;" for an invite or a recovery link, and `provider_only` that a recovery link of a linked person works only that way.
 
 Request body (application/json, required): `LinkIdIn`
 
@@ -90,6 +91,8 @@ Answer fields: `LinkDescriptionOut`
 | `name` | text | yes |  |
 | `display_name` | text or null | yes |  |
 | `state` | text | yes |  |
+| `provider_only` | true or false | no |  |
+| `offers_provider` | true or false | no |  |
 
 ## `POST /api/v1/sign-in/links/redeem`
 
@@ -186,7 +189,7 @@ Answer fields: `IssuedLinkOut`
 
 Start confirming your browser session with a passkey touch (step-up)
 
-Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A token has no browser session, so it gets 409: step-up never applies to a token's requests.
+Some actions in the web interface need a passkey touch no older than 15 minutes, such as adding or removing a passkey, issuing invites and recovery links and ending other people's sessions; without one they answer 403 `StepUpRequired`. The options list your own passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a passkey on your account page first. A person linked to the identity provider gets 409 `ProviderStepUpRequired`: confirm by signing in there again (`POST /api/v1/sign-in/oidc/step-up/start`). A token has no browser session, so it gets 409: step-up never applies to a token's requests.
 
 Parameters:
 
@@ -271,7 +274,7 @@ Answer fields: `PasskeyOptionsOut`
 
 Sign in with a passkey
 
-Send the browser's `credential.toJSON()` for the ceremony the options route started. A passkey that verifies starts a browser session with a fresh id (a session the browser had is ended), sets its cookie, and counts as a passkey touch for 15 minutes of step-up actions. An unknown, disabled or copied passkey, an answer from another address or without user verification, or a used or expired challenge answers 401 and is recorded in the audit log. A passkey whose signature counter went backwards is disabled (it may have been copied) and the person and every administrator are told.
+Send the browser's `credential.toJSON()` for the ceremony the options route started. A passkey that verifies starts a browser session with a fresh id (a session the browser had is ended), sets its cookie, and counts as a passkey touch for 15 minutes of step-up actions. An unknown, disabled or copied passkey, an answer from another address or without user verification, or a used or expired challenge answers 401 and is recorded in the audit log. A passkey whose signature counter went backwards is disabled (it may have been copied) and the person and every administrator are told. A person linked to the identity provider signs in only there: their passkey, once it verifies, answers 403 `ProviderSignInRequired`, recorded in the audit log too.
 
 Request body (application/json, required): `PasskeyAnswerIn`
 
@@ -288,6 +291,7 @@ Answers:
 | `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
 | `413` | The request body is larger than the server accepts. | `ErrorOut` |
 | `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
 Answer fields: `SignInOut`
@@ -323,7 +327,7 @@ Answer fields: `OidcInfoOut`
 
 Come back from the identity provider
 
-The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow is called back once.
+The provider sends the browser here; nothing else should. Checks the flow (its `state` and this browser's flow cookie), exchanges the code with the client secret and verifies the ID token, writes what it found on the flow, and always answers 303 to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, whatever happened. That page finishes the sign-in with `POST /api/v1/sign-in/oidc/finish`. A flow that links a signed-in person or confirms their session goes to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed` instead, which finishes it with `POST /api/v1/sign-in/oidc/finish-in-session`. Both are fixed pages of the public address. A flow is called back once.
 
 Parameters:
 
@@ -337,17 +341,23 @@ Answers:
 
 | Status | Meaning | Body |
 |---|---|---|
-| `303` | Always to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`. | none |
+| `303` | To `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc`, or `/sign-in/oidc/confirmed` for a link from the profile or a provider step-up. | none |
 | `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
-## `POST /api/v1/sign-in/oidc/start`
+## `POST /api/v1/sign-in/oidc/link/start`
 
-Start signing in through the identity provider
+Start linking your account to the identity provider, from your profile
 
-Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.
+Needs a browser session with a passkey touch from the last 15 minutes (403 `StepUpRequired`). Answers the provider's sign-in page: send the browser there; the provider sends it back to `<LAKANA_UI__PUBLIC_URL>/sign-in/oidc/confirmed`, which finishes with `POST /api/v1/sign-in/oidc/finish-in-session`. Once linked you sign in only through the provider: your passkeys stay stored, unused, and no session ends. 403 `OidcSignInRefused` with `reason` `already_linked`, `cannot_link_operator` (the server operator's account) or `last_unlinked_admin` (the last administrator who signs in with a passkey, who keeps the way in when the provider is down); 409 for a token.
 
-Request body (application/json, required): `OidcStartIn`
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Request body (application/json, required): `OidcInSessionStartIn`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -359,8 +369,103 @@ Answers:
 |---|---|---|
 | `200` | Successful Response | `OidcStartOut` |
 | `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `OidcStartOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `authorization_url` | text | yes |  |
+
+## `POST /api/v1/sign-in/oidc/step-up/start`
+
+Start confirming your browser session at the identity provider (provider step-up)
+
+For a person linked to the provider, who signs in only there: it stands in for the passkey touch that actions such as creating a token ask for (403 `StepUpRequired`). The provider is asked for a fresh sign-in (`prompt=login`, `max_age=0`), and the finish checks the `auth_time` it reports. Then press the action again: for 15 minutes it needs no other confirmation. 409 for a token, or for a person who is not linked (confirm with a passkey, `POST /api/v1/sign-in/step-up/options`).
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Request body (application/json, required): `OidcInSessionStartIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `return_to` | text or null | no |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `OidcStartOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `OidcStartOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `authorization_url` | text | yes |  |
+
+## `POST /api/v1/sign-in/oidc/finish-in-session`
+
+Finish a link from the profile or a provider step-up, in the session that started it
+
+The interface's page at `/sign-in/oidc/confirmed` calls this once, with the session's CSRF token: the session stays, and so does its token. A link links the caller to the identity the provider verified (403 `OidcSignInRefused` `identity_taken` when another account holds it, `last_unlinked_admin`). A step-up needs the caller's own identity (`identity_mismatch` otherwise) and an `auth_time` no earlier than the start, less 60 seconds (`auth_too_old`, also when the provider sent none); it then counts as the session's step-up touch, and as a provider sign-in for the token window. Also 403 `flow_expired` for a flow of another session, and the callback's refusals. 409 for a token and for a sign-in flow, which finishes at `/finish`.
+
+Parameters:
+
+| Name | In | Required | Type | Description |
+|---|---|---|---|---|
+| `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `OidcInSessionOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `401` | Not signed in: the token or browser session is missing, wrong, expired or revoked; an ended session says why in `reason`. | `ErrorOut` |
+| `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `OidcInSessionOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `return_to` | text | yes |  |
+| `step_up_until` | text (date-time) or null | yes |  |
+
+## `POST /api/v1/sign-in/oidc/start`
+
+Start signing in through the identity provider
+
+Needs no credential. Opens a flow that works once, for 10 minutes, binds it to this browser with a cookie, and answers the provider's sign-in page: send the browser there. The page to open afterwards (`return_to`) stays on the server; anything but a path inside the interface becomes `/`. With `purpose` ``invite`` or ``recovery`` and the link's `link_id` and `secret`, the flow accepts that invite or uses that recovery link: the link is checked here (410 with `state` as `/links/redeem` answers, a wrong secret like an unknown link) and used only at the finish. Answers 409 while OIDC sign-in is off, 403 `OidcSignInRefused` (`reason: provider_unreachable`) when the provider cannot be reached, 422 for a link of another kind, and 429 past `LAKANA_UI__PASSKEY_OPTIONS_PER_IP_PER_MINUTE` calls per client address or `LAKANA_UI__PASSKEY_OPTIONS_PER_NETWORK_PER_MINUTE` per network and minute.
+
+Request body (application/json, required): `OidcStartIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `return_to` | text or null | no |  |
+| `purpose` | one of `sign_in`, `invite`, `recovery` | no |  |
+| `link_id` | text or null | no |  |
+| `secret` | text or null | no |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `OidcStartOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
 | `413` | The request body is larger than the server accepts. | `ErrorOut` |
 | `403` | Signed in, but not allowed to do this; the message says why and what to do next. | `ErrorOut` |
+| `410` | The sign-in link cannot be used: `state` says whether it was used, expired, withdrawn or is not known; ask for a new link. | `ErrorOut` |
 | `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
 | `422` | Validation Error | `HTTPValidationError` |
 
@@ -374,7 +479,7 @@ Answer fields: `OidcStartOut`
 
 Finish signing in through the identity provider, after the callback
 
-Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended) and its cookie. A provider sign-in is no passkey touch: an action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, or `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes). A flow is finished once, whatever the answer.
+Needs no credential: the browser's flow cookie and the callback's checks are the proof. The interface's page at `/sign-in/oidc` calls this once. A person whose provider identity is linked to their account gets a browser session exactly as a passkey sign-in gives one: a fresh session id (a session the browser had is ended) and its cookie. A flow started with an invite creates the account and links it; one started with a recovery link signs its person in (a linked person only as the same identity, `identity_mismatch` otherwise) and links an unlinked one. The link is used here, so one withdrawn or used since the start answers `link_unusable` and changes nothing. A provider sign-in is no passkey touch: an action that needs step-up asks for one. Otherwise 403 `OidcSignInRefused` with `reason`: `not_linked` (ask an administrator for an invite), `deactivated`, `token_invalid`, `provider_unreachable`, `provider_refused`, `flow_expired` (no flow cookie, or a flow that was used, never called back or older than 10 minutes), or when linking `identity_taken`, `last_unlinked_admin` or `link_unusable`. A flow is finished once, whatever the answer. 409 for a flow that links or confirms a signed-in person: that one finishes at `/finish-in-session`.
 
 Answers:
 

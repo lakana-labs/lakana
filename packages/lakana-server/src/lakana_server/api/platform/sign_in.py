@@ -31,7 +31,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import PrincipalRef
-from lakana_core.errors import AuthenticationError, LinkUnusableError
+from lakana_core.errors import AuthenticationError, LinkUnusableError, ProviderSignInRequired
 from lakana_core.identity.links import LinkService
 from lakana_core.identity.passkeys import OPEN_BODY_LIMIT, PasskeyService
 from lakana_core.identity.sessions import STEP_UP_WINDOW, SessionService
@@ -192,7 +192,9 @@ def describe_link(
     Needs no credential and never uses the link: the sign-in page shows "Sign in as X" (or
     "Join as X") from this, so a link preview or a mail scanner opening the page cannot use
     it. Takes only the public id (`l=` after the `#`), never the secret. A used, expired,
-    withdrawn or unknown link answers 410 with `state` and what to do next.
+    withdrawn or unknown link answers 410 with `state` and what to do next. With OIDC sign-in
+    on, `offers_provider` says to offer "Sign in with <provider>" for an invite or a recovery
+    link, and `provider_only` that a recovery link of a linked person works only that way.
 
     Parameters
     ----------
@@ -227,6 +229,10 @@ def describe_link(
         name=described.name,
         display_name=described.display_name,
         state=described.state,
+        provider_only=described.provider_only,
+        offers_provider=(
+            request.app.state.oidc_provider is not None and described.kind in ("invite", "recovery")
+        ),
     )
 
 
@@ -409,7 +415,7 @@ def passkey_sign_in_options(
     return PasskeyOptionsOut(ceremony_id=ceremony_id, public_key=options)
 
 
-@open_router.post("/passkey", response_model=SignInOut, responses=errors(401))
+@open_router.post("/passkey", response_model=SignInOut, responses=errors(401, 403))
 def passkey_sign_in(
     body: PasskeyAnswerIn,
     request: Request,
@@ -425,7 +431,9 @@ def passkey_sign_in(
     actions. An unknown, disabled or copied passkey, an answer from another address or without
     user verification, or a used or expired challenge answers 401 and is recorded in the audit
     log. A passkey whose signature counter went backwards is disabled (it may have been
-    copied) and the person and every administrator are told.
+    copied) and the person and every administrator are told. A person linked to the identity
+    provider signs in only there: their passkey, once it verifies, answers 403
+    `ProviderSignInRequired`, recorded in the audit log too.
 
     Parameters
     ----------
@@ -450,6 +458,8 @@ def passkey_sign_in(
     ------
     AuthenticationError
         401 when the passkey does not sign in.
+    ProviderSignInRequired
+        403 for a person who signs in through the identity provider.
     """
     origin = request.app.state.settings.public_origin()
     try:
@@ -462,6 +472,9 @@ def passkey_sign_in(
         )
     except AuthenticationError:
         record_failed_passkey(request, session)
+        raise
+    except ProviderSignInRequired:
+        record_failed_passkey(request, session, reason="provider_only")
         raise
     lifetime = started.absolute_expires_at - get_clock(request)()
     set_session_cookie(
@@ -486,8 +499,10 @@ def step_up_options(
     adding or removing a passkey, issuing invites and recovery links and ending other people's
     sessions; without one they answer 403 `StepUpRequired`. The options list your own
     passkeys. An account with no passkey at this address gets 409 `NoPasskeyError`: add a
-    passkey on your account page first. A token has no browser session, so it gets 409:
-    step-up never applies to a token's requests.
+    passkey on your account page first. A person linked to the identity provider gets 409
+    `ProviderStepUpRequired`: confirm by signing in there again
+    (`POST /api/v1/sign-in/oidc/step-up/start`). A token has no browser session, so it gets
+    409: step-up never applies to a token's requests.
 
     Parameters
     ----------

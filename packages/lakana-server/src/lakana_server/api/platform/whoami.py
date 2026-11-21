@@ -45,6 +45,7 @@ def whoami(
     principal: PrincipalRef = Depends(get_principal),
     grants: GrantService = Depends(get_grant_service),
     pictures: PictureService = Depends(get_picture_service),
+    principals: PrincipalService = Depends(get_principal_service),
 ) -> WhoamiOut:
     """Show who is calling.
 
@@ -63,6 +64,8 @@ def whoami(
     the deploy steps of Home and offers its Secrets, Row filters & masks and Repositories pages,
     the instance-wide actions of Settings and each environment's own, from these eight.
     `picture` is the etag of your profile picture, or `null` without one.
+    `token_window_ends_at` is, for a person linked to the identity provider, until when their
+    personal tokens work without another sign-in there.
 
     Parameters
     ----------
@@ -72,6 +75,8 @@ def whoami(
         The grant service for this request, asked about the caller only.
     pictures
         The picture service, for the caller's picture etag.
+    principals
+        The principal service, for the caller's token window.
 
     Returns
     -------
@@ -79,10 +84,15 @@ def whoami(
         The caller's name, type, preferred language and access, plus its task-token scope or
         its CI token's scope if it authenticated with one of those.
     """
-    return _describe(principal, grants, pictures)
+    return _describe(principal, grants, pictures, principals)
 
 
-def _describe(principal: PrincipalRef, grants: GrantService, pictures: PictureService) -> WhoamiOut:
+def _describe(
+    principal: PrincipalRef,
+    grants: GrantService,
+    pictures: PictureService,
+    principals: PrincipalService,
+) -> WhoamiOut:
     """Describe the caller.
 
     Parameters
@@ -93,6 +103,8 @@ def _describe(principal: PrincipalRef, grants: GrantService, pictures: PictureSe
         The grant service, asked about the caller only.
     pictures
         The picture service, asked for the caller's picture etag only.
+    principals
+        The principal service, for the caller's token window.
 
     Returns
     -------
@@ -128,6 +140,7 @@ def _describe(principal: PrincipalRef, grants: GrantService, pictures: PictureSe
         instance_actions=grants.instance_actions(principal),
         managed_environments=grants.managed_environments(principal),
         picture=pictures.etag_of(principal.id),
+        token_window_ends_at=principals.own_token_window_ends_at(principal),
     )
 
 
@@ -164,4 +177,4 @@ def set_profile(
         Who you are, with the language now stored.
     """
     stored = principals.set_own_language(principal, body.language)
-    return _describe(replace(principal, language=stored), grants, pictures)
+    return _describe(replace(principal, language=stored), grants, pictures, principals)

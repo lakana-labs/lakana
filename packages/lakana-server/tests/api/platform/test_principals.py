@@ -111,6 +111,7 @@ def test_create_and_get_principal(client: TestClient) -> None:
         "is_active": True,
         "picture": None,
         "held_admin": False,
+        "provider_link": None,
     }
 
     fetched = client.get("/api/v1/principals/ci-bot", headers=AUTH_HEADER)
