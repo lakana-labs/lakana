@@ -173,6 +173,7 @@
     "attention": {
       "title": "Needs your attention",
       "subtitle": "Newest first · top {{count}}",
+      "region": "The newest failures",
       "none": "Nothing needs your attention.",
       "showAll": "Show all {{count}}",
       "showAllMore": "Show all {{count}}+",

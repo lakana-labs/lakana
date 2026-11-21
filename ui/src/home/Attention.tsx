@@ -121,22 +121,31 @@ function Rows({ items, truncated }: RowsProps): JSX.Element {
   const since = useSince();
   return (
     <>
-      <ObjectTable column={t("list.state")}>
-        {items.slice(0, SHOWN).map((item) => (
-          <ObjectRow
-            key={`${item.kind} ${item.ref} ${item.title}`}
-            to={attentionPath(item)}
-            name={item.title}
-            environment={item.environment}
-            second={
-              item.count > 1 && item.since !== null
-                ? t("home.attention.repeated", { count: item.count, since: since(item.since) })
-                : when(item.at)
-            }
-            aside={<State kind={item.kind} />}
-          />
-        ))}
-      </ObjectTable>
+      <div
+        className="list-scroll"
+        role="region"
+        aria-label={t("home.attention.region")}
+        // A scrolling region must be reachable by keyboard (WCAG 2.1.1), so it takes a tab stop.
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        tabIndex={0}
+      >
+        <ObjectTable column={t("list.state")}>
+          {items.slice(0, SHOWN).map((item) => (
+            <ObjectRow
+              key={`${item.kind} ${item.ref} ${item.title}`}
+              to={attentionPath(item)}
+              name={item.title}
+              environment={item.environment}
+              second={
+                item.count > 1 && item.since !== null
+                  ? t("home.attention.repeated", { count: item.count, since: since(item.since) })
+                  : when(item.at)
+              }
+              aside={<State kind={item.kind} />}
+            />
+          ))}
+        </ObjectTable>
+      </div>
       {items.length > SHOWN && (
         <p className="panel-foot">
           <Link to={runsTabPath({ status: ["failed"] })}>

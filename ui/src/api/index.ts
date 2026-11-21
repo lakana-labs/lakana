@@ -37,7 +37,13 @@ export type {
 } from "./catalog";
 export { ApiError, onUnauthorized } from "./client";
 export { getAttention, getGetStarted, getWork } from "./home";
-export type { AttentionItemOut, AttentionKind, GetStartedOut, GetStartedStepId, WorkRepositoryOut } from "./home";
+export type {
+  AttentionItemOut,
+  AttentionKind,
+  GetStartedOut,
+  GetStartedStepId,
+  WorkRepositoryOut,
+} from "./home";
 export { describeLink, redeemLink } from "./links";
 export type { LinkDescriptionOut } from "./links";
 export { changeInterfaceState, getInfo, getInterfaceState, listRecent, recordOpened } from "./me";
