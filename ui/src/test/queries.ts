@@ -129,6 +129,17 @@ export function aSavedQuery(over: Partial<SavedQueryOut> = {}): SavedQueryOut {
 }
 
 /**
+ * A saved query as a list shows it: without `sql`, which no list item carries.
+ *
+ * @param over - The fields that differ.
+ * @returns The list item.
+ */
+export function aListedSavedQuery(over: Partial<SavedQueryOut> = {}): SavedQueryOut {
+  const entries = Object.entries(aSavedQuery(over)).filter(([key]) => key !== "sql");
+  return Object.fromEntries(entries) as unknown as SavedQueryOut;
+}
+
+/**
  * The routes of the Queries screen: the environments, the lists, the run and the saved query.
  *
  * @returns The routes, keyed `"METHOD /path"`.
@@ -139,7 +150,7 @@ export function queryRoutes(): Record<string, FakeRoute> {
     "GET /api/v1/queries": { status: 200, body: { items: [aListedRun()], next_cursor: null } },
     "GET /api/v1/saved-queries": {
       status: 200,
-      body: { items: [aSavedQuery()], next_cursor: null },
+      body: { items: [aListedSavedQuery()], next_cursor: null },
     },
     [`GET /api/v1/environments/prod/queries/${RUN_ID}`]: { status: 200, body: aRun() },
     "GET /api/v1/environments/prod/saved-queries/6a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d": {

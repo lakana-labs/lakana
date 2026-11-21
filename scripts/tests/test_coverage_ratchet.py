@@ -14,6 +14,7 @@ from scripts.coverage_ratchet import (
     is_stale,
     main,
     read_baseline,
+    uncovered,
     write_baseline,
 )
 
@@ -532,3 +533,107 @@ def test_main_ignores_a_newer_omitted_test_file(
 
     os.utime(in_tmp / "src" / "module.py", (later, later))
     assert _run(monkeypatch, args) == 1
+
+
+def test_a_shortfall_too_small_for_two_decimals_is_shown_with_more() -> None:
+    """99.999% against 100% must not read "100.00% is below the baseline of 100.00%" (#779)."""
+    message = check(current=100 * 80278 / 80279, baseline=100.0, floor=90.0)
+    assert message is not None
+    assert "99.999% is below the baseline of 100.000%" in message
+
+
+def test_percentages_closer_than_the_most_decimals_print_with_the_most() -> None:
+    """A gap no 12 decimals can show still fails, printed at 12 decimals."""
+    message = check(current=100.0 - 1e-13, baseline=100.0, floor=90.0)
+    assert message is not None
+    assert "100.000000000000% is below the baseline of 100.000000000000%" in message
+
+
+def test_uncovered_names_each_file_with_its_lines_and_branch_arcs() -> None:
+    """Lines come as ranges, arcs as `a->b` (`a->exit` for an exit); full files are left out."""
+    report = {
+        "files": {
+            "pkg/b.py": {
+                "missing_lines": [782],
+                "missing_branches": [[352, 354], [400, -1]],
+            },
+            "pkg/a.py": {"missing_lines": [3, 4, 5, 9], "missing_branches": []},
+            "pkg/full.py": {"missing_lines": [], "missing_branches": []},
+            "pkg/no_branch_data.py": {"missing_lines": [7]},
+        }
+    }
+
+    assert uncovered(json.dumps(report)) == [
+        "pkg/a.py: lines 3-5, 9",
+        "pkg/b.py: lines 782; branches 352->354, 400->exit",
+        "pkg/no_branch_data.py: lines 7",
+    ]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        "[]",
+        '{"files": []}',
+        '{"files": {"a.py": []}}',
+        '{"files": {"a.py": {"missing_lines": "x"}}}',
+    ],
+)
+def test_uncovered_reads_nothing_from_a_report_without_usable_files(content: str) -> None:
+    assert uncovered(content) == []
+
+
+def _report_with_files(in_tmp: Path, percent: float, files: dict[str, object]) -> None:
+    """Rewrite the report with per-file data, keeping it newer than the source.
+
+    Parameters
+    ----------
+    in_tmp
+        The project directory.
+    percent
+        Total coverage.
+    files
+        The report's ``files``.
+    """
+    _overwrite_report(in_tmp, json.dumps({"totals": {"percent_covered": percent}, "files": files}))
+
+
+def test_main_names_the_uncovered_files_when_it_fails(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The failure says where coverage is missing, so the log alone shows what to test."""
+    args = _project(in_tmp, 100.0, "100.00\n")
+    percent = 100 * 80278 / 80279
+    _report_with_files(
+        in_tmp,
+        percent,
+        {"src/module.py": {"missing_lines": [782], "missing_branches": [[352, 354]]}},
+    )
+
+    assert _run(monkeypatch, args) == 1
+    err = capsys.readouterr().err
+    assert "99.999% is below the baseline of 100.000%" in err
+    assert "Missing lines or branches:\n  src/module.py: lines 782; branches 352->354" in err
+
+
+def test_main_says_when_no_file_has_a_miss(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A drop with no file missing anything points at the configuration instead."""
+    args = _project(in_tmp, 94.0, "95.00\n")
+
+    assert _run(monkeypatch, args) == 1
+    err = capsys.readouterr().err
+    assert "No file in" in err and "coverage.json lists a missing line or branch" in err
+
+
+def test_main_lists_nothing_when_it_passes(
+    in_tmp: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = _project(in_tmp, 95.0, "95.00\n")
+    _report_with_files(in_tmp, 95.0, {"src/module.py": {"missing_lines": [1]}})
+
+    assert _run(monkeypatch, args) == 0
+    captured = capsys.readouterr()
+    assert "Missing" not in captured.out + captured.err

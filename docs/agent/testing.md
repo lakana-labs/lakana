@@ -1167,6 +1167,13 @@ naming the file and the next step, on a missing or malformed report or baseline)
   `100.00`). Coverage may rise but must never fall below its own baseline, even if that value
   is above the floor.
 
+A failure of the floor or the baseline prints both percentages with as many decimals as it takes
+for them to differ (one line missed in 80,000 is `99.999%`, not the `100.00%` two decimals would
+show), then every file of `coverage.json` with a missing line or branch, for example
+`packages/lakana-core/src/lakana_core/catalog/saved_queries.py: lines 782; branches 352->354` (an
+arc to `exit` leaves the function). If no file lists one, it says so and points at what
+`[tool.coverage]` omits and measures.
+
 Because of the staleness check, `pytest` and the ratchet are one step, not two: run
 `pytest` **with** `--cov --cov-report=json` or the ratchet will refuse the report rather
 than quietly score the previous one.

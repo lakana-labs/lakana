@@ -4290,8 +4290,21 @@ own process opens no DuckDB connection and imports no `duckdb`.
   find nothing and try to download `httpfs`; it is told the worker's `~/.duckdb/extensions`
   instead (the image fills it at build time, local mode on the first query), so it loads the
   extension without network access. Then `allow_community_extensions = false` and
-  `allow_extension_repositories = 'forbidden'`: the default `undecided` may still change to
-  `allowed` at run time, `forbidden` may not and refuses `CREATE EXTENSION REPOSITORY`. All
+  `allow_extension_repositories = 'forbidden'`: the default (`undecided` on 2.0.0, which may
+  still change to `allowed` at run time; `hosts` on 2.0.1, under which `CREATE EXTENSION
+  REPOSITORY <host>`, new syntax in 2.0.1, adds a repository by its host name) can be loosened
+  or used, `forbidden` cannot change and refuses `CREATE EXTENSION REPOSITORY` in every form
+  (2.0.1: "allow_extension_repositories is 'forbidden', which does not allow adding any
+  repository"). On the configured connection that check is the third layer, and DuckDB 2.0.1
+  never reaches it: external access is off, so it first fails to open the repository file under
+  `HOME` (`Permission Error: Cannot access file ".../extension_repositories/<host>.duckdb_extension.repo.json"`),
+  and behind that the lock refuses adding or dropping a repository.
+  `test_no_setting_can_be_changed_once_configured` pins that the configured connection refuses
+  the host form and the move back to `hosts` or `allowed` (whichever layer answers);
+  `test_forbidden_alone_refuses_an_extension_repository` pins `forbidden` by itself, on a
+  connection with external access on and no lock, by its message, with nothing written under
+  `HOME` (under the default `hosts` the statement installs `httpfs` and fetches
+  `https://<host>/.well-known/duckdb-extension-repo.json`). All
   three read back in `test_the_connection_holds_no_credential_and_loads_nothing_by_itself`, and
   in a real child in `test_a_child_reads_back_the_settings_duckdb_2_names_differently`.
   `LAKANA_WORKER__EXTENSION_SOURCE` (request field `extension_source`, `duckdb` or `none`) changes
@@ -4432,12 +4445,20 @@ own process opens no DuckDB connection and imports no `duckdb`.
   (`http_retries`) still repeat the handshake inside the one attempt.
 - **What allow-list mode still leaves open** (reachable only past the guard; the guard is the
   first layer, credential scoping the structural one):
-  - **The whole store host:port, not just the prefix**, for SQL that spells a literal URL: a
-    `..` or `%2e%2e` segment passes DuckDB's string check (the HTTP client normalises `..` and
-    asks for the other path). Without a signature the store answers 403, so what remains is what
-    it serves without authentication on that port: anonymous-readable buckets or objects, and
-    unauthenticated endpoints on the S3 port. AWS virtual-host style confines this to the
-    bucket's host. Pinned by `test_known_residual_a_literal_dotdot_reaches_the_same_server`.
+  - **Closed by DuckDB 2.0.1: the whole store host:port, not just the prefix**, for SQL that
+    spells a literal URL. On 2.0.0 a `..` or `%2e%2e` segment passed DuckDB's string check (the
+    HTTP client normalised `..` and asked for the other path; without a signature the store
+    answers 403, so the reach was what it serves without authentication on that port). 2.0.1
+    refuses such a URL (`..`, `./..`, `%2e%2e`, `%2E%2E`) with a `Permission Error` before any
+    request, reported as `invalid` with the fixed text, and the worker requires
+    `duckdb>=2.0.1` for it. Pinned by `test_a_literal_dotdot_is_refused_and_reaches_no_server`
+    (red on 2.0.0; it replaced `test_known_residual_a_literal_dotdot_reaches_the_same_server`).
+    Not in DuckDB's release notes; found when the pinned residual failed on 2.0.1. "Dot
+    segment" is meant as RFC 3986 says: `..;` (`t1/..;/t2/a.parquet`) is no dot segment, passes
+    2.0.1, and reaches the store unchanged. S3 and SeaweedFS take the path literally, so it stays
+    inside the prefix there; a front end that strips `;` path parameters before normalising (as
+    Tomcat-style servers do) would resolve it to `t2`. Not a concern for the stores Lakana
+    supports, but an operator who puts such a proxy in front of the store reopens the residual.
   - **Unsigned requests to the allowed prefixes**: objects of a table nested in another's
     location; the same 403 limit.
   - **Redirects are followed.** httpfs follows a 3xx from an allowed URL to another host
@@ -4493,7 +4514,8 @@ so too.
 `_BLACKLISTED_FUNCTIONS` covers every file-reading, SQL-evaluating, or
 secret-revealing DuckDB table function found by inspecting DuckDB 1.5.5's function list,
 swept again on 2.0.0 (a diff of `duckdb_functions()`: 225 names new, the 18 new table
-functions refused by the allow-list below, the scalars read one by one)
+functions refused by the allow-list below, the scalars read one by one) and on 2.0.1 (see
+"The 2.0.1 sweep" below)
 — `query`/`query_table`/
 `json_execute_serialized_sql` each evaluate a string argument as SQL/a table reference
 (`json_execute_serialized_sql` takes `json_serialize_sql`'s own output, so a query naming
@@ -4536,7 +4558,7 @@ catalog instead" is no next step for them.
 error points at the SQL the function stands for (`CAST`, `BETWEEN`). Like every entry, the
 name is compared in lower case after sqlglot has removed quotes and any catalog or schema
 qualifier, so `"SETVAL"(…)`, `main.setval(…)` and the method form `'s'.setval(…)` are refused
-alike. This is a reference list confirmed against DuckDB 2.0.0, not a completeness guarantee — DuckDB adds table functions across
+alike. This is a reference list confirmed against DuckDB 2.0.0 and 2.0.1, not a completeness guarantee — DuckDB adds table functions across
 releases, and a future one in any of these categories (file-reading, SQL-evaluating,
 secret-revealing, introspecting, statistics-reading or state-changing) needs adding here as
 it's found.
@@ -4546,6 +4568,57 @@ any table function except the generators in `_ALLOWED_TABLE_FUNCTIONS` (`range`,
 `generate_series`, `unnest`) in any FROM-item position (`FROM fn()`, `LATERAL fn()`, `TABLE(fn())`),
 so a function DuckDB adds later is refused by default.
 `extract_table_refs` never reports a function call as a table.
+
+**The 2.0.1 sweep** (2026-11-21, the lock's move from 2.0.0 to 2.0.1). `duckdb_functions()`,
+`duckdb_settings()`, `duckdb_keywords()`, `duckdb_types()` and `duckdb_extensions()` of both
+versions, each with `httpfs` loaded, were diffed. Functions: 3,233 rows on 2.0.0, 3,327 on
+2.0.1; five names new, none gone. The four new table functions are refused by the allow-list:
+`parquet_page_index` (reads a Parquet file's page index, each page's min and max; also listed in
+`_BLACKLISTED_FUNCTIONS` and `_READER_NAMES`, with the metadata family), `duckdb_live_query_metrics`
+(the connection's I/O and memory counters; listed with the introspection functions), and
+`add_grammar_extension`/`remove_grammar_extension` (switch a parser grammar extension on or off
+for later statements; left to the allow-list like 2.0.0's external-resource functions). Past the
+guard the lock is the layer that holds: both write the setting `active_grammar_extensions`, and
+on the configured connection DuckDB refuses them with "Cannot change configuration option
+"active_grammar_extensions" - the configuration has been locked" before it looks the extension
+up (`test_a_grammar_extension_cannot_be_switched_once_configured`); besides, the child runs one
+statement and registers no grammar extension. The fifth, the `pg_catalog` macro
+`map_type_id_to_pg_oid`, is a `CASE` over type ids and stays allowed. The other changed rows are
+new `TIMESTAMP_S`/`_MS`/`_NS`/`TIMESTAMPTZ_NS` overloads, stability labels
+(`CONSISTENT_WITHIN_QUERY` on time-zone arithmetic), `fmod` turned from a macro into a scalar,
+new options of the file readers (already refused) and a `type` argument of
+`duckdb_external_resources` (refused). No new lambda-taking function (`_LAMBDA_FUNCTIONS`
+unchanged), no keyword change; one type, `PARQUET_VARIANT`. Settings: seven no longer listed in
+`duckdb_settings()` (`error_on_division_by_zero`, `regex_match_operator_semantics`,
+`table_function_identifier_conversion`, `legacy_disable_null_type`, `delim_join_as_cte`,
+`experimental_metadata_reuse`, `force_column_metadata_reuse`) but still readable, settable before
+the lock and refused after it, like `lambda_syntax` on 2.0.0; `logging_storage` is now listed as
+`logging_sink` (both names locked); new `http_retry_quota_throttled`,
+`http_retry_throttled_wait_ms`, `parquet_can_have_nan`, `parquet_use_page_index` and
+`s3_use_global_endpoint` (all refused after the lock); `allow_extension_repositories` changed as
+described above. What DuckDB enforces changed once, for the better: a literal URL with a dot
+segment is refused (see "Closed by DuckDB 2.0.1" under "What allow-list mode still leaves open").
+Otherwise as on 2.0.0: with external access off,
+`parquet_page_index` of a file outside the allowed paths is a `Permission Error`, `LOAD` of
+`glue` or `legacy_parser` (new default extensions in 2.0.1) is refused, and `CREATE SECRET (TYPE
+http, HTTP_PROXY …)` still succeeds on 2.0.1 (DuckDB reverted a change that would have refused it
+before the release; the child refuses it as a statement that is not one `SELECT`). The function diff was
+repeated with the iceberg, delta, ducklake, glue, aws, azure, avro, sqlite, postgres, mysql,
+spatial, fts, vortex and excel extensions installed and loaded in a scratch environment (3,665
+rows on 2.0.0, 3,816 on 2.0.1). Their new table functions (Iceberg `iceberg_partitions`,
+`iceberg_schemas`, `iceberg_expire_snapshots`; Glue `glue_get_partition_response`,
+`glue_repair_table`, `glue_requests`; the aws extension's `s3_*`, `s3tables_*`,
+`aws_system_table(s)`, `aws_system_table_families` and `__aws__*`; `read_single_avro_file`) are
+refused by the allow-list (`__aws__*` also by the `__` prefix). The readers among them,
+`iceberg_partitions`, `iceberg_schemas` and `aws_system_table` (an Iceberg scan), went into
+`_READER_NAMES` so the refusal says they reach data; the writing and managing ones keep the
+"check the name" message, as 2.0.0's `iceberg_rewrite_data_files` and `glue_*` did. Their new
+scalars (`ST_AsGrid`, `fts_analyze_pattern`, `fts_near_tf`, `ducklake_unreadable_macro_default`)
+and the window functions `ST_ClusterDBSCAN`/`ST_ClusterKMeans` belong to extensions the query
+process never loads; none matches the `SQL_RUNNING_FUNCTIONS` criterion. One behaviour
+change touched a test: 2.0.1's profiler writes `profile.json` for a failed statement too (2.0.0
+only for one that succeeded), so a query that ran out of memory without spilling leaves that file,
+and nothing else, in its temp directory.
 
 **Lambdas are re-spelled, not passed through.** DuckDB 2.0 refuses the arrow lambda
 (`x -> x + 1`), so `query_rewrite._render` marks every `exp.Lambda` for sqlglot's keyword form
@@ -5932,7 +6005,8 @@ exit criterion is being re-run after the M3f fixes above — see
 A saved query is SQL text under a name in an environment, owned by one principal, `private` or `everyone`. It is only text: running it is `POST …/queries` by the runner, with the runner's rights, never the owner's. `lakana_core.catalog.saved_queries.SavedQueryService` decides everything; the routes (`api/platform/saved_queries.py`) add only the statement length check (`check_statement`, 422 as for a submitted query) before it.
 
 - **Who sees a saved query (S2).** The owner always, with or without `SUBMIT_QUERY` today (so they can clean up); an `everyone` query, whoever holds `SUBMIT_QUERY` on its environment, so nobody sees a query they cannot run; an instance administrator (`acts_as_instance_admin`, personal token or session, never a CI token) every one. Anyone else gets `No saved query {id} in {env!r}.`, the same 404 as for a missing id, so the route is no oracle for another person's private query. A soft-deleted environment hides its saved queries (404, and absent from both lists); a restore shows them again. A task token gets 403 on every route and on both lists; the check comes before any read. The one thing that comes earlier is the routes' SQL length check on POST and PUT (`check_statement`, before the service is called), so an over-long SQL from a task token is a 422, not a 403.
-- **The SQL of a private query is protected as the audit log's query text is.** An administrator sees the name, owner and environment of someone else's private saved query and may delete it, but reads its `sql` only with `READ_QUERY_TEXT` on the instance, which the `ADMIN` role does not carry. Without it the answer **has no `sql` key** (`SavedQueryOut` is built with `sql` unset and the routes use `response_model_exclude_unset=True`; it is absent, never `null`), on the item and in both lists. The reason: a person's query can hold literals, names and comments they would not show an administrator, and administering the instance must not by itself show what everyone wrote. The right is asked at most once per request, and only for a private query of someone else. Tests: `test_an_admin_reads_a_private_query_without_its_sql_key` (route), `test_an_admin_sees_a_private_query_without_sql_and_may_only_delete` (service).
+- **The SQL of a private query is protected as the audit log's query text is.** An administrator sees the name, owner and environment of someone else's private saved query and may delete it, but reads its `sql` only with `READ_QUERY_TEXT` on the instance, which the `ADMIN` role does not carry. Without it the answer **has no `sql` key** (`SavedQueryOut` is built with `sql` unset and the routes use `response_model_exclude_unset=True`; it is absent, never `null`) on the item. The reason: a person's query can hold literals, names and comments they would not show an administrator, and administering the instance must not by itself show what everyone wrote. The right is asked at most once per request, and only for a private query of someone else. Tests: `test_an_admin_reads_a_private_query_without_its_sql_key` (route), `test_an_admin_sees_a_private_query_without_sql_and_may_only_delete` (service).
+- **Lists carry no SQL, for anyone (#692).** The items of both lists have no `sql` key, the owner's included; only reading one saved query (`get`) returns it, under the rule above. The list's one statement selects every column but `sql_text` (`_LISTED` in `lakana_core.catalog.saved_queries`), keeps the caller's rows by the visibility condition and the cursor's position together, and cuts the page with `LIMIT`; a cursor only narrows the set. Do not add the text back to a list: `test_a_list_reads_no_sql_text_and_the_same_statements_for_many_queries` fails on any list statement that names `sql_text`, and `test_the_lists_show_no_sql_even_to_the_owner_and_reading_one_does` on any list item with `sql`.
 - **What each may do (S3).** `actions` on each item: the owner `["update", "delete"]` (only `["delete"]` once they have lost `SUBMIT_QUERY`, because an update asks for it now), an administrator who is not the owner `["delete"]`, anyone else `[]`. The routes enforce the same: PUT by anyone but the owner is 403 (`Only the owner of a saved query can change it; save a copy under your own name instead.`), DELETE by anyone but the owner or an administrator is 403. A person who does not see the query gets the 404 first, so the 403 only ever reaches someone who already sees it.
 - **The cross-environment list asks every right in one batch (S2).** `GET /api/v1/saved-queries` reads the live environments once, asks `SUBMIT_QUERY` on each in one `permits_each` batch and keeps the rows by one SQL condition (own, or shared in a queryable environment, or all for an administrator), so an environment where the caller sees nothing contributes nothing and the route says nothing about which environments exist. With `environment` it is the per-environment list, with its 403 and 404 (404 for an unknown name). The cursor names the list (`saved-queries` or `all-saved-queries`); a cursor of the other is a 422.
 - **A deleted principal (S5).** Lakana deactivates principals and never deletes them; only an operator's SQL does. Then `private_owner_id … ON DELETE CASCADE` removes the person's private queries, and `owner_id … ON DELETE SET NULL` keeps their shared ones with `owner: null` and `former_owner: true`; only an administrator may delete those, and no one may update them.

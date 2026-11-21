@@ -5941,8 +5941,8 @@ class SavedQueryOut(BaseModel):
     name
         Its name.
     sql
-        Its SQL. Absent, not `null`, when the caller may not read it: an administrator without
-        `READ_QUERY_TEXT` reading someone else's private query.
+        Its SQL. Absent, not `null`, in a list's items, and when the caller may not read it: an
+        administrator without `READ_QUERY_TEXT` reading someone else's private query.
     visibility
         ``private`` or ``everyone``.
     owner

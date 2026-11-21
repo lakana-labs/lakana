@@ -95,6 +95,7 @@ _BLACKLISTED_FUNCTIONS = frozenset(
         "parquet_kv_metadata",
         "parquet_full_metadata",
         "parquet_bloom_probe",
+        "parquet_page_index",
         "json_execute_serialized_sql",
         "json_serialize_plan",
         "which_secret",
@@ -105,6 +106,7 @@ _BLACKLISTED_FUNCTIONS = frozenset(
         "duckdb_extensions",
         "duckdb_databases",
         "duckdb_memory",
+        "duckdb_live_query_metrics",
         "duckdb_temporary_files",
         "duckdb_external_file_cache",
         "duckdb_logs",
@@ -177,7 +179,8 @@ plans the SQL text it is given, and DuckDB folds `getvariable(...)` into that pl
 would show the session variables that carry a table's file URLs; see
 `test_json_serialize_plan_would_otherwise_show_a_variables_value`. `sniff_csv`/`parquet_metadata`/
 `parquet_schema`/`parquet_file_metadata`/`parquet_kv_metadata`/
-`parquet_full_metadata`/`parquet_bloom_probe` all read a named file's
+`parquet_full_metadata`/`parquet_bloom_probe`/`parquet_page_index` (2.0.1: each page's
+min and max) all read a named file's
 structure or contents directly, the same class of bypass as `read_parquet`
 itself, just reading metadata instead of rows. `which_secret` reveals which
 configured credential DuckDB would use for a given path — not a file read,
@@ -194,7 +197,8 @@ probed against DuckDB 1.5.5 through the real rewriter and executor:
 `current_setting`/`duckdb_settings`/`duckdb_secrets`/`duckdb_extensions`/
 `duckdb_databases`/`duckdb_temporary_files`/`duckdb_external_file_cache`
 disclose worker settings, filesystem paths, secrets configuration or cached
-file URLs; `duckdb_memory` and the `pragma_*` functions disclose host and
+file URLs; `duckdb_memory`, `duckdb_live_query_metrics` (2.0.1: the connection's I/O and
+memory counters) and the `pragma_*` functions disclose host and
 resource state; `duckdb_logs`/`duckdb_logs_parsed`/`duckdb_log_contexts`/
 `enable_logging` can record and replay executed statements; and
 `duckdb_views`/`duckdb_tables`/`duckdb_columns`/`duckdb_schemas` and their
@@ -242,7 +246,18 @@ DuckDB 2.0.0 — a *reference* list confirmed against that version's
 `duckdb_functions()` output, not a permanent enumeration (the 2.0.0 sweep diffed
 `duckdb_functions()` of 1.5.5 against 2.0.0, both with `httpfs` loaded: 225 names new, of
 them 198 scalar, 18 table, 5 macro and 4 aggregate; the 18 table functions are refused by
-`_ALLOWED_TABLE_FUNCTIONS`, and the scalars that pass were read one by one): DuckDB adds table
+`_ALLOWED_TABLE_FUNCTIONS`, and the scalars that pass were read one by one; the 2.0.1 sweep
+diffed 2.0.0 against 2.0.1 the same way: 5 names new, all refused, `parquet_page_index` and
+`duckdb_live_query_metrics` listed here, `add_grammar_extension` and `remove_grammar_extension`
+left to `_ALLOWED_TABLE_FUNCTIONS` like 2.0.0's external-resource functions, and the
+`pg_catalog` macro `map_type_id_to_pg_oid`, a `CASE` over type ids, allowed; the other changed
+rows are new `TIMESTAMP_NS`/`TIMESTAMPTZ_NS` overloads, stability labels and reader options,
+no new lambda-taking function; swept again with the iceberg, delta, ducklake, glue, aws, azure,
+avro, sqlite, postgres, mysql, spatial, fts, vortex and excel extensions loaded: their new
+table functions are refused by `_ALLOWED_TABLE_FUNCTIONS`, the `__aws__*` ones also by the `__`
+prefix, the new readers are in `_READER_NAMES`, and their four new scalars, `ST_AsGrid`,
+`fts_analyze_pattern`, `fts_near_tf` and `ducklake_unreadable_macro_default`, belong to
+extensions the query process never loads): DuckDB adds table
 functions across releases, and a future one in any of these
 categories needs adding here as it's found, the same way this residual
 round found two the initial pass missed. This blacklist is deliberately
@@ -291,9 +306,10 @@ _LAMBDA_FUNCTIONS = frozenset(
 
 The union, over DuckDB 1.5.5 and 2.0.0, of `SELECT DISTINCT function_name FROM
 duckdb_functions() WHERE list_contains(parameter_types, 'LAMBDA')` (`invoke` is 2.0.0's only
-addition). `COLUMNS(c -> …)` is the one other place DuckDB reads a lambda; sqlglot parses it to
-`exp.Columns`. Everywhere else DuckDB reads `j -> 'a'` in a function's arguments as a JSON
-extract, which sqlglot parses as a lambda: `_json_arrows_outside_lambda_functions` turns it back.
+addition; 2.0.1 adds none). `COLUMNS(c -> …)` is the one other place DuckDB reads a lambda;
+sqlglot parses it to `exp.Columns`. Everywhere else DuckDB reads `j -> 'a'` in a function's
+arguments as a JSON extract, which sqlglot parses as a lambda:
+`_json_arrows_outside_lambda_functions` turns it back.
 A new lambda-taking function in a DuckDB upgrade needs adding here, or its lambda becomes a JSON
 extract that DuckDB refuses to bind: a failure, never a bypass.
 """
@@ -853,6 +869,7 @@ _READER_NAMES = frozenset(
         "parquet_kv_metadata",
         "parquet_full_metadata",
         "parquet_bloom_probe",
+        "parquet_page_index",
         "avro_metadata",
         "delta_domain_metadata",
         "delta_get_transaction_version",
@@ -867,6 +884,10 @@ _READER_NAMES = frozenset(
         "iceberg_partition_stats",
         "iceberg_refs",
         "iceberg_snapshots",
+        "iceberg_partitions",
+        "iceberg_schemas",
+        # An AWS system table, read through `iceberg_scan` (aws extension, 2.0.1).
+        "aws_system_table",
         # Another database: read, run statements in (`_execute`) or attach.
         "sqlite_attach",
         "sqlite_query",
@@ -876,9 +897,14 @@ _READER_NAMES = frozenset(
         "mysql_execute",
     }
 )
-"""The table functions of DuckDB 2.0.0 that read a file or a URL, or read, run statements in or
-attach another database, by a name the prefix and suffix above miss. Only the refusal's message
-uses it: every table function outside the generator allow-list is refused either way."""
+"""The table functions that read a file or a URL, or read, run statements in or attach another
+database, by a name the prefix and suffix above miss. Swept on 2.0.0 with the parquet, json,
+httpfs, iceberg, delta, sqlite, postgres, mysql, avro and ducklake extensions loaded, and on 2.0.1
+with those and glue, aws, azure, spatial, fts, vortex and excel. Functions that write or manage
+(`iceberg_expire_snapshots`, `glue_repair_table`, `s3_create_bucket`, the `s3tables_*` and other
+`glue_*` functions) are not listed: they keep the message that asks to check the name. Only the
+refusal's message uses it: every table function outside the generator allow-list is refused
+either way."""
 
 _LOAD_FIRST = (
     'load the data into a table first (see "Load data from a source" in the user '

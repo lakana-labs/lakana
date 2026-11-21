@@ -47,6 +47,7 @@ _INTROSPECTION = [
     "(SELECT count(*) FROM duckdb_extensions())",
     "(SELECT count(*) FROM duckdb_databases())",
     "(SELECT count(*) FROM duckdb_memory())",
+    "(SELECT count(*) FROM duckdb_live_query_metrics())",
     "(SELECT count(*) FROM duckdb_temporary_files())",
     "(SELECT count(*) FROM duckdb_logs())",
     "(SELECT count(*) FROM duckdb_views())",

@@ -18,7 +18,10 @@ export interface SavedQueryOut {
   readonly environment: string;
   /** Its name. */
   readonly name: string;
-  /** Its SQL; absent when the reader may not read it (an administrator on a private query). */
+  /**
+   * Its SQL; absent in every item of a list, which carries no SQL (read the saved query for it),
+   * and when the reader may not read it (an administrator on someone else's private query).
+   */
   readonly sql?: string;
   /** Who may run it. */
   readonly visibility: SavedQueryVisibility;

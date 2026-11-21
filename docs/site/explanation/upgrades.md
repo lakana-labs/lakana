@@ -871,6 +871,31 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   one request and so gets only the first 100 row filters or column masks of a list, without a
   sign that more exist.
 
+### Queries run on DuckDB 2.0.1
+
+The worker runs queries on DuckDB 2.0.1 instead of 2.0.0, a release of fixes, and
+`lakana-worker` requires `duckdb>=2.0.1,<3` (was `>=2.0,<3`): a `pip install` of the worker
+upgrades DuckDB with it.
+
+- **One more download for a worker installed with `pip`.** Each DuckDB release has its own build
+  of the `httpfs` extension, so such a worker downloads it once more on its first query (see
+  [What leaves the machine](what-leaves-the-machine.md)). The container image already contains
+  it. On a machine without internet access, put the extension for DuckDB 2.0.1 (the folder
+  `v2.0.1/<platform>`) into the worker's extension directory before you upgrade, as
+  [Install without internet access](../how-to/install-without-internet-access.md) describes; with
+  `LAKANA_WORKER__EXTENSION_SOURCE=none` a worker without it refuses to start and names the path.
+- **`x = ANY(ARRAY(SELECT ...))` and `ALL` compare `x` with the list's elements.** DuckDB 2.0.0
+  refused them with "Cannot compare values of type ... in IN/ANY/ALL clause"; such a query now
+  runs.
+- **DuckDB 2.0.1's four new table functions are refused in queries**, like every table function
+  but `range`, `generate_series` and `unnest`. The refusal of `parquet_page_index` says that it
+  reads a file, and `duckdb_live_query_metrics` (the query process's own counters) is refused
+  wherever a query calls it, like the other introspection functions. None existed in 2.0.0, so
+  no query that ran before is affected.
+- **A URL with a `..` segment is refused by DuckDB itself.** A query cannot name a file by URL
+  (Lakana's checks refuse it first); behind those checks DuckDB 2.0.0 let `t1/../t2/` through
+  to the object store, and 2.0.1 refuses it before any request.
+
 ### One density in the web interface
 
 - The web interface has one density, compact: 32 px rows in lists and 24 px rows in data grids.
