@@ -28,6 +28,12 @@ under this lock too, so that every such check sees the others' commits.
 Order: a change takes the access lock (`lakana_core.access.managed.lock_access`) first, when it
 takes it at all, and this lock second, before it counts. An apply holds the access lock alone and
 takes this one inside it; taking them the other way round could deadlock against an apply.
+This lock also comes before the row lock of a sign-in link: a deactivation or a revoke withdraws
+its issuer's open links under it, so a provider finish that uses a link
+(`lakana_core.identity.links.LinkService.claim_for_provider`) takes it before it claims the link
+(review of #780). A principal's own row is locked last, by a provider sign-in, a recovery through
+the provider and an unlink (`lakana_core.identity.oidc_links.locked_principal`), none of which
+waits for this lock while holding that row.
 """
 
 from __future__ import annotations

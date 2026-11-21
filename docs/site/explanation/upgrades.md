@@ -830,6 +830,11 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   linked person (directly, through a group or in an access file) when no such administrator is
   left. A task token minted with a linked person's own token, and a local sign-in's session, end
   with that person's token window.
+- Changing the public address (`LAKANA_UI__PUBLIC_URL`) while people are linked: passkeys made for
+  the old address no longer count as a way in, as they no longer sign in. The server's start-up log
+  says how many administrators can still sign in with a passkey; at none, issue one a recovery
+  link with the bootstrap token (`lakana recovery create NAME`) and have them register a passkey at
+  the new address. Run every server of one database with the same public address.
 - `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
   from now on.
 

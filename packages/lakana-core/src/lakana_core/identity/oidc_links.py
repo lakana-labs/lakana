@@ -90,6 +90,58 @@ def in_browser_session(p: PrincipalRef) -> SessionContext:
     return p.session
 
 
+def locked_principal(session: Session, principal_id: uuid.UUID) -> Principal:
+    """Read a principal afresh and lock its row until the transaction ends.
+
+    A provider sign-in, a recovery through the provider and an unlink all take this lock before
+    they decide whether the person is linked, so a sign-in racing an unlink either starts its
+    session before the unlink ends every session, or sees the person unlinked (review of #780).
+
+    Parameters
+    ----------
+    session
+        Database session.
+    principal_id
+        The principal; it must exist.
+
+    Returns
+    -------
+    Principal
+        The row as committed now, never the session's cached copy.
+    """
+    return session.execute(
+        select(Principal)
+        .where(Principal.id == principal_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+
+
+def linked_principal_for_sign_in(session: Session, identity: ProviderIdentity) -> Principal | None:
+    """Find the person linked to a verified identity and lock their row, for a sign-in.
+
+    Parameters
+    ----------
+    session
+        Database session; the caller starts the session in this transaction.
+    identity
+        The verified identity.
+
+    Returns
+    -------
+    Principal or None
+        The linked person, read afresh under the row lock, still linked to this identity;
+        `None` when nobody is (also when an unlink committed meanwhile).
+    """
+    found = principal_for(session, identity)
+    if found is None:
+        return None
+    locked = locked_principal(session, found.id)
+    if (locked.oidc_issuer, locked.oidc_subject) != (identity.issuer, identity.subject):
+        return None
+    return locked
+
+
 def is_linked(principal: Principal) -> bool:
     """Say whether a person signs in through the identity provider.
 
@@ -402,7 +454,7 @@ class OidcLinkService:
         # Unlinking revokes the person's tokens: administering tokens, an administrator's alone.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
         require_step_up(p, now=self._clock())
-        target = principal_named(self._session, name)
+        target = locked_principal(self._session, principal_named(self._session, name).id)
         if target.id == p.id:
             raise ConflictError(
                 "You cannot unlink yourself: you would lose every way in at once. Ask another "

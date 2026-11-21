@@ -799,3 +799,36 @@ def _named(world: World, name: str) -> Principal:
         The row.
     """
     return world.session.execute(select(Principal).where(Principal.name == name)).scalar_one()
+
+
+def test_the_sign_in_lookup_reads_the_link_afresh_under_its_lock(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #780: a sign-in sees an unlink that committed while it looked."""
+    from lakana_core.identity import oidc_links
+    from lakana_core.identity.oidc_links import linked_principal_for_sign_in
+
+    alice = world.person("alice")
+    world.link(alice, "s-alice")
+    assert linked_principal_for_sign_in(world.session, identity("s-alice")) == alice
+    assert linked_principal_for_sign_in(world.session, identity("nobody")) is None
+    # The lookup found Alice, then an unlink cleared her link before the row lock was taken.
+    monkeypatch.setattr(oidc_links, "principal_for", lambda session, found: alice)
+    alice.oidc_subject = None
+    world.session.commit()
+    assert linked_principal_for_sign_in(world.session, identity("s-alice")) is None
+
+
+def test_a_changed_address_is_reported_with_the_count_at_the_new_one(world: World) -> None:
+    """Review of #780: the start-up warning names the new count and the operator's way in."""
+    from lakana_core.grants.break_glass import address_change_warning, record_rp_id
+
+    assert record_rp_id(world.session, RP_ID) is None
+    assert record_rp_id(world.session, RP_ID) is None
+    assert record_rp_id(world.session, "new.example.org") == RP_ID
+    assert address_change_warning(None, "x", linked=3, unlinked_admins=0) is None
+    assert address_change_warning("a", "b", linked=0, unlinked_admins=0) is None
+    kept = address_change_warning("a", "b", linked=2, unlinked_admins=1)
+    assert kept is not None and "1 administrator(s)" in kept and "recovery" not in kept
+    lost = address_change_warning("a", "b", linked=2, unlinked_admins=0)
+    assert lost is not None and "lakana recovery create" in lost

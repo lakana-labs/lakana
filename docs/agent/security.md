@@ -7094,7 +7094,22 @@ token window. Threat model: "OIDC sign-in (#32)".
   `test_a_rule_already_broken_blocks_nothing`). On Postgres,
   `test_oidc_links_postgres_integration.py` races the last two linking at once, a link against a
   deactivation of the other, and a grant of ADMIN to a linked person against the deactivation of
-  the last unlinked administrator; the second waits on the lock and is refused.
+  the last unlinked administrator, and a grant of ADMIN to a group against a new linked member in
+  both orders (the grant reads the members only under the lock); the second waits on the lock and
+  is refused. A change of the public address is recounted at start-up and logged while anyone is
+  linked (`test_a_changed_address_with_people_linked_is_logged_at_start_up`).
+- **Locks of a finish.** A provider finish that uses a link takes the administrator-count lock
+  before the link's row lock, the order a withdrawal of the link keeps
+  (`test_a_provider_finish_takes_the_admin_lock_before_the_links_row`). A provider sign-in, a
+  recovery through the provider and an unlink lock the person's row and read it afresh before they
+  decide (`locked_principal`), so no session started during an unlink survives it
+  (`test_a_provider_sign_in_waits_for_an_unlink_and_gets_no_session`,
+  `test_an_unlink_waits_for_a_provider_sign_in_and_ends_its_session`,
+  `test_a_recovery_through_the_provider_waits_for_an_unlink`). `_complete` refuses an
+  administrator's recovery link of a person who linked since `redeem` looked
+  (`test_an_admins_recovery_link_of_someone_linked_meanwhile_needs_the_provider`). Link flows send
+  `max_age=0` with `prompt=login` and need a fresh `auth_time`, as provider step-up does
+  (`test_a_link_without_a_fresh_provider_sign_in_is_refused`).
 - **L4, linking keeps passkeys stored and ends no session**
   (`test_link_from_profile_links_and_keeps_passkeys_stored`).
 - **L5, recovery links.** An administrator's recovery link of a linked person answers 403

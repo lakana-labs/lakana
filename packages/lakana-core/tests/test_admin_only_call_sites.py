@@ -432,8 +432,10 @@ _EXEMPT = {
     ("OidcLinkService", "refusal_for"): "reads whether one person may be linked, for the "
     "caller's own profile link before it starts, writing nothing",
     ("OidcLinkService", "unlink_for_operator_recovery"): "runs only inside a recovery link's "
-    "use that the server operator's bootstrap token issued (`LinkService._complete` checks "
-    "`_issued_by_operator`): the operator stands behind it",
+    "use, in the claimed transaction, after `LinkService._complete` read the person afresh under "
+    "the row lock and refused (`ProviderSignInRequired`) a linked person's link that the server "
+    "operator's bootstrap token did not issue (`_issued_by_operator`): the operator stands "
+    "behind it",
 }
 """Public methods of the three services that need no administrator check, and why."""
 _NAMES = {action.name for action in ADMIN_ONLY_ACTIONS}

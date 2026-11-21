@@ -364,7 +364,7 @@ class GroupService:
         # Lock before asking whether the group holds ADMIN, as `remove_member` does.
         lock_admin_count(self._session)
         if self._grants_instance_admin(group.id):
-            assert_break_glass_on_raise(self._session, [principal.id])
+            assert_break_glass_on_raise(self._session, principal_id=principal.id)
         self._session.add(GroupMembership(group_id=group.id, principal_id=principal.id))
         mark_admin_holders(self._session)
         AuditService(self._session).record(

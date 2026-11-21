@@ -49,11 +49,15 @@ from lakana_core.identity.oidc_flows import (
     FlowPurpose,
     OidcFlowStore,
     ProviderIdentity,
-    principal_for,
     safe_return_to,
     sign_in_outcome,
 )
-from lakana_core.identity.oidc_links import OidcLinkService, in_browser_session, is_linked
+from lakana_core.identity.oidc_links import (
+    OidcLinkService,
+    in_browser_session,
+    is_linked,
+    linked_principal_for_sign_in,
+)
 from lakana_core.identity.passkeys import OPEN_BODY_LIMIT
 from lakana_core.identity.sessions import (
     STEP_UP_WINDOW,
@@ -526,6 +530,11 @@ def finish_oidc_sign_in(
     replacing = request.cookies.get(cookie_name(origin)) or None
     user_agent = request.headers.get("user-agent", "")
     if flow.purpose in LINK_PURPOSES:
+        if not _fresh(found, flow.created_at):
+            record_refused_oidc(
+                request, session, "auth_too_old", iss=found.issuer, sub=found.subject
+            )
+            raise OidcSignInRefused("auth_too_old")
         try:
             started = links.claim_for_provider(
                 flow.link_id, found, replacing=replacing, peer=peer, user_agent=user_agent
@@ -594,7 +603,9 @@ def _sign_in(
     OidcSignInRefused
         ``not_linked`` or ``deactivated``, audited.
     """
-    principal = principal_for(session, found)
+    # Locked and read afresh, so an unlink at the same moment either committed before (nobody is
+    # linked then) or waits for this session to exist and ends it with the others.
+    principal = linked_principal_for_sign_in(session, found)
     if principal is None or not principal.is_active:
         reason: OidcRefusal = "not_linked" if principal is None else "deactivated"
         record_refused_oidc(request, session, reason, iss=found.issuer, sub=found.subject)
@@ -815,6 +826,8 @@ def finish_oidc_in_session(
     touched = context.last_touch_at
     try:
         if flow.purpose == "link":
+            if not _fresh(found, flow.created_at):
+                raise OidcSignInRefused("auth_too_old")
             links.link(principal.id, found, via="profile")
         else:
             touched = _confirm(request, session, sessions, principal, found, flow.created_at)
@@ -870,7 +883,7 @@ def _confirm(
     context = in_browser_session(principal)
     if (person.oidc_issuer, person.oidc_subject) != (found.issuer, found.subject):
         raise OidcSignInRefused("identity_mismatch")
-    if found.auth_time is None or found.auth_time < started_at - AUTH_TIME_SKEW:
+    if not _fresh(found, started_at):
         raise OidcSignInRefused("auth_too_old")
     now = get_clock(request)()
     sessions.touch(context.key_id)
@@ -888,3 +901,24 @@ def _confirm(
         },
     )
     return now
+
+
+def _fresh(found: ProviderIdentity, started_at: datetime) -> bool:
+    """Say whether the provider confirmed a sign-in made for this flow (``auth_time``).
+
+    The flows that link an identity and provider step-up ask for ``prompt=login`` and
+    ``max_age=0``; a provider may ignore both, so the answer must show it.
+
+    Parameters
+    ----------
+    found
+        The identity the provider verified.
+    started_at
+        When the flow was opened.
+
+    Returns
+    -------
+    bool
+        Whether ``auth_time`` is present and no earlier than `started_at` less `AUTH_TIME_SKEW`.
+    """
+    return found.auth_time is not None and found.auth_time >= started_at - AUTH_TIME_SKEW

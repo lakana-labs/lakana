@@ -696,7 +696,16 @@ their tokens only within the token window. `lakana login` follows.
   turns: linking the last such administrator, deactivating them, revoking their ADMIN, removing
   them from the admins group or deleting their last passkey, and as well granting ADMIN to a linked
   person (directly or through a group), adding one to the admins group, or an access apply that
-  does either. A change is refused only when the invariant held before it. The operator's recovery link unlinks a linked administrator
+  does either. A change is refused only when the invariant held before it.
+- **A changed public address.** Passkeys work only at the address they were made for, so the count
+  is taken for the address the server records at start-up, and recounted there, never carried
+  over. When the address changes while anyone is linked, the start-up log says how many
+  administrators can sign in with a passkey at the new address and, at none, points to the
+  operator's recovery link. Two servers with different public addresses on one database overwrite
+  each other's record at every start: give them one address.
+- **Sign-in against unlink.** A provider sign-in, a recovery through the provider and an unlink
+  lock the person's row before they decide, so a sign-in racing an unlink either starts its session
+  before the unlink ends every session, or finds the person unlinked. The operator's recovery link unlinks a linked administrator
   whatever the provider says, and revokes their personal tokens, so none outside the window comes
   back to life.
 - **Session fixation.** The session starts in `finish`, a same-origin POST, with a fresh id; a

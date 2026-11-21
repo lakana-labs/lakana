@@ -422,7 +422,7 @@ class GrantService:
         if twin is not None:
             raise AlreadyExistsError(duplicates.twin_message(subject, twin))
         if role == Role.ADMIN and kind == SecurableKind.INSTANCE:
-            assert_break_glass_on_raise(self._session, self._holders(principal_id, group_id))
+            assert_break_glass_on_raise(self._session, principal_id=principal_id, group_id=group_id)
         self._session.add(row)
         if not commit:
             self._record_created(p, row, principal=principal, group=group)
@@ -439,31 +439,6 @@ class GrantService:
                 raise
             raise AlreadyExistsError(duplicates.twin_message(subject, twin)) from exc
         return row
-
-    def _holders(
-        self, principal_id: uuid.UUID | None, group_id: uuid.UUID | None
-    ) -> set[uuid.UUID]:
-        """Name who a new grant covers: its principal, or its group's members.
-
-        Parameters
-        ----------
-        principal_id
-            The grant's principal, or `None`.
-        group_id
-            The grant's group, or `None`.
-
-        Returns
-        -------
-        set of uuid.UUID
-            The principals.
-        """
-        if principal_id is not None:
-            return {principal_id}
-        return set(
-            self._session.execute(
-                select(GroupMembership.principal_id).where(GroupMembership.group_id == group_id)
-            ).scalars()
-        )
 
     def _record_created(
         self, p: PrincipalRef, row: Grant, *, principal: str | None, group: str | None
@@ -1307,22 +1282,31 @@ def assert_admin_headroom(
         raise ConflictError(LAST_UNLINKED_ADMIN_MESSAGE)
 
 
-def assert_break_glass_on_raise(session: Session, principal_ids: Iterable[uuid.UUID]) -> None:
+def assert_break_glass_on_raise(
+    session: Session,
+    *,
+    principal_id: uuid.UUID | None = None,
+    group_id: uuid.UUID | None = None,
+) -> None:
     """Refuse making people instance administrators when that breaks the break-glass rule.
 
     The raising side of `lakana_core.grants.break_glass`: a grant of instance ADMIN (to a person,
     or to a group and so to its members) or a new member of a group that holds it may make a
     linked person an administrator while no unlinked administrator remains. Takes
-    `lock_admin_count` before it counts, after the access lock the change took, so a
-    concurrent removal of the last unlinked administrator waits for it, or it for the removal.
-    Inside an access apply it does nothing: the apply checks the rule once, at its end.
+    `lock_admin_count` first, after the access lock the change took, and reads a group's members
+    only then: a member added at the same moment either committed before (and counts) or waits
+    for this change and then asks itself (review of #780). A concurrent removal of the last
+    unlinked administrator takes turns with it the same way. Inside an access apply it does
+    nothing: the apply checks the rule once, at its end.
 
     Parameters
     ----------
     session
         Database session.
-    principal_ids
-        The principals the change makes administrators; inactive ones do not count.
+    principal_id
+        The person the change makes an administrator.
+    group_id
+        The group whose members the change makes administrators.
 
     Raises
     ------
@@ -1332,8 +1316,17 @@ def assert_break_glass_on_raise(session: Session, principal_ids: Iterable[uuid.U
     if ACCESS_APPLY_KEY in session.info:
         return
     lock_admin_count(session)
+    ids: set[uuid.UUID] = set()
+    if principal_id is not None:
+        ids.add(principal_id)
+    if group_id is not None:
+        ids.update(
+            session.execute(
+                select(GroupMembership.principal_id).where(GroupMembership.group_id == group_id)
+            ).scalars()
+        )
     before = active_instance_admin_ids(session)
-    ids = set(principal_ids) - before
+    ids -= before
     if not ids:
         return
     joining = set(

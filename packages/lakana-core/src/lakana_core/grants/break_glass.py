@@ -58,8 +58,13 @@ LAST_UNLINKED_ADMIN_MESSAGE = (
 """The 409 detail of a change that would break the break-glass rule."""
 
 
-def record_rp_id(session: Session, rp_id: str) -> None:
+def record_rp_id(session: Session, rp_id: str) -> str | None:
     """Record the relying-party id passkeys sign in with; the caller commits.
+
+    Every count afterwards reads it afresh (`unlinked_admin_ids`), so a change of the public
+    address applies to the next check: passkeys made for the old address no longer count, as
+    they no longer sign in. Two servers with different public addresses on one database each
+    record their own at start-up, and the last one started decides; give them one address.
 
     Parameters
     ----------
@@ -67,15 +72,22 @@ def record_rp_id(session: Session, rp_id: str) -> None:
         Database session.
     rp_id
         The host of the public address (`Settings.public_origin().host`).
+
+    Returns
+    -------
+    str or None
+        The id recorded before, when it was another one; `None` when it was the same or none.
     """
     row = session.get(InstanceSetting, RP_ID_KEY)
-    if row is not None and row.value == rp_id:
-        return
+    before = row.value if row is not None and isinstance(row.value, str) else None
+    if before == rp_id:
+        return None
     if row is None:
         row = InstanceSetting(key=RP_ID_KEY)
         session.add(row)
     row.value = rp_id
     row.updated_at = datetime.now(UTC)
+    return before
 
 
 def current_rp_id(session: Session) -> str | None:
@@ -234,3 +246,41 @@ def breaks(
     return holds(session, before) and not holds(
         session, after, linking=linking, excluding_passkey_id=excluding_passkey_id
     )
+
+
+def address_change_warning(
+    before: str | None, after: str, *, linked: int, unlinked_admins: int
+) -> str | None:
+    """Word the start-up warning of a public address that changed while people are linked.
+
+    Parameters
+    ----------
+    before
+        The relying-party id recorded before (`record_rp_id`), or `None` for the same one.
+    after
+        The one recorded now.
+    linked
+        Active people linked to the identity provider.
+    unlinked_admins
+        Administrators who can sign in with a passkey at the new address, counted after the
+        change (`unlinked_admin_ids`).
+
+    Returns
+    -------
+    str or None
+        The warning; `None` when the address did not change or nobody is linked.
+    """
+    if before is None or linked == 0:
+        return None
+    text = (
+        f"The public address changed from {before} to {after}: passkeys registered for {before} "
+        f"no longer sign in here. {unlinked_admins} administrator(s) can sign in with a passkey at "
+        f"the new address while {linked} people sign in through the identity provider."
+    )
+    if unlinked_admins == 0:
+        text += (
+            " None is left to sign in if the provider fails: issue an administrator a recovery "
+            "link with the server operator's bootstrap token (lakana recovery create NAME) and "
+            "have them register a passkey at the new address."
+        )
+    return text

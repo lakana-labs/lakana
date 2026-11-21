@@ -1699,3 +1699,32 @@ def test_operator_recovery_revokes_the_linked_persons_tokens(world: World) -> No
         )
     ).scalars()
     assert event["tokens_revoked"] == 1
+
+
+def test_an_admins_recovery_link_of_someone_linked_meanwhile_needs_the_provider(
+    world: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review of #780: a person linked between redeem's check and the claim is still refused.
+
+    The check inside the claimed transaction reads the person afresh, so an administrator's
+    recovery link never reaches the operator's unlink nor starts a passkey session for them.
+    """
+    bob = world.person("bob")
+    boss = world.person("boss", admin=True)
+    _passkey(world, bob)
+    link = world.links.issue_recovery(world.pat(boss), principal_name="bob")
+    # The person links after `redeem` looked: its early check sees nobody linked.
+    monkeypatch.setattr(LinkService, "_linked_needs_provider", lambda self, row: False)
+    _linked(world, bob)
+    with pytest.raises(ProviderSignInRequired):
+        world.redeem(link)
+    world.session.refresh(bob)
+    assert bob.oidc_subject == "bob"
+    assert world.links.describe(parts(link.url)[0]).state == "open"
+    assert (
+        len(world.session.execute(select(Passkey).where(Passkey.principal_id == bob.id)).all()) == 1
+    )
+    unlinked = world.session.execute(
+        select(AuditEvent.id).where(AuditEvent.event_type == AuditEventType.PRINCIPAL_OIDC_UNLINKED)
+    ).all()
+    assert unlinked == []

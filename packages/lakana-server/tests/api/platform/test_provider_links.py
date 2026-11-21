@@ -7,6 +7,7 @@ session lengths.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -254,3 +255,25 @@ def test_the_server_records_the_relying_party_for_the_break_glass_count(
     app = cast(FastAPI, client.app)
     with Session(app.state.engine) as session:
         assert current_rp_id(session) == "localhost"
+
+
+def test_a_changed_address_with_people_linked_is_logged_at_start_up(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Review of #780: passkeys of the old address stop counting, and the log says so."""
+    from lakana_core.grants.break_glass import record_rp_id
+    from lakana_server.app import _record_relying_party
+
+    _person(client, "carol", linked_ago=timedelta(days=1))
+    app = cast(FastAPI, client.app)
+    with Session(app.state.engine) as session:
+        record_rp_id(session, "old.example.org")
+        session.commit()
+        with caplog.at_level(logging.WARNING, logger="lakana_server.app"):
+            _record_relying_party(session, "localhost")
+    assert "changed from old.example.org to localhost" in caplog.text
+    assert "0 administrator(s)" in caplog.text and "lakana recovery create" in caplog.text
+    caplog.clear()
+    with Session(app.state.engine) as session, caplog.at_level(logging.WARNING):
+        _record_relying_party(session, "localhost")
+    assert caplog.text == ""
