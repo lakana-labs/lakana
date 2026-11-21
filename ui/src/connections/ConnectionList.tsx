@@ -271,13 +271,15 @@ function ConnectionRows({
   const { t } = useTranslation();
   return (
     <>
-      <EnvironmentPicker
-        environments={environments}
-        value={filter}
-        label={t("connections.list.environment")}
-        all={t("connections.list.all")}
-        onChange={onFilter}
-      />
+      <div className="toolbar">
+        <EnvironmentPicker
+          environments={environments}
+          value={filter}
+          label={t("connections.list.environment")}
+          all={t("connections.list.all")}
+          onChange={onFilter}
+        />
+      </div>
       <ConnectionTable
         key={filter ?? ""}
         environments={environments}

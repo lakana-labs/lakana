@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
-import { aSavedQuery } from "../test/queries";
+import { aListedSavedQuery } from "../test/queries";
 import { fakeServer, type FakeRoute } from "../test/server";
 import { SavedList } from "./SavedList";
 
@@ -46,9 +46,9 @@ describe("SavedList", () => {
         status: 200,
         body: {
           items: [
-            aSavedQuery(),
-            aSavedQuery({ id: "b2", name: "Station ranking", visibility: "everyone" }),
-            aSavedQuery({
+            aListedSavedQuery(),
+            aListedSavedQuery({ id: "b2", name: "Station ranking", visibility: "everyone" }),
+            aListedSavedQuery({
               id: "c3",
               name: "Late trains",
               environment: "dev",
@@ -56,7 +56,12 @@ describe("SavedList", () => {
               visibility: "everyone",
               actions: [],
             }),
-            aSavedQuery({ id: "d4", name: "Old \u202Eview", owner: null, former_owner: true }),
+            aListedSavedQuery({
+              id: "d4",
+              name: "Old \u202Eview",
+              owner: null,
+              former_owner: true,
+            }),
           ],
           next_cursor: null,
         },
@@ -82,8 +87,11 @@ describe("SavedList", () => {
   it("shows more by cursor", async () => {
     const server = fakeServer({
       [SAVED]: byCursor({
-        "": { items: [aSavedQuery()], next_cursor: "c-2" },
-        "c-2": { items: [aSavedQuery({ id: "b2", name: "Station ranking" })], next_cursor: null },
+        "": { items: [aListedSavedQuery()], next_cursor: "c-2" },
+        "c-2": {
+          items: [aListedSavedQuery({ id: "b2", name: "Station ranking" })],
+          next_cursor: null,
+        },
       }),
     });
     const user = userEvent.setup();
@@ -112,13 +120,13 @@ describe("SavedList", () => {
   });
 
   it("reads the list again when the reload key changes, keeping the rows meanwhile", async () => {
-    let answer = [aSavedQuery()];
+    let answer = [aListedSavedQuery()];
     const server = fakeServer({
       [SAVED]: () => ({ status: 200, body: { items: answer, next_cursor: null } }),
     });
     const { rerender } = renderSaved();
     await screen.findByRole("link", { name: "Daily sales" });
-    answer = [aSavedQuery(), aSavedQuery({ id: "b2", name: "Station ranking" })];
+    answer = [aListedSavedQuery(), aListedSavedQuery({ id: "b2", name: "Station ranking" })];
 
     rerender(
       <MemoryRouter>

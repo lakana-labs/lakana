@@ -62,6 +62,15 @@ describe("Downloads", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("sets the two download buttons in one button row, 8 px apart (screen.css)", () => {
+    show();
+
+    const csv = screen.getByRole("button", { name: "Download CSV" });
+    const xlsx = screen.getByRole("button", { name: "Download spreadsheet" });
+    expect(csv.parentElement).toBe(xlsx.parentElement);
+    expect(csv.parentElement).toHaveClass("button-row");
+  });
+
   it("downloads a spreadsheet with the xlsx accept header", async () => {
     const blob = new Blob(["PK"], { type: RESULT_MEDIA_TYPES.xlsx });
     const server = fakeServer({ [RESULT]: { status: 200, blob } });

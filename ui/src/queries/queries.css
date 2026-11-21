@@ -5,12 +5,6 @@
    toolbar, the editor and the result. Below 640 px the library is not rendered (useFolded), and
    the work takes the whole width. */
 
-/* Writing SQL and reading its result is not text to read: the screen takes the whole window, as
-   a table's Preview and Lineage do. */
-.queries-page .page {
-  max-width: none;
-}
-
 .queries {
   display: flex;
   align-items: flex-start;
@@ -18,7 +12,7 @@
 }
 
 .queries-library {
-  flex: 0 0 18rem;
+  flex: 0 0 22rem;
   min-width: 0;
 }
 
@@ -81,7 +75,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--control-gap) var(--space-3);
 }
 
 .queries-name {
@@ -162,7 +156,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--control-gap);
 }
 
 .queries-result-more {
