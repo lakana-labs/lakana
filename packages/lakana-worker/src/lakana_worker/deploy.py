@@ -77,7 +77,7 @@ from lakana_core.projects.lockfile import (
     task_interpreter,
     used_indexes,
 )
-from lakana_core.projects.manifest import build_manifest, manifest_tables
+from lakana_core.projects.manifest import build_manifest, manifest_jobs, manifest_tables
 from lakana_core.projects.model import project_model_issues
 from lakana_core.projects.model_checks import generated_checks, generated_name_issues
 from lakana_core.projects.package_indexes import registered_indexes
@@ -905,6 +905,7 @@ def _deploy(
         # to parse has said what is wrong, so its terms are not reported again as unknown
         translatable = NO_GLOSSARY if glossary is None else None if glossary_problems else glossary
         graph = build_graph(assets)
+        current = service.current_job_version(environment_id, repository_id)
         resolved, reference_issues = service.resolve_model_references(
             principal, environment_name, repository_id, assets
         )
@@ -921,6 +922,7 @@ def _deploy(
                 graph,
                 config_text=normalize_source(checkout.config_text or ""),
                 environment=environment_name,
+                deployed_jobs=manifest_jobs(current.manifest_json if current is not None else None),
             )
             + run_policy_issues(assets, settings.caps)
             + (
@@ -982,7 +984,6 @@ def _deploy(
         )
         # Built here, from the model references: the upload below rebinds `resolved`.
         files = source_map_records(checkout.assets, assets, resolved)
-        current = service.current_job_version(environment_id, repository_id)
         diff = dataclasses.replace(
             diff_manifests(
                 current.manifest_json if current is not None else None,
