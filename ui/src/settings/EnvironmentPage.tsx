@@ -20,6 +20,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { Button } from "react-aria-components";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
@@ -360,7 +361,11 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
   const manages = managesEnvironment(viewer, name);
   const creates = mayCreateEnvironments(viewer) === true;
   const heading = useRef<HTMLHeadingElement>(null);
-  const load = useCallback(() => getEnvironment(name), [name]);
+  const reading = useRef<AbortController | null>(null);
+  const load = useCallback(() => {
+    reading.current = new AbortController();
+    return getEnvironment(name, reading.current.signal);
+  }, [name]);
   const read = useResource(load);
   // The focus moves once the page is read again, after the dialog has given it back.
   const { target: retentionButton, arm: armRetention } = useFocusAfter<HTMLButtonElement>(
@@ -369,6 +374,19 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
   const { target: protectButton, arm: armProtect } = useFocusAfter<HTMLButtonElement>(read.data);
   const { target: storageButton, arm: armStorage } = useFocusAfter<HTMLButtonElement>(read.data);
   const [open, setOpen] = useState<Open | null>(null);
+  // While it is deleted, the read on its way (one a change started) is cancelled, and read again
+  // if the deletion is refused: one answered after the deletion is a 404 the browser logs.
+  const [deleting, setDeleting] = useState(false);
+  const wasDeleting = useRef(false);
+  const { reload } = read;
+  useEffect(() => {
+    if (deleting) {
+      reading.current?.abort();
+    } else if (wasDeleting.current) {
+      reload();
+    }
+    wasDeleting.current = deleting;
+  }, [deleting, reload]);
   const close = (): void => {
     setOpen(null);
   };
@@ -420,7 +438,7 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
               retentionButton={retentionButton}
               protectButton={protectButton}
             />
-            {manages && <EnvironmentUsage name={environment.name} />}
+            {manages && <EnvironmentUsage name={environment.name} paused={deleting} />}
             {creates && (
               <StoragePanel
                 environment={environment}
@@ -465,6 +483,12 @@ export function EnvironmentPage({ name }: EnvironmentPageProps): JSX.Element {
                   environment={environment}
                   onClose={close}
                   onLeave={leave}
+                  onDeleting={(now) => {
+                    // At once: the deletion is sent right after, and the read must be gone first.
+                    flushSync(() => {
+                      setDeleting(now);
+                    });
+                  }}
                 />
               </Suspense>
             )}
