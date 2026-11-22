@@ -6,8 +6,8 @@
 import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  createPath,
   type DataRouter,
+  type Location,
   Navigate,
   Outlet,
   type RouteObject,
@@ -26,9 +26,11 @@ import { SignInPage } from "./SignInPage";
 
 /**
  * Makes the router for a route tree: `createBrowserRouter` in the browser. The interface makes
- * a new one when the person's areas change, at the location the old one showed.
+ * a new one when the person's areas change, at the location the old one showed, with its
+ * history state: a browser router reads both from the address bar and the history entry, and a
+ * memory router (tests) takes them as its first entry.
  */
-export type RouterFactory = (routes: RouteObject[], at: string | undefined) => DataRouter;
+export type RouterFactory = (routes: RouteObject[], at: Location | undefined) => DataRouter;
 
 /**
  * Access for a person whose rights cannot be read: the administration areas and Your work stay
@@ -173,14 +175,17 @@ class RouterHost {
   }
 
   /**
-   * Makes the router for a new route tree, at the shown router's location.
+   * Makes the router for a new route tree, at the shown router's location and history state.
+   *
+   * The state matters while sign-in waits for a page loaded on demand: the shown router is still
+   * at `/sign-in`, whose state says where the person was going, and the new router must go on
+   * there instead of Home.
    *
    * @param routes - The route tree.
    * @returns The new router.
    */
   routerFor(routes: RouteObject[]): DataRouter {
-    const at = this.#shown === null ? undefined : createPath(this.#shown.state.location);
-    return this.#create(routes, at);
+    return this.#create(routes, this.#shown?.state.location);
   }
 
   /**

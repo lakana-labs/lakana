@@ -5,6 +5,14 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { Interface, type RouterFactory } from "./Interface";
 
+// The confirmation pages of `lakana login` load on demand. A slow runner (CI) loads them after the
+// person's rights have arrived and the interface has made a new router; delaying the chunk here
+// makes that order certain, so the return to the page is tested as a slow browser sees it.
+vi.mock("./CliSignIn", async (importOriginal) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return importOriginal();
+});
+
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
 import { catalogRoutes } from "../test/catalog";
 import { homeRoutes } from "../test/home";
