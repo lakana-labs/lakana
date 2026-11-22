@@ -356,14 +356,17 @@ for (const theme of ["light", "dark"] as const) {
       await editor.click();
       await page.keyboard.press("End");
       await page.keyboard.insertText(" -- by store");
+      await expect(page.locator(".cm-content")).toContainText("-- by store");
+      const typed = (await page.locator(".cm-content").textContent()) ?? "";
       await page.keyboard.press("Alt+Shift+N");
       const dialog = page.getByRole("dialog", { name: "Start a new query?" });
       await expect(dialog).toBeVisible();
       await dialog.getByRole("button", { name: "Cancel" }).click();
       await expect(dialog).toBeHidden();
       expect(await inEditor(page)).toBe(true);
-      await expect(page.locator(".cm-content")).toContainText("-- by store");
-      await expect(page.locator(".cm-content")).not.toContainText("˜");
+      // The text is as it was: the keys typed nothing. (Chromium on Linux sends "N" here; the
+      // Mac's "˜" at N's place is covered by newQueryKeys.test.ts.)
+      await expect(page.locator(".cm-content")).toHaveText(typed);
 
       // Again, and Discard changes: empty, at the new query's address, the focus in the editor.
       await page.keyboard.press("Alt+Shift+N");

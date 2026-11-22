@@ -1308,6 +1308,80 @@ describe("New query", () => {
     expect(view.state.doc.toString()).toBe("select 1 as one");
   });
 
+  it("held-down keys and keys an input method composes leave the page alone", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+
+    expect(pressNewQuery(document.body, { key: "N", repeat: true }).defaultPrevented).toBe(false);
+    expect(
+      pressNewQuery(view.contentDOM, { key: "Process", isComposing: true }).defaultPrevented,
+    ).toBe(false);
+
+    expect(shell.router.state.location.pathname).toBe(SAVED_PATH);
+    expect(view.state.doc.toString()).toBe("select 1 as one");
+  });
+
+  it("a second New query in a row is said again: the line empties for a moment first", async () => {
+    const shell = renderShell("/queries", { routes: routes() });
+    const view = await editor();
+    const button = screen.getByRole("button", { name: "New query" });
+    await shell.user.click(button);
+    const line = await screen.findByText("A new, empty query is open.");
+    const seen: string[] = [];
+    const watch = new MutationObserver(() => {
+      seen.push(line.textContent);
+    });
+    watch.observe(line, { childList: true, characterData: true, subtree: true });
+
+    await shell.user.click(button);
+
+    await waitFor(() => {
+      expect(seen).toEqual(["", "A new, empty query is open."]);
+    });
+    watch.disconnect();
+    expect(view.state.doc.toString()).toBe("");
+  });
+
+  it("the note goes once the person types", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    await shell.user.click(screen.getByRole("button", { name: "New query" }));
+    const line = await screen.findByText("A new, empty query is open.");
+
+    type(view, "select 2 as two");
+
+    expect(line).toBeEmptyDOMElement();
+    expect(line).toHaveClass("visually-hidden");
+  });
+
+  it("the note after a delete goes once the person runs a query", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`DELETE ${SAVED_ONE}`]: { status: 204 } }),
+    });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    await shell.user.click(screen.getByRole("button", { name: "Delete…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete the saved query Daily sales?" });
+    await shell.user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    const line = await screen.findByText("Deleted Daily sales. A new, empty query is open.");
+
+    act(() => {
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }),
+      );
+    });
+
+    expect(line).toBeEmptyDOMElement();
+  });
+
   it("the keys do nothing while another dialog is open", async () => {
     const shell = renderShell(SAVED_PATH, { routes: routes() });
     const view = await editor();

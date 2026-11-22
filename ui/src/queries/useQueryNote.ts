@@ -17,10 +17,7 @@ import type { QueriesState } from "./useOpenedSaved";
  * @returns True for the same note.
  */
 function sameNote(held: QueryNoteState, carried: QueryNoteState | undefined): boolean {
-  if (held.kind === "new") {
-    return carried?.kind === "new";
-  }
-  return carried?.kind === "deleted" && carried.name === held.name;
+  return carried?.id === held.id;
 }
 
 /**

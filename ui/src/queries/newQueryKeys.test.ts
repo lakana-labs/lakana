@@ -19,8 +19,16 @@ describe("isNewQueryKey", () => {
     expect(isNewQueryKey(press({ key: "˜", code: "KeyN" }))).toBe(true);
   });
 
-  it("leaves another letter at N's place alone, as on a Dvorak layout", () => {
+  it("leaves another letter at N's place alone, of any script, as Option Shift B on a Mac's Dvorak", () => {
+    // On a Mac's Dvorak layout B sits at N's place, and Option Shift B types "ı".
+    expect(isNewQueryKey(press({ key: "ı", code: "KeyN" }))).toBe(false);
     expect(isNewQueryKey(press({ key: "B", code: "KeyN" }))).toBe(false);
+  });
+
+  it("leaves a key alone while an input method composes, or while the keys are held down", () => {
+    expect(isNewQueryKey(press({ key: "Process", code: "KeyN", isComposing: true }))).toBe(false);
+    expect(isNewQueryKey(press({ key: "N", code: "KeyN", isComposing: true }))).toBe(false);
+    expect(isNewQueryKey(press({ key: "N", code: "KeyN", repeat: true }))).toBe(false);
   });
 
   it("leaves N alone without both Alt and Shift, or with Ctrl or ⌘", () => {

@@ -300,6 +300,12 @@ test("an administrator sees another's private saved query without its SQL and de
   await expect(
     page.getByRole("status").filter({ hasText: `Deleted ${name}. A new, empty query is open.` }),
   ).toBeVisible();
+  await expect(page.locator(".cm-content")).toHaveText("");
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.activeElement?.classList.contains("sql-editor") === true),
+    )
+    .toBe(true);
   await expect(
     page.getByRole("region", { name: "Saved queries" }).getByRole("link", { name }),
   ).toHaveCount(0);

@@ -39,7 +39,7 @@ import { NewQueryDialog } from "./NewQueryDialog";
 import { isNewQueryKey } from "./newQueryKeys";
 import { savedPath } from "./paths";
 import { endedMessage } from "./QueryError";
-import { QueryNote, type QueryNoteState } from "./QueryNote";
+import { QueryNote, type QueryNoteSaid, type QueryNoteState } from "./QueryNote";
 import { QueryToolbar } from "./QueryToolbar";
 import { readEnvironment, readFilter, writeEnvironment } from "./remember";
 import { RunResult } from "./RunResult";
@@ -57,6 +57,19 @@ const SqlEditor = lazy(() => import("./editor/SqlEditor"));
 
 /** The command line that runs a query, for a person who may not run one here yet. */
 const CLI_QUERY = 'lakana sql "select 1" --env <environment>';
+
+// The last note's number: each note is a new one, even when it says the same as the one before.
+let lastNote = 0;
+
+/**
+ * The next note's number.
+ *
+ * @returns A number no note of this page had.
+ */
+function nextNote(): number {
+  lastNote += 1;
+  return lastNote;
+}
 
 /**
  * The place of the editor while its chunk loads: empty at first, then, after a second, words.
@@ -121,6 +134,8 @@ function Work({
   const query = useQueryRun();
   const saved = useOpenedSaved(address);
   const note = useQueryNote();
+  // The note the person moved on from (by typing or running): it is no longer true, so it goes.
+  const [passed, setPassed] = useState<QueryNoteState | null>(null);
   const { opened, error: savedError } = saved;
   const editor = useRef<SqlEditorHandle | null>(null);
   const runButton = useRef<HTMLButtonElement>(null);
@@ -221,6 +236,7 @@ function Work({
     if (active || query.phase === "submitting" || readOnly || !allowed) {
       return;
     }
+    setPassed(note);
     writeEnvironment(environment);
     void query.submit(environment, sql, { saved: opened });
   };
@@ -251,13 +267,16 @@ function Work({
   // A new, empty query at `/queries`: a push from another address, so Back opens it again; a
   // replace at `/queries` itself. The note is said in the status line; the focus goes to the
   // editor.
-  const startNew = (note: QueryNoteState): void => {
+  const startNew = (said: QueryNoteSaid): void => {
     close();
     setSql("");
     setFormatLine(null);
     query.reset();
     setFocusEditor((count) => count + 1);
-    void navigate("/queries", { replace: address === null, state: { keepFocus: true, note } });
+    void navigate("/queries", {
+      replace: address === null,
+      state: { keepFocus: true, note: { ...said, id: nextNote() } },
+    });
   };
   // Whether the question was asked from the editor: React Aria cannot give the focus back into
   // the editor's shadow root, so Cancel does.
@@ -322,7 +341,7 @@ function Work({
       {!allowed && (
         <p className="queries-saved-facts">{t("queries.notAllowed", { environment })}</p>
       )}
-      <QueryNote note={note} />
+      <QueryNote note={note === passed ? null : note} />
       {savedError !== null && (
         // The server's cause, then the next step: Try again when another read may help, and a
         // new query in every case.
@@ -355,6 +374,7 @@ function Work({
           <SqlEditor
             value={sql}
             onChange={(changed) => {
+              setPassed(note);
               setSql(changed);
               setFormatLine(null);
             }}

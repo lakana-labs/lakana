@@ -4,13 +4,13 @@
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
+import { type JSX, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./queryStrings";
 
 /** What just happened: a new query was started, or a saved query was deleted. */
-export type QueryNoteState =
+export type QueryNoteSaid =
   | {
       /** A new, empty query was started. */
       readonly kind: "new";
@@ -22,6 +22,12 @@ export type QueryNoteState =
       readonly name: string;
     };
 
+/** A note as the history entry carries it. */
+export type QueryNoteState = QueryNoteSaid & {
+  /** A number of its own, so a note that says the same as the one before is still a new one. */
+  readonly id: number;
+};
+
 /** Properties of {@link QueryNote}. */
 export interface QueryNoteProps {
   /** What happened; null keeps the line mounted and empty. */
@@ -29,8 +35,10 @@ export interface QueryNoteProps {
 }
 
 /**
- * Renders the note as a status line that stays mounted, empty without a note, so a screen reader
- * announces each note as it arrives while the focus goes to the editor.
+ * Renders the note as a status line that stays mounted, empty and visually hidden without a note,
+ * so a screen reader announces each note as it arrives while the focus goes to the editor. A new
+ * note comes a frame after the line emptied, so one that says the same as the note before (a
+ * second New query) is a change and is announced again.
  *
  * @param props - The note.
  * @param props.note - What happened, or null.
@@ -38,14 +46,26 @@ export interface QueryNoteProps {
  */
 export function QueryNote({ note }: QueryNoteProps): JSX.Element {
   const { t } = useTranslation();
+  // The note whose frame has come; until then the line is empty.
+  const [ready, setReady] = useState<QueryNoteState | null>(null);
+  useEffect(() => {
+    if (note === null) {
+      return undefined;
+    }
+    const frame = requestAnimationFrame(() => {
+      setReady(note);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [note]);
   let text = "";
-  if (note?.kind === "new") {
-    text = t("queries.new.done");
-  } else if (note?.kind === "deleted") {
-    text = t("queries.delete.done", { name: note.name });
+  if (note !== null && ready === note) {
+    text =
+      note.kind === "new" ? t("queries.new.done") : t("queries.delete.done", { name: note.name });
   }
   return (
-    <p className="queries-note" role="status">
+    <p className={text === "" ? "queries-note visually-hidden" : "queries-note"} role="status">
       {text}
     </p>
   );
