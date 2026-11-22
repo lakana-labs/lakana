@@ -42,7 +42,7 @@ export interface WaitingFilter {
  * @param filter - The filters.
  * @returns The jobs whose start waits.
  */
-export function waitingStarts(
+function waitingStarts(
   jobs: readonly JobOut[],
   filter: Omit<WaitingFilter, "environments">,
 ): JobOut[] {
