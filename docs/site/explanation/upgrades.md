@@ -245,6 +245,18 @@ newest failure's. A client that handles every kind must accept `deploy_failed`. 
 newest five rows and **Show all N** for the rest, in place. The route serves the web interface;
 programs read the same facts from `GET /api/v1/runs/failed` and the deploys lists.
 
+### A deploy names its commit's subject
+
+Each deploy has a new field, `commit_subject`: the first line of the commit's message, cut to
+200 characters, read by the worker when it fetches the commit; a rollback repeats the one its
+target version was deployed with. The migration adds the column empty, so deploys from before
+the upgrade have `null` there and show the commit's ID only, and so does a rollback to a version
+that was only deployed before it. `lakana deploys list` has a `commit_subject` column after
+`resolved_sha`, and the SDK's `Deploy` a `commit_subject` attribute. On the Deploys tab,
+`current` now marks only the newest successful deploy or rollback of each repository, not every
+row of the current version: after a rollback to an earlier version, only the rollback says
+`current`.
+
 ### An audit event shows its stored type
 
 Each audit event has a new field, `event_type_raw`: the type as stored, the same as `event_type`.

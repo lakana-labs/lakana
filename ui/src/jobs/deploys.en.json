@@ -34,6 +34,7 @@
   "dialog": {
     "title": "Roll back {{repository}} in {{environment}}?",
     "reading": "Reading the jobs this changes…",
+    "commitWithSubject": "{{commit}} · “{{subject}}”",
     "text": "This makes {{commit}}, deployed {{when}} by {{who}}, the current version of {{repository}} in {{environment}} again. Every job {{repository}} defines there changes with it:",
     "kept": "{{job}}",
     "removed": "{{job}}: removed by the rollback",
