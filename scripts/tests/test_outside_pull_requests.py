@@ -9,6 +9,7 @@ invites the pull request runs here on fixed API answers.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -94,6 +95,9 @@ def _invited(*issues: dict) -> str:
     """
     jq = shutil.which("jq")
     if jq is None:
+        # In CI a missing jq must not pass unnoticed as six skipped tests.
+        if os.environ.get("CI"):
+            pytest.fail("jq is not installed on this runner")
         pytest.skip("jq is not installed")
     answer = {
         "data": {
