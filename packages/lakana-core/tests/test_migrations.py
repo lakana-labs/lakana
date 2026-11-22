@@ -7030,3 +7030,62 @@ def test_0089_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
         assert sorted(kept) == sorted(names)
     finally:
         engine.dispose()
+
+
+_REVISION_0090 = "4b8d2f6a1c93"
+
+
+def test_0090_adds_the_commit_subject_to_deploy_runs(migrated_db: MigratedDb) -> None:
+    """Revision `0090`: `deploy_runs.commit_subject`, 200 characters, null for existing runs.
+
+    A run from before the column keeps every other value and has no subject; the downgrade drops
+    the column and keeps the run.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0089)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+    deploy_id = uuid.uuid4().hex
+
+    def columns() -> dict[str, dict[str, Any]]:
+        return {c["name"]: dict(c) for c in inspect(engine).get_columns("deploy_runs")}
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(sa.text("PRAGMA foreign_keys=OFF"))
+            connection.execute(
+                sa.text(
+                    "INSERT INTO deploy_runs (id, environment_id, repository_id, kind, status,"
+                    " resolved_sha, created_at) VALUES (:id, :env, :repo, 'DEPLOY', 'SUCCEEDED',"
+                    " :sha, :now)"
+                ),
+                {
+                    "id": deploy_id,
+                    "env": uuid.uuid4().hex,
+                    "repo": uuid.uuid4().hex,
+                    "sha": "a" * 40,
+                    "now": _utc_text(),
+                },
+            )
+        assert "commit_subject" not in columns()
+        command.upgrade(config, _REVISION_0090)
+        found = columns()["commit_subject"]
+        assert found["nullable"]
+        assert getattr(found["type"], "length", None) == 200
+        with engine.connect() as connection:
+            row = connection.execute(
+                sa.text("SELECT resolved_sha, commit_subject FROM deploy_runs WHERE id = :id"),
+                {"id": deploy_id},
+            ).one()
+        assert tuple(row) == ("a" * 40, None)
+        command.downgrade(config, _REVISION_0089)
+        assert "commit_subject" not in columns()
+        with engine.connect() as connection:
+            kept = connection.execute(sa.text("SELECT id FROM deploy_runs")).scalars().all()
+        assert kept == [deploy_id]
+    finally:
+        engine.dispose()

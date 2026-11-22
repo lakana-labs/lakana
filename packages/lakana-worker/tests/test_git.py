@@ -34,6 +34,7 @@ from lakana_worker.git import (
     _extract,
     _ssh_command,
     classify_failure,
+    commit_subject,
     fetch_commit,
     git_environment,
     redact,
@@ -127,6 +128,44 @@ def local_sha(tmp_path: Path) -> str:
         The commit SHA.
     """
     return make_repo(tmp_path / "repos" / "analytics", _FILES)
+
+
+def test_a_fetch_reads_the_first_line_of_the_commit_message(tmp_path: Path) -> None:
+    """The subject is the message's first line, without the body or the blank line before it."""
+    repo = tmp_path / "repos" / "analytics"
+    make_repo(repo, _FILES)
+    commit(
+        repo, {"assets/bronze/more.sql": "SELECT 2 AS id\n"}, "Review 4-6: four jobs\n\nThe body."
+    )
+    assert _fetch(tmp_path).subject == "Review 4-6: four jobs"
+
+
+@pytest.mark.parametrize(
+    ("message", "subject"),
+    [
+        ("Review 4-6: four jobs\n\nThe body.\n", "Review 4-6: four jobs"),
+        ("  Add the jobs  \r\nmore", "Add the jobs"),
+        ("first\u2028second", "first"),
+        ("", None),
+        ("   \n\nbody only after a blank first line", None),
+        ("nul\x00inside", "nul\ufffdinside"),
+        ("x" * 200, "x" * 200),
+        ("x" * 201, "x" * 199 + "\u2026"),
+    ],
+)
+def test_commit_subject_is_the_first_line_cut_to_200_characters(
+    message: str, subject: str | None
+) -> None:
+    """The first line, trimmed; none for a blank one; a NUL replaced; past 200 characters cut.
+
+    Parameters
+    ----------
+    message
+        The commit message.
+    subject
+        What is stored.
+    """
+    assert commit_subject(message) == subject
 
 
 def test_local_fetch_of_head_extracts_the_tree_without_git(tmp_path: Path, local_sha: str) -> None:

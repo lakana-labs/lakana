@@ -3449,6 +3449,10 @@ class Deploy:
         Ref or SHA asked for.
     resolved_sha
         Commit fetched.
+    commit_subject
+        The first line of that commit's message, cut to 200 characters; for a rollback, the
+        one its target was deployed with. `None` before the fetch, for a blank first line, for
+        a deploy from before the server stored it and from a server that predates the field.
     rollback_to_project_version_id
         A rollback's target.
     error_message
@@ -3516,6 +3520,7 @@ class Deploy:
     actions: tuple[str, ...] = ()
     submitted_by: str | None = None
     jobs: tuple[str, ...] | None = None
+    commit_subject: str | None = None
 
 
 @dataclass(frozen=True)

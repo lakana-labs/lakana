@@ -57,6 +57,7 @@ from typing import Any
 from lakana_core.config import validate_proxy_url
 from lakana_core.errors import ValidationError
 from lakana_core.models import ProbeOutcome, RepositoryKind
+from lakana_core.models.deploy import COMMIT_SUBJECT_CHARS
 from lakana_core.net.egress import is_never_reachable
 from lakana_core.projects.git_input import (
     is_full_sha,
@@ -143,11 +144,39 @@ class FetchedCommit:
         `git archive` of the commit (tar, no `.git`).
     tree
         The archive, extracted.
+    subject
+        The first line of the commit's message (`commit_subject`); `None` when it is blank or
+        git could not read it.
     """
 
     sha: str
     archive: Path
     tree: Path
+    subject: str | None = None
+
+
+def commit_subject(message: str) -> str | None:
+    """Return the first line of a commit message, as a deploy stores it.
+
+    Parameters
+    ----------
+    message
+        The message, as git prints it.
+
+    Returns
+    -------
+    str or None
+        Its first line without the spaces around it, a NUL (which Postgres cannot store)
+        replaced by U+FFFD, cut to `COMMIT_SUBJECT_CHARS` with an ellipsis as the last
+        character; `None` for a blank first line.
+    """
+    lines = message.splitlines()
+    subject = lines[0].strip().replace("\x00", "\ufffd") if lines else ""
+    if not subject:
+        return None
+    if len(subject) > COMMIT_SUBJECT_CHARS:
+        return subject[: COMMIT_SUBJECT_CHARS - 1] + "\u2026"
+    return subject
 
 
 def git_environment(
@@ -1017,7 +1046,45 @@ def fetch_commit(
         )
         tree = run / "tree"
         _extract(archive, tree, limit=limits.checkout_bytes, max_members=limits.checkout_members)
-        return FetchedCommit(sha=sha, archive=archive, tree=tree)
+        subject = _subject_of(sha, repo=repo, env=env, limits=limits, deadline=deadline)
+        return FetchedCommit(sha=sha, archive=archive, tree=tree, subject=subject)
+
+
+def _subject_of(
+    sha: str, *, repo: Path, env: Mapping[str, str], limits: DeployLimits, deadline: float
+) -> str | None:
+    """Read the first line of a fetched commit's message.
+
+    git writes the message in UTF-8 whatever encoding the commit names. A failure here never
+    fails the deploy: the subject is only shown beside the commit's ID.
+
+    Parameters
+    ----------
+    sha
+        The fetched commit.
+    repo
+        The bare repository.
+    env
+        Git environment.
+    limits
+        Limits.
+    deadline
+        Job deadline.
+
+    Returns
+    -------
+    str or None
+        `commit_subject` of the message; `None` if git could not read it.
+    """
+    shown = _run(
+        ["git", "log", "-1", "--no-show-signature", "--format=%B", "--end-of-options", sha],
+        cwd=repo,
+        env=env,
+        timeout=_timeout(limits, deadline),
+    )
+    if shown.returncode != 0:
+        return None
+    return commit_subject(shown.stdout)
 
 
 def _neutralise_export_subst(repo: Path) -> None:
