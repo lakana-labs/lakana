@@ -418,8 +418,9 @@ every missing output of it means "run everything".
   `scripts/tests/test_workflows.py` says why not (`mutation.yml` today).
 - **`outside-pull-requests.yml`** (Outside pull requests) closes a pull request opened by anyone
   who is not an owner, member or collaborator, with a comment pointing to the issue tracker,
-  unless an issue it closes carries the label `pr-welcome` (a maintainer's invitation). Bots are
-  left alone, and it runs only on `opened`, so a maintainer can reopen a pull request. It is a
+  unless an open issue of this repository that it closes carries the label `pr-welcome` (a
+  maintainer's invitation; an issue elsewhere never counts). Bots are left alone. It runs on
+  `opened` and when the author reopens, so a maintainer can still reopen one. It is a
   `pull_request_target` workflow: it checks out and runs nothing from the pull request, its one
   job has `pull-requests: write` and `issues: read`, and the event's fields reach the script as
   environment variables (`scripts/tests/test_outside_pull_requests.py`).
