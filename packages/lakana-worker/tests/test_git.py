@@ -140,8 +140,8 @@ def test_a_fetch_reads_the_first_line_of_the_commit_message(tmp_path: Path) -> N
     assert _fetch(tmp_path).subject == "Review 4-6: four jobs"
 
 
-def _subject_runs_fail(monkeypatch: pytest.MonkeyPatch, how: str) -> None:
-    """Make the git commands that read the subject fail, and nothing else.
+def _subject_runs_fail(monkeypatch: pytest.MonkeyPatch, how: str, commands: set[str]) -> None:
+    """Make the given git commands that read the subject fail, and nothing else.
 
     Parameters
     ----------
@@ -150,11 +150,13 @@ def _subject_runs_fail(monkeypatch: pytest.MonkeyPatch, how: str) -> None:
     how
         ``raise`` for a `GitError` (a timeout, the output cap, the deadline), ``exit`` for a
         non-zero exit.
+    commands
+        The git subcommands that fail: ``cat-file`` (the size), ``log`` (the message).
     """
     real = module._run
 
     def run(args: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        if args[1] in {"log", "cat-file"}:
+        if args[1] in commands:
             if how == "raise":
                 raise GitError("git log timed out after 1s")
             return subprocess.CompletedProcess(list(args), 1, "", "fatal: bad object")
@@ -163,9 +165,21 @@ def _subject_runs_fail(monkeypatch: pytest.MonkeyPatch, how: str) -> None:
     monkeypatch.setattr(module, "_run", run)
 
 
-@pytest.mark.parametrize("how", ["raise", "exit"])
+@pytest.mark.parametrize(
+    ("how", "commands"),
+    [
+        ("raise", {"cat-file", "log"}),
+        ("exit", {"cat-file"}),
+        ("raise", {"log"}),
+        ("exit", {"log"}),
+    ],
+)
 def test_a_subject_git_cannot_read_leaves_none_and_the_fetch_goes_on(
-    tmp_path: Path, local_sha: str, monkeypatch: pytest.MonkeyPatch, how: str
+    tmp_path: Path,
+    local_sha: str,
+    monkeypatch: pytest.MonkeyPatch,
+    how: str,
+    commands: set[str],
 ) -> None:
     """A timeout, the output cap or a failed command reading the subject never fails a deploy.
 
@@ -179,8 +193,10 @@ def test_a_subject_git_cannot_read_leaves_none_and_the_fetch_goes_on(
         Pytest's monkeypatch.
     how
         How the subject's read fails.
+    commands
+        Which of its commands fail: the size's, the message's, or both.
     """
-    _subject_runs_fail(monkeypatch, how)
+    _subject_runs_fail(monkeypatch, how, commands)
     fetched = _fetch(tmp_path)
     assert (fetched.sha, fetched.subject) == (local_sha, None)
     assert (fetched.tree / "assets" / "bronze" / "events.sql").is_file()
