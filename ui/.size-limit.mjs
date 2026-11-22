@@ -191,7 +191,10 @@ const NAMED_LIMITS = [
   // Measured 2.87 kB (2026-11-18) after review: Read again shows no rows while it reads, with
   // its status line and the focus kept off the page, and no error of another filter shows; the
   // limit holds.
-  { name: "the Runs tab", prefix: "RunsTab-", limit: "2.95 kB" },
+  // Raised to the measured 3.33 kB (2026-11-22) + 10 %: the starts that wait for the run holding
+  // their project, read every 30 s from the environments' jobs, held against the tab's filters
+  // and listed above the runs as Waiting, with what they wait for (#786).
+  { name: "the Runs tab", prefix: "RunsTab-", limit: "3.66 kB" },
   // Measured 3.44 kB (2026-11-18) + 10 %: the Deploys tab, loaded on /jobs/deploys: one
   // environment at a time with the line that says so, the Repository menu in the address, the
   // current version of each repository (and the sentence with Try again when it cannot be read),
