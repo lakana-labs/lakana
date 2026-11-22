@@ -181,6 +181,17 @@ def test_open_purges_flows_a_day_past_their_expiry(
         ("/a\x7fb", "/"),
         ("catalog", "/"),
         ("/catalog/../..//evil", "/"),
+        # lakana login's confirmations come back after a provider sign-in (#32, PR 3).
+        ("/sign-in/cli?port=49152&state=s&challenge=c&host=laptop-7",) * 2,
+        ("/sign-in/device",) * 2,
+        ("/sign-in/device?x=1",) * 2,
+        ("/sign-in/cli/../oidc", "/"),
+        ("/sign-in/clix", "/"),
+        ("/sign-in/CLI", "/"),
+        ("/sign-in/oidc?next=/sign-in/cli", "/"),
+        ("/%73ign-in/cli", "/"),
+        ("/sign-in/cli?x=//evil", "/"),
+        ("/sign-in/device#x", "/"),
     ],
 )
 def test_return_to_is_kept_only_when_it_is_an_app_path(given: str | None, kept: str) -> None:

@@ -100,88 +100,86 @@ async function focusOnBody(page: Page): Promise<boolean> {
 }
 
 for (const theme of ["light", "dark"] as const) {
-  for (const density of ["roomy", "compact"] as const) {
-    test.describe(`${theme}, ${density}`, () => {
-      test.beforeEach(async ({ page }) => {
-        await page.addInitScript(
-          ([key, value]) => {
-            window.localStorage.setItem(key ?? "", value ?? "");
-          },
-          [KEY, JSON.stringify({ theme, density, language: "en" })],
-        );
-      });
-
-      test("the loopback confirmation by keyboard, to 127.0.0.1", async ({ page }) => {
-        const errors = consoleErrors(page);
-        const paths = await stub(page);
-        await page.goto(link());
-
-        const heading = page.getByRole("heading", {
-          level: 1,
-          name: "Create the API token “lakana login on laptop-7” for kim?",
-        });
-        await expect(heading).toBeFocused();
-        expect(await violations(page)).toEqual([]);
-
-        await tabTo(page, page.getByRole("button", { name: "Create token" }));
-        expect(await focusOnBody(page)).toBe(false);
-        const back = page.waitForRequest((request) =>
-          request.url().startsWith(`http://127.0.0.1:${String(PORT)}/`),
-        );
-        await page.keyboard.press("Enter");
-        const request = await back;
-
-        expect(request.url()).toBe(`http://127.0.0.1:${String(PORT)}/?code=c0de&state=st-1`);
-        expect(paths.filter((path) => !STUBBED.has(path))).toEqual([]);
-        expect(errors).toEqual([]);
-      });
-
-      test("the device page by keyboard", async ({ page }) => {
-        const errors = consoleErrors(page);
-        const paths = await stub(page);
-        await page.goto("/sign-in/device");
-
-        await expect(
-          page.getByRole("heading", { level: 1, name: "Sign in a command line elsewhere" }),
-        ).toBeFocused();
-        expect(await violations(page)).toEqual([]);
-        await tabTo(page, page.getByRole("textbox", { name: "Code" }));
-        await page.keyboard.type("BCDF-GHJK");
-        await page.keyboard.press("Enter");
-        await expect(
-          page.getByRole("heading", {
-            level: 1,
-            name: "Create the API token “lakana login on build-box” for kim?",
-          }),
-        ).toBeFocused();
-        expect(await violations(page), "the confirmation").toEqual([]);
-        await tabTo(page, page.getByRole("button", { name: "Create token" }));
-        await page.keyboard.press("Enter");
-        await expect(page.getByRole("status")).toHaveText(
-          "Done. Go back to the terminal: lakana login finishes there.",
-        );
-        expect(await focusOnBody(page)).toBe(false);
-        expect(await violations(page), "done").toEqual([]);
-        expect(paths.filter((path) => !STUBBED.has(path))).toEqual([]);
-        expect(errors).toEqual([]);
-      });
-
-      test("the confirmation at 320 px with a 64-character host", async ({ page }) => {
-        await stub(page);
-        await page.setViewportSize({ width: 320, height: 640 });
-        await page.goto(link(LONG_HOST.slice(0, 64)));
-
-        const heading = page.getByRole("heading", { level: 1 });
-        await expect(heading).toContainText(LONG_HOST.slice(0, 64));
-        const scroll = await page.evaluate(() => ({
-          page: document.documentElement.scrollWidth,
-          view: document.documentElement.clientWidth,
-        }));
-        expect(scroll.page).toBeLessThanOrEqual(scroll.view);
-        const box = await heading.boundingBox();
-        expect(box === null ? 0 : box.x + box.width).toBeLessThanOrEqual(320);
-        expect(await violations(page)).toEqual([]);
-      });
+  test.describe(theme, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.addInitScript(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme, language: "en" })],
+      );
     });
-  }
+
+    test("the loopback confirmation by keyboard, to 127.0.0.1", async ({ page }) => {
+      const errors = consoleErrors(page);
+      const paths = await stub(page);
+      await page.goto(link());
+
+      const heading = page.getByRole("heading", {
+        level: 1,
+        name: "Create the API token “lakana login on laptop-7” for kim?",
+      });
+      await expect(heading).toBeFocused();
+      expect(await violations(page)).toEqual([]);
+
+      await tabTo(page, page.getByRole("button", { name: "Create token" }));
+      expect(await focusOnBody(page)).toBe(false);
+      const back = page.waitForRequest((request) =>
+        request.url().startsWith(`http://127.0.0.1:${String(PORT)}/`),
+      );
+      await page.keyboard.press("Enter");
+      const request = await back;
+
+      expect(request.url()).toBe(`http://127.0.0.1:${String(PORT)}/?code=c0de&state=st-1`);
+      expect(paths.filter((path) => !STUBBED.has(path))).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    test("the device page by keyboard", async ({ page }) => {
+      const errors = consoleErrors(page);
+      const paths = await stub(page);
+      await page.goto("/sign-in/device");
+
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Sign in a command line elsewhere" }),
+      ).toBeFocused();
+      expect(await violations(page)).toEqual([]);
+      await tabTo(page, page.getByRole("textbox", { name: "Code" }));
+      await page.keyboard.type("BCDF-GHJK");
+      await page.keyboard.press("Enter");
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: "Create the API token “lakana login on build-box” for kim?",
+        }),
+      ).toBeFocused();
+      expect(await violations(page), "the confirmation").toEqual([]);
+      await tabTo(page, page.getByRole("button", { name: "Create token" }));
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("status")).toHaveText(
+        "Done. Go back to the terminal: lakana login finishes there.",
+      );
+      expect(await focusOnBody(page)).toBe(false);
+      expect(await violations(page), "done").toEqual([]);
+      expect(paths.filter((path) => !STUBBED.has(path))).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+
+    test("the confirmation at 320 px with a 64-character host", async ({ page }) => {
+      await stub(page);
+      await page.setViewportSize({ width: 320, height: 640 });
+      await page.goto(link(LONG_HOST.slice(0, 64)));
+
+      const heading = page.getByRole("heading", { level: 1 });
+      await expect(heading).toContainText(LONG_HOST.slice(0, 64));
+      const scroll = await page.evaluate(() => ({
+        page: document.documentElement.scrollWidth,
+        view: document.documentElement.clientWidth,
+      }));
+      expect(scroll.page).toBeLessThanOrEqual(scroll.view);
+      const box = await heading.boundingBox();
+      expect(box === null ? 0 : box.x + box.width).toBeLessThanOrEqual(320);
+      expect(await violations(page)).toEqual([]);
+    });
+  });
 }

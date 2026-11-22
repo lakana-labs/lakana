@@ -377,13 +377,14 @@ class CliGrantService:
         grant
             The grant.
         **extra
-            Further fields (``key_id``, ``reason``).
+            Further fields (``key_id``, ``reason``, ``peer``).
         """
-        AuditService(self._session).record(
-            p_id,
-            kind,
-            detail={"id": str(grant.id), "kind": grant.kind, "host": grant.host, **extra},
-        )
+        detail = {"id": str(grant.id), "kind": grant.kind, "host": grant.host, **extra}
+        if grant.requested_from is not None:
+            # The address that started a device grant: an incident review's first question
+            # after a phished code, kept here beyond the row's purge.
+            detail["requested_from"] = grant.requested_from
+        AuditService(self._session).record(p_id, kind, detail=detail)
 
     def purge(self, now: datetime) -> int:
         """Delete the grants more than `PURGE_AFTER` past their expiry.
@@ -470,7 +471,9 @@ class CliGrantService:
         self._session.commit()
         return code
 
-    def exchange_loopback(self, code: str, code_verifier: str) -> IssuedPat:
+    def exchange_loopback(
+        self, code: str, code_verifier: str, *, peer: str | None = None
+    ) -> IssuedPat:
         """Exchange a loopback code and its verifier for the new token, once.
 
         The code is used up by the first exchange, right or wrong.
@@ -481,6 +484,8 @@ class CliGrantService:
             The code the browser brought to the loopback port.
         code_verifier
             The command line's PKCE verifier.
+        peer
+            The client address that exchanges, recorded with the token.
 
         Returns
         -------
@@ -513,7 +518,7 @@ class CliGrantService:
         ):
             self._audit_refusal(claimed, "wrong_verifier")
             raise CliGrantRefused(EXCHANGE_REFUSED)
-        return self._issue(claimed, refusal=EXCHANGE_REFUSED)
+        return self._issue(claimed, refusal=EXCHANGE_REFUSED, peer=peer)
 
     def _audit_refusal(self, grant: CliGrant, reason: str) -> None:
         """Record the first refused exchange of a grant that exists, and commit.
@@ -614,7 +619,9 @@ class CliGrantService:
         except AuthenticationError:
             return None
 
-    def _issue(self, grant: CliGrant, *, refusal: str = SESSION_ENDED) -> IssuedPat:
+    def _issue(
+        self, grant: CliGrant, *, refusal: str = SESSION_ENDED, peer: str | None = None
+    ) -> IssuedPat:
         """Issue the token of a grant just used, as the person in the session that approved it.
 
         Parameters
@@ -623,6 +630,8 @@ class CliGrantService:
             The grant, approved and now used.
         refusal
             The sentence of the refusal when the approving session has ended.
+        peer
+            The client address that collects the token, for the audit; `None` for none.
 
         Returns
         -------
@@ -650,7 +659,8 @@ class CliGrantService:
         grant.pat_id = self._session.execute(
             select(PersonalAccessToken.id).where(PersonalAccessToken.key_id == issued.key_id)
         ).scalar_one()
-        self._audit(ref.id, AuditEventType.SIGN_IN_CLI_TOKEN_ISSUED, grant, key_id=issued.key_id)
+        extra = {"key_id": issued.key_id} | ({} if peer is None else {"peer": peer[:PEER_LENGTH]})
+        self._audit(ref.id, AuditEventType.SIGN_IN_CLI_TOKEN_ISSUED, grant, **extra)
         self._session.commit()
         return issued
 
@@ -823,13 +833,15 @@ class CliGrantService:
         self._audit(p.id, AuditEventType.SIGN_IN_CLI_DENIED, grant)
         self._session.commit()
 
-    def poll_device(self, device_code: str) -> DevicePoll:
+    def poll_device(self, device_code: str, *, peer: str | None = None) -> DevicePoll:
         """Ask about a device grant; an approved one answers its token, once.
 
         Parameters
         ----------
         device_code
             The device code `start_device` answered.
+        peer
+            The client address that polls, recorded with the token it collects.
 
         Returns
         -------
@@ -843,7 +855,8 @@ class CliGrantService:
             For a device code that names no grant (`DEVICE_REFUSED`), or an approving session
             that has ended.
         CliPollTooFast
-            Sooner than `POLL_INTERVAL` after the previous poll (`SLOW_DOWN`).
+            Sooner than `POLL_INTERVAL` after the last accepted poll (`SLOW_DOWN`); such a poll
+            writes nothing.
         """
         grant = None
         if device_code:
@@ -856,10 +869,13 @@ class CliGrantService:
         if grant is None:
             raise CliGrantRefused(DEVICE_REFUSED)
         now = self._clock()
-        previous, grant.last_polled_at = grant.last_polled_at, now
-        self._session.commit()
+        previous = grant.last_polled_at
+        # A poll too soon writes nothing (RFC 8628's slow_down: the interval counts from the last
+        # accepted poll), so a fast poller cannot drive a commit per request.
         if previous is not None and now - previous < POLL_INTERVAL - POLL_TOLERANCE:
             raise CliPollTooFast(SLOW_DOWN)
+        grant.last_polled_at = now
+        self._session.commit()
         state = self._state(grant, now)
         if state != "approved":
             return DevicePoll(state=state)
@@ -869,7 +885,7 @@ class CliGrantService:
         self._session.commit()
         if used is None:
             return DevicePoll(state="expired")
-        return DevicePoll(state="approved", token=self._issue(used))
+        return DevicePoll(state="approved", token=self._issue(used, peer=peer))
 
     @staticmethod
     def _state(grant: CliGrant, now: datetime) -> PollState:

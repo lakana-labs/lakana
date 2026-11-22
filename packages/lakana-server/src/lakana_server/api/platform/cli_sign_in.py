@@ -434,7 +434,8 @@ def exchange_cli_code(
         The token, shown this once.
     """
     _admit(request)
-    return _issued(grants.exchange_loopback(body.code, body.code_verifier))
+    client = request.client.host if request.client else "unknown"
+    return _issued(grants.exchange_loopback(body.code, body.code_verifier, peer=client))
 
 
 @open_router.post("/device", response_model=CliDeviceOut)
@@ -505,7 +506,8 @@ def poll_cli_device(
         The state, with the token once approved.
     """
     _admit(request, poll=True)
-    polled = grants.poll_device(body.device_code)
+    client = request.client.host if request.client else "unknown"
+    polled = grants.poll_device(body.device_code, peer=client)
     return CliDevicePollOut(
         state=polled.state, token=None if polled.token is None else _issued(polled.token)
     )

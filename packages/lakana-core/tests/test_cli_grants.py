@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.orm import Session
 
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef
@@ -650,7 +650,7 @@ def test_a_denied_device_sign_in_is_audited(world: World) -> None:
 
     grant = world.session.execute(select(CliGrant)).scalar_one()
     assert world.events(AuditEventType.SIGN_IN_CLI_DENIED) == [
-        {"id": str(grant.id), "kind": "device", "host": "box"}
+        {"id": str(grant.id), "kind": "device", "host": "box", "requested_from": "203.0.113.7"}
     ]
 
 
@@ -778,3 +778,79 @@ def test_the_age_is_never_below_zero(world: World) -> None:
     world.clock.now = START - timedelta(seconds=30)
 
     assert world.grants.describe_device(kim, started.user_code).age_seconds == 0
+
+
+# -- the third round's findings (#32, PR 3) ---------------------------------------------------
+
+
+def test_the_device_audit_names_the_requesting_and_collecting_addresses(world: World) -> None:
+    kim = world.signed_in(world.person("kim"))
+    started = world.grants.start_device("box", peer="203.0.113.7")
+    world.grants.approve_device(kim, started.user_code)
+
+    polled = world.grants.poll_device(started.device_code, peer="198.51.100.4")
+
+    assert polled.token is not None
+    approved = world.events(AuditEventType.SIGN_IN_CLI_APPROVED)[0]
+    issued = world.events(AuditEventType.SIGN_IN_CLI_TOKEN_ISSUED)[0]
+    assert approved["requested_from"] == "203.0.113.7"
+    assert (issued["requested_from"], issued["peer"]) == ("203.0.113.7", "198.51.100.4")
+
+
+def test_the_loopback_audit_names_the_collecting_address(world: World) -> None:
+    code = _approve(world, world.signed_in(world.person("kim")))
+
+    world.grants.exchange_loopback(code, VERIFIER, peer="127.0.0.1")
+
+    issued = world.events(AuditEventType.SIGN_IN_CLI_TOKEN_ISSUED)[0]
+    assert issued["peer"] == "127.0.0.1"
+    assert "requested_from" not in issued
+    assert "requested_from" not in world.events(AuditEventType.SIGN_IN_CLI_APPROVED)[0]
+
+
+def test_a_lakana_login_token_is_refused_outside_the_token_window(world: World) -> None:
+    kim_row = world.person("kim")
+    kim_row.oidc_issuer, kim_row.oidc_subject = "https://idp.example.com", "kim"
+    kim_row.last_provider_sign_in_at = datetime.now(UTC) - timedelta(days=1)
+    world.session.commit()
+    issued = world.grants.exchange_loopback(_approve(world, world.signed_in(kim_row)), VERIFIER)
+    parsed = parse_token(issued.token, "lakana_pat")
+    assert parsed is not None
+    pats = PatService(world.session, world.authz)
+    assert pats.verify(*parsed).name == "kim"
+
+    kim_row.last_provider_sign_in_at = datetime.now(UTC) - timedelta(days=31)
+    world.session.commit()
+    with pytest.raises(AuthenticationError, match="nobody has signed in there as you"):
+        pats.verify(*parsed)
+
+    kim_row.last_provider_sign_in_at = datetime.now(UTC)
+    world.session.commit()
+    assert pats.verify(*parsed).name == "kim"
+
+
+def test_a_too_fast_poll_writes_nothing(world: World) -> None:
+    started = world.grants.start_device("box", peer="203.0.113.7")
+    world.grants.poll_device(started.device_code)
+    first = world.session.execute(select(CliGrant.last_polled_at)).scalar_one()
+    assert first is not None
+    world.clock.now += timedelta(seconds=2)
+    statements: list[str] = []
+
+    def record(conn: object, cursor: object, statement: str, *args: object) -> None:
+        statements.append(statement)
+
+    engine = world.session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        with pytest.raises(CliPollTooFast):
+            world.grants.poll_device(started.device_code)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert [s for s in statements if not s.lstrip().upper().startswith("SELECT")] == []
+    world.session.expire_all()
+    assert world.session.execute(select(CliGrant.last_polled_at)).scalar_one() == first
+    # RFC 8628: the interval counts from the last accepted poll, so waiting it out works.
+    world.clock.now = first + POLL_INTERVAL
+    assert world.grants.poll_device(started.device_code).state == "pending"

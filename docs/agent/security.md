@@ -7471,7 +7471,9 @@ sign-in (#32)".
   (`test_poll_slow_down_is_429`, `test_denied_grant_never_yields_a_token`). Polls have buckets of
   their own at 120 times the start rate (`POLL_RATE`, the polls of 10 minutes of starts at the full
   rate: at the default rates 600 waiting sign-ins per address and 2,400 per network;
-  `test_polls_have_buckets_of_their_own`), and the SDK reads any 429 as `slow_down`, the CLI waiting
+  `test_polls_have_buckets_of_their_own`); a poll too soon answers `slow_down` without a write,
+  the interval counting from the last accepted poll (`test_a_too_fast_poll_writes_nothing`), so a
+  fast poller drives no commit per request; the SDK reads any 429 as `slow_down`, the CLI waiting
   5 seconds more and at least `Retry-After` (whole seconds, at most 60, the SDK's capped parser).
   The CLI stops at the code's expiry even if every poll is refused
   (`test_device_stops_at_the_codes_expiry_when_every_poll_is_refused`). The age on the page is the
@@ -7496,9 +7498,14 @@ sign-in (#32)".
   the system's host name into `-`. A name the person already uses for a live token gets ` (2)`,
   ` (3)` (`test_taken_name_gets_a_number`). It works for 90 days (maintainer, 2026-11-20,
   `test_token_lives_ninety_days`); a new `lakana login` makes a new token and revokes none. A linked
-  person's token stays bound by the token window (PR 2). Audited as `SIGN_IN_CLI_APPROVED` and
-  `SIGN_IN_CLI_TOKEN_ISSUED` (`id`, `kind`, `host`, `key_id`) beside `PAT_ISSUED`, with
-  `SIGN_IN_CLI_DENIED` and `SIGN_IN_CLI_REFUSED` (`reason`); no code,
+  person's token stays bound by the token window (PR 2):
+  `test_a_lakana_login_token_is_refused_outside_the_token_window` (401 past the window, working
+  again after a provider sign-in). Audited as `SIGN_IN_CLI_APPROVED` and
+  `SIGN_IN_CLI_TOKEN_ISSUED` (`id`, `kind`, `host`, `key_id`, and `peer`, the address that
+  collected the token) beside `PAT_ISSUED`, with `SIGN_IN_CLI_DENIED` and `SIGN_IN_CLI_REFUSED`
+  (`reason`); every event of a device grant also names `requested_from`, the address that started
+  it, which outlives the grant's row for an incident review
+  (`test_the_device_audit_names_the_requesting_and_collecting_addresses`); no code,
   verifier or token reaches a log, an audit row or the terminal
   (`test_routes_never_log_the_code_or_verifier`, `test_the_token_is_never_printed`).
 - **C6, the confirmation page** names the token and the person ("Create the API token “lakana
@@ -7513,7 +7520,10 @@ sign-in (#32)".
   to this computer's `127.0.0.1`. Create token asks for the touch
   before the POST and a cancelled touch sends nothing (`asks for the touch before creating`,
   `a cancelled touch sends nothing`). A signed-out visitor signs in first and comes back with the
-  link's query.
+  link's query: through the interface's history after a passkey sign-in, and through
+  `safe_return_to` after a provider sign-in, which keeps exactly `/sign-in/cli` and
+  `/sign-in/device` with their query (no fragment, no other spelling) and still turns every other
+  `/sign-in…` path into `/` (`test_return_to_is_kept_only_when_it_is_an_app_path`).
 
 ## Git fetch hardening (M5b)
 

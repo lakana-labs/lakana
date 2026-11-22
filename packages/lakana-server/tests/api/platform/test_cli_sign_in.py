@@ -543,3 +543,17 @@ def test_a_host_that_is_no_host_name_is_refused_at_the_start(
 
 def test_the_poll_rate_covers_every_sign_in_that_may_wait() -> None:
     assert cli_sign_in.POLL_RATE == 120
+
+
+def test_the_issued_token_names_the_collecting_address(
+    client: TestClient, program: TestClient
+) -> None:
+    code = _approve(client, _browser(client))
+    program.post(TOKEN, json={"code": code, "code_verifier": VERIFIER})
+    started = _start(program)
+    client.post(APPROVE, headers=_browser(client), json={"user_code": started["user_code"]})
+    program.post(POLL, json={"device_code": started["device_code"]})
+
+    issued = _events(client, AuditEventType.SIGN_IN_CLI_TOKEN_ISSUED)
+    assert [event["peer"] for event in issued] == ["testclient", "testclient"]
+    assert [event.get("requested_from") for event in issued] == [None, "testclient"]
