@@ -297,7 +297,9 @@ test("an administrator sees another's private saved query without its SQL and de
     .getByRole("button", { name: "Delete" })
     .click();
   await expect(page).toHaveURL(/\/queries$/);
-  await expect(page.getByRole("status").filter({ hasText: `Deleted ${name}.` })).toBeFocused();
+  await expect(
+    page.getByRole("status").filter({ hasText: `Deleted ${name}. A new, empty query is open.` }),
+  ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Saved queries" }).getByRole("link", { name }),
   ).toHaveCount(0);

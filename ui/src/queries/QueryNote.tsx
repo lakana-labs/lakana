@@ -1,45 +1,52 @@
 /**
- * The line that says what the Queries screen just did to a saved query: deleted it.
+ * The line that says what the Queries screen just did: started a new query, or deleted a saved
+ * one and started a new query.
  *
  * @packageDocumentation
  */
-import { type JSX, useEffect, useRef } from "react";
+import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./queryStrings";
 
-/** What happened to a saved query. */
-export interface QueryNoteState {
-  /** It was deleted. */
-  readonly kind: "deleted";
-  /** Its name. */
-  readonly name: string;
-}
+/** What just happened: a new query was started, or a saved query was deleted. */
+export type QueryNoteState =
+  | {
+      /** A new, empty query was started. */
+      readonly kind: "new";
+    }
+  | {
+      /** A saved query was deleted, and a new, empty query started. */
+      readonly kind: "deleted";
+      /** The deleted query's name. */
+      readonly name: string;
+    };
 
 /** Properties of {@link QueryNote}. */
 export interface QueryNoteProps {
-  /** What happened. */
-  readonly note: QueryNoteState;
+  /** What happened; null keeps the line mounted and empty. */
+  readonly note: QueryNoteState | null;
 }
 
 /**
- * Renders the note as a status line and puts the focus on it when it arrives, since the control
- * that caused it (Delete…) is gone with the saved query.
+ * Renders the note as a status line that stays mounted, empty without a note, so a screen reader
+ * announces each note as it arrives while the focus goes to the editor.
  *
  * @param props - The note.
- * @param props.note - What happened.
+ * @param props.note - What happened, or null.
  * @returns The line.
  */
 export function QueryNote({ note }: QueryNoteProps): JSX.Element {
   const { t } = useTranslation();
-  const line = useRef<HTMLParagraphElement>(null);
-  const { kind, name } = note;
-  useEffect(() => {
-    line.current?.focus();
-  }, [kind, name]);
+  let text = "";
+  if (note?.kind === "new") {
+    text = t("queries.new.done");
+  } else if (note?.kind === "deleted") {
+    text = t("queries.delete.done", { name: note.name });
+  }
   return (
-    <p className="queries-note" role="status" tabIndex={-1} ref={line}>
-      {t("queries.delete.done", { name })}
+    <p className="queries-note" role="status">
+      {text}
     </p>
   );
 }

@@ -50,14 +50,20 @@
   overflow-wrap: anywhere;
 }
 
-/* The note after a delete takes the focus; its ring shows where it is. */
+/* The note after a new query or a delete. It stays mounted, so each note is announced; while
+   empty it takes no room in the column (the visually-hidden pattern), and still exists for
+   assistive technology. */
 .queries-note {
   margin: 0;
 }
 
-.queries-note:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
+.queries-note:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* A flex item's minimum width is its content's: without this, a wide result would push the page

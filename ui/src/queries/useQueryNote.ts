@@ -1,5 +1,5 @@
 /**
- * The note the Queries screen shows once after a delete.
+ * The note the Queries screen shows once after a new query or a delete.
  *
  * @packageDocumentation
  */
@@ -17,12 +17,15 @@ import type { QueriesState } from "./useOpenedSaved";
  * @returns True for the same note.
  */
 function sameNote(held: QueryNoteState, carried: QueryNoteState | undefined): boolean {
-  return carried?.kind === held.kind && carried.name === held.name;
+  if (held.kind === "new") {
+    return carried?.kind === "new";
+  }
+  return carried?.kind === "deleted" && carried.name === held.name;
 }
 
 /**
  * The note the history entry brought, shown once: the entry is marked seen as soon as the note
- * shows, so a reload or Back to the entry, which find it seen, show nothing (and move no focus).
+ * shows, so a reload or Back to the entry, which find it seen, show nothing.
  * The note stays while the entry is the one it came with.
  *
  * @returns The note to show, or null.

@@ -977,6 +977,14 @@ upgrades DuckDB with it.
 - Each list says how many rows it has above it, with its search on the left and its filters and
   a Refresh button on the right.
 
+### Queries: New query, and Delete leaves an empty editor
+
+- **New query** in the editor bar of **Queries**, or **Alt Shift N** (**⌥⇧N** on a Mac), clears
+  the editor and the result and opens a new query. When the editor holds changes that are not
+  saved, it asks first.
+- Deleting a saved query now opens a new, empty query; before, its SQL stayed in the editor.
+  To keep a copy, choose **Save…** and **Save as new** before you delete it.
+
 ## Notes for 0.22.0
 
 ### Say what a table is in its asset's header

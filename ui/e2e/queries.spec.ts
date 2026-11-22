@@ -222,6 +222,14 @@ for (const theme of ["light", "dark"] as const) {
       await remove.getByRole("button", { name: "Cancel" }).click();
       await expect(remove).toBeHidden();
 
+      await writeSql(page, editor, SALES_SQL);
+      await page.getByRole("button", { name: "New query" }).click();
+      const fresh = page.getByRole("dialog", { name: "Start a new query?" });
+      await expect(fresh.getByRole("button", { name: "Discard changes" })).toBeVisible();
+      expect(await violations(page), "the New query dialog").toEqual([]);
+      await fresh.getByRole("button", { name: "Cancel" }).click();
+      await expect(fresh).toBeHidden();
+
       await page.getByRole("link", { name: DRAFT.name }).click();
       await expect(page.getByText("You may not read the SQL of this query.")).toBeVisible();
       expect(await violations(page), "a saved query without its SQL").toEqual([]);
@@ -322,6 +330,48 @@ for (const theme of ["light", "dark"] as const) {
         await page.evaluate(() => document.activeElement !== document.body),
         "the focus is never on <body>",
       ).toBe(true);
+    });
+
+    test("New query by its keys: asked from the editor, Cancel returns there, Discard changes clears it; a clean query goes at once and Back opens it again", async ({
+      page,
+    }) => {
+      const editor = await openQueries(page, `/queries/prod/saved/${WEEKLY.id}`);
+      await expect(page.locator(".cm-content")).toContainText("GROUP BY store");
+
+      // Clean: at once, from anywhere outside the editor, with the focus in the empty editor.
+      await page.getByRole("heading", { level: 1, name: "Queries" }).focus();
+      await page.keyboard.press("Alt+Shift+N");
+      await expect(page).toHaveURL(/\/queries$/u);
+      await expect(page.locator(".cm-content")).toHaveText("");
+      await expect(page.locator(".queries-name")).toHaveText("Untitled query");
+      await expect(page.locator(".queries-note")).toHaveText("A new, empty query is open.");
+      expect(await inEditor(page)).toBe(true);
+
+      // Back opens the saved query again.
+      await page.goBack();
+      await expect(page).toHaveURL(new RegExp(`/queries/prod/saved/${WEEKLY.id}$`, "u"));
+      await expect(page.locator(".cm-content")).toContainText("GROUP BY store");
+
+      // Changed, in the editor: the keys ask and type nothing; Cancel returns to the editor.
+      await editor.click();
+      await page.keyboard.press("End");
+      await page.keyboard.insertText(" -- by store");
+      await page.keyboard.press("Alt+Shift+N");
+      const dialog = page.getByRole("dialog", { name: "Start a new query?" });
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await expect(dialog).toBeHidden();
+      expect(await inEditor(page)).toBe(true);
+      await expect(page.locator(".cm-content")).toContainText("-- by store");
+      await expect(page.locator(".cm-content")).not.toContainText("˜");
+
+      // Again, and Discard changes: empty, at the new query's address, the focus in the editor.
+      await page.keyboard.press("Alt+Shift+N");
+      await dialog.getByRole("button", { name: "Discard changes" }).click();
+      await expect(page).toHaveURL(/\/queries$/u);
+      await expect(page.locator(".cm-content")).toHaveText("");
+      expect(await inEditor(page)).toBe(true);
+      expect(sent).toEqual([]);
     });
 
     test("Escape closes the completion list first and cancels only on the next press", async ({
@@ -558,8 +608,12 @@ for (const theme of ["light", "dark"] as const) {
         .getByRole("button", { name: "Delete" })
         .click();
       await expect(
-        page.getByRole("status").filter({ hasText: "Deleted Broken on purpose." }),
-      ).toBeFocused();
+        page
+          .getByRole("status")
+          .filter({ hasText: "Deleted Broken on purpose. A new, empty query is open." }),
+      ).toBeVisible();
+      await expect(page.locator(".cm-content")).toHaveText("");
+      expect(await inEditor(page)).toBe(true);
 
       // The run again from Recent, with its result.
       await recent.getByRole("link").first().click();

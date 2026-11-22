@@ -1,6 +1,6 @@
 /**
- * The editor bar of the Queries screen: the query's name, Save…, Delete…, Format, the environment
- * and Run, which becomes Cancel while the run is active.
+ * The editor bar of the Queries screen: the query's name, New query, Save…, Delete…, Format, the
+ * environment and Run, which becomes Cancel while the run is active.
  *
  * @packageDocumentation
  */
@@ -13,6 +13,7 @@ import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { PendingButton } from "../shell/PendingButton";
 import { shortcutLabel } from "../shell/shortcut";
 import { VisibleText } from "../shell/VisibleText";
+import { NEW_QUERY_KEYS } from "./newQueryKeys";
 import type { QueryRun } from "./useQueryRun";
 import "./queryStrings";
 
@@ -36,6 +37,8 @@ export interface QueryToolbarProps {
   readonly query: QueryRun;
   /** Run's button, which Try again focuses. */
   readonly runButton: Ref<HTMLButtonElement>;
+  /** Starts a new query, asking first when the editor holds changes that are not saved. */
+  readonly onNew: () => void;
   /** Opens Save…. */
   readonly onSave: () => void;
   /** Opens Delete…. */
@@ -62,6 +65,7 @@ export interface QueryToolbarProps {
  * @param props.allowed - Whether a run may be sent there.
  * @param props.query - The run.
  * @param props.runButton - Run's button.
+ * @param props.onNew - Starts a new query.
  * @param props.onSave - Opens Save….
  * @param props.onDelete - Opens Delete….
  * @param props.onFormat - Formats the SQL.
@@ -79,6 +83,7 @@ export function QueryToolbar({
   allowed,
   query,
   runButton,
+  onNew,
   onSave,
   onDelete,
   onFormat,
@@ -93,6 +98,10 @@ export function QueryToolbar({
       <p className="queries-name">
         <VisibleText text={name} />
       </p>
+      {/* A native button: React Aria's Button drops aria-keyshortcuts. */}
+      <button type="button" className="button" aria-keyshortcuts={NEW_QUERY_KEYS} onClick={onNew}>
+        {t("queries.new.open")}
+      </button>
       <Button className="button" isDisabled={readOnly} onPress={onSave}>
         {t("queries.save.open")}
       </Button>

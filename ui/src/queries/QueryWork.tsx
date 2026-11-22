@@ -1,7 +1,7 @@
 /**
  * The work of the Queries screen: the library of saved and recent queries beside the editor bar
  * ({@link QueryToolbar}), the saved query's facts, the SQL editor, and the run under it
- * ({@link RunResult}).
+ * ({@link RunResult}). New query (and its keys, {@link isNewQueryKey}) clears them all.
  *
  * @packageDocumentation
  */
@@ -12,6 +12,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useRef,
   useState,
 } from "react";
@@ -24,6 +25,7 @@ import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { Loaded } from "../shell/Loaded";
 import { useMe } from "../shell/me";
+import { overlayOpen } from "../shell/overlay";
 import { Page } from "../shell/Page";
 import { useFolded } from "../shell/useFolded";
 import { useResource } from "../shell/useResource";
@@ -33,9 +35,11 @@ import { catalogCache } from "./editor/catalog";
 import type { SqlEditorHandle } from "./editor/SqlEditor";
 import { Library } from "./Library";
 import { LibraryFold } from "./LibraryFold";
+import { NewQueryDialog } from "./NewQueryDialog";
+import { isNewQueryKey } from "./newQueryKeys";
 import { savedPath } from "./paths";
 import { endedMessage } from "./QueryError";
-import { QueryNote } from "./QueryNote";
+import { QueryNote, type QueryNoteState } from "./QueryNote";
 import { QueryToolbar } from "./QueryToolbar";
 import { readEnvironment, readFilter, writeEnvironment } from "./remember";
 import { RunResult } from "./RunResult";
@@ -89,7 +93,11 @@ interface WorkProps {
 /**
  * The toolbar, the editor and the run, once the environments are known. An address that names
  * no run (a new query, a saved one) shows no run: entering it stops following the old one
- * (without a cancel) and keeps the editor's text.
+ * (without a cancel) and keeps the editor's text. New query (the button, or Alt Shift N anywhere
+ * on the screen but in a dialog, a menu or a popover) and a delete clear the editor too; New
+ * query asks first when the editor holds text that is neither empty nor kept (the opened saved
+ * query's, or the run's at a run's address). A run that is active goes on, as when the page is
+ * left: Recent lists it.
  *
  * @param props - The environments, the address, the fold and the library's reloads.
  * @param props.environments - The environments where the person may run a query.
@@ -124,7 +132,10 @@ function Work({
   // load; null when it worked. The next edit takes the line away.
   const [formatLine, setFormatLine] = useState<"unreadable" | "unloaded" | null>(null);
   const [remembered, setRemembered] = useState(readEnvironment);
-  const [dialog, setDialog] = useState<"save" | "delete" | null>(null);
+  const [dialog, setDialog] = useState<"save" | "delete" | "new" | null>(null);
+  // Raised to move the focus into the editor after the commit that cleared it, once a dialog that
+  // closed with it is gone (React Aria gives the focus back only while nothing else holds it).
+  const [focusEditor, setFocusEditor] = useState(0);
   // A choice holds for the address it was made at; another address brings its own.
   const at = address === null ? "" : `${address.kind}/${address.environment}/${address.id}`;
   const [picked, setPicked] = useState<{ at: string; environment: string } | null>(null);
@@ -174,6 +185,12 @@ function Work({
       focusRunAt.current = null;
     }
   }, [savedFailure]);
+
+  useEffect(() => {
+    if (focusEditor > 0) {
+      editor.current?.focus();
+    }
+  }, [focusEditor]);
 
   // Recent lists a run once its submit is taken, and its new state once it ends.
   const { listed } = query;
@@ -228,6 +245,45 @@ function Work({
   const close = (): void => {
     setDialog(null);
   };
+  // Text the person would lose: neither empty nor what a saved query or the run keeps.
+  const kept = [opened?.sql, runAddress === null ? undefined : query.run?.sql];
+  const unsaved = sql.trim() !== "" && !kept.includes(sql);
+  // A new, empty query at `/queries`: a push from another address, so Back opens it again; a
+  // replace at `/queries` itself. The note is said in the status line; the focus goes to the
+  // editor.
+  const startNew = (note: QueryNoteState): void => {
+    close();
+    setSql("");
+    setFormatLine(null);
+    query.reset();
+    setFocusEditor((count) => count + 1);
+    void navigate("/queries", { replace: address === null, state: { keepFocus: true, note } });
+  };
+  // Whether the question was asked from the editor: React Aria cannot give the focus back into
+  // the editor's shadow root, so Cancel does.
+  const askedInEditor = useRef(false);
+  const askNew = (): void => {
+    if (unsaved) {
+      askedInEditor.current = document.activeElement?.closest(".queries-editor") != null;
+      setDialog("new");
+    } else {
+      startNew({ kind: "new" });
+    }
+  };
+  const onNewKey = useEffectEvent(askNew);
+  useEffect(() => {
+    const pressed = (event: KeyboardEvent): void => {
+      // Before the editor sees it, so the key types nothing there; never behind an overlay.
+      if (isNewQueryKey(event) && !overlayOpen()) {
+        event.preventDefault();
+        onNewKey();
+      }
+    };
+    window.addEventListener("keydown", pressed, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", pressed, { capture: true });
+    };
+  }, []);
   return (
     <div className="queries-work">
       <QueryToolbar
@@ -240,6 +296,7 @@ function Work({
         allowed={allowed}
         query={query}
         runButton={runButton}
+        onNew={askNew}
         onSave={() => {
           setDialog("save");
         }}
@@ -265,7 +322,7 @@ function Work({
       {!allowed && (
         <p className="queries-saved-facts">{t("queries.notAllowed", { environment })}</p>
       )}
-      {note !== null && <QueryNote note={note} />}
+      <QueryNote note={note} />
       {savedError !== null && (
         // The server's cause, then the next step: Try again when another read may help, and a
         // new query in every case.
@@ -348,14 +405,24 @@ function Work({
         <DeleteSavedDialog
           saved={opened}
           onDone={() => {
-            close();
             onSavedChange();
-            // The SQL stays in the editor; the note takes the focus from the gone Delete….
-            void navigate("/queries", {
-              state: { keepFocus: true, note: { kind: "deleted", name: opened.name } },
-            });
+            // A new, empty query; the focus goes from the gone Delete… to the editor.
+            startNew({ kind: "deleted", name: opened.name });
           }}
           onCancel={close}
+        />
+      )}
+      {dialog === "new" && (
+        <NewQueryDialog
+          onConfirm={() => {
+            startNew({ kind: "new" });
+          }}
+          onCancel={() => {
+            close();
+            if (askedInEditor.current) {
+              setFocusEditor((count) => count + 1);
+            }
+          }}
         />
       )}
     </div>
