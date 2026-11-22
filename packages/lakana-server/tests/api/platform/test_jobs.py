@@ -577,3 +577,28 @@ def test_a_job_without_notify_has_notify_null(client: TestClient) -> None:
     _deploy_jobs(client, notifying=True)
     body = client.get(f"{_ENV}/jobs/daily", headers=AUTH_HEADER).json()
     assert "notify" in body and body["notify"] is None
+
+
+def test_a_waiting_job_shows_since_when_and_how_but_never_who_asked(client: TestClient) -> None:
+    """A reader sees the waiting start's time and trigger, as the admin does, and no requester.
+
+    The list and the job both carry it (#786); a job that does not wait carries nulls.
+    """
+    _deploy_jobs(client)
+    run = client.post(f"{_ENV}/jobs/manual/runs", headers=AUTH_HEADER, json=_BODY).json()["run"]
+    waiting = client.post(f"{_ENV}/jobs/daily/runs", headers=AUTH_HEADER, json=_BODY).json()
+    asked = waiting["waiting"]["requested_at"]
+    reader = _reader(client)
+    for header in (AUTH_HEADER, reader):
+        listed = {j["name"]: j for j in client.get(f"{_ENV}/jobs", headers=header).json()}
+        shown = client.get(f"{_ENV}/jobs/daily", headers=header).json()
+        for daily in (listed["daily"], shown):
+            assert daily["state"] == "waiting"
+            assert daily["waits_for_run_id"] == run["id"]
+            assert daily["waiting_since"] == asked
+            assert daily["waiting_trigger"] == "manual"
+            assert not {"requested_by", "waiting_requested_by"} & set(daily)
+        assert (listed["manual"]["waiting_since"], listed["manual"]["waiting_trigger"]) == (
+            None,
+            None,
+        )

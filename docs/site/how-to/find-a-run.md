@@ -74,7 +74,11 @@ included, in its place, which adds no step for Back; Back to an address without 
 environments. A run you started
 from the command line for a selection of assets says `selection` and its patterns, with
 `+upstream` and `+downstream`; a resume says which run it continues and links to it. The tab starts no run: start a selection with
-`lakana runs start`. The list is read again every 30 seconds until you show more; then **Read
+`lakana runs start`. Above the runs, a start of a job that waits for the run holding its project
+shows as **Waiting**, with when it was requested and a link to the run it waits for; it opens the
+job's page, and it shows under **All** and **Queued or running**. It is not a run yet, so it has no
+page of its own: once the run it waits for ends, the scheduler starts it and the run takes its
+place. The list is read again every 30 seconds until you show more; then **Read
 again** starts over from the first page. **See every running run**, under **Running now** when
 more run than it shows, opens the tab filtered to queued and running runs.
 

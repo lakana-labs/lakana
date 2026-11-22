@@ -295,3 +295,13 @@ def test_job_reads_notify_commit_and_source_link() -> None:
 def test_an_older_server_gives_none_for_them() -> None:
     job = _jobs(200, [_JOB]).list("dev")[0]
     assert (job.commit_sha, job.source_url, job.notify) == (None, None, None)
+
+
+def test_a_waiting_job_reads_since_when_and_how_and_an_older_server_reads_none() -> None:
+    """The waiting start's first request time and trigger, `None` from a server without them."""
+    body = {**_JOB, "waiting_since": "2026-10-14T12:00:01+00:00", "waiting_trigger": "schedule"}
+    (job,) = _jobs(200, [body]).list("dev")
+    assert job.waiting_since is not None and job.waiting_since.minute == 0
+    assert job.waiting_trigger == "schedule"
+    (older,) = _jobs(200, [_JOB]).list("dev")
+    assert (older.waiting_since, older.waiting_trigger) == (None, None)

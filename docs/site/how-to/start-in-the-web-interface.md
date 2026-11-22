@@ -106,7 +106,8 @@ Someone who may not run queries anywhere yet sees why, and the command to use me
 **Jobs** in the menu shows first what runs now and what failed, then every job. **Running now**
 lists the queued and running runs with how far each has come, and **Cancel**; **Failed, needs
 attention** lists the same failed runs as Home, each with why it failed, **Resume** and **Logs**;
-**All jobs** lists each job with its schedule, its last and next run, **Run** and **Pause** or
+**All jobs** lists each job with its schedule, its last and next run (**Waiting** while a start
+of it waits for another run of its project; point at it to see which), **Run** and **Pause** or
 **Resume**. Each row names its environment; **Environment** shows one of them instead of all and
 is remembered, and **Search jobs** narrows the three lists. A row opens its run or its job
 ([Find a run](find-a-run.md#find-what-failed-in-every-environment),

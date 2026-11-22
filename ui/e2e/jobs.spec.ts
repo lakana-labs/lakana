@@ -23,8 +23,11 @@ import {
   SELECTION_PATTERNS,
   STARTED_ID,
   stubJobs,
+  stubWaitingJob,
   TIMED_OUT,
   TIMEOUT_CAUSE,
+  WAITING_JOB,
+  WAITING_MESSAGE,
 } from "./jobs";
 import { consoleErrors, violations } from "./session";
 
@@ -1212,6 +1215,66 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page).toHaveURL(new RegExp(`${runPage(FAILED_ID)}$`));
       await expect(page.getByRole("heading", { level: 1, name: /^Run of / })).toBeVisible();
       await expect(page.getByText(TIMEOUT_CAUSE)).toBeVisible();
+    });
+  });
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test.describe(`a job whose start waits, ${theme}`, () => {
+    test.beforeEach(async ({ page }) => {
+      await stubJobs(page);
+      await stubWaitingJob(page);
+      await page.addInitScript(
+        ([key, value]) => {
+          window.localStorage.setItem(key ?? "", value ?? "");
+        },
+        [KEY, JSON.stringify({ theme, language: "en" })],
+      );
+    });
+
+    test("shows Waiting in All jobs, on its page and in Runs, with why on hover and focus", async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const errors = consoleErrors(page);
+      await openList(page);
+      const row = page
+        .getByRole("region", { name: "Every job listed" })
+        .getByRole("row")
+        .filter({ has: page.getByRole("link", { name: WAITING_JOB }) });
+      const pill = row.locator("[data-tip]");
+      await expect(pill).toContainText("Waiting");
+      await expect(row).toContainText("Succeeded");
+      expect(await violations(page), "the list").toEqual([]);
+
+      const tip = page.locator(".truncation-tip");
+      await pill.hover();
+      await expect(tip).toHaveText(WAITING_MESSAGE);
+      await page.mouse.move(0, 0);
+      await expect(tip).toBeHidden();
+      await pill.focus();
+      await expect(tip).toHaveText(WAITING_MESSAGE);
+      await page.keyboard.press("Escape");
+      await expect(tip).toBeHidden();
+
+      // A click on the pill opens the job, as the rest of the row does.
+      await pill.click();
+      await expect(page.getByRole("heading", { level: 1, name: WAITING_JOB })).toBeVisible();
+      const facts = page.locator(".jobs-waiting");
+      await expect(facts).toContainText("Waiting");
+      await expect(facts).toContainText(WAITING_MESSAGE);
+      await expect(facts).toContainText("By hand");
+      await expect(facts.getByRole("link", { name: "Open the run it waits for" })).toBeVisible();
+      expect(await violations(page), "the job's page").toEqual([]);
+
+      await page.goto("/jobs/runs?period=all");
+      const runs = page.getByRole("region", { name: "Runs listed" });
+      const first = runs.getByRole("row").nth(1);
+      await expect(first.getByRole("link", { name: WAITING_JOB })).toBeVisible();
+      await expect(first).toContainText("Waiting");
+      await expect(first.getByRole("link", { name: /^waits for run / })).toBeVisible();
+      expect(await violations(page), "the Runs tab").toEqual([]);
+      expect(errors).toEqual([]);
     });
   });
 }

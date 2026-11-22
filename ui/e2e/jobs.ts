@@ -45,6 +45,12 @@ export const FAILED_ID = FAILED_RUN_ID;
 /** The running run, the newest of the job's runs, so the job page selects it. */
 export const RUNNING_ID = "1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9";
 
+/** A job of {@link REPOSITORY} whose start waits for {@link RUNNING_ID} (`stubWaitingJob`). */
+export const WAITING_JOB = "hourly_stock";
+
+/** What {@link WAITING_JOB}'s start waits for, as the server says it. */
+export const WAITING_MESSAGE = `A start of this job waits for run ${RUNNING_ID} of this project to finish; it starts then.`;
+
 /** The run Run now queues. */
 export const STARTED_ID = "2c3d4e5f-6071-4829-93a4-b5c6d7e8f9a0";
 
@@ -213,6 +219,7 @@ export const JOBS_STUBBED = [
   `${DEV_AT}/runs/${ADHOC_FAILED_ID}`,
   `${DEV_AT}/runs/${DEV_RUNNING_ID}`,
   JOB_PATH,
+  `${AT}/jobs/${WAITING_JOB}`,
   `${JOB_PATH}/runs`,
   `${JOB_PATH}/pause`,
   `${JOB_PATH}/resume`,
@@ -250,6 +257,8 @@ function job(paused: boolean): JobOut {
     last_run_id: RUNNING_ID,
     last_run_status: "running",
     last_run_at: "2026-11-17T09:00:00Z",
+    waiting_since: null,
+    waiting_trigger: null,
     triggers: [
       {
         kind: "schedule",
@@ -823,6 +832,37 @@ function runAnswer(route: Route, state: JobsState): Promise<void> {
     return route.fulfill({ json: logPiece(decodeURIComponent(log[1] ?? ""), offset) });
   }
   return route.fulfill({ json: found });
+}
+
+/**
+ * Adds to {@link stubJobs} a second job of the environment whose start waits for the running run
+ * of {@link JOB}, in the jobs list and on its own page (#786).
+ *
+ * @param page - The page.
+ */
+export async function stubWaitingJob(page: Page): Promise<void> {
+  const waiting: JobOut = {
+    ...job(false),
+    name: WAITING_JOB,
+    select: ["silver.stock.*"],
+    state: "waiting",
+    waiting_for: { code: "job_waits", message: WAITING_MESSAGE },
+    waits_for_run_id: RUNNING_ID,
+    last_run_id: FAILED_ID,
+    last_run_status: "succeeded",
+    last_run_at: "2026-11-17T08:00:00Z",
+    waiting_since: "2026-11-17T09:12:00Z",
+    waiting_trigger: "manual",
+    notify: null,
+  };
+  await page.route(
+    (url) => url.pathname === `${AT}/jobs`,
+    (route) => route.fulfill({ json: [job(false), waiting] }),
+  );
+  await page.route(
+    (url) => url.pathname === `${AT}/jobs/${WAITING_JOB}`,
+    (route) => route.fulfill({ json: waiting }),
+  );
 }
 
 /**

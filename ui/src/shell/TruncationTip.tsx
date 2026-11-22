@@ -5,6 +5,11 @@
  * it. A cut name that is not a link (a dropped table, an upload) is made a Tab stop while it is
  * cut, so the keyboard reaches its tooltip too.
  *
+ * The same tooltip shows the sentence of an element that carries one in `data-tip`, such as what
+ * a waiting job waits for on its "Waiting" pill, whether or not anything is cut. Such an element
+ * is made a Tab stop here; it says the sentence to a screen reader itself, since the tooltip is
+ * hidden from screen readers.
+ *
  * @packageDocumentation
  */
 import { type JSX, useEffect, useRef, useState } from "react";
@@ -12,14 +17,24 @@ import { type JSX, useEffect, useRef, useState } from "react";
 /** What is cut with an ellipsis, and so gets the tooltip when it does not fit. */
 const TRUNCATED = ".list .row-name, .truncate";
 
+/** What carries a sentence of its own to show, in its `data-tip`. */
+const TIPPED = "[data-tip]";
+
 /** The mark on a name this file made a Tab stop, so it only ever takes back its own tabindex. */
 const OWN_STOP = "data-cut-stop";
 
 /**
  * Makes every cut name that is not focusable of its own a Tab stop, and takes the stop back from
- * one that fits again. A name with a tabindex of its own, or a link, is left alone.
+ * one that fits again. A name with a tabindex of its own, or a link, is left alone. An element
+ * with a `data-tip` is made a Tab stop for good.
  */
 function markCutStops(): void {
+  // An element with a sentence of its own is always a Tab stop, so the keyboard reaches it.
+  for (const element of document.querySelectorAll<HTMLElement>(TIPPED)) {
+    if (!element.hasAttribute("tabindex") && !(element instanceof HTMLAnchorElement)) {
+      element.setAttribute("tabindex", "0");
+    }
+  }
   for (const element of document.querySelectorAll<HTMLElement>(TRUNCATED)) {
     const ours = element.hasAttribute(OWN_STOP);
     if (!ours && (element.hasAttribute("tabindex") || element instanceof HTMLAnchorElement)) {
@@ -40,7 +55,7 @@ function markCutStops(): void {
 
 /** Where the tooltip shows, and what it says. */
 interface Tip {
-  /** The cut element's whole text. */
+  /** The cut element's whole text, or the sentence of its `data-tip`. */
   readonly text: string;
   /** The top of the tooltip, in the window, in pixels: right under the element, with no gap the pointer would have to cross. */
   readonly top: number;
@@ -49,20 +64,35 @@ interface Tip {
 }
 
 /**
- * The element cut with an ellipsis that an event happened in, if its text does not fit.
+ * The element an event happened in that has a tooltip: one with a sentence in `data-tip`, or one
+ * cut with an ellipsis whose text does not fit.
  *
  * @param target - Where the event happened.
- * @returns The element, or null when there is none or its text fits.
+ * @returns The element, or null when there is none, its `data-tip` is empty or its text fits.
  */
 function cutElement(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) {
     return null;
+  }
+  const tipped = target.closest(TIPPED);
+  if (tipped instanceof HTMLElement && tipped.dataset["tip"] !== "") {
+    return tipped;
   }
   const found = target.closest(TRUNCATED);
   if (!(found instanceof HTMLElement) || found.scrollWidth <= found.clientWidth) {
     return null;
   }
   return found;
+}
+
+/**
+ * What the tooltip of an element says.
+ *
+ * @param element - An element {@link cutElement} found.
+ * @returns Its `data-tip`, or its whole text.
+ */
+function tipText(element: HTMLElement): string {
+  return element.dataset["tip"] ?? element.textContent;
 }
 
 /**
@@ -101,7 +131,7 @@ export function TruncationTip(): JSX.Element | null {
       }
       shown.current = element;
       const box = element.getBoundingClientRect();
-      setTip({ text: element.textContent, top: box.bottom, left: box.left });
+      setTip({ text: tipText(element), top: box.bottom, left: box.left });
     };
     const hide = (): void => {
       if (shown.current !== null) {

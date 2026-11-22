@@ -180,4 +180,55 @@ describe("JobFacts", () => {
       "/jobs/prod/runs/r1",
     );
   });
+
+  it("marks a waiting start with the Waiting pill and says since when and how (#786)", () => {
+    renderFacts(
+      aJob({
+        state: "waiting",
+        waiting_for: { code: "job_waits", message: "A start waits for run r1." },
+        waits_for_run_id: "r1",
+        waiting_since: "2026-11-17T09:12:00Z",
+        waiting_trigger: "manual",
+      }),
+    );
+
+    const waiting = document.querySelector(".jobs-waiting") as HTMLElement;
+    expect(within(waiting).getByText("Waiting").closest(".pill")).not.toBeNull();
+    const at = new Intl.DateTimeFormat(i18next.language, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date("2026-11-17T09:12:00Z"));
+    expect(waiting).toHaveTextContent(`Requested ${at} · By hand`);
+    // On the page the sentence is in plain sight: no tooltip of its own.
+    expect(waiting.querySelector("[data-tip]")).toBeNull();
+  });
+
+  it("shows the pill once the run has ended and the scheduler begins it, without a link", () => {
+    renderFacts(
+      aJob({
+        state: "waiting to start",
+        waiting_for: { code: "job_starts_soon", message: "It begins within a few seconds." },
+        waiting_since: null,
+        waiting_trigger: null,
+      }),
+    );
+
+    const waiting = document.querySelector(".jobs-waiting") as HTMLElement;
+    expect(within(waiting).getByText("Waiting")).toBeInTheDocument();
+    expect(waiting).not.toHaveTextContent("Requested");
+    expect(within(waiting).queryByRole("link")).toBeNull();
+  });
+
+  it("has no pill when the schedule cannot start, only the reason", () => {
+    renderFacts(
+      aJob({
+        state: "no run principal",
+        waiting_for: { code: "no_run_principal", message: "No run principal is bound." },
+      }),
+    );
+
+    const reason = document.querySelector(".jobs-waiting") as HTMLElement;
+    expect(reason).toHaveTextContent("No run principal is bound.");
+    expect(within(reason).queryByText("Waiting")).toBeNull();
+  });
 });

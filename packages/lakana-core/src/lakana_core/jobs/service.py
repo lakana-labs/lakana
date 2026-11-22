@@ -258,6 +258,12 @@ class JobView:
         What started it.
     last_run_at
         When it was created.
+    waiting_since
+        For a waiting start (``waiting`` or ``waiting to start``), when it was first requested;
+        `None` otherwise, or when the stored time cannot be read. Who asked is never shown.
+    waiting_trigger
+        For a waiting start, what asked for it (``schedule``, ``api``, ``manual``, ``deploy``);
+        `None` otherwise.
     on_deploy
         Whether the job starts after each deploy that changes the project version here.
     notify
@@ -287,6 +293,8 @@ class JobView:
     last_run_status: str | None
     last_run_trigger: str | None
     last_run_at: datetime | None
+    waiting_since: datetime | None = None
+    waiting_trigger: str | None = None
     on_deploy: bool = False
     notify: JobNotify | None = None
     commit_sha: str = ""
@@ -411,6 +419,23 @@ def _requested_at(pending: Mapping[str, Any]) -> datetime:
         park or a list into an error.
     """
     return _readable(pending.get("requested_at")) or datetime.now(UTC)
+
+
+def _known_trigger(value: object) -> str | None:
+    """Read the trigger of a stored waiting start for a view.
+
+    Parameters
+    ----------
+    value
+        The stored trigger.
+
+    Returns
+    -------
+    str or None
+        One of the `RunTrigger` values, or `None` for anything else, so that a damaged row
+        cannot turn a list into an error.
+    """
+    return value if isinstance(value, str) and value in {t.value for t in RunTrigger} else None
 
 
 def _readable(text: object) -> datetime | None:
@@ -1472,6 +1497,8 @@ class JobService:
             last_run_status=last[1].value if last else None,
             last_run_trigger=last[2].value if last and last[2] is not None else None,
             last_run_at=last[3] if last else None,
+            waiting_since=_readable(pending.get("requested_at")) if pending is not None else None,
+            waiting_trigger=_known_trigger(pending.get("trigger")) if pending is not None else None,
             on_deploy=job_on_deploy(entry),
             notify=job_notify({"jobs": {job: entry}}, job),
             commit_sha=version.commit_sha,
