@@ -7745,3 +7745,163 @@ class StepUpOut(BaseModel):
     """
 
     step_up_until: datetime
+
+
+class CliApprovalIn(BaseModel):
+    """Request body of `POST /api/v1/sign-in/cli/approvals`: the confirmation of `lakana login`.
+
+    Parameters
+    ----------
+    port
+        The port `lakana login` listens on at ``127.0.0.1``, 1024 to 65535.
+    code_challenge
+        The S256 challenge of its PKCE verifier: 43 characters of ``A-Z a-z 0-9 - _``.
+    host
+        Its computer's name: 1 to 64 characters of ``A-Z a-z 0-9 . _ -`` (422 otherwise), shown
+        in the confirmation and kept in the token's name.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    port: int = Field(ge=1024, le=65535)
+    code_challenge: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+    host: str = Field(max_length=256)
+
+
+class CliApprovalOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/cli/approvals`.
+
+    Parameters
+    ----------
+    code
+        The one-time code for `lakana login`: it works once, for 2 minutes, and only with the
+        PKCE verifier of the challenge it was approved for.
+    port
+        The port to send the browser back to, at ``http://127.0.0.1:<port>/``.
+    """
+
+    code: str
+    port: int
+
+
+class CliTokenIn(BaseModel):
+    """Request body of `POST /api/v1/auth/cli/token`: a loopback code and its verifier.
+
+    Parameters
+    ----------
+    code
+        The code the browser brought to `lakana login`'s port.
+    code_verifier
+        The PKCE verifier, 43 to 128 characters.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(max_length=256)
+    code_verifier: str = Field(min_length=43, max_length=128)
+
+
+class CliDeviceIn(BaseModel):
+    """Request body of `POST /api/v1/auth/cli/device`.
+
+    Parameters
+    ----------
+    host
+        The command line's computer name: 1 to 64 characters of ``A-Z a-z 0-9 . _ -`` (422
+        otherwise).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(max_length=256)
+
+
+class CliDeviceOut(BaseModel):
+    """Response body of `POST /api/v1/auth/cli/device` (the shapes of RFC 8628).
+
+    Parameters
+    ----------
+    device_code
+        What the command line polls with; keep it to itself.
+    user_code
+        What the person types in the browser, as ``XXXX-XXXX``.
+    verification_url
+        Where the person types it: ``<LAKANA_UI__PUBLIC_URL>/sign-in/device``.
+    expires_in
+        Seconds the codes work: 600.
+    interval
+        Seconds to wait between two polls: 5.
+    """
+
+    device_code: str
+    user_code: str
+    verification_url: str
+    expires_in: int
+    interval: int
+
+
+class CliUserCodeIn(BaseModel):
+    """Request body naming a device grant by the code a person typed.
+
+    Parameters
+    ----------
+    user_code
+        The code, in any letter case, with or without its dash.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_code: str = Field(max_length=32)
+
+
+class CliDeviceHostOut(BaseModel):
+    """Response body of `POST /api/v1/sign-in/cli/device/describe`.
+
+    Parameters
+    ----------
+    host
+        The name the command line gave its computer, for the confirmation.
+    requested_from
+        The client address that started the sign-in, as the server saw it, so the person can
+        tell their own request from someone else's.
+    requested_at
+        When it was started.
+    age_seconds
+        How long ago it was started, by the server's clock, never below 0: show this, not a
+        difference with the browser's clock.
+    """
+
+    host: str
+    requested_from: str
+    requested_at: datetime
+    age_seconds: int
+
+
+class CliDevicePollIn(BaseModel):
+    """Request body of `POST /api/v1/auth/cli/device/token`.
+
+    Parameters
+    ----------
+    device_code
+        The device code `POST /api/v1/auth/cli/device` answered.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    device_code: str = Field(max_length=256)
+
+
+class CliDevicePollOut(BaseModel):
+    """Response body of `POST /api/v1/auth/cli/device/token`.
+
+    Parameters
+    ----------
+    state
+        ``pending`` while nobody decided, ``approved`` with the token, ``denied``, or
+        ``expired`` (past 10 minutes, or once the token was handed out).
+    token
+        The new token, only with ``approved``: shown this once.
+    """
+
+    state: Literal["pending", "approved", "denied", "expired"]
+    token: TokenIssueOut | None

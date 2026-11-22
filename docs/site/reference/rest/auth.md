@@ -40,3 +40,98 @@ Answer fields: `CiTokenOut`
 | `kinds` | list of text | yes |  |
 | `sha` | text or null | yes |  |
 | `rule_id` | text (uuid) | yes |  |
+
+## `POST /api/v1/auth/cli/token`
+
+Exchange the one-time code of `lakana login` and its PKCE verifier for the new token
+
+Needs no credential: the code and the verifier are the proof. The code is used up by the first exchange, right or wrong (400, one sentence for an unknown, used, expired or wrong one, or when the browser session that confirmed it has ended; each but the unknown one is audited as `SIGN_IN_CLI_REFUSED`). The token is the confirming person's, named `lakana login on <host>`, and works for 90 days. 429 past the rate.
+
+Request body (application/json, required): `CliTokenIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `code` | text | yes |  |
+| `code_verifier` | text | yes |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `TokenIssueOut` |
+| `400` | The client closed the connection before the request body arrived in full. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `413` | The request body is larger than the server accepts. | `ErrorOut` |
+| `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `TokenIssueOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key_id` | text | yes |  |
+| `name` | text | yes |  |
+| `token` | text | yes |  |
+
+## `POST /api/v1/auth/cli/device`
+
+Start a sign-in of `lakana login --device`, for a computer without a browser
+
+Needs no credential. `host` is 1 to 64 characters of `A-Z a-z 0-9 . _ -` (422 with a sentence otherwise). Show `user_code` and `verification_url` to the person, who confirms in a browser where they are signed in; poll `POST /api/v1/auth/cli/device/token` every `interval` seconds. The codes work for 10 minutes. 429 past the rate.
+
+Request body (application/json, required): `CliDeviceIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `host` | text | yes |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `CliDeviceOut` |
+| `400` | The client closed the connection before the request body arrived in full. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `413` | The request body is larger than the server accepts. | `ErrorOut` |
+| `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `CliDeviceOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device_code` | text | yes |  |
+| `user_code` | text | yes |  |
+| `verification_url` | text | yes |  |
+| `expires_in` | whole number | yes |  |
+| `interval` | whole number | yes |  |
+
+## `POST /api/v1/auth/cli/device/token`
+
+Ask whether a sign-in of `lakana login --device` was approved
+
+Needs no credential: the device code is the proof. Answers ``pending`` until someone decides, then ``approved`` with the token once, or ``denied``; ``expired`` after 10 minutes and after the token was handed out. 429 with ``error: slow_down`` when asked again sooner than 5 seconds; 400 for an unknown device code.
+
+Request body (application/json, required): `CliDevicePollIn`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device_code` | text | yes |  |
+
+Answers:
+
+| Status | Meaning | Body |
+|---|---|---|
+| `200` | Successful Response | `CliDevicePollOut` |
+| `400` | The client closed the connection before the request body arrived in full. | `ErrorOut` |
+| `409` | The request conflicts with the current state; the message says what to change. | `ErrorOut` |
+| `413` | The request body is larger than the server accepts. | `ErrorOut` |
+| `429` | Too many attempts from this address; ask again after the time in `Retry-After`. | `ErrorOut` |
+| `422` | Validation Error | `HTTPValidationError` |
+
+Answer fields: `CliDevicePollOut`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `state` | one of `pending`, `approved`, `denied`, `expired` | yes |  |
+| `token` | `TokenIssueOut` or null | yes |  |

@@ -10,6 +10,8 @@ import { useTranslation } from "react-i18next";
 export interface StepProps {
   /** The step's name: its heading and the first part of the document title. */
   readonly title: string;
+  /** What the heading shows instead of the title, such as a question with names in it. */
+  readonly heading?: ReactNode;
   /** The step's content under the heading. */
   readonly children: ReactNode;
 }
@@ -20,21 +22,22 @@ export interface StepProps {
  *
  * @param props - The title and the content.
  * @param props.title - The step's name.
+ * @param props.heading - What the heading shows instead of the title.
  * @param props.children - The content under the heading.
  * @returns The step.
  */
-export function Step({ title, children }: StepProps): JSX.Element {
+export function Step({ title, heading, children }: StepProps): JSX.Element {
   const { t } = useTranslation();
-  const heading = useRef<HTMLHeadingElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     document.title = t("shell.documentTitle", { page: title });
-    heading.current?.focus();
+    headingRef.current?.focus();
   }, [t, title]);
   return (
     <main className="step">
       <p className="step-product">{t("shell.product")}</p>
-      <h1 className="page-title" ref={heading} tabIndex={-1}>
-        {title}
+      <h1 className="page-title" ref={headingRef} tabIndex={-1}>
+        {heading ?? title}
       </h1>
       {children}
     </main>

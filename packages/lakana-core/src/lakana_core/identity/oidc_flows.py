@@ -43,6 +43,9 @@ PURGE_AFTER = timedelta(days=1)
 MAX_RETURN_TO = 2048
 """The longest app path kept."""
 
+CLI_CONFIRMATIONS: frozenset[str] = frozenset({"/sign-in/cli", "/sign-in/device"})
+"""The sign-in pages a sign-in may come back to: `lakana login` waits on them (#32, PR 3)."""
+
 FlowPurpose = Literal["sign_in", "invite", "recovery", "link", "step_up"]
 """What a flow is for: signing in; using an invite or a recovery link through the provider;
 linking a signed-in person (their profile); confirming a linked person's session (step-up)."""
@@ -206,10 +209,13 @@ def safe_return_to(value: str | None) -> str:
     str
         `value` when it starts with exactly one ``/``, has no ``//`` or backslash anywhere (also
         percent-encoded), no control or format character, is at most `MAX_RETURN_TO`
-        characters and is not a sign-in page; ``/`` otherwise.
+        characters and is not a sign-in page, except `lakana login`'s two confirmations
+        (`CLI_CONFIRMATIONS`, spelt exactly, with their query and no fragment); ``/`` otherwise.
     """
     if not value or len(value) > MAX_RETURN_TO or not value.startswith("/"):
         return "/"
+    path, _, _ = value.partition("?")
+    confirmation = path in CLI_CONFIRMATIONS
     spellings = [value]
     for _ in range(3):
         spellings.append(unquote(spellings[-1]))
@@ -218,7 +224,8 @@ def safe_return_to(value: str | None) -> str:
             "//" in spelling
             or "\\" in spelling
             or any(unicodedata.category(char) in ("Cc", "Cf") for char in spelling)
-            or spelling.lower().startswith("/sign-in")
+            or ("#" in spelling and confirmation)
+            or (spelling.lower().startswith("/sign-in") and not confirmation)
         ):
             return "/"
     return value

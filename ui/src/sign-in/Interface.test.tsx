@@ -5,6 +5,14 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { Interface, type RouterFactory } from "./Interface";
 
+// The confirmation pages of `lakana login` load on demand. A slow runner (CI) loads them after the
+// person's rights have arrived and the interface has made a new router; delaying the chunk here
+// makes that order certain, so the return to the page is tested as a slow browser sees it.
+vi.mock("./CliSignIn", async (importOriginal) => {
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  return importOriginal();
+});
+
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
 import { catalogRoutes } from "../test/catalog";
 import { homeRoutes } from "../test/home";
@@ -285,6 +293,46 @@ describe("Interface", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toBeInTheDocument();
     expect(path()).toBe("/jobs");
+  });
+
+  it("sends an unsigned visitor of lakana login's page to sign-in and back", async () => {
+    fakeWebAuthn();
+    const session = sessionRoute(SIGNED_OUT);
+    const challenge = "c".repeat(43);
+    const { user, path } = renderInterface(
+      `/sign-in/cli?port=49152&state=s-1&challenge=${challenge}&host=laptop-7`,
+      {
+        "GET /api/v1/sign-in/session": session.route,
+        "POST /api/v1/sign-in/passkey/options": OPTIONS,
+        "POST /api/v1/sign-in/passkey": () => {
+          session.next({ status: 200, body: ADMIN_SESSION });
+          return {
+            status: 200,
+            body: { name: "admin", needs_passkey: false, offer_passkey: false, csrf_token: "c" },
+          };
+        },
+      },
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Sign in with a passkey" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: "Create the API token “lakana login on laptop-7” for admin?",
+      }),
+    ).toBeInTheDocument();
+    expect(path()).toBe("/sign-in/cli");
+  });
+
+  it("opens the device page behind the gate", async () => {
+    renderInterface("/sign-in/device", {
+      "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Sign in a command line elsewhere" }),
+    ).toBeInTheDocument();
   });
 
   it("sends a signed-in browser from the sign-in page to Home", async () => {

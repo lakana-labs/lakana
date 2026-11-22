@@ -4355,3 +4355,34 @@ def test_0089_on_postgres() -> None:
                 conn.execute(definitions).all()
             )
         engine.dispose()
+
+
+def test_0090_on_postgres() -> None:
+    """0090 adds `cli_sign_in_grants` with unique code hashes, and drops it again."""
+    revision_0089 = "7c1e5a9d3f20"
+    revision_0090 = "7c3e91a0b5d2"
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0089)
+        engine = sqlalchemy.create_engine(url)
+        tables = sqlalchemy.text(
+            "SELECT count(*) FROM information_schema.tables WHERE table_name = 'cli_sign_in_grants'"
+        )
+        insert = sqlalchemy.text(
+            "INSERT INTO cli_sign_in_grants (id, kind, host, user_code_hash, created_at,"
+            " expires_at) VALUES (:id, 'device', 'box', :hash, now(), now())"
+        )
+        with engine.connect() as conn:
+            assert conn.execute(tables).scalar_one() == 0
+        migrate.upgrade(url, revision_0090)
+        assert _alembic_version(engine) == revision_0090
+        with engine.begin() as conn:
+            assert conn.execute(tables).scalar_one() == 1
+            conn.execute(insert, {"id": uuid.uuid4(), "hash": "b" * 64})
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(insert, {"id": uuid.uuid4(), "hash": "b" * 64})
+        migrate.downgrade(url, revision_0089)
+        assert _alembic_version(engine) == revision_0089
+        with engine.connect() as conn:
+            assert conn.execute(tables).scalar_one() == 0
+        engine.dispose()

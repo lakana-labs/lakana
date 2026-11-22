@@ -884,6 +884,20 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
 - `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
   from now on.
 
+### `lakana login` can sign in through the browser
+
+- Migration `0090` adds the table `cli_sign_in_grants`, which holds the one-time grants of a
+  command-line sign-in. Nothing has to be done: the upgrade runs with the others. Going back drops
+  the table; a sign-in waiting in a browser has to start again, and the tokens it created stay.
+- Against a server with OIDC sign-in on, `lakana login` run in a terminal now opens the browser,
+  asks you to confirm, and saves a new personal API token named `lakana login on <computer>` that
+  works for 90 days. `lakana login --paste` keeps the token prompt, `--token-stdin` is unchanged,
+  and `--device` signs in a computer without a browser by a short code. Against a server without
+  OIDC sign-in, when the server cannot say, and whenever stdin is not a terminal (a token piped
+  in), `lakana login` asks for a token as before.
+- The audit log has four new events, `SIGN_IN_CLI_APPROVED`, `SIGN_IN_CLI_DENIED`,
+  `SIGN_IN_CLI_REFUSED` and `SIGN_IN_CLI_TOKEN_ISSUED`, beside the `PAT_ISSUED` of the token.
+
 ### A run records the connection it failed on
 
 - Migration `0088` adds `failure_connection` and `error_type` to `task_runs` and

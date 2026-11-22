@@ -65,6 +65,10 @@ _OIDC = (
     "session; lakana login gets its token another way (#32, PR 3)"
 )
 
+_CLI_CONFIRM = (
+    "a person confirms lakana login in the browser, signed in, after a touch; a token is "
+    "refused, and the command line itself calls the /api/v1/auth/cli routes"
+)
 BROWSER_ONLY: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/sign-in/links/describe"): (
         "the sign-in page reads the link's fragment, which only the browser that opened it has"
@@ -74,13 +78,16 @@ BROWSER_ONLY: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/v1/sign-in/passkey/options"): _WEBAUTHN,
     ("POST", "/api/v1/sign-in/passkey"): _WEBAUTHN,
-    ("GET", "/api/v1/sign-in/oidc"): "the sign-in page asks whether to show the provider's button",
     ("POST", "/api/v1/sign-in/oidc/start"): _OIDC,
     ("GET", "/api/v1/sign-in/oidc/callback"): _OIDC,
     ("POST", "/api/v1/sign-in/oidc/finish"): _OIDC,
     ("POST", "/api/v1/sign-in/oidc/link/start"): _OIDC,
     ("POST", "/api/v1/sign-in/oidc/step-up/start"): _OIDC,
     ("POST", "/api/v1/sign-in/oidc/finish-in-session"): _OIDC,
+    ("POST", "/api/v1/sign-in/cli/approvals"): _CLI_CONFIRM,
+    ("POST", "/api/v1/sign-in/cli/device/describe"): _CLI_CONFIRM,
+    ("POST", "/api/v1/sign-in/cli/device/approve"): _CLI_CONFIRM,
+    ("POST", "/api/v1/sign-in/cli/device/deny"): _CLI_CONFIRM,
     ("POST", "/api/v1/sign-in/step-up/options"): _WEBAUTHN,
     ("POST", "/api/v1/sign-in/step-up"): _WEBAUTHN,
     ("POST", "/api/v1/principals/{name}/passkeys/options"): _WEBAUTHN,

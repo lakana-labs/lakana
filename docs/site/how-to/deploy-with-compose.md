@@ -434,7 +434,9 @@ should also keep out what the server would refuse anyway, so that it never reach
   `X-Forwarded-Proto`, as a JSON list of addresses or networks. Use the address the server sees the
   proxy connect from: for a proxy on the host in front of the bundle, Docker's gateway of the
   bundle's network (`docker network inspect` shows it), for example `'["172.18.0.1"]'`. Unlisted,
-  the audit log and the failed sign-in limit see every client as the proxy. No proxy is trusted by
+  the audit log and the failed sign-in limit see every client as the proxy, and the confirmation
+  page of `lakana login --device` says every sign-in was "Requested from" the proxy's address, so
+  people cannot tell their own sign-in from one someone else started. No proxy is trusted by
   default, also not one on the same machine.
 
 ### Interrupted uploads on an object store

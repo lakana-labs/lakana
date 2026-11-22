@@ -19,7 +19,11 @@ from lakana._config import ResolvedConfig
 from lakana._http import HttpTransport
 from lakana._models import (
     BrowserSession,
+    DeviceSignIn,
+    DeviceSignInPoll,
     IssuedLink,
+    IssuedToken,
+    OidcInfo,
     OpenInvite,
     OpenRecoveryLink,
     Passkey,
@@ -28,6 +32,7 @@ from lakana._models import (
     SignInSettings,
 )
 from lakana.client import Client
+from lakana.errors import InvalidResponse, LakanaError
 from lakana.resources.sign_in import (
     Invites,
     Passkeys,
@@ -379,3 +384,128 @@ def test_sign_in_settings_carry_the_token_window_and_the_provider() -> None:
     )
     # An older server answers neither: the defaults stand in.
     assert _PARSED.token_provider_window_days == 30 and _PARSED.provider is None
+
+
+# -- what `lakana login` asks before it has a token (#32, PR 3) ---------------------------------
+
+
+def test_oidc_info_sends_no_credential() -> None:
+    seen: list[httpx.Request] = []
+    info = SignIn(
+        _transport(_recording(seen, 200, {"enabled": True, "display_name": "Keycloak"}))
+    ).oidc_info()
+
+    assert info == OidcInfo(enabled=True, display_name="Keycloak")
+    assert (seen[0].method, seen[0].url.path) == ("GET", "/api/v1/sign-in/oidc")
+    assert "authorization" not in seen[0].headers
+
+
+def test_exchange_code_sends_the_code_and_verifier_without_a_credential() -> None:
+    seen: list[httpx.Request] = []
+    body = {"key_id": "k", "name": "lakana login on box", "token": "lakana_pat_k_s"}
+    issued = SignIn(_transport(_recording(seen, 200, body))).exchange_code("c", "v" * 43)
+
+    assert issued == IssuedToken(key_id="k", name="lakana login on box", token="lakana_pat_k_s")
+    assert seen[0].url.path == "/api/v1/auth/cli/token"
+    assert json.loads(seen[0].content) == {"code": "c", "code_verifier": "v" * 43}
+    assert "authorization" not in seen[0].headers
+
+
+def test_start_device_hides_the_device_code() -> None:
+    seen: list[httpx.Request] = []
+    body = {
+        "device_code": "dev1ce",
+        "user_code": "BCDF-GHJK",
+        "verification_url": "http://l/sign-in/device",
+        "expires_in": 600,
+        "interval": 5,
+    }
+    started = SignIn(_transport(_recording(seen, 200, body))).start_device("box")
+
+    assert started == DeviceSignIn(
+        device_code="dev1ce",
+        user_code="BCDF-GHJK",
+        verification_url="http://l/sign-in/device",
+        expires_in=600,
+        interval=5,
+    )
+    assert "dev1ce" not in repr(started)
+    assert json.loads(seen[0].content) == {"host": "box"}
+    assert "authorization" not in seen[0].headers
+
+
+def test_poll_device_reads_each_state() -> None:
+    token = {"key_id": "k", "name": "n", "token": "lakana_pat_k_s"}
+    approved = SignIn(
+        _transport(_recording([], 200, {"state": "approved", "token": token}))
+    ).poll_device("d")
+    pending = SignIn(_transport(_recording([], 200, {"state": "pending", "token": None})))
+
+    assert approved == DeviceSignInPoll(
+        state="approved", token=IssuedToken(key_id="k", name="n", token="lakana_pat_k_s")
+    )
+    assert "lakana_pat_k_s" not in repr(approved)
+    assert pending.poll_device("d") == DeviceSignInPoll(state="pending")
+
+
+def test_poll_device_too_soon_is_slow_down() -> None:
+    body = {"detail": "Asked too soon", "type": "CliPollTooFast", "error": "slow_down"}
+
+    polled = SignIn(_transport(_recording([], 429, body))).poll_device("d")
+
+    assert polled == DeviceSignInPoll(state="slow_down")
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "seconds"),
+    [
+        ("20", 20.0),
+        ("99999", 60.0),
+        ("inf", None),
+        ("1e9", None),
+        ("nan", None),
+        ("-5", None),
+        ("Wed, 21 Oct 2026 07:28:00 GMT", None),
+    ],
+)
+def test_poll_device_past_the_rate_is_slow_down_with_the_wait(
+    retry_after: str, seconds: float | None
+) -> None:
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"detail": "Too many.", "type": "TooManyAttemptsError"},
+            headers={"Retry-After": retry_after},
+        )
+
+    polled = SignIn(_transport(answer)).poll_device("d")
+
+    assert polled == DeviceSignInPoll(state="slow_down", retry_after=seconds)
+
+
+def test_poll_device_raises_any_other_refusal() -> None:
+    body = {"detail": "This device code is not known", "type": "CliGrantRefused"}
+
+    with pytest.raises(LakanaError, match="not known") as raised:
+        SignIn(_transport(_recording([], 400, body))).poll_device("d")
+    assert raised.value.status == 400
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(200, text="<html>Sign in to the guest network</html>"),
+        httpx.Response(200, json=[True]),
+        httpx.Response(200, json={"display_name": "Keycloak"}),
+        httpx.Response(200, json={"enabled": "yes", "display_name": None}),
+    ],
+)
+def test_oidc_info_refuses_an_answer_of_another_shape(answer: httpx.Response) -> None:
+    with pytest.raises(InvalidResponse, match="did not answer like a Lakana server"):
+        SignIn(_transport(lambda request: answer)).oidc_info()
+
+
+def test_oidc_info_reads_a_missing_name_as_none() -> None:
+    info = SignIn(_transport(_recording([], 200, {"enabled": False}))).oidc_info()
+
+    assert info == OidcInfo(enabled=False, display_name=None)

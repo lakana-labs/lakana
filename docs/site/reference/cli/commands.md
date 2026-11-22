@@ -7,7 +7,9 @@ run `uv run python scripts/generate_reference.py` and commit the result. -->
 
 Usage: `lakana login [OPTIONS]`
 
-Verify a credential and save it as a profile.
+Sign in and save the credential as a profile.
+
+Against a server whose people sign in through an identity provider, opens the browser: you confirm there, and a new personal token named `lakana login on HOST`, HOST being this computer's name, is created for 90 days and saved. Anywhere else, and whenever stdin is not a terminal, asks for a token as before (`--paste`). On a computer without a browser, use `--device`: it shows an address and a short code to confirm in a browser elsewhere. The token is never printed.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
@@ -15,6 +17,9 @@ Verify a credential and save it as a profile.
 | `--url` | text | none | Platform URL. |
 | `--token-stdin` | flag | off | Read the token from stdin (for CI). |
 | `--env` | text | none | Default environment. |
+| `--device` | flag | off | Sign in by a code confirmed in a browser on another computer. |
+| `--browser` | flag | off | Sign in through this computer's browser, with or without OIDC. |
+| `--paste` | flag | off | Paste a token at a hidden prompt. |
 
 ## `lakana logout`
 

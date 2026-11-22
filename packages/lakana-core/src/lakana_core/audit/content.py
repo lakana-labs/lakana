@@ -181,6 +181,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "ref",
         "repository",
         "requested_by",
+        # the client address that started a device sign-in of `lakana login` (#32, PR 3)
+        "requested_from",
         "resumed_from_run_id",
         "role",
         "rule_id",

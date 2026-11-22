@@ -6,8 +6,8 @@
 import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  createPath,
   type DataRouter,
+  type Location,
   Navigate,
   Outlet,
   type RouteObject,
@@ -26,9 +26,11 @@ import { SignInPage } from "./SignInPage";
 
 /**
  * Makes the router for a route tree: `createBrowserRouter` in the browser. The interface makes
- * a new one when the person's areas change, at the location the old one showed.
+ * a new one when the person's areas change, at the location the old one showed, with its
+ * history state: a browser router reads both from the address bar and the history entry, and a
+ * memory router (tests) takes them as its first entry.
  */
-export type RouterFactory = (routes: RouteObject[], at: string | undefined) => DataRouter;
+export type RouterFactory = (routes: RouteObject[], at: Location | undefined) => DataRouter;
 
 /**
  * Access for a person whose rights cannot be read: the administration areas and Your work stay
@@ -173,14 +175,17 @@ class RouterHost {
   }
 
   /**
-   * Makes the router for a new route tree, at the shown router's location.
+   * Makes the router for a new route tree, at the shown router's location and history state.
+   *
+   * The state matters while sign-in waits for a page loaded on demand: the shown router is still
+   * at `/sign-in`, whose state says where the person was going, and the new router must go on
+   * there instead of Home.
    *
    * @param routes - The route tree.
    * @returns The new router.
    */
   routerFor(routes: RouteObject[]): DataRouter {
-    const at = this.#shown === null ? undefined : createPath(this.#shown.state.location);
-    return this.#create(routes, at);
+    return this.#create(routes, this.#shown?.state.location);
   }
 
   /**
@@ -192,6 +197,30 @@ class RouterHost {
     this.#shown = router;
   }
 }
+
+/**
+ * The confirmation pages of `lakana login`, behind the gate and outside the shell: a
+ * signed-out browser signs in first and comes back with the link's query. Loaded on demand,
+ * as one chunk.
+ */
+const CLI_SIGN_IN_ROUTES: RouteObject[] = [
+  {
+    path: "/sign-in/cli",
+    hydrateFallbackElement: <></>,
+    lazy: async () => {
+      const { CliSignInPage } = await import("./CliSignIn");
+      return { element: <CliSignInPage /> };
+    },
+  },
+  {
+    path: "/sign-in/device",
+    hydrateFallbackElement: <></>,
+    lazy: async () => {
+      const { CliDevicePage } = await import("./CliSignIn");
+      return { element: <CliDevicePage /> };
+    },
+  },
+];
 
 /** Properties of {@link Routed}. */
 interface RoutedProps {
@@ -224,11 +253,10 @@ function Routed({ createRouter, pages, link, onLinkDone }: RoutedProps): JSX.Ele
       { path: "/sign-in", element: <SignInRoute link={link} onLinkDone={onLinkDone} /> },
       {
         element: <Gate ready={access !== null} />,
-        children: appRoutes(
-          areasFor(access?.noAccessYet === true),
-          pages,
-          access ?? noKnownRights(""),
-        ),
+        children: [
+          ...CLI_SIGN_IN_ROUTES,
+          ...appRoutes(areasFor(access?.noAccessYet === true), pages, access ?? noKnownRights("")),
+        ],
       },
     ],
     [access, pages, link, onLinkDone],

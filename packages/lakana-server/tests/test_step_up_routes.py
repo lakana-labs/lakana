@@ -771,7 +771,34 @@ def _disabled_rule(client: TestClient) -> Request:
     return f"{rule}/enable", None
 
 
+def _device_code(client: TestClient) -> Request:
+    """Start a device grant of `lakana login --device` to approve.
+
+    Parameters
+    ----------
+    client
+        The client.
+
+    Returns
+    -------
+    tuple
+        The approve path and the user code's body.
+    """
+    started = client.post("/api/v1/auth/cli/device", json={"host": "box"})
+    _ok(started, 200)
+    return "/api/v1/sign-in/cli/device/approve", {"user_code": started.json()["user_code"]}
+
+
 STEP_UP_ROUTES: dict[tuple[str, str], Case] = {
+    ("POST", "/api/v1/sign-in/cli/approvals"): Case(
+        lambda c: (
+            "/api/v1/sign-in/cli/approvals",
+            {"port": 49152, "code_challenge": "c" * 43, "host": "laptop"},
+        ),
+        200,
+        token=403,
+    ),
+    ("POST", "/api/v1/sign-in/cli/device/approve"): Case(_device_code, 204, token=403),
     ("POST", "/api/v1/principals/{name}/tokens"): Case(
         lambda c: (f"/api/v1/principals/{_principal(c, 'SERVICE_ACCOUNT')}/tokens", {"name": "t"}),
         201,
@@ -994,6 +1021,17 @@ NO_STEP_UP: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/task-tokens"): "token-only route: a session never reaches it",
     ("DELETE", "/api/v1/task-tokens/{key_id}"): "revoking a token removes access",
     ("POST", "/api/v1/auth/oidc/token"): "a CI provider's ID token, never a session",
+    ("POST", "/api/v1/sign-in/cli/device/describe"): "reads which computer a code names",
+    ("POST", "/api/v1/sign-in/cli/device/deny"): "refuses a command-line sign-in: removes access",
+    ("POST", "/api/v1/auth/cli/token"): (
+        "lakana login's exchange: the code and its verifier are the proof; the confirmation "
+        "that made the code asked for the touch"
+    ),
+    ("POST", "/api/v1/auth/cli/device"): "starts a device sign-in, which a touch then approves",
+    ("POST", "/api/v1/auth/cli/device/token"): (
+        "lakana login --device's poll: the device code is the proof; the approval asked for "
+        "the touch"
+    ),
     (
         "DELETE",
         "/api/v1/environments/{env}/deployments/{repo}/run-as",
