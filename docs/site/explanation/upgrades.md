@@ -234,6 +234,17 @@ your rights allow; the server still decides each request).
 The orphans list now includes dropped tables that can still be restored, with `exists: false`. Its
 hidden count includes dropped tables you may not read.
 
+### Needs your attention counts failures in a row and lists failed deploys
+
+`GET /api/v1/home/attention` lists a new kind, `deploy_failed`: a repository whose newest finished
+deploy or rollback in an environment you may read failed in the last 7 days (dry runs do not count).
+Its `title` is the repository and its `ref` the deploy's id. Each row has two new fields: `count`,
+how many times in a row the job, deploy or check failed in those 7 days (1 for every other kind),
+and `since`, when the first of them ended (`null` when `count` is 1); `ref` and `at` are the
+newest failure's. A client that handles every kind must accept `deploy_failed`. Home shows the
+newest five rows and **Show all N** for the rest, in place. The route serves the web interface;
+programs read the same facts from `GET /api/v1/runs/failed` and the deploys lists.
+
 ### An audit event shows its stored type
 
 Each audit event has a new field, `event_type_raw`: the type as stored, the same as `event_type`.
@@ -961,7 +972,10 @@ upgrades DuckDB with it.
   earlier release stored in the browser is ignored, and nobody needs to do anything.
 - Screens and their tables use the full width of the window; a long name in a list ends with
   an ellipsis and shows whole in a tooltip. A state in a list is a small pill.
-- Alt+Left goes back from any page, as in the browser, unless the focus is in a text field.
+- Alt+Left goes back from any page, as in the browser, unless the focus is in a text field or a
+  dialog, a menu or a popover is open.
+- Each list says how many rows it has above it, with its search on the left and its filters and
+  a Refresh button on the right.
 
 ## Notes for 0.22.0
 

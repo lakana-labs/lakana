@@ -10,9 +10,9 @@ import {
   STALE_SESSION,
   STEP_UP_ROUTES,
 } from "../test/access";
-import { held } from "../test/pending";
+import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
-import type { FakeRoute } from "../test/server";
+import type { FakeAnswer, FakeRoute } from "../test/server";
 import { fakeWebAuthn } from "../test/webauthn";
 
 const PATH = "/settings/access/grants";
@@ -61,6 +61,66 @@ describe("GrantsPage", () => {
       "/api/v1/grants?principal_name=maria&role=ANALYST&limit=50",
     ]);
     expect(screen.getByRole("button", { name: /^A person/ })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("maria");
+    expect(screen.getByRole("button", { name: /^ANALYST/ })).toBeInTheDocument();
+  });
+
+  it("counts the grants and reads them again on Refresh", async () => {
+    const { server, user } = renderShell(PATH, { routes: grantRoutes() });
+    await screen.findByRole("region", { name: "Grants" });
+    expect(await screen.findByText(/^\d+ grants?$/)).toHaveClass("toolbar-count");
+    const before = listReads(server.sent).length;
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(listReads(server.sent).length).toBeGreaterThan(before);
+    });
+  });
+
+  it("keeps saying the first rows while Refresh reads a list that has more", async () => {
+    let reads = 0;
+    let answer: (value: FakeAnswer) => void = () => undefined;
+    const { user } = renderShell(PATH, {
+      routes: grantRoutes({
+        "GET /api/v1/grants": () => {
+          reads += 1;
+          if (reads === 1) {
+            return { status: 200, body: [aGrant()], headers: { "X-Next-Cursor": "c2" } };
+          }
+          return new Promise<FakeAnswer>((resolve) => {
+            answer = resolve;
+          });
+        },
+      }),
+    });
+    expect(await screen.findByText("The first 1 grant")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    expect(screen.getByText("The first 1 grant")).toBeInTheDocument();
+    expectPending(screen.getByRole("button", { name: /^Refresh/ }));
+    answer({ status: 200, body: [aGrant()] });
+    expect(await screen.findByText("1 grant")).toBeInTheDocument();
+  });
+
+  it("keeps the filter on Refresh", async () => {
+    const { server, user } = renderShell(`${PATH}?principal=maria&role=ANALYST`, {
+      routes: grantRoutes(),
+    });
+    await screen.findByRole("region", { name: "Grants" });
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => {
+      expect(listReads(server.sent)).toEqual([
+        "/api/v1/grants?principal_name=maria&role=ANALYST&limit=50",
+        "/api/v1/grants?principal_name=maria&role=ANALYST&limit=50",
+      ]);
+    });
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("maria");
     expect(screen.getByRole("button", { name: /^ANALYST/ })).toBeInTheDocument();
   });

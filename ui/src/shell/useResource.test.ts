@@ -89,4 +89,35 @@ describe("useResource", () => {
     });
     expect(result.current.failure).toBeNull();
   });
+
+  it("is busy for the first read and for one after reload, keeping the last answer meanwhile", async () => {
+    let answer: (value: string) => void = () => undefined;
+    let reads = 0;
+    const load = (): Promise<string> => {
+      reads += 1;
+      return reads === 1
+        ? Promise.resolve("first")
+        : new Promise((resolve) => {
+            answer = resolve;
+          });
+    };
+    const { result } = renderHook(() => useResource(load));
+    expect(result.current.busy).toBe(true);
+    await waitFor(() => {
+      expect(result.current.busy).toBe(false);
+    });
+
+    act(() => {
+      result.current.reload();
+    });
+    expect(result.current.busy).toBe(true);
+    expect(result.current.data).toBe("first");
+    await act(async () => {
+      answer("second");
+      await Promise.resolve();
+    });
+
+    expect(result.current.busy).toBe(false);
+    expect(result.current.data).toBe("second");
+  });
 });

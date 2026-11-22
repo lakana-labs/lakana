@@ -30,6 +30,8 @@ interface State<T> {
   error: string | null;
   failure: ApiError | null;
   failures: number;
+  /** The `reload` round the latest answer belongs to; -1 before the first. */
+  round: number;
 }
 
 /**
@@ -59,6 +61,7 @@ export function useLivePoll<T>(
     error: null,
     failure: null,
     failures: 0,
+    round: -1,
   });
   const [round, setRound] = useState(0);
   useEffect(() => {
@@ -87,7 +90,7 @@ export function useLivePoll<T>(
           reading = false;
           if (latest) {
             failed = 0;
-            setState({ data, error: null, failure: null, failures: 0 });
+            setState({ data, error: null, failure: null, failures: 0, round });
             schedule();
           }
         },
@@ -100,6 +103,7 @@ export function useLivePoll<T>(
               error: problemText(t, cause),
               failure: cause instanceof ApiError ? cause : null,
               failures: failed,
+              round,
             }));
             schedule();
           }
@@ -133,6 +137,9 @@ export function useLivePoll<T>(
     error: state.error,
     failure: state.failure,
     reload,
+    // The first read, and one after `reload`, are reads a person waits for; the calm polls between
+    // are not.
+    busy: state.round !== round,
     stale: state.failures > 0 && state.data !== undefined,
     failures: state.failures,
   };

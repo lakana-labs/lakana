@@ -1,7 +1,15 @@
-/* Row filters & masks: two lists, each in its own scrolling region. An expression is code: it
+/* Row filters & masks: two lists, each in its own scrolling region from 720 px down, so both fit a
+   panel beside Settings' list from a 1280 px window on. An expression is code: it
    wraps inside its cell and is never cut. */
 .list-scroll.policies-scroll .list {
-  min-width: 960px;
+  min-width: 720px;
+}
+
+/* Who and when stay on one line, as a name does, so the expression (code, which wraps) takes the
+   squeeze of a narrow panel. */
+.policies-scroll .policy-who,
+.policies-scroll time {
+  white-space: nowrap;
 }
 
 .list-scroll.policies-scroll .access-name,

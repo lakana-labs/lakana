@@ -10,6 +10,7 @@ import { Link } from "react-router";
 
 import { listPeople, PEOPLE_LIMIT } from "../api";
 import { Avatar } from "../profile/Avatar";
+import { countWords, ListToolbar } from "../shell/ListToolbar";
 import { ListHead } from "../shell/ListHead";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
@@ -44,17 +45,24 @@ export function PeoplePage(): JSX.Element {
   const people = useResource(load);
   return (
     <SettingsFrame title={t("settings.places.people")}>
-      <SearchField className="field" value={words} onChange={setWords}>
-        <Label className="visually-hidden">{t("access.people.find")}</Label>
-        <Input placeholder={t("access.people.find")} />
-      </SearchField>
+      <ListToolbar
+        count={countWords(t, "access.people", people.data?.people.length, people.data?.more)}
+        search={
+          <SearchField className="field" value={words} onChange={setWords}>
+            <Label className="visually-hidden">{t("access.people.find")}</Label>
+            <Input placeholder={t("access.people.find")} />
+          </SearchField>
+        }
+        onRefresh={people.reload}
+        refreshing={people.busy}
+      />
       <Loaded resource={people}>
-        {(found) =>
+        {({ people: found, more }) =>
           found.length === 0 ? (
             <p className="empty">{t("access.people.none")}</p>
           ) : (
             <>
-              {found.length === PEOPLE_LIMIT && (
+              {more && (
                 <p className="page-purpose">{t("access.people.capped", { count: PEOPLE_LIMIT })}</p>
               )}
               <table className="list">
@@ -81,7 +89,14 @@ export function PeoplePage(): JSX.Element {
                           </span>
                         </div>
                       </td>
-                      <td>{person.is_active ? "" : t("access.people.deactivated")}</td>
+                      <td>
+                        {/* Every row names its state: a blank cell would read as missing. */}
+                        <span className={`pill ${person.is_active ? "pill-neutral" : "pill-warn"}`}>
+                          {person.is_active
+                            ? t("access.people.active")
+                            : t("access.people.deactivated")}
+                        </span>
+                      </td>
                       <td>
                         <span className="chevron" aria-hidden="true">
                           ›

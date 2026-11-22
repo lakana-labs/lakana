@@ -66,6 +66,7 @@ function RepositoryList({ manages, heading }: RepositoryListProps): JSX.Element 
       region={t(`${p}.region`)}
       rowsOpen
       scroll="repositories-scroll"
+      toolbar={{ count: p }}
       head={
         <tr>
           <th scope="col">{t("list.name")}</th>

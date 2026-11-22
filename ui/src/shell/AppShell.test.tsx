@@ -185,4 +185,167 @@ describe("AppShell", () => {
 
     expect(router.state.location.pathname).toBe("/catalog");
   });
+
+  it("goes back with Alt+Left on a page without a breadcrumb too: it is global, as in the browser", async () => {
+    const { router, user } = renderShell("/catalog");
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    await act(() => router.navigate("/queries"));
+    await screen.findByRole("heading", { level: 1, name: "Queries" });
+    expect(screen.queryByRole("navigation", { name: "Breadcrumb" })).toBeNull();
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Catalog" })).toBeInTheDocument();
+  });
+
+  it("leaves Alt+Left to a select and to editable content", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    for (const make of [
+      () => document.createElement("select"),
+      () => {
+        const editable = document.createElement("div");
+        editable.setAttribute("contenteditable", "true");
+        editable.setAttribute("tabindex", "0");
+        return editable;
+      },
+    ]) {
+      const field = make();
+      document.body.append(field);
+      field.focus();
+      await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+      expect(router.state.location.pathname, field.tagName).toBe("/catalog");
+      field.remove();
+    }
+
+    expect(router.state.location.pathname).toBe("/catalog");
+  });
+
+  it("does nothing with Alt+Left while a dialog, a menu or a popover is open", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    await user.click(screen.getByRole("button", { name: "Help" }));
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    const pressed = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(pressed);
+
+    // Prevented, so the browser does not go back either.
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(router.state.location.pathname).toBe("/catalog");
+  });
+
+  it("stops Alt+Left in a text field of an open dialog too, so the page behind it stays", async () => {
+    const { router } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    const field = document.createElement("input");
+    dialog.append(field);
+    document.body.append(dialog);
+    field.focus();
+    const pressed = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      altKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+
+    field.dispatchEvent(pressed);
+
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(router.state.location.pathname).toBe("/catalog");
+    dialog.remove();
+  });
+
+  it("ignores a dialog kept hidden or inert in the page, and goes back", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const hidden = document.createElement("div");
+    hidden.setAttribute("role", "dialog");
+    hidden.hidden = true;
+    const inert = document.createElement("div");
+    inert.setAttribute("data-trigger", "MenuTrigger");
+    inert.setAttribute("inert", "");
+    document.body.append(hidden, inert);
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    hidden.remove();
+    inert.remove();
+  });
+
+  it.each(["plaintext-only", "true", ""])(
+    "leaves Alt+Left to content editable as %j, and takes it inside contenteditable=false",
+    async (value) => {
+      const { router, user } = renderShell("/");
+      await screen.findByRole("heading", { level: 1, name: "Home" });
+      await act(() => router.navigate("/catalog"));
+      await screen.findByRole("heading", { level: 1, name: "Catalog" });
+      const editable = document.createElement("div");
+      editable.setAttribute("contenteditable", value);
+      editable.setAttribute("tabindex", "0");
+      document.body.append(editable);
+      editable.focus();
+
+      await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+      expect(router.state.location.pathname).toBe("/catalog");
+
+      const fixed = document.createElement("span");
+      fixed.setAttribute("contenteditable", "false");
+      fixed.setAttribute("tabindex", "0");
+      editable.append(fixed);
+      fixed.focus();
+      await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+      expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+      editable.remove();
+    },
+  );
+
+  it("goes back when the key reaches the window itself, outside any element", async () => {
+    const { router } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "ArrowLeft", altKey: true, cancelable: true }),
+      );
+    });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+  });
+
+  it("asks the browser whether an overlay is shown, where it can tell", async () => {
+    const { router, user } = renderShell("/");
+    await screen.findByRole("heading", { level: 1, name: "Home" });
+    await act(() => router.navigate("/catalog"));
+    await screen.findByRole("heading", { level: 1, name: "Catalog" });
+    const closed = document.createElement("div");
+    closed.setAttribute("role", "dialog");
+    // A dialog left in the page with display: none, which only the browser's layout knows.
+    Object.defineProperty(closed, "checkVisibility", { value: () => false });
+    document.body.append(closed);
+
+    await user.keyboard("{Alt>}{ArrowLeft}{/Alt}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    closed.remove();
+  });
 });

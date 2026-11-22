@@ -69,6 +69,8 @@ export interface PolicyListProps {
   readonly round: number;
   /** The section's heading, which takes the focus once a deleted policy has left the list. */
   readonly headingRef: RefObject<HTMLHeadingElement | null>;
+  /** The heading's id, which names the section: the list's count is the heading. */
+  readonly headingId?: string | undefined;
   /** Called once a policy is deleted. */
   readonly onDeleted: () => void;
   /** Goes back to every policy. */
@@ -88,6 +90,7 @@ export interface PolicyListProps {
  * @param props.filter - The filter.
  * @param props.scopes - The managed scopes, or null.
  * @param props.round - Changes when the list must be read again.
+ * @param props.headingId - The heading's id.
  * @param props.headingRef - The section's heading.
  * @param props.onDeleted - Called once a policy is deleted.
  * @param props.onClear - Goes back to every policy.
@@ -99,6 +102,7 @@ export function PolicyList({
   scopes,
   round,
   headingRef,
+  headingId,
   onDeleted,
   onClear,
 }: PolicyListProps): JSX.Element {
@@ -143,6 +147,12 @@ export function PolicyList({
         empty={filtered ? t(`policies.${kind}.noMatch`) : t(`policies.${kind}.none`)}
         region={t(`policies.${kind}.title`)}
         scroll="policies-scroll"
+        toolbar={{
+          count: `policies.${kind}`,
+          heading: t(`policies.${kind}.title`),
+          headingId,
+          headingRef,
+        }}
         head={
           <tr>
             <th scope="col">{t("policies.who")}</th>
@@ -161,7 +171,9 @@ export function PolicyList({
           return (
             <tr key={policy.id}>
               <td>
-                <SubjectName subject={policy} link={admin} />
+                <span className="policy-who">
+                  <SubjectName subject={policy} link={admin} />
+                </span>
               </td>
               <td>
                 <Link
@@ -174,7 +186,8 @@ export function PolicyList({
               {policy.column !== null && (
                 <td>
                   <span className="row-name">
-                    <VisibleText text={policy.column} breakable name />
+                    {/* Cut, never wrapped: no break opportunities in a list's name. */}
+                    <VisibleText text={policy.column} name />
                   </span>
                 </td>
               )}

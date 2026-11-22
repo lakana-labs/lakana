@@ -472,4 +472,25 @@ describe("InvitesPage", () => {
     expect(row).toHaveTextContent("KimU+2066 Lee");
     expect(row.textContent).not.toMatch(/[\u202E\u2066]/u);
   });
+
+  it("reads the open invites again on Refresh", async () => {
+    const { server, user } = renderShell("/settings/sign-in/invites", {
+      routes: { "GET /api/v1/invites": { status: 200, body: [OPEN] } },
+    });
+    expect(await screen.findByText("1 open invite")).toBeInTheDocument();
+    const reads = (): number =>
+      server.sent.filter(
+        (request) => request.method === "GET" && request.path.startsWith("/api/v1/invites"),
+      ).length;
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(0);
+    });
+    const before = reads();
+
+    await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+
+    await waitFor(() => {
+      expect(reads()).toBeGreaterThan(before);
+    });
+  });
 });

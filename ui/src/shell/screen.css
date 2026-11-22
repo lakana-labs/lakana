@@ -27,6 +27,22 @@
   margin: 0 0 var(--space-3);
 }
 
+/* A list's count, the section's title: the section step, on the controls' line. */
+/* Two classes, so a panel's own heading rules (`.access-section h2`) do not reach a count that is
+   the panel's heading. */
+.toolbar .toolbar-count {
+  min-width: 0;
+  min-height: var(--type-section-line);
+  margin: 0 var(--space-2) 0 0;
+  font-size: var(--type-section-size);
+  line-height: var(--type-section-line);
+  font-weight: var(--type-section-weight);
+}
+
+.toolbar .toolbar-count:empty {
+  margin: 0;
+}
+
 .toolbar-end {
   display: flex;
   flex-wrap: wrap;
@@ -229,7 +245,13 @@ tr:hover a.row-name {
   color: var(--color-accent);
 }
 
-/* Queued, cancelled and upstream failed: no colour to claim, a hairline instead. */
+/* A pill without a glyph (a person's state) pads both sides alike. */
+.pill:not(:has(svg)) {
+  padding: 0 var(--space-2);
+}
+
+/* Queued, cancelled and upstream failed, and a state with nothing to claim (an active person):
+   no colour, a hairline instead. */
 .pill-neutral {
   border-color: var(--color-line);
   color: var(--color-text-muted);
@@ -249,8 +271,16 @@ tr:hover a.row-name {
   font-size: var(--type-dense-size);
 }
 
+/* The quiet `›` ends the row at the list's right edge: its column is only as wide as the mark,
+   so the table gives the spare width to the columns of data. */
 .chevron {
   width: var(--space-4);
+  margin-left: auto;
+  text-align: right;
+}
+
+.list td:has(> .chevron) {
+  width: 1%;
 }
 
 tr:hover .chevron {
@@ -416,6 +446,33 @@ tr:hover .chevron {
   text-decoration: underline;
 }
 
+/* A muted line in a panel, such as the note that the server cut a list, with its link on. */
+.panel-note {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+}
+
+/* Underlined: colour alone does not set a link in a sentence apart (WCAG 1.4.1). */
+.panel-note a {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+/* A button that reads as a link: Defined in's path, which opens the file, and a dashboard panel's
+   Show all N, which shows the rest of its rows in place. */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Facts as name and value: the name muted, both on one baseline, the names in one column. */
 .fact-list {
   display: grid;
@@ -505,4 +562,23 @@ tr:hover .chevron {
 
 .read-failed p {
   margin: 0;
+}
+
+/* A cut name without a page is a Tab stop while it is cut (TruncationTip), so its ring shows. */
+.row-name[data-cut-stop]:focus-visible,
+.truncate[data-cut-stop]:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* A field in a toolbar keeps no room below it: the row sets the spacing. */
+.toolbar .field {
+  margin: 0;
+}
+
+/* A count that is its panel's heading keeps the toolbar's look; its ring shows when the page
+   moves the focus there. */
+h2.toolbar-count:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }

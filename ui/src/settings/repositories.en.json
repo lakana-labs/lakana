@@ -1,4 +1,8 @@
 {
+  "count_one": "{{count}} repository",
+  "count_other": "{{count}} repositories",
+  "countFirst_one": "The first {{count}} repository",
+  "countFirst_other": "The first {{count}} repositories",
   "region": "Repositories",
   "url": "URL",
   "kind": "Kind",

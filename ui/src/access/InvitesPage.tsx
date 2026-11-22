@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 
 import { type InviteOut, listInvites, withdrawInvite } from "../api";
 import { issueInvite } from "../api/signInAdmin";
+import { countWords, ListToolbar } from "../shell/ListToolbar";
 import { ActionDialog } from "../shell/ActionDialog";
 import { CopyLine } from "../shell/CopyLine";
 import { ListHead } from "../shell/ListHead";
@@ -139,6 +140,11 @@ export function InvitesPage(): JSX.Element {
         </Button>
       }
     >
+      <ListToolbar
+        count={countWords(t, "access.invites", invites.data?.length)}
+        onRefresh={invites.reload}
+        refreshing={invites.busy}
+      />
       <Loaded resource={invites}>
         {(open) =>
           open.length === 0 ? (

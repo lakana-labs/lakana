@@ -57,7 +57,7 @@ describe("TaskRow", () => {
       "href",
       `/jobs/prod/runs/${JOB_RUN_ID}/tasks/gold.sales`,
     );
-    // A button among buttons: the Catalog's link-button style is not loaded on the Jobs screen.
+    // A button among buttons, not a link-button: it stands beside Log and Open table.
     expect(line.getByRole("button", { name: "Show source gold.sales" })).toHaveClass("button");
     expect(line.getByRole("link", { name: "Open table gold.sales" })).toHaveAttribute(
       "href",
@@ -65,11 +65,12 @@ describe("TaskRow", () => {
     );
   });
 
-  it("breaks a task's name after its dots, not inside a word", () => {
+  it("keeps a task's name on one line, to be cut with an ellipsis rather than broken (#782)", () => {
     const table = renderTask(FAILED);
 
     const name = within(table).getByRole("link", { name: "gold.sales" });
-    expect(name.querySelectorAll("wbr")).toHaveLength(1);
+    expect(name).toHaveClass("row-name");
+    expect(name.querySelectorAll("wbr")).toHaveLength(0);
   });
 
   it("names each control by its task, so a list of them is not Log, Log, Log", () => {

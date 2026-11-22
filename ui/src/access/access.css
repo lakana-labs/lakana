@@ -132,9 +132,3 @@
 .access-choice {
   margin: 0 0 var(--space-4);
 }
-
-/* The groups list's quiet `›` ends the row, beside the name's column. */
-.list-scroll.groups-scroll td:last-child,
-.list-scroll.groups-scroll th:last-child {
-  width: 1%;
-}

@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useState } from "react";
+import { type JSX, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
@@ -32,6 +32,8 @@ export interface SectionProps {
   readonly reloadKey: number;
   /** Told that a control of the section acted, so the list is read again. */
   readonly onChanged: () => void;
+  /** Told whether a read the person waits for is on its way, for the toolbar's Refresh. */
+  readonly onBusy?: ((busy: boolean) => void) | undefined;
 }
 
 /** Properties of {@link RunProgress}. */
@@ -78,6 +80,7 @@ function RunProgress({ run }: RunProgressProps): JSX.Element {
  * @param props.query - The words searched for.
  * @param props.reloadKey - Changes when the section must be read again.
  * @param props.onChanged - Told that a control acted.
+ * @param props.onBusy - Told whether a read the person waits for is on its way.
  * @returns The section.
  */
 export function RunningNow({
@@ -85,6 +88,7 @@ export function RunningNow({
   query,
   reloadKey,
   onChanged,
+  onBusy,
 }: SectionProps): JSX.Element {
   const { t } = useTranslation();
   const load = useCallback(
@@ -103,6 +107,10 @@ export function RunningNow({
     [environment],
   );
   const poll = useListPoll(load, reloadKey);
+  const { busy } = poll;
+  useEffect(() => {
+    onBusy?.(busy);
+  }, [onBusy, busy]);
   const [note, setNote] = useState<ControlNoteValue | null>(null);
   // A cancelled run as the server answered the cancel, until the list is read again.
   const [changed, setChanged] = useState<{
