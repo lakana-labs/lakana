@@ -1,0 +1,63 @@
+# Lakana takes code from its maintainers, and from an outside contributor only on invitation.
+# Everyone may open issues; .github/CONTRIBUTING.md says so.
+#
+# A pull request opened by someone who is not an owner, member or collaborator of the repository
+# is closed with a comment that points to the issue tracker, unless an issue it closes ("Closes #N"
+# in its description) carries the label `pr-welcome`, which a maintainer sets to invite one.
+# Bots (Dependabot, release-please) are left alone. A maintainer who reopens a closed pull
+# request keeps it open: the workflow runs only when a pull request is opened.
+#
+# `pull_request_target` runs with the base repository's token, so this workflow never checks out
+# or runs anything from the pull request; it only reads labels and closes through the API. Values
+# from the event reach the shell as environment variables, never spliced into the script.
+name: Outside pull requests
+
+on:
+  pull_request_target:
+    types: [opened]
+
+# Read-only at the top: the one job below asks for what it writes.
+permissions:
+  contents: read
+
+jobs:
+  close-uninvited:
+    if: >-
+      github.event.pull_request.user.type != 'Bot' &&
+      !contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'),
+      github.event.pull_request.author_association)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read             # the labels of the issues the pull request closes
+      pull-requests: write     # the comment and the close
+    steps:
+      - name: Close unless an issue invites it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          # The issues GitHub links as closed by this pull request, and whether one is labelled.
+          invited=$(gh api graphql \
+            -f query='query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  closingIssuesReferences(first: 10) { nodes { labels(first: 30) { nodes { name } } } }
+                }
+              }
+            }' \
+            -F owner="$OWNER" -F repo="$REPO" -F number="$PR" \
+            --jq '[.data.repository.pullRequest.closingIssuesReferences.nodes[].labels.nodes[].name]
+                  | index("pr-welcome") != null')
+          if [ "$invited" = "true" ]; then
+            echo "An issue this pull request closes carries pr-welcome; it stays open."
+            exit 0
+          fi
+          gh pr close "$PR" --repo "$OWNER/$REPO" --comment "Thank you for your interest in Lakana!
+
+          Lakana takes code from its maintainers, and from other contributors only on invitation, so this pull request has been closed automatically. Please open an issue instead to report a bug or propose a change: https://github.com/$OWNER/$REPO/issues/new/choose
+
+          If a maintainer has asked for a pull request on an issue (it carries the label \`pr-welcome\`), open a new pull request whose description says \`Closes #<that issue>\`. See .github/CONTRIBUTING.md."
