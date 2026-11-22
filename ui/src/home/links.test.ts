@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { ATTENTION_OBJECTS, isReleaseVersion, objectPath, releaseNotesUrl } from "./links";
+import type { AttentionKind } from "../api";
+import { attentionPath, isReleaseVersion, objectPath, releaseNotesUrl } from "./links";
 
 describe("links", () => {
   it.each([
@@ -49,16 +50,36 @@ describe("links", () => {
     expect(objectPath("table", "prod", "x")).toBeNull();
   });
 
-  it("maps every attention kind to the object it opens", () => {
-    expect(ATTENTION_OBJECTS).toEqual({
-      run_failed: "run",
-      table_late: "table",
-      check_failed: "check",
-      query_failed: "query",
-      recovery_link_open: "recovery_link",
-      worker_lost: "worker",
-    });
-  });
+  it.each([
+    ["run_failed", "prod", "nightly_ranking", "run-1", "/jobs/prod/runs/run-1"],
+    [
+      "deploy_failed",
+      "prod",
+      "team/analytics",
+      "deploy-1",
+      "/jobs/deploys?environment=prod&repository=team%2Fanalytics",
+    ],
+    ["deploy_failed", null, "analytics", "deploy-1", "/jobs/deploys?repository=analytics"],
+    ["table_late", "prod", "gold.sales", "gold.sales", "/catalog/prod/gold/sales"],
+    ["check_failed", "dev", "gold.sales/not_null_id", "run-2", "/jobs/dev/runs/run-2"],
+    ["query_failed", "dev", "Query 3f9c2a1b", "3f9c2a1b", "/queries/dev/runs/3f9c2a1b"],
+    ["recovery_link_open", null, "sam", "link-1", "/settings/sign-in/recovery-links"],
+    ["worker_lost", null, "worker-2", "w-2", "/settings/status"],
+  ] as const)(
+    "opens a %s row at its failure or its place (%s, %s)",
+    (kind: AttentionKind, environment, title, ref, path) => {
+      const item = {
+        kind,
+        environment,
+        title,
+        ref,
+        at: "2026-11-21T08:00:00Z",
+        count: 1,
+        since: null,
+      };
+      expect(attentionPath(item)).toBe(path);
+    },
+  );
 
   it.each([
     ["0.23.0", true],

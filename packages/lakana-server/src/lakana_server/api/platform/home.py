@@ -100,7 +100,10 @@ def read_attention(
     """Show what needs your attention.
 
     Everyone sees the jobs whose newest finished run failed in the last seven days, in every
-    environment they may read (`READ_ENVIRONMENT`), by the rule of `GET /api/v1/runs/failed`.
+    environment they may read (`READ_ENVIRONMENT`), by the rule of `GET /api/v1/runs/failed`,
+    and there the repositories whose newest finished deploy or rollback failed (dry runs do not
+    count). A job, deploy or check that failed several times in a row is one row: the newest
+    failure, with `count` and `since` saying how many and since when.
     An administrator also sees the late tables, the checks whose newest result failed or
     errored, the open recovery links, the lost workers and their own queries that failed in
     that time. Anyone else also sees the late tables and failed checks among the tables they
@@ -129,6 +132,8 @@ def read_attention(
                 title=item.title,
                 ref=item.ref,
                 at=item.at,
+                count=item.count,
+                since=item.since,
             )
             for item in items
         ],

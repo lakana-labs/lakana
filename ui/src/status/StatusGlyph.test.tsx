@@ -55,6 +55,16 @@ describe("StatusGlyph", () => {
     expect(pill?.querySelector("svg")).toHaveAttribute("width", "12");
   });
 
+  it("StatusLabel names the state in other words when given a label, in the same pill", () => {
+    const { container } = render(<StatusLabel kind="failed" label="Deploy failed" />);
+    const pill = container.querySelector(".pill");
+
+    expect(pill).toHaveClass("status-label", "pill-bad");
+    expect(pill).toHaveTextContent("Deploy failed");
+    expect(screen.queryByText("Failed")).toBeNull();
+    expect(pill?.querySelector("svg")).toHaveAttribute("width", "12");
+  });
+
   it("only the running glyph carries the pulse class", () => {
     for (const kind of STATUS_KINDS) {
       const { container, unmount } = render(<StatusGlyph kind={kind} />);

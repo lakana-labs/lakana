@@ -13,6 +13,11 @@ import type { StatusKind } from "./status";
 export interface StatusLabelProps {
   /** The state to show. */
   kind: StatusKind;
+  /**
+   * The words to name it with, such as "Deploy failed" for a failed deploy; the state's own word
+   * when absent. The glyph and the tint stay the state's.
+   */
+  label?: string;
 }
 
 /**
@@ -35,16 +40,17 @@ export const PILL_TONES: Readonly<
  * Shows the glyph and the translated word of a state, as a small pill tinted for the state. The
  * shape and the word carry the state; the tint only repeats it.
  *
- * @param props - The state.
+ * @param props - The state and, optionally, its words.
  * @param props.kind - The state to show.
+ * @param props.label - The words to name it with instead of the state's own.
  * @returns The pill.
  */
-export function StatusLabel({ kind }: StatusLabelProps): JSX.Element {
+export function StatusLabel({ kind, label }: StatusLabelProps): JSX.Element {
   const { t } = useTranslation();
   return (
     <span className={`status-label pill pill-${PILL_TONES[kind]}`}>
       <StatusGlyph kind={kind} size={12} />
-      <span>{t(`status.${kind}`)}</span>
+      <span>{label ?? t(`status.${kind}`)}</span>
     </span>
   );
 }
