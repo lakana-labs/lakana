@@ -416,6 +416,14 @@ every missing output of it means "run everything".
   job has `issues: write` and nothing else, checks nothing out and gets the run's fields as
   environment variables. A new scheduled workflow joins its list, or `_NOT_REPORTED` in
   `scripts/tests/test_workflows.py` says why not (`mutation.yml` today).
+- **`outside-pull-requests.yml`** (Outside pull requests) closes a pull request opened by anyone
+  who is not an owner, member or collaborator, with a comment pointing to the issue tracker,
+  unless an open issue of this repository that it closes carries the label `pr-welcome` (a
+  maintainer's invitation; an issue elsewhere never counts). Bots are left alone. It runs on
+  `opened` and when the author reopens, so a maintainer can still reopen one. It is a
+  `pull_request_target` workflow: it checks out and runs nothing from the pull request, its one
+  job has `pull-requests: write` and `issues: read`, and the event's fields reach the script as
+  environment variables (`scripts/tests/test_outside_pull_requests.py`).
 - **`fuzz.yml`** (Fuzzing) runs ClusterFuzzLite over the Atheris harnesses in `fuzz/`: about five
   minutes on a pull request from a branch of this repository (never a fork's) that changes what
   they load, an hour every night on `main` with corpus pruning after it (`.clusterfuzzlite/nightly.sh`).
@@ -430,7 +438,7 @@ every missing output of it means "run everything".
   setup: switching on *default setup* in the repository's code-scanning settings would make its
   uploads fail, so leave that toggle off.
 - **Token permissions.** No workflow has a write permission at its top level: each job names its
-  own (`cla.yml`, `security-deep.yml` and `scheduled-failure.yml` included). `scripts/tests/test_workflows.py` fails on one.
+  own (`cla.yml`, `outside-pull-requests.yml`, `security-deep.yml` and `scheduled-failure.yml` included). `scripts/tests/test_workflows.py` fails on one.
 - **`release.yml`** is described in `docs/agent/release.md`; it also attaches the SBOM to each
   GitHub release, and publishes the documentation site on GitHub Pages (`pages` and
   `pages-deploy`; see "The documentation site on GitHub Pages" there).

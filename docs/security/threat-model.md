@@ -1293,7 +1293,9 @@ code above:
   `docs-examples`. The CLA check (`cla.yml`) runs on every pull request and records signatures
   in a separate private repository. It is not a required check, because Dependabot's pull
   requests get no Actions secrets and could never pass it, so the maintainer confirms a
-  signature before merging an outside contribution.
+  signature before merging an outside contribution. Outside contributions come only on invitation: `outside-pull-requests.yml`
+  closes a pull request from anyone who is not an owner, member or collaborator unless an open issue
+  of this repository that it closes carries `pr-welcome`, without checking out or running its code.
 - **Weekly**, a deep scan runs semgrep against the full codebase (`.github/workflows/security-deep.yml`),
   uploading its SARIF output to GitHub's code scanning UI and keeping it as a build artifact.
   CodeQL analyses the Python code on every pull request, on every push to `main` and weekly
