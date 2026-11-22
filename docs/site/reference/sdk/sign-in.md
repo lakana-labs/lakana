@@ -39,6 +39,73 @@ Returns: `IssuedLink`. The link, shown only here.
 | `lakana.NotFound` | If local sign-in is off on the server. |
 | `lakana.PermissionDenied` | If the credential is not a person's own personal access token. |
 
+### `client.sign_in.oidc_info`
+
+Signature: `client.sign_in.oidc_info() -> OidcInfo`
+
+Say whether the server signs people in through an identity provider.
+
+Sends no credential.
+
+Returns: `OidcInfo`. Whether it is on, and the provider's name.
+
+| Error | When |
+|---|---|
+| `lakana.NotFound` | From a server older than sign-in through a provider. |
+| `lakana.Conflict` | If the server's web interface is off. |
+| `lakana.InvalidResponse` | If the answer is not a JSON object with a boolean `enabled` (a proxy's or a portal's page, say). |
+
+### `client.sign_in.exchange_code`
+
+Signature: `client.sign_in.exchange_code(code: str, code_verifier: str) -> IssuedToken`
+
+Exchange the one-time code of a sign-in confirmed in a browser for a new token.
+
+Sends no credential: the code and the PKCE verifier it was confirmed for are the proof. The code works once, for 2 minutes; a wrong verifier uses it up too.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `code` | `str` | required | The code the browser brought back to the command line. |
+| `code_verifier` | `str` | required | The PKCE verifier whose S256 challenge the browser confirmed. |
+
+Returns: `IssuedToken`. The confirming person's new token, named ``lakana login on &lt;host&gt;``, for 90 days.
+
+| Error | When |
+|---|---|
+| `lakana.LakanaError` | With status 400 for an unknown, used, expired or wrong code or verifier; the message says to sign in again. |
+
+### `client.sign_in.start_device`
+
+Signature: `client.sign_in.start_device(host: str) -> DeviceSignIn`
+
+Start a sign-in of the command line to confirm in a browser elsewhere.
+
+Sends no credential. Show `DeviceSignIn.user_code` and `DeviceSignIn.verification_url` to the person, then call `poll_device` every `DeviceSignIn.interval` seconds.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `host` | `str` | required | This computer's name, for the confirmation and the token's name. |
+
+Returns: `DeviceSignIn`. The codes, the page and the interval.
+
+### `client.sign_in.poll_device`
+
+Signature: `client.sign_in.poll_device(device_code: str) -> DeviceSignInPoll`
+
+Ask whether a device sign-in was confirmed; an approved one answers its token once.
+
+Sends no credential.
+
+| Name | Type | Default | Description |
+|---|---|---|---|
+| `device_code` | `str` | required | `DeviceSignIn.device_code`. |
+
+Returns: `DeviceSignInPoll`. The state, with the token once approved; ``slow_down`` for any 429: asked too soon, or past the server's rate.
+
+| Error | When |
+|---|---|
+| `lakana.LakanaError` | With status 400 for a device code the server does not know. |
+
 ## `client.invites`
 
 Invites of new people: `Client.invites`. Needs the ADMIN role.

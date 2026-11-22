@@ -606,6 +606,10 @@ def test_every_route_that_needs_a_caller_documents_the_refusal_of_a_missing_one(
         "POST /api/v1/sign-in/oidc/start",
         "GET /api/v1/sign-in/oidc/callback",
         "POST /api/v1/sign-in/oidc/finish",
+        # lakana login: the code and verifier, or the device code, are the proof (#32, PR 3)
+        "POST /api/v1/auth/cli/token",
+        "POST /api/v1/auth/cli/device",
+        "POST /api/v1/auth/cli/device/token",
     }
     missing = [
         f"{method} {path}"

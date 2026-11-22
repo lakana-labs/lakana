@@ -86,6 +86,15 @@ CREDENTIAL_SPECIFIC_ROUTES: dict[tuple[str, str], str] = {
         )
     },
     **{
+        route: "session only: a person confirms lakana login in the browser; a token is refused"
+        for route in (
+            ("POST", "/api/v1/sign-in/cli/approvals"),
+            ("POST", "/api/v1/sign-in/cli/device/describe"),
+            ("POST", "/api/v1/sign-in/cli/device/approve"),
+            ("POST", "/api/v1/sign-in/cli/device/deny"),
+        )
+    },
+    **{
         route: "token-only: the cookie is refused (403 TokenOnlyRoute)"
         for route in TOKEN_ONLY_ROUTES
     },
@@ -120,6 +129,9 @@ STATEFUL_READS: dict[tuple[str, str], str] = {
 OPEN_OPERATIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/auth/oidc/token"): "takes a CI provider's ID token, not a credential",
     ("POST", "/api/v1/sign-in/passkey"): "usernameless sign-in: the passkey is the proof",
+    ("POST", "/api/v1/auth/cli/token"): "lakana login's code and verifier are the proof",
+    ("POST", "/api/v1/auth/cli/device"): "starts a device sign-in; takes no credential",
+    ("POST", "/api/v1/auth/cli/device/token"): "lakana login --device's code is the proof",
 }
 """Operations that read no credential at all; they may answer 401 both ways."""
 
@@ -129,6 +141,8 @@ _TIME = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
 _TOKEN = re.compile(r"^lakana_(pat|task|ci)_")
 _KEY_ID = re.compile(r"^[0-9a-f]{16}$|^[0-9a-f]{32}$")
 _SIGN_IN_LINK = re.compile(r"^https?://[^#]+/sign-in#l=[\w-]+&s=[\w-]+$")
+_RANDOM_FIELDS = frozenset({"challenge", "device_code", "user_code"})
+"""Fields drawn at random for every request: a WebAuthn challenge, a device grant's codes."""
 
 _BY_SEGMENT = {
     "environments": ENV,
@@ -399,8 +413,8 @@ def _normalised(value: Any) -> Any:  # ruff: ignore[any-type]
     """Replace what two identical requests made at different moments answer differently.
 
     A created object's id, a timestamp, a newly issued token's text, a new sign-in link's
-    random halves and a WebAuthn challenge differ between the two worlds even when the
-    credential plays no part; everything else is compared as it is.
+    random halves, a WebAuthn challenge and a device grant's codes differ between the two
+    worlds even when the credential plays no part; everything else is compared as it is.
 
     Parameters
     ----------
@@ -416,7 +430,7 @@ def _normalised(value: Any) -> Any:  # ruff: ignore[any-type]
     """
     if isinstance(value, dict):
         return {
-            k: "<challenge>" if k == "challenge" else _normalised(v)
+            k: f"<{k}>" if k in _RANDOM_FIELDS else _normalised(v)
             for k, v in value.items()
             if k != "request_id"
         }

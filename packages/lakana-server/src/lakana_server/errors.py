@@ -19,6 +19,8 @@ from lakana_core.errors import (
     AlreadyExistsError,
     AuditUnavailableError,
     AuthenticationError,
+    CliGrantRefused,
+    CliPollTooFast,
     ConflictError,
     GraphBusyError,
     KeptAfterCheckError,
@@ -147,6 +149,8 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
     AuthenticationError: 401,
     PasskeyRefused: 403,
     TooManyAttemptsError: 429,
+    CliPollTooFast: 429,
+    CliGrantRefused: 400,
     LinkUnusableError: 410,
     NotFoundError: 404,
     AlreadyExistsError: 409,
@@ -173,6 +177,7 @@ _STATUS_CODES: dict[type[LakanaError], int] = {
 
 _RETRY_AFTER_SECONDS: dict[type[LakanaError], str] = {
     TooManyAttemptsError: "60",
+    CliPollTooFast: "5",
     AppendConcurrencyLimitError: "1",
     DownloadConcurrencyLimitError: "1",
     ResultPageLimitError: "1",
@@ -242,7 +247,8 @@ def install_exception_handlers(app: FastAPI) -> None:
             say why the person has to sign in again; so does an `OidcSignInRefused` (403:
             ``not_linked``, ``deactivated``, ``token_invalid``, ...). A `LinkUnusableError`
             (410) adds `state` (``used``, ``expired``, ``withdrawn``, ``unknown``), so the
-            sign-in page can say which.
+            sign-in page can say which. A `CliPollTooFast` (429) adds ``error: slow_down``, RFC
+            8628's name for it.
 
         Notes
         -----
@@ -265,6 +271,8 @@ def install_exception_handlers(app: FastAPI) -> None:
             content["reason"] = exc.reason
         if isinstance(exc, LinkUnusableError):
             content["state"] = exc.state
+        if isinstance(exc, CliPollTooFast):
+            content["error"] = "slow_down"
         return JSONResponse(status_code=status_code, content=content, headers=headers)
 
     def handle_validation_error(request: Request, exc: Exception) -> JSONResponse:

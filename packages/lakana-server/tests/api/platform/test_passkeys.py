@@ -472,6 +472,9 @@ def pending(
 _OPERATIONS = _all_operations(_route_app())
 _OPEN_OPERATIONS = {
     ("POST", "/api/v1/auth/oidc/token"),
+    ("POST", "/api/v1/auth/cli/token"),
+    ("POST", "/api/v1/auth/cli/device"),
+    ("POST", "/api/v1/auth/cli/device/token"),
     ("POST", "/api/v1/sign-in/links/describe"),
     ("POST", "/api/v1/sign-in/links/redeem"),
     ("POST", "/api/v1/sign-in/passkey/options"),

@@ -60,6 +60,7 @@ from lakana_core.models.deploy import (
     ProjectFileText,
 )
 from lakana_core.models.ci_oidc import CiOidcJti, CiToken, CiTrustRule
+from lakana_core.models.cli_grant import CliGrant
 from lakana_core.models.check_result import CheckOutcome, CheckResult, RollbackOutcome
 from lakana_core.models.job import JobFire, JobSchedule
 from lakana_core.models.notification import NotificationDelivery, NotificationState
@@ -113,6 +114,7 @@ __all__ = [
     "CiOidcJti",
     "CiToken",
     "CiTrustRule",
+    "CliGrant",
     "ColumnDescription",
     "ColumnMask",
     "Connection",

@@ -333,6 +333,21 @@ class OidcSignInRefused(PermissionDenied):
         super().__init__(_OIDC_REFUSED[reason])
 
 
+class CliGrantRefused(LakanaError):
+    """A command-line sign-in's code, verifier or device code was refused; mapped to 400.
+
+    The answer is the same for an unknown, used, expired or wrong value, so that none can be
+    probed: the message says to start `lakana login` again.
+    """
+
+
+class CliPollTooFast(LakanaError):
+    """A command line asked about its device grant faster than the interval; mapped to 429.
+
+    The answer carries ``error: slow_down`` (RFC 8628's name) and a `Retry-After` header.
+    """
+
+
 class StorageUnavailableError(LakanaError):
     """Storage could not be written or read right now (a full disk, an unreachable bucket).
 

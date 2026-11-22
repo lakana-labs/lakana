@@ -7032,11 +7032,50 @@ def test_0089_keys_saved_queries_by_their_folded_name_and_indexes_the_filter(
         engine.dispose()
 
 
-_REVISION_0090 = "4b8d2f6a1c93"
+_REVISION_0090 = "7c3e91a0b5d2"
 
 
-def test_0090_adds_the_commit_subject_to_deploy_runs(migrated_db: MigratedDb) -> None:
-    """Revision `0090`: `deploy_runs.commit_subject`, 200 characters, null for existing runs.
+def test_0090_keeps_the_grants_of_lakana_login(migrated_db: MigratedDb) -> None:
+    """Revision `0090`: the `cli_sign_in_grants` table, its unique code hashes and its drop.
+
+    Parameters
+    ----------
+    migrated_db
+        Copies the file migrated to the revision the test starts from.
+    """
+    db_path = migrated_db(_REVISION_0089)
+    config = Config(str(ALEMBIC_INI))
+    engine = create_engine(f"sqlite:///{db_path}")
+
+    def insert(connection: sa.Connection, code_hash: str) -> None:
+        connection.execute(
+            sa.text(
+                "INSERT INTO cli_sign_in_grants (id, kind, host, code_hash, created_at,"
+                " expires_at) VALUES (:id, 'loopback', 'laptop', :code_hash,"
+                " '2026-11-20 00:00:00', '2026-11-20 00:02:00')"
+            ),
+            {"id": uuid.uuid4().hex, "code_hash": code_hash},
+        )
+
+    try:
+        assert "cli_sign_in_grants" not in inspect(engine).get_table_names()
+        command.upgrade(config, _REVISION_0090)
+        assert "cli_sign_in_grants" in inspect(engine).get_table_names()
+        with engine.begin() as connection:
+            insert(connection, "a" * 64)
+        with pytest.raises(IntegrityError), engine.begin() as connection:
+            insert(connection, "a" * 64)
+        command.downgrade(config, _REVISION_0089)
+        assert "cli_sign_in_grants" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+
+
+_REVISION_0091 = "4b8d2f6a1c93"
+
+
+def test_0091_adds_the_commit_subject_to_deploy_runs(migrated_db: MigratedDb) -> None:
+    """Revision `0091`: `deploy_runs.commit_subject`, 200 characters, null for existing runs.
 
     A run from before the column keeps every other value and has no subject; the downgrade drops
     the column and keeps the run.
@@ -7046,7 +7085,7 @@ def test_0090_adds_the_commit_subject_to_deploy_runs(migrated_db: MigratedDb) ->
     migrated_db
         Copies the file migrated to the revision the test starts from.
     """
-    db_path = migrated_db(_REVISION_0089)
+    db_path = migrated_db(_REVISION_0090)
     config = Config(str(ALEMBIC_INI))
     engine = create_engine(f"sqlite:///{db_path}")
     deploy_id = uuid.uuid4().hex
@@ -7072,7 +7111,7 @@ def test_0090_adds_the_commit_subject_to_deploy_runs(migrated_db: MigratedDb) ->
                 },
             )
         assert "commit_subject" not in columns()
-        command.upgrade(config, _REVISION_0090)
+        command.upgrade(config, _REVISION_0091)
         found = columns()["commit_subject"]
         assert found["nullable"]
         assert getattr(found["type"], "length", None) == 200
@@ -7082,7 +7121,7 @@ def test_0090_adds_the_commit_subject_to_deploy_runs(migrated_db: MigratedDb) ->
                 {"id": deploy_id},
             ).one()
         assert tuple(row) == ("a" * 40, None)
-        command.downgrade(config, _REVISION_0089)
+        command.downgrade(config, _REVISION_0090)
         assert "commit_subject" not in columns()
         with engine.connect() as connection:
             kept = connection.execute(sa.text("SELECT id FROM deploy_runs")).scalars().all()

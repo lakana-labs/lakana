@@ -225,6 +225,10 @@ _OPEN_ROUTES = {
     "/api/v1/sign-in/oidc/start",
     "/api/v1/sign-in/oidc/callback",
     "/api/v1/sign-in/oidc/finish",
+    # lakana login (#32, PR 3): the code and verifier, or the device code, are the proof; <= 16 KiB
+    "/api/v1/auth/cli/token",
+    "/api/v1/auth/cli/device",
+    "/api/v1/auth/cli/device/token",
 }
 """The routes that answer without a credential, by design: the CI token exchange takes an ID
 token, not a credential, and reads at most 16 KiB of body; `/readyz` has no body and answers

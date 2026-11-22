@@ -1,0 +1,33 @@
+{
+  "title": "Sign in the command line",
+  "question": "Create the API token “<token/>” for <person/>?",
+  "tokenName": "lakana login on <host/>",
+  "effect": "The command line on that computer can then do everything you can, for 90 days.",
+  "create": "Create token",
+  "cancel": "Cancel",
+  "creating": "Creating the token…",
+  "sent": "The token is on its way to the command line. You can close this tab.",
+  "badLink": {
+    "title": "This sign-in link does not work",
+    "body": "The link lakana login opened is incomplete or changed: its port must be between 1024 and 65535, and the computer's name may hold only A-Z, a-z, 0-9, '.', '_' and '-'. Run lakana login again."
+  },
+  "device": {
+    "title": "Sign in a command line elsewhere",
+    "intro": "Type the code lakana login --device shows on the other computer.",
+    "code": "Code",
+    "codeHelp": "Eight letters, such as BCDF-GHJK.",
+    "next": "Continue",
+    "checking": "Looking for the sign-in…",
+    "unknown": "No sign-in is waiting for this code. Check it on the other computer; it works for 10 minutes.",
+    "approved": "Done. Go back to the terminal: lakana login finishes there.",
+    "denied": "Refused. The command line on that computer was told, and no token was created.",
+    "doneTitle": "Command-line sign-in",
+    "warning": "Continue only if you started lakana login --device yourself, a moment ago. Never enter a code someone sent you or read out to you: whoever started this sign-in would get a token that acts as you.",
+    "requested_one": "Requested from <address/>, {{count}} minute ago.",
+    "requested_other": "Requested from <address/>, {{count}} minutes ago.",
+    "requestedNow": "Requested from <address/>, less than a minute ago."
+  },
+  "effectLinked": "The command line on that computer can then do everything you can, for 90 days, and only while you keep signing in to Lakana through your identity provider.",
+  "warning": "Continue only if you ran lakana login on this computer yourself, a moment ago. If a link or a message brought you here, close this tab.",
+  "hostNote": "“<host/>” is the name the computer gave itself; Lakana cannot check it."
+}

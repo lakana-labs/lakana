@@ -599,6 +599,28 @@ walk("an invite link marks hidden characters in the name it signs in as", async 
   expectOnlyStubbed(paths, ["/api/v1/sign-in/session", "/api/v1/sign-in/links/describe"]);
 });
 
+walk("lakana login's confirmations mark hidden characters", async ({ page }) => {
+  const paths = apiPaths(page);
+  const stub = poisoned(page);
+  await signInAsAdmin(stub);
+  await stub.route("**/api/v1/sign-in/cli/device/describe", (route) =>
+    route.fulfill({
+      json: { host: "build-box", requested_from: "203.0.113.7", requested_at: AT, age_seconds: 90 },
+    }),
+  );
+  const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+  // The page refuses a host that is no host name, so the link's own text carries no override.
+  await visit(page, `/sign-in/cli?port=49152&state=s-1&challenge=${challenge}&host=laptop`, [
+    "admin",
+  ]);
+  await page.goto("/sign-in/device");
+  await page.getByRole("textbox", { name: "Code" }).fill("BCDF-GHJK");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Create token" })).toBeVisible();
+  await expectMarked(page, "the device confirmation", ["build-box", "admin", "203.0.113.7"]);
+  expectOnlyStubbed(paths, [...STUBBED, "/api/v1/sign-in/cli/device/describe"]);
+});
+
 walk("Connect a repository marks hidden characters in every step", async ({ page }) => {
   const paths = apiPaths(page);
   await signInAsAdmin(poisoned(page));

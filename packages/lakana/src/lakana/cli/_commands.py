@@ -12,6 +12,12 @@ from __future__ import annotations
 
 COMMANDS: dict[str, tuple[str, ...]] = {
     "whoami": ("client.whoami",),
+    "login": (
+        "sign_in.oidc_info",
+        "sign_in.exchange_code",
+        "sign_in.start_device",
+        "sign_in.poll_device",
+    ),
     "me set": ("client.set_language",),
     "search": ("client.search",),
     "env create": ("environments.create",),
@@ -247,7 +253,6 @@ COMMANDS: dict[str, tuple[str, ...]] = {
 LOCAL_COMMANDS: frozenset[str] = frozenset(
     {
         "init",
-        "login",
         "logout",
         "profile list",
         "profile use",

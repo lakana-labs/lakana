@@ -1,5 +1,21 @@
 # Contributing to Lakana
 
+## How to contribute
+
+Lakana is open source, but its code comes from its maintainers. Everyone is welcome to:
+
+- **Report a bug or propose a change** by [opening an issue](https://github.com/lakana-labs/lakana/issues/new/choose).
+  A clear issue with steps to reproduce helps the project most.
+- **Report a security vulnerability** privately, as [SECURITY.md](SECURITY.md) describes.
+
+Pull requests are by invitation. When a maintainer would welcome a pull request for an issue, they
+add the label `pr-welcome` to it; open your pull request with `Closes #<that issue>` in its
+description. A pull request from outside the maintainers without such an issue is closed
+automatically, with a pointer back to the issue tracker. This is not a judgement of your work: it
+keeps the project's design and review load in a few hands.
+
+You are of course free to fork Lakana under its license.
+
 ## Before your first pull request
 
 You must sign the [Contributor License Agreement](https://github.com/lakana-labs/lakana/blob/main/docs/legal/CLA.md). A bot will comment

@@ -6,7 +6,7 @@ target version. The history shows it beside the commit's ID. Runs from before th
 none, and none is filled in here: the commits are in the repositories, which only a worker reads.
 
 Revision ID: 4b8d2f6a1c93
-Revises: 7c1e5a9d3f20
+Revises: 7c3e91a0b5d2
 Create Date: 2026-11-21 12:00:00.000000
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "4b8d2f6a1c93"
-down_revision: str | Sequence[str] | None = "7c1e5a9d3f20"
+down_revision: str | Sequence[str] | None = "7c3e91a0b5d2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

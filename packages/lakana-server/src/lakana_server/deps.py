@@ -36,6 +36,7 @@ from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.service import GrantService
 from lakana_core.home.attention import AttentionService
 from lakana_core.home.recent import RecentService
+from lakana_core.identity.cli_grants import CliGrantService
 from lakana_core.identity.groups import GroupService
 from lakana_core.identity.interface_state import InterfaceStateService
 from lakana_core.identity.links import LinkService
@@ -328,6 +329,30 @@ def get_oidc_link_service(
         clock=get_clock(request),
         bootstrap_name=request.app.state.settings.bootstrap_admin,
     )
+
+
+def get_cli_grant_service(
+    request: Request,
+    session: Session = Depends(get_session),
+    authz: AuthorizationService = Depends(get_grant_authorization),
+) -> CliGrantService:
+    """Build a CliGrantService for the current request.
+
+    Parameters
+    ----------
+    request
+        The current request, used to reach the app's clock.
+    session
+        The current request's database session.
+    authz
+        The real, grant-backed authorization service, for issuing the token.
+
+    Returns
+    -------
+    CliGrantService
+        A service using real authorization and the app's clock.
+    """
+    return CliGrantService(session, authz, clock=get_clock(request))
 
 
 def get_notice_service(request: Request, session: Session = Depends(get_session)) -> NoticeService:
