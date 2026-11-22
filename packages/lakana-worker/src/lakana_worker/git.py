@@ -86,6 +86,9 @@ _MAX_STDERR = 2000
 _MAX_STDOUT = 16 * 1024 * 1024
 """Most stdout kept from one git command; the largest legitimate output is a
 `ls-remote` listing of `fetch_refs` branches and tags."""
+_SUBJECT_COMMIT_BYTES = 64 * 1024
+"""The largest commit object whose message is read for its subject; a larger one (a crafted
+message, far past any real one) has none, so the read stays small."""
 _MAX_STDERR_READ = 64 * 1024
 """Most stderr kept in memory; messages are cut to `_MAX_STDERR` when shown."""
 _WATCH_SECONDS = 0.5
@@ -166,14 +169,15 @@ def commit_subject(message: str) -> str | None:
     Returns
     -------
     str or None
-        Its first line without the spaces around it, a NUL (which Postgres cannot store)
-        replaced by U+FFFD, cut to `COMMIT_SUBJECT_CHARS` with an ellipsis as the last
-        character; `None` for a blank first line.
+        Its first line that is not blank (git's own subject skips leading blank lines too),
+        without the spaces around it, a NUL (which Postgres cannot store) replaced by U+FFFD,
+        cut to `COMMIT_SUBJECT_CHARS` with an ellipsis as the last character; `None` for a
+        blank message.
     """
-    lines = message.splitlines()
-    subject = lines[0].strip().replace("\x00", "\ufffd") if lines else ""
+    subject = next((line.strip() for line in message.splitlines() if line.strip()), "")
     if not subject:
         return None
+    subject = subject.replace("\x00", "\ufffd")
     if len(subject) > COMMIT_SUBJECT_CHARS:
         return subject[: COMMIT_SUBJECT_CHARS - 1] + "\u2026"
     return subject
@@ -1055,8 +1059,12 @@ def _subject_of(
 ) -> str | None:
     """Read the first line of a fetched commit's message.
 
-    git writes the message in UTF-8 whatever encoding the commit names. A failure here never
-    fails the deploy: the subject is only shown beside the commit's ID.
+    The commit object's size is asked first, and the message is read only when the object is at
+    most `_SUBJECT_COMMIT_BYTES`, so a crafted message of many megabytes is never read. git
+    writes the message in UTF-8 whatever encoding the commit names. Nothing here fails the
+    deploy: the subject is only shown beside the commit's ID, so a failed command, a timeout,
+    the output cap or a passed deadline leave it `None` (a passed deadline still ends the deploy
+    at its next step).
 
     Parameters
     ----------
@@ -1074,14 +1082,28 @@ def _subject_of(
     Returns
     -------
     str or None
-        `commit_subject` of the message; `None` if git could not read it.
+        `commit_subject` of the message; `None` if git could not read it or the commit is too
+        large.
     """
-    shown = _run(
-        ["git", "log", "-1", "--no-show-signature", "--format=%B", "--end-of-options", sha],
-        cwd=repo,
-        env=env,
-        timeout=_timeout(limits, deadline),
-    )
+    try:
+        size = _run(
+            ["git", "cat-file", "-s", "--end-of-options", sha],
+            cwd=repo,
+            env=env,
+            timeout=_timeout(limits, deadline),
+        )
+        if size.returncode != 0 or not size.stdout.strip().isdigit():
+            return None
+        if int(size.stdout.strip()) > _SUBJECT_COMMIT_BYTES:
+            return None
+        shown = _run(
+            ["git", "log", "-1", "--no-show-signature", "--format=%B", "--end-of-options", sha],
+            cwd=repo,
+            env=env,
+            timeout=_timeout(limits, deadline),
+        )
+    except GitError:
+        return None
     if shown.returncode != 0:
         return None
     return commit_subject(shown.stdout)

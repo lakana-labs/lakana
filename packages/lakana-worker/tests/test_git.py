@@ -140,6 +140,83 @@ def test_a_fetch_reads_the_first_line_of_the_commit_message(tmp_path: Path) -> N
     assert _fetch(tmp_path).subject == "Review 4-6: four jobs"
 
 
+def _subject_runs_fail(monkeypatch: pytest.MonkeyPatch, how: str) -> None:
+    """Make the git commands that read the subject fail, and nothing else.
+
+    Parameters
+    ----------
+    monkeypatch
+        Pytest's monkeypatch.
+    how
+        ``raise`` for a `GitError` (a timeout, the output cap, the deadline), ``exit`` for a
+        non-zero exit.
+    """
+    real = module._run
+
+    def run(args: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        if args[1] in {"log", "cat-file"}:
+            if how == "raise":
+                raise GitError("git log timed out after 1s")
+            return subprocess.CompletedProcess(list(args), 1, "", "fatal: bad object")
+        return real(args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(module, "_run", run)
+
+
+@pytest.mark.parametrize("how", ["raise", "exit"])
+def test_a_subject_git_cannot_read_leaves_none_and_the_fetch_goes_on(
+    tmp_path: Path, local_sha: str, monkeypatch: pytest.MonkeyPatch, how: str
+) -> None:
+    """A timeout, the output cap or a failed command reading the subject never fails a deploy.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    local_sha
+        The repository's commit.
+    monkeypatch
+        Pytest's monkeypatch.
+    how
+        How the subject's read fails.
+    """
+    _subject_runs_fail(monkeypatch, how)
+    fetched = _fetch(tmp_path)
+    assert (fetched.sha, fetched.subject) == (local_sha, None)
+    assert (fetched.tree / "assets" / "bronze" / "events.sql").is_file()
+
+
+def test_a_commit_too_large_to_read_has_no_subject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The message is read only when the commit object is within `_SUBJECT_COMMIT_BYTES`.
+
+    Parameters
+    ----------
+    tmp_path
+        Pytest's per-test directory.
+    monkeypatch
+        Pytest's monkeypatch.
+    """
+    repo = tmp_path / "repos" / "analytics"
+    make_repo(repo, _FILES)
+    commit(repo, {}, "A subject\n\n" + "x" * 4096)
+    asked: list[str] = []
+    real = module._run
+
+    def run(args: Sequence[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        asked.append(args[1])
+        return real(args, **kwargs)  # ty: ignore[invalid-argument-type]
+
+    monkeypatch.setattr(module, "_run", run)
+    monkeypatch.setattr(module, "_SUBJECT_COMMIT_BYTES", 1024)
+    assert _fetch(tmp_path).subject is None
+    assert "cat-file" in asked
+    assert "log" not in asked
+    monkeypatch.setattr(module, "_SUBJECT_COMMIT_BYTES", 64 * 1024)
+    assert _fetch(tmp_path).subject == "A subject"
+
+
 @pytest.mark.parametrize(
     ("message", "subject"),
     [
@@ -147,7 +224,8 @@ def test_a_fetch_reads_the_first_line_of_the_commit_message(tmp_path: Path) -> N
         ("  Add the jobs  \r\nmore", "Add the jobs"),
         ("first\u2028second", "first"),
         ("", None),
-        ("   \n\nbody only after a blank first line", None),
+        ("  \n \t\n", None),
+        ("   \n\nReal subject after blank lines\n\nbody", "Real subject after blank lines"),
         ("nul\x00inside", "nul\ufffdinside"),
         ("x" * 200, "x" * 200),
         ("x" * 201, "x" * 199 + "\u2026"),
@@ -156,7 +234,9 @@ def test_a_fetch_reads_the_first_line_of_the_commit_message(tmp_path: Path) -> N
 def test_commit_subject_is_the_first_line_cut_to_200_characters(
     message: str, subject: str | None
 ) -> None:
-    """The first line, trimmed; none for a blank one; a NUL replaced; past 200 characters cut.
+    """The first line that is not blank, trimmed, as git's own subject; a NUL replaced; cut.
+
+    A blank message has none; past 200 characters the subject ends in an ellipsis.
 
     Parameters
     ----------
