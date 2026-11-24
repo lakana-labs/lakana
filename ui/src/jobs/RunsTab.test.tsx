@@ -709,6 +709,21 @@ describe("RunsTab", () => {
       expect(jobReads(server.sent)).toBe(shown);
     });
 
+    it("reads the waiting starts again with Read again", async () => {
+      const { server, user } = renderTab(twoPages, "/jobs/runs", jobs());
+      await user.click(await screen.findByRole("button", { name: "Show more" }));
+      const again = await screen.findByRole("button", { name: "Read again" });
+      const before = jobReads(server.sent);
+
+      await user.click(again);
+      await waitFor(() => {
+        expect(jobReads(server.sent)).toBeGreaterThan(before);
+      });
+      await waitFor(async () => {
+        expect((await listed()).slice(0, 2)).toEqual(["orders_daily", "hourly_stock"]);
+      });
+    });
+
     it("says Unknown for a start whose trigger the server could not read", async () => {
       renderTab(page([]), "/jobs/runs?environment=prod", {
         "GET /api/v1/environments/prod/jobs": {

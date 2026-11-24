@@ -8,7 +8,7 @@ import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import { type JobOut, listJobs } from "../api/jobs";
+import type { JobOut } from "../api/jobs";
 import { openFromCell, Unknown } from "../catalog/cells";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useWhen } from "../shell/useWhen";
@@ -17,6 +17,7 @@ import "./jobStrings";
 import { isWaiting, WaitingLabel } from "./JobWaiting";
 import { jobPath, jobRunPath } from "./paths";
 import { type Period, sinceOf } from "./period";
+import { readJobsOf } from "./readJobsOf";
 import "./runStrings";
 
 /** The filters of the Runs tab that a waiting start is held against. */
@@ -60,8 +61,12 @@ function waitingStarts(
     .sort((a, b) => (b.waiting_since ?? "").localeCompare(a.waiting_since ?? ""));
 }
 
-/** The most environments whose jobs are read at once, as All jobs reads them. */
-const READS_IN_FLIGHT = 4;
+/**
+ * How long one environment's jobs may take before the Runs tab goes on without its waiting
+ * starts. The first page of runs waits for these reads, so that runs and waiting starts are one
+ * moment's answer; a slow environment must not hold the whole tab, its Refresh and Read again.
+ */
+const WAITING_READ_LIMIT_MS = 5_000;
 
 /**
  * Whether the State filter can show a waiting start: All, or Queued or running.
@@ -77,8 +82,9 @@ function showsWaiting(status: string): boolean {
  * Reads the jobs of the listed environments, at most four at once, and keeps the starts that
  * wait and match the filters. The Runs tab reads them with its first page, so the two are one
  * moment's answer: a start that has begun shows once, as its run, and never twice or not at all.
- * Nothing is read when the State filter shows no waiting start. A job list that cannot be read
- * adds no row and no error here; the Jobs tab says so.
+ * Nothing is read when the State filter shows no waiting start. A job list that cannot be read,
+ * or that takes longer than {@link WAITING_READ_LIMIT_MS}, adds no row and no error here; the
+ * Jobs tab says so.
  *
  * @param filter - The environments and the filters.
  * @returns The jobs whose start waits, newest request first.
@@ -87,21 +93,9 @@ export async function readWaitingStarts(filter: WaitingFilter): Promise<JobOut[]
   if (!showsWaiting(filter.status)) {
     return [];
   }
-  const names = [...filter.environments];
-  const jobs: JobOut[] = [];
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    while (next < names.length) {
-      const name = names[next] as string;
-      next += 1;
-      try {
-        jobs.push(...(await listJobs(name)));
-      } catch {
-        // The Jobs tab says that an environment's jobs cannot be read; here it adds no row.
-      }
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(READS_IN_FLIGHT, names.length) }, worker));
+  const answers = await readJobsOf(filter.environments, WAITING_READ_LIMIT_MS);
+  // An environment whose jobs failed or came too late adds no row; the Jobs tab says so.
+  const jobs = answers.flatMap((answer) => ("jobs" in answer ? answer.jobs : []));
   return waitingStarts(jobs, filter);
 }
 
