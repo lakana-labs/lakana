@@ -31,6 +31,14 @@ describe("saved queries api", () => {
     expect(server.sent[1]?.path).toBe("/api/v1/saved-queries?limit=50&environment=pro+d&cursor=c1");
   });
 
+  it("sends a sort", async () => {
+    const server = fakeServer(queryRoutes());
+
+    await listSavedQueries(null, null, { sort: "updated", order: "desc" });
+
+    expect(server.sent[0]?.path).toBe("/api/v1/saved-queries?limit=50&sort=updated&order=desc");
+  });
+
   it("reads one saved query under its environment", async () => {
     const server = fakeServer(queryRoutes());
 

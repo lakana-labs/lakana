@@ -84,10 +84,12 @@ describe("access", () => {
 
     expect(await listPeople("")).toEqual({ people: [], more: false });
     await listPeople("a&b");
+    await listPeople("", { sort: "name", order: "desc" });
 
     expect(server.sent.map((request) => request.path)).toEqual([
       "/api/v1/principals?limit=200",
       "/api/v1/principals?limit=200&q=a%26b",
+      "/api/v1/principals?limit=200&sort=name&order=desc",
     ]);
   });
 

@@ -123,6 +123,35 @@
   white-space: nowrap;
 }
 
+/* A column header that sorts (SortHeader): text that looks like the header, a button to the
+   keyboard, with the arrow of the sorted one. */
+.sort-head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sort-head[data-hovered] {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.sort-head[data-focus-visible] {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+th[aria-sort] .sort-head {
+  color: var(--color-text);
+  font-weight: 500;
+}
+
 /* 24 px between columns: a right-aligned number never meets the text after it. */
 .list td {
   box-sizing: border-box;

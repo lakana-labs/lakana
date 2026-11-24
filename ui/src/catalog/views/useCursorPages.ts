@@ -40,11 +40,14 @@ interface State<T> {
  * @template T - A row.
  * @param key - What the list is of (an environment and a namespace); a new one starts again.
  * @param load - Reads a page from a cursor; null for the first.
+ * @param order - The order the list is read in; a new one reads the first page again, and the
+ *   rows shown stay, marked busy, until it arrives, so the header that sorted keeps the focus.
  * @returns The rows, the state of the read and the two ways to read on.
  */
 export function useCursorPages<T>(
   key: string,
   load: (cursor: string | null) => Promise<CursorPage<T>>,
+  order = "",
 ): CursorPages<T> {
   const { t } = useTranslation();
   const [state, setState] = useState<State<T>>({
@@ -95,7 +98,7 @@ export function useCursorPages<T>(
         }
       },
     );
-  }, [key, round, t]);
+  }, [key, order, round, t]);
 
   const current = state.key === key;
   const { next, items } = state;
