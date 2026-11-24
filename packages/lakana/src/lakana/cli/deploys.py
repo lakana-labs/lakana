@@ -485,12 +485,22 @@ def list_deploys(
         page = deploys.list_all(repository=repo, limit=limit, cursor=cursor)
     else:
         page = deploys.list_page(environment, repository=repo, limit=limit, cursor=cursor)
-    columns = ["id", "repository", "kind", "status", "submitted_by", "resolved_sha", "created_at"]
+    columns = [
+        "id",
+        "repository",
+        "kind",
+        "status",
+        "submitted_by",
+        "resolved_sha",
+        "commit_subject",
+        "created_at",
+    ]
     _output.emit(
         state,
         page.items,
         columns=[columns[0], "environment", *columns[1:]] if all_environments else columns,
-        droppable=["kind", "resolved_sha", "repository", "created_at"],
+        droppable=["commit_subject", "kind", "resolved_sha", "repository", "created_at"],
+        flexible=["commit_subject"],
     )
     more_results(
         state,
