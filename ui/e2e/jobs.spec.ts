@@ -585,7 +585,10 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByRole("heading", { level: 1, name: "Runs" })).toBeVisible();
       await expect(page.getByRole("region", { name: "Runs listed" })).toBeVisible();
 
-      const state = page.getByRole("button", { name: /State/ });
+      // The filter's menu, not the column header that sorts by the state.
+      const state = page
+        .getByRole("button", { name: /State/ })
+        .and(page.locator(":not(.sort-head)"));
       await tabOnto(state);
       await page.keyboard.press("Enter");
       await page.getByRole("option", { name: "Queued or running" }).press("Enter");
@@ -823,7 +826,10 @@ for (const theme of ["light", "dark"] as const) {
       await openRuns(page);
       await page.getByRole("button", { name: "Show more" }).click();
       await expect(page.getByText(`selection ${SELECTION_PATTERNS.join(" ")}`)).toBeVisible();
-      await expect(page.getByRole("button", { name: /run|start/i })).toHaveCount(0);
+      // The column headers sort the runs; none of them starts one.
+      await expect(
+        page.getByRole("button", { name: /run|start/i }).and(page.locator(":not(.sort-head)")),
+      ).toHaveCount(0);
       await page.getByRole("link", { name: `resume of ${FAILED_ID.slice(0, 8)}` }).click();
       await expect(page).toHaveURL(new RegExp(`${runPage(FAILED_ID)}$`));
       await expect(page.getByRole("navigation", { name: "Jobs views" })).toHaveCount(0);

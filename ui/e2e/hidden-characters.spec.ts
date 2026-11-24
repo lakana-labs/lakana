@@ -114,6 +114,7 @@ const LITERAL_CODES: Record<string, string> = {
   JobRunFilter: "status",
   LastMaintenanceOut: "status",
   LinkDescriptionOut: "kind state",
+  ListSortChoice: "order",
   ListTablesQuery: "order sort",
   NotifyOut: "format",
   OnDemandTriggerOut: "kind",
