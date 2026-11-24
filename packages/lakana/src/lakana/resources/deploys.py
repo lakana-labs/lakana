@@ -109,6 +109,7 @@ def deploy_from_json(data: dict[str, Any]) -> Deploy:
         actions=tuple(data.get("actions", [])),
         submitted_by=data.get("submitted_by"),
         jobs=None if data.get("jobs") is None else tuple(data["jobs"]),
+        commit_subject=data.get("commit_subject"),
     )
 
 

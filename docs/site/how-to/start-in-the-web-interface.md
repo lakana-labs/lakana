@@ -75,6 +75,7 @@ person → **Remove picture**. The person can set a new one whenever they like.
 | **Alt ←** | Go back to the page before, from any page, such as from a table to the Catalog. Not in a text field, where it moves the cursor, and not while a menu or a window is open. |
 | **Ctrl Enter** (**⌘ Enter** on a Mac) | In the editor of **Queries**: run the query. |
 | **Esc** in the editor of **Queries** | Close the completion list or a tooltip; with none open, cancel the running query. |
+| **Alt Shift N** (**⌥⇧N** on a Mac) | In **Queries**: start a new, empty query, as **New query** does. Works in the editor too, not while a menu or a window is open. |
 
 Home shows everything you may see across all environments; each row carries a small label with
 its environment (`dev`, `prod`), or `Instance` for something that belongs to the whole instance,
@@ -99,6 +100,10 @@ SQL out. A column completes after its table and a dot (`t.avg`) or on its own (`
 the tables the query reads; a name that several of them have is offered once for each, named by
 its table, and goes in with it (`t.station_id`). Leaving the screen lets the query run on; **Recent**, beside the editor, opens it again,
 and **Saved** holds the queries you keep ([Save and share a query](save-and-share-a-query.md#in-the-web-interface)).
+**New query** in the editor bar, or **Alt Shift N**, clears the editor and the result for a new
+query. When the editor holds changes that are not saved, it asks first: **Discard changes** clears
+them, **Cancel** keeps them. A query that still runs goes on, as when you leave the screen, and
+**Recent** opens it again.
 Someone who may not run queries anywhere yet sees why, and the command to use meanwhile.
 
 ## Jobs

@@ -50,14 +50,10 @@
   overflow-wrap: anywhere;
 }
 
-/* The note after a delete takes the focus; its ring shows where it is. */
+/* The note after a new query or a delete. It stays mounted, so each note is announced; while
+   empty it is visually hidden (QueryNote adds the shared class). */
 .queries-note {
   margin: 0;
-}
-
-.queries-note:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
 }
 
 /* A flex item's minimum width is its content's: without this, a wide result would push the page

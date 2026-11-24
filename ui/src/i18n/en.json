@@ -714,6 +714,13 @@
     "back": {
       "keys": "Alt ←",
       "text": "Go back to the page before, such as a detail page's list."
+    },
+    "newQuery": {
+      "keys": {
+        "mac": "⌥⇧N",
+        "other": "Alt Shift N"
+      },
+      "text": "In Queries: start a new, empty query."
     }
   },
   "tour": {

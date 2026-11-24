@@ -1583,6 +1583,26 @@ def test_deploys_list_shows_who(tmp_path: Path) -> None:
     assert "ada" in _plain(result.stdout)
 
 
+def test_deploys_list_shows_the_commit_subject_after_the_commit(tmp_path: Path) -> None:
+    """`commit_subject` follows `resolved_sha`; a deploy from before #783 leaves it blank."""
+    api = FakeApi()
+    api.on(
+        "GET",
+        "/api/v1/environments/dev/deploys",
+        json=[_deploy("succeeded", commit_subject="Review 4-6: four jobs"), _deploy("failed")],
+    )
+    state = make_state(tmp_path, api)
+    result = invoke(state, "deploys", "list", "--env", "dev", env=_CI)
+    assert result.exit_code == 0, result.output
+    header = _plain(result.stdout).replace("┃", " ").replace("┏", " ").split()
+    assert header.index("commit_subject") == header.index("resolved_sha") + 1
+    assert "Review 4-6: four jobs" in _plain(result.stdout)
+    as_json = json.loads(
+        invoke(state, "--output", "json", "deploys", "list", "--env", "dev").stdout
+    )
+    assert [d["commit_subject"] for d in as_json] == ["Review 4-6: four jobs", None]
+
+
 def test_deploys_show_lists_the_jobs(tmp_path: Path) -> None:
     """`deploys show` names who deployed and the jobs, comma-separated; none is empty."""
     api = FakeApi()

@@ -825,6 +825,9 @@ class DeployRunView:
         The ref or SHA asked for.
     resolved_sha
         The commit the worker fetched.
+    commit_subject
+        The first line of that commit's message; `None` before the fetch and for a run from
+        before it was stored.
     rollback_to_job_version_id
         A rollback's target.
     error_message
@@ -889,6 +892,7 @@ class DeployRunView:
     job_starts: tuple[DeployJobStart, ...] = ()
     submitted_by: str | None = None
     jobs: tuple[str, ...] | None = None
+    commit_subject: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1148,6 +1152,7 @@ class DeployService:
             status=run.status,
             requested_ref=run.requested_ref,
             resolved_sha=run.resolved_sha,
+            commit_subject=run.commit_subject,
             rollback_to_job_version_id=run.rollback_to_job_version_id,
             error_message=error,
             diff=diff,
@@ -4800,12 +4805,37 @@ class DeployService:
         )
         write_glossary(self._session, environment_id, repository_id, target.manifest_json)
         run.resolved_sha = target.commit_sha
+        run.commit_subject = self._subject_of_version(target.id)
         run.job_version_id = target.id
         run.diff_json = diff.to_json()
         run.status = DeployStatus.SUCCEEDED
         run.finished_at = finished
         self._finish(lambda: self._audit(p, run, names, AuditEventType.ROLLED_BACK, target, diff))
         return target
+
+    def _subject_of_version(self, job_version_id: uuid.UUID) -> str | None:
+        """Read the commit subject the newest run that made a project version current stored.
+
+        Parameters
+        ----------
+        job_version_id
+            The project version.
+
+        Returns
+        -------
+        str or None
+            The subject of the newest deploy or rollback with that version that has one; `None`
+            when every such run is from before the subject was stored.
+        """
+        return self._session.execute(
+            select(DeployRun.commit_subject)
+            .where(
+                DeployRun.job_version_id == job_version_id,
+                DeployRun.commit_subject.is_not(None),
+            )
+            .order_by(DeployRun.created_at.desc(), DeployRun.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
 
     def fail(
         self,

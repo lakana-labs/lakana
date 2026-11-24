@@ -257,6 +257,7 @@ export function aDeploy(over: Partial<DeployOut> = {}): DeployOut {
     status: "succeeded",
     requested_ref: "main",
     resolved_sha: "4f9d2a7c81b3e5f60718293a4b5c6d7e8f901234",
+    commit_subject: null,
     project_version_id: DEPLOY_VERSION,
     error_message: null,
     created_at: "2026-11-16T09:00:00Z",

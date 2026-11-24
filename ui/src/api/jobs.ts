@@ -647,6 +647,11 @@ export interface DeployOut {
   readonly requested_ref: string | null;
   /** The commit it deployed; null before the worker resolved it. */
   readonly resolved_sha: string | null;
+  /**
+   * The first line of that commit's message; for a rollback, the one its target was deployed
+   * with. Null before the worker resolved the commit and for a deploy from before it was stored.
+   */
+  readonly commit_subject: string | null;
   /** The project version it made; null before it made one, and for a dry run. */
   readonly project_version_id: string | null;
   /** Why it failed, in the server's words; null for none. */
