@@ -91,6 +91,12 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
 - **Refusals and errors name the cause and the next step**, in the user's words, next to the
   field they belong to, or above the form when they concern the whole step. Every view designs
   its empty, loading, partial, error, offline or stale, and permission-denied states.
+- **A field that names a principal or a table suggests what exists** (`NamePicker`,
+  `ui/src/shell/NamePicker.tsx`, a React Aria `ComboBox`): the server filters under the person's
+  own rights, the list marks hidden characters, says while it waits, when nothing matches ("No
+  principal named …") and when it shows only the first matches, and Escape closes it without
+  closing the dialog around it. What is typed may still be sent; the server judges it. A person
+  who may not list those names gets the plain field, which asks nothing.
 - Every string through i18next (`ui/src/i18n/en.json`); sentence case; the same term everywhere.
 
 ## Layout and rhythm

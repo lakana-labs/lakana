@@ -5,20 +5,22 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useId, useRef, useState } from "react";
-import { Input, Label, Text, TextField } from "react-aria-components";
+import { type JSX, useCallback, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
 import { listEnvironments } from "../api/environments";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
+import { useSettingsViewer } from "../settings/viewer";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { countWords, ListToolbar, useListState } from "../shell/ListToolbar";
+import { NamePicker } from "../shell/NamePicker";
 import { useResource } from "../shell/useResource";
 import "./access.css";
 import { tokensPath } from "./accessPaths";
+import { principalSearch } from "./suggest";
 import { PersonalTokens, TaskTokens } from "./TokenLists";
 import "./tokenStrings";
 
@@ -35,8 +37,8 @@ function filterOf(params: URLSearchParams, name: string): string | null {
 }
 
 /**
- * Renders the place: Personal tokens with the Owner filter (applied on Enter or when the field
- * is left, `?owner=`) and the command for a service account's token, then Task tokens with the
+ * Renders the place: Personal tokens with the Owner filter (it suggests principals as one types;
+ * applied when one is chosen, on Enter or when the field is left, `?owner=`) and the command for a service account's token, then Task tokens with the
  * Environment filter (`?environment=`) and the command that mints one. Each list is read under
  * its filter, so a new filter drops the old rows at once. A personal token's revoke reads the
  * task tokens again too: those it minted ended with it.
@@ -72,10 +74,12 @@ export function TokensPage(): JSX.Element {
     });
     setParams(new URLSearchParams(path.split("?")[1] ?? ""));
   };
-  const applyOwner = (): void => {
-    const next = typed.trim() === "" ? null : typed.trim();
+  const applyOwner = (text: string = typed): void => {
+    const next = text.trim() === "" ? null : text.trim();
     if (next !== owner) go({ owner: next, environment });
   };
+  const admin = useSettingsViewer().admin;
+  const suggest = useMemo(() => (admin ? principalSearch(t) : null), [admin, t]);
   return (
     <SettingsFrame title={t("settings.places.tokens")}>
       <section className="flat-panel access-section" aria-labelledby={personalId}>
@@ -90,19 +94,23 @@ export function TokensPage(): JSX.Element {
           }}
           refreshing={personal.busy}
         />
-        <TextField
-          className="field"
+        <NamePicker
+          label={t("tokens.personal.filter")}
+          help={t("tokens.personal.filterHelp")}
           value={typed}
           onChange={setTyped}
-          onBlur={applyOwner}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") applyOwner();
+          search={suggest}
+          noMatch={(text) => t("picker.noPrincipal", { name: text })}
+          onPick={(choice) => {
+            applyOwner(choice.name);
           }}
-        >
-          <Label>{t("tokens.personal.filter")}</Label>
-          <Input autoComplete="off" spellCheck={false} />
-          <Text slot="description">{t("tokens.personal.filterHelp")}</Text>
-        </TextField>
+          onBlur={() => {
+            applyOwner();
+          }}
+          onEnter={() => {
+            applyOwner();
+          }}
+        />
         <PersonalTokens
           key={owner ?? ""}
           round={personalRound}

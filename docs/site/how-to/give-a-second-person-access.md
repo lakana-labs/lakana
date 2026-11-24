@@ -78,7 +78,8 @@ was created.` To take the access away, revoke that one grant with `lakana grant 
 In the web interface, an administrator does the same under **Settings → Access → Grants**: **Add
 grant** asks who (a person or a group), a role or a single action, and where, and it asks for the
 environment unless the grant is on the whole instance. **Settings → Access → Groups** creates a
-group and adds or removes its members. Both ask for a passkey touch before a change, and a scope
+group and adds or removes its members; as you type a member's name, it suggests the people and
+service accounts whose name contains it, and a name nobody has is named before you save. Both ask for a passkey touch before a change, and a scope
 that an access file manages carries the "⌂ Git" mark and changes only through the file.
 
 !!! note "Hide rows or columns before you give access"
@@ -116,7 +117,8 @@ message that disappears, and not by e-mail or in a ticket. The address and the e
 secret. Never put the token in a file of a git repository.
 
 In the web interface, an administrator sees everyone's live tokens under **Settings → Access →
-Tokens**, a person's page links to their tokens, and each token can be revoked there. The
+Tokens**, filtered by owner (the field suggests names as you type), a person's page links to their
+tokens, and each token can be revoked there. The
 interface issues only one's own token: a service account's still comes from `lakana token issue`.
 
 ## What the new person types

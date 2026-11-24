@@ -582,3 +582,42 @@ h2.toolbar-count:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
 }
+
+/* A name picker (NamePicker): its list is at least as wide as the field and scrolls inside
+   itself; each name is followed by a quiet word (a kind, a namespace) and the list's state line
+   (waiting, nothing matches, only the first matches) stands under the names. */
+.name-picker-float {
+  min-width: var(--trigger-width);
+  max-width: min(480px, 100%);
+  max-height: 320px;
+}
+
+.name-picker-name {
+  overflow-wrap: anywhere;
+}
+
+.name-picker-detail {
+  margin-left: auto;
+  padding-left: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+  white-space: nowrap;
+}
+
+.name-picker-state {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--type-dense-size);
+  line-height: var(--type-dense-line);
+}
+
+/* An empty state line keeps its live region but takes no room. */
+.name-picker-state:empty {
+  padding: 0;
+}
+
+.menu + .name-picker-state:not(:empty) {
+  border-top: 1px solid var(--color-line);
+}

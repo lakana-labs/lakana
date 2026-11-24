@@ -4,7 +4,7 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useState } from "react";
+import { type JSX, useMemo, useState } from "react";
 import {
   Form,
   Heading,
@@ -30,6 +30,7 @@ import {
 } from "../api/policies";
 import { ActionDialog } from "../shell/ActionDialog";
 import { EnvironmentName } from "../shell/EnvironmentName";
+import { NamePicker } from "../shell/NamePicker";
 import { markedText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import "./accessStrings";
@@ -37,6 +38,7 @@ import { Choice } from "./Choice";
 import { FormFoot } from "./FormFoot";
 import { GitMark } from "./GitMark";
 import { managedScopeOf } from "./managed";
+import { tableSearch } from "./suggest";
 import "./policies.css";
 import "./policyStrings";
 
@@ -146,7 +148,9 @@ function PlainField({ label, value, onChange, help }: PlainFieldProps): JSX.Elem
 }
 
 /**
- * Renders the form. Create is held, and says why, until every field is filled; a managed
+ * Renders the form. Once a listed environment is chosen, the table field suggests the tables of
+ * it that the person may read, and choosing one fills the namespace too. Create is held, and
+ * says why, until every field is filled; a managed
  * environment shows the managed sentence in place of Create. Create asks for the passkey touch
  * first; the server's refusal (an unknown name, table or column, an expression it cannot take)
  * shows under the form and takes the focus, with every field kept. While the request is open,
@@ -178,6 +182,9 @@ export function AddPolicyDialog({
   const managed = environment === null ? null : managedScopeOf(scopes, environment.trim());
   const held = missing(t, fields);
   const listed = environments ?? [];
+  // Tables are suggested once a listed environment is chosen; a typed one may not exist.
+  const known = listed.find((choice) => choice.name === environment)?.name ?? null;
+  const suggest = useMemo(() => (known === null ? null : tableSearch(known)), [known]);
   const create = async (): Promise<void> => {
     const body: RowFilterCreateIn = {
       principal: who === "principal" ? name.trim() : null,
@@ -288,12 +295,23 @@ export function AddPolicyDialog({
             set({ namespace: value });
           }}
         />
-        <PlainField
+        <NamePicker
           label={t("policies.addDialog.table")}
+          help={
+            known
+              ? t("policies.addDialog.tableHelp")
+              : t("policies.addDialog.tableHelpNoEnvironment")
+          }
           value={table}
           onChange={(value) => {
             set({ table: value });
           }}
+          search={suggest}
+          noMatch={(text) => t("picker.noTable", { name: text, environment: known ?? "" })}
+          onPick={(choice) => {
+            set({ namespace: choice.data.namespace, table: choice.data.name });
+          }}
+          isRequired
         />
         {kind === "column-mask" && (
           <PlainField

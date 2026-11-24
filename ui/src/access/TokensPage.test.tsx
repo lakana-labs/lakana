@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TaskTokenOut, TokenOut } from "../api/tokens";
 import { areasFor } from "../shell/areas";
-import { anEnvironment } from "../test/access";
+import { aMember, anEnvironment } from "../test/access";
 import { renderShell } from "../test/render";
 import type { FakeRoute } from "../test/server";
 
@@ -201,7 +201,7 @@ describe("TokensPage", () => {
     });
     await screen.findByRole("region", { name: "Live personal tokens" });
 
-    await shell.user.type(screen.getByRole("textbox", { name: "Owner" }), "maria{Enter}");
+    await shell.user.type(screen.getByRole("combobox", { name: "Owner" }), "maria{Enter}");
 
     await waitFor(() => {
       expect(shell.router.state.location.search).toBe("?owner=maria");
@@ -225,12 +225,38 @@ describe("TokensPage", () => {
       );
     });
     expect(sentTo(shell, "/api/v1/tokens")).toHaveLength(2);
-    expect(screen.getByRole("textbox", { name: "Owner" })).toHaveValue("maria");
+    expect(screen.getByRole("combobox", { name: "Owner" })).toHaveValue("maria");
+  });
+
+  it("suggests owners as one types and filters by the chosen one at once", async () => {
+    const shell = renderShell(PATH, {
+      routes: tokenRoutes({
+        "GET /api/v1/principals": {
+          status: 200,
+          body: [aMember("maria"), aMember("marek", "SERVICE_ACCOUNT")],
+        },
+      }),
+    });
+    const field = await screen.findByRole("combobox", { name: "Owner" });
+
+    await shell.user.type(field, "mar");
+    await screen.findAllByRole("option");
+    await shell.user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+
+    await waitFor(() => {
+      expect(shell.router.state.location.search).toBe("?owner=marek");
+    });
+    expect(field).toHaveValue("marek");
+    expect(sentTo(shell, "/api/v1/tokens")).toEqual([
+      "/api/v1/tokens?limit=50",
+      "/api/v1/tokens?owner=marek&limit=50",
+    ]);
+    expect(sentTo(shell, "/api/v1/principals?")).toEqual(["/api/v1/principals?limit=20&q=mar"]);
   });
 
   it("clears the owner when the field is emptied and left", async () => {
     const shell = renderShell(`${PATH}?owner=maria`, { routes: tokenRoutes() });
-    const field = await screen.findByRole("textbox", { name: "Owner" });
+    const field = await screen.findByRole("combobox", { name: "Owner" });
     expect(field).toHaveValue("maria");
 
     await shell.user.clear(field);
