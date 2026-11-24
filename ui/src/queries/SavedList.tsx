@@ -10,12 +10,12 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { listSavedQueries, type SavedQueryOut } from "../api/savedQueries";
+import { When } from "../catalog/cells";
 import { ViewList } from "../catalog/views/ViewList";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import type { ListSortSpec } from "../shell/listSort";
 import { SortHeader } from "../shell/SortHeader";
 import { useListSort } from "../shell/useListSort";
-import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { savedPath } from "./paths";
 import { useLibraryPages } from "./useLibraryPages";
@@ -72,7 +72,6 @@ export interface SavedListProps {
  */
 export function SavedList({ me, filter, reloadKey }: SavedListProps): JSX.Element {
   const { t } = useTranslation();
-  const when = useWhen();
   const sorting = useListSort(SAVED_SORTS);
   const sort = sorting.choice;
   const pages = useLibraryPages(
@@ -112,7 +111,7 @@ export function SavedList({ me, filter, reloadKey }: SavedListProps): JSX.Elemen
               {who !== "" && <span className="second">{who}</span>}
             </td>
             <td>
-              <time dateTime={saved.updated_at}>{when(saved.updated_at)}</time>
+              <When iso={saved.updated_at} never="" />
             </td>
             <td>
               <span className="chevron" aria-hidden="true">

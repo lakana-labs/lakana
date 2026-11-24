@@ -179,7 +179,9 @@ th[aria-sort] .sort-head {
   position: relative;
 }
 
-.list tr:hover {
+/* The body's rows only: the header row is no row to open, and its sortable heads underline on
+   hover themselves. */
+.list tbody tr:hover {
   background: var(--color-sunk);
 }
 
