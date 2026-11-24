@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from lakana._http import HttpTransport
+from lakana._http import HttpTransport, query_params
 from lakana._models import Delivery, Job, JobNotify, JobStart, Trigger, WaitingStart
 from lakana._routes import ROUTES
 from lakana.resources.queries import waiting_for_from_json
@@ -156,7 +156,14 @@ class Jobs:
     def __init__(self, transport: HttpTransport) -> None:
         self._transport = transport
 
-    def list(self, environment: str, *, repository: str | None = None) -> _JobList:
+    def list(
+        self,
+        environment: str,
+        *,
+        repository: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
+    ) -> _JobList:
         """List the jobs of the deployed repositories (needs `READ_ENVIRONMENT`).
 
         Parameters
@@ -165,16 +172,22 @@ class Jobs:
             Environment name.
         repository
             Only this repository's jobs.
+        sort
+            What the jobs are sorted by: ``name``, ``status`` (the last run's), ``last_run`` or
+            ``next_run``; a job without a value comes last. Without it (and `order`), by
+            repository, then name.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``last_run``, ``asc`` for the others.
 
         Returns
         -------
         list of Job
-            By repository, then name.
+            By repository, then name, unless sorted otherwise.
         """
         response = self._transport.request(
             ROUTES["jobs.list"],
             path_params={"env": environment},
-            params={"repository": repository} if repository is not None else None,
+            params=query_params(repository=repository, sort=sort, order=order) or None,
         )
         return [job_from_json(item) for item in response.json()]
 

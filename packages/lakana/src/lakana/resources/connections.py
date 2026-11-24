@@ -468,7 +468,13 @@ class Connections:
         return _connection_from_json(_object(response, "a connection"))
 
     def list(
-        self, environment: str, *, limit: int | None = None, cursor: str | None = None
+        self,
+        environment: str,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> ConnectionPage:
         """List one page of an environment's connections, newest first.
 
@@ -480,6 +486,12 @@ class Connections:
             Most connections returned (1 to 200); `None` leaves it to the server (100).
         cursor
             A previous page's `next_cursor`.
+        sort
+            What the connections are sorted by: ``created`` (the default), ``name`` (in any
+            letter case) or ``status``, the last test: failed first, then queued or running,
+            then passed, never tested last. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
@@ -489,17 +501,30 @@ class Connections:
         response = self._transport.request(
             ROUTES["connections.list"],
             path_params={"environment_name": environment},
-            params=query_params(limit=limit, cursor=cursor),
+            params=query_params(limit=limit, cursor=cursor, sort=sort, order=order),
         )
         return _page_from_json(_object(response, "the connections"))
 
-    def iter(self, environment: str, *, page_size: int = 100) -> Iterator[Connection]:
+    def iter(
+        self,
+        environment: str,
+        *,
+        page_size: int = 100,
+        sort: str | None = None,
+        order: str | None = None,
+    ) -> Iterator[Connection]:
         """Yield every connection of an environment, newest first, fetching pages as needed.
 
         Parameters
         ----------
         environment
             The environment.
+        sort
+            What the connections are sorted by: ``created`` (the default), ``name`` (in any
+            letter case) or ``status``, the last test: failed first, then queued or running,
+            then passed, never tested last. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         page_size
             Connections per request (1 to 200).
 
@@ -508,10 +533,20 @@ class Connections:
         Iterator of Connection
             Each connection, once.
         """
-        return every_page(lambda cursor: self.list(environment, limit=page_size, cursor=cursor))
+        return every_page(
+            lambda cursor: self.list(
+                environment, limit=page_size, cursor=cursor, sort=sort, order=order
+            )
+        )
 
     def list_all(
-        self, *, environment: str | None = None, limit: int | None = None, cursor: str | None = None
+        self,
+        *,
+        environment: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> ConnectionPage:
         """List one page of the connections of every environment you may read, newest first.
 
@@ -527,6 +562,12 @@ class Connections:
             Most connections returned (1 to 200); `None` leaves it to the server (100).
         cursor
             A previous page's `next_cursor` of this list.
+        sort
+            What the connections are sorted by: ``created`` (the default), ``name`` (in any
+            letter case) or ``status``, the last test: failed first, then queued or running,
+            then passed, never tested last. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
@@ -547,12 +588,19 @@ class Connections:
         with route_of_a_newer_server("GET /api/v1/connections", _LIST_ALL_INSTEAD):
             response = self._transport.request(
                 ROUTES["connections.list_all"],
-                params=query_params(environment=environment, limit=limit, cursor=cursor),
+                params=query_params(
+                    environment=environment, limit=limit, cursor=cursor, sort=sort, order=order
+                ),
             )
         return _page_from_json(_object(response, "the connections"))
 
     def iter_all(
-        self, *, environment: str | None = None, page_size: int = 100
+        self,
+        *,
+        environment: str | None = None,
+        page_size: int = 100,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Iterator[Connection]:
         """Yield every connection of every environment you may read, fetching pages as needed.
 
@@ -560,6 +608,12 @@ class Connections:
         ----------
         environment
             Only this environment.
+        sort
+            What the connections are sorted by: ``created`` (the default), ``name`` (in any
+            letter case) or ``status``, the last test: failed first, then queued or running,
+            then passed, never tested last. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         page_size
             Connections per request (1 to 200).
 
@@ -569,7 +623,9 @@ class Connections:
             Each connection, once, in the order of `list_all`.
         """
         return every_page(
-            lambda cursor: self.list_all(environment=environment, limit=page_size, cursor=cursor)
+            lambda cursor: self.list_all(
+                environment=environment, limit=page_size, cursor=cursor, sort=sort, order=order
+            )
         )
 
     def environments(self) -> _EnvironmentList:

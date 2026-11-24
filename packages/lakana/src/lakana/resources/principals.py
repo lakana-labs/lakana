@@ -245,7 +245,13 @@ class Principals:
         return _principal_from_json(response.json())
 
     def list(
-        self, *, search: str | None = None, limit: int | None = None, cursor: str | None = None
+        self,
+        *,
+        search: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> _PrincipalList:
         """List principals, newest first.
 
@@ -259,17 +265,30 @@ class Principals:
         limit
             Most principals returned (1 to 200); `None` leaves it to the server (100).
         cursor
-            A previous page's `next_cursor`. Send the same `search` with every page.
+            A previous page's `next_cursor`. Send the same `search` and sort with every page.
+        sort
+            What the principals are sorted by: ``created`` (the default), ``name`` (in any
+            letter case) or ``status``, the active first, each by name.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
         list of Principal
             Newest first.
         """
-        return self.list_page(search=search, limit=limit, cursor=cursor).items
+        return self.list_page(
+            search=search, limit=limit, cursor=cursor, sort=sort, order=order
+        ).items
 
     def list_page(
-        self, *, search: str | None = None, limit: int | None = None, cursor: str | None = None
+        self,
+        *,
+        search: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> PrincipalPage:
         """List one page of principals, newest first, with the cursor of the next page.
 
@@ -280,7 +299,12 @@ class Principals:
         limit
             Most principals returned (1 to 200); `None` leaves it to the server (100).
         cursor
-            A previous page's `next_cursor`. Send the same `search` with every page.
+            A previous page's `next_cursor`. Send the same `search` and sort with every page.
+        sort
+            What the principals are sorted by: ``created`` (the default), ``name`` (in any
+            letter case) or ``status``, the active first, each by name.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
@@ -288,20 +312,33 @@ class Principals:
             The principals, and the cursor for the next page (`None` on the last).
         """
         response = self._transport.request(
-            ROUTES["principals.list"], params=query_params(q=search, limit=limit, cursor=cursor)
+            ROUTES["principals.list"],
+            params=query_params(q=search, limit=limit, cursor=cursor, sort=sort, order=order),
         )
         return PrincipalPage(
             items=[_principal_from_json(item) for item in response.json()],
             next_cursor=response.headers.get(NEXT_CURSOR_HEADER),
         )
 
-    def iter(self, *, search: str | None = None, page_size: int = 100) -> Iterator[Principal]:
+    def iter(
+        self,
+        *,
+        search: str | None = None,
+        page_size: int = 100,
+        sort: str | None = None,
+        order: str | None = None,
+    ) -> Iterator[Principal]:
         """Yield every matching principal, newest first, fetching pages as needed.
 
         Parameters
         ----------
         search
             Only principals whose name contains this text, in any letter case.
+        sort
+            What the principals are sorted by: ``created`` (the default), ``name`` (in any
+            letter case) or ``status``, the active first, each by name.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         page_size
             Principals per request (1 to 200).
 
@@ -311,7 +348,9 @@ class Principals:
             Each principal, once.
         """
         return every_page(
-            lambda cursor: self.list_page(search=search, limit=page_size, cursor=cursor)
+            lambda cursor: self.list_page(
+                search=search, limit=page_size, cursor=cursor, sort=sort, order=order
+            )
         )
 
     def permissions(

@@ -10,6 +10,7 @@ import typer
 
 from lakana._models import Job, Trigger
 from lakana.cli import _output
+from lakana.cli._paging import ORDER, sort_option
 from lakana.cli._state import resolve_environment, state_of
 from lakana.cli.deploys import resolve_repository
 from lakana.cli.runs import follow_run, notification_state
@@ -183,7 +184,19 @@ def register(app: typer.Typer) -> None:
 
 
 @job_app.command("list")
-def list_jobs(ctx: typer.Context, env: _ENV = None, repo: _REPO = None) -> None:
+def list_jobs(
+    ctx: typer.Context,
+    env: _ENV = None,
+    repo: _REPO = None,
+    sort: Annotated[
+        str | None,
+        sort_option(
+            "name, status (the last run's), last_run (latest first) or next_run (soonest "
+            "first); a job without one comes last. Without it, by repository, then name"
+        ),
+    ] = None,
+    order: ORDER = None,
+) -> None:
     """List the jobs of the deployed projects: state, triggers, next run and last run.
 
     Parameters
@@ -194,9 +207,15 @@ def list_jobs(ctx: typer.Context, env: _ENV = None, repo: _REPO = None) -> None:
         Environment.
     repo
         Only this repository's jobs (default: all of them).
+    sort
+        The field the jobs are sorted by.
+    order
+        ``asc`` or ``desc``.
     """
     state = state_of(ctx)
-    jobs = state.client().jobs.list(resolve_environment(state, env), repository=repo)
+    jobs = state.client().jobs.list(
+        resolve_environment(state, env), repository=repo, sort=sort, order=order
+    )
     _output.emit(
         state,
         jobs,

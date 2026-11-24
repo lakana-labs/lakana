@@ -21,6 +21,7 @@ import typer
 from lakana._http import every_page
 from lakana._models import Connection, ConnectionTest, LastConnectionTest
 from lakana.cli import _output
+from lakana.cli._paging import ORDER, sort_option
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli.secrets import read_stdin, read_values
 
@@ -718,11 +719,19 @@ def list_connections(
             help="The connections of every environment you may read, with an environment column.",
         ),
     ] = False,
+    sort: Annotated[
+        str | None,
+        sort_option(
+            "created (the default, newest first), name or status (the last test: failed first, "
+            "then queued or running, then passed, never tested last)"
+        ),
+    ] = None,
+    order: ORDER = None,
 ) -> None:
     """List the connections of an environment, newest first, with each one's last test.
 
     With --all-environments, the connections of every environment you may read, newest first
-    over all of them.
+    over all of them. --sort and --order sort them otherwise.
 
     Parameters
     ----------
@@ -732,6 +741,10 @@ def list_connections(
         The environment.
     all_environments
         List every environment you may read instead of one; not with `--env`.
+    sort
+        The field the connections are sorted by.
+    order
+        ``asc`` or ``desc``.
 
     Raises
     ------
@@ -743,10 +756,10 @@ def list_connections(
         raise CliError("--all-environments lists every environment; leave out --env.")
     resource = state.client().connections
     if all_environments:
-        connections = list(resource.iter_all())
+        connections = list(resource.iter_all(sort=sort, order=order))
         columns = ["name", "environment", "kind", "address", "secret", "declared_by", "last_test"]
     else:
-        connections = list(resource.iter(resolve_environment(state, env)))
+        connections = list(resource.iter(resolve_environment(state, env), sort=sort, order=order))
         columns = ["name", "kind", "address", "secret", "declared_by", "last_test"]
     _output.emit(
         state,

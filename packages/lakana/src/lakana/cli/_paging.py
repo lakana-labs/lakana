@@ -28,6 +28,30 @@ SEARCH = Annotated[
 ]
 """The `--search` option of the principal and group lists."""
 
+ORDER = Annotated[
+    str | None,
+    typer.Option(
+        "--order", help="asc or desc; without it, the direction each --sort field has by default."
+    ),
+]
+"""The `--order` option of a list a person can sort."""
+
+
+def sort_option(fields: str) -> typer.models.OptionInfo:
+    """Build the `--sort` option of a list.
+
+    Parameters
+    ----------
+    fields
+        The fields the list sorts by and its default, in words.
+
+    Returns
+    -------
+    typer.models.OptionInfo
+        The option.
+    """
+    return typer.Option("--sort", help=f"What to sort by: {fields}.")
+
 
 def parse_since(value: str | None) -> datetime | None:
     """Read the value of `--since` as a time with a time zone.
