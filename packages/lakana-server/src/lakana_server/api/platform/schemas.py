@@ -4698,6 +4698,10 @@ class DeployOut(BaseModel):
         Ref or SHA asked for.
     resolved_sha
         The commit fetched.
+    commit_subject
+        The first line of that commit's message, cut to 200 characters; for a rollback, the
+        one its target version was deployed with. Null before the commit is fetched, for a
+        blank first line, and for a deploy from before Lakana stored it.
     rollback_to_project_version_id
         A rollback's target.
     error_message
@@ -4751,6 +4755,7 @@ class DeployOut(BaseModel):
     status: str
     requested_ref: str | None
     resolved_sha: str | None
+    commit_subject: str | None = None
     rollback_to_project_version_id: uuid.UUID | None
     error_message: str | None
     diff: dict[str, list[str]] | None

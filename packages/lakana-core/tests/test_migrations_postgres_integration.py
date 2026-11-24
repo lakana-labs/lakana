@@ -4386,3 +4386,55 @@ def test_0090_on_postgres() -> None:
         with engine.connect() as conn:
             assert conn.execute(tables).scalar_one() == 0
         engine.dispose()
+
+
+def test_0091_on_postgres() -> None:
+    """0091 adds `deploy_runs.commit_subject`, a nullable `varchar(200)`; existing runs have none.
+
+    The downgrade drops the column and keeps the runs.
+    """
+    revision_0090 = "7c3e91a0b5d2"
+    revision_0091 = "4b8d2f6a1c93"
+    deploy_id = uuid.uuid4()
+    column = sqlalchemy.text(
+        "SELECT is_nullable, character_maximum_length FROM information_schema.columns"
+        " WHERE table_name = 'deploy_runs' AND column_name = 'commit_subject'"
+    )
+    with PostgresContainer("postgres:16", driver="pg8000") as pg:
+        url = pg.get_connection_url()
+        migrate.upgrade(url, revision_0090)
+        engine = sqlalchemy.create_engine(url)
+        with engine.begin() as conn:
+            conn.execute(sqlalchemy.text("SET LOCAL session_replication_role = replica"))
+            conn.execute(
+                sqlalchemy.text(
+                    "INSERT INTO deploy_runs (id, environment_id, repository_id, kind, status, "
+                    "resolved_sha, created_at) VALUES (:id, :env, :repo, 'DEPLOY', 'SUCCEEDED', "
+                    ":sha, :now)"
+                ),
+                {
+                    "id": deploy_id,
+                    "env": uuid.uuid4(),
+                    "repo": uuid.uuid4(),
+                    "sha": "a" * 40,
+                    "now": datetime(2026, 11, 21, 9, 0, tzinfo=UTC),
+                },
+            )
+        with engine.connect() as conn:
+            assert conn.execute(column).all() == []
+        migrate.upgrade(url, revision_0091)
+        assert _alembic_version(engine) == revision_0091
+        with engine.connect() as conn:
+            assert tuple(conn.execute(column).one()) == ("YES", 200)
+            subject = conn.execute(
+                sqlalchemy.text("SELECT commit_subject FROM deploy_runs WHERE id = :id"),
+                {"id": deploy_id},
+            ).scalar_one()
+            assert subject is None
+        migrate.downgrade(url, revision_0090)
+        assert _alembic_version(engine) == revision_0090
+        with engine.connect() as conn:
+            assert conn.execute(column).all() == []
+            kept = conn.execute(sqlalchemy.text("SELECT id FROM deploy_runs")).scalars().all()
+            assert kept == [deploy_id]
+        engine.dispose()

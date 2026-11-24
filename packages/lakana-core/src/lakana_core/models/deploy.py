@@ -23,6 +23,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, UTCDateTime, utcnow
 
+COMMIT_SUBJECT_CHARS = 200
+"""The most characters of a commit's first line a deploy run keeps (`DeployRun.commit_subject`)."""
+
 
 class DeployKind(enum.StrEnum):
     """What a deploy run does."""
@@ -150,6 +153,10 @@ class DeployRun(Base):
     kind: Mapped[DeployKind] = mapped_column(SAEnum(DeployKind, native_enum=False, length=8))
     requested_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     resolved_sha: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    commit_subject: Mapped[str | None] = mapped_column(String(COMMIT_SUBJECT_CHARS), nullable=True)
+    """The first line of `resolved_sha`'s commit message, as the worker read it at the fetch; for
+    a rollback, the one the target version's newest deploy read. `None` before the fetch, for a
+    blank first line, and for a run written before the column existed (#783)."""
     rollback_to_job_version_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("job_versions.id", ondelete="SET NULL"), nullable=True
     )

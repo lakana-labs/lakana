@@ -7,7 +7,8 @@
  * once cancelled, a running run in `dev` and a queued run of no job; a run of a selection and a
  * resume of the failed run on a second page of every run; a task's log in three pieces; the
  * deploys of `analytics` in `prod` (the current one, an older successful deploy by an account
- * since deleted, a dry run, a failed deploy and an older rollback) with the current version and
+ * since deleted, a dry run, a failed deploy and an older rollback from before commit subjects were
+ * stored) with the current version and
  * the jobs of each version; and what Run now, Pause, Resume schedule, Cancel, Resume and a
  * rollback answer, the rollback running at its first read and succeeded at the second. What a
  * control changes shows in the reads after it.
@@ -610,6 +611,7 @@ function deploy(id: string, over: Partial<DeployOut> = {}): DeployOut {
     status: "succeeded",
     requested_ref: "main",
     resolved_sha: CURRENT_COMMIT,
+    commit_subject: "Review 4-6: four jobs",
     project_version_id: VERSIONS.current,
     error_message: null,
     created_at: "2026-11-17T08:00:00Z",
@@ -628,6 +630,7 @@ const DEPLOYS: readonly DeployOut[] = [
     kind: "dry_run",
     requested_ref: "feature/weekly",
     resolved_sha: "aa11bb22cc33dd44ee55ff6677889900aabbccdd",
+    commit_subject: "Add the weekly report job",
     project_version_id: null,
     created_at: "2026-11-17T10:00:00Z",
     submitted_by: "ana.nowak",
@@ -636,6 +639,7 @@ const DEPLOYS: readonly DeployOut[] = [
   deploy(FAILED_DEPLOY_ID, {
     status: "failed",
     resolved_sha: "77ab88cd99ef00aa11bb22cc33dd44ee55ff6677",
+    commit_subject: "Select the weekly report by tag",
     project_version_id: null,
     error_message: `${DEPLOY_FAILURE}\nTraceback (most recent call last):`,
     created_at: "2026-11-16T15:00:00Z",
@@ -643,6 +647,7 @@ const DEPLOYS: readonly DeployOut[] = [
   }),
   deploy(OLDER_DEPLOY_ID, {
     resolved_sha: OLDER_COMMIT,
+    commit_subject: "Rank stations by daily riders",
     project_version_id: VERSIONS.older,
     created_at: "2026-11-16T09:00:00Z",
     submitted_by: null,
@@ -651,6 +656,7 @@ const DEPLOYS: readonly DeployOut[] = [
     kind: "rollback",
     requested_ref: null,
     resolved_sha: "0be1f6a9d2c3b4a5968778695a4b3c2d1e0f9a8b",
+    commit_subject: null,
     project_version_id: VERSIONS.rollback,
     created_at: "2026-11-15T09:00:00Z",
   }),
@@ -678,6 +684,7 @@ function newRollback(reads: number): DeployOut {
     status: reads === 0 ? "running" : "succeeded",
     requested_ref: null,
     resolved_sha: OLDER_COMMIT,
+    commit_subject: "Rank stations by daily riders",
     project_version_id: VERSIONS.older,
     created_at: "2026-11-17T11:00:00Z",
     finished_at: reads === 0 ? null : "2026-11-17T11:00:30Z",
