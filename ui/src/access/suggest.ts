@@ -5,8 +5,7 @@
  */
 import type { TFunction } from "i18next";
 
-import { suggestPrincipals } from "../api/access";
-import { suggestTables } from "../api/catalog";
+import { suggestPrincipals, suggestTables } from "../api/suggestions";
 import { type NameSearch, PICKER_LIMIT } from "../shell/NamePicker";
 import "./accessStrings";
 

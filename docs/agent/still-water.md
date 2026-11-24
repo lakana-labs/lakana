@@ -95,7 +95,8 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   `ui/src/shell/NamePicker.tsx`, a React Aria `ComboBox`): the server filters under the person's
   own rights, the list marks hidden characters, says while it waits, when nothing matches ("No
   principal named …") and when it shows only the first matches, and Escape closes it without
-  closing the dialog around it. What is typed may still be sent; the server judges it. A person
+  closing the dialog around it; Enter takes the highlighted suggestion, or with none sends the
+  form as any field does. What is typed may still be sent; the server judges it. A person
   who may not list those names gets the plain field, which asks nothing.
 - Every string through i18next (`ui/src/i18n/en.json`); sentence case; the same term everywhere.
 

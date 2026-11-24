@@ -159,7 +159,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(members.getByRole("link", { name: "maria" })).toBeVisible();
       expect(await violations(page)).toEqual([]);
 
-      const field = page.getByRole("textbox", { name: "Person or service account" });
+      const field = page.getByRole("combobox", { name: "Person or service account" });
       await tabTo(page, field);
       await page.keyboard.type("ben");
       await page.keyboard.press("Enter");
@@ -218,7 +218,9 @@ for (const theme of ["light", "dark"] as const) {
       await page.goto("/settings/access/groups/analysts");
       await expect(page.getByRole("link", { name: "maria" })).toBeVisible();
       await expect(page.getByRole("button", { name: /^(Remove|Delete group|Add)/ })).toHaveCount(0);
-      await expect(page.getByRole("textbox", { name: "Person or service account" })).toHaveCount(0);
+      await expect(page.getByRole("combobox", { name: "Person or service account" })).toHaveCount(
+        0,
+      );
 
       await page.goto("/settings/access/grants");
       const region = page.getByRole("region", { name: "Grants" });

@@ -298,6 +298,38 @@ describe("NamePicker", () => {
     expect(field).toHaveValue("ma");
   });
 
+  it("sends the form on Enter with the list open and nothing highlighted, as other fields do", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    const sent = vi.fn();
+    render(
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          sent();
+        }}
+      >
+        <Harness search={search} />
+      </form>,
+    );
+
+    await user.type(screen.getByRole("combobox"), "ma");
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await screen.findByRole("option");
+    await user.keyboard("{Enter}");
+
+    expect(sent).toHaveBeenCalledTimes(1);
+    expect(held()).toBe("ma");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(held()).toBe("maria");
+    expect(sent).toHaveBeenCalledTimes(1);
+  });
+
   it("takes a pasted exact name as it is and suggests it", async () => {
     const user = userEvent.setup();
     const { search, calls } = heldSearch();

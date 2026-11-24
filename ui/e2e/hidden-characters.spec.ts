@@ -917,7 +917,9 @@ walk("Tokens, one's API tokens and Secrets mark hidden characters", async ({ pag
   // The Owner filter's suggestions (#784).
   await page.getByRole("combobox", { name: "Owner" }).fill("adm");
   await expect(page.getByRole("option").first()).toBeVisible();
-  await expectMarked(page, "the Owner filter's suggestions", ["admin"]);
+  // The list stands in a popover, outside the page's main part.
+  await expect(page.getByRole("listbox")).toContainText("adminU+202E");
+  await expectNoRaw(page, "the Owner filter's suggestions");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("listbox")).toBeHidden();
 
@@ -1001,7 +1003,9 @@ walk("Groups, a group, Grants and What I may do mark hidden characters", async (
   // Add a member's suggestions (#784).
   await page.getByRole("combobox", { name: "Person or service account" }).fill("adm");
   await expect(page.getByRole("option").first()).toBeVisible();
-  await expectMarked(page, "Add a member's suggestions", ["admin"]);
+  // The list stands in a popover, outside the page's main part.
+  await expect(page.getByRole("listbox")).toContainText("adminU+202E");
+  await expectNoRaw(page, "Add a member's suggestions");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("listbox")).toBeHidden();
   await page.getByRole("button", { name: /^Remove mariaU\+202E from analystsU\+202E/ }).click();

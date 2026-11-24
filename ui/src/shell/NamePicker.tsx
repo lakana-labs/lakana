@@ -208,7 +208,8 @@ function stateLine<T>(
  * when the first page is all it shows and when the suggestions could not be read. Choosing a
  * suggestion puts its exact name in the field. Whatever is typed may be sent too: the server
  * judges it. Escape closes an open list and keeps the text, without closing a dialog the field
- * is in; Enter with the list open takes the highlighted suggestion or closes the list.
+ * is in. Enter takes the highlighted suggestion; with none highlighted it sends the form, as in
+ * every other field.
  *
  * @template T - What a suggestion carries.
  * @param props - The label, the value, the search and the handlers.
@@ -304,8 +305,12 @@ export function NamePicker<T>({
           onKeyDown={(event) => {
             // An open list takes Escape: the dialog the field is in stays open.
             if (event.key === "Escape" && openAtKey.current) event.stopPropagation();
-            // An Enter that chose a suggestion has handed it over through `onPick` already.
-            if (event.key === "Enter" && !pickedByKey.current) onEnter?.();
+            if (event.key !== "Enter" || pickedByKey.current) return;
+            // An Enter that chose no suggestion does what it does in every other field: React
+            // Aria closes the open list and keeps the form from sending, so the form is sent
+            // here. One that chose a suggestion handed it over through `onPick` already.
+            if (openAtKey.current) event.currentTarget.form?.requestSubmit();
+            onEnter?.();
           }}
         />
         {(help !== undefined || shown !== value) && (

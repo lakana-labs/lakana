@@ -155,8 +155,7 @@ describe("GroupPage", () => {
     });
     const field = await screen.findByRole("combobox", { name: "Person or service account" });
 
-    // The first Enter closes the list of suggestions, the second sends the form.
-    await user.type(field, "ben{Enter}{Enter}");
+    await user.type(field, "ben{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No principal named 'ben'.");
     expect(field).toHaveValue("ben");
@@ -213,7 +212,7 @@ describe("GroupPage", () => {
     await waitFor(() => {
       expect(screen.getByText("No principal named “bne”. Check the spelling.")).toBeInTheDocument();
     });
-    await user.keyboard("{Enter}{Enter}");
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No principal named 'bne'.");
     expect(server.sent.map((request) => `${request.method} ${request.path}`)).toContain(

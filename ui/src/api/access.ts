@@ -161,29 +161,6 @@ export async function listPeople(words: string): Promise<PeoplePage> {
 }
 
 /**
- * Suggests principals for a name picker: the first `limit` whose name contains the text, newest
- * first. It needs the right to list principals (`MANAGE_PRINCIPAL`), as the People list does.
- *
- * @param text - What the name must contain; blank for the newest.
- * @param limit - How many to ask for.
- * @param signal - Cancels the read once a newer text is typed.
- * @returns The principals and whether more match.
- * @throws {ApiError} for a refusal or an unreachable server.
- */
-export async function suggestPrincipals(
-  text: string,
-  limit: number,
-  signal: AbortSignal,
-): Promise<PeoplePage> {
-  const query = new URLSearchParams({ limit: String(limit) });
-  if (text !== "") {
-    query.set("q", text);
-  }
-  const page = await api.page(`/api/v1/principals?${query.toString()}`, { signal });
-  return { people: page.body as readonly PrincipalOut[], more: page.nextCursor !== null };
-}
-
-/**
  * Reads one principal.
  *
  * @param name - The principal name.

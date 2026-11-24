@@ -266,7 +266,17 @@ const NAMED_LIMITS = [
   // Catalog's Sort by and Order, the environment picker of the Queries and Connections screens
   // and the Status and Period of a job's runs; never in the first load. Measured 9.82 kB
   // (2026-11-18) with the Connections screen among its importers; the limit holds.
-  { name: "the menus", prefix: "Select-", limit: "10.84 kB" },
+  // Lowered to the measured 6.02 kB (2026-11-24) + 10 %: once the name pickers (#784) share
+  // React Aria's ListBox with the menus, the bundler gives it a chunk of its own (ListBox-, below).
+  { name: "the menus", prefix: "Select-", limit: "6.62 kB" },
+  // Measured 4.61 kB (2026-11-24) + 10 %: React Aria's ListBox, which the menus share with the
+  // name pickers (#784); never in the first load.
+  { name: "the menus' and the pickers' list", prefix: "ListBox-", limit: "5.07 kB" },
+  // Measured 11.12 kB (2026-11-24) + 10 %: the name picker (shell/NamePicker.tsx, React Aria's
+  // ComboBox and its input) with the searches of Access (access/suggest.ts, which names the chunk)
+  // and their reads (api/suggestions.ts), shared by a group's Add a member, the tokens' Owner
+  // filter and Add filter or mask (#784); never in the first load.
+  { name: "the name pickers", prefix: "suggest-", limit: "12.23 kB" },
   // Measured 7.03 kB (2026-11-17) + 10 %: the React Aria collection code the menus share with
   // the Catalog's tree (the chunk is named after one of its modules); never in the first load.
   {
