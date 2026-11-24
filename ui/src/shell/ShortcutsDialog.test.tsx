@@ -20,7 +20,7 @@ describe("ShortcutsDialog", () => {
     const terms = within(dialog)
       .getAllByRole("term")
       .map((term) => term.textContent);
-    expect(terms).toEqual(["Ctrl K", "Esc", "Tab, Shift Tab", "Enter", "Alt ←"]);
+    expect(terms).toEqual(["Ctrl K", "Esc", "Tab, Shift Tab", "Enter", "Alt ←", "Alt Shift N"]);
     const details = within(dialog)
       .getAllByRole("definition")
       .map((detail) => detail.textContent);
@@ -30,6 +30,7 @@ describe("ShortcutsDialog", () => {
       "Move to the next or the previous control.",
       "Open the row that has focus.",
       "Go back to the page before, such as a detail page's list.",
+      "In Queries: start a new, empty query.",
     ]);
   });
 
@@ -62,7 +63,7 @@ describe("ShortcutsDialog", () => {
     });
   });
 
-  it("names ⌘ K on a Mac", async () => {
+  it("names ⌘ K and ⌥⇧N on a Mac", async () => {
     vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
     const { user } = renderShell("/");
     await screen.findByRole("heading", { level: 1, name: "Home" });
@@ -71,5 +72,6 @@ describe("ShortcutsDialog", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
     expect(within(dialog).getAllByRole("term")[0]).toHaveTextContent("⌘ K");
+    expect(within(dialog).getAllByRole("term")[5]).toHaveTextContent("⌥⇧N");
   });
 });

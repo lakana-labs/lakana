@@ -488,7 +488,7 @@ test.describe("the Queries screen, checked by clicking through", () => {
 
     await page.getByRole("button", { name: "Delete…" }).click();
     const remove = page.getByRole("dialog", { name: `Delete the saved query ${WEEKLY.name}?` });
-    await expect(remove).toContainText("The SQL stays in the editor, and its runs stay in Recent.");
+    await expect(remove).toContainText("Its runs stay in Recent.");
   });
 
   test("a saved query read while offline offers Try again and a new query, and Try again opens it once online", async ({
