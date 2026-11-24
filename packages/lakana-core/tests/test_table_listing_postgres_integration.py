@@ -276,9 +276,10 @@ def test_name_matches_the_table_name_alone_in_any_case_and_only_where_readable(
     listing = TableListing(session, GrantAuthorization(session))
     assert [i.name for i in listing.list(admin, name="DAILY_o").items] == ["Daily_Orders"]
     assert [i.name for i in listing.list(admin, name="%_").items] == ["100%_sure"]
-    # `c0_0` is a column of every table and `silver` a namespace: neither is a table's name
+    # `c0_0` is a column of every table and `silver.c` the start of a dotted table: no table's own
+    # name holds either
     assert listing.list(admin, name="c0_").items == []
-    assert listing.list(admin, name="silver").items == []
+    assert listing.list(admin, name="silver.c").items == []
     assert [i.name for i in listing.list(admin, name="cGOLD").items] == ["cgold0", "cgold1"]
     assert listing.list(reader, name="cgold").items == []
     assert len(listing.list(reader, name="csilver").items) == 8
