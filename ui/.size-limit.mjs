@@ -181,7 +181,9 @@ const NAMED_LIMITS = [
   // Lowered to the measured 3.69 kB (2026-11-18) + 10 %: the environments' states, a run's first
   // cells, the shared filter and the reads every 30 s moved into chunks the list shares with the
   // Runs and Deploys tabs (on the shared limit).
-  { name: "the Jobs list", prefix: "JobsList-", limit: "4.06 kB" },
+  // Raised to the measured 4.18 kB (2026-11-24) + 10 %: its columns sort on the server, the order
+  // kept in the address (#787).
+  { name: "the Jobs list", prefix: "JobsList-", limit: "4.6 kB" },
   // Measured 2.68 kB (2026-11-18) + 10 %: the Runs tab, loaded on /jobs/runs: the environment, State
   // (Queued or running as one choice), Trigger, the exact job name applied on Enter or when left,
   // and Period, all in the address; every run newest first, 50 a page with Show more, the first
@@ -191,7 +193,9 @@ const NAMED_LIMITS = [
   // Measured 2.87 kB (2026-11-18) after review: Read again shows no rows while it reads, with
   // its status line and the focus kept off the page, and no error of another filter shows; the
   // limit holds.
-  { name: "the Runs tab", prefix: "RunsTab-", limit: "2.95 kB" },
+  // Raised to the measured 2.99 kB (2026-11-24) + 10 %: its columns sort on the server, the order
+  // kept in the address (#787).
+  { name: "the Runs tab", prefix: "RunsTab-", limit: "3.29 kB" },
   // Measured 3.44 kB (2026-11-18) + 10 %: the Deploys tab, loaded on /jobs/deploys: one
   // environment at a time with the line that says so, the Repository menu in the address, the
   // current version of each repository (and the sentence with Try again when it cannot be read),
@@ -202,7 +206,9 @@ const NAMED_LIMITS = [
   // Measured 3.54 kB (2026-11-18) after review: the focus kept off the page whichever read
   // answers first, and every Roll back to this… held, with the note as its description, while
   // a rollback is followed; the limit holds.
-  { name: "the Deploys tab", prefix: "DeploysTab-", limit: "3.79 kB" },
+  // Raised to the measured 3.81 kB (2026-11-24) + 10 %: its columns sort on the server, the order
+  // kept in the address (#787).
+  { name: "the Deploys tab", prefix: "DeploysTab-", limit: "4.19 kB" },
   // Measured 1.22 kB (2026-11-18) + 10 %: the rollback's question, loaded on the first press of
   // Roll back to this…: the two reads at once with their wait and Try again, what the rollback makes
   // current, the union of the jobs marked kept, removed or back, the protected environment named,
