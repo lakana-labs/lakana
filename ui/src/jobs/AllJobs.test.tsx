@@ -217,6 +217,21 @@ describe("AllJobs", () => {
     );
   });
 
+  it("a click inside a row's dialog never opens the row", async () => {
+    const { user } = renderAll(["prod"], { [jobsOf("prod")]: { status: 200, body: [aJob()] } });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Pause the schedule of nightly_sales" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    // The dialog is a portal: React hands its clicks to the row it was opened from.
+    await user.click(within(dialog).getByText("Pause the schedule of nightly_sales?"));
+    await user.click(document.querySelector(".palette-overlay") as HTMLElement);
+
+    expect(screen.getByLabelText("where")).toHaveTextContent(/^\/jobs$/u);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("Run starts the job and Pause asks first, each named by the row", async () => {
     const { server, onChanged, user } = renderAll(["prod"], {
       [jobsOf("prod")]: {

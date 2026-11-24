@@ -4,11 +4,11 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useMemo } from "react";
+import type { JSX } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import type { JobOut } from "../api/jobs";
+import { type JobOut, listJobs } from "../api/jobs";
 import { openFromCell, Unknown } from "../catalog/cells";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import { useWhen } from "../shell/useWhen";
@@ -18,7 +18,6 @@ import { isWaiting, WaitingLabel } from "./JobWaiting";
 import { jobPath, jobRunPath } from "./paths";
 import { type Period, sinceOf } from "./period";
 import "./runStrings";
-import { useJobsOf } from "./useJobsOf";
 
 /** The filters of the Runs tab that a waiting start is held against. */
 export interface WaitingFilter {
@@ -46,7 +45,7 @@ function waitingStarts(
   jobs: readonly JobOut[],
   filter: Omit<WaitingFilter, "environments">,
 ): JobOut[] {
-  if (filter.status !== "all" && filter.status !== "queued,running") {
+  if (!showsWaiting(filter.status)) {
     return [];
   }
   const since = sinceOf(filter.period);
@@ -61,20 +60,49 @@ function waitingStarts(
     .sort((a, b) => (b.waiting_since ?? "").localeCompare(a.waiting_since ?? ""));
 }
 
+/** The most environments whose jobs are read at once, as All jobs reads them. */
+const READS_IN_FLIGHT = 4;
+
 /**
- * Reads the jobs of the listed environments every 30 s and keeps the starts that wait. A job
- * list that cannot be read adds no row and no error here: the Jobs tab says so.
+ * Whether the State filter can show a waiting start: All, or Queued or running.
  *
- * @param filter - The filters.
- * @returns The jobs whose start waits.
+ * @param status - The State choice.
+ * @returns True when the waiting starts are read.
  */
-export function useWaitingStarts(filter: WaitingFilter): readonly JobOut[] {
-  const { rows } = useJobsOf(filter.environments, 0);
-  const { status, trigger, job, period } = filter;
-  return useMemo(
-    () => waitingStarts(rows, { status, trigger, job, period }),
-    [rows, status, trigger, job, period],
-  );
+function showsWaiting(status: string): boolean {
+  return status === "all" || status === "queued,running";
+}
+
+/**
+ * Reads the jobs of the listed environments, at most four at once, and keeps the starts that
+ * wait and match the filters. The Runs tab reads them with its first page, so the two are one
+ * moment's answer: a start that has begun shows once, as its run, and never twice or not at all.
+ * Nothing is read when the State filter shows no waiting start. A job list that cannot be read
+ * adds no row and no error here; the Jobs tab says so.
+ *
+ * @param filter - The environments and the filters.
+ * @returns The jobs whose start waits, newest request first.
+ */
+export async function readWaitingStarts(filter: WaitingFilter): Promise<JobOut[]> {
+  if (!showsWaiting(filter.status)) {
+    return [];
+  }
+  const names = [...filter.environments];
+  const jobs: JobOut[] = [];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < names.length) {
+      const name = names[next] as string;
+      next += 1;
+      try {
+        jobs.push(...(await listJobs(name)));
+      } catch {
+        // The Jobs tab says that an environment's jobs cannot be read; here it adds no row.
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READS_IN_FLIGHT, names.length) }, worker));
+  return waitingStarts(jobs, filter);
 }
 
 /** Properties of {@link WaitingRow}. */
@@ -108,10 +136,16 @@ export function WaitingRow({ job }: WaitingRowProps): JSX.Element {
       <td>
         <EnvironmentLabel environment={job.environment} />
       </td>
-      <td>{t(`jobs.trigger.${job.waiting_trigger ?? "manual"}`)}</td>
+      <td>
+        {job.waiting_trigger === null ? (
+          <Unknown words={t("jobs.waiting.unknown")} />
+        ) : (
+          t(`jobs.trigger.${job.waiting_trigger}`)
+        )}
+      </td>
       <td>
         {job.waiting_since === null ? (
-          <Unknown words={t("jobs.duration.notStarted")} />
+          <Unknown words={t("jobs.waiting.unknown")} />
         ) : (
           <time dateTime={job.waiting_since}>{when(job.waiting_since)}</time>
         )}

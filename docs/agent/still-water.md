@@ -79,6 +79,14 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   shows it whole on hover and on focus; a cut name without a page (`span.row-name`) is made a Tab
   stop while it is cut, so the keyboard reaches its tooltip. Never add a tooltip of your own for
   a cut name.
+- **A short sentence on hover** (what a waiting job waits for) goes through the same tooltip: put
+  it in `data-tip` on the element (marked with `markedText`), and repeat it inside the element in
+  a `.visually-hidden` span for screen readers, since the tooltip is `aria-hidden`. The tooltip
+  makes the element a Tab stop for good (not for an empty `data-tip`), so it shows on focus too.
+  Inside a list row the element must sit above the row's link (`position: relative; z-index: 1`,
+  as `.jobs-waits`), and the row forwards a plain click to its link (`openFromCell`). Never a
+  `title` or a tooltip of your own, and never anything a person must read only there: the same
+  sentence is in the object's own page.
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
   own list or tab. Alt+Left goes back from any page (the shell's, global as in the browser); it
   does nothing while a dialog, a menu or a popover is shown, from a text field inside it too, and

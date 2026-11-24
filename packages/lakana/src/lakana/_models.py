@@ -4352,8 +4352,10 @@ class Job:
         For a start that waits (``waiting`` or ``waiting to start``), when it was first asked
         for; `None` otherwise, and from a server that predates it.
     waiting_trigger
-        For a start that waits, what asked for it (``schedule``, ``api``, ``manual``,
-        ``deploy``); `None` otherwise, and from a server that predates it.
+        For a start that waits, what first asked for it (``schedule``, ``api``, ``manual``,
+        ``deploy``), the request `waiting_since` names; `None` otherwise, when the server cannot
+        tell, and from a server that predates it. The run that begins can run as another
+        trigger: a schedule that merges into a start by hand makes it a scheduled run.
     actions
         The words of what your rights allow on it: ``run``, ``pause``, ``resume``. Rights
         only; offer a control when the word is listed and the job's state allows it. Empty from

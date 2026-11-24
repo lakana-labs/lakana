@@ -10,7 +10,8 @@ import { useTranslation } from "react-i18next";
 
 import type { RequestOptions } from "../api/client";
 import type { EnvironmentChoice } from "../api/environments";
-import { listAllRuns } from "../api/jobs";
+import { type JobOut, listAllRuns, type RunOut } from "../api/jobs";
+import type { CursorPage } from "../api/manage";
 import { ViewList } from "../catalog/views/ViewList";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
@@ -20,7 +21,13 @@ import { RunRow } from "./RunRow";
 import "./runStrings";
 import { STATE_CHOICES, toAllRunsFilter, TRIGGER_CHOICES, useRunsFilter } from "./useRunsFilter";
 import { useRunPages } from "./useRunPages";
-import { useWaitingStarts, WaitingRow } from "./WaitingRow";
+import { readWaitingStarts, WaitingRow } from "./WaitingRow";
+
+/** A page of runs; the first one also holds the starts that wait, read at the same moment. */
+interface RunsPage extends CursorPage<RunOut> {
+  /** The starts that wait, newest request first; empty on a later page. */
+  readonly waiting: readonly JobOut[];
+}
 
 /** Properties of {@link JobField}. */
 interface JobFieldProps {
@@ -84,8 +91,9 @@ interface RunsListProps {
 /**
  * The filters, then the runs: 50 a page with Show more, the first page read again every 30 s
  * until Show more read a further page; then Read again starts over from the first page. Above
- * the runs, the starts that wait for the run holding their project, read every 30 s from the
- * environments' jobs and held against the same filters.
+ * the runs, the starts that wait for the run holding their project, read from the environments'
+ * jobs with the first page (and with it on Refresh and Read again, and kept as they were while
+ * Show more holds the list), held against the same filters.
  *
  * @param props - The environments.
  * @param props.environments - The environments the person may read.
@@ -98,22 +106,26 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
   const jobInput = useRef<HTMLInputElement>(null);
   const key = JSON.stringify(choice);
   const { environment, status, trigger, job, period } = choice;
+  const names = JSON.stringify(environments.map((choice) => choice.name));
   const load = useCallback(
-    (cursor: string | null, options: RequestOptions) =>
-      listAllRuns(toAllRunsFilter({ environment, status, trigger, job, period }), cursor, {
-        background: options.background === true,
-      }),
-    [environment, status, trigger, job, period],
+    async (cursor: string | null, options: RequestOptions): Promise<RunsPage> => {
+      const filtered = toAllRunsFilter({ environment, status, trigger, job, period });
+      const runs = listAllRuns(filtered, cursor, { background: options.background === true });
+      if (cursor !== null) {
+        return { ...(await runs), waiting: [] };
+      }
+      const listed = environment === null ? (JSON.parse(names) as string[]) : [environment];
+      const [page, waiting] = await Promise.all([
+        runs,
+        readWaitingStarts({ environments: listed, status, trigger, job, period }),
+      ]);
+      return { ...page, waiting };
+    },
+    [environment, status, trigger, job, period, names],
   );
   const pages = useRunPages(key, load, 0);
   const rows = pages.items ?? [];
-  const waiting = useWaitingStarts({
-    environments: environment === null ? environments.map((choice) => choice.name) : [environment],
-    status,
-    trigger,
-    job,
-    period,
-  });
+  const waiting = pages.firstPage?.waiting ?? [];
   // Read again takes its own button away: the focus goes to the line that says the list is read
   // again, then to the list, or to what stands in its place, never to the page.
   const readingAgain = useRef<HTMLParagraphElement>(null);

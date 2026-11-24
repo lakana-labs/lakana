@@ -626,5 +626,110 @@ describe("RunsTab", () => {
       await settle();
       expect(screen.queryByRole("alert")).toBeNull();
     });
+
+    /**
+     * The reads of an environment's jobs, in order.
+     *
+     * @param sent - The requests.
+     * @returns How many there were.
+     */
+    const jobReads = (sent: readonly { method: string; path: string }[]): number =>
+      sent.filter((request) => /^\/api\/v1\/environments\/[^/]+\/jobs$/u.test(request.path)).length;
+
+    it("reads no jobs when the State shows no waiting start", async () => {
+      const { server } = renderTab(page([older]), "/jobs/runs?status=succeeded", jobs());
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["nightly_sales"]);
+      });
+      await settle();
+      expect(jobReads(server.sent)).toBe(0);
+    });
+
+    it("reads the waiting starts with the first page: on Refresh, not again on Show more", async () => {
+      let started = false;
+      const answers = jobs();
+      const { server, user } = renderTab(
+        (request) =>
+          request.path.includes("cursor=c1")
+            ? { status: 200, body: { items: [oldest], next_cursor: null } }
+            : {
+                status: 200,
+                body: {
+                  items: started
+                    ? [
+                        aJobRun({
+                          id: "r-stock",
+                          job: "hourly_stock",
+                          status: "queued",
+                          tasks: [],
+                        }),
+                        older,
+                      ]
+                    : [older],
+                  next_cursor: "c1",
+                },
+              },
+        "/jobs/runs",
+        {
+          ...answers,
+          "GET /api/v1/environments/prod/jobs": () =>
+            started
+              ? { status: 200, body: [aJob({ name: "hourly_stock" })] }
+              : (answers["GET /api/v1/environments/prod/jobs"] as {
+                  status: number;
+                  body: unknown;
+                }),
+        },
+      );
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["orders_daily", "hourly_stock", "nightly_sales"]);
+      });
+      const before = jobReads(server.sent);
+
+      // The start has begun: Refresh reads its run and the starts together, so it shows once.
+      started = true;
+      await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["orders_daily", "hourly_stock", "nightly_sales"]);
+        expect(screen.getAllByText("Waiting")).toHaveLength(1);
+      });
+      expect(jobReads(server.sent)).toBeGreaterThan(before);
+
+      // Show more goes on from that first page and its starts; it reads no jobs of its own.
+      const shown = jobReads(server.sent);
+      await user.click(screen.getByRole("button", { name: "Show more" }));
+      await waitFor(async () => {
+        expect(await listed()).toEqual([
+          "orders_daily",
+          "hourly_stock",
+          "nightly_sales",
+          "nightly_sales",
+        ]);
+      });
+      expect(jobReads(server.sent)).toBe(shown);
+    });
+
+    it("says Unknown for a start whose trigger the server could not read", async () => {
+      renderTab(page([]), "/jobs/runs?environment=prod", {
+        "GET /api/v1/environments/prod/jobs": {
+          status: 200,
+          body: [
+            aJob({
+              name: "hourly_stock",
+              state: "waiting to start",
+              waiting_for: waits("It begins within a few seconds."),
+              waiting_since: null,
+              waiting_trigger: null,
+            }),
+          ],
+        },
+      });
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["hourly_stock"]);
+      });
+      const row = screen.getByRole("link", { name: "hourly_stock" }).closest("tr") as HTMLElement;
+      expect(row).not.toHaveTextContent("By hand");
+      expect(within(row).getAllByText("Unknown").length).toBeGreaterThan(0);
+    });
   });
 });

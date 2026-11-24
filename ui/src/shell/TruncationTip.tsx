@@ -29,9 +29,11 @@ const OWN_STOP = "data-cut-stop";
  * with a `data-tip` is made a Tab stop for good.
  */
 function markCutStops(): void {
-  // An element with a sentence of its own is always a Tab stop, so the keyboard reaches it.
+  // An element with a sentence of its own is always a Tab stop, so the keyboard reaches it; one
+  // whose sentence is empty shows nothing, so it is none.
   for (const element of document.querySelectorAll<HTMLElement>(TIPPED)) {
-    if (!element.hasAttribute("tabindex") && !(element instanceof HTMLAnchorElement)) {
+    const empty = element.dataset["tip"] === "";
+    if (!empty && !element.hasAttribute("tabindex") && !(element instanceof HTMLAnchorElement)) {
       element.setAttribute("tabindex", "0");
     }
   }

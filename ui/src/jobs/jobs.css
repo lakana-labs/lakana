@@ -425,10 +425,12 @@
 }
 
 /* A waiting job's pill (JobWaiting): a Tab stop above the row's link, so the pointer and the
-   focus reach the shared tooltip that says what the start waits for. A plain click on it still
+   focus reach the shared tooltip that says what the start waits for, also where the pill comes
+   before the link (the Runs tab), whose layer would otherwise cover it. A plain click on it still
    opens the job (the row forwards it). */
 .jobs-waits {
   position: relative;
+  z-index: 1;
   display: inline-flex;
   border-radius: var(--radius-control);
 }

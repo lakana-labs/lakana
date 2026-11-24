@@ -1273,6 +1273,11 @@ for (const theme of ["light", "dark"] as const) {
       await expect(first.getByRole("link", { name: WAITING_JOB })).toBeVisible();
       await expect(first).toContainText("Waiting");
       await expect(first.getByRole("link", { name: /^waits for run / })).toBeVisible();
+      // The pill sits before the job's link, whose layer covers the row: it must still be on top.
+      await first.locator("[data-tip]").hover();
+      await expect(tip).toHaveText(WAITING_MESSAGE);
+      await page.mouse.move(0, 0);
+      await expect(tip).toBeHidden();
       expect(await violations(page), "the Runs tab").toEqual([]);
       expect(errors).toEqual([]);
     });

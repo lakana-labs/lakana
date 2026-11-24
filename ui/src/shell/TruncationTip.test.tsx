@@ -339,5 +339,11 @@ describe("TruncationTip", () => {
     pill.getBoundingClientRect = () => new DOMRect(10, 20, 60, 20);
     fireEvent.pointerMove(pill, { clientX: 30, clientY: 30 });
     expect(tip()).toBeNull();
+    // With nothing to show, the keyboard gets no stop either.
+    expect(pill).not.toHaveAttribute("tabindex");
+    act(() => {
+      pill.focus();
+    });
+    expect(tip()).toBeNull();
   });
 });

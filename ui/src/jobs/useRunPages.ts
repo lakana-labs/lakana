@@ -16,7 +16,14 @@ import { problemText } from "../sign-in/messages";
 import { LIST_EVERY_MS } from "./poll";
 
 /** What {@link useRunPages} hands back. */
-export interface RunPages extends CursorPages<RunOut> {
+export interface RunPages<
+  P extends CursorPage<RunOut> = CursorPage<RunOut>,
+> extends CursorPages<RunOut> {
+  /**
+   * The first page as the list shows it, with whatever else its read brought (the Runs tab's
+   * waiting starts): the page read now, or the one Show more went on from; undefined before.
+   */
+  readonly firstPage: P | undefined;
   /** Whether Show more read a page, so the first page is no longer read again. */
   readonly shown: boolean;
   /**
@@ -62,16 +69,17 @@ interface More {
  * page, and an answer for a filter no longer shown is dropped.
  *
  * @param key - The filter; a new one starts again from the first page.
- * @param load - Reads a page from a cursor, null for the first, as a background poll or not.
+ * @param load - Reads a page from a cursor, null for the first, as a background poll or not; the
+ *   first page may carry more, which `firstPage` hands back with it.
  * @param revision - A number that changes when the first page must be read again at once.
  * @returns The pages, in the shape the list frame reads, with whether Show more read a page and
  *   the way to start again from the first page.
  */
-export function useRunPages(
+export function useRunPages<P extends CursorPage<RunOut> = CursorPage<RunOut>>(
   key: string,
-  load: (cursor: string | null, options: RequestOptions) => Promise<CursorPage<RunOut>>,
+  load: (cursor: string | null, options: RequestOptions) => Promise<P>,
   revision: number,
-): RunPages {
+): RunPages<P> {
   const { t } = useTranslation();
   const [more, setMore] = useState<More | null>(null);
   if (more !== null && more.key !== key) {
@@ -149,6 +157,8 @@ export function useRunPages(
   };
   return {
     items,
+    // The first page Show more went on from is one this hook read, so it is a P.
+    firstPage: data === undefined ? undefined : (firstPage as P),
     error: data === undefined ? pollError : (extra?.error ?? (quiet ? null : pollError)),
     busy: (data === undefined && pollError === null) || extra?.busy === true,
     hasMore: next !== null,

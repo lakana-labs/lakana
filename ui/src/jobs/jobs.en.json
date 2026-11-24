@@ -230,6 +230,7 @@
     "since": "Requested {{when}} · {{trigger}}",
     "sinceAt": "Requested {{when}}",
     "forRun": "waits for run {{id}}",
-    "soon": "starts within seconds"
+    "soon": "starts within seconds",
+    "unknown": "Unknown"
   }
 }

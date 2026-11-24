@@ -5659,8 +5659,10 @@ class JobOut(BaseModel):
         for; a later request merges into it and keeps this time. Null otherwise. Who asked is
         not shown here.
     waiting_trigger
-        For a start that waits, what asked for it: ``schedule``, ``api``, ``manual`` or
-        ``deploy``; null otherwise.
+        For a start that waits, what first asked for it: ``schedule``, ``api``, ``manual`` or
+        ``deploy``, the request `waiting_since` names. Null otherwise, and for an older waiting
+        start that merged several requests. The run that begins can run as another trigger: a
+        schedule that merges into a start by hand makes it a scheduled run.
     triggers
         How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule
         in this environment, a ``deploy`` trigger when it starts after each deploy here, and the

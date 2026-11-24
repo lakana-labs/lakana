@@ -36,9 +36,13 @@ Both answer the fields `name`, `environment`, `repository`, `select`, `upstream`
 The pause and resume routes answer the same body.
 
 `waiting_since` and `waiting_trigger` describe a start that waits (the state `waiting` or
-`waiting to start`): when it was first asked for, and what asked for it (`schedule`, `api`,
-`manual` or `deploy`). A later request merges into the waiting start and keeps the first time.
-Both are null for a job with no waiting start. Who asked is not shown; the audit event
+`waiting to start`): when it was first asked for, and what asked for it then (`schedule`, `api`,
+`manual` or `deploy`). A later request merges into the waiting start and keeps both. The run
+that begins can run as another trigger: a schedule that merges into a start by hand makes it a
+scheduled run (see [Why is it waiting?](../how-to/why-is-it-waiting.md#a-waiting-job)), while
+`waiting_trigger` still says `manual`. A start that waited from before this field existed and
+merged several requests has `waiting_trigger` null, since which came first is not known. Both
+are null for a job with no waiting start. Who asked is not shown; the audit event
 `JOB_START_WAITING` records it.
 
 `repository` is needed only when several repositories declare a job of the same name; without
