@@ -438,3 +438,49 @@ def test_instant_key_orders_like_the_times() -> None:
     ]
     assert sorted(times, key=instant_key) == sorted(times)
     assert instant_key(times[2]) == "2026-01-01T09:00:00.000001Z"
+
+
+def test_a_name_is_ordered_in_lower_case_and_by_code_point_on_postgres() -> None:
+    """Postgres is told ``"C"``; SQLite compares by code point already. No connection is opened."""
+    import sqlalchemy as sa
+    from sqlalchemy.orm import Session
+
+    from lakana_core.models import Principal
+    from lakana_core.pagination import name_order
+
+    for url, collated in (("sqlite://", False), ("postgresql+pg8000://lakana@localhost/l", True)):
+        engine = sa.create_engine(url)
+        try:
+            with Session(engine) as session:
+                compiled = str(name_order(session, Principal.name).compile(dialect=engine.dialect))
+        finally:
+            engine.dispose()
+        assert compiled.startswith("lower(principals.name)")
+        assert compiled.endswith('COLLATE "C"') is collated
+
+
+def test_a_sorted_page_refuses_a_limit_below_one() -> None:
+    import sqlalchemy as sa
+    from sqlalchemy.orm import Session
+
+    from lakana_core.models import Principal
+    from lakana_core.pagination import ListSort, SortField, SortKey, sorted_page
+
+    engine = sa.create_engine("sqlite://")
+    try:
+        with (
+            Session(engine) as session,
+            pytest.raises(ValidationError, match="limit must be at least 1"),
+        ):
+            sorted_page(
+                session,
+                sa.select(Principal),
+                kind="principals",
+                sort=ListSort("name", False),
+                field=SortField((SortKey(Principal.name, str),), descending=False),
+                row_id=Principal.id,
+                limit=0,
+                cursor=None,
+            )
+    finally:
+        engine.dispose()
