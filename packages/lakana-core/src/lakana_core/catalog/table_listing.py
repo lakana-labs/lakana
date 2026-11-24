@@ -33,7 +33,12 @@ from lakana_core.catalog.health_summary import (
     shown_health,
 )
 from lakana_core.catalog.row_actions import place_actions_each, table_actions_each
-from lakana_core.catalog.search import CatalogSearch, SearchHit, _normalized_query
+from lakana_core.catalog.search import (
+    MAX_QUERY_LENGTH,
+    CatalogSearch,
+    SearchHit,
+    _normalized_query,
+)
 from lakana_core.db import db_now
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath, TableRef
@@ -57,6 +62,7 @@ from lakana_core.pagination import (
     after_sorted,
     decode_sorted_cursor,
     encode_sorted_cursor,
+    name_contains,
     sorted_order,
 )
 from lakana_core.projects.asset_model import require_model_kind
@@ -453,6 +459,33 @@ def table_facts(
     }
 
 
+def _name_needle(name: str) -> str:
+    """Trim the name a picker looks for and check its length.
+
+    Parameters
+    ----------
+    name
+        The text as sent.
+
+    Returns
+    -------
+    str
+        The trimmed text.
+
+    Raises
+    ------
+    ValidationError
+        If it is empty after trimming or longer than `MAX_QUERY_LENGTH`.
+    """
+    needle = name.strip()
+    if not 1 <= len(needle) <= MAX_QUERY_LENGTH:
+        raise ValidationError(
+            f"The name to look for must be between 1 and {MAX_QUERY_LENGTH} characters after "
+            "trimming; give a table's name or a part of it, or leave `name` out."
+        )
+    return needle
+
+
 def _under(namespace: str) -> ColumnElement[bool]:
     """Keep the tables of a namespace and of the namespaces beneath it, never a sibling's.
 
@@ -612,6 +645,7 @@ class TableListing:
         environment: str | None = None,
         namespace: str | None = None,
         q: str | None = None,
+        name: str | None = None,
         model_kind: str | None = None,
         sort: TableSort = TableSort.NAME,
         order: SortOrder | None = None,
@@ -632,6 +666,10 @@ class TableListing:
         q
             Only tables whose name, label, description, grain, or a column's name, label,
             description or measure, contains this text; trimmed, 1 to 200 characters.
+        name
+            Only tables whose own name contains this text, in any letter case, ``%`` and ``_``
+            taken literally; trimmed, 1 to 200 characters. A namespace, a column or a text
+            never matches it: a name picker asks with it.
         model_kind
             Only tables whose asset header declares this ``kind``.
         sort
@@ -653,7 +691,7 @@ class TableListing:
         Raises
         ------
         ValidationError
-            If `limit`, `q`, `model_kind` or `cursor` is not valid.
+            If `limit`, `q`, `name`, `model_kind` or `cursor` is not valid.
         NotFoundError
             If `environment` does not exist and `p` may read environments; anyone else gets an
             empty page, as for an environment that exists.
@@ -662,6 +700,7 @@ class TableListing:
             raise ValidationError(f"limit must be between 1 and {MAX_LIMIT}; got {limit}.")
         if q is not None:
             _normalized_query(q)
+        needle = None if name is None else _name_needle(name)
         if model_kind is not None:
             require_model_kind(model_kind)
         order = order or DEFAULT_ORDER[sort]
@@ -675,6 +714,8 @@ class TableListing:
             filters.append(_under(namespace))
         if model_kind is not None:
             filters.append(Table.model_kind == model_kind)
+        if needle is not None:
+            filters.append(name_contains(Table.name, needle))
         allowed = self._readable(p, filters)
         hits: dict[uuid.UUID, SearchHit] = {}
         capped = False
