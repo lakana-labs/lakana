@@ -186,3 +186,27 @@ describe("PeoplePage", () => {
     expect(screen.getByRole("table").textContent).not.toMatch(/[\u202E\u2066]/u);
   });
 });
+
+describe("PeoplePage's sort", () => {
+  it("sorts by name and by state on the server and keeps the order in the address", async () => {
+    const { user, server, router } = renderShell("/settings/access/people", {
+      routes: { "GET /api/v1/principals": { status: 200, body: PEOPLE } },
+    });
+    await screen.findByRole("link", { name: "kim" });
+    expect(screen.getByRole("columnheader", { name: /State/u })).not.toHaveAttribute("aria-sort");
+
+    await user.click(screen.getByRole("button", { name: /^State/u }));
+    await waitFor(() => {
+      expect(server.sent.at(-1)?.path).toBe("/api/v1/principals?limit=200&sort=status&order=asc");
+    });
+    expect(router.state.location.search).toBe("?sort=status");
+    await user.click(screen.getByRole("button", { name: /^State/u }));
+    await waitFor(() => {
+      expect(router.state.location.search).toBe("?sort=status&order=desc");
+    });
+    expect(await screen.findByRole("columnheader", { name: /State/u })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+  });
+});

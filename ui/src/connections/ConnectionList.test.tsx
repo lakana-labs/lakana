@@ -1057,3 +1057,29 @@ describe("ConnectionList", () => {
     expect(screen.getByText("Deleted old.")).toBeInTheDocument();
   });
 });
+
+describe("ConnectionList's sort", () => {
+  it("sorts by name and by state on the server, the rows kept until the new order arrives", async () => {
+    const server = fakeServer(connectionRoutes([aConnection()], MANAGER));
+    renderList();
+    await screen.findByRole("link", { name: aConnection().name });
+    expect(screen.getByRole("columnheader", { name: /Name/u })).not.toHaveAttribute("aria-sort");
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /^Status/u }));
+    await waitFor(() => {
+      expect(server.sent.at(-1)?.path).toContain("sort=status&order=asc");
+    });
+    expect(screen.getByRole("link", { name: aConnection().name })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Status/u })).toHaveFocus();
+    expect(screen.getByRole("columnheader", { name: /Status/u })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+
+    await user.click(screen.getByRole("button", { name: /^Name/u }));
+    await waitFor(() => {
+      expect(server.sent.at(-1)?.path).toContain("sort=name&order=asc");
+    });
+  });
+});

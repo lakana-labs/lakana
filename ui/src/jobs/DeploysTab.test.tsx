@@ -168,10 +168,10 @@ describe("DeploysTab", () => {
     );
     const region = await screen.findByRole("region", { name: "Deploys of dev" });
     await waitFor(() => {
-      expect(within(region).getAllByRole("button")).toHaveLength(2);
+      expect(within(region).getAllByRole("button", { name: /^Roll back/u })).toHaveLength(2);
     });
 
-    const buttons = within(region).getAllByRole("button");
+    const buttons = within(region).getAllByRole("button", { name: /^Roll back/u });
     expect(buttons[0]).toHaveAccessibleName("Roll back to this… (analytics at 4f9d2a7)");
     expect(buttons[1]).toHaveAccessibleName("Roll back to this… (analytics at 0be1f6a)");
   });
@@ -186,7 +186,7 @@ describe("DeploysTab", () => {
       "The current versions could not be read, so no deploy is marked current and none offers a rollback:",
     );
     const region = await screen.findByRole("region", { name: "Deploys of dev" });
-    expect(within(region).queryByRole("button")).toBeNull();
+    expect(within(region).queryByRole("button", { name: /^Roll back/u })).toBeNull();
     expect(region).not.toHaveTextContent("current");
 
     server.route({
@@ -406,6 +406,26 @@ describe("DeploysTab", () => {
     expect(window.localStorage.getItem("lakana.jobs.environment")).toBe("prod");
     expect(server.sent.map((request) => request.path)).toContain(
       "/api/v1/environments/prod/deployments",
+    );
+  });
+});
+
+describe("DeploysTab's sort", () => {
+  it("sorts by result on the server and keeps the repository filter", async () => {
+    const { server, user } = renderTab(
+      list([NOW]),
+      "/jobs/deploys?environment=prod&repository=analytics",
+    );
+    await screen.findByRole("region", { name: /Deploys/u });
+    await user.click(screen.getByRole("button", { name: /^Result/u }));
+    await waitFor(() => {
+      expect(server.sent.at(-1)?.path).toContain("sort=status&order=asc");
+    });
+    expect(server.sent.at(-1)?.path).toContain("repository=analytics");
+    expect(screen.getByTestId("address")).toHaveTextContent("repository=analytics&sort=status");
+    expect(screen.getByRole("columnheader", { name: /Result/u })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
     );
   });
 });

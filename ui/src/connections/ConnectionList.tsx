@@ -20,10 +20,13 @@ import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { countWords, ListToolbar, type ListState, useListState } from "../shell/ListToolbar";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
+import type { ListSortSpec } from "../shell/listSort";
 import { useMe } from "../shell/me";
 import { Page } from "../shell/Page";
 import { shellQuote } from "../shell/shellQuote";
+import { SortHeader } from "../shell/SortHeader";
 import { useFocusAfter } from "../shell/useFocusAfter";
+import { useListSort } from "../shell/useListSort";
 import { useResource } from "../shell/useResource";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { ConnectionNote, listNote } from "./ConnectionNote";
@@ -38,6 +41,15 @@ import { TestStatus } from "./TestStatus";
 import { useNow } from "./useNow";
 import { FollowedAnswers, testKey, useOpenTests } from "./useOpenTests";
 import "./connectionStrings";
+
+/**
+ * The columns the connections sort by. Their own order, the newest first, is no column; by state,
+ * the failed tests come first, then the open ones, then those that passed, never tested last.
+ */
+const CONNECTION_SORTS: ListSortSpec<"name" | "status"> = {
+  fields: { name: "asc", status: "asc" },
+  natural: null,
+};
 
 /** Properties of {@link ConnectionRows} and {@link ConnectionTable}. */
 interface ConnectionRowsProps {
@@ -78,7 +90,14 @@ function ConnectionTable({
 }): JSX.Element {
   const { t } = useTranslation();
   const now = useNow();
-  const pages = useCursorPages(filter ?? "", (cursor) => listConnections(filter, cursor));
+  const sorting = useListSort(CONNECTION_SORTS);
+  const sort = sorting.choice;
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(
+    filter ?? "",
+    (cursor) => listConnections(filter, cursor, undefined, undefined, sort),
+    JSON.stringify(sort),
+  );
   // Refresh reads the list again in place: the rows and the count stay until the answer is in.
   const { reload } = pages;
   const firstRound = useRef(round);
@@ -159,13 +178,13 @@ function ConnectionTable({
         onState={onState}
         head={
           <tr>
-            <th scope="col">{t("connections.list.name")}</th>
+            <SortHeader {...sorting.header("name")}>{t("connections.list.name")}</SortHeader>
             <th scope="col">{t("connections.list.kind")}</th>
             <th scope="col" className="narrow-hide">
               {t("connections.list.where")}
             </th>
             <th scope="col">{t("connections.list.environment")}</th>
-            <th scope="col">{t("connections.list.status")}</th>
+            <SortHeader {...sorting.header("status")}>{t("connections.list.status")}</SortHeader>
             <th scope="col" className="number narrow-hide">
               {t("connections.list.usedBy")}
             </th>

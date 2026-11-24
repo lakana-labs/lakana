@@ -71,12 +71,13 @@ describe("SavedList", () => {
 
     const region = await screen.findByRole("region", { name: "Saved queries" });
     const rows = within(region).getAllByRole("row").slice(1);
-    expect(rows.map((row) => row.textContent)).toEqual([
-      "Daily sales Environment prod›",
-      "Station ranking Environment prodeveryone›",
-      "Late trains Environment deveveryone · by sam.ortiz›",
-      "Old U+202Eview Environment prodformer owner›",
+    expect(rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent)).toEqual([
+      "Daily sales Environment prod",
+      "Station ranking Environment prodeveryone",
+      "Late trains Environment deveveryone · by sam.ortiz",
+      "Old U+202Eview Environment prodformer owner",
     ]);
+    expect(rows.every((row) => row.textContent.endsWith("›"))).toBe(true);
     const link = within(region).getByRole("link", { name: "Late trains" });
     expect(link).toHaveAttribute("href", "/queries/dev/saved/c3");
     expect(link).toHaveClass("row-name");
@@ -146,5 +147,36 @@ describe("SavedList", () => {
     renderSaved();
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy; try again.");
+  });
+});
+
+describe("SavedList's sort", () => {
+  it("shows when each changed, and sorts by Changed or Name on the server", async () => {
+    const server = fakeServer({
+      [SAVED]: { status: 200, body: { items: [aListedSavedQuery()], next_cursor: null } },
+    });
+    renderSaved();
+    const name = await screen.findByRole("columnheader", { name: /Name/u });
+    expect(name).toHaveAttribute("aria-sort", "ascending");
+    const row = screen.getAllByRole("row")[1] as HTMLElement;
+    expect(within(row).getByRole("time")).toHaveAttribute(
+      "datetime",
+      aListedSavedQuery().updated_at,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /Changed/u }));
+    await waitFor(() => {
+      expect(server.sent.at(-1)?.path).toContain("sort=updated&order=desc");
+    });
+    await user.click(screen.getByRole("button", { name: /^Name/u }));
+    await waitFor(() => {
+      expect(screen.getByRole("columnheader", { name: /Name/u })).toHaveAttribute(
+        "aria-sort",
+        "ascending",
+      );
+    });
+    // Back at the list's own order: the request names no sort.
+    expect(server.sent.at(-1)?.path).not.toContain("sort=");
   });
 });

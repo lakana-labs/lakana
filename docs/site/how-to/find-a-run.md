@@ -134,3 +134,10 @@ repository's current version says `current`. Choose the repository under **Repos
 page links to its repository's deploys from its facts. **Roll back to this…** beside an earlier
 successful deploy rolls the repository back to it (see
 [Deploy, dry-run, roll back](projects.md#deploy-dry-run-roll-back)).
+
+Every long list of the web interface sorts by a column: press the header of **Result** or **When**
+here, **State**, **Run** or **Created** on the Runs tab, a job's **Name**, **Last run** or **Next
+run**; press it again for the other direction. The server sorts, so the order holds across every
+page, and the order stays in the address, so a link opens the list sorted the same way. The
+filters stay as they are. On the command line it is `--sort` and `--order`; see
+[Sorting](../reference/lists.md#sorting).

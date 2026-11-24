@@ -14,7 +14,10 @@ import { ViewList } from "../catalog/views/ViewList";
 import { countWords, ListToolbar, useSteadyMore } from "../shell/ListToolbar";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
 import { settingParam, useAddressParams } from "../shell/useAddressParams";
+import { useListSort } from "../shell/useListSort";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { DeployRow } from "./DeployRow";
@@ -41,6 +44,12 @@ interface Rolled {
 
 /** The Repository menu's choice of every repository; a repository's choice is `repo:` and its name. */
 const ALL_REPOSITORIES = "all";
+
+/** The columns the deploys sort by: the newest first unless the address says otherwise. */
+const DEPLOY_SORTS: ListSortSpec<"status" | "created"> = {
+  fields: { status: "asc", created: "desc" },
+  natural: { field: "created", order: "desc" },
+};
 
 /** Properties of {@link DeploysOf}. */
 interface DeploysOfProps {
@@ -69,11 +78,18 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   const [params, update] = useAddressParams();
   const repository = params.get("repository");
   const deployments = useResource(useCallback(() => listDeployments(environment), [environment]));
+  const sorting = useListSort(DEPLOY_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    (cursor: string | null) => listDeploys(environment, repository, cursor),
-    [environment, repository],
+    (cursor: string | null) => listDeploys(environment, repository, cursor, sort),
+    [environment, repository, sort],
   );
-  const pages = useCursorPages(JSON.stringify([environment, repository]), load);
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(
+    JSON.stringify([environment, repository]),
+    load,
+    JSON.stringify(sort),
+  );
   const current = new Map(
     (deployments.data ?? []).map((deployment) => [
       deployment.repository,
@@ -171,12 +187,14 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
         scroll="jobs-deploys-scroll"
         head={
           <tr>
-            <th scope="col">{t("jobs.deploys.columns.result")}</th>
+            <SortHeader {...sorting.header("status")}>
+              {t("jobs.deploys.columns.result")}
+            </SortHeader>
             <th scope="col">{t("jobs.deploys.columns.kind")}</th>
             <th scope="col">{t("jobs.deploys.columns.commit")}</th>
             <th scope="col">{t("jobs.deploys.columns.repository")}</th>
             <th scope="col">{t("jobs.deploys.columns.who")}</th>
-            <th scope="col">{t("jobs.deploys.columns.when")}</th>
+            <SortHeader {...sorting.header("created")}>{t("jobs.deploys.columns.when")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("jobs.deploys.columns.actions")}</span>
             </th>
