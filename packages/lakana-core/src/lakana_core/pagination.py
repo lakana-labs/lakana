@@ -10,7 +10,10 @@ A list ordered by a unique key instead (the glossary's terms) has a cursor of th
 list's kind, with the same refusal of another list's cursor.
 
 A list the caller sorts by a key of their choice (the tables) has a cursor of that key's values,
-the item's id, the list's kind and the sort, so a cursor of another sort is refused too.
+the item's id, the list's kind and the sort, so a cursor of another sort is refused too. The
+newest-first lists take a chosen sort as well (`parse_sort`, `sorted_page`): in their default
+order they keep the cursor of a time and an id, in any other the sorted cursor, and each refuses
+the other's.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ import itertools
 import json
 import unicodedata
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Generic, NamedTuple, TypeVar
@@ -49,6 +52,16 @@ _OTHER_LIST = (
 _OTHER_SORT = (
     "The cursor is not valid for the list sorted by `{expected}`: it came from the list sorted "
     "by `{actual}`. Start the listing again without `cursor`."
+)
+_SORTED_NOT_DEFAULT = (
+    "The cursor is not valid for the list in its default order: it came from the list sorted by "
+    "`{actual}`. Send the same `sort` and `order` with every page, or start the listing again "
+    "without `cursor`."
+)
+_DEFAULT_NOT_SORTED = (
+    "The cursor is not valid for the list sorted by `{expected}`: it came from the list in its "
+    "default order. Send the same `sort` and `order` with every page, or start the listing again "
+    "without `cursor`."
 )
 
 
@@ -130,10 +143,13 @@ def decode_cursor(kind: str, cursor: str) -> Position:
     Raises
     ------
     ValidationError
-        If `cursor` is not one this server could have issued, or belongs to another list.
+        If `cursor` is not one this server could have issued, belongs to another list, or came
+        from the list sorted by a chosen key (`sorted_page`).
     """
     try:
         data = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)))
+        if isinstance(data, dict) and data.get("k") == kind and isinstance(data.get("s"), str):
+            raise ValidationError(_SORTED_NOT_DEFAULT.format(actual=data["s"]))
         if not (
             isinstance(data, dict)
             and isinstance(data.get("k"), str)
@@ -320,9 +336,13 @@ def decode_key_cursor(kind: str, cursor: str) -> str:
     Raises
     ------
     ValidationError
-        If `cursor` is not one this server could have issued, or belongs to another list.
+        If `cursor` is not one this server could have issued, belongs to another list, or came
+        from the list sorted by a chosen key (`sorted_page`).
     """
-    key = _cursor_body(kind, cursor).get("n")
+    body = _cursor_body(kind, cursor)
+    if isinstance(body.get("s"), str):
+        raise ValidationError(_SORTED_NOT_DEFAULT.format(actual=body["s"]))
+    key = body.get("n")
     if not isinstance(key, str):
         raise ValidationError(_BAD_CURSOR)
     return _stored_text(key)
@@ -677,6 +697,265 @@ def after_sorted(
     for key, value in reversed(list(zip(keys, at.values, strict=True))):
         condition = or_(beyond(key, value), and_(key == value, condition))
     return condition
+
+
+class SortKey(NamedTuple):
+    """One key a list sorted by a chosen field orders by.
+
+    Parameters
+    ----------
+    expression
+        What is compared: a column, or an expression of the listed row's columns.
+    type
+        The type of its value, as the cursor holds it.
+    descending
+        A direction of its own, whichever way the list runs (such as the newest first among
+        runs of one state); `None` follows the list.
+    nullable
+        Whether it can be null; a null sorts last, in either direction.
+    """
+
+    expression: ColumnElement[Any] | InstrumentedAttribute[Any]
+    type: KeyType
+    descending: bool | None = None
+    nullable: bool = False
+
+
+class SortField(NamedTuple):
+    """A field a list may be sorted by: its keys and the direction it runs in by default.
+
+    Parameters
+    ----------
+    keys
+        The keys, most significant first; the row's id breaks the last tie.
+    descending
+        Whether the field runs from the largest value down when no `order` is given.
+    """
+
+    keys: tuple[SortKey, ...]
+    descending: bool
+
+
+class ListSort(NamedTuple):
+    """The sort a list is read in: a field of the list and a direction.
+
+    Parameters
+    ----------
+    field
+        The field's name, one of the list's.
+    descending
+        Whether the list runs from the largest value down.
+    """
+
+    field: str
+    descending: bool
+
+    @property
+    def name(self) -> str:
+        """The sort as a cursor holds and a message names it, ``<field>:<asc|desc>``.
+
+        Returns
+        -------
+        str
+            The name.
+        """
+        return f"{self.field}:{'desc' if self.descending else 'asc'}"
+
+
+SORT_ORDERS = ("asc", "desc")
+"""The values of a list's `order`."""
+
+
+def parse_sort(
+    sort: str | None, order: str | None, fields: Mapping[str, bool], default: str
+) -> ListSort:
+    """Read a list's `sort` and `order`, refusing a field or a direction the list does not have.
+
+    Parameters
+    ----------
+    sort
+        The field asked for; `None` for the list's default.
+    order
+        ``asc`` or ``desc``; `None` for the field's own direction.
+    fields
+        The list's fields, each with whether it runs from the largest value down by default.
+    default
+        The field of the default order.
+
+    Returns
+    -------
+    ListSort
+        The sort.
+
+    Raises
+    ------
+    ValidationError
+        If `sort` is not one of `fields` or `order` is neither ``asc`` nor ``desc``; the
+        message names the choices.
+    """
+    field = default if sort is None else sort
+    if field not in fields:
+        choices = ", ".join(sorted(fields))
+        raise ValidationError(f"`sort` must be one of: {choices}; got {sort!r}.")
+    if order is None:
+        return ListSort(field, fields[field])
+    if order not in SORT_ORDERS:
+        raise ValidationError(f"`order` must be asc or desc; got {order!r}.")
+    return ListSort(field, order == "desc")
+
+
+def _key_order(key: SortKey, descending: bool) -> ColumnElement[Any]:
+    """Order by one key, a null last.
+
+    Parameters
+    ----------
+    key
+        The key.
+    descending
+        The list's direction, which a key without one of its own follows.
+
+    Returns
+    -------
+    ColumnElement
+        The ``ORDER BY`` term.
+    """
+    down = descending if key.descending is None else key.descending
+    return (key.expression.desc() if down else key.expression.asc()).nulls_last()
+
+
+def _after_keys(
+    keys: Sequence[SortKey],
+    row_id: ColumnElement[uuid.UUID] | InstrumentedAttribute[uuid.UUID],
+    descending: bool,
+    at: SortedPosition,
+) -> ColumnElement[bool]:
+    """Keep the rows strictly after a position, in the order `_key_order` gives each key.
+
+    Parameters
+    ----------
+    keys
+        The keys, most significant first.
+    row_id
+        The id column, which breaks the last tie in the list's direction.
+    descending
+        The list's direction.
+    at
+        Where the previous page ended.
+
+    Returns
+    -------
+    ColumnElement
+        The condition.
+    """
+    condition: ColumnElement[bool] = row_id < at.id if descending else row_id > at.id
+    for key, value in reversed(list(zip(keys, at.values, strict=True))):
+        column = key.expression
+        if value is None:
+            # A null sorts last: no value comes after it, and the nulls tie among themselves.
+            condition = and_(column.is_(None), condition)
+            continue
+        down = descending if key.descending is None else key.descending
+        beyond = column < value if down else column > value
+        if key.nullable:
+            beyond = or_(beyond, column.is_(None))
+        condition = or_(beyond, and_(column == value, condition))
+    return condition
+
+
+def sorted_page(
+    session: Session,
+    query: Select[*tuple[Any, ...]],
+    *,
+    kind: str,
+    sort: ListSort,
+    field: SortField,
+    row_id: ColumnElement[uuid.UUID] | InstrumentedAttribute[uuid.UUID],
+    limit: int,
+    cursor: str | None,
+) -> Page[Any]:
+    """Read one page of a list sorted by a chosen field, ordered and cut in the database.
+
+    The cursor holds the last row's key values as the database gave them, its id, the list's
+    kind and the sort's name, so a cursor of another list, another sort or the list's default
+    order is refused, never misread.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    query
+        The rows of the list, already filtered and joined to what the keys read.
+    kind
+        The list, as the cursor names it.
+    sort
+        The sort the page is read in.
+    field
+        Its field's keys.
+    row_id
+        The id column, which breaks the last tie.
+    limit
+        Most rows returned; at least 1.
+    cursor
+        The `next_cursor` of the previous page, or `None` for the first.
+
+    Returns
+    -------
+    Page
+        The rows as `query` selects them (one entity alone, or a row of several), and the
+        cursor of the next page (`None` on the last).
+
+    Raises
+    ------
+    ValidationError
+        If `limit` is below 1, or `cursor` is not one this server issued for this list in
+        this sort.
+    """
+    if limit < 1:
+        raise ValidationError(f"limit must be at least 1, got {limit}.")
+    width = len(query.column_descriptions)
+    keys = field.keys
+    if cursor is not None:
+        if "s" not in _cursor_body(kind, cursor):
+            raise ValidationError(_DEFAULT_NOT_SORTED.format(expected=sort.name))
+        at = decode_sorted_cursor(kind, sort.name, cursor, [k.type for k in keys])
+        query = query.where(_after_keys(keys, row_id, sort.descending, at))
+    # Labelled, so a key never merges with a column of an entity the query already selects.
+    extra = [k.expression.label(f"sort_key_{n}") for n, k in enumerate(keys)]
+    ordered = query.add_columns(*extra, row_id.label("sort_key_id")).order_by(
+        *(_key_order(k, sort.descending) for k in keys),
+        row_id.desc() if sort.descending else row_id.asc(),
+    )
+    rows = list(session.execute(ordered.limit(limit + 1)).all())
+    page = rows[:limit]
+    next_cursor = None
+    if len(rows) > limit:
+        last = page[-1]
+        next_cursor = encode_sorted_cursor(kind, sort.name, last[width:-1], last[-1])
+    return Page([row[0] if width == 1 else tuple(row[:width]) for row in page], next_cursor)
+
+
+def name_order(
+    session: Session, column: ColumnElement[str] | InstrumentedAttribute[str]
+) -> ColumnElement[str]:
+    """Order a name the way the lists sort it: in any letter case, by code point everywhere.
+
+    Parameters
+    ----------
+    session
+        The session the list is read in, for its database's dialect.
+    column
+        The name.
+
+    Returns
+    -------
+    ColumnElement
+        The name in lower case, collated ``"C"`` on Postgres (which compares under the
+        database's collation otherwise); SQLite compares text by code point already.
+    """
+    lowered: ColumnElement[str] = func.lower(column, type_=String)
+    if session.get_bind().dialect.name == "postgresql":
+        return lowered.collate("C")
+    return lowered
 
 
 def escape_like(value: str) -> str:
