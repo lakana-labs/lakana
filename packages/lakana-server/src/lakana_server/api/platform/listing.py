@@ -1,4 +1,4 @@
-"""What the list routes of runs, queries and deploys share: filter values and the cursor header.
+"""What the list routes share: filter values, the cursor header and the sort parameters.
 
 These lists answer with a JSON array, as they did before they could be paged, so the cursor of the
 next page travels in a response header instead of a body field.
@@ -6,7 +6,9 @@ next page travels in a response header instead of a body field.
 
 from __future__ import annotations
 
-from fastapi import Response
+from typing import Annotated
+
+from fastapi import Query, Response
 
 NEXT_CURSOR_HEADER = "X-Next-Cursor"
 """The response header that carries the cursor of the next page; absent on the last page."""
@@ -43,3 +45,10 @@ def set_next_cursor(response: Response, next_cursor: str | None) -> None:
     """
     if next_cursor is not None:
         response.headers[NEXT_CURSOR_HEADER] = next_cursor
+
+
+SortParam = Annotated[str | None, Query(max_length=32)]
+"""A list's `sort`: the field it is sorted by; each route's docstring names the fields."""
+
+OrderParam = Annotated[str | None, Query(max_length=8)]
+"""A list's `order`: ``asc`` or ``desc``; each route's docstring says which way is the default."""

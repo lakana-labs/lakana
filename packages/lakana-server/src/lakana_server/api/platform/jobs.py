@@ -18,6 +18,7 @@ from lakana_core.jobs.service import JobService, JobView, StartResult, WaitingSt
 from lakana_core.notifications.events import JOB_NOTIFY_EVENTS
 from lakana_core.notifications.views import DeliveryView
 from lakana_core.runs.operator import OperatorRights, job_actions, operator_rights_each, run_actions
+from lakana_server.api.platform.listing import OrderParam, SortParam
 from lakana_server.api.platform.runs import run_out
 from lakana_server.api.platform.schemas import (
     DeliveryOut,
@@ -150,15 +151,18 @@ def _start_out(result: StartResult, rights: OperatorRights) -> JobStartOut:
 def list_jobs(
     env: str,
     repository: str | None = Query(default=None, max_length=255),
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: JobService = Depends(get_job_service),
     authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[JobOut]:
     """List jobs.
 
-    Lists the jobs of the repositories deployed in the environment. Needs
+    Lists the jobs of the repositories deployed in the environment, by repository and then
+    name, or in the order `sort` and `order` ask for; the list is not paged. Needs
     `READ_ENVIRONMENT`. Answers 404 when the environment or the repository asked for does
-    not exist.
+    not exist, and 422 for an unknown `sort` or `order`.
 
     Parameters
     ----------
@@ -166,6 +170,12 @@ def list_jobs(
         Environment name.
     repository
         Only this repository's jobs.
+    sort
+        What the list is sorted by: `name`, `status` (the last run's), `last_run` or
+        `next_run`; by repository, then name, when absent. A job without a value comes last.
+    order
+        `asc` or `desc`; by default `desc` for `last_run` (the latest first), `asc` for the
+        others.
     principal
         The authenticated caller.
     service
@@ -176,10 +186,11 @@ def list_jobs(
     Returns
     -------
     list of JobOut
-        By repository, then job name.
+        By repository, then job name, unless sorted otherwise.
     """
     rights = _rights_of(authz, principal, env)
-    return [_job_out(view, rights) for view in service.list(principal, env, repository)]
+    views = service.list(principal, env, repository, sort=sort, order=order)
+    return [_job_out(view, rights) for view in views]
 
 
 @router.get("/jobs/{job}", response_model=JobOut, responses=errors(403, 404, 409))

@@ -5,9 +5,9 @@ audit log, like managing grants, is instance-scoped rather than tied to one
 environment.
 
 The listing pages by keyset: `next_cursor` is an opaque token encoding the
-`(occurred_at, id)` of a page's last event, and passing it back as
-`?cursor=` resumes strictly after that event. Filters are not part of the
-cursor; send the same ones with every page.
+`(occurred_at, id)` of a page's last event, and the order when it is not the
+newest first; passing it back as `?cursor=` resumes strictly after that event.
+Filters are not part of the cursor; send the same ones with every page.
 """
 
 from __future__ import annotations
@@ -20,10 +20,16 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
 
-from lakana_core.audit.service import AuditCursor, AuditService, ShownAuditEvent
+from lakana_core.audit.service import (
+    AUDIT_DEFAULT_SORT,
+    AuditCursor,
+    AuditService,
+    ShownAuditEvent,
+)
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ValidationError
 from lakana_core.models import AuditEventFilter, AuditEventType
+from lakana_server.api.platform.listing import OrderParam, SortParam
 from lakana_server.api.platform.namespace_forms import dotted_namespace
 from lakana_server.api.platform.schemas import AuditEventOut, AuditEventPage
 from lakana_server.api.responses import errors
@@ -54,9 +60,13 @@ def _encode_cursor(position: AuditCursor) -> str:
     Returns
     -------
     str
-        Unpadded base64url of `{"o": occurred_at, "i": id}`.
+        Unpadded base64url of `{"o": occurred_at, "i": id}`, with `"s"` the order when it is
+        not the newest first.
     """
-    raw = json.dumps({"o": position.occurred_at.isoformat(), "i": str(position.id)}).encode()
+    body = {"o": position.occurred_at.isoformat(), "i": str(position.id)}
+    if position.sort != AUDIT_DEFAULT_SORT:
+        body["s"] = position.sort
+    raw = json.dumps(body).encode()
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
@@ -87,6 +97,7 @@ def _decode_cursor(cursor: str) -> AuditCursor:
             isinstance(data, dict)
             and isinstance(data.get("o"), str)
             and isinstance(data.get("i"), str)
+            and isinstance(data.get("s", AUDIT_DEFAULT_SORT), str)
         ):
             raise ValidationError(_BAD_CURSOR)
         occurred_at = datetime.fromisoformat(data["o"])
@@ -97,7 +108,7 @@ def _decode_cursor(cursor: str) -> AuditCursor:
         event_id = uuid.UUID(data["i"])
     except (binascii.Error, ValueError, OverflowError) as exc:
         raise ValidationError(_BAD_CURSOR) from exc
-    return AuditCursor(occurred_at=occurred_at, id=event_id)
+    return AuditCursor(occurred_at=occurred_at, id=event_id, sort=data.get("s", AUDIT_DEFAULT_SORT))
 
 
 def _to_out(event: ShownAuditEvent) -> AuditEventOut:
@@ -142,15 +153,19 @@ def list_audit_events(
     until: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     cursor: str | None = Query(default=None, max_length=512),
+    sort: SortParam = None,
+    order: OrderParam = None,
     p: PrincipalRef = Depends(get_principal),
     audit: AuditService = Depends(get_audit_service),
 ) -> AuditEventPage:
     """List audit events.
 
-    Lists one page of audit events, newest first, with optional filters. The cursor of the
-    next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the
-    instance. Another principal's query text and column values are hidden unless the caller
-    also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than
+    Lists one page of audit events, newest first (the oldest first with `order=asc`), with
+    optional filters; every order lists the same events. The cursor of the next page is the
+    body's `next_cursor`, null on the last page; send the same filters and order with it. Needs
+    `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are
+    hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or
+    one of the other order, an unknown `sort` or `order`, a `kind` other than
     `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when
     the read had to be recorded in the audit log and could not be; no events are returned then.
     An event whose type this release does not know (written by a newer release before a
@@ -177,6 +192,10 @@ def list_audit_events(
         a 422 rather than silently clamped or ignored.
     cursor
         A previous page's `next_cursor`, to fetch the page after it.
+    sort
+        What the log is sorted by: `occurred`, the only field.
+    order
+        `desc` (the newest first, the default) or `asc` (the oldest first).
     p
         The acting principal.
     audit
@@ -192,9 +211,10 @@ def list_audit_events(
     PermissionDenied
         If `p` may not read the audit log.
     ValidationError
-        If `cursor` is malformed, `kind` is not a kind, or `event_type` is not of `kind`;
-        mapped to 422. An `event_type` that is no `AuditEventFilter` value (`UNKNOWN` among
-        them) is refused with 422 before this function runs.
+        If `cursor` is malformed or of the other order, `kind` is not a kind, `event_type` is
+        not of `kind`, or `sort` or `order` is unknown; mapped to 422. An `event_type` that is
+        no `AuditEventFilter` value (`UNKNOWN` among them) is refused with 422 before this
+        function runs.
     lakana_core.errors.AuditUnavailableError
         If the read had to be recorded in the audit log and could not be; mapped to 503 with
         `Retry-After`, and no event is returned.
@@ -218,6 +238,8 @@ def list_audit_events(
         until=until,
         limit=limit,
         cursor=position,
+        sort=sort,
+        order=order,
     )
     next_cursor = None if page.next_cursor is None else _encode_cursor(page.next_cursor)
     return AuditEventPage(items=[_to_out(event) for event in page.items], next_cursor=next_cursor)

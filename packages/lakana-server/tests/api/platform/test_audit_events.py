@@ -239,6 +239,41 @@ def test_list_audit_events_pages_through_every_event_with_a_cursor(client: TestC
     assert seen == expected
 
 
+def test_list_audit_events_pages_oldest_first_and_keeps_the_order_in_the_cursor(
+    client: TestClient,
+) -> None:
+    """`order=asc` gives the same events in the other order; its cursor resumes only that order."""
+    _create_principals(client, 4)
+    params = {"event_type": "PRINCIPAL_CREATED"}
+    newest = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params=params).json()
+    expected = [e["id"] for e in newest["items"]][::-1]
+
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(10):
+        page_params = {**params, "order": "asc", "limit": "2"} | (
+            {"cursor": cursor} if cursor else {}
+        )
+        response = client.get("/api/v1/audit-events", headers=AUTH_HEADER, params=page_params)
+        assert response.status_code == 200, response.text
+        seen.extend(e["id"] for e in response.json()["items"])
+        cursor = response.json()["next_cursor"]
+        if cursor is None:
+            break
+    assert seen == expected
+
+    first = client.get(
+        "/api/v1/audit-events", headers=AUTH_HEADER, params={**params, "order": "asc", "limit": 1}
+    ).json()
+    refused = client.get(
+        "/api/v1/audit-events",
+        headers=AUTH_HEADER,
+        params={**params, "cursor": first["next_cursor"]},
+    )
+    assert refused.status_code == 422
+    assert "came from the list sorted by `occurred:asc`" in refused.json()["detail"]
+
+
 def test_list_audit_events_has_no_next_cursor_when_the_page_is_exactly_full(
     client: TestClient,
 ) -> None:
