@@ -20,7 +20,7 @@ import { markedText } from "../shell/VisibleText";
 import { DeployRow } from "./DeployRow";
 import "./deployStrings";
 import { Environments, type SomeEnvironments } from "./Environments";
-import { mayRollBackTo, type RollbackTarget } from "./rollbackable";
+import { currentDeploys, mayRollBackTo, type RollbackTarget } from "./rollbackable";
 import { RollbackNote } from "./RollbackNote";
 import { useJobsFilter } from "./useJobsFilter";
 
@@ -51,7 +51,8 @@ interface DeploysOfProps {
 }
 
 /**
- * One environment's deploys: the Repository menu (every repository, then those deployed there,
+ * One environment's deploys, the newest run of each repository's current version marked
+ * current: the Repository menu (every repository, then those deployed there,
  * in the address as `?repository=`), the line that says why its current versions could not be
  * read, and the deploys, 50 a page with Show more. They are not read again on their own: a
  * deploy is the person's own act, and the list and the current versions are read again once a
@@ -121,6 +122,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     }
   }, [pages.items, deployments.data]);
   const rows = pages.items ?? [];
+  const marked = currentDeploys(rows, current);
   const steadyMore = useSteadyMore(pages.hasMore, pages.busy);
   return (
     <div ref={area}>
@@ -187,10 +189,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
           <DeployRow
             key={deploy.id}
             deploy={deploy}
-            current={
-              deploy.project_version_id !== null &&
-              current.get(deploy.repository) === deploy.project_version_id
-            }
+            current={marked.has(deploy.id)}
             onRollBack={
               mayRollBackTo(deploy, current)
                 ? () => {

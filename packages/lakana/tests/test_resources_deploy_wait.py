@@ -207,3 +207,10 @@ def test_a_deploy_that_has_not_finished_at_the_timeout_is_a_plain_timeout(
 def test_a_deploy_reads_actions_and_an_older_server_gives_none() -> None:
     assert deploy_from_json(_BODY).actions == ()
     assert deploy_from_json({**_BODY, "actions": ["rollback"]}).actions == ("rollback",)
+
+
+def test_a_deploy_reads_its_commit_subject_and_an_older_server_gives_none() -> None:
+    """The commit's first line comes through; a server before #783 sends none."""
+    assert deploy_from_json(_BODY).commit_subject is None
+    body = {**_BODY, "resolved_sha": "a" * 40, "commit_subject": "Review 4-6: four jobs"}
+    assert deploy_from_json(body).commit_subject == "Review 4-6: four jobs"

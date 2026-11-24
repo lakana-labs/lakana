@@ -874,7 +874,7 @@ def _deploy(
             repository_name=repository_name,
         )
         credential = None
-        run.resolved_sha = fetched.sha
+        run.resolved_sha, run.commit_subject = fetched.sha, fetched.subject
         session.commit()
         if ci_scope is not None:
             service.check_ci_commit(principal, ci_scope, kind, fetched.sha)

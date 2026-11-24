@@ -322,7 +322,8 @@ An asset file may hold tabs and line breaks but no other control characters; a d
 run refuse it, naming the file and the line.
 
 `lakana deploys list` has a `submitted_by` column, the name of who queued each deploy (empty once
-that account is deleted). `lakana deploys show` adds `submitted_by` and `jobs`, the jobs the
+that account is deleted), and a `commit_subject` column, the first line of the deployed commit's
+message (a rollback repeats its target's; empty for a deploy from before Lakana stored it). `lakana deploys show` adds `submitted_by` and `jobs`, the jobs the
 deploy's project version defines, sorted and comma-separated (empty for a deploy that made no project version);
 the history carries no `jobs`. `lakana deploys list --all-environments` lists the deploys of every
 environment you may read, newest first, with an `environment` column after `id`; it is not
@@ -371,7 +372,7 @@ repository contains it. A rollback never contacts the git host.
 
 In the web interface, open **Jobs**, then the **Deploys** tab, and choose the environment. Beside
 every earlier deploy or rollback that succeeded stands **Roll back to this…**, if you may deploy
-there (a CI token never may). It asks first and names every job the repository defines in either
+there (a CI token never may). It asks first, naming the commit by its ID and its subject, and names every job the repository defines in either
 version: a job both versions define, one the rollback removes and one it brings back, so no job
 changes that the question did not name; when it cannot read both lists it says why and offers no
 rollback. **Roll back** queues the rollback to that commit, and a line under the list follows it

@@ -66,6 +66,20 @@ describe("DeployRow", () => {
     expect(rollback.querySelector("code")).toBeNull();
   });
 
+  it("writes the commit's subject after its ID, and the ID alone for a deploy without one", () => {
+    const row = renderRow(aDeploy({ commit_subject: "Review 4-6: four jobs" }), true);
+    expect(row).toHaveTextContent("4f9d2a7 · Review 4-6: four jobs · current");
+    expect(within(row).getByText("Review 4-6: four jobs")).toHaveClass("truncate");
+    row.remove();
+
+    const marked = renderRow(aDeploy({ commit_subject: "Fix\u202Egnp.exe" }));
+    expect(marked).toHaveTextContent("4f9d2a7 · Fix");
+    expect(marked).toHaveTextContent("U+202E");
+    marked.remove();
+
+    expect(renderRow(aDeploy())).toHaveTextContent(/4f9d2a7analytics/u);
+  });
+
   it("says current in words on the current version", () => {
     expect(renderRow(aDeploy(), true)).toHaveTextContent("4f9d2a7 · current");
   });

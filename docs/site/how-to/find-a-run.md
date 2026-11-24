@@ -128,9 +128,12 @@ lakana deploys list --env dev --repo analytics --limit 20
 ```
 
 In the web interface, the **Deploys** tab of the Jobs page lists one environment's deploys at a
-time, newest first, 50 at a time with **Show more**: the result, the kind, the commit, the
-repository, who asked for it and when, and the first line of a failed deploy's message. The
-repository's current version says `current`. Choose the repository under **Repository**; a job's
+time, newest first, 50 at a time with **Show more**: the result, the kind, the commit (its ID and
+the first line of its message, such as `36a4ec5 · Review 4-6: four jobs`; the ID alone for a
+deploy from before Lakana stored that line), the repository, who asked for it and when, and the
+first line of a failed deploy's message. The newest successful deploy or rollback of each
+repository's current version says `current`; after a rollback to an earlier version, only the
+rollback does, not the deploy that first made it. Choose the repository under **Repository**; a job's
 page links to its repository's deploys from its facts. **Roll back to this…** beside an earlier
 successful deploy rolls the repository back to it (see
 [Deploy, dry-run, roll back](projects.md#deploy-dry-run-roll-back)).
