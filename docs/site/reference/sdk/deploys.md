@@ -46,7 +46,7 @@ Returns: `Deploy`. The run.
 
 ### `client.deploys.list`
 
-Signature: `client.deploys.list(environment: str, *, repository: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[Deploy]`
+Signature: `client.deploys.list(environment: str, *, repository: str | None = None, limit: int | None = None, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> list[Deploy]`
 
 List an environment's deploy history, newest first.
 
@@ -58,6 +58,8 @@ The deploys of one page; `list_page` also returns the cursor of the next one.
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
 | `limit` | `int | None` | `None` | Most deploys returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `repository` with every page. |
+| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
 
 Returns: `list of Deploy`. Newest first.
 
@@ -67,7 +69,7 @@ Returns: `list of Deploy`. Newest first.
 
 ### `client.deploys.list_page`
 
-Signature: `client.deploys.list_page(environment: str, *, repository: str | None = None, limit: int | None = None, cursor: str | None = None) -> DeployPage`
+Signature: `client.deploys.list_page(environment: str, *, repository: str | None = None, limit: int | None = None, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> DeployPage`
 
 List one page of an environment's deploy history, with the cursor of the next page.
 
@@ -77,6 +79,8 @@ List one page of an environment's deploy history, with the cursor of the next pa
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
 | `limit` | `int | None` | `None` | Most deploys returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `repository` with every page. |
+| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
 
 Returns: `DeployPage`. The deploys, newest first, and the cursor for the next page (`None` on the last).
 
@@ -86,7 +90,7 @@ Returns: `DeployPage`. The deploys, newest first, and the cursor for the next pa
 
 ### `client.deploys.list_all`
 
-Signature: `client.deploys.list_all(*, environment: str | None = None, repository: str | None = None, limit: int | None = None, cursor: str | None = None) -> DeployPage`
+Signature: `client.deploys.list_all(*, environment: str | None = None, repository: str | None = None, limit: int | None = None, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> DeployPage`
 
 List one page of the deploys of every environment you may read.
 
@@ -98,6 +102,8 @@ The environments are those where you hold `READ_ENVIRONMENT`; one where you do n
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
 | `limit` | `int | None` | `None` | Most deploys returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same `repository` with every page. |
+| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
 
 Returns: `DeployPage`. The deploys, newest first, and the cursor for the next page (`None` on the last).
 
@@ -109,7 +115,7 @@ Returns: `DeployPage`. The deploys, newest first, and the cursor for the next pa
 
 ### `client.deploys.iter_all`
 
-Signature: `client.deploys.iter_all(*, environment: str | None = None, repository: str | None = None, page_size: int = 100) -> Iterator[Deploy]`
+Signature: `client.deploys.iter_all(*, environment: str | None = None, repository: str | None = None, sort: str | None = None, order: str | None = None, page_size: int = 100) -> Iterator[Deploy]`
 
 Yield every deploy of every environment you may read, fetching pages as needed.
 
@@ -117,6 +123,8 @@ Yield every deploy of every environment you may read, fetching pages as needed.
 |---|---|---|---|
 | `environment` | `str | None` | `None` | Only this environment. |
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
+| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
 | `page_size` | `int` | `100` | Deploys per request (1 to 200). |
 
 Yields: `Deploy`. Each deploy, once, in the order of `list_all`.

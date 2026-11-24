@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List audit events
 
-Lists one page of audit events, newest first, with optional filters. The cursor of the next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.
+Lists one page of audit events, newest first (the oldest first with `order=asc`), with optional filters; every order lists the same events. The cursor of the next page is the body's `next_cursor`, null on the last page; send the same filters and order with it. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or one of the other order, an unknown `sort` or `order`, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.
 
 Parameters:
 
@@ -23,6 +23,8 @@ Parameters:
 | `until` | query | no | text (date-time) or null | Only return events at or before this time, if given. |
 | `limit` | query | no | whole number | The maximum number of events to return. Defaults to 100, must be between 1 and 500 inclusive; an out-of-range value is rejected with a 422 rather than silently clamped or ignored. |
 | `cursor` | query | no | text or null | A previous page's `next_cursor`, to fetch the page after it. |
+| `sort` | query | no | text or null | What the log is sorted by: `occurred`, the only field. |
+| `order` | query | no | text or null | `desc` (the newest first, the default) or `asc` (the oldest first). |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

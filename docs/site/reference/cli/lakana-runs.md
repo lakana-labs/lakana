@@ -13,7 +13,7 @@ Runs of deployed project versions.
 
 Usage: `lakana runs list [OPTIONS]`
 
-List runs, newest first.
+List runs, newest first, or sorted by --sort and --order.
 
 --all-environments lists the runs of every environment you may read at once. A long list prints a "More results" line with the command that shows the next page.
 
@@ -28,6 +28,8 @@ List runs, newest first.
 | `--since` | text | none | Only runs created at or after this date or time, such as 2026-10-18 or 2026-10-18T09:30:00Z. Without a time zone it is read in yours. |
 | `--limit` | whole number, 1 to 200 | none | Most runs to list (default 100). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
+| `--sort` | text | none | What to sort by: created (the default, newest first), name (the job's, else the repository's) or status; runs of one name or state come newest first. |
+| `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ## `lakana runs show`
 

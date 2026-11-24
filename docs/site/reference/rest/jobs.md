@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List jobs
 
-Lists the jobs of the repositories deployed in the environment. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or the repository asked for does not exist.
+Lists the jobs of the repositories deployed in the environment, by repository and then name, or in the order `sort` and `order` ask for; the list is not paged. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or the repository asked for does not exist, and 422 for an unknown `sort` or `order`.
 
 Parameters:
 
@@ -17,6 +17,8 @@ Parameters:
 |---|---|---|---|---|
 | `env` | path | yes | text | Environment name. |
 | `repository` | query | no | text or null | Only this repository's jobs. |
+| `sort` | query | no | text or null | What the list is sorted by: `name`, `status` (the last run's), `last_run` or `next_run`; by repository, then name, when absent. A job without a value comes last. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `last_run` (the latest first), `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

@@ -2959,7 +2959,7 @@
           "saved-queries"
         ],
         "summary": "List the saved queries of an environment you see",
-        "description": "You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. The items have no `sql` key: read a saved query (`GET .../saved-queries/{saved_query_id}`) for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.",
+        "description": "You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. The items have no `sql` key: read a saved query (`GET .../saved-queries/{saved_query_id}`) for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id, unless `sort` and `order` ask for another; every order shows the same saved queries. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` with the same sort for the next page.",
         "operationId": "list_saved_queries_api_v1_environments__env__saved_queries_get",
         "parameters": [
           {
@@ -3002,6 +3002,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `name` (the default, in any letter case), `updated` or `created`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `asc` for `name`, `desc` for `updated` and `created` (the latest first)."
           },
           {
             "name": "authorization",
@@ -3530,7 +3566,7 @@
           "saved-queries"
         ],
         "summary": "List the saved queries of every environment you see",
-        "description": "Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. The items have no `sql` key: read a saved query in its environment for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
+        "description": "Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. The items have no `sql` key: read a saved query in its environment for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id, unless `sort` and `order` ask for another. Send `next_cursor` back as `cursor` with the same sort for the next page; a cursor of the list of one environment or of another order is refused with 422 here.",
         "operationId": "list_all_saved_queries_api_v1_saved_queries_get",
         "parameters": [
           {
@@ -3581,6 +3617,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `name` (the default, in any letter case), `updated` or `created`."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `asc` for `name`, `desc` for `updated` and `created` (the latest first)."
           },
           {
             "name": "authorization",
@@ -11074,7 +11146,7 @@
           "principals"
         ],
         "summary": "List principals",
-        "description": "Lists the principals, newest first. Needs `MANAGE_PRINCIPAL` on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.",
+        "description": "Lists the principals, newest first, or in the order `sort` and `order` ask for. Needs `MANAGE_PRINCIPAL` on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same `q` and sort with every page. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order.",
         "operationId": "list_principals_api_v1_principals_get",
         "parameters": [
           {
@@ -11125,6 +11197,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page; send the same `q`."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the active first, each by name."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
           },
           {
             "name": "authorization",
@@ -15316,7 +15424,7 @@
           "connections"
         ],
         "summary": "List the connections of an environment",
-        "description": "Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.",
+        "description": "Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. `sort` and `order` order the list by another field; one state is ordered by name. Answers 404 when the environment does not exist and 422 for an unknown `sort` or `order` or a cursor this list did not issue in this order.",
         "operationId": "list_connections_api_v1_environments__environment_name__connections_get",
         "parameters": [
           {
@@ -15359,6 +15467,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the last test: failed first, then queued or running, then passed, never tested last; one state by name."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
           },
           {
             "name": "authorization",
@@ -15988,7 +16132,7 @@
           "connections"
         ],
         "summary": "List the connections of every environment you may read",
-        "description": "Without `environment`, lists one page of the connections of every environment where you hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An environment where you do not hold it is left out, so this is never a 404, and never a 403 but for a task token, which is refused as every connection read is. With `environment`, it answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers, with its 403 and 404. Each connection carries its last test and what you may do with it (`actions`), as in that list: the last test's `id`, `created_at`, `message` and `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.",
+        "description": "Without `environment`, lists one page of the connections of every environment where you hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An environment where you do not hold it is left out, so this is never a 404, and never a 403 but for a task token, which is refused as every connection read is. With `environment`, it answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers, with its 403 and 404. Each connection carries its last test and what you may do with it (`actions`), as in that list: the last test's `id`, `created_at`, `message` and `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. `sort` and `order` order the list as on the list of one environment. Send `next_cursor` back as `cursor` with the same sort for the next page; a cursor of the list of one environment or of another order is refused with 422 here.",
         "operationId": "list_all_connections_api_v1_connections_get",
         "parameters": [
           {
@@ -16039,6 +16183,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the last test: failed first, then queued or running, then passed, never tested last; one state by name."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
           },
           {
             "name": "authorization",
@@ -17727,7 +17907,7 @@
           "deploys"
         ],
         "summary": "List an environment's deploys",
-        "description": "Lists the deploy history, newest first, one page at a time. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same `repository` with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1 or a `cursor` this server did not issue.",
+        "description": "Lists the deploy history, newest first, one page at a time, or in the order `sort` and `order` ask for: deploys of one state come newest first. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same `repository` and sort with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1, an unknown `sort` or `order`, or a `cursor` this server did not issue for this list in this order.",
         "operationId": "list_deploys_api_v1_environments__env__deploys_get",
         "parameters": [
           {
@@ -17788,6 +17968,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default) or `status`; deploys of one state come newest first."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for `status`."
           },
           {
             "name": "authorization",
@@ -18624,7 +18840,7 @@
           "deploys"
         ],
         "summary": "List the deploys of every environment you may read",
-        "description": "Without `environment`, lists the deploys of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue for this list.",
+        "description": "Without `environment`, lists the deploys of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send `next_cursor` back as `cursor` with the same `repository` and sort for the next page; `sort` and `order` order the list as on the list of one environment, and a cursor of that list is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown `sort` or `order`, or a `cursor` this server did not issue for this list in this order.",
         "operationId": "list_all_deploys_api_v1_deploys_get",
         "parameters": [
           {
@@ -18693,6 +18909,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default) or `status`; deploys of one state come newest first."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for `status`."
           },
           {
             "name": "authorization",
@@ -18883,7 +19135,7 @@
           "runs"
         ],
         "summary": "List runs",
-        "description": "Lists runs, newest first, one page at a time. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server did not issue.",
+        "description": "Lists runs, newest first, one page at a time, or in the order `sort` and `order` ask for: runs of one name or state come newest first. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters and sort with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1, an unknown status, trigger, `sort` or `order`, a `since` without a time zone, or a `cursor` this server did not issue for this list in this order.",
         "operationId": "list_runs_api_v1_environments__env__runs_get",
         "parameters": [
           {
@@ -19010,6 +19262,42 @@
               "title": "Cursor"
             },
             "description": "The `X-Next-Cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case) or `status`; runs of one name or state come newest first."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
           },
           {
             "name": "authorization",
@@ -20099,7 +20387,7 @@
           "jobs"
         ],
         "summary": "List jobs",
-        "description": "Lists the jobs of the repositories deployed in the environment. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or the repository asked for does not exist.",
+        "description": "Lists the jobs of the repositories deployed in the environment, by repository and then name, or in the order `sort` and `order` ask for; the list is not paged. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or the repository asked for does not exist, and 422 for an unknown `sort` or `order`.",
         "operationId": "list_jobs_api_v1_environments__env__jobs_get",
         "parameters": [
           {
@@ -20129,6 +20417,42 @@
               "title": "Repository"
             },
             "description": "Only this repository's jobs."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `name`, `status` (the last run's), `last_run` or `next_run`; by repository, then name, when absent. A job without a value comes last."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `last_run` (the latest first), `asc` for the others."
           },
           {
             "name": "authorization",
@@ -21092,7 +21416,7 @@
           "runs"
         ],
         "summary": "List the runs of every environment you may read",
-        "description": "Without `environment`, lists the runs of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server did not issue for this list.",
+        "description": "Without `environment`, lists the runs of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run names its `environment` and comes without tasks. `sort` and `order` order the list as on the list of one environment. Send `next_cursor` back as `cursor` with the same filters and sort for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown status, trigger, `sort` or `order`, a `since` without a time zone, or a `cursor` this server did not issue for this list in this order.",
         "operationId": "list_all_runs_api_v1_runs_get",
         "parameters": [
           {
@@ -21227,6 +21551,42 @@
               "title": "Cursor"
             },
             "description": "The `next_cursor` of the previous page."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case) or `status`; runs of one name or state come newest first."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
           },
           {
             "name": "authorization",
@@ -21420,7 +21780,7 @@
           "audit"
         ],
         "summary": "List audit events",
-        "description": "Lists one page of audit events, newest first, with optional filters. The cursor of the next page is the body's `next_cursor`, null on the last page. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.",
+        "description": "Lists one page of audit events, newest first (the oldest first with `order=asc`), with optional filters; every order lists the same events. The cursor of the next page is the body's `next_cursor`, null on the last page; send the same filters and order with it. Needs `READ_AUDIT_LOG` on the instance. Another principal's query text and column values are hidden unless the caller also has `READ_QUERY_TEXT`. Answers 422 for a malformed cursor or one of the other order, an unknown `sort` or `order`, a `kind` other than `connection`, an `event_type` that is not of `kind` or not a known type, and 503 when the read had to be recorded in the audit log and could not be; no events are returned then. An event whose type this release does not know (written by a newer release before a downgrade) is listed with `event_type` `UNKNOWN` and its stored type in `event_type_raw`.",
         "operationId": "list_audit_events_api_v1_audit_events_get",
         "parameters": [
           {
@@ -21560,6 +21920,42 @@
               "title": "Cursor"
             },
             "description": "A previous page's `next_cursor`, to fetch the page after it."
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
+            },
+            "description": "What the log is sorted by: `occurred`, the only field."
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            },
+            "description": "`desc` (the newest first, the default) or `asc` (the oldest first)."
           },
           {
             "name": "authorization",
