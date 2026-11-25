@@ -1,6 +1,8 @@
 /**
  * A text field that suggests the names of things that exist as one types: the principals of
- * a group's Add a member and the tokens' Owner, the tables of Add filter or mask. The server
+ * a group's Add a member and the tokens' Owner; the principals or groups of Add grant's and Add
+ * filter or mask's Name and of the Who filter of Grants and Row filters & masks; the tables of
+ * Add filter or mask and of Row filters & masks' Table filter. The server
  * filters, under the person's own rights, so a name they may not see is never suggested; the
  * suggestion is help, and the server still checks what is sent.
  *

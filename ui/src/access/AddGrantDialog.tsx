@@ -39,7 +39,7 @@ import { Choice } from "./Choice";
 import { FormFoot } from "./FormFoot";
 import { GitMark } from "./GitMark";
 import { managedScopeOf } from "./managed";
-import { useGroupSearch, usePrincipalSearch } from "./suggest";
+import { useWhoSearch } from "./suggest";
 import { actionWords, roleName, roleSummary } from "./words";
 
 /** The single actions that do nothing without the ADMIN role, which Add grant does not offer. */
@@ -126,9 +126,7 @@ export function AddGrantDialog({
     setFields((previous) => ({ ...previous, ...change }));
   };
   const { who, name, what, role, action, where, environment, namespace, table } = fields;
-  const principals = usePrincipalSearch();
-  const groups = useGroupSearch();
-  const suggest = who === "group" ? groups : principals;
+  const suggest = useWhoSearch(who);
   const onInstance = where === "INSTANCE";
   const managed = managedScopeOf(scopes, onInstance ? null : environment);
   let held: string | null = null;
@@ -189,12 +187,8 @@ export function AddGrantDialog({
           onChange={(value) => {
             set({ name: value });
           }}
-          search={suggest}
-          noMatch={(text) =>
-            who === "group"
-              ? t("picker.noGroup", { name: text })
-              : t("picker.noPrincipal", { name: text })
-          }
+          search={suggest.search}
+          noMatch={suggest.noMatch}
         />
         <RadioGroup
           className="field"

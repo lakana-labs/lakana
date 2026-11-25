@@ -68,13 +68,15 @@ export async function suggestGroups(
 
 /**
  * Suggests tables for a name picker: the first `limit` of an environment whose own name contains
- * the text (`name`, never a namespace, a column or a description), by name. Only tables the
- * person may read are listed; one they may not read is left out, never refused.
+ * the text (`name`, never a namespace, a column or a description), by name, in a namespace and
+ * the ones beneath it when one is given. Only tables the person may read are listed; one they
+ * may not read is left out, never refused.
  *
  * @param environment - The environment.
  * @param text - What the table's name must contain; blank for the first by name.
  * @param limit - How many to ask for.
  * @param signal - Cancels the read once a newer text is typed.
+ * @param namespace - Only this dotted namespace and the ones beneath it; null for any.
  * @returns The page.
  * @throws {ApiError} for a refusal or an unreachable server.
  */
@@ -83,8 +85,12 @@ export function suggestTables(
   text: string,
   limit: number,
   signal: AbortSignal,
+  namespace: string | null = null,
 ): Promise<TableListPageOut> {
   const params = new URLSearchParams({ environment, sort: "name", limit: String(limit) });
+  if (namespace !== null) {
+    params.set("namespace", namespace);
+  }
   if (text !== "") {
     params.set("name", text);
   }
