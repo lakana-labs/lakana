@@ -21,6 +21,13 @@ export interface LinkDescriptionOut {
    * `open` for a usable link (the only one the server describes). The server may add values: compare, and keep a fallback.
    */
   readonly state: "open" | "used" | "expired" | "withdrawn";
+  /**
+   * True when the link works only through the identity provider: a recovery link of a person
+   * linked to it. Absent from a server older than #32.
+   */
+  readonly provider_only?: boolean;
+  /** True when the page offers "Sign in with <provider>" for the link; absent before #32. */
+  readonly offers_provider?: boolean;
 }
 
 /** What signing in answers. */

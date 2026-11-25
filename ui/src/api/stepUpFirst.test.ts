@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { send, setStepUp } from "./client";
+import { PROVIDER_TRIP_KEY, ProviderRedirect } from "./oidc";
 import { guarded, STEP_UP_MARGIN_MS } from "./stepUpFirst";
 
 import { fakeServer } from "../test/server";
@@ -123,5 +124,74 @@ describe("guarded", () => {
       "POST /api/v1/sign-in/step-up",
       "DELETE /api/v1/grants/g-1",
     ]);
+  });
+
+  it("guarded sends a linked person through the provider and sends nothing", async () => {
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": {
+        status: 200,
+        body: { step_up_until: null, provider_linked: true },
+      },
+      "POST /api/v1/sign-in/oidc/step-up/start": {
+        status: 200,
+        body: { authorization_url: "https://id.example.org/authorize?state=s" },
+      },
+      "DELETE /api/v1/grants/g-1": { status: 204 },
+    });
+    const touch = ceremony();
+    setStepUp(touch);
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign, pathname: "/settings/access/grants", search: "?who=kim" });
+
+    await expect(guarded("DELETE", "/api/v1/grants/g-1")).rejects.toBeInstanceOf(ProviderRedirect);
+
+    expect(touch).not.toHaveBeenCalled();
+    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/oidc/step-up/start",
+    ]);
+    expect(server.sent[1]?.body).toEqual({ return_to: "/settings/access/grants?who=kim" });
+    expect(assign).toHaveBeenCalledWith("https://id.example.org/authorize?state=s");
+    expect(JSON.parse(sessionStorage.getItem(PROVIDER_TRIP_KEY) ?? "null")).toEqual({
+      purpose: "step_up",
+      back: "/settings/access/grants?who=kim",
+    });
+    sessionStorage.clear();
+  });
+
+  it("guarded keeps the passkey ceremony for an unlinked person", async () => {
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": {
+        status: 200,
+        body: { step_up_until: null, provider_linked: false },
+      },
+      ...STEP_UP_ROUTES,
+      "DELETE /api/v1/grants/g-1": { status: 204 },
+    });
+    setStepUp(ceremony());
+
+    await guarded("DELETE", "/api/v1/grants/g-1");
+
+    expect(server.sent.map((request) => request.path)).not.toContain(
+      "/api/v1/sign-in/oidc/step-up/start",
+    );
+    expect(server.sent.at(-1)?.method).toBe("DELETE");
+  });
+
+  it("a linked person's fresh confirmation sends at once", async () => {
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": {
+        status: 200,
+        body: {
+          step_up_until: new Date(Date.now() + 10 * 60_000).toISOString(),
+          provider_linked: true,
+        },
+      },
+      "DELETE /api/v1/grants/g-1": { status: 204 },
+    });
+
+    await guarded("DELETE", "/api/v1/grants/g-1");
+
+    expect(server.sent.map((request) => request.method)).toEqual(["GET", "DELETE"]);
   });
 });
