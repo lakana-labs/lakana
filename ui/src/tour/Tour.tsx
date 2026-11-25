@@ -20,7 +20,7 @@ import { useInterfaceState } from "../shell/InterfaceState";
 import { shortcutLabel } from "../shell/shortcut";
 import { useFolded } from "../shell/useFolded";
 import { useResource } from "../shell/useResource";
-import { type TourStepId, tourSteps, tourTarget } from "./steps";
+import { TOUR_GUIDES, type TourStepId, tourSteps, tourTarget } from "./steps";
 
 /** The name of a step that is not an area (an area's is `areas.<id>.name`, as in the sidebar). */
 const PLACE_NAMES: Partial<Record<TourStepId, string>> = {
@@ -34,6 +34,31 @@ const READING = [
   ["howTo", HOW_TO_URL],
   ["docs", DOCS_URL],
 ] as const;
+
+/** Properties of {@link Guide}. */
+interface GuideProps {
+  /** The step, other than the last. */
+  readonly id: Exclude<TourStepId, "help">;
+}
+
+/**
+ * The link of a step to the guide for its place on the documentation site, in a new tab.
+ *
+ * @param props - The step.
+ * @param props.id - The step.
+ * @returns The link in a paragraph of its own.
+ */
+function Guide({ id }: GuideProps): JSX.Element {
+  const { t } = useTranslation();
+  return (
+    <p>
+      <a href={`${DOCS_URL}${TOUR_GUIDES[id]}`} target="_blank" rel="noreferrer">
+        {t(`tour.steps.${id}.guide`)}
+        <span className="visually-hidden"> {t("home.newTab")}</span>
+      </a>
+    </p>
+  );
+}
 
 /** Properties of {@link NextStep}. */
 interface NextStepProps {
@@ -93,7 +118,7 @@ interface StepContentProps {
 }
 
 /**
- * What a step says: the place, what is found there, and the way on.
+ * What a step says: the place, what is found there, the guide to it, and the way on.
  *
  * @param props - The step and the handlers.
  * @param props.id - The step.
@@ -128,6 +153,7 @@ function StepContent({
           keys: t(`shell.searchShortcut.${shortcutLabel(navigator)}`),
         })}
       </p>
+      {id !== "help" && <Guide id={id} />}
       {last && (
         <>
           {next !== undefined && <NextStep id={next} onLeave={onEnd} />}
