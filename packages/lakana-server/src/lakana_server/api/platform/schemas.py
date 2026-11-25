@@ -5659,6 +5659,15 @@ class JobOut(BaseModel):
         What started it.
     last_run_at
         When it was created.
+    waiting_since
+        For a start that waits (``waiting`` or ``waiting to start``), when it was first asked
+        for; a later request merges into it and keeps this time. Null otherwise. Who asked is
+        not shown here.
+    waiting_trigger
+        For a start that waits, what first asked for it: ``schedule``, ``api``, ``manual`` or
+        ``deploy``, the request `waiting_since` names. Null otherwise, and for an older waiting
+        start that merged several requests. The run that begins can run as another trigger: a
+        schedule that merges into a start by hand makes it a scheduled run.
     triggers
         How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule
         in this environment, a ``deploy`` trigger when it starts after each deploy here, and the
@@ -5695,6 +5704,8 @@ class JobOut(BaseModel):
     last_run_status: str | None
     last_run_trigger: str | None
     last_run_at: datetime | None
+    waiting_since: datetime | None = None
+    waiting_trigger: str | None = None
     triggers: list[TriggerOut]
     actions: list[str] = Field(default_factory=list)
     commit_sha: str

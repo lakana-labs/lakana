@@ -31,9 +31,19 @@ know**. The SDK does so.
 
 Both answer the fields `name`, `environment`, `repository`, `select`, `upstream`, `downstream`,
 `cron`, `timezone`, `state`, `paused`, `next_run_at`, `next_run_local`, `waiting_for`,
-`waits_for_run_id`, `last_run_id`, `last_run_status`, `last_run_trigger`, `last_run_at` and
-`triggers`. `cron`, `timezone` and `state` are unchanged. The pause and resume routes answer
-the same body.
+`waits_for_run_id`, `last_run_id`, `last_run_status`, `last_run_trigger`, `last_run_at`,
+`waiting_since`, `waiting_trigger` and `triggers`. `cron`, `timezone` and `state` are unchanged.
+The pause and resume routes answer the same body.
+
+`waiting_since` and `waiting_trigger` describe a start that waits (the state `waiting` or
+`waiting to start`): when it was first asked for, and what asked for it then (`schedule`, `api`,
+`manual` or `deploy`). A later request merges into the waiting start and keeps both. The run
+that begins can run as another trigger: a schedule that merges into a start by hand makes it a
+scheduled run (see [Why is it waiting?](../how-to/why-is-it-waiting.md#a-waiting-job)), while
+`waiting_trigger` still says `manual`. A start that waited from before this field existed and
+merged several requests has `waiting_trigger` null, since which came first is not known. Both
+are null for a job with no waiting start. Who asked is not shown; the audit event
+`JOB_START_WAITING` records it.
 
 `repository` is needed only when several repositories declare a job of the same name; without
 it the answer is `409` and names them. A job that does not exist is `404` and lists the jobs that
@@ -44,7 +54,7 @@ do.
 | Command | Shows |
 |---|---|
 | `lakana job list [--env ENV] [--repo REPO]` | one row per job with a `triggers` column that holds each trigger on its own line, for example `schedule 0 6 * * * Europe/Berlin`, `after each deploy` and `on demand`; a paused schedule reads `schedule 0 6 * * * Europe/Berlin (paused)` |
-| `lakana job show NAME [--env ENV] [--repo REPO]` | the job's state, selection and last run, each trigger on its own line with the next run of a schedule, and `notify`: the format and events, with `; via secret NAME` for a caller with the deploy right (see [Get told when a job fails](../how-to/get-told-when-a-job-fails.md#see-where-a-job-reports)) |
+| `lakana job show NAME [--env ENV] [--repo REPO]` | the job's state, selection and last run, each trigger on its own line with the next run of a schedule, and `notify`: the format and events, with `; via secret NAME` for a caller with the deploy right (see [Get told when a job fails](../how-to/get-told-when-a-job-fails.md#see-where-a-job-reports)); for a job whose start waits, the sentence of what it waits for and a line such as `Waiting since 2026-11-17 09:12 UTC (manual).` |
 
 With `--output json` both print the whole body, `triggers` included.
 
@@ -53,7 +63,8 @@ With `--output json` both print the whole body, `triggers` included.
 `next_run_at`; the fields a kind does not have are `None`). From a server that does not send
 triggers the tuple is empty. `Job.commit_sha`, `Job.source_url` (the link to `lakana.yaml` at that
 commit on the git host, or `None`) and `Job.notify` (a `JobNotify` with `format`, `events` and
-`secret`, which is `None` unless you hold the deploy right) are `None` from an older server.
+`secret`, which is `None` unless you hold the deploy right) are `None` from an older server, and
+so are `Job.waiting_since` and `Job.waiting_trigger`.
 
 ## After a deploy
 

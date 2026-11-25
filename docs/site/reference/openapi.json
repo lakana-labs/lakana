@@ -33872,6 +33872,29 @@
             ],
             "title": "Last Run At"
           },
+          "waiting_since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting Since"
+          },
+          "waiting_trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting Trigger"
+          },
           "triggers": {
             "items": {
               "oneOf": [
@@ -33955,7 +33978,7 @@
           "source_url"
         ],
         "title": "JobOut",
-        "description": "One job and the platform's state for it.\n\nParameters\n----------\nname\n    The job's name.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nselect\n    The selection's patterns.\nupstream\n    Whether ancestors are added.\ndownstream\n    Whether descendants are added.\ncron\n    The cron expression, or null for a job without a schedule here.\ntimezone\n    The schedule's IANA zone, or null without a schedule.\nstate\n    ``scheduled``, ``paused``, ``waiting`` (a start waits for the active run),\n    ``waiting to start`` (a start waits and the project is free), ``no schedule``,\n    ``no run principal`` or ``run principal unusable``.\npaused\n    Whether the schedule is paused.\nnext_run_at\n    The next scheduled time (UTC), or null.\nnext_run_local\n    The same moment in the job's zone, ISO 8601 with the offset.\nwaiting_for\n    Why a start waits (`job_waits`, `job_starts_soon`) or why the schedule cannot start\n    (`no_run_principal`, `run_principal_unusable`): a stable `code` and one sentence in\n    `message`; null otherwise.\nwaits_for_run_id\n    For ``waiting``, the run it waits for.\nlast_run_id\n    The job's latest run, if any.\nlast_run_status\n    Its status.\nlast_run_trigger\n    What started it.\nlast_run_at\n    When it was created.\ntriggers\n    How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule\n    in this environment, a ``deploy`` trigger when it starts after each deploy here, and the\n    ``on_demand`` trigger every job has, last. Kinds may be added.\nactions\n    The words of what the caller's rights allow on it: ``run``, ``pause``, ``resume``.\n    Rights only, as for a table's `actions`: offer a control only when the word is listed\n    and the job's state allows it (Pause for an unpaused job with a schedule, Resume for a\n    paused one); the server decides every request again.\ncommit_sha\n    The commit of the project version deployed in the environment.\nsource_url\n    The link to ``lakana.yaml`` at that commit on the repository's git host; null for a\n    repository without a known host.\nnotify\n    Where the job reports; null for a job without a usable `notify:`."
+        "description": "One job and the platform's state for it.\n\nParameters\n----------\nname\n    The job's name.\nenvironment\n    Environment name.\nrepository\n    Repository name.\nselect\n    The selection's patterns.\nupstream\n    Whether ancestors are added.\ndownstream\n    Whether descendants are added.\ncron\n    The cron expression, or null for a job without a schedule here.\ntimezone\n    The schedule's IANA zone, or null without a schedule.\nstate\n    ``scheduled``, ``paused``, ``waiting`` (a start waits for the active run),\n    ``waiting to start`` (a start waits and the project is free), ``no schedule``,\n    ``no run principal`` or ``run principal unusable``.\npaused\n    Whether the schedule is paused.\nnext_run_at\n    The next scheduled time (UTC), or null.\nnext_run_local\n    The same moment in the job's zone, ISO 8601 with the offset.\nwaiting_for\n    Why a start waits (`job_waits`, `job_starts_soon`) or why the schedule cannot start\n    (`no_run_principal`, `run_principal_unusable`): a stable `code` and one sentence in\n    `message`; null otherwise.\nwaits_for_run_id\n    For ``waiting``, the run it waits for.\nlast_run_id\n    The job's latest run, if any.\nlast_run_status\n    Its status.\nlast_run_trigger\n    What started it.\nlast_run_at\n    When it was created.\nwaiting_since\n    For a start that waits (``waiting`` or ``waiting to start``), when it was first asked\n    for; a later request merges into it and keeps this time. Null otherwise. Who asked is\n    not shown here.\nwaiting_trigger\n    For a start that waits, what first asked for it: ``schedule``, ``api``, ``manual`` or\n    ``deploy``, the request `waiting_since` names. Null otherwise, and for an older waiting\n    start that merged several requests. The run that begins can run as another trigger: a\n    schedule that merges into a start by hand makes it a scheduled run.\ntriggers\n    How the job starts, schedule first: a ``schedule`` trigger when the job has a schedule\n    in this environment, a ``deploy`` trigger when it starts after each deploy here, and the\n    ``on_demand`` trigger every job has, last. Kinds may be added.\nactions\n    The words of what the caller's rights allow on it: ``run``, ``pause``, ``resume``.\n    Rights only, as for a table's `actions`: offer a control only when the word is listed\n    and the job's state allows it (Pause for an unpaused job with a schedule, Resume for a\n    paused one); the server decides every request again.\ncommit_sha\n    The commit of the project version deployed in the environment.\nsource_url\n    The link to ``lakana.yaml`` at that commit on the repository's git host; null for a\n    repository without a known host.\nnotify\n    Where the job reports; null for a job without a usable `notify:`."
       },
       "JobRunRequest": {
         "properties": {
