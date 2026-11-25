@@ -3,8 +3,9 @@
 After this guide the people of your team sign in to the web interface with their Microsoft work
 account. Someone you disable in Microsoft Entra ID can no longer sign in to Lakana; what they
 already hold runs out on its own, and deactivating them in Lakana ends it at once
-([Offboard someone](bring-your-team-onto-single-sign-on.md#4-offboard-someone)). Lakana stores no password and never creates an account because Entra
-ID says so: only a person Lakana already knows signs in through it, once their account is linked
+([Offboard someone](bring-your-team-onto-single-sign-on.md#4-offboard-someone)). Lakana stores no
+password and never creates an account because Entra ID says so: only a person Lakana already knows
+signs in through it, once their account is linked
 ([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md) links them).
 
 The guide is for the server operator together with someone who may register applications in
@@ -88,8 +89,9 @@ LAKANA_OIDC__DISPLAY_NAME=Microsoft
 ```
 
 `LAKANA_OIDC__DISPLAY_NAME` is the name on the sign-in button ("Sign in with Microsoft"); your
-company's name works as well; without the setting the button names the issuer's host. The [settings reference](../reference/settings.md#lakana_oidc__)
-has every `LAKANA_OIDC__` setting with its default.
+company's name works as well; without the setting the button names the issuer's host. The
+[settings reference](../reference/settings.md#lakana_oidc__) has every `LAKANA_OIDC__` setting with
+its default.
 
 The bundle's `compose.yaml` passes the server only the variables it names, so add the four to
 the `server` service's `environment:`, and keep every entry that is there:
@@ -109,7 +111,8 @@ services:
 
 Each line takes its value from `.env`, so every variable it names needs a line there: Compose
 passes a variable that `.env` lacks as an empty value, and the server does not start with an
-empty `LAKANA_OIDC__` setting. To leave a setting out, remove its line from both files.
+empty `LAKANA_OIDC__` setting, except `LAKANA_OIDC__ALLOW_HOSTS`, where empty allows no internal
+host. To leave a setting out, remove its line from both files.
 
 Then restart the server from the bundle's directory:
 

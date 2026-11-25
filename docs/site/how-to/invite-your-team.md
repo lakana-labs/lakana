@@ -37,7 +37,8 @@ their fingerprint, face, PIN or security key. From then on the passkey signs the
 When the server signs people in through your identity provider, the invite offers **Sign in
 with** and the provider's name beside **Add a passkey**. Choosing the provider creates the
 account linked to the person's account there, with no passkey, and from then on they sign in
-only through the provider ([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md)).
+only through the provider
+([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md)).
 
 The open invites are listed on the same tab. **Withdraw** stops a link that is no longer wanted,
 for example one sent to the wrong address; its name is free again at once. An invite also stops

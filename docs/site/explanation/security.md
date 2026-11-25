@@ -114,14 +114,16 @@ provider's authorization-code flow with PKCE itself; no proxy in front of it sig
 - **One way in.** A linked person signs in only through the provider: their passkeys no longer sign
   them in, none can be added, and a recovery link an administrator issues for them offers only
   the provider.
-- **Nobody is locked out by an outage.** While any administrator is linked, at least one administrator who
-  is not linked and has a passkey for this address must remain, and Lakana refuses what would
-  leave none. The server operator's recovery link unlinks a linked administrator whatever the
-  provider says ([Bring your team onto single sign-on](../how-to/bring-your-team-onto-single-sign-on.md#when-the-provider-is-down-or-refuses-an-administrator)).
+- **Nobody is locked out by an outage.** While any administrator is linked, at least one
+  administrator who is not linked and has a passkey for this address must remain, and Lakana refuses
+  what would leave none. The server operator's recovery link unlinks a linked administrator whatever
+  the provider says
+  ([Bring your team onto single sign-on](../how-to/bring-your-team-onto-single-sign-on.md#when-the-provider-is-down-or-refuses-an-administrator)).
 - **Offboarding reaches tokens.** A linked person's personal API tokens work only within the token
   window after their last sign-in through the provider (30 days by default, 1 to 365). Someone
   disabled at the provider therefore loses token access within the window, and an open browser
-  session within its session lengths; deactivating them in Lakana ends both at once. Task and CI tokens act for a run or a CI job and are not under it.
+  session within its session lengths; deactivating them in Lakana ends both at once. Task and CI
+  tokens act for a run or a CI job and are not under it.
 - **What it does not do.** Signing out of Lakana ends Lakana's session only, and signing out at
   the provider does not end it: a Lakana session runs its course (12 hours without use, 7 days at
   most) unless it is ended in Lakana. Lakana does not ask the provider whether a person is still

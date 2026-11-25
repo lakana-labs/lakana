@@ -3,9 +3,9 @@
 After this guide the people of your team sign in to the web interface with the account they
 already have in Keycloak. Someone you disable in Keycloak can no longer sign in to Lakana;
 what they already hold runs out on its own, and deactivating them in Lakana ends it at once
-([Offboard someone](bring-your-team-onto-single-sign-on.md#4-offboard-someone)). Lakana still stores no password. It never creates an account
-because Keycloak says so: only a person Lakana already knows signs in through Keycloak, once
-their account is linked to their Keycloak identity
+([Offboard someone](bring-your-team-onto-single-sign-on.md#4-offboard-someone)). Lakana still stores
+no password. It never creates an account because Keycloak says so: only a person Lakana already
+knows signs in through Keycloak, once their account is linked to their Keycloak identity
 ([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md) links them).
 
 The guide is for the server operator together with a Keycloak administrator. It uses the
@@ -16,8 +16,9 @@ Microsoft's cloud, see [Sign in through Microsoft Entra ID](sign-in-with-entra-i
 
 - **The web interface at an HTTPS address.** The server needs `LAKANA_UI__ENABLED=true` and
   `LAKANA_UI__PUBLIC_URL`, the address people open, such as `https://lakana.example.com`, as
-  passkeys already do ([Deploying with Compose](deploy-with-compose.md#sign-in-to-the-web-interface)).
-  Without them the server does not start once an issuer is set, and says which one is missing.
+  passkeys already do
+  ([Deploying with Compose](deploy-with-compose.md#sign-in-to-the-web-interface)). Without them the
+  server does not start once an issuer is set, and says which one is missing.
 - **Keycloak over HTTPS, reachable from the server.** The server fetches Keycloak's discovery
   document, its keys and its token endpoint itself, over `https` only, on port 443 or on the
   port the issuer names (such as `https://idp.example.com:8443/realms/lakana`), never through a
@@ -100,8 +101,9 @@ LAKANA_OIDC__DISPLAY_NAME=Keycloak
 
 `LAKANA_OIDC__DISPLAY_NAME` is the name on the sign-in button ("Sign in with Keycloak"); a
 name your people know, such as your company's, reads better. Without the setting (its line left
-out of `.env` and of `compose.yaml`, below), the button names the issuer's host. The [settings reference](../reference/settings.md#lakana_oidc__) has every
-`LAKANA_OIDC__` setting with its default.
+out of `.env` and of `compose.yaml`, below), the button names the issuer's host. The
+[settings reference](../reference/settings.md#lakana_oidc__) has every `LAKANA_OIDC__` setting with
+its default.
 
 The bundle's `compose.yaml` passes the server only the variables it names, so add the four to
 the `server` service's `environment:`, and keep every entry that is there:
@@ -121,7 +123,8 @@ services:
 
 Each line takes its value from `.env`, so every variable it names needs a line there: Compose
 passes a variable that `.env` lacks as an empty value, and the server does not start with an
-empty `LAKANA_OIDC__` setting. To leave a setting out, remove its line from both files.
+empty `LAKANA_OIDC__` setting, except `LAKANA_OIDC__ALLOW_HOSTS`, where empty allows no internal
+host. To leave a setting out, remove its line from both files.
 
 ### Keycloak on your internal network
 

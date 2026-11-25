@@ -36,8 +36,8 @@ sign in at the provider. When the provider refuses you or is down, ask an admini
 recovery link an administrator issues for you offers only the provider; to get a passkey back, an
 administrator unlinks you first and then sends the link
 ([Take someone off single sign-on](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)).
-A linked administrator is recovered by the server operator, below: their recovery link unlinks
-the administrator from the provider and asks for a new passkey.
+A linked administrator is recovered by the server operator, below: their recovery link unlinks the
+administrator from the provider and asks for a new passkey.
 
 ## You still have a passkey
 

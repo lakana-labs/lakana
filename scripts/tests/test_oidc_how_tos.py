@@ -249,12 +249,33 @@ def test_a_setting_left_out_of_env_only_stops_the_server(
     assert _server_starts(monkeypatch, passed)
 
 
+def test_only_an_empty_allow_hosts_starts_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    from lakana_core.oidc.config import OidcSignInConfig
+
+    full = _compose_environment(_env("oidc-keycloak.env"))
+    accepted = set()
+    for field in OidcSignInConfig.model_fields:
+        key = f"{PREFIX}{field.upper()}"
+        if _server_starts(monkeypatch, {**full, key: ""}):
+            accepted.add(key)
+    # The pages name the one exception.
+    assert accepted == {f"{PREFIX}ALLOW_HOSTS"}
+
+
 def test_the_pages_say_to_leave_a_setting_out_of_both_files() -> None:
-    rule = "To leave a setting out, remove its line from both files."
+    rule = (
+        "the server does not start with an empty `LAKANA_OIDC__` setting, except "
+        "`LAKANA_OIDC__ALLOW_HOSTS`, where empty allows no internal host. To leave a setting "
+        "out, remove its line from both files."
+    )
     for page in PAGES:
         assert rule in " ".join((HOW_TO / page).read_text().split()), page
     guide = " ".join((HOW_TO / "bring-your-team-onto-single-sign-on.md").read_text().split())
     assert "means removing every `LAKANA_OIDC__` line from the `server` service's" in guide
+    assert (
+        "the server does not start with any empty `LAKANA_OIDC__` setting but "
+        "`LAKANA_OIDC__ALLOW_HOSTS`"
+    ) in guide
 
 
 UI = ROOT / "ui/src"

@@ -5,8 +5,8 @@ Once the server signs people in through your identity provider
 guide moves the team onto it: everyone links their Lakana account to their account at the
 provider, newcomers join through it, and someone who leaves the company can no longer sign in once
 their account at the provider is disabled. What they already hold runs out on its own, and
-deactivating them in Lakana ends it at once (step 4). One administrator stays off it on purpose, so that an outage at the
-provider locks nobody out.
+deactivating them in Lakana ends it at once (step 4). One administrator stays off it on purpose, so
+that an outage at the provider locks nobody out.
 
 Here the provider is called Keycloak; the interface shows the name you set in
 `LAKANA_OIDC__DISPLAY_NAME`. You need an administrator's account in the interface.
@@ -50,8 +50,8 @@ lakana login --url https://lakana.example.com --device
 
 ## 1. Keep an administrator who signs in with a passkey
 
-While any administrator is linked, Lakana keeps at least one active administrator who is not linked and
-has a working passkey for this address. It refuses whatever would leave none: linking the last
+While any administrator is linked, Lakana keeps at least one active administrator who is not linked
+and has a working passkey for this address. It refuses whatever would leave none: linking the last
 one, deactivating them, taking their `ADMIN` role away, deleting their last passkey, and giving
 `ADMIN` to a linked person when no such administrator is left. **Settings → Sign-in**, under
 **Single sign-on**, shows **Unlinked administrators** and warns at one.
@@ -192,5 +192,6 @@ Successful sign-ins are `SIGN_IN_OIDC`, links and unlinks `PRINCIPAL_OIDC_LINKED
   at none, the operator issues one a recovery link as above.
 - **Turning single sign-on off** means removing every `LAKANA_OIDC__` line from the `server`
   service's `environment:` in `compose.yaml` as well as from `.env`: a line left in `compose.yaml`
-  passes an empty value, and the server does not start. It does not give linked people their
-  passkeys back: unlink them first and send recovery links.
+  passes an empty value, and the server does not start with any empty `LAKANA_OIDC__` setting
+  but `LAKANA_OIDC__ALLOW_HOSTS`. It does not give linked people their passkeys back: unlink them
+  first and send recovery links.
