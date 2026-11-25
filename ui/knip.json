@@ -5,6 +5,7 @@
     "build/*.ts",
     "scripts/*.mjs",
     "e2e/**/*.spec.ts",
+    "e2e/visual/*.visual.ts",
     "e2e-server/**/*.spec.ts",
     "*.config.ts",
     "csp.ts",
