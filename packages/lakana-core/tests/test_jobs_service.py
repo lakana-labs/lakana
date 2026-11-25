@@ -1586,6 +1586,10 @@ def test_an_older_merged_start_without_its_first_trigger_shows_none(
     assert daily.waiting_since is not None and daily.waiting_trigger is None
     _wait_with(session, "daily", trigger="schedule", merged=1)
     assert _service(session).get(principal, "dev", "daily").waiting_trigger == "schedule"
+    # A count that cannot be read says nothing of how many merged, so nothing of which came first.
+    _wait_with(session, "daily", trigger="schedule", merged="several")
+    damaged = _service(session).get(principal, "dev", "daily")
+    assert (damaged.state, damaged.waiting_trigger) == ("waiting to start", None)
 
 
 def test_a_waiting_job_keeps_its_request_once_its_run_has_ended(
