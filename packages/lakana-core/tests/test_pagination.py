@@ -529,3 +529,55 @@ def test_the_longest_cursors_fit_the_routes_limit() -> None:
     )
     # A name of 45 Cyrillic letters once made a cursor of 532 characters, past the old 512.
     assert len(encode_sorted_cursor("runs", "name:asc", ["ж" * 45, _AT], ID)) < 512
+
+
+def test_the_longest_namespace_and_table_cursors_fit_their_routes_limits() -> None:
+    """The widest key of each list stays within the `cursor` its route takes (#804)."""
+    from lakana_core.models import Namespace, Repository, Table
+    from lakana_core.pagination import (
+        NAMESPACE_CURSOR_MAX_LENGTH,
+        TABLE_CURSOR_MAX_LENGTH,
+        decode_tuple_cursor,
+        encode_tuple_cursor,
+    )
+
+    path_max = Namespace.path.type.length
+    name_max = Table.name.type.length
+    repository_max = Repository.name.type.length
+    assert path_max == 1024
+    assert name_max == 255
+    assert repository_max <= 255
+
+    wide = "\U0001d538"  # four bytes in UTF-8
+    for letter in (wide, "ж", "a", '"', "\\"):
+        # One part of the longest path, and the most parts of one character (the unit separator
+        # between them takes a character each).
+        for parts in ((letter * path_max,), (letter,) * ((path_max + 1) // 2)):
+            cursor = encode_tuple_cursor("namespaces", parts)
+            assert len(cursor) <= NAMESPACE_CURSOR_MAX_LENGTH, (letter, len(parts))
+            assert decode_tuple_cursor("namespaces", cursor) == parts
+        artifact = (letter * path_max, "", letter * name_max)
+        expiring = ("2026-10-11T12:00:00.000000+00:00", letter * (path_max + 1 + name_max), str(ID))
+        orphan = (letter * repository_max, letter * (path_max + 1 + name_max))
+        for kind, key in (
+            ("artifacts", artifact),
+            ("expiring_tables", expiring),
+            ("orphans", orphan),
+        ):
+            cursor = encode_tuple_cursor(kind, key)
+            assert len(cursor) <= TABLE_CURSOR_MAX_LENGTH, (kind, letter)
+            assert decode_tuple_cursor(kind, cursor) == key
+
+
+def test_a_namespace_cursor_issued_before_still_decodes() -> None:
+    """The cursor's format did not change: one an older server issued reads back."""
+    from lakana_core.pagination import decode_tuple_cursor
+
+    issued = (
+        base64.urlsafe_b64encode(
+            json.dumps({"k": "namespaces", "n": json.dumps(["gold", "sales"])}).encode()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
+    assert decode_tuple_cursor("namespaces", issued) == ("gold", "sales")
