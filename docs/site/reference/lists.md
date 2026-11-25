@@ -114,10 +114,17 @@ stays in the address, so a shared link opens sorted the same way.
 | Principals (Access › People) | `lakana principal list` | `created`, `name`, `status` (active first, then by name) | `created` newest first; the others ascending |
 | Audit log | `lakana audit list` | `occurred` (only `--order`) | newest first; `asc` is oldest first |
 
-Names sort in any letter case, by code point, the same on SQLite and PostgreSQL. Equal values sort
-by the row's id, so no row is repeated or skipped between pages. A sort shows exactly the rows the
-list shows without it: it never adds a row you may not see, and the audit log records a read the
-same way in every order. Send the same `sort` and `order` with every page: the cursor names its
+Names sort by code point after lower-casing, so `alpha`, `Beta`, `gamma` come in that order. Only
+the letters A to Z are lower-cased the same everywhere: SQLite lower-cases ASCII letters only,
+PostgreSQL every letter its database's locale knows, and the jobs list folds names in Python
+(`ß` as `ss`), so a name with other letters can sort elsewhere on another database. Saved queries
+sort by their folded name (`casefold`), stored with them, the same everywhere. Equal values sort
+by the row's id, so a row whose sort value does not change while you page is never repeated or
+skipped. A row whose value changes between two pages (a run that starts while the list is sorted
+by state, a saved query edited while it is sorted by Changed) can move from one page to another:
+it may come again on a later page, or not at all. The web interface shows a row that comes again
+once. A sort shows exactly the rows the list shows without it: it never adds a row you may not
+see, and the audit log records a read the same way in every order. Send the same `sort` and `order` with every page: the cursor names its
 order, and a cursor of another order, or of the list's own order, is refused with `422` and a
 message that names both, instead of being read in the wrong order. Another field, or another
 direction, is `422` with the fields the list takes.

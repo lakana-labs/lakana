@@ -131,9 +131,11 @@ export function useRunPages(
     let after: More;
     try {
       const page = await load(next, {});
+      // A run whose state changed while the list is paged by state can come again: shown once.
+      const shownIds = new Set([...firstPage.items, ...moreItems].map((run) => run.id));
       after = {
         ...base,
-        items: [...moreItems, ...page.items],
+        items: [...moreItems, ...page.items.filter((run) => !shownIds.has(run.id))],
         next: page.nextCursor,
         shown: true,
         busy: false,

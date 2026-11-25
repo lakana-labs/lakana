@@ -97,6 +97,8 @@ function ConnectionTable({
     filter ?? "",
     (cursor) => listConnections(filter, cursor, undefined, undefined, sort),
     JSON.stringify(sort),
+    // A connection whose last test changed while the list is paged by state is shown once.
+    (row) => testKey(row.environment, row.name),
   );
   // Refresh reads the list again in place: the rows and the count stay until the answer is in.
   const { reload } = pages;

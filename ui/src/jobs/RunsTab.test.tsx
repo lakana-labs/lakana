@@ -582,3 +582,19 @@ describe("RunsTab's sort", () => {
     );
   });
 });
+
+describe("RunsTab's pages in an order by a value that changes", () => {
+  it("shows once a run that a later page repeats", async () => {
+    const { user } = renderTab((request) =>
+      request.path.includes("cursor=c1")
+        ? { status: 200, body: { items: [older, oldest], next_cursor: null } }
+        : { status: 200, body: { items: [newer, older], next_cursor: "c1" } },
+    );
+    const region = await screen.findByRole("region", { name: "Runs listed" });
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    });
+    expect(within(region).getAllByRole("row")).toHaveLength(4);
+  });
+});

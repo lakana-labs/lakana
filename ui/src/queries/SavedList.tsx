@@ -79,6 +79,8 @@ export function SavedList({ me, filter, reloadKey }: SavedListProps): JSX.Elemen
     reloadKey,
     (cursor) => listSavedQueries(filter, cursor, sort),
     JSON.stringify(sort),
+    // A saved query changed while the list is paged by Changed is shown once.
+    (saved) => saved.id,
   );
   const rows = pages.items ?? [];
   return (
