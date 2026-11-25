@@ -406,6 +406,9 @@ describe("FiltersAndMasksPage", () => {
       );
     });
     expect(table).toHaveFocus();
+    // The list closes with the choice, and stays closed while the lists are read again.
+    expect(table).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("listbox")).toBeNull();
     expect(listReads(server.sent, "row-filters")).toContain(
       "/api/v1/row-filters?environment=dev&namespace=silver.weather&table=station_daily&limit=50",
     );

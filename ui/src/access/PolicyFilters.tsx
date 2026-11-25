@@ -94,7 +94,9 @@ export function PolicyFilters({ filter, environments, onChange }: PolicyFiltersP
     if (split === null || (split.namespace === filter.namespace && split.name === filter.table)) {
       return;
     }
-    setTypedFor(text);
+    // The field already shows it; the address changes after this, and the table that comes
+    // back sets the field to what it shows (the old one meanwhile is left alone, so the field
+    // does not flicker back to it, which reopened the list of suggestions).
     onChange({ ...filter, namespace: split.namespace, table: split.name }, "replace");
   };
   return (
@@ -129,9 +131,8 @@ export function PolicyFilters({ filter, environments, onChange }: PolicyFiltersP
           setRefused(false);
         }}
         search={suggest}
-        noMatch={(text) =>
-          t("picker.noTable", { name: text, environment: filter.environment ?? "" })
-        }
+        // Only a search says no match, and there is one only in a listed environment.
+        noMatch={(text) => t("picker.noTable", { name: text, environment: known })}
         onPick={(choice) => {
           applyTable(choice.name);
         }}

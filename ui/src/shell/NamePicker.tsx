@@ -273,8 +273,11 @@ export function NamePicker<T>({
   const line = stateLine(t, found, noMatch);
   const shown = markedName(value);
   const choose = (key: Key | null): void => {
-    // React Aria also sends null when a list is left without a choice (a custom value).
+    // React Aria also sends null when a list is left without a choice (a custom value), should
+    // its selection ever differ from the one given here; since the choice stays selected only
+    // while the list holds it, no path is known to reach this, and the guard stays (#801).
     const choice = choices.find((one) => one.key === key);
+    /* v8 ignore next -- defensive: see above */
     if (choice === undefined) return;
     pickedByKey.current = true;
     setSelected({ key: choice.key, search });
