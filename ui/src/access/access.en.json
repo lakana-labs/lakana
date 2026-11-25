@@ -210,5 +210,18 @@
     "manage": "Manage grants",
     "reading": "Reading the grants and groups…",
     "tokens": "Tokens of {{name}}"
+  },
+  "provider": {
+    "title": "Linked to <name/>",
+    "email": "E-mail",
+    "name": "Name at the provider",
+    "lastSignIn": "Last signed in through it",
+    "never": "Not yet",
+    "unlink": "Unlink",
+    "unlinkTitle": "Unlink {{name}} from {{provider}}?",
+    "unlinkGoes": "This deletes the passkeys of {{name}}, revokes every personal API token of theirs and ends every session they have. Their account and grants stay.",
+    "unlinkThen": "{{name}} then needs a recovery link to sign in again, which you can issue on this page.",
+    "offboard": "To offboard someone, deactivate them instead.",
+    "unlinkConfirm": "Unlink"
   }
 }
