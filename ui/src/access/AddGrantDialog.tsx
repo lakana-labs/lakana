@@ -31,6 +31,7 @@ import {
 } from "../api/grants";
 import { ActionDialog } from "../shell/ActionDialog";
 import { EnvironmentName } from "../shell/EnvironmentName";
+import { NamePicker } from "../shell/NamePicker";
 import { markedText } from "../shell/VisibleText";
 import { useAttempt } from "../sign-in/Attempt";
 import "./accessStrings";
@@ -38,6 +39,7 @@ import { Choice } from "./Choice";
 import { FormFoot } from "./FormFoot";
 import { GitMark } from "./GitMark";
 import { managedScopeOf } from "./managed";
+import { useGroupSearch, usePrincipalSearch } from "./suggest";
 import { actionWords, roleName, roleSummary } from "./words";
 
 /** The single actions that do nothing without the ADMIN role, which Add grant does not offer. */
@@ -124,6 +126,9 @@ export function AddGrantDialog({
     setFields((previous) => ({ ...previous, ...change }));
   };
   const { who, name, what, role, action, where, environment, namespace, table } = fields;
+  const principals = usePrincipalSearch();
+  const groups = useGroupSearch();
+  const suggest = who === "group" ? groups : principals;
   const onInstance = where === "INSTANCE";
   const managed = managedScopeOf(scopes, onInstance ? null : environment);
   let held: string | null = null;
@@ -178,16 +183,19 @@ export function AddGrantDialog({
             <RadioButton className="radio">{t("access.addGrant.group")}</RadioButton>
           </RadioField>
         </RadioGroup>
-        <TextField
-          className="field"
+        <NamePicker
+          label={t("access.addGrant.name")}
           value={name}
           onChange={(value) => {
             set({ name: value });
           }}
-        >
-          <Label>{t("access.addGrant.name")}</Label>
-          <Input autoComplete="off" spellCheck={false} />
-        </TextField>
+          search={suggest}
+          noMatch={(text) =>
+            who === "group"
+              ? t("picker.noGroup", { name: text })
+              : t("picker.noPrincipal", { name: text })
+          }
+        />
         <RadioGroup
           className="field"
           orientation="horizontal"

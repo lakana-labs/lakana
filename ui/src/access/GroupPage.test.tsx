@@ -46,6 +46,7 @@ function groupRoutes(more: Record<string, FakeRoute> = {}): Record<string, FakeR
       ],
     },
     "GET /api/v1/groups": { status: 200, body: [{ name: "analysts" }] },
+    "GET /api/v1/principals": { status: 200, body: [] },
     ...more,
   };
 }
@@ -117,14 +118,19 @@ describe("GroupPage", () => {
         }),
       }),
     });
-    const field = await screen.findByRole("textbox", { name: "Person or service account" });
+    const field = await screen.findByRole("combobox", { name: "Person or service account" });
 
     await user.type(field, "ben");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    // The open list of suggestions hides the rest of the page from screen readers, not from
+    // the pointer.
+    const add = [...document.querySelectorAll("button")].find((b) => b.textContent === "Add");
+    await user.click(add as HTMLElement);
 
     expect(await screen.findByRole("link", { name: "ben" })).toBeInTheDocument();
     expect(field).toHaveValue("");
     expect(field).toHaveFocus();
+    // The emptied field opens no list of its own.
+    expect(screen.queryByRole("listbox")).toBeNull();
     expect(screen.getByText("Added ben to analysts.")).toBeInTheDocument();
     const after = server.sent.findIndex((request) => request.path === "/api/v1/sign-in/session");
     expect(
@@ -147,13 +153,71 @@ describe("GroupPage", () => {
         },
       }),
     });
-    const field = await screen.findByRole("textbox", { name: "Person or service account" });
+    const field = await screen.findByRole("combobox", { name: "Person or service account" });
 
     await user.type(field, "ben{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No principal named 'ben'.");
     expect(field).toHaveValue("ben");
     expect(field).toHaveFocus();
+  });
+
+  it("suggests people and service accounts as one types and adds the chosen one", async () => {
+    const { user, server } = renderShell(PATH, {
+      routes: groupRoutes({
+        "GET /api/v1/principals": {
+          status: 200,
+          body: [
+            aMember("ben"),
+            { ...aMember("bench-loader", "SERVICE_ACCOUNT"), is_active: false },
+          ],
+        },
+        "PUT /api/v1/groups/analysts/members/bench-loader": { status: 204 },
+      }),
+    });
+    const field = await screen.findByRole("combobox", { name: "Person or service account" });
+
+    await user.type(field, "ben");
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "benPerson",
+      "bench-loaderService account · Deactivated",
+    ]);
+    await user.click(options[1] as HTMLElement);
+    expect(field).toHaveValue("bench-loader");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText("Added bench-loader to analysts.")).toBeInTheDocument();
+    const asked = server.sent.filter((request) => request.path.startsWith("/api/v1/principals?"));
+    expect(asked.map((request) => request.path)).toEqual(["/api/v1/principals?limit=20&q=ben"]);
+    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toContain(
+      "PUT /api/v1/groups/analysts/members/bench-loader",
+    );
+  });
+
+  it("says when no principal has that name, and still lets the server judge it", async () => {
+    const { user, server } = renderShell(PATH, {
+      routes: groupRoutes({
+        "GET /api/v1/principals": { status: 200, body: [] },
+        "PUT /api/v1/groups/analysts/members/bne": {
+          status: 404,
+          body: { detail: "No principal named 'bne'.", type: "NotFoundError" },
+        },
+      }),
+    });
+    const field = await screen.findByRole("combobox", { name: "Person or service account" });
+
+    await user.type(field, "bne");
+    expect(await screen.findByRole("status", { name: "" })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("No principal named “bne”. Check the spelling.")).toBeInTheDocument();
+    });
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("No principal named 'bne'.");
+    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toContain(
+      "PUT /api/v1/groups/analysts/members/bne",
+    );
   });
 
   it("removes a member and keeps the focus on Members", async () => {
@@ -283,7 +347,7 @@ describe("GroupPage", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Delete group/ })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Person or service account" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Person or service account" })).toBeNull();
   });
 
   it("says why nothing can be changed when the managed scopes cannot be read", async () => {

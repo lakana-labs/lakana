@@ -61,7 +61,10 @@ test("an administrator makes a group, fills it and grants it a role", async ({
 
   await page.getByRole("link", { name: group }).click();
   await expect(page.getByRole("heading", { level: 1, name: group })).toBeVisible();
-  await page.getByRole("textbox", { name: "Person or service account" }).fill(name);
+  // The field suggests the person from the server's list of principals (#784).
+  await page.getByRole("combobox", { name: "Person or service account" }).fill(name);
+  await page.getByRole("option", { name: `${name}, Person` }).click();
+  await expect(page.getByRole("combobox", { name: "Person or service account" })).toHaveValue(name);
   // The passkey touch is asked for first, answered by the virtual authenticator.
   await page.getByRole("button", { name: "Add", exact: true }).click();
   const members = page.getByRole("region", { name: `Members of ${group}` });
@@ -72,7 +75,7 @@ test("an administrator makes a group, fills it and grants it a role", async ({
   await page.getByRole("button", { name: "Add grant" }).click();
   const add = page.getByRole("dialog", { name: "Add grant" });
   await expect(add.getByRole("radio", { name: "A group" })).toBeChecked();
-  await expect(add.getByRole("textbox", { name: "Name" })).toHaveValue(group);
+  await expect(add.getByRole("combobox", { name: "Name" })).toHaveValue(group);
   await add.getByRole("button", { name: /Role$/ }).click();
   await page.getByRole("option", { name: /^ANALYST/ }).click();
   await add.getByRole("button", { name: /Environment$/ }).click();

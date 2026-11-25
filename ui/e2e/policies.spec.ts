@@ -153,8 +153,17 @@ for (const theme of ["light", "dark"] as const) {
         ["Column", "email"],
         ["Expression", "'***'"],
       ] as const) {
-        await tabTo(page, dialog.getByRole("textbox", { name: field, exact: true }));
+        // The table field suggests names: a combobox.
+        const role = field === "Table" ? "combobox" : "textbox";
+        await tabTo(page, dialog.getByRole(role, { name: field, exact: true }));
         await page.keyboard.type(text);
+        if (role === "combobox") {
+          // Escape closes the suggestions, which hide the rest of the dialog from screen readers
+          // while they are open, and leaves the dialog open.
+          await page.keyboard.press("Escape");
+          await expect(page.getByRole("listbox")).toBeHidden();
+          await expect(dialog).toBeVisible();
+        }
       }
       expect(await violations(page), "Add filter or mask").toEqual([]);
       const masksSent = mutatingRequests(page, "/api/v1/column-masks");

@@ -11,7 +11,7 @@ Every table you may read, across environments and namespaces.
 
 ### `client.catalog.list`
 
-Signature: `client.catalog.list(*, environment: str | None = None, namespace: str | None = None, q: str | None = None, model_kind: str | None = None, sort: str = 'name', order: str | None = None, limit: int | None = None, cursor: str | None = None, lang: str | None = None) -> TableListPage`
+Signature: `client.catalog.list(*, environment: str | None = None, namespace: str | None = None, q: str | None = None, name: str | None = None, model_kind: str | None = None, sort: str = 'name', order: str | None = None, limit: int | None = None, cursor: str | None = None, lang: str | None = None) -> TableListPage`
 
 List one page of the tables you may read.
 
@@ -22,6 +22,7 @@ What you may not read is left out, not refused. Every table shows its owner, whe
 | `environment` | `str | None` | `None` | Only this environment. |
 | `namespace` | `str | None` | `None` | Only this namespace and the ones beneath it, dotted. |
 | `q` | `str | None` | `None` | Only tables whose name, label, description, grain, or a column's name, label, description or measure contains this text; 1 to 200 characters. |
+| `name` | `str | None` | `None` | Only tables whose own name contains this text, ignoring the case of A to Z (and of other letters on PostgreSQL, as its locale folds them); 1 to 255 characters. A namespace, a column or a description never matches it. |
 | `model_kind` | `str | None` | `None` | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
 | `sort` | `str` | `'name'` | What the list is sorted by: ``name``, ``owner``, ``health``, ``rows``, ``size``, ``last_write``, ``last_read`` or ``created``. A table with no value comes last. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``asc`` for name, owner and health, ``desc`` for the rest. |
@@ -34,11 +35,11 @@ Returns: `TableListPage`. The page; ``next_cursor`` is `None` on the last, and `
 | Error | When |
 |---|---|
 | `lakana.NotFound` | If ``environment`` does not exist. |
-| `lakana.ValidationError` | If ``sort``, ``order``, ``limit``, ``q``, ``model_kind``, ``lang`` or ``cursor`` is not valid; the message names the choices or the range. Start again without ``cursor`` after a cursor error. |
+| `lakana.ValidationError` | If ``sort``, ``order``, ``limit``, ``q``, ``name``, ``model_kind``, ``lang`` or ``cursor`` is not valid; the message names the choices or the range. Start again without ``cursor`` after a cursor error. |
 
 ### `client.catalog.iter`
 
-Signature: `client.catalog.iter(*, environment: str | None = None, namespace: str | None = None, q: str | None = None, model_kind: str | None = None, sort: str = 'name', order: str | None = None, limit: int | None = None, lang: str | None = None) -> Iterator[TableListItem]`
+Signature: `client.catalog.iter(*, environment: str | None = None, namespace: str | None = None, q: str | None = None, name: str | None = None, model_kind: str | None = None, sort: str = 'name', order: str | None = None, limit: int | None = None, lang: str | None = None) -> Iterator[TableListItem]`
 
 Yield every table you may read, fetching pages as needed.
 
@@ -47,6 +48,7 @@ Yield every table you may read, fetching pages as needed.
 | `environment` | `str | None` | `None` | Only this environment. |
 | `namespace` | `str | None` | `None` | Only this namespace and the ones beneath it, dotted. |
 | `q` | `str | None` | `None` | Only tables matching this text; see `list`. |
+| `name` | `str | None` | `None` | Only tables whose own name contains this text; see `list`. |
 | `model_kind` | `str | None` | `None` | Only tables whose asset header declares this kind. |
 | `sort` | `str` | `'name'` | What the list is sorted by; see `list`. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``. |

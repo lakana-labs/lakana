@@ -47,7 +47,7 @@ from lakana_core.models import (
     TableRead,
     TableType,
 )
-from lakana_core.models.table import table_kind
+from lakana_core.models.table import TABLE_NAME_MAX, table_kind
 from lakana_core.pagination import (
     BIGINT_KEY,
     SMALLINT_KEY,
@@ -57,6 +57,7 @@ from lakana_core.pagination import (
     after_sorted,
     decode_sorted_cursor,
     encode_sorted_cursor,
+    name_contains,
     sorted_order,
 )
 from lakana_core.projects.asset_model import require_model_kind
@@ -453,6 +454,34 @@ def table_facts(
     }
 
 
+def _name_needle(name: str) -> str:
+    """Trim the name a picker looks for and check its length.
+
+    Parameters
+    ----------
+    name
+        The text as sent.
+
+    Returns
+    -------
+    str
+        The trimmed text.
+
+    Raises
+    ------
+    ValidationError
+        If it is empty after trimming or longer than a table's name may be (`TABLE_NAME_MAX`),
+        so that a whole name pasted in is always a valid one.
+    """
+    needle = name.strip()
+    if not 1 <= len(needle) <= TABLE_NAME_MAX:
+        raise ValidationError(
+            f"The name to look for must be between 1 and {TABLE_NAME_MAX} characters after "
+            "trimming; give a table's name or a part of it, or leave `name` out."
+        )
+    return needle
+
+
 def _under(namespace: str) -> ColumnElement[bool]:
     """Keep the tables of a namespace and of the namespaces beneath it, never a sibling's.
 
@@ -612,6 +641,7 @@ class TableListing:
         environment: str | None = None,
         namespace: str | None = None,
         q: str | None = None,
+        name: str | None = None,
         model_kind: str | None = None,
         sort: TableSort = TableSort.NAME,
         order: SortOrder | None = None,
@@ -632,6 +662,11 @@ class TableListing:
         q
             Only tables whose name, label, description, grain, or a column's name, label,
             description or measure, contains this text; trimmed, 1 to 200 characters.
+        name
+            Only tables whose own name contains this text, ``%``, ``_`` and the backslash taken
+            literally, the case ignored as `name_contains` does; trimmed, 1 to `TABLE_NAME_MAX`
+            characters. A namespace, a column or a text never matches it: a name picker asks
+            with it.
         model_kind
             Only tables whose asset header declares this ``kind``.
         sort
@@ -653,7 +688,7 @@ class TableListing:
         Raises
         ------
         ValidationError
-            If `limit`, `q`, `model_kind` or `cursor` is not valid.
+            If `limit`, `q`, `name`, `model_kind` or `cursor` is not valid.
         NotFoundError
             If `environment` does not exist and `p` may read environments; anyone else gets an
             empty page, as for an environment that exists.
@@ -662,6 +697,7 @@ class TableListing:
             raise ValidationError(f"limit must be between 1 and {MAX_LIMIT}; got {limit}.")
         if q is not None:
             _normalized_query(q)
+        needle = None if name is None else _name_needle(name)
         if model_kind is not None:
             require_model_kind(model_kind)
         order = order or DEFAULT_ORDER[sort]
@@ -675,6 +711,8 @@ class TableListing:
             filters.append(_under(namespace))
         if model_kind is not None:
             filters.append(Table.model_kind == model_kind)
+        if needle is not None:
+            filters.append(name_contains(Table.name, needle))
         allowed = self._readable(p, filters)
         hits: dict[uuid.UUID, SearchHit] = {}
         capped = False

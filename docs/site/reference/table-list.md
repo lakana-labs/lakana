@@ -20,6 +20,7 @@ Both need a signed-in caller (`401` otherwise) and take no environment in the pa
 | `environment` | every environment you may read | Only this environment. If it does not exist: a `404` when you may read environments (`READ_ENVIRONMENT`), otherwise an empty page, as for one that exists. |
 | `namespace` | every namespace | Only this namespace and the ones beneath it, dotted: `gold` lists `gold` and `gold.sales`, not `golden`. Letter case counts, on SQLite as on PostgreSQL: `gold` does not list `Gold`. Every character means itself. |
 | `q` | no search | Only tables whose name, label, description or grain, or a column's name, label, description or measure, contains this text, in any letter case. 1 to 200 characters after trimming. `%`, `_` and `\` match themselves. The rules are those of [Search](search.md). |
+| `name` | any name | Only tables whose own name contains this text; a namespace, a column, a label or a description never matches it. The case of A to Z is ignored; that of other letters (`Ä` and `ä`) only on PostgreSQL, as far as its locale folds them, and not on SQLite. 1 to 255 characters after trimming, the longest a table's name may be. `%`, `_` and `\` match themselves. The web interface's table pickers ask with it. |
 | `model_kind` | any | Only tables whose asset header declares this kind: `fact`, `dimension`, `wide` or `staging`. |
 | `sort` | `name` | What to sort by: `name`, `owner`, `health`, `rows`, `size`, `last_write`, `last_read` or `created`. |
 | `order` | by sort | `asc` or `desc`. |
@@ -28,7 +29,7 @@ Both need a signed-in caller (`401` otherwise) and take no environment in the pa
 | `lang` | your profile's language | The language in which translated texts are matched, as in [Search](search.md#languages). |
 
 A value that is not valid is a `422` that names the choices or the range. A NUL character in
-`environment`, `namespace` or `q` is refused.
+`environment`, `namespace`, `q` or `name` is refused.
 
 ## The fields of a table
 
@@ -183,7 +184,7 @@ read is left out of your word.
 `client.catalog.list(...)` returns one `TableListPage` (`items`, `next_cursor`, `capped`);
 `client.catalog.iter(...)` yields every `TableListItem` across the pages; `client.catalog.tree()`
 returns a `TableTree`. They take the parameters above as keyword arguments (`environment`,
-`namespace`, `q`, `model_kind`, `sort`, `order`, `limit`, `cursor` and `lang`; `iter` has no
+`namespace`, `q`, `name`, `model_kind`, `sort`, `order`, `limit`, `cursor` and `lang`; `iter` has no
 `cursor`).
 
 ```python
@@ -257,6 +258,7 @@ lakana table list --search order --under silver
 | Option | Meaning |
 |---|---|
 | `--search TEXT` | The `q` parameter. A `match` column says what matched. |
+| `--name TEXT` | The `name` parameter: the table's own name only. |
 | `--under NAMESPACE` | The `namespace` parameter: this namespace and the ones beneath it. |
 | `--all-environments` | Every environment you may read; cannot be combined with `--env`. |
 | `--model-kind KIND` | The `model_kind` parameter. |

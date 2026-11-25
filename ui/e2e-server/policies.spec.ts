@@ -70,14 +70,22 @@ async function addPolicy(
   const typed: Locator = dialog.getByRole("textbox", { name: "Environment" });
   const environment: Locator = dialog.getByRole("button", { name: /Environment$/ });
   await expect(typed.or(environment)).toBeVisible();
-  if (await typed.isVisible()) {
+  const listed = !(await typed.isVisible());
+  if (!listed) {
     await typed.fill(fields.environment);
   } else if (!(await environment.textContent())?.includes(fields.environment)) {
     await environment.click();
     await page.getByRole("option", { name: fields.environment }).click();
   }
   await dialog.getByRole("textbox", { name: "Namespace" }).fill("gold");
-  await dialog.getByRole("textbox", { name: "Table", exact: true }).fill("stations");
+  // The table field is a name picker (#784): with a listed environment it suggests the tables
+  // the person may read there, and choosing one fills in its namespace; with a typed one it asks
+  // nothing and the name is sent as typed.
+  await dialog.getByRole("combobox", { name: "Table", exact: true }).fill("stations");
+  if (listed) {
+    await page.getByRole("option", { name: "stations, gold" }).click();
+    await expect(dialog.getByRole("textbox", { name: "Namespace" })).toHaveValue("gold");
+  }
   if (fields.column !== undefined) {
     await dialog.getByRole("textbox", { name: "Column" }).fill(fields.column);
   }

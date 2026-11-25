@@ -699,7 +699,11 @@ def escape_like(value: str) -> str:
 
 
 def name_contains(column: InstrumentedAttribute[str], text: str) -> ColumnElement[bool]:
-    """Match a name that contains `text`, in any letter case, wildcards taken literally.
+    """Match a name that contains `text`, the letter case ignored, wildcards taken literally.
+
+    The case is ignored with the database's own ``lower()``: for A to Z everywhere, and for other
+    letters (``Ä`` and ``ä``) only on PostgreSQL, as far as its locale (``LC_CTYPE``) folds them;
+    SQLite folds A to Z alone. The lists of principals, groups and tables share this rule.
 
     Parameters
     ----------

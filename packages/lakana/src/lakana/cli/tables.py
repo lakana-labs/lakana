@@ -289,7 +289,8 @@ def _list_dropped_across(
     state
         The CLI state.
     narrowed
-        `--search`, `--under`, `--model-kind`, `--sort` and `--order`, which do not apply.
+        `--search`, `--name`, `--under`, `--model-kind`, `--sort` and `--order`, which do not
+        apply.
     all_environments
         `--all-environments`, which does not apply.
     limit
@@ -306,8 +307,8 @@ def _list_dropped_across(
     """
     if all_environments or any(option is not None for option in narrowed):
         raise CliError(
-            "--search, --under, --model-kind, --all-environments, --sort and --order do not "
-            "apply to --dropped without NAMESPACE: leave them out, or give NAMESPACE."
+            "--search, --name, --under, --model-kind, --all-environments, --sort and --order do "
+            "not apply to --dropped without NAMESPACE: leave them out, or give NAMESPACE."
         )
     page = state.client().tables.list_dropped_page(
         resolve_environment(state, env), limit=limit, cursor=cursor
@@ -356,6 +357,14 @@ def list_tables(
             "--search",
             help="Only tables whose name, label, description or grain, or a column's name, "
             "label, description or measure, contains this text (1 to 200 characters).",
+        ),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help="Only tables whose own name contains this text, ignoring the case of A to Z (1 "
+            "to 255 characters); a namespace, a column or a description never matches it.",
         ),
     ] = None,
     under: Annotated[
@@ -407,7 +416,8 @@ def list_tables(
 
     Without NAMESPACE: one page of the tables you may read in the environment (or in every
     environment with --all-environments), each with its owner, health in one word, rows, size,
-    and when it was last written and read. Narrow it with --search, --under and --model-kind,
+    and when it was last written and read. Narrow it with --search, --name (the table's own name
+    only), --under and --model-kind,
     order it with --sort and --order, and page on with --cursor; --lang is the language in which
     --search matches translated texts. A line on stderr says when a search stopped early.
 
@@ -423,6 +433,8 @@ def list_tables(
         Only tables whose header declares this kind.
     search
         Only tables matching this text (across namespaces).
+    name
+        Only tables whose own name contains this text (across namespaces).
     under
         Only this namespace and the ones beneath it (across namespaces).
     all_environments
@@ -451,7 +463,7 @@ def list_tables(
         if dropped:
             _list_dropped_across(
                 state,
-                narrowed=(search, under, model_kind, sort, order),
+                narrowed=(search, name, under, model_kind, sort, order),
                 all_environments=all_environments,
                 limit=limit,
                 cursor=cursor,
@@ -467,6 +479,7 @@ def list_tables(
             state,
             None if all_environments else resolve_environment(state, env),
             search=search,
+            name=name,
             under=under,
             model_kind=model_kind,
             sort=sort or "name",
@@ -477,11 +490,12 @@ def list_tables(
             env=env,
         )
         return
-    across = (search, under, sort, order, limit, cursor)
+    across = (search, name, under, sort, order, limit, cursor)
     if all_environments or any(option is not None for option in across):
         raise CliError(
-            "--search, --under, --all-environments, --sort, --order, --limit and --cursor list "
-            "across namespaces: leave out NAMESPACE and pass --under NAMESPACE instead."
+            "--search, --name, --under, --all-environments, --sort, --order, --limit and "
+            "--cursor list across namespaces: leave out NAMESPACE and pass --under NAMESPACE "
+            "instead."
         )
     environment = resolve_environment(state, env)
     if dropped:
@@ -577,6 +591,7 @@ def _list_across(
     environment: str | None,
     *,
     search: str | None,
+    name: str | None,
     under: str | None,
     model_kind: str | None,
     sort: str,
@@ -596,6 +611,8 @@ def _list_across(
         The environment, or `None` for every one.
     search
         The search text, if any.
+    name
+        The text the table's own name must contain, if any.
     under
         The namespace to stay under, if any.
     model_kind
@@ -623,6 +640,7 @@ def _list_across(
             environment=environment,
             namespace=under,
             q=search,
+            name=name,
             model_kind=model_kind,
             sort=sort,
             order=order,
@@ -654,6 +672,7 @@ def _list_across(
             "--env": env,
             "--all-environments": environment is None,
             "--search": search,
+            "--name": name,
             "--under": under,
             "--model-kind": model_kind,
             "--sort": sort if sort != "name" else None,
