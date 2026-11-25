@@ -423,3 +423,26 @@ def test_a_linked_person_has_no_passkey_step_to_leave_the_list_open(session: Ses
     answer = _started(session, admin, local=True)
     assert _ids(answer) == ["deploy_project_local", "open_table", "run_query"]
     assert answer.complete is False
+
+
+def test_a_linked_person_with_a_passkey_gets_the_list_without_the_step(session: Session) -> None:
+    admin = _setup(session, "admin")
+    session.add(
+        Passkey(
+            id=uuid.uuid4(),
+            principal_id=admin.id,
+            credential_id="c1",
+            public_key=b"k",
+            sign_count=0,
+            rp_id="localhost",
+            name="laptop",
+            backup_eligible=False,
+            created_at=datetime.now(UTC),
+            created_user_agent="test",
+        )
+    )
+    session.commit()
+    _link(session, admin, issuer=IDP, server_issuer=IDP)
+    answer = _started(session, admin, local=True)
+    assert _ids(answer) == ["deploy_project_local", "open_table", "run_query"]
+    assert answer.complete is False

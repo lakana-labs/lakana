@@ -195,11 +195,12 @@ done, in any environment:
 - **Someone who may only read**: open a table in the Catalog, run your first query.
 
 If you sign in through your organisation's identity provider, the passkey step is left out: a
-passkey does not sign you in. It stays in the list if the provider is off, or your link is to
-a provider the server no longer uses, because you then sign in with a passkey.
+passkey does not sign you in. It stays in the list if the provider is off, if your account is
+not linked to the provider (even while the provider is on), or if your link is to a provider
+the server no longer uses, because you then sign in with a passkey.
 
-On a server in local mode (one person on one machine), an administrator's list is add a passkey,
-deploy your first project from a folder on this machine, open a table and run a query; nothing
+On a server in local mode (one person on one machine), an administrator's list is add a passkey
+(unless you sign in through the provider), deploy your first project from a folder on this machine, open a table and run a query; nothing
 that needs a team.
 
 The list disappears when every step is done. **Hide** puts it away before then, on every
