@@ -9,12 +9,13 @@
  * host and the person's name are shown as text, with hidden characters marked.
  * @packageDocumentation
  */
-import { type JSX, useRef, useState } from "react";
+import { type JSX, useEffect, useRef, useState } from "react";
 import { Button, FieldError, Form, Input, Label, Text, TextField } from "react-aria-components";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
 import { ApiError } from "../api/client";
+import { ProviderRedirect } from "../api/oidc";
 import {
   approveCli,
   type CliDeviceHostOut,
@@ -29,6 +30,8 @@ import { VisibleText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import "./cliSignInStrings";
 import { problemText } from "./messages";
+import { keepCode, takeKeptCode } from "./keptCode";
+import { ProviderNote } from "./ProviderNote";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
 
@@ -240,6 +243,7 @@ export function CliSignInPage({ navigate = assign }: CliSignInProps): JSX.Elemen
   };
   return (
     <Step title={t("cliSignIn.title")} heading={<TokenQuestion host={request.host} />}>
+      <ProviderNote />
       <HostNote host={request.host} />
       <TokenEffect />
       <p className="step-warning">{t("cliSignIn.warning")}</p>
@@ -285,7 +289,21 @@ export function CliDevicePage(): JSX.Element {
   const { t } = useTranslation();
   const attempt = useAttempt();
   const [phase, setPhase] = useState<DevicePhase>({ kind: "enter" });
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(takeKeptCode);
+  // The kept code is only for the return from the provider: leaving the page, or coming back to
+  // it from the browser's history (where it stays as it was), forgets it.
+  useEffect(() => {
+    const shown = (event: PageTransitionEvent): void => {
+      if (event.persisted) {
+        keepCode(null);
+      }
+    };
+    window.addEventListener("pageshow", shown);
+    return () => {
+      window.removeEventListener("pageshow", shown);
+      keepCode(null);
+    };
+  }, []);
   const [codeError, setCodeError] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
 
@@ -302,8 +320,20 @@ export function CliDevicePage(): JSX.Element {
     const decide = (approve: boolean): void => {
       attempt.run(async () => {
         if (approve) {
-          await approveDevice(phase.code);
+          // A person who confirms at the identity provider comes back to this page: the code
+          // they typed waits for them in this tab, and goes once the approval is answered.
+          keepCode(phase.code);
+          try {
+            await approveDevice(phase.code);
+          } catch (error) {
+            if (!(error instanceof ProviderRedirect)) {
+              keepCode(null);
+            }
+            throw error;
+          }
+          keepCode(null);
         } else {
+          keepCode(null);
           await denyDevice(phase.code);
         }
         setPhase({ kind: approve ? "approved" : "denied" });
@@ -360,6 +390,7 @@ export function CliDevicePage(): JSX.Element {
   };
   return (
     <Step title={t("cliSignIn.device.title")}>
+      <ProviderNote />
       <p>{t("cliSignIn.device.intro")}</p>
       <p className="step-warning">{t("cliSignIn.device.warning")}</p>
       <Form

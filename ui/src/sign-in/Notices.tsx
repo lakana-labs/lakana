@@ -1,5 +1,6 @@
 /**
- * Sign-in notices above the page: a recovery link used, a passkey added or disabled.
+ * Sign-in notices above the page: a recovery link used, a passkey added or disabled, an account
+ * unlinked from the identity provider by the server operator's recovery link.
  *
  * @packageDocumentation
  */
@@ -12,7 +13,7 @@ import { problemText } from "./messages";
 import { useSession } from "./SessionProvider";
 
 /** The notice kinds with their own words; any other is named in general terms. */
-const KINDS = new Set(["recovery_used", "passkey_disabled", "passkey_added"]);
+const KINDS = new Set(["recovery_used", "passkey_disabled", "passkey_added", "oidc_unlinked"]);
 
 /**
  * Renders the person's open sign-in notices as a banner, each with "Dismiss". After one is

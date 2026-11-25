@@ -13,7 +13,7 @@ import type { Page } from "@playwright/test";
 import type { GraphOut } from "../src/api";
 
 import { mutatingRequests, stubStepUpCeremony } from "./manage";
-import { signInAsAdmin, STUBBED, TABLE_DETAIL } from "./session";
+import { signInAsAdmin, STUBBED, TABLE_DETAIL, freshTouch } from "./session";
 
 /** The path of the namespace `prod.ml`. */
 const ML = "/api/v1/environments/prod/namespaces/ml";
@@ -238,6 +238,7 @@ async function answer(page: Page, path: string, json: () => unknown): Promise<vo
  */
 export async function stubArtifacts(page: Page): Promise<void> {
   await signInAsAdmin(page);
+  await freshTouch(page);
   const state = { current: 2 as number | null, uploads: [UPLOAD_ID], dropped: false };
   await page.route(
     (url) => url.pathname === "/api/v1/tables/tree",

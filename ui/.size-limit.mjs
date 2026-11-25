@@ -460,7 +460,10 @@ const NAMED_LIMITS = [
   // Measured 2.24 kB (2026-11-13) + 10 %: the Access tab, what the person may do and why, and for
   // an administrator the grants level by level, the row filters and the column masks. It loads
   // only when the Access tab is opened.
-  { name: "the Access tab", prefix: "AccessTab-", limit: "2.46 kB" },
+  // Raised to the measured 2.46 kB (2,461 B, 2026-11-25) + 10 %: 1 B over once #32 PR 4 moved
+  // the step-up ceremony into the API's entry (every step-up write asks first, #805), which
+  // changed the minifier's names in the chunks the tab imports; the tab's code is unchanged.
+  { name: "the Access tab", prefix: "AccessTab-", limit: "2.71 kB" },
   // Measured 1.01 kB (2026-11-16, `npm run size`) + 10 %: the References tab, its two flat panels of references,
   // the hidden counts and the focus after Try again. It loads only when the tab is opened.
   { name: "the References tab", prefix: "ReferencesTab-", limit: "1.11 kB" },
@@ -621,11 +624,18 @@ export default [
   // Aria's I18nProvider (i18n/LanguageProvider.tsx), so React Aria's own words and formats follow
   // the interface's language rather than the browser's (#784). Raised from 212 kB to 213 kB for
   // its +0.25 kB; nothing else entered the first load.
+  // Raised to the measured 213.2 kB (2026-11-25; 211.81 kB on main in the same build) + 10 %:
+  // sign-in through the identity provider (#32 PR 4). What the first visit needs before anyone is
+  // signed in: the provider's read and the two starts without a session (api/oidc.ts), the sign-in
+  // page's and a sign-in link's provider buttons, the note a confirmation leaves on the page it
+  // returns to, the sentences of the two new session ends and of a provider redirect, and their
+  // strings (+1.39 kB). The return pages, the profile's section, Settings' single sign-on, Unlink
+  // and the calls behind them load on demand. main stood 0.19 kB under the old limit.
   {
     name: "JavaScript, first load",
     path: INITIAL.map((name) => `${ASSETS}/${name}`),
     gzip: true,
-    limit: "213 kB",
+    limit: "234.5 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
   // Raised from 8.03 kB: measured 7.42 kB with the Health and Access tabs' rules (their sections,

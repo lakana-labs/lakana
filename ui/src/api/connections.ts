@@ -9,6 +9,7 @@
  * @packageDocumentation
  */
 import { api } from "./client";
+import { guarded } from "./stepUpFirst";
 import { environmentPath, withQuery, type CursorPage } from "./manage";
 import { type ListSortChoice, setSort } from "./sorting";
 
@@ -276,7 +277,7 @@ export function createConnection(
   environment: string,
   body: ConnectionCreateIn,
 ): Promise<ConnectionOut> {
-  return api.request<ConnectionOut>("POST", connectionPath(environment, null), body);
+  return guarded<ConnectionOut>("POST", connectionPath(environment, null), body);
 }
 
 /**
@@ -293,7 +294,7 @@ export function updateConnection(
   name: string,
   body: ConnectionUpdateIn,
 ): Promise<ConnectionOut> {
-  return api.request<ConnectionOut>("PATCH", connectionPath(environment, name), body);
+  return guarded<ConnectionOut>("PATCH", connectionPath(environment, name), body);
 }
 
 /**

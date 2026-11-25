@@ -43,12 +43,14 @@ interface Rendered {
  * @param path - The path to start at.
  * @param routes - The fake server's routes beyond notices and an administrator's rights.
  * @param storage - The browser storage.
+ * @param state - The history state of the first entry.
  * @returns The server, a user-event session and the current path.
  */
 function renderInterface(
   path: string,
   routes: Record<string, FakeRoute>,
   storage: Storage = new MemoryStorage(),
+  state: unknown = null,
 ): Rendered {
   const server = fakeServer({
     "GET /api/v1/sign-in/notices": { status: 200, body: [] },
@@ -60,7 +62,7 @@ function renderInterface(
   });
   let newest: ReturnType<typeof createMemoryRouter> | null = null;
   const createRouter: RouterFactory = (tree, at) => {
-    newest = createMemoryRouter(tree, { initialEntries: [at ?? path] });
+    newest = createMemoryRouter(tree, { initialEntries: [at ?? { pathname: path, state }] });
     return newest;
   };
   const user = userEvent.setup();
@@ -325,6 +327,63 @@ describe("Interface", () => {
     expect(path()).toBe("/sign-in/cli");
   });
 
+  it.each([
+    ["/sign-in/cli?port=49152&state=s-1&challenge=" + "c".repeat(43) + "&host=laptop-7"],
+    ["/sign-in/device"],
+  ])("the provider's sign-in comes back to lakana login's page: %s", async (page) => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", {
+      pathname: window.location.pathname,
+      search: window.location.search,
+      hash: window.location.hash,
+      assign,
+    });
+    const { server, user } = renderInterface(page, {
+      "GET /api/v1/sign-in/session": SIGNED_OUT,
+      "GET /api/v1/sign-in/oidc": { status: 200, body: { enabled: true, display_name: "Okta" } },
+      "POST /api/v1/sign-in/oidc/start": {
+        status: 200,
+        body: { authorization_url: "https://id.example.org/authorize" },
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Sign in with Okta" }));
+
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("https://id.example.org/authorize");
+    });
+    const start = server.sent.find((request) => request.path === "/api/v1/sign-in/oidc/start");
+    expect(start?.body).toEqual({ return_to: page });
+  });
+
+  it("finishes a provider sign-in outside the gate and opens the page it names", async () => {
+    const session = sessionRoute(SIGNED_OUT);
+    const { path } = renderInterface("/sign-in/oidc", {
+      "GET /api/v1/sign-in/session": session.route,
+      "POST /api/v1/sign-in/oidc/finish": () => {
+        session.next({ status: 200, body: ADMIN_SESSION });
+        return {
+          status: 200,
+          body: { name: "admin", csrf_token: "c", return_to: "/jobs" },
+        };
+      },
+    });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Jobs" })).toBeInTheDocument();
+    expect(path()).toBe("/jobs");
+  });
+
+  it("sends a signed-out visitor of the confirmation page to sign-in", async () => {
+    const { path } = renderInterface("/sign-in/oidc/confirmed", {
+      "GET /api/v1/sign-in/session": SIGNED_OUT,
+    });
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Sign in to Lakana" }),
+    ).toBeInTheDocument();
+    expect(path()).toBe("/sign-in");
+  });
+
   it("opens the device page behind the gate", async () => {
     renderInterface("/sign-in/device", {
       "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION },
@@ -341,6 +400,27 @@ describe("Interface", () => {
     });
 
     expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["//evil.example/x", "/"],
+    ["/\\evil.example/x", "/"],
+    ["/\t/evil.example", "/"],
+    ["https://evil.example/x", "/"],
+    ["", "/"],
+    ["/jobs", "/jobs"],
+  ])("after sign-in follows only a local path: %j", async (from, landed) => {
+    const { path } = renderInterface(
+      "/sign-in",
+      { "GET /api/v1/sign-in/session": { status: 200, body: ADMIN_SESSION } },
+      new MemoryStorage(),
+      { from },
+    );
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: landed === "/" ? "Home" : "Jobs" }),
+    ).toBeInTheDocument();
+    expect(path()).toBe(landed);
   });
 
   it("says it is loading until the session is known", async () => {

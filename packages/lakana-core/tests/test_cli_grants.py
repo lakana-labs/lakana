@@ -543,6 +543,34 @@ def test_polling_faster_than_the_interval_is_slow_down(world: World) -> None:
     assert world.grants.poll_device(started.device_code).state == "pending"
 
 
+def test_two_polls_at_once_accept_only_one(world: World) -> None:
+    """Two polls that both read the grant before either writes: one is accepted, one slows down.
+
+    The acceptance is one conditional ``UPDATE`` on `last_polled_at`, so a burst of polls of one
+    device code drives one commit per interval, not one per poll (review of #796).
+    """
+    started = world.grants.start_device("box", peer="203.0.113.7")
+    other = Session(world.session.get_bind())
+    rival = CliGrantService(other, GrantAuthorization(other), clock=world.clock)
+    raced: list[str] = []
+
+    def racing() -> datetime:
+        if not raced:
+            # The rival polls after this poll read the grant and before it writes.
+            raced.append(rival.poll_device(started.device_code).state)
+        return world.clock()
+
+    racer = CliGrantService(world.session, world.authz, clock=racing)
+    try:
+        with pytest.raises(CliPollTooFast):
+            racer.poll_device(started.device_code)
+    finally:
+        other.close()
+    assert raced == ["pending"]
+    world.session.expire_all()
+    assert world.session.execute(select(CliGrant.last_polled_at)).scalar_one() == START
+
+
 def test_denied_grant_never_yields_a_token(world: World) -> None:
     kim_row = world.person("kim")
     kim = world.signed_in(kim_row)

@@ -49,6 +49,9 @@ async function fakeServer(page: Page): Promise<{ sent: Request[] }> {
       : route.fulfill({ json: session }),
   );
   await page.route("**/api/v1/sign-in/notices", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/v1/sign-in/oidc", (route) =>
+    route.fulfill({ json: { enabled: false, display_name: null } }),
+  );
   await page.route("**/api/v1/whoami", (route) => route.fulfill({ json: KIM_WHOAMI }));
   await page.route("**/api/v1/sign-in/links/describe", (route) =>
     route.fulfill({ json: { kind: "invite", name: "kim", display_name: null, state: "open" } }),

@@ -136,7 +136,7 @@
 "principal get": { class: ui, part: 7 }
 "principal list": { class: ui, part: 7 }
 "principal unlink-provider":
-  { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink" }
+  { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink", done: true }
 "profile list": { class: git, reason: "local CLI credential file" }
 "profile remove": { class: git, reason: "local CLI credential file" }
 "profile use": { class: git, reason: "local CLI credential file" }
@@ -279,7 +279,7 @@
 "DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7 }
 "DELETE /api/v1/principals/{name}/oidc-link":
-  { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink" }
+  { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink", done: true }
 "DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
 "DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2 }
 "DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
@@ -475,9 +475,14 @@
 "GET /api/v1/settings/sign-in": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
 "GET /api/v1/sign-in/notices": { class: ui, part: 1 }
 "GET /api/v1/sign-in/oidc":
-  { class: ui, part: 1, note: "OIDC sign-in (#32): the sign-in page's button" }
+  { class: ui, part: 1, note: "OIDC sign-in (#32): the sign-in page's button", done: true }
 "GET /api/v1/sign-in/oidc/callback":
-  { class: ui, part: 1, note: "OIDC sign-in (#32): the provider sends the browser here" }
+  {
+    class: ui,
+    part: 1,
+    note: "OIDC sign-in (#32): the provider sends the browser here",
+    done: true,
+  }
 "GET /api/v1/sign-in/session": { class: ui, part: 1 }
 "GET /api/v1/status": { class: read, part: 2, done: true }
 "GET /api/v1/tables": { class: read, part: 3, done: true }
@@ -625,14 +630,19 @@
 "POST /api/v1/sign-in/cli/device/describe":
   { class: ui, part: 1, done: true, note: "lakana login --device (#32): /sign-in/device" }
 "POST /api/v1/sign-in/oidc/finish":
-  { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc" }
+  { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc", done: true }
 "POST /api/v1/sign-in/oidc/finish-in-session":
-  { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc/confirmed" }
+  { class: ui, part: 1, note: "OIDC sign-in (#32): /sign-in/oidc/confirmed", done: true }
 "POST /api/v1/sign-in/oidc/link/start":
-  { class: ui, part: 1, note: "OIDC sign-in (#32): the profile's Use <provider> to sign in" }
-"POST /api/v1/sign-in/oidc/start": { class: ui, part: 1, note: "OIDC sign-in (#32)" }
+  {
+    class: ui,
+    part: 1,
+    note: "OIDC sign-in (#32): the profile's Use <provider> to sign in",
+    done: true,
+  }
+"POST /api/v1/sign-in/oidc/start": { class: ui, part: 1, note: "OIDC sign-in (#32)", done: true }
 "POST /api/v1/sign-in/oidc/step-up/start":
-  { class: ui, part: 1, note: "OIDC sign-in (#32): step-up of a linked person" }
+  { class: ui, part: 1, note: "OIDC sign-in (#32): step-up of a linked person", done: true }
 "POST /api/v1/sign-in/passkey": { class: ui, part: 1 }
 "POST /api/v1/sign-in/passkey/options": { class: ui, part: 1 }
 "POST /api/v1/sign-in/setup-link":

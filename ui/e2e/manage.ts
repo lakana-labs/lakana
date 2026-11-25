@@ -9,7 +9,7 @@ import { generateKeyPairSync } from "node:crypto";
 
 import type { BrowserContext, Page, Request } from "@playwright/test";
 
-import { signInAsAdmin, STUBBED, TABLE_DETAIL, TABLE_PATH } from "./session";
+import { signInAsAdmin, STUBBED, TABLE_DETAIL, TABLE_PATH, freshTouch } from "./session";
 
 /** Where the browser reaches the preview server: passkeys need a domain, never an address. */
 export const ORIGIN = "http://localhost:4173";
@@ -262,6 +262,7 @@ export async function stubGitOwned(page: Page): Promise<void> {
  */
 export async function stubManagement(page: Page): Promise<void> {
   await signInAsAdmin(page);
+  await freshTouch(page);
   await page.route(
     (url) => url.pathname === `${ENV_PATH}/expiring-tables`,
     (route) => route.fulfill({ json: EXPIRING }),

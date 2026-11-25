@@ -1,5 +1,21 @@
 {
   "lengths": "Session lengths",
   "invitesRegion": "Open invites",
-  "recoveryRegion": "Open recovery links"
+  "recoveryRegion": "Open recovery links",
+  "provider": {
+    "title": "Single sign-on",
+    "intro": "People linked to the identity provider sign in through it only. The provider is set by the server operator (LAKANA_OIDC__ISSUER), so it is shown here and changed there.",
+    "name": "Provider",
+    "issuer": "Issuer",
+    "linked": "Linked people",
+    "unlinked": "Unlinked administrators",
+    "warningWord": "Warning:",
+    "oneLeft": "Only one administrator can still sign in with a passkey. Keep at least one, so a provider outage cannot lock everyone out.",
+    "noneLeft": "No administrator can sign in with a passkey. Add a passkey for one, or unlink one, so a provider outage cannot lock everyone out."
+  },
+  "window": {
+    "label": "Token window in days",
+    "help": "The personal API tokens of a linked person work for this long after their last sign-in through the identity provider. Between {{min}} and {{max}} days.",
+    "outOfBounds": "The token window is between {{min}} and {{max}} days. Enter a whole number in that range."
+  }
 }

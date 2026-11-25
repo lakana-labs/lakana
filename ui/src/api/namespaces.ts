@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { api } from "./client";
+import { guarded } from "./stepUpFirst";
 import { breakGlassQuery, environmentPath, withQuery } from "./manage";
 
 /** A namespace, as the server answers it. */
@@ -64,7 +65,7 @@ export async function deleteNamespace(
   breakGlassReason: string | null,
 ): Promise<void> {
   const target = namespacesPath(environment, path);
-  await api.request<undefined>("DELETE", withQuery(target, breakGlassQuery(breakGlassReason)));
+  await guarded<undefined>("DELETE", withQuery(target, breakGlassQuery(breakGlassReason)));
 }
 
 /** The file formats an external table can read. */

@@ -11,7 +11,7 @@
 import type { Page, Route } from "@playwright/test";
 
 import { stubStepUpCeremony } from "./manage";
-import { signInAsAdmin, STUBBED } from "./session";
+import { signInAsAdmin, STUBBED, freshTouch } from "./session";
 
 /** The name of the connection the Add flow creates in these stubs. */
 export const CREATED = "events";
@@ -260,6 +260,7 @@ function testId(count: number): string {
  */
 export async function stubConnections(page: Page): Promise<ConnectionsStub> {
   await signInAsAdmin(page);
+  await freshTouch(page);
   const sent: string[] = [];
   const requests: Sent[] = [];
   page.on("request", (request) => {

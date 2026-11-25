@@ -1,6 +1,6 @@
 /**
- * A person in Settings › Access › People: their picture, their passkeys and sessions, and the way back in when they
- * lost their passkeys.
+ * A person in Settings › Access › People: their picture, their link to the identity provider,
+ * their passkeys and sessions, and the way back in when they lost their passkeys.
  *
  * @packageDocumentation
  */
@@ -9,6 +9,7 @@ import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
 import { getPrincipal, removePicture, type SessionOut } from "../api";
+import type { ProviderLinkOut } from "../api/access";
 import { Avatar, useCurrentPicture } from "../profile/Avatar";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
 import { CopyLine } from "../shell/CopyLine";
@@ -20,6 +21,7 @@ import { OwnRecoveryNote } from "../sign-in/OwnRecoveryNote";
 import { PasskeysPanel } from "../sign-in/PasskeysPanel";
 import { SessionsPanel } from "../sign-in/SessionsPanel";
 import { useSession } from "../sign-in/SessionProvider";
+import { ProviderLink } from "./ProviderLink";
 import { RecoveryDialog } from "./RecoveryDialog";
 import { markedText } from "../shell/VisibleText";
 import "../settings/settingsStrings";
@@ -38,6 +40,8 @@ interface About {
   readonly kind: Kind;
   /** The picture's etag, or null without one (or when the principal could not be read). */
   readonly picture: string | null;
+  /** Their link to the identity provider, or null when they are not linked (or it is unknown). */
+  readonly link: ProviderLinkOut | null;
 }
 
 /**
@@ -52,10 +56,23 @@ interface About {
 async function aboutOther(name: string): Promise<About> {
   const principal = await getPrincipal(name).catch(() => null);
   const picture = principal?.picture ?? null;
+  const link = principal?.provider_link ?? null;
   if (principal !== null && principal.type !== "USER") {
-    return { kind: "service", picture };
+    return { kind: "service", picture, link };
   }
-  return { kind: principal?.held_admin === true ? "admin" : "person", picture };
+  return { kind: principal?.held_admin === true ? "admin" : "person", picture, link };
+}
+
+/**
+ * Finds out one's own link to the identity provider; the rest is known from the session.
+ *
+ * @param name - One's own principal name.
+ * @param picture - One's picture's etag, or null.
+ * @returns What the page shows.
+ */
+async function aboutOwn(name: string, picture: string | null): Promise<About> {
+  const principal = await getPrincipal(name).catch(() => null);
+  return { kind: "own", picture, link: principal?.provider_link ?? null };
 }
 
 /** Properties of {@link PersonPage}. */
@@ -82,16 +99,20 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
   const own = name === (useSession().session as SessionOut).name;
   const me = useMe();
   const load = useCallback(
-    async (): Promise<About> => (own ? { kind: "own", picture: me.picture } : aboutOther(name)),
+    async (): Promise<About> => (own ? aboutOwn(name, me.picture) : aboutOther(name)),
     [name, own, me.picture],
   );
-  const about = useResource(load).data;
+  const read = useResource(load);
+  const about = read.data;
   const kind = about?.kind;
   const picture = useCurrentPicture(name, about?.picture ?? null);
   const [recovering, setRecovering] = useState(false);
   const [removing, setRemoving] = useState(false);
-  // The button that opened the confirmation is gone once the picture is: focus the heading.
-  const focus = useFocusAfter<HTMLHeadingElement>(removing);
+  // An unlink deletes the passkeys and ends the sessions: the panels read them again.
+  const [unlinked, setUnlinked] = useState(0);
+  // The button that opened the confirmation is gone once the picture or the link is: focus the
+  // heading.
+  const focus = useFocusAfter<HTMLHeadingElement>(`${String(removing)} ${String(unlinked)}`);
   return (
     <Page
       title={name}
@@ -139,12 +160,24 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
           />
         </section>
       )}
-      {own && <OwnRecoveryNote name={name} />}
+      {own && <OwnRecoveryNote name={name} linked={about?.link != null} />}
       <Suspense fallback={null}>
         <PersonGrants name={name} />
       </Suspense>
-      <PasskeysPanel name={name} own={own} />
-      <SessionsPanel name={name} own={own} />
+      {about?.link != null && (
+        <ProviderLink
+          name={name}
+          link={about.link}
+          own={own}
+          onUnlinked={() => {
+            focus.arm();
+            setUnlinked((count) => count + 1);
+            read.reload();
+          }}
+        />
+      )}
+      <PasskeysPanel key={`passkeys-${String(unlinked)}`} name={name} own={own} />
+      <SessionsPanel key={`sessions-${String(unlinked)}`} name={name} own={own} />
       {removing && (
         <ConfirmDialog
           title={t("profile.removeTitle", { name: markedText(name) })}

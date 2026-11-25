@@ -895,6 +895,12 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   the new address. Run every server of one database with the same public address.
 - `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
   from now on.
+- The web interface offers the provider once `LAKANA_OIDC__ISSUER` is set: "Sign in with
+  <provider>" first on the sign-in page, beside "Add a passkey" on an invite, and alone on a
+  linked person's recovery link. The profile's Sign-in section links one's own account, Settings ›
+  Sign-in shows the provider with its counts and the token window, and a person's page in Access
+  shows the link with Unlink. A linked person confirms a guarded action at the provider and then
+  presses it again. Without the setting the interface is unchanged.
 
 ### `lakana login` can sign in through the browser
 

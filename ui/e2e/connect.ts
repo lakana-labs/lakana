@@ -4,6 +4,7 @@
  *
  * @packageDocumentation
  */
+import { freshTouch } from "./session";
 import type { Page } from "@playwright/test";
 
 const AT = "2026-11-11T08:00:00Z";
@@ -66,6 +67,7 @@ export const ROUTES = [
  * @param page - The page.
  */
 export async function stubConnect(page: Page): Promise<void> {
+  await freshTouch(page);
   await page.route(
     (url) => url.pathname === "/api/v1/repository-probes",
     async (route) => {

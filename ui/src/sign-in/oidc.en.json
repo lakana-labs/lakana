@@ -1,0 +1,39 @@
+{
+  "finishing": {
+    "title": "Signing in",
+    "status": "Signing you in…",
+    "confirmTitle": "Confirming",
+    "confirmStatus": "Confirming with the identity provider…"
+  },
+  "refused": {
+    "title": "You were not signed in",
+    "confirmTitle": "This was not confirmed",
+    "tryAgain": "Try again",
+    "not_linked": "Your account at the identity provider is not linked to anyone in Lakana. Ask an administrator for an invite.",
+    "deactivated": "Your Lakana account is deactivated. Ask an administrator to reactivate it.",
+    "provider_unreachable": "Lakana could not reach the identity provider. Try again in a moment.",
+    "provider_refused": "The identity provider did not sign you in. Try again, or ask your IT department.",
+    "token_invalid": "Lakana could not verify the identity provider's answer, so nobody was signed in. Try again; if it keeps happening, tell an administrator.",
+    "flow_expired": "This sign-in took longer than 10 minutes or was already finished. Start again.",
+    "identity_taken": "This identity at the identity provider is already linked to another Lakana account. Ask an administrator.",
+    "identity_mismatch": "You signed in at the identity provider as someone else. Sign in there as yourself and try again.",
+    "link_unusable": "The link was used or withdrawn, or it expired. Ask whoever sent it for a new one.",
+    "last_unlinked_admin": "You are the last administrator who signs in with a passkey. Another administrator must keep a passkey, so that an outage at the identity provider cannot lock everyone out: link another administrator first, or keep yours.",
+    "cannot_link_operator": "The server operator's account cannot sign in through the identity provider; it keeps its token.",
+    "already_linked": "Your account is already linked to the identity provider.",
+    "auth_too_old": "The identity provider confirmed an earlier sign-in, not a new one. Try again, and sign in there when it asks."
+  },
+  "section": {
+    "title": "Sign-in",
+    "linked": "You sign in through <name/>.",
+    "window": "Your API tokens work until {{when}}; signing in through <name/> renews this.",
+    "unlinked": "You sign in with a passkey. You can sign in through <name/> instead.",
+    "link": "Use <name/> to sign in",
+    "linkTitle": "Sign in through {{provider}} from now on?",
+    "linkBody": "From then on you sign in only through <name/>. Your passkeys stay stored but no longer sign you in.",
+    "continue": "Continue",
+    "keptPasskeys": "Your passkeys are kept but no longer sign you in.",
+    "linkFirst": "You confirm with your passkey first, then sign in at <name/>.",
+    "operatorForYou": "If you cannot sign in through the identity provider (it is down, or it refuses you), only the server operator can let you back in, because you are an administrator: they run this where the server runs, with the bootstrap token. Their recovery link unlinks your account from the provider and revokes your personal API tokens, and you then sign in with a new passkey."
+  }
+}

@@ -226,6 +226,8 @@
       "replaced": "A newer sign-in in this browser replaced this session. Sign in again.",
       "deactivated": "Your account is deactivated, so your session ended. Ask an administrator to reactivate it, then sign in again.",
       "token_revoked": "The token this session was created with was revoked or expired, so the session ended. Sign in again.",
+      "token_window": "This session began with an API token of an account that signs in through the identity provider, and nobody has signed in there as you within the token window, so it ended. Sign in again through the identity provider.",
+      "oidc_unlinked": "An administrator unlinked your account from the identity provider, which ended your sessions. Ask an administrator for a recovery link.",
       "recovery": "Your account was recovered with a recovery link, which ended every earlier session. Sign in again with your new passkey.",
       "passkey_copied": "A copy of one of your passkeys was detected; it is disabled and every session of your account was ended. Sign in with another passkey, or ask an administrator for a recovery link.",
       "passkey_removed": "An administrator removed one of your passkeys, which ended your sessions. Sign in again with another passkey, or ask an administrator for a recovery link.",
@@ -234,7 +236,8 @@
   },
   "errors": {
     "unreachable": "Lakana could not be reached. Check that the server is running and your network works, then try again.",
-    "unexpected": "Something went wrong in the interface. Reload the page and try again."
+    "unexpected": "Something went wrong in the interface. Reload the page and try again.",
+    "providerRedirect": "Your browser is going to the identity provider to confirm it is you. Back here, do this again."
   },
   "passkey": {
     "cancelled": "The passkey request was cancelled or took too long. Try again when you are ready.",
@@ -251,7 +254,14 @@
     "passkey": "Sign in with a passkey",
     "waiting": "Waiting for your passkey…",
     "refused": "This passkey did not sign you in: it may belong to another Lakana server, or it was removed. Try another passkey, or ask an administrator for a recovery link.",
-    "noPasskey": "No passkey on this device? Ask an administrator for a recovery link."
+    "noPasskey": "No passkey on this device? Ask an administrator for a recovery link.",
+    "oidc": {
+      "intro": "Sign in with your organisation's account at <name/>.",
+      "provider": "Sign in with <name/>",
+      "leaving": "Going to the identity provider…",
+      "passkey": "Use a passkey",
+      "passkeyHint": "For people who don't sign in through <name/>."
+    }
   },
   "link": {
     "checkingTitle": "Signing in",
@@ -281,7 +291,10 @@
       "body": "Check that you opened all of it, including everything after #, or ask whoever sent it for a new link."
     },
     "tryAgain": "Try again",
-    "replaces": "This browser is signed in as {{name}}; continuing signs that session out."
+    "replaces": "This browser is signed in as {{name}}; continuing signs that session out.",
+    "withProvider": "Sign in with <name/>",
+    "providerOnly": "Your account signs in through <name/>.",
+    "leaving": "Going to the identity provider…"
   },
   "addPasskey": {
     "title": "Add a passkey",
@@ -314,6 +327,15 @@
     "other": {
       "self": "Something changed about signing in to your account on {{date}}.",
       "other": "Something changed about signing in to the account of {{subject}} on {{date}}."
+    },
+    "oidc_unlinked": {
+      "self": "Your account was unlinked from the identity provider by the server operator's recovery link on {{date}}. If this was not you, tell an administrator at once.",
+      "other": "{{subject}} was unlinked from the identity provider by the server operator's recovery link on {{date}}."
+    },
+    "confirmed": {
+      "step_up": "Confirmed with <name/>. Do it again now; it won't ask for 15 minutes.",
+      "link": "You now sign in through <name/>. Your passkeys are kept but no longer sign you in.",
+      "provider": "the identity provider"
     }
   },
   "copy": {

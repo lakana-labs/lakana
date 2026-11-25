@@ -5,16 +5,18 @@
  */
 import { type JSX, useEffect, useEffectEvent, useState } from "react";
 import { Button } from "react-aria-components";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 
 import { ApiError, describeLink, type LinkDescriptionOut, redeemLink } from "../api";
+import { goToProvider, startWithLink } from "../api/oidc";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import type { LinkFragment } from "./fragment";
 import { problemText } from "./messages";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
 import { PendingButton } from "../shell/PendingButton";
-import { markedText } from "../shell/VisibleText";
+import { markedText, VisibleText } from "../shell/VisibleText";
+import { useProviderName } from "./useProviderName";
 
 /** The states of a link the server answers 410 with. */
 const UNUSABLE = new Set(["used", "expired", "withdrawn", "unknown"]);
@@ -52,7 +54,9 @@ export interface LinkLandingProps {
  * Describes the link (never using it) and asks the person to confirm, so a link preview or
  * a mail scanner opening the page cannot use it. A local link (`lakana server start --local`)
  * is used at once, but only when the browser has no session: it never signs a signed-in
- * browser in as someone else.
+ * browser in as someone else. With an identity provider an invite or a recovery link offers it
+ * beside a passkey, and a recovery link of a person linked to it offers only the provider: the
+ * link's two halves go to the server in the body, and the browser goes to the provider.
  *
  * @param props - The link and what to do afterwards.
  * @param props.link - The link taken from the address.
@@ -68,22 +72,34 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
     complete ? { kind: "checking" } : { kind: "unusable", state: "unknown" },
   );
 
+  const viaProvider =
+    phase.kind === "open" &&
+    (phase.link.provider_only === true || phase.link.offers_provider === true) &&
+    (phase.link.kind === "invite" || phase.link.kind === "recovery");
+  const provider = useProviderName(viaProvider);
+  const [waiting, setWaiting] = useState(t("link.signingIn"));
+
+  const describeFailure = (error: unknown): string => {
+    const refused = unusable(error);
+    if (refused !== null) {
+      setPhase(refused);
+      return "";
+    }
+    return problemText(t, error);
+  };
   const use = (): void => {
-    attempt.run(
-      async () => {
-        await redeemLink(link.linkId, link.secret);
-        await session.refresh();
-        onDone();
-      },
-      (error) => {
-        const refused = unusable(error);
-        if (refused !== null) {
-          setPhase(refused);
-          return "";
-        }
-        return problemText(t, error);
-      },
-    );
+    setWaiting(t("link.signingIn"));
+    attempt.run(async () => {
+      await redeemLink(link.linkId, link.secret);
+      await session.refresh();
+      onDone();
+    }, describeFailure);
+  };
+  const withProvider = (purpose: "invite" | "recovery"): void => {
+    setWaiting(t("link.leaving"));
+    attempt.run(async () => {
+      throw goToProvider(await startWithLink(link.linkId, link.secret, purpose));
+    }, describeFailure);
   };
 
   const described = useEffectEvent((answer: LinkDescriptionOut) => {
@@ -162,9 +178,49 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
   }
   const shown = markedText(phase.link.display_name ?? phase.link.name);
   const invite = phase.link.kind === "invite";
+  const purpose = invite ? "invite" : "recovery";
+  const providerOnly = viaProvider && phase.link.provider_only === true;
+  const name =
+    provider === null ? <>{t("notices.confirmed.provider")}</> : <VisibleText text={provider} />;
+  const providerButton = (className: string) => (
+    <PendingButton
+      className={`${className} button-wrap`}
+      pending={attempt.busy}
+      onPress={() => {
+        withProvider(purpose);
+      }}
+    >
+      <Trans t={t} i18nKey="link.withProvider" components={{ name }} />
+    </PendingButton>
+  );
+  let actions: JSX.Element;
+  if (providerOnly) {
+    actions = providerButton("button button-primary");
+  } else if (viaProvider && provider !== null) {
+    // Two equal choices, the provider first.
+    actions = (
+      <>
+        {providerButton("button")}
+        <PendingButton className="button" pending={attempt.busy} onPress={use}>
+          {t("passkey.add")}
+        </PendingButton>
+      </>
+    );
+  } else {
+    actions = (
+      <PendingButton className="button button-primary" pending={attempt.busy} onPress={use}>
+        {t("link.confirm")}
+      </PendingButton>
+    );
+  }
   return (
     <Step title={invite ? t("link.joinAs", { name: shown }) : t("link.signInAs", { name: shown })}>
       <p>{invite ? t("link.joinIntro") : t("link.signInIntro")}</p>
+      {providerOnly && (
+        <p>
+          <Trans t={t} i18nKey="link.providerOnly" components={{ name }} />
+        </p>
+      )}
       {session.state === "signed-in" &&
         session.session !== undefined &&
         phase.link.kind !== "local" && (
@@ -173,12 +229,10 @@ export function LinkLanding({ link, onDone }: LinkLandingProps): JSX.Element {
           </p>
         )}
       <div className="step-actions">
-        <PendingButton className="button button-primary" pending={attempt.busy} onPress={use}>
-          {t("link.confirm")}
-        </PendingButton>
+        {actions}
         {attempt.error !== null && attempt.error !== "" && leave}
       </div>
-      <AttemptStatus attempt={attempt} waiting={t("link.signingIn")} />
+      <AttemptStatus attempt={attempt} waiting={waiting} />
     </Step>
   );
 }

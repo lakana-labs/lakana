@@ -9,7 +9,7 @@
  * cancelled or waited too long); a browser without these methods gets `NotSupportedError`.
  * @packageDocumentation
  */
-import { send, setCsrfToken } from "./client";
+import { api, send, setCsrfToken } from "./client";
 import type { SignInOut } from "./links";
 
 /** The start of a ceremony, as the options routes answer it. */
@@ -98,7 +98,9 @@ export async function stepUp(): Promise<void> {
 export async function addPasskey(name: string): Promise<void> {
   const credentials = webAuthn();
   const base = `/api/v1/principals/${encodeURIComponent(name)}/passkeys`;
-  const options = await send<OptionsOut>("POST", `${base}/options`, {});
+  // Adding one's first passkey needs no touch, so none is asked first; when the server asks for
+  // one (403 `StepUpRequired`), `api.request` runs the step-up ceremony and asks again.
+  const options = await api.request<OptionsOut>("POST", `${base}/options`, {});
   const publicKey = credentials.parseCreationOptionsFromJSON(
     options.public_key as PublicKeyCredentialCreationOptionsJSON,
   );

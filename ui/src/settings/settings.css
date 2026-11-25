@@ -173,3 +173,24 @@
 .status-differs {
   color: var(--color-warn);
 }
+
+/* Settings › Sign-in's Single sign-on: an issuer of any length wraps in its cell, and the
+   warning is its glyph beside the word, never colour alone. */
+.sso-issuer {
+  overflow-wrap: anywhere;
+}
+
+.sso-warning {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.sso-warning .status-glyph {
+  flex: none;
+  align-self: center;
+}
+
+.sso-warning-word {
+  font-weight: 500;
+}

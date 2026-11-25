@@ -15,7 +15,7 @@ import {
   waitForProbe,
 } from "./repositories";
 
-import { fakeServer } from "../test/server";
+import { fakeServer, withoutSessionReads } from "../test/server";
 
 const QUEUED = {
   id: "p-1",
@@ -64,10 +64,13 @@ describe("repositories", () => {
     await vi.advanceTimersByTimeAsync(1001);
 
     expect(await waiting).toEqual(DONE);
-    const gets = server.sent.filter((request) => request.method === "GET");
+    const gets = withoutSessionReads(server).filter((request) => request.method === "GET");
     expect(gets).toHaveLength(2);
     expect(gets.every((request) => request.headers["x-lakana-background"] === "1")).toBe(true);
-    expect(server.sent[0]?.body).toEqual({ kind: "host_keys", url: "git@github.com:acme/a.git" });
+    expect(withoutSessionReads(server)[0]?.body).toEqual({
+      kind: "host_keys",
+      url: "git@github.com:acme/a.git",
+    });
   });
 
   it("stops polling when the page lets go", async () => {
@@ -84,7 +87,7 @@ describe("repositories", () => {
     await refused;
     await vi.advanceTimersByTimeAsync(5000);
 
-    expect(server.sent).toHaveLength(1);
+    expect(withoutSessionReads(server)).toHaveLength(1);
     await expect(waitForProbe("p-1", leaving.signal)).rejects.toThrow("stopped");
   });
 
@@ -102,11 +105,11 @@ describe("repositories", () => {
       ssh_known_hosts: "github.com ssh-ed25519 AAAA",
     });
     expect(await generateDeployKey("a b")).toEqual(out);
-    expect(server.sent.map((request) => request.path)).toEqual([
+    expect(withoutSessionReads(server).map((request) => request.path)).toEqual([
       "/api/v1/repositories",
       "/api/v1/repositories/a%20b/deploy-key",
     ]);
-    expect(server.sent[1]?.body).toEqual({});
+    expect(withoutSessionReads(server)[1]?.body).toEqual({});
   });
 
   it("reads a registered repository's name, kind, URL and trusted host keys", async () => {
@@ -151,8 +154,8 @@ describe("repositories", () => {
       "GET /api/v1/sign-in/session",
       "POST /api/v1/repositories/analytics/deploy-key",
     ]);
-    expect(server.sent[3]?.body).toEqual({ environments: ["dev"], replace: true });
-    expect(server.sent[5]?.body).toEqual({});
+    expect(withoutSessionReads(server)[1]?.body).toEqual({ environments: ["dev"], replace: true });
+    expect(withoutSessionReads(server)[2]?.body).toEqual({});
   });
 
   it("deletes without asking for a touch", async () => {
@@ -172,7 +175,7 @@ describe("repositories", () => {
 
     await updateRepository("analytics", { default_ref: null });
 
-    expect(server.sent[1]?.body).toStrictEqual({ default_ref: null });
+    expect(withoutSessionReads(server)[0]?.body).toStrictEqual({ default_ref: null });
   });
 
   it("encodes the name in the path", async () => {
@@ -186,7 +189,7 @@ describe("repositories", () => {
     await expect(getRepositoryPage("a b")).resolves.toEqual({ name: "a b" });
     await deleteRepository("x%y");
 
-    expect(server.sent.map((request) => request.path)).toEqual([
+    expect(withoutSessionReads(server).map((request) => request.path)).toEqual([
       "/api/v1/repositories",
       "/api/v1/repositories/a%20b",
       "/api/v1/repositories/x%25y",

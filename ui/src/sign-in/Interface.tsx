@@ -21,6 +21,7 @@ import { type AreaPages, appRoutes } from "../shell/routes";
 import { AddPasskey } from "./AddPasskey";
 import { type LinkFragment, takeLinkFragment } from "./fragment";
 import { LinkLanding } from "./LinkLanding";
+import { isLocalPath } from "./localPath";
 import { SessionProvider, type SessionValue, useSession } from "./SessionProvider";
 import { SignInPage } from "./SignInPage";
 
@@ -44,14 +45,15 @@ function noKnownRights(name: string): AccessOut {
 }
 
 /**
- * The path a page that sent the browser to sign-in left in the history state.
+ * The path a page that sent the browser to sign-in left in the history state. History state
+ * outlives the page that wrote it, so anything but a local path counts as none.
  *
  * @param state - The location's state.
  * @returns The path, or Home.
  */
 function cameFrom(state: unknown): string {
   const from = (state as { readonly from?: unknown } | null)?.from;
-  return typeof from === "string" ? from : "/";
+  return isLocalPath(from) ? from : "/";
 }
 
 /**
@@ -93,10 +95,11 @@ function SignInRoute({ link, onLinkDone }: SignInRouteProps): JSX.Element {
   if (link !== null) {
     return <LinkLanding link={link} onDone={onLinkDone} />;
   }
+  const from = cameFrom(location.state);
   if (session.state === "signed-in") {
-    return <Navigate to={cameFrom(location.state)} replace />;
+    return <Navigate to={from} replace />;
   }
-  return <SignInPage />;
+  return <SignInPage from={from} />;
 }
 
 /** Properties of {@link Gate}. */
@@ -222,6 +225,33 @@ const CLI_SIGN_IN_ROUTES: RouteObject[] = [
   },
 ];
 
+/**
+ * The page the identity provider sends a sign-in back to, outside the gate: it finishes the
+ * sign-in, so nobody is signed in yet. Loaded on demand.
+ */
+const PROVIDER_RETURN_ROUTE: RouteObject = {
+  path: "/sign-in/oidc",
+  hydrateFallbackElement: <></>,
+  lazy: async () => {
+    const { ProviderReturn } = await import("./ProviderReturn");
+    return { element: <ProviderReturn /> };
+  },
+};
+
+/**
+ * The page the identity provider sends a link from the profile or a provider step-up back to,
+ * behind the gate and outside the shell: it finishes in the session that started it. Loaded on
+ * demand, with the sign-in's return page.
+ */
+const PROVIDER_CONFIRMED_ROUTE: RouteObject = {
+  path: "/sign-in/oidc/confirmed",
+  hydrateFallbackElement: <></>,
+  lazy: async () => {
+    const { ProviderConfirmed } = await import("./ProviderReturn");
+    return { element: <ProviderConfirmed /> };
+  },
+};
+
 /** Properties of {@link Routed}. */
 interface RoutedProps {
   /** Makes the router. */
@@ -251,10 +281,12 @@ function Routed({ createRouter, pages, link, onLinkDone }: RoutedProps): JSX.Ele
   const routes = useMemo(
     (): RouteObject[] => [
       { path: "/sign-in", element: <SignInRoute link={link} onLinkDone={onLinkDone} /> },
+      PROVIDER_RETURN_ROUTE,
       {
         element: <Gate ready={access !== null} />,
         children: [
           ...CLI_SIGN_IN_ROUTES,
+          PROVIDER_CONFIRMED_ROUTE,
           ...appRoutes(areasFor(access?.noAccessYet === true), pages, access ?? noKnownRights("")),
         ],
       },

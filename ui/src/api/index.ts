@@ -3,13 +3,14 @@
  *
  * @remarks
  * Importing this module connects the step-up ceremony to `api.request`, so a request that
- * needs a fresh passkey touch asks for one and is sent once more.
+ * needs a fresh passkey touch asks for one and is sent once more; a person linked to the
+ * identity provider is sent there instead, and the request is not sent again.
  * @packageDocumentation
  */
 import { setStepUp } from "./client";
-import { stepUp } from "./passkeys";
+import { confirmPresence } from "./stepUpFirst";
 
-setStepUp(stepUp);
+setStepUp(confirmPresence);
 
 export {
   getPrincipal,
