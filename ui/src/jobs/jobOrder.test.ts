@@ -44,4 +44,12 @@ describe("jobOrder", () => {
       [ALPHA, twin].sort(jobOrder({ sort: "status", order: "desc" })).map((j) => j.name),
     ).toEqual(["aaa", "alpha"]);
   });
+
+  it("compares times as instants: a whole second is before a fraction of it", () => {
+    const whole = aJob({ name: "whole", last_run_at: "2026-11-17T10:00:00Z" });
+    const later = aJob({ name: "later", last_run_at: "2026-11-17T10:00:00.500Z" });
+    expect(
+      [whole, later].sort(jobOrder({ sort: "last_run", order: "desc" })).map((j) => j.name),
+    ).toEqual(["later", "whole"]);
+  });
 });

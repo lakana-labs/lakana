@@ -7,7 +7,7 @@
 import { type JSX, lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { listDeployments, listDeploys } from "../api/jobs";
+import { type DeployOut, listDeployments, listDeploys } from "../api/jobs";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
@@ -51,6 +51,15 @@ const DEPLOY_SORTS: ListSortSpec<"status" | "created"> = {
   natural: { field: "created", order: "desc" },
 };
 
+/**
+ * A deploy's identity, so a deploy a later page repeats (its state changed while the list was
+ * paged by state) is shown once.
+ *
+ * @param deploy - The deploy.
+ * @returns Its id.
+ */
+const deployId = (deploy: DeployOut): string => deploy.id;
+
 /** Properties of {@link DeploysOf}. */
 interface DeploysOfProps {
   /** The environment whose deploys are listed. */
@@ -90,6 +99,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     JSON.stringify([environment, repository]),
     load,
     JSON.stringify(sort),
+    deployId,
   );
   const current = new Map(
     (deployments.data ?? []).map((deployment) => [
@@ -138,10 +148,13 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     }
   }, [pages.items, deployments.data]);
   const rows = pages.items ?? [];
-  // In another order than the newest first, a page still to be read may hold a repository's
-  // newest deploy: nothing is marked current until every page is read.
+  // Nothing is marked while a read is on its way: after a new sort the rows of the old one stay
+  // until the new first page arrives. In another order than the newest first, a page still to be
+  // read may hold a repository's newest deploy: nothing is marked until every page is read.
   const marked =
-    sort === null || !pages.hasMore ? currentDeploys(rows, current) : new Set<string>();
+    !pages.busy && (sort === null || !pages.hasMore)
+      ? currentDeploys(rows, current)
+      : new Set<string>();
   const steadyMore = useSteadyMore(pages.hasMore, pages.busy);
   return (
     <div ref={area}>

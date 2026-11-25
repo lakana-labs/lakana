@@ -456,4 +456,24 @@ describe("DeploysTab's current mark in another order", () => {
     await within(region).findAllByRole("row");
     expect(region).not.toHaveTextContent("current");
   });
+
+  it("marks nothing current while the rows of the previous sort wait for the new order", async () => {
+    const next = held();
+    const route: FakeRoute = (request) =>
+      request.path.includes("sort=status") ? next.route() : list([NOW]);
+    const { user } = renderTab(route, "/jobs/deploys?environment=prod");
+    const region = await screen.findByRole("region", { name: /Deploys/u });
+    await waitFor(() => {
+      expect(region).toHaveTextContent("current");
+    });
+
+    await user.click(screen.getByRole("button", { name: /^Result/u }));
+    await waitFor(() => {
+      expect(region).not.toHaveTextContent("current");
+    });
+    next.release(list([NOW]));
+    await waitFor(() => {
+      expect(region).toHaveTextContent("current");
+    });
+  });
 });

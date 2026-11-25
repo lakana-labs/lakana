@@ -51,8 +51,14 @@ export function currentDeploys(
 ): ReadonlySet<string> {
   const marked = new Set<string>();
   const seen = new Set<string>();
-  // Stable: deploys of one time keep the list's order, which the server breaks by id.
-  const newestFirst = [...deploys].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  // By the instant, not the text (a whole second has no fraction: `…:00Z` is before
+  // `…:00.000005Z`), then by id, as the server breaks ties in its newest-first order, so every
+  // order of the list marks the same row.
+  const newestFirst = [...deploys].sort(
+    (a, b) =>
+      Date.parse(b.created_at) - Date.parse(a.created_at) ||
+      (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+  );
   for (const deploy of newestFirst) {
     if (
       seen.has(deploy.repository) ||

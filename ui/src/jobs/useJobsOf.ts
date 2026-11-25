@@ -62,11 +62,25 @@ function byName(a: JobOut, b: JobOut): number {
   );
 }
 
-/** The value of a job a sort other than by name compares. */
-const SORT_VALUES: Readonly<Record<string, (job: JobOut) => string | null>> = {
+/**
+ * The instant of an ISO time, or null without one.
+ *
+ * @param iso - The time.
+ * @returns Milliseconds since the epoch.
+ */
+function instant(iso: string | null): number | null {
+  return iso === null ? null : Date.parse(iso);
+}
+
+/**
+ * The value of a job a sort other than by name compares: a state word as text, a time as its
+ * instant (a whole second is written without a fraction, so its text would sort after a later
+ * time of the same second).
+ */
+const SORT_VALUES: Readonly<Record<string, (job: JobOut) => string | number | null>> = {
   status: (job) => job.last_run_status,
-  last_run: (job) => job.last_run_at,
-  next_run: (job) => job.next_run_at,
+  last_run: (job) => instant(job.last_run_at),
+  next_run: (job) => instant(job.next_run_at),
 };
 
 /**
@@ -92,7 +106,6 @@ export function jobOrder(sort: ListSortChoice | null): (a: JobOut, b: JobOut) =>
     if (left === null || right === null) {
       return left === null ? 1 : -1;
     }
-    // ISO times and state words both compare as text.
     return sign * (left < right ? -1 : 1);
   };
 }
