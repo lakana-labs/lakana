@@ -35,8 +35,19 @@ export interface WaitingFilter {
 }
 
 /**
- * The waiting starts among some jobs that match the Runs tab's filters, newest request first. A
- * start whose time the server could not read is kept, as it surely waits now.
+ * When a start was requested, as text that sorts by time; empty, so last, when unknown.
+ *
+ * @param job - The job whose start waits.
+ * @returns The ISO 8601 time, or an empty string.
+ */
+function requestedAt(job: JobOut): string {
+  return job.waiting_since ?? "";
+}
+
+/**
+ * The waiting starts among some jobs that match the Runs tab's Trigger, Job and Period, newest
+ * request first (the State is checked before anything is read). A start whose time the server
+ * could not read is kept, as it surely waits now, and comes last.
  *
  * @param jobs - The jobs read.
  * @param filter - The filters.
@@ -46,9 +57,6 @@ function waitingStarts(
   jobs: readonly JobOut[],
   filter: Omit<WaitingFilter, "environments">,
 ): JobOut[] {
-  if (!showsWaiting(filter.status)) {
-    return [];
-  }
   const since = sinceOf(filter.period);
   return jobs
     .filter(
@@ -58,7 +66,7 @@ function waitingStarts(
         (filter.job === "" || job.name === filter.job) &&
         (since === null || job.waiting_since === null || job.waiting_since >= since),
     )
-    .sort((a, b) => (b.waiting_since ?? "").localeCompare(a.waiting_since ?? ""));
+    .sort((a, b) => requestedAt(b).localeCompare(requestedAt(a)));
 }
 
 /**

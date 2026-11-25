@@ -709,6 +709,50 @@ describe("RunsTab", () => {
       expect(jobReads(server.sent)).toBe(shown);
     });
 
+    it("holds the starts against the Period, newest request first, one of unknown time last", async () => {
+      const old = new Date(Date.now() - 2 * 86_400_000).toISOString();
+      const starts: Record<string, FakeRoute> = {
+        "GET /api/v1/environments/prod/jobs": {
+          status: 200,
+          body: [
+            aJob({
+              name: "unknown_time",
+              state: "waiting to start",
+              waiting_for: waits("It begins within a few seconds."),
+              waiting_since: null,
+              waiting_trigger: null,
+            }),
+            aJob({
+              name: "two_days_ago",
+              state: "waiting",
+              waiting_for: waits("A start waits."),
+              waits_for_run_id: "1b2c3d4e-0000",
+              waiting_since: old,
+              waiting_trigger: "schedule",
+            }),
+            aJob({
+              name: "just_now",
+              state: "waiting",
+              waiting_for: waits("A start waits."),
+              waits_for_run_id: "1b2c3d4e-0000",
+              waiting_since: recent(1),
+              waiting_trigger: "api",
+            }),
+          ],
+        },
+      };
+      renderTab(page([]), "/jobs/runs?environment=prod&period=24h", starts);
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["just_now", "unknown_time"]);
+      });
+
+      cleanup();
+      renderTab(page([]), "/jobs/runs?environment=prod&period=all", starts);
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["just_now", "two_days_ago", "unknown_time"]);
+      });
+    });
+
     it("reads the waiting starts again with Read again", async () => {
       const { server, user } = renderTab(twoPages, "/jobs/runs", jobs());
       await user.click(await screen.findByRole("button", { name: "Show more" }));

@@ -203,6 +203,25 @@ describe("JobFacts", () => {
     expect(waiting.querySelector("[data-tip]")).toBeNull();
   });
 
+  it("says only when a start was requested when the server cannot tell how", () => {
+    renderFacts(
+      aJob({
+        state: "waiting",
+        waiting_for: { code: "job_waits", message: "A start waits for run r1." },
+        waits_for_run_id: "r1",
+        waiting_since: "2026-11-17T09:12:00Z",
+        waiting_trigger: null,
+      }),
+    );
+
+    const waiting = document.querySelector(".jobs-waiting") as HTMLElement;
+    const at = new Intl.DateTimeFormat(i18next.language, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date("2026-11-17T09:12:00Z"));
+    expect(waiting.textContent.endsWith(`Requested ${at}`)).toBe(true);
+  });
+
   it("shows the pill once the run has ended and the scheduler begins it, without a link", () => {
     renderFacts(
       aJob({
