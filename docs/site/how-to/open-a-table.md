@@ -51,7 +51,9 @@ it from Orphans.`, with the table's own repository and file. A screen reader hea
 when the menu opens. Change the table in git, or use **Rebuild from git…**.
 
 Drop and Rebuild from git ask for a recent passkey touch: one from the last 15 minutes. When yours
-is older, the browser asks you to touch your passkey and the action is sent again. If the touch
+is older, the browser asks you to touch your passkey and the action is sent again.
+Someone who signs in through the organisation's identity provider confirms there
+instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). If the touch
 fails, the dialog stays open with the reason, nothing is dropped, and **Cancel** closes it. In a
 protected environment Drop also asks why you break the protection, which the audit log records.
 Rebuild from git asks for no second reason: the one reason it asks for is also sent as the reason

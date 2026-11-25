@@ -372,7 +372,9 @@ connection shows the newest task that failed on it when all of these hold:
 
 **Save** asks for a passkey touch when the server needs a fresh one (within the last 15 minutes),
 then creates the connection and opens its page, which says "Created NAME. Test it now to see that
-a worker can reach it." with **Test now** as its primary action. A refusal, such as a name taken,
+a worker can reach it." with **Test now** as its primary action.
+Someone who signs in through the organisation's identity provider confirms there
+instead, then presses the action again ([single sign-on](../how-to/bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). A refusal, such as a name taken,
 shows above the form in the server's words and keeps what you typed.
 
 A secret's values live only in the form. Each is a password field that your browser neither shows

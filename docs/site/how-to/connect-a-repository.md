@@ -33,7 +33,9 @@ before it is done.
    key types** shows the others. Nothing is stored yet.
 3. **Create the repository and its keys.** **Create the repository and its keys** registers the
    repository with the keys you ticked, and only those, then makes a key pair for every
-   environment where you may manage secrets. It asks for one passkey touch for both. The page
+   environment where you may manage secrets. It asks for one passkey touch for both.
+   Someone who signs in through the organisation's identity provider confirms there
+   instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). The page
    lists each environment's public key with **Copy key** (a key made before is marked *made
    earlier*), links the host's deploy-key page, and names the environments it could not write.
    Add each key as a read-only deploy key at your git host (below). If the repository was

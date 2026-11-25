@@ -80,6 +80,8 @@ list, the deleted environments can be restored, or their files deleted now. A pe
 and restore it, but not protect it, change its storage or create environments, which need the
 right on the instance. Creating, protecting, changing the storage and deleting the files ask for
 a passkey touch first.
+Someone who signs in through the organisation's identity provider confirms there
+instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 
 A second environment, such as `prod`, needs the bundle's storage and its secret; the commands are in
 [Add an environment to a Compose instance](deploy-with-compose.md#add-an-environment-to-a-compose-instance).

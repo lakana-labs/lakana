@@ -56,6 +56,8 @@ choose **Save**:
 }
 ```
 
+Lakana's own tests sign in through a client with exactly these settings, in Keycloak 26.8.
+
 To create it by hand instead, choose **Create client** and set:
 
 1. **General settings:** **Client type** OpenID Connect, **Client ID** `lakana`.
@@ -198,6 +200,10 @@ deletes their passkeys, revokes their personal API tokens and ends their session
 issues them a recovery link, on which they choose **Sign in with Keycloak**. An administrator's
 recovery link comes from the server operator. Plan an issuer change like an address change:
 keep the unlinked administrator, then unlink and send links right after it.
+
+This is how the current release behaves, and it is meant to change: an issuer change should not
+lock linked people out
+([issue 809](https://github.com/lakana-labs/lakana/issues/809)). This section changes with it.
 
 ## When something goes wrong
 

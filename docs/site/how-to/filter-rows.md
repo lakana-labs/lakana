@@ -103,7 +103,9 @@ once you choose the environment, the **Table** field suggests, as you type, the 
 name contains what you typed and that you may read, and choosing one fills in its namespace too
 (a table you may not read is never suggested; the server still checks the name you send).
 **Delete** says who then sees more. Both ask for a passkey touch first, like the other changes of
-access. The server checks the expression as it does for `lakana row-filter create`, and its reason
+access.
+Someone who signs in through the organisation's identity provider confirms there
+instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). The server checks the expression as it does for `lakana row-filter create`, and its reason
 for a refusal shows in the form, with what you typed kept. A filter in an environment an access
 file manages is marked **⌂ Git** and cannot be changed there: change the file instead
 ([Keep access in a reviewed file](keep-access-in-a-reviewed-file.md)). The table's own Access tab

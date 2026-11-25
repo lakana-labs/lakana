@@ -9,6 +9,8 @@ You need `DROP_TABLE` on the artifact. The roles `DATA_ENGINEER` and `ADMIN` hav
 never has it: a running task cannot delete anything, whatever its principal may do. From the web
 interface, deleting a version or dropping the artifact also asks for a recent passkey touch, one
 from the last 15 minutes; the command line uses a token and is never asked.
+Someone who signs in through the organisation's identity provider confirms there
+instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 
 If you only want to keep fewer versions over time, set `keep_versions` instead:
 [Limit how many versions are kept](limit-artifact-versions.md).

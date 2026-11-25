@@ -50,7 +50,9 @@ working one) and signs you out everywhere.
 
 In the interface, open **Settings → Sign-in → Recovery links** and choose **Issue a recovery link**,
 or open the person under **Settings → Access → People** and choose it there. Type the person's name; after a touch of
-your own passkey the interface shows the link once. Send it to that person on a channel you
+your own passkey the interface shows the link once.
+Someone who signs in through the organisation's identity provider confirms there
+instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). Send it to that person on a channel you
 trust (the link is as good as a sign-in). The open links are listed on the same tab, where
 **Withdraw** stops one. From the command line, `recovery create` followed by the person's name
 does the same; the [CLI reference](../reference/cli/lakana-recovery.md) lists the commands that

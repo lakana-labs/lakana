@@ -18,6 +18,8 @@ the way in: a secret string that stands for one person.
     make their own token: on their account page (**Passkeys and sessions** in the menu under their
     name), **API tokens** → **Create a token** asks for a passkey touch and shows the token once,
     with the `lakana login` command to paste it into. The token carries exactly their rights.
+    Someone who signs in through the organisation's identity provider confirms there
+    instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 
 The steps below give a person called `alice` access to the environment `dev`. Use your own names.
 
