@@ -1310,8 +1310,10 @@ five).
   image without alt text, an undocumented export, a `fetch`, `window.fetch`, `navigator.sendBeacon`
   or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type
   errors, an import out of `src/api/` and a cycle, an unused file, an untested branch, a size limit
-  of 1 B, an 80-token copy), runs the gate and requires it to fail with the expected message; one
-  probe checks the other way round, that a `fetch` inside `src/api/` is accepted. The nine ESLint
+  of 1 B, an 80-token copy), runs the gate and requires it to fail with the expected message; three
+  probes check the other way round: that a `fetch` inside `src/api/` is accepted, that a file whose
+  branches are all tested keeps the coverage ratchet at its baseline, and that a file no test loads
+  is still listed as uncovered by the project's own coverage settings. The nine ESLint
   probes share one ESLint run (one run takes 15 s locally, about 23 s in CI; nine runs made the
   proofs take 290 s of what was then one `ui` job, #586): all their files are written at once and each probe must
   find its rules in the lines ESLint prints about its own files. ESLint runs with `--max-warnings
@@ -1320,8 +1322,15 @@ five).
   (`gate-verdict.test.ts`). When a step before a gate fails (the coverage probe's `test:coverage`,
   say), the probe's message ends with that step's exit status and the end of its output. It prints
   one line per probe and fails naming every gate that got its probe wrong: fix the gate, not the
-  probe. Each gate's run may take 360 s (`TIMEOUT_MS`), since the coverage probe runs the whole
-  Vitest suite (182 s in CI on 2026-11-17); a run cut by the timeout is judged a leak. It refuses a `$GATE_PROBE_DIR` that is not empty and lacks its marker file
+  probe. Each gate's run may take 180 s (`TIMEOUT_MS`); a run cut by the timeout is judged a leak. The coverage probes do not run the whole Vitest suite (264-273 s in CI on
+  2026-11-25, past the 360 s this was under load, #822). The ratchet probe plants a file with
+  enough covered lines that one untested branch lands the total between the ratchet's floor (90)
+  and its baseline (100), runs Vitest with coverage over `src/probe/` only (about a second) and
+  requires `below the baseline`; the same file fully tested must pass. A third probe runs the
+  project's own coverage settings, no override, over `src/probe/` with a planted file nothing
+  imports and requires the summary to list it with no covered line, which fails when
+  `coverage.include` is narrowed. The whole suite with coverage stays in `npm run check` (the
+  `ui (gates)` job). It refuses a `$GATE_PROBE_DIR` that is not empty and lacks its marker file
   `.lakana-ui-gate-probe`, so it never empties a directory it did not make. It needs a build (`npm
   --prefix ui run build`) and `npm ci --ignore-scripts --prefix tools/jscpd`. The axe gate's proof
   is the smoke test's positive control (an image without alt text must be found); the audits prove

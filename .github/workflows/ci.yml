@@ -222,8 +222,8 @@ jobs:
         run: npm --prefix ui run size
 
   # `prove-gates` on a build of its own: each gate of `ui (gates)` still fails on a violation. It
-  # runs ESLint, Vitest with coverage and the rest once more in a scratch copy, so it takes about
-  # as long as the gates themselves.
+  # runs ESLint, tsc and the rest once more in a scratch copy, the coverage gate on one small
+  # file instead of the whole suite (#822), so it takes about a minute.
   ui-gate-proofs:
     name: ui (gate proofs)
     needs: changes
