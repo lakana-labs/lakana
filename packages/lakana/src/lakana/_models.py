@@ -1588,6 +1588,10 @@ class ProviderLink:
         When they last signed in through the provider.
     token_window_ends_at
         Until when their personal API tokens work without another provider sign-in.
+    stale
+        Whether the link is to an issuer the server no longer uses, or OIDC sign-in is off: it
+        signs nobody in, but still holds their tokens to the window. `False` from a server that
+        does not say.
     """
 
     issuer: str
@@ -1595,6 +1599,7 @@ class ProviderLink:
     name: str | None
     last_sign_in_at: datetime | None
     token_window_ends_at: datetime | None
+    stale: bool = False
 
 
 @dataclass(frozen=True)

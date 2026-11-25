@@ -21,8 +21,10 @@ from lakana_core.ci_oidc.verification import IdTokenVerifier
 from lakana_core.config import warn_about_tokens_in_url_paths
 from lakana_core.db import create_engine
 from lakana_core.grants.admin import ineffective_grants_warning
-from lakana_core.grants.break_glass import address_change_warning, record_rp_id
+from lakana_core.grants.break_glass import address_change_warning, holds, record_rp_id
+from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.oidc_links import linked_count, unlinked_admin_count
+from lakana_core.identity.provider_issuer import issuer_change_warning, record_oidc_issuer
 from lakana_core.identity.sessions import utc_now
 from lakana_core.oidc.provider import OidcProvider
 from lakana_core.readiness import probe_storage, read_database
@@ -219,6 +221,32 @@ def _record_relying_party(session: Session, rp_id: str) -> None:
         logger.warning(warning)
 
 
+def _record_provider_issuer(session: Session, issuer: str | None) -> None:
+    """Record the issuer links count for, and warn when the change stopped some from counting.
+
+    A link to another issuer counts as no link (`lakana_core.identity.provider_issuer`), so the
+    people linked to the old one sign in with a passkey again until they link again.
+
+    Parameters
+    ----------
+    session
+        Database session; committed.
+    issuer
+        `LAKANA_OIDC__ISSUER`; `None` while OIDC sign-in is off.
+    """
+    change = record_oidc_issuer(session, issuer)
+    if change is None:
+        return
+    warning = issuer_change_warning(
+        change,
+        linked=linked_count(session),
+        unlinked_admins=unlinked_admin_count(session),
+        rule_holds=holds(session, active_instance_admin_ids(session)),
+    )
+    if warning is not None:
+        logger.warning(warning)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the Lakana control-plane application.
 
@@ -370,6 +398,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                     token_file=resolved_settings.bootstrap_token_file,
                 )
+                # The issuer first: the relying party's warning counts the people linked to it.
+                _record_provider_issuer(session, resolved_settings.oidc.issuer)
                 if resolved_settings.ui.enabled or resolved_settings.ui.public_url is not None:
                     _record_relying_party(session, resolved_settings.public_origin().host)
             if token is not None:

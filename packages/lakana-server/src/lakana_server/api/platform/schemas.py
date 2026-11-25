@@ -2251,6 +2251,10 @@ class ProviderLinkOut(BaseModel):
         When they last signed in through the provider.
     token_window_ends_at
         Until when their personal API tokens work without another provider sign-in.
+    stale
+        Whether the link is to an issuer this server no longer uses, or OIDC sign-in is off:
+        it signs nobody in (the person signs in with a passkey and may link again), but their
+        personal API tokens still stop at `token_window_ends_at`. An administrator may unlink it.
     """
 
     issuer: str
@@ -2258,6 +2262,7 @@ class ProviderLinkOut(BaseModel):
     name: str | None
     last_sign_in_at: datetime | None
     token_window_ends_at: datetime | None
+    stale: bool = False
 
 
 class PrincipalOut(BaseModel):
@@ -2279,8 +2284,9 @@ class PrincipalOut(BaseModel):
         or through a group. Such a person is recovered only by the server operator. `null`
         unless the caller is an administrator (the `ADMIN` role on the instance).
     provider_link
-        The person's link to the identity provider; `null` when they are not linked, or for a
-        caller who is neither an administrator nor the person.
+        The person's link to the identity provider; `null` when they have none, or for a
+        caller who is neither an administrator nor the person. A link to an issuer the server no
+        longer uses is there, with `stale` true.
     """
 
     name: str

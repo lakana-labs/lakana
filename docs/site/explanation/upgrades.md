@@ -893,6 +893,23 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
   says how many administrators can still sign in with a passkey; at none, issue one a recovery
   link with the bootstrap token (`lakana recovery create NAME`) and have them register a passkey at
   the new address. Run every server of one database with the same public address.
+- Changing `LAKANA_OIDC__ISSUER`, or removing it, unlinks everyone linked to the old issuer until
+  they link again: their passkeys sign them in again and they link to the new provider from their
+  profile (someone without a passkey needs a recovery link). Their personal API tokens keep the
+  token window and stop at its end unless they link again. With OIDC sign-in off there is nothing
+  to link to: to let someone use tokens again, an administrator unlinks them (`lakana principal
+  unlink-provider NAME`, or **Unlink** on their page, which shows the link as no longer
+  configured). That deletes their passkeys and revokes their tokens, so they come back with a
+  recovery link, add a passkey and create new tokens, which have no window; a sole administrator
+  is unlinked by the server operator with the bootstrap token. **Deactivate in
+  Lakana (`lakana principal deactivate NAME`) anyone who left at the old provider**: their passkeys
+  sign them in again. The links are kept, not deleted: setting the old issuer back counts them
+  again. The server records its issuer at every start (the instance setting `sign_in.oidc_issuer`,
+  no migration) and writes one `SIGN_IN_SETTINGS_CHANGED` event with `detail.source` `start-up`,
+  the issuers in `before` and `after` (`first_record: true` instead of `before` on a database's
+  first record) and `links_not_counted`; its start-up log names the people concerned. Run every
+  server of one database with the same issuer: the last one started decides. A new link that
+  replaces an old one records it in `PRINCIPAL_OIDC_LINKED`'s `detail.replaces`.
 - `SIGN_IN_SETTINGS_CHANGED` events record `token_provider_window_days` in `before` and `after`
   from now on.
 - The web interface offers the provider once `LAKANA_OIDC__ISSUER` is set: "Sign in with

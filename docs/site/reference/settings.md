@@ -190,7 +190,7 @@ in **Settings → Configuration**, with `lakana configuration` or
 
 | Variable | Type | Default | Read by | Description |
 |---|---|---|---|---|
-| `LAKANA_OIDC__ISSUER` | text | not set | server | The identity provider's issuer URL, exactly as its ID tokens name it in iss, such as `https://idp.example/realms/lakana` for a Keycloak realm. A port is allowed; no trailing slash. Empty (the default) turns OIDC sign-in off. |
+| `LAKANA_OIDC__ISSUER` | text | not set | server | The identity provider's issuer URL, exactly as its ID tokens name it in iss, such as `https://idp.example/realms/lakana` for a Keycloak realm. A port is allowed; no trailing slash. Empty (the default) turns OIDC sign-in off. People are linked to this issuer: after a change, or with it removed, everyone linked to the old one counts as unlinked until they link again (their passkeys sign them in meanwhile, and their API tokens stop at the end of the token window); setting the old issuer back counts their links again. Deactivate in Lakana anyone who left at the old provider: the start-up log names the people concerned. |
 | `LAKANA_OIDC__CLIENT_ID` | text | not set | server | The client id the provider gave Lakana. Required with an issuer. |
 | `LAKANA_OIDC__CLIENT_SECRET` | secret text | not set | server | The client secret the provider gave Lakana; sent only to the provider's token endpoint, never shown or logged. Required with an issuer. |
 | `LAKANA_OIDC__SCOPES` | list | `['openid', 'profile', 'email']` | server | The scopes Lakana asks for, as a space- or comma-separated list or a JSON list (default `openid profile email`). It must contain `openid`. Lakana reads only the ID token's `sub`, and `email` and `name` to show who is linked. |

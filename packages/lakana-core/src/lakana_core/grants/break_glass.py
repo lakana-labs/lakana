@@ -44,6 +44,7 @@ from datetime import UTC, datetime
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
+from lakana_core.identity.provider_issuer import linked_clause, unlinked_clause
 from lakana_core.models import InstanceSetting, Passkey, Principal
 
 RP_ID_KEY = "sign_in.rp_id"
@@ -146,7 +147,7 @@ def unlinked_admin_ids(
         session.execute(
             select(Principal.id).where(
                 Principal.id.in_(admin_ids),
-                Principal.oidc_subject.is_(None),
+                unlinked_clause(session),
                 exists(working),
             )
         ).scalars()
@@ -166,13 +167,14 @@ def _linked_ids(session: Session, ids: Collection[uuid.UUID]) -> set[uuid.UUID]:
     Returns
     -------
     set of uuid.UUID
-        Those of `ids` with a provider identity.
+        Those of `ids` linked to the provider (`lakana_core.identity.provider_issuer`): a
+        stored link to another issuer does not count.
     """
     if not ids:
         return set()
     return set(
         session.execute(
-            select(Principal.id).where(Principal.id.in_(ids), Principal.oidc_subject.is_not(None))
+            select(Principal.id).where(Principal.id.in_(ids), linked_clause(session))
         ).scalars()
     )
 

@@ -234,8 +234,13 @@ export async function stubProvider(
  *
  * @param page - The page.
  * @param world - The stubbed server's state, to record the unlink in.
+ * @param stale - True for a link to an issuer the server no longer uses (#809).
  */
-export async function stubLinkedKim(page: Page, world: ProviderWorld): Promise<void> {
+export async function stubLinkedKim(
+  page: Page,
+  world: ProviderWorld,
+  stale = false,
+): Promise<void> {
   let unlinked = false;
   await page.route(
     (url) => url.pathname === "/api/v1/principals/kim",
@@ -250,11 +255,15 @@ export async function stubLinkedKim(page: Page, world: ProviderWorld): Promise<v
           provider_link: unlinked
             ? null
             : {
-                issuer: "https://example.okta.com/oauth2/default",
+                issuer: stale
+                  ? "https://old-idp.example.com/realms/lakana"
+                  : "https://example.okta.com/oauth2/default",
                 email: "kim.lindqvist@example.org",
                 name: "Kim Lindqvist",
                 last_sign_in_at: "2026-11-24T08:30:00Z",
-                token_window_ends_at: "2026-12-24T08:30:00Z",
+                // A stale link's window is far ahead, so "work until" does not age into "stopped".
+                token_window_ends_at: stale ? "2099-12-24T08:30:00Z" : "2026-12-24T08:30:00Z",
+                stale,
               },
         },
       }),

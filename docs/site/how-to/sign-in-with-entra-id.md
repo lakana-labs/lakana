@@ -93,6 +93,12 @@ company's name works as well; without the setting the button names the issuer's 
 [settings reference](../reference/settings.md#lakana_oidc__) has every `LAKANA_OIDC__` setting with
 its default.
 
+People are linked to this issuer. Moving to another tenant changes it: everyone linked to the old
+tenant then signs in with their passkeys and links again, their API tokens stop at the end of the
+token window until they do, and anyone who left at the old tenant has to be deactivated in Lakana
+([Changing the issuer later](sign-in-with-keycloak.md#changing-the-issuer-later) has the details,
+which are the same for Entra ID).
+
 The bundle's `compose.yaml` passes the server only the variables it names, so add the four to
 the `server` service's `environment:`, and keep every entry that is there:
 

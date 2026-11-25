@@ -42,10 +42,19 @@ from lakana_core.identity.oidc_links import (
 )
 from lakana_core.identity.passkeys import PasskeyService
 from lakana_core.identity.principals import PrincipalService
+from lakana_core.identity.provider_issuer import (
+    OIDC_ISSUER_KEY,
+    IssuerChange,
+    record_oidc_issuer,
+    recorded_issuer,
+)
 from lakana_core.identity.sessions import SessionService
 from lakana_core.models import (
+    AuditEvent,
+    AuditEventType,
     BrowserSession,
     Grant,
+    InstanceSetting,
     Passkey,
     Principal,
     PrincipalType,
@@ -973,3 +982,146 @@ def test_removing_a_passkey_while_its_person_is_unlinked(
     Session.commit(unlinking)
     unlinking.close()
     assert racing.finish().startswith("not found: ")
+
+
+# -- the issuer change (#809) ---------------------------------------------------------------------
+
+_NEW_ISSUER = "https://login.example.org/realms/lakana"
+
+
+@pytest.fixture
+def recorded(engine: Engine) -> Iterator[None]:
+    """Let a test record issuers, and forget them afterwards so the other tests see none.
+
+    Parameters
+    ----------
+    engine
+        The engine.
+
+    Yields
+    ------
+    None
+        While the test runs.
+    """
+    yield
+    with Session(engine) as session:
+        row = session.get(InstanceSetting, OIDC_ISSUER_KEY)
+        if row is not None:
+            session.delete(row)
+            session.commit()
+
+
+def _relinking(principal_id: uuid.UUID, subject: str) -> Callable[[Session], None]:
+    """Build one link to the new issuer that leaves its change uncommitted.
+
+    Parameters
+    ----------
+    principal_id
+        The person to link.
+    subject
+        The ``sub`` at the new issuer.
+
+    Returns
+    -------
+    Callable[[Session], None]
+        The link, run in the session it is given.
+    """
+
+    def run(session: Session) -> None:
+        """Link in `session` without committing.
+
+        Parameters
+        ----------
+        session
+            The link's own session.
+        """
+        identity = ProviderIdentity(
+            issuer=_NEW_ISSUER, subject=subject, email=None, name=None, auth_time=None
+        )
+        OidcLinkService(session, AllowAllAuthorization(), bootstrap_name="admin").link(
+            principal_id, identity, via="profile"
+        )
+
+    return run
+
+
+def test_two_finishes_replacing_one_stale_link_at_once(
+    engine: Engine, actor: PrincipalRef, recorded: None
+) -> None:
+    """The conditional update's three-way `unlinked_clause` on Postgres: one replaces it."""
+    with Session(engine) as session:
+        record_oidc_issuer(session, _ISSUER)
+        alice = _person(session, actor, admin=False)
+        alice_id = alice.id
+        _linking(alice_id, f"old-{alice_id.hex}")(session)
+        session.commit()
+        record_oidc_issuer(session, _NEW_ISSUER)
+    first, second = f"a-{alice_id.hex}", f"b-{alice_id.hex}"
+    with Session(engine) as session:
+        _relinking(alice_id, first)(session)
+        racing = _Second(engine, _relinking(alice_id, second))
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == "already_linked"
+    with Session(engine) as session:
+        row = session.get(Principal, alice_id)
+        assert row is not None
+        assert (row.oidc_issuer, row.oidc_subject) == (_NEW_ISSUER, first)
+        replaces = [
+            d.get("replaces")
+            for d in session.execute(
+                select(AuditEvent.detail).where(
+                    AuditEvent.event_type == AuditEventType.PRINCIPAL_OIDC_LINKED,
+                    AuditEvent.principal_id == alice_id,
+                )
+            ).scalars()
+        ]
+        assert {"iss": _ISSUER, "sub": f"old-{alice_id.hex}"} in replaces
+
+
+def test_recording_the_issuer_waits_for_the_admin_lock_and_reads_afresh(
+    engine: Engine, recorded: None
+) -> None:
+    """Two servers starting at once: the second reads what the first recorded under the lock."""
+    with Session(engine) as session:
+        record_oidc_issuer(session, _ISSUER)
+    seen: list[IssuerChange | None] = []
+
+    def record(other: Session) -> None:
+        """Read the recorded issuer into the session's cache, then record the new one.
+
+        Parameters
+        ----------
+        other
+            The second server's session.
+        """
+        # Held, so the identity map keeps the copy read before the lock.
+        cached = other.get(InstanceSetting, OIDC_ISSUER_KEY)
+        assert cached is not None and recorded_issuer(other) == _ISSUER
+        seen.append(record_oidc_issuer(other, _NEW_ISSUER))
+
+    with Session(engine) as session:
+        lock_admin_count(session)
+        row = session.get(InstanceSetting, OIDC_ISSUER_KEY)
+        assert row is not None
+        row.value = {"issuer": None}
+        session.flush()
+        racing = _Second(engine, record)
+        racing.blocked_or_done()
+        session.commit()
+    assert racing.finish() == _DONE
+    [change] = seen
+    assert change is not None and change.before is None and change.after == _NEW_ISSUER
+    with Session(engine) as session:
+        assert recorded_issuer(session) == _NEW_ISSUER
+        details = session.execute(
+            select(AuditEvent.detail)
+            .where(AuditEvent.event_type == AuditEventType.SIGN_IN_SETTINGS_CHANGED)
+            .order_by(AuditEvent.occurred_at.desc())
+            .limit(1)
+        ).scalars()
+        [last] = list(details)
+        assert (last["before"], last["after"]) == (
+            {"oidc_issuer": None},
+            {"oidc_issuer": _NEW_ISSUER},
+        )

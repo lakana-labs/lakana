@@ -29,7 +29,9 @@ from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.deps import PASSKEY_FIRST_ROUTES, TOKEN_ONLY_ROUTES
 from lakana_server.settings import Settings, UiConfig
+from tests.api.platform.test_oidc_sign_in import _app as oidc_app
 from tests.conftest import _TEST_MASTER_KEY, AUTH_HEADER, PUBLIC, write_ui_dist
+from tests.oidc_fake import ISSUER as OIDC_ISSUER
 from tests.server_test_helpers import session_headers, signed_in
 from tests.test_session_parity import _all_operations, _route_app
 
@@ -188,14 +190,29 @@ def test_a_refused_passkey_sign_in_answers_401(client: TestClient, alice: dict[s
 
 
 def test_a_linked_persons_passkey_sign_in_is_403_and_audited(
-    client: TestClient, alice: dict[str, str]
+    settings: Settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Once linked to the identity provider, a passkey that verifies still signs nobody in."""
-    auth, _ = _register(client, "alice", alice)
+    app = oidc_app(settings, tmp_path, monkeypatch)
+    with TestClient(app, base_url=PUBLIC, headers={"Origin": PUBLIC}) as client:
+        _passkey_sign_in_of_a_linked_person(client)
+
+
+def _passkey_sign_in_of_a_linked_person(client: TestClient) -> None:
+    """Link alice, who has a passkey, to the configured provider and sign in with the passkey.
+
+    Parameters
+    ----------
+    client
+        A started client of an app with OIDC sign-in on.
+    """
+    _person(client, "alice")
+    name, value, csrf = signed_in(client, "alice", via="invite")
+    auth, _ = _register(client, "alice", session_headers(name, value, csrf))
     app = cast(FastAPI, client.app)
     with Session(app.state.engine) as session:
         person = session.execute(select(Principal).where(Principal.name == "alice")).scalar_one()
-        person.oidc_issuer, person.oidc_subject = "https://idp.example.com", "alice"
+        person.oidc_issuer, person.oidc_subject = OIDC_ISSUER, "alice"
         session.commit()
     options = client.post("/api/v1/sign-in/passkey/options").json()
     r = client.post("/api/v1/sign-in/passkey", json=_answer(auth, options))

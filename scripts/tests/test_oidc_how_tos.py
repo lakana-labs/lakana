@@ -410,3 +410,25 @@ def test_the_other_quoted_sentences_are_the_code_s() -> None:
     warning = _ui_text("settings/signIn.en.json", "provider.warningWord")
     oneleft = _ui_text("settings/signIn.en.json", "provider.oneLeft")
     assert f"{warning} {oneleft}" in _page("sign-in-with-keycloak.md")
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        "sign-in-with-keycloak.md",
+        "bring-your-team-onto-single-sign-on.md",
+        "../explanation/upgrades.md",
+    ],
+)
+def test_the_advice_for_tokens_with_sso_off_says_what_an_unlink_does(page: str) -> None:
+    """Review of #814: an unlink revokes the tokens and deletes the passkeys, it keeps none.
+
+    With single sign-on off a stale link's tokens stop at the window and only an unlink frees
+    them; the page must say that it takes the passkeys and tokens, that a recovery link and new
+    tokens follow, and how a sole administrator, who cannot unlink themselves, gets there.
+    """
+    text = " ".join((HOW_TO / page).read_text().split())
+    assert "keep using tokens" not in text
+    assert r"deletes their passkeys and revokes their tokens" in text, page
+    assert "recovery link" in text and "which have no window" in text, page
+    assert "lakana principal unlink-provider NAME" in text and "bootstrap token" in text, page

@@ -322,6 +322,30 @@ for (const theme of ["light", "dark"] as const) {
       expect(unexpected(errors)).toEqual([]);
     });
 
+    test("a stale link on a person, with Unlink", async ({ page }) => {
+      const errors = consoleErrors(page);
+      const world = await stubProvider(page);
+      await stubLinkedKim(page, world, true);
+      await page.goto("/settings/access/people/kim");
+
+      const panel = page.getByRole("region", {
+        name: "Linked to a provider that is no longer configured",
+      });
+      await expect(panel).toContainText("kim was linked to old-idp.example.com");
+      await expect(panel).toContainText("Personal API tokens work until");
+      expect(await violations(page)).toEqual([]);
+      await tabTo(page, panel.getByRole("button", { name: "Unlink" }));
+      await page.keyboard.press("Enter");
+      const dialog = page.getByRole("dialog", { name: "Unlink kim from old-idp.example.com?" });
+      await expect(dialog).toContainText("To offboard someone, deactivate them instead.");
+      await tabTo(page, dialog.getByRole("button", { name: "Unlink" }));
+      await page.keyboard.press("Enter");
+      await expect(panel).toBeHidden();
+      expect(world.sent).toContain("DELETE /api/v1/principals/kim/oidc-link");
+      expect(unstubbed(world)).toEqual([]);
+      expect(unexpected(errors)).toEqual([]);
+    });
+
     test("a linked person's Create token goes through the provider and back", async ({ page }) => {
       const errors = consoleErrors(page);
       const world = await stubProvider(page, { linked: true });

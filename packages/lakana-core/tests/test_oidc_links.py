@@ -33,13 +33,13 @@ from lakana_core.identity.groups import GroupService
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_links import (
     OidcLinkService,
-    is_linked,
     linked_count,
     unlinked_admin_count,
 )
 from lakana_core.identity.passkeys import PasskeyService
 from lakana_core.identity.pats import PatService
 from lakana_core.identity.principals import PrincipalService
+from lakana_core.identity.provider_issuer import is_linked
 from lakana_core.identity.sessions import SessionService
 from lakana_core.models import (
     AuditEvent,
@@ -244,7 +244,7 @@ def test_link_sets_the_identity_and_audits(world: World) -> None:
     assert (alice.oidc_issuer, alice.oidc_subject) == (ISSUER, "s-alice")
     assert (alice.oidc_email, alice.oidc_name) == ("s-alice@example.com", "s-alice")
     assert alice.last_provider_sign_in_at == START
-    assert is_linked(alice)
+    assert is_linked(world.session, alice)
     assert linked_count(world.session) == 1
     [event] = world.events(AuditEventType.PRINCIPAL_OIDC_LINKED)
     assert event == {"principal": "alice", "iss": ISSUER, "sub": "s-alice", "via": "invite"}
@@ -257,7 +257,7 @@ def test_bootstrap_principal_can_never_be_linked(world: World) -> None:
     with pytest.raises(OidcSignInRefused) as refused:
         world.links.link(bootstrap.id, identity(), via="profile")
     assert refused.value.reason == "cannot_link_operator"
-    assert not is_linked(bootstrap)
+    assert not is_linked(world.session, bootstrap)
 
 
 def test_a_service_account_can_never_be_linked(world: World) -> None:
@@ -416,7 +416,7 @@ def test_unlink_deletes_passkeys_revokes_tokens_ends_sessions(world: World) -> N
     carol, ann = _linked_with_everything(world)
     world.links.unlink(ann, "carol")
     world.session.refresh(carol)
-    assert not is_linked(carol)
+    assert not is_linked(world.session, carol)
     assert carol.oidc_email is None and carol.last_provider_sign_in_at is None
     assert (
         world.session.execute(select(Passkey).where(Passkey.principal_id == carol.id)).all() == []
@@ -458,7 +458,7 @@ def test_unlink_needs_step_up_and_admin(world: World) -> None:
     dave = world.person("dave")
     with pytest.raises(PermissionDenied):
         world.links.unlink(world.signed_in(dave), "carol")
-    assert is_linked(carol)
+    assert is_linked(world.session, carol)
     with pytest.raises(NotFoundError):
         world.links.unlink(ann, "nobody")
 
@@ -489,7 +489,7 @@ def test_operator_recovery_unlink_notifies_every_admin(world: World) -> None:
     )
     world.links.unlink_for_operator_recovery(ann, link_id, operator=operator)
     world.session.commit()
-    assert not is_linked(ann)
+    assert not is_linked(world.session, ann)
     [event] = world.events(AuditEventType.PRINCIPAL_OIDC_UNLINKED)
     assert event == {
         "principal": "ann",

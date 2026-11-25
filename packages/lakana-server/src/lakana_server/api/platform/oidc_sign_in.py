@@ -55,10 +55,10 @@ from lakana_core.identity.oidc_flows import (
 from lakana_core.identity.oidc_links import (
     OidcLinkService,
     in_browser_session,
-    is_linked,
     linked_principal_for_sign_in,
 )
 from lakana_core.identity.passkeys import OPEN_BODY_LIMIT
+from lakana_core.identity.provider_issuer import is_linked
 from lakana_core.identity.sessions import (
     STEP_UP_WINDOW,
     SessionService,
@@ -738,7 +738,7 @@ def start_oidc_step_up(
     _provider(request)
     context = in_browser_session(principal)
     person = session.get(Principal, principal.id)
-    if person is None or not is_linked(person):
+    if person is None or not is_linked(session, person):
         raise ConflictError(NOT_LINKED_STEP_UP)
     return _open_flow(
         request,
@@ -881,7 +881,10 @@ def _confirm(
     person = session.get(Principal, principal.id)
     assert person is not None  # nosec B101 -- a verified session's person exists
     context = in_browser_session(principal)
-    if (person.oidc_issuer, person.oidc_subject) != (found.issuer, found.subject):
+    if not is_linked(session, person) or (person.oidc_issuer, person.oidc_subject) != (
+        found.issuer,
+        found.subject,
+    ):
         raise OidcSignInRefused("identity_mismatch")
     if not _fresh(found, started_at):
         raise OidcSignInRefused("auth_too_old")

@@ -182,8 +182,10 @@ Successful sign-ins are `SIGN_IN_OIDC`, links and unlinks `PRINCIPAL_OIDC_LINKED
 
 ## Changes that affect everyone linked
 
-- **A new issuer** (another realm, another tenant, a renamed host) leaves everyone linked to the
-  old one, unable to sign in until an administrator unlinks them and sends a recovery link:
+- **A new issuer** (another realm, another tenant, a renamed host) unlinks everyone linked to the
+  old one until they link again: they sign in with their passkeys and link from their profile,
+  their API tokens stop at the end of the token window until they do, and anyone who left at the
+  old provider has to be deactivated in Lakana, as their passkeys work again:
   [Changing the issuer later](sign-in-with-keycloak.md#changing-the-issuer-later).
 - **A new public address** (`LAKANA_UI__PUBLIC_URL`) makes the passkeys of the unlinked
   administrators unusable, as for everyone
@@ -193,5 +195,12 @@ Successful sign-ins are `SIGN_IN_OIDC`, links and unlinks `PRINCIPAL_OIDC_LINKED
 - **Turning single sign-on off** means removing every `LAKANA_OIDC__` line from the `server`
   service's `environment:` in `compose.yaml` as well as from `.env`: a line left in `compose.yaml`
   passes an empty value, and the server does not start with any empty `LAKANA_OIDC__` setting
-  but `LAKANA_OIDC__ALLOW_HOSTS`. It does not give linked people their passkeys back: unlink them
-  first and send recovery links.
+  but `LAKANA_OIDC__ALLOW_HOSTS`. Everyone linked then signs in with their passkeys again (deactivate
+  first anyone who should not), and someone without a passkey needs a recovery link. Their API
+  tokens stop at the end of the token window and stay stopped, as there is nothing to link to.
+  To let someone use tokens again, unlink them as in
+  [Take someone off single sign-on](#take-someone-off-single-sign-on): that deletes their
+  passkeys and revokes their tokens, so send them a recovery link, and they add a passkey and
+  create new tokens, which have no window. A sole administrator cannot unlink themselves: the
+  server operator runs `lakana principal unlink-provider NAME` with the bootstrap token and then
+  `lakana recovery create NAME`.
