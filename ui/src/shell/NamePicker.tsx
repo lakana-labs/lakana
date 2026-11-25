@@ -259,13 +259,18 @@ export function NamePicker<T>({
   // emptied after an add, a filter from the address) shows none and opens no list.
   const found: Found<T> =
     asked.state !== "idle" && asked.text === value ? asked : { state: "idle" };
-  // The chosen suggestion, with the search it came from: another search (another environment's
-  // tables, groups after people) chose nothing.
+  // The chosen suggestion, with the search it came from and the name it put in the field:
+  // another search (another environment's tables, groups after people) chose nothing, and nor
+  // does a field whose text changed since (emptied from outside after an add).
   const [selected, setSelected] = useState<{
     readonly key: Key;
+    readonly name: string;
     readonly search: NameSearch<T> | null;
   } | null>(null);
-  const selectedKey = selected !== null && selected.search === search ? selected.key : null;
+  const selectedKey =
+    selected !== null && selected.search === search && selected.name === value
+      ? selected.key
+      : null;
   const open = useRef(false);
   const openAtKey = useRef(false);
   const pickedByKey = useRef(false);
@@ -280,7 +285,7 @@ export function NamePicker<T>({
     /* v8 ignore next -- defensive: see above */
     if (choice === undefined) return;
     pickedByKey.current = true;
-    setSelected({ key: choice.key, search });
+    setSelected({ key: choice.key, name: choice.name, search });
     settle(choice);
     onChange(choice.name);
     onPick?.(choice);

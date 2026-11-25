@@ -429,6 +429,65 @@ describe("NamePicker", () => {
     expect(held()).toBe("mariana");
   });
 
+  it("opens the list on Arrow Down once the field is emptied from outside after a choice", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    /**
+     * The picker in a form that empties it after an add, as Add a member does.
+     *
+     * @returns The form.
+     */
+    function Emptied(): JSX.Element {
+      const [value, setValue] = useState("");
+      return (
+        <div>
+          <NamePicker
+            label="Person or service account"
+            value={value}
+            onChange={setValue}
+            search={search}
+            noMatch={(text) => `No principal named “${text}”.`}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setValue("");
+            }}
+          >
+            Add
+          </button>
+        </div>
+      );
+    }
+    render(<Emptied />);
+    const field = screen.getByRole("combobox");
+    await user.type(field, "mar");
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria"), aChoice("mariana")], more: false });
+    });
+    await user.click((await screen.findAllByRole("option"))[0] as HTMLElement);
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(field).toHaveValue("");
+
+    await user.click(field);
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    expect(calls[1]?.text).toBe("");
+    act(() => {
+      calls[1]?.answer({ choices: [aChoice("maria"), aChoice("mariana")], more: false });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option")).toHaveLength(2);
+    });
+    expect(field).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("puts the exact name of a chosen suggestion in the field and hands it over", async () => {
     const user = userEvent.setup();
     const { search, calls } = heldSearch();
