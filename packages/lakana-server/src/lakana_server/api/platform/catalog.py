@@ -137,11 +137,10 @@ def list_tables(
     the sort key comes last. A search text matches the same texts as the environment search,
     only in tables you may read; `capped` says it stopped early, at 5,000 readable candidates, so
     narrow it. `name` matches a table's own name alone, ignoring the case of A to Z (a name
-    picker, such as the table of a row filter, asks with it), under the same rights. Answers 404
-    when
-    `environment` does not exist (to someone who may read environments; anyone else gets an
-    empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`, `name`,
-    `model_kind`, `lang` or `cursor` that is not valid.
+    picker, such as the table of a row filter, asks with it), under the same rights. Answers
+    404 when `environment` does not exist (to someone who may read environments; anyone else
+    gets an empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`,
+    `name`, `model_kind`, `lang` or `cursor` that is not valid.
 
     Parameters
     ----------

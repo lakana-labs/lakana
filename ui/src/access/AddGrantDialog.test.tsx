@@ -93,7 +93,7 @@ describe("AddGrantDialog", () => {
     await user.keyboard("{ArrowDown}");
 
     expect(await screen.findByRole("option", { name: "marketing" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "maria" })).toBeNull();
+    expect(screen.queryByRole("option", { name: /^maria/ })).toBeNull();
     await user.keyboard("{Enter}");
     expect(name).toHaveValue("marketing");
     expect(

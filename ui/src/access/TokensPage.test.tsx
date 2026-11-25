@@ -240,7 +240,7 @@ describe("TokensPage", () => {
     const field = await screen.findByRole("combobox", { name: "Owner" });
 
     await shell.user.type(field, "mar");
-    await shell.user.click(await screen.findByRole("option", { name: "marek" }));
+    await shell.user.click(await screen.findByRole("option", { name: "marek, Service account" }));
 
     await waitFor(() => {
       expect(shell.router.state.location.search).toBe("?owner=marek");

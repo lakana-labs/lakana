@@ -257,7 +257,13 @@ export function NamePicker<T>({
   // emptied after an add, a filter from the address) shows none and opens no list.
   const found: Found<T> =
     asked.state !== "idle" && asked.text === value ? asked : { state: "idle" };
-  const [selected, setSelected] = useState<Key | null>(null);
+  // The chosen suggestion, with the search it came from: another search (another environment's
+  // tables, groups after people) chose nothing.
+  const [selected, setSelected] = useState<{
+    readonly key: Key;
+    readonly search: NameSearch<T> | null;
+  } | null>(null);
+  const selectedKey = selected !== null && selected.search === search ? selected.key : null;
   const open = useRef(false);
   const openAtKey = useRef(false);
   const pickedByKey = useRef(false);
@@ -265,10 +271,11 @@ export function NamePicker<T>({
   const line = stateLine(t, found, noMatch);
   const shown = markedName(value);
   const choose = (key: Key | null): void => {
-    // React Aria offers only the listed choices, so the key is one of them.
-    const choice = choices.find((one) => one.key === key) as NameChoice<T>;
+    // React Aria also sends null when a list is left without a choice (a custom value).
+    const choice = choices.find((one) => one.key === key);
+    if (choice === undefined) return;
     pickedByKey.current = true;
-    setSelected(key);
+    setSelected({ key: choice.key, search });
     settle(choice);
     onChange(choice.name);
     onPick?.(choice);
@@ -279,7 +286,7 @@ export function NamePicker<T>({
         className="field"
         items={choices}
         inputValue={value}
-        value={found.state === "done" ? selected : null}
+        value={found.state === "done" ? selectedKey : null}
         allowsCustomValue
         allowsEmptyCollection={search !== null && found.state !== "idle"}
         isRequired={isRequired}
@@ -339,9 +346,14 @@ export function NamePicker<T>({
                 id={choice.key}
                 className="menu-item"
                 // The raw name goes into the field once chosen; the name a screen reader speaks
-                // (VoiceOver takes it for React Aria's announcements) shows hidden characters.
+                // (VoiceOver takes it for React Aria's announcements) shows hidden characters,
+                // with the quiet word that tells two equal names apart (a table's namespace).
                 textValue={choice.name}
-                aria-label={markedName(choice.name)}
+                aria-label={
+                  choice.detail === null
+                    ? markedName(choice.name)
+                    : `${markedName(choice.name)}, ${markedName(choice.detail)}`
+                }
               >
                 <span className="name-picker-name">
                   <VisibleText text={choice.name} name />

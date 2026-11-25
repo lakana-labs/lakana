@@ -196,6 +196,103 @@ describe("NamePicker", () => {
     expect(screen.queryAllByRole("option")).toEqual([]);
   });
 
+  it("keeps the chosen name when the same search answers again without it and the list is left", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+    const field = screen.getByRole("combobox");
+    await user.type(field, "mar");
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await user.click(await screen.findByRole("option"));
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    act(() => {
+      calls[1]?.answer({ choices: [aChoice("mariana")], more: false });
+    });
+    // The chosen one is gone from the list, so React Aria closes it, and hands over no choice
+    // (null) once the field is left.
+    await waitFor(() => {
+      expect(field).toHaveAttribute("aria-expanded", "false");
+    });
+    await user.click(document.body);
+
+    expect(held()).toBe("maria");
+    expect(field).toHaveValue("maria");
+  });
+
+  it("names two tables of one name apart by their namespaces", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+
+    await user.type(screen.getByRole("combobox"), "ord");
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({
+        choices: [
+          { key: "gold.orders", name: "orders", detail: "gold", data: null },
+          { key: "silver.orders", name: "orders", detail: "silver", data: null },
+        ],
+        more: false,
+      });
+    });
+
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
+      "orders, gold",
+      "orders, silver",
+    ]);
+  });
+
+  it("keeps the chosen name when a new search's list is left, without a choice of its own", async () => {
+    const user = userEvent.setup();
+    const first = heldSearch();
+    const second = heldSearch();
+    const errors: unknown[] = [];
+    const caught = (event: ErrorEvent): void => {
+      errors.push(event.error);
+    };
+    window.addEventListener("error", caught);
+    const { rerender } = render(<Harness search={first.search} />);
+    const field = screen.getByRole("combobox");
+    await user.type(field, "mar");
+    await waitFor(() => {
+      expect(first.calls).toHaveLength(1);
+    });
+    act(() => {
+      first.calls[0]?.answer({ choices: [aChoice("maria")], more: false });
+    });
+    await user.click(await screen.findByRole("option"));
+    expect(held()).toBe("maria");
+
+    rerender(<Harness search={second.search} />);
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(second.calls).toHaveLength(1);
+    });
+    act(() => {
+      second.calls[0]?.answer({ choices: [aChoice("mariana")], more: false });
+    });
+    await screen.findByRole("option");
+    // Leaving with the pointer takes no suggestion (Tab would take the highlighted one).
+    await user.click(document.body);
+
+    window.removeEventListener("error", caught);
+    expect(errors).toEqual([]);
+    expect(held()).toBe("maria");
+    expect(field).toHaveValue("maria");
+  });
+
   it("drops an older text's answer and cancels its request", async () => {
     const user = userEvent.setup();
     const { search, calls } = heldSearch();
@@ -240,7 +337,7 @@ describe("NamePicker", () => {
       calls[1]?.answer({ choices: [aChoice("max")], more: false });
     });
 
-    expect(await screen.findByRole("option", { name: "max" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "max, Person" })).toBeInTheDocument();
     expect(screen.getByRole("status")).not.toHaveTextContent("could not be read");
   });
 
@@ -340,8 +437,8 @@ describe("NamePicker", () => {
     const [first] = await screen.findAllByRole("option");
     expect(first).toHaveTextContent("admU+202EnimdaPerson");
     // The name a screen reader speaks (VoiceOver takes it for React Aria's announcements) is
-    // marked too.
-    expect(first).toHaveAccessibleName("admU+202Enimda");
+    // marked too, with the quiet word that tells two equal names apart.
+    expect(first).toHaveAccessibleName("admU+202Enimda, Person");
     await user.click(first as HTMLElement);
 
     expect(held()).toBe(spoof);
