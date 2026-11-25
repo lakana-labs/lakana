@@ -107,6 +107,10 @@ saved the `team` profile.
 - Sessions last 12 hours without use and 7 days at most; see and change both with
   `lakana sign-in settings` (in minutes). The same command sets how long people linked to an
   identity provider may use their API tokens after their last sign-in there (30 days by default).
+- To sign people in through your identity provider instead of passkeys, see
+  [Sign in through Keycloak](sign-in-with-keycloak.md) or
+  [Sign in through Microsoft Entra ID](sign-in-with-entra-id.md): the `LAKANA_OIDC__` settings
+  go into `.env` and the `server` service's `environment:`.
 
 ## Local repositories
 

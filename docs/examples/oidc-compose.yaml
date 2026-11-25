@@ -1,0 +1,9 @@
+services:
+  server:
+    # ... (image, command and the rest unchanged)
+    environment:
+      # ... (every entry that is there, unchanged)
+      LAKANA_OIDC__ISSUER: ${LAKANA_OIDC__ISSUER}
+      LAKANA_OIDC__CLIENT_ID: ${LAKANA_OIDC__CLIENT_ID}
+      LAKANA_OIDC__CLIENT_SECRET: ${LAKANA_OIDC__CLIENT_SECRET}
+      LAKANA_OIDC__DISPLAY_NAME: ${LAKANA_OIDC__DISPLAY_NAME}

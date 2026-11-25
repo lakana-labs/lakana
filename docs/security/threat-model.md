@@ -670,7 +670,12 @@ People sign in to the web interface through the organisation's identity provider
 profile or a recovery link); a linked person signs in and steps up only through the provider and uses
 their tokens only within the token window. `lakana login` signs the command line in through a
 browser: see "`lakana login` through a browser" below and `docs/agent/security.md`, "OIDC
-sign-in (#32, PR 3)".
+sign-in (#32, PR 3)". The interface's side of the flows (no replay of an action after provider
+step-up, local return paths only, the link's secret in the body only) is "OIDC sign-in in the
+interface (#32, PR 4)". The operator's setup and the team's move onto the provider, with the
+break-glass administrator, are the user guides `docs/site/how-to/sign-in-with-keycloak.md`,
+`sign-in-with-entra-id.md` and `bring-your-team-onto-single-sign-on.md`; the user's view of what
+is trusted is `docs/site/explanation/security.md`, "Signing in through your identity provider".
 
 ### What is defended
 
@@ -744,6 +749,11 @@ sign-in (#32, PR 3)".
    code and the state); Lakana's access log writes it as `?…`.
 5. **A passkey disabled as a copy** can take the last administrator who signs in with a passkey;
    that is never refused, and the operator's recovery link is then the way in.
+6. **A changed issuer strands the linked people.** A link holds the issuer it was made with, so
+   after `LAKANA_OIDC__ISSUER` changes (or is removed) a linked person is refused as `not_linked`
+   and their passkeys still do not sign them in, until an administrator unlinks them and issues
+   a recovery link. That is fail-closed on purpose: a new issuer could otherwise hand an old
+   subject to someone else. The Keycloak how-to says so.
 
 ### `lakana login` through a browser
 

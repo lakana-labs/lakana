@@ -95,11 +95,15 @@ than** (30 days by default), press **Find**, and the page lists each directory w
 size, its newest file and whether it is recent (and so kept). **Delete the old ones** asks once,
 naming how many directories and how much data go. The files cannot be restored, so it then asks
 you to confirm with your passkey, unless you did so within the last 15 minutes, as purging a
-deleted environment does. It then lists each directory as deleted or with the reason it was kept.
-When the server's time limit stopped a search, **Find again** continues it; a deletion it stopped
-offers **Continue**, which asks for the passkey again once the 15 minutes are over. **Find**
-never asks for it. The panel is shown to whoever may manage environments on the instance, on the
-page of a live environment; for a deleted environment, use the command.
+deleted environment does.
+Someone who signs in through the organisation's identity provider confirms there instead, then
+presses the action again
+([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). It
+then lists each directory as deleted or with the reason it was kept. When the server's time limit
+stopped a search, **Find again** continues it; a deletion it stopped offers **Continue**, which asks
+for the passkey again once the 15 minutes are over. **Find** never asks for it. The panel is shown
+to whoever may manage environments on the instance, on the page of a live environment; for a deleted
+environment, use the command.
 
 ## The same over REST and the SDK
 
