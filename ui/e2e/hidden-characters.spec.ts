@@ -110,7 +110,7 @@ const LITERAL_CODES: Record<string, string> = {
   HealthSummaryOut: "state",
   HeldGrantOut: "kind",
   InstanceStatusOut: "state",
-  JobOut: "actions last_run_status",
+  JobOut: "actions last_run_status waiting_trigger",
   JobRunFilter: "status",
   LastMaintenanceOut: "status",
   LinkDescriptionOut: "kind state",
@@ -915,6 +915,15 @@ walk("Tokens, one's API tokens and Secrets mark hidden characters", async ({ pag
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
 
+  // The Owner filter's suggestions (#784).
+  await page.getByRole("combobox", { name: "Owner" }).fill("adm");
+  await expect(page.getByRole("option").first()).toBeVisible();
+  // The list stands in a popover, outside the page's main part.
+  await expect(page.getByRole("listbox")).toContainText("adminU+202E");
+  await expectNoRaw(page, "the Owner filter's suggestions");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+
   await visit(page, "/account", ["laptop"]);
 
   await visit(page, "/settings/access/secrets", ["pypi-corp", "corp", "alerts-webhook", "dev"]);
@@ -962,8 +971,14 @@ walk(
       .click();
     await expect(page.getByRole("listbox")).toBeVisible();
     await expectNoRaw(page, "Add filter or mask's environments");
+    // The table field's suggestions (#784): Escape closes them, not the dialog.
+    await page.getByRole("option").first().click();
+    await page.getByRole("dialog").getByRole("combobox", { name: "Table" }).fill("station");
+    await expect(page.getByRole("option").first()).toBeVisible();
+    await expectNoRaw(page, "Add filter or mask's table suggestions");
     await page.keyboard.press("Escape");
     await expect(page.getByRole("listbox")).toBeHidden();
+    await expect(page.getByRole("dialog")).toBeVisible();
     await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).toBeHidden();
 
@@ -986,6 +1001,14 @@ walk("Groups, a group, Grants and What I may do mark hidden characters", async (
   await visit(page, "/settings/access/groups", ["analysts", "ops"]);
 
   await visit(page, `/settings/access/groups/${n("analysts")}`, ["ci-bot", "maria", "dev"]);
+  // Add a member's suggestions (#784).
+  await page.getByRole("combobox", { name: "Person or service account" }).fill("adm");
+  await expect(page.getByRole("option").first()).toBeVisible();
+  // The list stands in a popover, outside the page's main part.
+  await expect(page.getByRole("listbox")).toContainText("adminU+202E");
+  await expectNoRaw(page, "Add a member's suggestions");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
   await page.getByRole("button", { name: /^Remove mariaU\+202E from analystsU\+202E/ }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expectMarked(page, "the Remove member dialog", ["maria", "analysts"]);
@@ -1011,6 +1034,13 @@ walk("Groups, a group, Grants and What I may do mark hidden characters", async (
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toBeHidden();
   await page.getByRole("button", { name: "Add grant" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  // Add grant's Name suggests people and service accounts (#784).
+  await page.getByRole("dialog").getByRole("combobox", { name: "Name" }).fill("adm");
+  await expect(page.getByRole("listbox")).toContainText("adminU+202E");
+  await expectNoRaw(page, "Add grant's suggestions");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page
     .getByRole("dialog")

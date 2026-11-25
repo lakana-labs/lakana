@@ -299,4 +299,51 @@ describe("TruncationTip", () => {
     expect(name).not.toHaveAttribute("tabindex");
     table.remove();
   });
+
+  it("shows the sentence of an element with data-tip on hover and on focus, cut or not", () => {
+    render(
+      <>
+        <span data-tip="Waits for run 1b2c3d4e of this project to finish.">Waiting</span>
+        <TruncationTip />
+      </>,
+    );
+    const pill = screen.getByText("Waiting");
+    pill.getBoundingClientRect = () => new DOMRect(10, 20, 60, 20);
+
+    fireEvent.pointerMove(pill, { clientX: 30, clientY: 30 });
+    expect(tip()).toHaveTextContent("Waits for run 1b2c3d4e of this project to finish.");
+    expect(tip()).toHaveStyle({ top: "40px", left: "10px" });
+    // It is made a Tab stop for good, not as a cut name that may fit again.
+    expect(pill).toHaveAttribute("tabindex", "0");
+    expect(pill).not.toHaveAttribute("data-cut-stop");
+
+    fireEvent.pointerMove(document.body, { clientX: 500, clientY: 500 });
+    expect(tip()).toBeNull();
+
+    act(() => {
+      pill.focus();
+    });
+    expect(tip()).toHaveTextContent("Waits for run 1b2c3d4e");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(tip()).toBeNull();
+  });
+
+  it("shows nothing for an empty data-tip", () => {
+    render(
+      <>
+        <span data-tip="">Waiting</span>
+        <TruncationTip />
+      </>,
+    );
+    const pill = screen.getByText("Waiting");
+    pill.getBoundingClientRect = () => new DOMRect(10, 20, 60, 20);
+    fireEvent.pointerMove(pill, { clientX: 30, clientY: 30 });
+    expect(tip()).toBeNull();
+    // With nothing to show, the keyboard gets no stop either.
+    expect(pill).not.toHaveAttribute("tabindex");
+    act(() => {
+      pill.focus();
+    });
+    expect(tip()).toBeNull();
+  });
 });

@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import type { JobOut, JobStartOut } from "../api/jobs";
+import { openFromCell } from "../catalog/cells";
 import { HOW_TO_URL } from "../shell/docs";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
 import type { ListSortSpec } from "../shell/listSort";
@@ -19,6 +20,7 @@ import { VisibleText } from "../shell/VisibleText";
 import { StatusLabel } from "../status/StatusLabel";
 import type { ControlNoteValue } from "./ControlNote";
 import { RunNowButton, ScheduleButton } from "./JobControls";
+import { isWaiting, WaitingLabel } from "./JobWaiting";
 import "./jobStrings";
 import "./listStrings";
 import { ListSection, RowEnd } from "./ListSection";
@@ -85,7 +87,8 @@ function Schedule({ job }: ScheduleProps): JSX.Element {
  * Renders the section: the jobs of each environment, at most four read at once, every 30 s while
  * the tab is visible, sorted by name (or the column whose header was pressed) and narrowed by the search. Each
  * row opens the job's page from its name and shows its repository, environment, schedule, last
- * run (glyph and word, or "never") and next run, with Run and Pause or Resume when the server
+ * run (glyph and word, or "never") and next run ("Waiting" while a start waits, with what it
+ * waits for in the shared tooltip), with Run and Pause or Resume when the server
  * lists them. An environment whose jobs cannot be read keeps one line with the server's sentence
  * and Try again; the others' rows stay.
  *
@@ -188,7 +191,10 @@ export function AllJobs({
       }
     >
       {shown.map((job) => (
-        <tr key={JSON.stringify([job.environment, job.repository, job.name])}>
+        <tr
+          key={JSON.stringify([job.environment, job.repository, job.name])}
+          onClick={openFromCell}
+        >
           <td>
             <Link className="row-name" to={jobPath(job.environment, job.repository, job.name)}>
               <VisibleText text={job.name} />
@@ -214,8 +220,13 @@ export function AllJobs({
             )}
           </td>
           <td>
-            {!job.paused && job.next_run_at !== null && (
-              <time dateTime={job.next_run_at}>{when(job.next_run_at)}</time>
+            {isWaiting(job) ? (
+              <WaitingLabel job={job} tip />
+            ) : (
+              !job.paused &&
+              job.next_run_at !== null && (
+                <time dateTime={job.next_run_at}>{when(job.next_run_at)}</time>
+              )
             )}
           </td>
           <RowEnd>

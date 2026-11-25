@@ -1,10 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, MemoryRouter, RouterProvider, useLocation } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunOut } from "../api/jobs";
-import { aJobRun, ENVIRONMENTS } from "../test/jobs";
+import { aJob, aJobRun, ENVIRONMENTS } from "../test/jobs";
 import { held } from "../test/pending";
 import { type FakeRoute, fakeServer } from "../test/server";
 import { RunsTab } from "./RunsTab";
@@ -54,12 +54,14 @@ function renderRouted() {
  *
  * @param runs - What `GET /api/v1/runs` answers.
  * @param path - The address.
+ * @param more - Further routes, such as the environments' jobs.
  * @returns The server and a user-event session.
  */
-function renderTab(runs: FakeRoute, path = "/jobs/runs") {
+function renderTab(runs: FakeRoute, path = "/jobs/runs", more: Record<string, FakeRoute> = {}) {
   const server = fakeServer({
     "GET /api/v1/environments": { status: 200, body: ENVIRONMENTS },
     [RUNS]: runs,
+    ...more,
   });
   render(
     <MemoryRouter initialEntries={[path]}>
@@ -532,6 +534,281 @@ describe("RunsTab", () => {
 
     await waitFor(() => {
       expect(reads()).toBeGreaterThan(before);
+    });
+  });
+
+  describe("starts that wait (#786)", () => {
+    const recent = (minutes: number): string =>
+      new Date(Date.now() - minutes * 60_000).toISOString();
+    const waits = (message: string) => ({ code: "job_waits", message });
+    const jobs = (): Record<string, FakeRoute> => ({
+      "GET /api/v1/environments/prod/jobs": {
+        status: 200,
+        body: [
+          aJob({
+            name: "hourly_stock",
+            state: "waiting",
+            waiting_for: waits("A start waits for run 1b2c3d4e-0000 to finish."),
+            waits_for_run_id: "1b2c3d4e-0000",
+            waiting_since: recent(8),
+            waiting_trigger: "manual",
+          }),
+          aJob({ name: "nightly_sales" }),
+          aJob({ name: "fresh", last_run_id: null, last_run_status: null, last_run_at: null }),
+        ],
+      },
+      "GET /api/v1/environments/dev/jobs": {
+        status: 200,
+        body: [
+          aJob({
+            name: "orders_daily",
+            environment: "dev",
+            state: "waiting to start",
+            waiting_for: { code: "job_starts_soon", message: "It begins within a few seconds." },
+            waiting_since: recent(2),
+            waiting_trigger: "schedule",
+          }),
+        ],
+      },
+    });
+
+    /**
+     * The rows of the list, each as its first link's text.
+     *
+     * @returns The names.
+     */
+    async function listed(): Promise<(string | undefined)[]> {
+      const region = await screen.findByRole("region", { name: "Runs listed" });
+      return within(region)
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("link")[0]?.textContent);
+    }
+
+    it("lists every waiting start above the runs as Waiting, newest request first", async () => {
+      renderTab(page([older]), "/jobs/runs", jobs());
+
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["orders_daily", "hourly_stock", "nightly_sales"]);
+      });
+      const region = screen.getByRole("region", { name: "Runs listed" });
+      const [soon, busy] = within(region).getAllByRole("row").slice(1);
+      expect(within(busy as HTMLElement).getByText("Waiting")).toBeInTheDocument();
+      expect(busy).toHaveTextContent("Environment prod");
+      expect(busy).toHaveTextContent("By hand");
+      expect(busy).toHaveTextContent("Not started yet");
+      expect(
+        within(busy as HTMLElement).getByRole("link", { name: "hourly_stock" }),
+      ).toHaveAttribute("href", "/jobs/prod/job/analytics/hourly_stock");
+      expect(
+        within(busy as HTMLElement).getByRole("link", { name: "waits for run 1b2c3d4e" }),
+      ).toHaveAttribute("href", "/jobs/prod/runs/1b2c3d4e-0000");
+      expect(busy?.querySelector("[data-tip]")).toHaveAttribute(
+        "data-tip",
+        "A start waits for run 1b2c3d4e-0000 to finish.",
+      );
+      expect(soon).toHaveTextContent("Schedule");
+      expect(soon).toHaveTextContent("starts within seconds");
+      expect(within(soon as HTMLElement).getAllByRole("link")).toHaveLength(1);
+      // The count holds the waiting starts, which become runs.
+      expect(screen.getByText(/^3 runs$/)).toBeInTheDocument();
+    });
+
+    it("leaves them out under a state, trigger, job or period they do not match", async () => {
+      const cases: [string, string[]][] = [
+        ["status=succeeded", ["nightly_sales"]],
+        ["status=queued%2Crunning", ["orders_daily", "hourly_stock", "nightly_sales"]],
+        ["trigger=schedule", ["orders_daily", "nightly_sales"]],
+        ["job=hourly_stock", ["hourly_stock", "nightly_sales"]],
+        ["environment=prod", ["hourly_stock", "nightly_sales"]],
+      ];
+      for (const [query, names] of cases) {
+        cleanup();
+        renderTab(page([older]), `/jobs/runs?${query}`, jobs());
+        await waitFor(async () => {
+          expect(await listed()).toEqual(names);
+        });
+      }
+    });
+
+    it("shows a waiting start when no run matches, and runs alone when jobs cannot be read", async () => {
+      renderTab(page([]), "/jobs/runs", jobs());
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["orders_daily", "hourly_stock"]);
+      });
+      expect(screen.queryByText("No runs match these filters.")).toBeNull();
+
+      cleanup();
+      renderTab(page([older]), "/jobs/runs");
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["nightly_sales"]);
+      });
+      await settle();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+
+    /**
+     * The reads of an environment's jobs, in order.
+     *
+     * @param sent - The requests.
+     * @returns How many there were.
+     */
+    const jobReads = (sent: readonly { method: string; path: string }[]): number =>
+      sent.filter((request) => /^\/api\/v1\/environments\/[^/]+\/jobs$/u.test(request.path)).length;
+
+    it("reads no jobs when the State shows no waiting start", async () => {
+      const { server } = renderTab(page([older]), "/jobs/runs?status=succeeded", jobs());
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["nightly_sales"]);
+      });
+      await settle();
+      expect(jobReads(server.sent)).toBe(0);
+    });
+
+    it("reads the waiting starts with the first page: on Refresh, not again on Show more", async () => {
+      let started = false;
+      const answers = jobs();
+      const { server, user } = renderTab(
+        (request) =>
+          request.path.includes("cursor=c1")
+            ? { status: 200, body: { items: [oldest], next_cursor: null } }
+            : {
+                status: 200,
+                body: {
+                  items: started
+                    ? [
+                        aJobRun({
+                          id: "r-stock",
+                          job: "hourly_stock",
+                          status: "queued",
+                          tasks: [],
+                        }),
+                        older,
+                      ]
+                    : [older],
+                  next_cursor: "c1",
+                },
+              },
+        "/jobs/runs",
+        {
+          ...answers,
+          "GET /api/v1/environments/prod/jobs": () =>
+            started
+              ? { status: 200, body: [aJob({ name: "hourly_stock" })] }
+              : (answers["GET /api/v1/environments/prod/jobs"] as {
+                  status: number;
+                  body: unknown;
+                }),
+        },
+      );
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["orders_daily", "hourly_stock", "nightly_sales"]);
+      });
+      const before = jobReads(server.sent);
+
+      // The start has begun: Refresh reads its run and the starts together, so it shows once.
+      started = true;
+      await user.click(screen.getAllByRole("button", { name: "Refresh" })[0] as HTMLElement);
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["orders_daily", "hourly_stock", "nightly_sales"]);
+        expect(screen.getAllByText("Waiting")).toHaveLength(1);
+      });
+      expect(jobReads(server.sent)).toBeGreaterThan(before);
+
+      // Show more goes on from that first page and its starts; it reads no jobs of its own.
+      const shown = jobReads(server.sent);
+      await user.click(screen.getByRole("button", { name: "Show more" }));
+      await waitFor(async () => {
+        expect(await listed()).toEqual([
+          "orders_daily",
+          "hourly_stock",
+          "nightly_sales",
+          "nightly_sales",
+        ]);
+      });
+      expect(jobReads(server.sent)).toBe(shown);
+    });
+
+    it("holds the starts against the Period, newest request first, one of unknown time last", async () => {
+      const old = new Date(Date.now() - 2 * 86_400_000).toISOString();
+      const starts: Record<string, FakeRoute> = {
+        "GET /api/v1/environments/prod/jobs": {
+          status: 200,
+          body: [
+            aJob({
+              name: "unknown_time",
+              state: "waiting to start",
+              waiting_for: waits("It begins within a few seconds."),
+              waiting_since: null,
+              waiting_trigger: null,
+            }),
+            aJob({
+              name: "two_days_ago",
+              state: "waiting",
+              waiting_for: waits("A start waits."),
+              waits_for_run_id: "1b2c3d4e-0000",
+              waiting_since: old,
+              waiting_trigger: "schedule",
+            }),
+            aJob({
+              name: "just_now",
+              state: "waiting",
+              waiting_for: waits("A start waits."),
+              waits_for_run_id: "1b2c3d4e-0000",
+              waiting_since: recent(1),
+              waiting_trigger: "api",
+            }),
+          ],
+        },
+      };
+      renderTab(page([]), "/jobs/runs?environment=prod&period=24h", starts);
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["just_now", "unknown_time"]);
+      });
+
+      cleanup();
+      renderTab(page([]), "/jobs/runs?environment=prod&period=all", starts);
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["just_now", "two_days_ago", "unknown_time"]);
+      });
+    });
+
+    it("reads the waiting starts again with Read again", async () => {
+      const { server, user } = renderTab(twoPages, "/jobs/runs", jobs());
+      await user.click(await screen.findByRole("button", { name: "Show more" }));
+      const again = await screen.findByRole("button", { name: "Read again" });
+      const before = jobReads(server.sent);
+
+      await user.click(again);
+      await waitFor(() => {
+        expect(jobReads(server.sent)).toBeGreaterThan(before);
+      });
+      await waitFor(async () => {
+        expect((await listed()).slice(0, 2)).toEqual(["orders_daily", "hourly_stock"]);
+      });
+    });
+
+    it("says Unknown for a start whose trigger the server could not read", async () => {
+      renderTab(page([]), "/jobs/runs?environment=prod", {
+        "GET /api/v1/environments/prod/jobs": {
+          status: 200,
+          body: [
+            aJob({
+              name: "hourly_stock",
+              state: "waiting to start",
+              waiting_for: waits("It begins within a few seconds."),
+              waiting_since: null,
+              waiting_trigger: null,
+            }),
+          ],
+        },
+      });
+      await waitFor(async () => {
+        expect(await listed()).toEqual(["hourly_stock"]);
+      });
+      const row = screen.getByRole("link", { name: "hourly_stock" }).closest("tr") as HTMLElement;
+      expect(row).not.toHaveTextContent("By hand");
+      expect(within(row).getAllByText("Unknown").length).toBeGreaterThan(0);
     });
   });
 });

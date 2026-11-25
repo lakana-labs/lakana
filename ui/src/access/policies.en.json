@@ -62,6 +62,8 @@
     "namespace": "Namespace",
     "namespaceHelp": "Dotted, such as gold.sales.",
     "table": "Table",
+    "tableHelp": "Type part of its name to see the tables you may read; choosing one fills in its namespace.",
+    "tableHelpNoEnvironment": "Choose the environment first to see its tables.",
     "column": "Column",
     "expression": "Expression",
     "filterHelp": "Which rows they see: comparisons, AND, OR, NOT, current_user() and has_group('name'), such as region = 'EU'.",

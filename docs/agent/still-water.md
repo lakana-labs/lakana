@@ -79,6 +79,14 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
   shows it whole on hover and on focus; a cut name without a page (`span.row-name`) is made a Tab
   stop while it is cut, so the keyboard reaches its tooltip. Never add a tooltip of your own for
   a cut name.
+- **A short sentence on hover** (what a waiting job waits for) goes through the same tooltip: put
+  it in `data-tip` on the element (marked with `markedText`), and repeat it inside the element in
+  a `.visually-hidden` span for screen readers, since the tooltip is `aria-hidden`. The tooltip
+  makes the element a Tab stop for good (not for an empty `data-tip`), so it shows on focus too.
+  Inside a list row the element must sit above the row's link (`position: relative; z-index: 1`,
+  as `.jobs-waits`), and the row forwards a plain click to its link (`openFromCell`). Never a
+  `title` or a tooltip of your own, and never anything a person must read only there: the same
+  sentence is in the object's own page.
 - **Breadcrumbs on every detail page:** pass `trail` to `Page`; never a breadcrumb on an area's
   own list or tab. Alt+Left goes back from any page (the shell's, global as in the browser); it
   does nothing while a dialog, a menu or a popover is shown, from a text field inside it too, and
@@ -91,7 +99,17 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
 - **Refusals and errors name the cause and the next step**, in the user's words, next to the
   field they belong to, or above the form when they concern the whole step. Every view designs
   its empty, loading, partial, error, offline or stale, and permission-denied states.
+- **A field that names a principal, a group or a table suggests what exists** (`NamePicker`,
+  `ui/src/shell/NamePicker.tsx`, a React Aria `ComboBox`): the server filters under the person's
+  own rights, the list marks hidden characters, says while it waits, when nothing matches ("No
+  principal named …") and when it shows only the first matches, and Escape closes it without
+  closing the dialog around it; Enter takes the highlighted suggestion, or with none sends the
+  form as any field does. What is typed may still be sent; the server judges it. A person
+  who may not list those names gets the plain field, which asks nothing.
 - Every string through i18next (`ui/src/i18n/en.json`); sentence case; the same term everywhere.
+  React Aria's own words (its announcements, a list's default name) follow i18next's language
+  through `ui/src/i18n/LanguageProvider.tsx`: a new root (another entry, a test's render) wraps
+  in it.
 
 ## Layout and rhythm
 

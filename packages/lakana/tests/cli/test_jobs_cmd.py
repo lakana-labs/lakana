@@ -201,6 +201,32 @@ def test_show_of_a_waiting_job_says_why_it_waits(tmp_path: Path) -> None:
     assert "A start waits for run X." in _plain(result.stdout)
 
 
+def test_show_of_a_waiting_job_says_since_when_and_json_carries_it(tmp_path: Path) -> None:
+    """The time the start was first asked for and its trigger, in words and in JSON (#786)."""
+    api = FakeApi()
+    waiting = {"code": "job_waits", "message": "A start waits for run X."}
+    body = _job(
+        "busy",
+        state="waiting",
+        waiting_for=waiting,
+        waiting_since="2026-10-14T12:05:00+00:00",
+        waiting_trigger="manual",
+    )
+    api.on("GET", f"{_JOBS}/busy", json=body)
+    result = invoke(make_state(tmp_path, api), "job", "show", "busy", "--env", "dev")
+    assert result.exit_code == 0, result.output
+    assert "Waiting since 2026-10-14 12:05 UTC (manual)." in _plain(result.stdout)
+    shown = invoke(
+        make_state(tmp_path, api), "--output", "json", "job", "show", "busy", "--env", "dev"
+    )
+    assert shown.exit_code == 0, shown.output
+    data = json.loads(shown.stdout)
+    assert (data["waiting_since"], data["waiting_trigger"]) == (
+        "2026-10-14T12:05:00+00:00",
+        "manual",
+    )
+
+
 def test_show_of_a_paused_schedule_and_of_a_job_without_one(tmp_path: Path) -> None:
     api = FakeApi()
     paused = {

@@ -146,7 +146,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(personal.getByText("laptop")).toBeVisible();
       expect(await violations(page), "Tokens").toEqual([]);
 
-      await tabTo(page, page.getByRole("textbox", { name: "Owner" }));
+      await tabTo(page, page.getByRole("combobox", { name: "Owner" }));
       await page.keyboard.type("maria");
       await page.keyboard.press("Enter");
       await expect(page).toHaveURL(/\?owner=maria$/);

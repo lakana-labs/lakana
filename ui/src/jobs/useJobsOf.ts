@@ -6,16 +6,14 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
-import { type JobOut, listJobs } from "../api/jobs";
+import type { JobOut } from "../api/jobs";
 import type { ListSortChoice } from "../api/sorting";
 import type { LivePoll } from "../shell/useLivePoll";
 import { problemText } from "../sign-in/messages";
 import "./jobStrings";
 import "./listStrings";
+import { readJobsOf } from "./readJobsOf";
 import { useListPoll } from "./useListPoll";
-
-/** How many environments' jobs are read at once, at most. */
-const JOBS_READS_IN_FLIGHT = 4;
 
 /** An environment whose jobs could not be read. */
 interface JobsReadFailure {
@@ -130,27 +128,17 @@ export function useJobsOf(
   const key = JSON.stringify(environments);
   const load = useCallback(async (): Promise<Round> => {
     const names = JSON.parse(key) as string[];
-    const answers: ({ readonly jobs: readonly JobOut[] } | { readonly message: string })[] = [];
-    let next = 0;
-    const worker = async (): Promise<void> => {
-      while (next < names.length) {
-        const index = next;
-        next += 1;
-        try {
-          answers[index] = { jobs: await listJobs(names[index] as string, undefined, sort) };
-        } catch (failure: unknown) {
-          answers[index] = { message: problemText(t, failure) };
-        }
-      }
-    };
-    await Promise.all(Array.from({ length: Math.min(JOBS_READS_IN_FLIGHT, names.length) }, worker));
+    const answers = await readJobsOf(names, undefined, sort);
     const rows: JobOut[] = [];
     const failed: { environment: string; message: string }[] = [];
     answers.forEach((answer, index) => {
       if ("jobs" in answer) {
         rows.push(...answer.jobs);
       } else {
-        failed.push({ environment: names[index] as string, message: answer.message });
+        failed.push({
+          environment: names[index] as string,
+          message: problemText(t, answer.failure),
+        });
       }
     });
     return { rows: rows.sort(jobOrder(sort)), failed };

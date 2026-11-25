@@ -80,6 +80,7 @@ class Catalog:
         environment: str | None = None,
         namespace: str | None = None,
         q: str | None = None,
+        name: str | None = None,
         model_kind: str | None = None,
         sort: str = "name",
         order: str | None = None,
@@ -101,6 +102,10 @@ class Catalog:
         q
             Only tables whose name, label, description, grain, or a column's name, label,
             description or measure contains this text; 1 to 200 characters.
+        name
+            Only tables whose own name contains this text, ignoring the case of A to Z (and of
+            other letters on PostgreSQL, as its locale folds them); 1 to 255 characters. A
+            namespace, a column or a description never matches it.
         model_kind
             Only tables whose asset header declares this kind: fact, dimension, wide or staging.
         sort
@@ -127,14 +132,15 @@ class Catalog:
         lakana.errors.NotFound
             If ``environment`` does not exist.
         lakana.errors.ValidationError
-            If ``sort``, ``order``, ``limit``, ``q``, ``model_kind``, ``lang`` or ``cursor`` is
-            not valid; the message names the choices or the range. Start again without
+            If ``sort``, ``order``, ``limit``, ``q``, ``name``, ``model_kind``, ``lang`` or
+            ``cursor`` is not valid; the message names the choices or the range. Start again without
             ``cursor`` after a cursor error.
         """
         given = {
             "environment": environment,
             "namespace": namespace,
             "q": q,
+            "name": name,
             "model_kind": model_kind,
             "order": order,
             "limit": limit,
@@ -156,6 +162,7 @@ class Catalog:
         environment: str | None = None,
         namespace: str | None = None,
         q: str | None = None,
+        name: str | None = None,
         model_kind: str | None = None,
         sort: str = "name",
         order: str | None = None,
@@ -172,6 +179,8 @@ class Catalog:
             Only this namespace and the ones beneath it, dotted.
         q
             Only tables matching this text; see `list`.
+        name
+            Only tables whose own name contains this text; see `list`.
         model_kind
             Only tables whose asset header declares this kind.
         sort
@@ -194,6 +203,7 @@ class Catalog:
                 environment=environment,
                 namespace=namespace,
                 q=q,
+                name=name,
                 model_kind=model_kind,
                 sort=sort,
                 order=order,

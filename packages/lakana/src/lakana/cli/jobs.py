@@ -263,6 +263,10 @@ def show_job(ctx: typer.Context, name: _NAME, env: _ENV = None, repo: _REPO = No
     )
     if state.output != "json" and job.waiting_for is not None:
         typer.echo(_output.inline(job.waiting_for.message, 300))
+    if state.output != "json" and job.waiting_since is not None:
+        since = job.waiting_since.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        how = f" ({_output.inline(job.waiting_trigger)})" if job.waiting_trigger else ""
+        typer.echo(f"Waiting since {since}{how}.")
 
 
 @job_app.command("run")

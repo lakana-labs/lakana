@@ -649,6 +649,51 @@ def test_q_takes_percent_and_underscore_literally(session: Session) -> None:
     assert listing.list(admin, q="%").items == []
 
 
+def test_name_matches_only_the_table_name_in_any_letter_case(world: ListingWorld) -> None:
+    # `store_id` (a column of silver.orders) and `joins dim_store` (its description) match
+    # `q="store"`; `name` matches only the table's own name, never a namespace or a text
+    assert world.listing.list(world.admin, name="store").items == []
+    assert world.listing.list(world.admin, name="gold").items == []
+    assert _names(world.listing.list(world.admin, name="ORDER")) == [
+        "dev:gold.orders",
+        "dev:silver.orders",
+        "prod:silver.orders",
+    ]
+
+
+def test_name_never_hints_at_a_table_the_caller_may_not_read(world: ListingWorld) -> None:
+    assert _names(world.listing.list(world.alice, name="orders")) == ["dev:silver.orders"]
+    assert world.listing.list(world.alice, name="secret").items == []
+    assert _names(world.listing.list(world.tim, name="r")) == ["dev:gold.orders"]
+
+
+def test_name_keeps_the_other_filters_and_pages(world: ListingWorld) -> None:
+    page = world.listing.list(world.admin, environment="dev", name="orders", limit=1)
+    assert _names(page) == ["dev:gold.orders"] and page.next_cursor is not None
+    rest = world.listing.list(
+        world.admin, environment="dev", name="orders", cursor=page.next_cursor
+    )
+    assert _names(rest) == ["dev:silver.orders"] and rest.next_cursor is None
+    assert _names(world.listing.list(world.admin, namespace="silver", name="orders")) == [
+        "dev:silver.orders",
+        "prod:silver.orders",
+    ]
+
+
+def test_name_takes_percent_and_underscore_literally(session: Session) -> None:
+    admin, listing = _admin_listing(session, {"silver": "order_lines", "gold": "orders"})
+    assert _names(listing.list(admin, name="_")) == ["dev:silver.order_lines"]
+    assert listing.list(admin, name="%").items == []
+    assert _names(listing.list(admin, name=" orders ")) == ["dev:gold.orders"]
+
+
+def test_name_takes_a_name_as_long_as_a_table_may_have(session: Session) -> None:
+    # a table's name may be 255 characters long, so pasting a whole one is a valid name
+    long = "t" * 255
+    admin, listing = _admin_listing(session, {"gold": long})
+    assert [item.name for item in listing.list(admin, name=long).items] == [long]
+
+
 def _admin_listing(
     session: Session, namespaces: dict[str, str]
 ) -> tuple[PrincipalRef, TableListing]:
@@ -884,6 +929,8 @@ def test_a_table_found_by_its_name_and_its_column_is_one_item(world: ListingWorl
         ({"limit": 0}, "limit must be between 1 and 200"),
         ({"limit": MAX_LIMIT + 1}, "limit must be between 1 and 200"),
         ({"q": "  "}, "between 1 and 200 characters"),
+        ({"name": "  "}, "The name to look for must be between 1 and 255 characters"),
+        ({"name": "x" * 256}, "The name to look for must be between 1 and 255 characters"),
         ({"model_kind": "cube"}, "cube"),
         ({"cursor": "!"}, "cursor is not valid"),
     ],

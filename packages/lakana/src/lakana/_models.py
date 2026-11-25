@@ -4353,6 +4353,14 @@ class Job:
         When it was created.
     triggers
         How the job starts, schedule first; empty from a server that does not send them.
+    waiting_since
+        For a start that waits (``waiting`` or ``waiting to start``), when it was first asked
+        for; `None` otherwise, and from a server that predates it.
+    waiting_trigger
+        For a start that waits, what first asked for it (``schedule``, ``api``, ``manual``,
+        ``deploy``), the request `waiting_since` names; `None` otherwise, when the server cannot
+        tell, and from a server that predates it. The run that begins can run as another
+        trigger: a schedule that merges into a start by hand makes it a scheduled run.
     actions
         The words of what your rights allow on it: ``run``, ``pause``, ``resume``. Rights
         only; offer a control when the word is listed and the job's state allows it. Empty from
@@ -4391,6 +4399,8 @@ class Job:
     commit_sha: str | None = None
     source_url: str | None = None
     notify: JobNotify | None = None
+    waiting_since: datetime | None = None
+    waiting_trigger: str | None = None
 
 
 @dataclass(frozen=True)

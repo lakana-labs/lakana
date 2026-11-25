@@ -8,6 +8,7 @@ import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 
 import type { AccessOut } from "../api";
+import { LanguageProvider } from "../i18n/LanguageProvider";
 import { PreferencesProvider } from "../preferences/PreferencesProvider";
 import { ALL_SHIPPED, type AreaAccess } from "../shell/areas";
 import { type AreaPages, appRoutes } from "../shell/routes";
@@ -92,11 +93,13 @@ export function renderShell(path = "/", options: ShellOptions = {}): RenderedShe
   });
   const user = userEvent.setup();
   render(
-    <PreferencesProvider storage={storage}>
-      <SessionContext value={options.session ?? signedIn()}>
-        <RouterProvider router={router} />
-      </SessionContext>
-    </PreferencesProvider>,
+    <LanguageProvider>
+      <PreferencesProvider storage={storage}>
+        <SessionContext value={options.session ?? signedIn()}>
+          <RouterProvider router={router} />
+        </SessionContext>
+      </PreferencesProvider>
+    </LanguageProvider>,
   );
   return { router, storage, user, server };
 }

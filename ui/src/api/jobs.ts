@@ -117,6 +117,10 @@ export interface JobOut {
   readonly last_run_status: RunStatus | null;
   /** When the latest run was created. */
   readonly last_run_at: string | null;
+  /** For a start that waits (`waiting`, `waiting to start`), when it was first asked for. */
+  readonly waiting_since: string | null;
+  /** For a start that waits, what asked for it. */
+  readonly waiting_trigger: "schedule" | "api" | "manual" | "deploy" | null;
   /** How the job starts, schedule first. */
   readonly triggers: readonly TriggerOut[];
   /** The commit of the project version deployed in the environment. */

@@ -115,6 +115,8 @@ def job_from_json(data: dict[str, Any]) -> Job:
         commit_sha=data.get("commit_sha"),
         source_url=data.get("source_url"),
         notify=_notify_from_json(data.get("notify")),
+        waiting_since=_when(data.get("waiting_since")),
+        waiting_trigger=data.get("waiting_trigger"),
     )
 
 

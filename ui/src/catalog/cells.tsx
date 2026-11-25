@@ -47,7 +47,9 @@ export function Unknown({ words }: { readonly words: string }): JSX.Element {
 /**
  * Hands a plain primary click on a row's cell to the row's link, so the cells that carry hover
  * text open the table page like the rest of the row. A click on the link or a button, one with
- * a modifier key, a middle click and the end of a text selection are left alone.
+ * a modifier key, a middle click and the end of a text selection are left alone, and so is a
+ * click outside the row's own elements: React hands the row the clicks of a dialog its control
+ * opened in a portal (Pause, Cancel), which must never open the row behind it.
  *
  * @param event - The click on the row.
  */
@@ -58,6 +60,7 @@ export function openFromCell(event: MouseEvent<HTMLTableRowElement>): void {
   if (
     plain &&
     !selecting &&
+    event.currentTarget.contains(event.target as Node) &&
     !event.defaultPrevented &&
     !(event.target as Element).closest("a, button")
   ) {
