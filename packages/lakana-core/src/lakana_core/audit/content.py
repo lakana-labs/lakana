@@ -291,11 +291,11 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "dry_run",
         "expires_at",
         "file_count",
+        "files",
+        "files_deleted",
         # the first record of the identity provider's issuer on a database, which has no
         # `before` (#809)
         "first_record",
-        "files",
-        "files_deleted",
         "freed_files",
         "keep_days",
         "keep_last",
