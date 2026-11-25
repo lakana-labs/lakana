@@ -7,6 +7,8 @@ import globals from "globals";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
 
+import { noLiteralText } from "./build/no-literal-text.ts";
+
 const SERVER_ONLY_THROUGH_API =
   "Only ui/src/api/ talks to the server (the REST API is the only way in)";
 
@@ -147,6 +149,15 @@ export default defineConfig(
       "no-restricted-globals": ["error", ...NODE_GLOBALS],
       "no-restricted-properties": "off",
     },
+  },
+  // Text a person reads comes from i18next (docs/agent/conventions.md, "Every string the user sees
+  // goes through i18next"); tests may write what they like. The fixtures are linted on purpose by
+  // scripts/lint-ban.test.ts.
+  {
+    files: ["src/**/*.tsx", "scripts/lint-fixtures/*.tsx"],
+    ignores: ["src/**/*.test.tsx", "src/test/**"],
+    plugins: { lakana: { rules: { "no-literal-text": noLiteralText } } },
+    rules: { "lakana/no-literal-text": "error" },
   },
   {
     // eslint-plugin-jsx-a11y ships no types, so its config is `any` in this one file.
