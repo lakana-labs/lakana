@@ -18,6 +18,7 @@ never quotes a value from the provider.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,6 +35,8 @@ from lakana_core.oidc.id_token import (
     verify_id_token,
 )
 from lakana_core.oidc.keys import JwksCache, KeySource, https_url_on
+
+_log = logging.getLogger(__name__)
 
 ID_TOKEN_MAX_AGE_SECONDS = 600
 """The oldest ID token a sign-in accepts, counted from ``iat``: the flow's own lifetime."""
@@ -53,6 +56,10 @@ NO_ALGORITHM = (
 NO_CLIENT_AUTH = (
     "the identity provider's token endpoint accepts neither client_secret_basic nor "
     "client_secret_post; configure the client for one of them"
+)
+ENDPOINT_NOT_ALLOWED = (
+    "is not https on the issuer's host or a host of LAKANA_OIDC__ALLOW_HOSTS; add its host to "
+    "LAKANA_OIDC__ALLOW_HOSTS or correct the provider's configuration"
 )
 
 Poster = Callable[[str, Mapping[str, str], Mapping[str, str], Collection[str]], object]
@@ -122,7 +129,32 @@ def key_source(config: OidcSignInConfig) -> KeySource:
     )
 
 
-def _endpoint(document: Mapping[str, object], name: str, allowed: Collection[str]) -> str:
+def _logged(issuer: str, reason: str) -> str:
+    """Log why the provider cannot be used, once, and hand the reason back.
+
+    The reason is a fixed sentence naming the setting to check, never a value from the
+    provider; the issuer is the configured one. The discovery and key fetches log their own
+    line (`lakana_core.oidc.keys`), so they do not come here.
+
+    Parameters
+    ----------
+    issuer
+        The configured issuer.
+    reason
+        The fixed reason.
+
+    Returns
+    -------
+    str
+        The reason, for `ProviderUnavailable`.
+    """
+    _log.warning("could not use the OIDC sign-in provider %s: %s", issuer, reason)
+    return reason
+
+
+def _endpoint(
+    document: Mapping[str, object], name: str, allowed: Collection[str], issuer: str
+) -> str:
     """Read one endpoint of the discovery document.
 
     Parameters
@@ -133,6 +165,8 @@ def _endpoint(document: Mapping[str, object], name: str, allowed: Collection[str
         The member, such as ``token_endpoint``.
     allowed
         The host names it may be on.
+    issuer
+        The configured issuer, for the log line.
 
     Returns
     -------
@@ -147,8 +181,7 @@ def _endpoint(document: Mapping[str, object], name: str, allowed: Collection[str
     value = document.get(name)
     if not https_url_on(value, allowed):
         raise ProviderUnavailable(
-            f"the identity provider's {name} is not https on the issuer's host or a host of "
-            "LAKANA_OIDC__ALLOW_HOSTS"
+            _logged(issuer, f"the identity provider names a {name} that {ENDPOINT_NOT_ALLOWED}")
         )
     return str(value)
 
@@ -313,12 +346,12 @@ class OidcProvider:
         if document is None:
             raise ProviderUnavailable(UNREACHABLE)
         allowed = self.allowed_hosts
-        authorization = _endpoint(document, "authorization_endpoint", allowed)
-        token = _endpoint(document, "token_endpoint", allowed)
+        authorization = _endpoint(document, "authorization_endpoint", allowed, self._issuer)
+        token = _endpoint(document, "token_endpoint", allowed, self._issuer)
         listed = _texts(document.get("id_token_signing_alg_values_supported")) or ["RS256"]
         algorithms = frozenset(listed) & frozenset(SUPPORTED_ALGORITHMS)
         if not algorithms:
-            raise ProviderUnavailable(NO_ALGORITHM)
+            raise ProviderUnavailable(_logged(self._issuer, NO_ALGORITHM))
         methods = _texts(document.get("token_endpoint_auth_methods_supported"))
         # OIDC Discovery: an absent list means client_secret_basic.
         token_auth: Literal["client_secret_basic", "client_secret_post"]
@@ -327,7 +360,7 @@ class OidcProvider:
         elif "client_secret_post" in methods:
             token_auth = "client_secret_post"  # nosec B105 -- a method name, not a secret
         else:
-            raise ProviderUnavailable(NO_CLIENT_AUTH)
+            raise ProviderUnavailable(_logged(self._issuer, NO_CLIENT_AUTH))
         return ProviderMetadata(
             issuer=self._issuer,
             authorization_endpoint=authorization,

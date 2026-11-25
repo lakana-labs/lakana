@@ -497,6 +497,225 @@ def test_the_client_secret_is_posted_when_basic_is_not_offered(
     assert (_outcome(client) or {})["ok"] is True
 
 
+# -- every failure the operator can fix writes one line to the log (#810) -------------------------
+
+
+UNUSABLE = f"could not use the OIDC sign-in provider {ISSUER}: the identity provider "
+
+
+def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """Read what the sign-in wrote at warning level or above.
+
+    Parameters
+    ----------
+    caplog
+        The captured log.
+
+    Returns
+    -------
+    list of str
+        The messages, oldest first.
+    """
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def _lakana_log(caplog: pytest.LogCaptureFixture) -> str:
+    """Read everything Lakana logged, not the test client's own request lines.
+
+    Parameters
+    ----------
+    caplog
+        The captured log.
+
+    Returns
+    -------
+    str
+        The messages, one per line.
+    """
+    return "\n".join(r.getMessage() for r in caplog.records if r.name.startswith("lakana"))
+
+
+def _discovery_with(fake: FakeProvider, client: TestClient, **changes: object) -> None:
+    """Change the discovery document and give the app a provider client that reads it afresh.
+
+    Parameters
+    ----------
+    fake
+        The provider.
+    client
+        The client of the app.
+    **changes
+        Members to set.
+    """
+    document = dict(cast(dict[str, object], fake.documents[DISCOVERY]))
+    fake.documents[DISCOVERY] = {**document, **changes}
+    cast(FastAPI, client.app).state.oidc_provider = fake.provider()
+
+
+def _fail_at_the_token_endpoint(
+    client: TestClient, fake: FakeProvider, failure: FetchFailed
+) -> None:
+    """Run a sign-in whose token request fails.
+
+    Parameters
+    ----------
+    client
+        The browser.
+    fake
+        The provider.
+    failure
+        What the token request raises.
+    """
+    code, state = fake.authorize(_start(client))
+    fake.token_answer = failure
+    _callback(client, code=code, state=state)
+
+
+@pytest.mark.parametrize(
+    "reason", ["the host is not one this request may reach", "the host name does not resolve"]
+)
+def test_a_token_endpoint_that_cannot_be_reached_is_logged(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture, reason: str
+) -> None:
+    _fail_at_the_token_endpoint(client, fake, FetchFailed(reason))
+    assert _outcome(client) == {"ok": False, "reason": "provider_unreachable"}
+    (line,) = _warnings(caplog)
+    assert f"could not reach the OIDC sign-in token endpoint of {ISSUER}: {reason}" in line
+    assert "LAKANA_OIDC__ALLOW_HOSTS" in line
+
+
+def test_a_token_endpoint_that_answers_5xx_is_logged(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    _fail_at_the_token_endpoint(client, fake, FetchFailed("the server answered 503", status=503))
+    assert _outcome(client) == {"ok": False, "reason": "provider_unreachable"}
+    (line,) = _warnings(caplog)
+    assert f"the OIDC sign-in token endpoint of {ISSUER} answered 503" in line
+    assert "the provider's own log" in line
+
+
+def test_a_token_endpoint_that_refuses_the_code_is_logged(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    _fail_at_the_token_endpoint(client, fake, FetchFailed("the server answered 401", status=401))
+    assert _outcome(client) == {"ok": False, "reason": "provider_refused"}
+    (line,) = _warnings(caplog)
+    assert f"the OIDC sign-in token endpoint of {ISSUER} refused the code (401)" in line
+    assert "LAKANA_OIDC__CLIENT_SECRET" in line
+
+
+def test_a_token_endpoint_that_answers_no_id_token_is_logged(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    code, state = fake.authorize(_start(client))
+    fake.token_answer = {"access_token": "an-access-token-sentinel"}
+    _callback(client, code=code, state=state)
+    assert _outcome(client) == {"ok": False, "reason": "provider_refused"}
+    (line,) = _warnings(caplog)
+    assert f"the OIDC sign-in token endpoint of {ISSUER} answered no ID token" in line
+    assert "openid" in line
+    assert "an-access-token-sentinel" not in caplog.text
+
+
+def test_a_provider_that_sends_the_browser_back_with_an_error_is_logged(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    state = parse_qs(urlsplit(_start(client)).query)["state"][0]
+    _callback(client, error="invalid_scope", state=state)
+    assert _outcome(client) == {"ok": False, "reason": "provider_refused"}
+    (line,) = [r.getMessage() for r in caplog.records if r.name == "lakana_server.oidc_flow"]
+    assert (
+        f"OIDC sign-in provider {ISSUER} sent the browser back with the error invalid_scope" in line
+    )
+    assert _warnings(caplog) == []
+
+
+def test_a_provider_error_that_is_no_known_code_is_not_quoted(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    state = parse_qs(urlsplit(_start(client)).query)["state"][0]
+    _callback(client, error="forged\nline", state=state)
+    assert "forged" not in _lakana_log(caplog)
+
+
+def test_a_callback_without_a_code_is_logged(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    state = parse_qs(urlsplit(_start(client)).query)["state"][0]
+    _callback(client, state=state)
+    (line,) = [r.getMessage() for r in caplog.records if r.name == "lakana_server.oidc_flow"]
+    assert f"OIDC sign-in provider {ISSUER} sent the browser back without a code" in line
+
+
+def test_a_provider_with_no_supported_signing_algorithm_is_logged(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    _discovery_with(fake, client, id_token_signing_alg_values_supported=["ES256"])
+    assert client.post(START, json={}).json()["reason"] == "provider_unreachable"
+    (line,) = _warnings(caplog)
+    assert f"{UNUSABLE}signs ID tokens with no algorithm Lakana supports" in line
+    assert "RS256" in line
+
+
+def test_a_provider_with_no_client_authentication_by_secret_is_logged(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    _discovery_with(fake, client, token_endpoint_auth_methods_supported=["private_key_jwt"])
+    assert client.post(START, json={}).json()["reason"] == "provider_unreachable"
+    (line,) = _warnings(caplog)
+    assert f"{UNUSABLE.rstrip()}'s token endpoint accepts neither client_secret_basic" in line
+    assert "client_secret_post" in line
+
+
+def test_an_endpoint_on_a_host_that_is_not_allowed_is_logged(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    _discovery_with(fake, client, token_endpoint="https://evil.example.net/token")
+    assert client.post(START, json={}).json()["reason"] == "provider_unreachable"
+    (line,) = _warnings(caplog)
+    assert f"{UNUSABLE}names a token_endpoint that is not https" in line
+    assert "LAKANA_OIDC__ALLOW_HOSTS" in line
+    assert "evil.example.net" not in line
+
+
+def test_a_discovery_that_cannot_be_fetched_is_logged_once(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake.documents[DISCOVERY] = FetchFailed("the host name does not resolve")
+    cast(FastAPI, client.app).state.oidc_provider = fake.provider()
+    assert client.post(START, json={}).json()["reason"] == "provider_unreachable"
+    (line,) = _warnings(caplog)
+    assert f"could not fetch the OIDC sign-in keys of {ISSUER}: the host name" in line
+
+
+def test_no_failure_line_holds_a_secret_a_code_a_state_or_a_token(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    seen: list[str] = []
+    for failure in (
+        FetchFailed("the host name does not resolve"),
+        FetchFailed("the server answered 503", status=503),
+        FetchFailed("the server answered 400", status=400),
+    ):
+        code, state = fake.authorize(_start(client))
+        seen += [code, state]
+        fake.token_answer = failure
+        _callback(client, code=code, state=state)
+    code, state = fake.authorize(_start(client))
+    seen += [code, state]
+    fake.token_answer = {"id_token": "", "access_token": "an-access-token-sentinel"}
+    _callback(client, code=code, state=state)
+    assert len(_warnings(caplog)) == 4
+    shown = _lakana_log(caplog)
+    assert ISSUER in shown
+    for forbidden in [CLIENT_SECRET, "an-access-token-sentinel", *seen]:
+        assert forbidden not in shown
+
+
 def test_routes_answer_409_while_the_interface_is_off(settings: Settings) -> None:
     with TestClient(create_app(settings)) as off:
         for method, path in [("GET", INFO), ("POST", START), ("GET", CALLBACK), ("POST", FINISH)]:
