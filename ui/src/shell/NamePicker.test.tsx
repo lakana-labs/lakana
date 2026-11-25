@@ -217,11 +217,10 @@ describe("NamePicker", () => {
     act(() => {
       calls[1]?.answer({ choices: [aChoice("mariana")], more: false });
     });
-    // The chosen one is gone from the list, so React Aria closes it, and hands over no choice
-    // (null) once the field is left.
-    await waitFor(() => {
-      expect(field).toHaveAttribute("aria-expanded", "false");
-    });
+    // The list stays open on the other matches; React Aria hands over no choice (null) once
+    // the field is left.
+    expect(await screen.findByRole("option", { name: /^mariana/ })).toBeInTheDocument();
+    expect(field).toHaveAttribute("aria-expanded", "true");
     await user.click(document.body);
 
     expect(held()).toBe("maria");
@@ -396,6 +395,38 @@ describe("NamePicker", () => {
       );
     });
     expect(held()).toBe("ben");
+  });
+
+  it("shows the other matches on Arrow Down after a choice, the chosen one among them", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+    const field = screen.getByRole("combobox");
+    await user.type(field, "mar");
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    act(() => {
+      calls[0]?.answer({ choices: [aChoice("maria"), aChoice("mariana")], more: false });
+    });
+    await user.click((await screen.findAllByRole("option"))[0] as HTMLElement);
+    expect(held()).toBe("maria");
+
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    expect(calls[1]?.text).toBe("maria");
+    act(() => {
+      calls[1]?.answer({ choices: [aChoice("maria"), aChoice("mariana")], more: false });
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByRole("option")).toHaveLength(2);
+    });
+    expect(field).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(held()).toBe("mariana");
   });
 
   it("puts the exact name of a chosen suggestion in the field and hands it over", async () => {

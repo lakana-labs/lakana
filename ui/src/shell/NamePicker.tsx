@@ -286,7 +286,9 @@ export function NamePicker<T>({
         className="field"
         items={choices}
         inputValue={value}
-        value={found.state === "done" ? selectedKey : null}
+        // The choice stays selected while the list holds it, the answer to Arrow Down after it
+        // too: a selection that left and came back would read as a new one, and close the list.
+        value={choices.some((one) => one.key === selectedKey) ? selectedKey : null}
         allowsCustomValue
         allowsEmptyCollection={search !== null && found.state !== "idle"}
         isRequired={isRequired}
