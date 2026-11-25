@@ -9,7 +9,16 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from lakana_core.models import DeployRun, QueryRun, QueryRunStatus, Run, RunStatus, RunTrigger
+from lakana_core.models import (
+    DeployRun,
+    Principal,
+    PrincipalType,
+    QueryRun,
+    QueryRunStatus,
+    Run,
+    RunStatus,
+    RunTrigger,
+)
 from lakana_server.api.platform.listing import NEXT_CURSOR_HEADER
 from tests.api.platform.test_deployments_run_as import _deploy
 from tests.api.platform.test_deploys import _setup as _deploys_setup
@@ -337,3 +346,75 @@ def test_runs_sorted_by_a_column_page_with_the_header_cursor(client: TestClient)
     )
     assert other.status_code == 422
     assert "came from the list sorted by `name:asc`" in other.json()["detail"]
+
+
+_WIDE = "\U0001d538"
+"""A letter of four bytes in UTF-8, the widest a name can hold."""
+
+
+def _walk_ids(client: TestClient, url: str, headers: dict[str, str], **params: object) -> list[str]:
+    """Read every page of a list, one row a page, following its cursor.
+
+    Parameters
+    ----------
+    client
+        The test client.
+    url
+        The list's route.
+    headers
+        The caller's Authorization header.
+    **params
+        The sort and the filters.
+
+    Returns
+    -------
+    list of str
+        Each row's id (a principal's name), in the order of the pages.
+    """
+    seen: list[str] = []
+    query: dict[str, object] = {"limit": 1, **params}
+    while True:
+        response = client.get(url, headers=headers, params=query)
+        assert response.status_code == 200, (url, response.text)
+        body = response.json()
+        items = body if isinstance(body, list) else body["items"]
+        seen += [str(item.get("id", item.get("name"))) for item in items]
+        cursor = (
+            response.headers.get(NEXT_CURSOR_HEADER)
+            if isinstance(body, list)
+            else body["next_cursor"]
+        )
+        if cursor is None:
+            return seen
+        query["cursor"] = cursor
+
+
+def test_lists_page_past_names_of_the_longest_length_in_wide_letters(client: TestClient) -> None:
+    """Every cursor of a name fits the route's `cursor`: no list stops at a long name (#803)."""
+    _deploy(client)
+    names = [_WIDE * 255, "ж" * 255, "a" * 255]
+    made = _make_runs(client, [_Spec(minutes=m, job=name) for m, name in enumerate(names)])
+    for url in (_RUNS, "/api/v1/runs"):
+        for sort in ("name", "status", "created"):
+            for order in ("asc", "desc"):
+                got = _walk_ids(client, url, AUTH_HEADER, sort=sort, order=order)
+                assert sorted(got) == sorted(made), (url, sort, order)
+
+    with Session(client.app.state.engine) as session:
+        for name in names:
+            session.add(Principal(id=uuid.uuid4(), type=PrincipalType.USER, name=name))
+        session.commit()
+    people = _walk_ids(client, "/api/v1/principals", AUTH_HEADER, sort="name", order="desc")
+    assert set(names) <= set(people)
+
+    saved = [_WIDE * 200, "ж" * 200, "S" * 200]
+    for name in saved:
+        created = client.post(
+            "/api/v1/environments/dev/saved-queries",
+            headers=AUTH_HEADER,
+            json={"name": name, "sql": "SELECT 1"},
+        )
+        assert created.status_code == 201, created.text
+    for url in ("/api/v1/environments/dev/saved-queries", "/api/v1/saved-queries"):
+        for params in ({}, {"sort": "name", "order": "desc"}, {"sort": "updated"}):
+            assert len(_walk_ids(client, url, AUTH_HEADER, **params)) == 3, (url, params)

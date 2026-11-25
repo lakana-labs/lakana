@@ -15,7 +15,7 @@ from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.models import DeployKind
 from lakana_core.projects.deploys import DeploymentView, DeployRunView, DeployService
 from lakana_core.runs.operator import deploy_actions, operator_rights_each
-from lakana_server.api.platform.listing import OrderParam, SortParam, set_next_cursor
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
 from lakana_server.api.platform.schemas import (
     DeployAccepted,
     DeployCreate,
@@ -160,7 +160,7 @@ def list_deploys(
     response: Response,
     repository: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
@@ -525,7 +525,7 @@ def list_all_deploys(
     environment: str | None = Query(default=None, max_length=255),
     repository: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),

@@ -10,6 +10,8 @@ from typing import Annotated
 
 from fastapi import Query, Response
 
+from lakana_core.pagination import CURSOR_MAX_LENGTH
+
 NEXT_CURSOR_HEADER = "X-Next-Cursor"
 """The response header that carries the cursor of the next page; absent on the last page."""
 
@@ -52,3 +54,6 @@ SortParam = Annotated[str | None, Query(max_length=32)]
 
 OrderParam = Annotated[str | None, Query(max_length=8)]
 """A list's `order`: ``asc`` or ``desc``; each route's docstring says which way is the default."""
+
+CursorParam = Annotated[str | None, Query(max_length=CURSOR_MAX_LENGTH)]
+"""The `cursor` of a list whose cursor holds names: as long as the longest one it issues."""

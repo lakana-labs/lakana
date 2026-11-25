@@ -18,7 +18,7 @@ from lakana_core.catalog.saved_queries import (
     SavedQueryService,
     SavedQueryView,
 )
-from lakana_server.api.platform.listing import OrderParam, SortParam
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam
 from lakana_server.api.platform.schemas import (
     SavedQueryIn,
     SavedQueryOut,
@@ -84,7 +84,7 @@ def _out(view: SavedQueryView) -> SavedQueryOut:
 def list_saved_queries(
     env: str,
     limit: int = Query(default=SAVED_QUERY_LIST_DEFAULT, ge=1, le=SAVED_QUERY_LIST_MAX),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
@@ -382,7 +382,7 @@ def delete_saved_query(
 def list_all_saved_queries(
     environment: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=SAVED_QUERY_LIST_DEFAULT, ge=1, le=SAVED_QUERY_LIST_MAX),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),

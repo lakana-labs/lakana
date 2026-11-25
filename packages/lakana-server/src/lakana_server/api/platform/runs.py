@@ -21,6 +21,7 @@ from lakana_core.runs.operator import operator_rights_each, run_actions
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService, RunView, TaskLogView, TaskRunView, WorkerView
 from lakana_server.api.platform.listing import (
+    CursorParam,
     OrderParam,
     SortParam,
     set_next_cursor,
@@ -225,7 +226,7 @@ def list_runs(
     job: str | None = Query(default=None, max_length=255),
     since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
@@ -713,7 +714,7 @@ def list_all_runs(
     job: str | None = Query(default=None, max_length=255),
     since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),

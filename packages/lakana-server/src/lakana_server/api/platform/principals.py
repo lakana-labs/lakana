@@ -14,7 +14,7 @@ from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import Principal, PrincipalType
 from lakana_server.api.platform.grants import permissions_out
-from lakana_server.api.platform.listing import OrderParam, SortParam, set_next_cursor
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
 from lakana_server.api.platform.namespace_forms import dotted_namespace
 from lakana_server.api.platform.schemas import (
     HeldGrantOut,
@@ -296,7 +296,7 @@ def list_principals(
     response: Response,
     q: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),

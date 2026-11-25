@@ -23,6 +23,7 @@ import binascii
 import enum
 import itertools
 import json
+import math
 import unicodedata
 import uuid
 from collections.abc import Callable, Mapping, Sequence
@@ -516,7 +517,10 @@ def encode_sorted_cursor(
         Unpadded base64url of ``{"k": kind, "s": sort, "v": [[tag, value], …], "i": id}``.
     """
     body = {"k": kind, "s": sort, "v": [_tagged(v) for v in values], "i": str(row_id)}
-    return base64.urlsafe_b64encode(json.dumps(body).encode()).rstrip(b"=").decode()
+    # UTF-8 rather than JSON escapes, as `encode_key_cursor`: a non-ASCII name is at most four
+    # bytes a character, not twelve, so the cursor stays within `CURSOR_MAX_LENGTH`.
+    text = json.dumps(body, ensure_ascii=False)
+    return base64.urlsafe_b64encode(text.encode("utf-8", "surrogatepass")).rstrip(b"=").decode()
 
 
 def _untagged(item: object, wanted: KeyType) -> CursorValue:
@@ -697,6 +701,17 @@ def after_sorted(
     for key, value in reversed(list(zip(keys, at.values, strict=True))):
         condition = or_(beyond(key, value), and_(key == value, condition))
     return condition
+
+
+LONGEST_KEY_CHARS = 600 + 255
+"""The most characters the text keys of one cursor hold together: a saved query's folded name
+(`NAME_KEY_MAX`, 600) and its environment's name (255). Every other list's keys are shorter: a
+run's job or repository name and a principal's name are 255, a connection's 63."""
+
+CURSOR_MAX_LENGTH = 4 * math.ceil((4 * LONGEST_KEY_CHARS + 512) / 3)
+"""The longest cursor a list issues: base64 of the keys' text at four UTF-8 bytes a character, and
+512 bytes for the JSON around them (the list's kind, the sort, a time, an id). The routes of the
+lists whose cursors hold names take a `cursor` this long."""
 
 
 class SortKey(NamedTuple):
@@ -1113,7 +1128,7 @@ def encode_tuple_cursor(kind: str, key: tuple[str, ...]) -> str:
     str
         A key cursor (`encode_key_cursor`) of the key as a JSON array.
     """
-    return encode_key_cursor(kind, json.dumps(list(key)))
+    return encode_key_cursor(kind, json.dumps(list(key), ensure_ascii=False))
 
 
 def decode_tuple_cursor(kind: str, cursor: str) -> tuple[str, ...]:

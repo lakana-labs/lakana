@@ -484,3 +484,48 @@ def test_a_sorted_page_refuses_a_limit_below_one() -> None:
             )
     finally:
         engine.dispose()
+
+
+def test_the_longest_cursors_fit_the_routes_limit() -> None:
+    """Keys of four-byte characters at every name's longest still fit `CURSOR_MAX_LENGTH`."""
+    from lakana_core.models import Environment, Principal, Repository, Run
+    from lakana_core.models.saved_query import NAME_KEY_MAX
+    from lakana_core.pagination import (
+        CURSOR_MAX_LENGTH,
+        LONGEST_KEY_CHARS,
+        decode_tuple_cursor,
+        encode_tuple_cursor,
+    )
+
+    def length(column: object) -> int:
+        """Read a text column's most characters.
+
+        Parameters
+        ----------
+        column
+            The mapped column.
+
+        Returns
+        -------
+        int
+            Its length.
+        """
+        found = getattr(getattr(column, "type", None), "length", None)
+        assert isinstance(found, int)
+        return found
+
+    env_max = length(Environment.name)
+    assert NAME_KEY_MAX + env_max == LONGEST_KEY_CHARS
+    for column in (Principal.name, Repository.name, Run.job):
+        assert length(column) <= LONGEST_KEY_CHARS
+    wide = "\U0001d538"  # four bytes in UTF-8
+    saved = encode_tuple_cursor("all-saved-queries", (wide * NAME_KEY_MAX, wide * env_max, str(ID)))
+    assert len(saved) <= CURSOR_MAX_LENGTH
+    assert decode_tuple_cursor("all-saved-queries", saved)[0] == wide * NAME_KEY_MAX
+    run = encode_sorted_cursor("all-runs", "name:desc", [wide * 255, _AT], ID)
+    assert len(run) <= CURSOR_MAX_LENGTH
+    assert (
+        decode_sorted_cursor("all-runs", "name:desc", run, [str, datetime]).values[0] == wide * 255
+    )
+    # A name of 45 Cyrillic letters once made a cursor of 532 characters, past the old 512.
+    assert len(encode_sorted_cursor("runs", "name:asc", ["ж" * 45, _AT], ID)) < 512

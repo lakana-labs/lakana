@@ -23,7 +23,7 @@ from pydantic import SecretStr
 from lakana_core.auth import PrincipalRef
 from lakana_core.connections.service import TEST_ALL_MAX, ConnectionService, ConnectionView
 from lakana_core.models import ConnectionTest
-from lakana_server.api.platform.listing import OrderParam, SortParam
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam
 from lakana_server.api.platform.schemas import (
     ConnectionCreate,
     ConnectionEnvironmentOut,
@@ -206,7 +206,7 @@ def create_connection(
 def list_connections(
     environment_name: str,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
@@ -550,7 +550,7 @@ def get_connection_test(
 def list_all_connections(
     environment: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
     sort: SortParam = None,
     order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
