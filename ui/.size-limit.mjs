@@ -460,7 +460,10 @@ const NAMED_LIMITS = [
   // Measured 2.24 kB (2026-11-13) + 10 %: the Access tab, what the person may do and why, and for
   // an administrator the grants level by level, the row filters and the column masks. It loads
   // only when the Access tab is opened.
-  { name: "the Access tab", prefix: "AccessTab-", limit: "2.46 kB" },
+  // Raised to the measured 2.46 kB (2,461 B, 2026-11-25) + 10 %: 1 B over once #32 PR 4 moved
+  // the step-up ceremony into the API's entry (every step-up write asks first, #805), which
+  // changed the minifier's names in the chunks the tab imports; the tab's code is unchanged.
+  { name: "the Access tab", prefix: "AccessTab-", limit: "2.71 kB" },
   // Measured 1.01 kB (2026-11-16, `npm run size`) + 10 %: the References tab, its two flat panels of references,
   // the hidden counts and the focus after Try again. It loads only when the tab is opened.
   { name: "the References tab", prefix: "ReferencesTab-", limit: "1.11 kB" },
