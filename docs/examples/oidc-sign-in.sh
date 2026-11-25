@@ -6,7 +6,17 @@ set -euo pipefail
 # Not an example the runner starts (it needs a server with OIDC sign-in on and people linked to
 # an identity provider): packages/lakana-server/tests/cli/test_oidc_docs.py runs every command of
 # every region with the CLI against the real app, with OIDC sign-in on, `sam` linked and `kim` a
-# linked administrator, and checks what each command did.
+# linked administrator, and checks what each command did. The two `lakana login` regions run
+# against the app's address instead of https://lakana.example.com, with the test playing the
+# browser that confirms.
+
+# docs:start login
+lakana login --url https://lakana.example.com
+# docs:end login
+
+# docs:start login-device
+lakana login --url https://lakana.example.com --device
+# docs:end login-device
 
 # docs:start window
 lakana sign-in settings --token-window-days 14

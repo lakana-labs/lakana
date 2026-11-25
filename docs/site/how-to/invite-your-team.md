@@ -23,8 +23,9 @@ once, for 7 days, and the account it creates has no rights at all until you gran
    another open invite holds, in any letter case, is refused: choose another.
 3. Choose **Create the invite**. If you have not touched your passkey in the last 15 minutes, your
    browser asks for it now; issuing an invite always needs a fresh touch.
-   Someone who signs in through the organisation's identity provider confirms there
-   instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
+   Someone who signs in through the organisation's identity provider confirms there instead, then
+   presses the action again
+   ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 4. The interface shows the link **once**. Copy it with **Copy link** and send it to the person
    yourself, on a channel you trust: a chat with them, or a message that disappears. Whoever opens
    the link first gets the account. Choose **Done**; the link is not shown again, and Lakana keeps

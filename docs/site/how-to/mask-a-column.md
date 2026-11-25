@@ -150,10 +150,11 @@ whoever holds `MANAGE_POLICY` on the instance. **Add filter or mask** with **Col
 asks for the table, the column, who the mask is for and what they see instead, such as
 `'***' || substr(email, -4)`; **Delete** says who then sees the column as it is stored. Both ask
 for a passkey touch first.
-Someone who signs in through the organisation's identity provider confirms there
-instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). A mask in an environment an access file manages is marked **⌂ Git** and
-is changed in the file. [Show some people only some
-rows](filter-rows.md#in-the-web-interface) describes the page.
+Someone who signs in through the organisation's identity provider confirms there instead, then
+presses the action again
+([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). A mask
+in an environment an access file manages is marked **⌂ Git** and is changed in the file. [Show some
+people only some rows](filter-rows.md#in-the-web-interface) describes the page.
 
 ## An expression must not fail on any stored value
 

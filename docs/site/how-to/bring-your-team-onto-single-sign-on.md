@@ -3,8 +3,9 @@
 Once the server signs people in through your identity provider
 ([Keycloak](sign-in-with-keycloak.md) or [Microsoft Entra ID](sign-in-with-entra-id.md)), this
 guide moves the team onto it: everyone links their Lakana account to their account at the
-provider, newcomers join through it, and leaving the company ends Lakana access without anyone
-doing anything in Lakana. One administrator stays off it on purpose, so that an outage at the
+provider, newcomers join through it, and someone who leaves the company can no longer sign in once
+their account at the provider is disabled. What they already hold runs out on its own, and
+deactivating them in Lakana ends it at once (step 4). One administrator stays off it on purpose, so that an outage at the
 provider locks nobody out.
 
 Here the provider is called Keycloak; the interface shows the name you set in
@@ -27,15 +28,29 @@ Here the provider is called Keycloak; the interface shows the name you set in
   Sign in to Lakana in the browser once, then the token works again." The token is not revoked.
   Their profile and their API tokens panel say until when the tokens work. Task tokens and CI
   tokens act for a run or a CI job and are not under the window.
-- **The command line signs in through the browser.** `lakana login` against this server opens the
-  browser, asks the person to confirm, and saves a new token named `lakana login on <computer>`
-  for 90 days; on a computer without a browser, `lakana login --device` shows an address and a
-  short code to confirm in a browser elsewhere (the [command reference](../reference/cli/commands.md#lakana-login)
-  has the options). It works for unlinked people too.
+- **The command line signs in through the browser.** Against this server, `lakana login` opens
+  the browser, asks the person to confirm, and saves a new token named `lakana login on
+  <computer>` for 90 days. It works for unlinked people too (below).
+
+On a computer with a browser, with your server's address
+([command reference](../reference/cli/commands.md#lakana-login)):
+
+<!-- source: docs/examples/oidc-sign-in.sh#login -->
+```bash
+lakana login --url https://lakana.example.com
+```
+
+On a computer without a browser, `--device` shows an address and a short code to confirm in a
+browser elsewhere:
+
+<!-- source: docs/examples/oidc-sign-in.sh#login-device -->
+```bash
+lakana login --url https://lakana.example.com --device
+```
 
 ## 1. Keep an administrator who signs in with a passkey
 
-While anyone is linked, Lakana keeps at least one active administrator who is not linked and
+While any administrator is linked, Lakana keeps at least one active administrator who is not linked and
 has a working passkey for this address. It refuses whatever would leave none: linking the last
 one, deactivating them, taking their `ADMIN` role away, deleting their last passkey, and giving
 `ADMIN` to a linked person when no such administrator is left. **Settings → Sign-in**, under
@@ -82,18 +97,26 @@ invite."
 
 ## 4. Offboard someone
 
-Disable or delete the person at the provider. From then on they cannot sign in to the web
-interface, and their personal API tokens stop working once the token window ends, at most 30
-days after their last sign-in there by default. To end everything at once, deactivate them in
-Lakana too: on their page under **Settings → Access → People**, or
+Disable or delete the person at the provider. From then on they cannot sign in again, but what
+they already hold keeps working for a while:
+
+- **A browser session that is open** ends after 12 hours without use, and 7 days after its sign-in
+  at the latest. These are the session lengths of **Settings → Sign-in**, which an administrator
+  may set up to 24 hours and 30 days.
+- **Their personal API tokens** work until the token window ends: 30 days after their last
+  sign-in at the provider by default. A task token minted with one of them stops with it.
+
+To cut access at once, deactivate them in Lakana as well. That ends every session of theirs and
+stops every token at once. Do it for anyone who leaves on bad terms, or whose laptop you do not
+have back. On their page under **Settings → Access → People**, or:
 
 <!-- source: docs/examples/oidc-sign-in.sh#offboard -->
 ```bash
 lakana principal deactivate sam --yes
 ```
 
-Deactivating keeps the link, the grants and the history; reactivated, the person signs in
-through the provider again. Do not unlink to offboard: unlinking is for moving someone off
+Deactivating cannot be undone in this release: the account, its grants and its history stay, but
+nobody signs in as it again. Do not unlink to offboard: unlinking is for moving someone off
 single sign-on (below), and the interface says so in the dialog.
 
 A shorter window shortens the time a disabled person's tokens still work, and makes people sign
@@ -167,5 +190,7 @@ Successful sign-ins are `SIGN_IN_OIDC`, links and unlinks `PRINCIPAL_OIDC_LINKED
   ([Lost your passkey](lost-your-passkey.md#after-changing-the-public-address)). At start-up the
   server's log says how many administrators can still sign in with a passkey at the new address;
   at none, the operator issues one a recovery link as above.
-- **Turning single sign-on off** (removing `LAKANA_OIDC__ISSUER`) does not give linked people
-  their passkeys back: unlink them first and send recovery links.
+- **Turning single sign-on off** means removing every `LAKANA_OIDC__` line from the `server`
+  service's `environment:` in `compose.yaml` as well as from `.env`: a line left in `compose.yaml`
+  passes an empty value, and the server does not start. It does not give linked people their
+  passkeys back: unlink them first and send recovery links.

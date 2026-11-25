@@ -116,10 +116,11 @@ then shows its sentence, as above, and stays open. An artifact is dropped from i
 [Drop the whole artifact](delete-an-artifact-version.md#drop-the-whole-artifact)). The dialog asks "Delete namespace gold.sales?";
 press **Delete the namespace**. From a browser the server asks for a passkey touch within the last
 15 minutes: touch your passkey when the browser asks, and the delete is sent again.
-Someone who signs in through the organisation's identity provider confirms there
-instead, then presses the action again ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). If the touch
-fails, the dialog stays open with the reason and nothing is deleted. The Catalog then opens the
-namespace above, or the environment, with fresh counts, and says "Deleted namespace gold.sales."
+Someone who signs in through the organisation's identity provider confirms there instead, then
+presses the action again
+([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). If the
+touch fails, the dialog stays open with the reason and nothing is deleted. The Catalog then opens
+the namespace above, or the environment, with fresh counts, and says "Deleted namespace gold.sales."
 
 ## In a protected environment
 

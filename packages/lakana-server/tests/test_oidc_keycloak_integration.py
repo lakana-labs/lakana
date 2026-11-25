@@ -639,10 +639,13 @@ def test_unlinked_identity_is_not_linked(client: TestClient, browser: KeycloakBr
 
 def test_disabled_person_cannot_sign_in(client: TestClient, browser: KeycloakBrowser) -> None:
     started = client.post(START, json={})
-    page = browser.sign_in(started.json()["authorization_url"], "disabled-person", "x")
-    # Keycloak answers with its own page and never sends the browser back.
+    page = browser.sign_in(
+        started.json()["authorization_url"], "disabled-person", "disabled-person-password-test"
+    )
+    # With the right password, Keycloak refuses because the account is disabled, on its own
+    # page, and never sends the browser back.
     assert isinstance(page, httpx.Response), page
-    assert page.status_code == 200
+    assert "Account is disabled" in page.text, page.text[-3000:]
     answer = client.post(FINISH, json={})
     assert answer.status_code == 403, answer.text
     assert SESSION_COOKIE not in answer.headers.get("set-cookie", "")

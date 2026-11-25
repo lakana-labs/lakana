@@ -13,6 +13,7 @@ the server sends, or from the client of the realm that
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -157,3 +158,234 @@ def test_the_how_to_s_client_is_the_tested_realm_s() -> None:
             continue
         assert tested[key] == value, key
     assert tested["redirectUris"] == [tested["rootUrl"] + CALLBACK_PATH]
+
+
+def _compose_environment(env: dict[str, str]) -> dict[str, str]:
+    """Name what the bundle's `server` gets with the snippets' lines and an `.env`.
+
+    Compose replaces `${NAME}` with the `.env` value, or with an empty string when `.env` has
+    no line for it.
+
+    Parameters
+    ----------
+    env
+        The `LAKANA_OIDC__` lines of `.env`.
+
+    Returns
+    -------
+    dict of str to str
+        Each variable of both snippets with the value the server sees.
+    """
+    passed: dict[str, str] = {}
+    for name in COMPOSE_SNIPPETS:
+        for key, value in _passed(name).items():
+            match = _INTERPOLATED.match(str(value))
+            assert match is not None, (key, value)
+            passed[key] = env.get(match.group(1), "")
+    return passed
+
+
+def _server_starts(monkeypatch: pytest.MonkeyPatch, environment: dict[str, str]) -> bool:
+    """Say whether the server's settings accept an environment.
+
+    Parameters
+    ----------
+    monkeypatch
+        Sets the variables for this test only.
+    environment
+        The `LAKANA_OIDC__` variables the server gets; absent ones are unset.
+
+    Returns
+    -------
+    bool
+        Whether `lakana_server.settings.Settings` validates.
+    """
+    from pydantic import ValidationError
+
+    from lakana_server.settings import Settings
+
+    for key in [k for k in os.environ if k.startswith("LAKANA_")]:
+        monkeypatch.delenv(key)
+    base = {
+        "LAKANA_DATABASE__URL": "sqlite:///lakana.db",
+        "LAKANA_UI__ENABLED": "true",
+        "LAKANA_UI__PUBLIC_URL": "https://lakana.example.com",
+    }
+    for key, value in {**base, **environment}.items():
+        monkeypatch.setenv(key, value)
+    try:
+        Settings(_env_file=None)
+    except ValidationError:
+        return False
+    return True
+
+
+def test_the_documented_lines_start_the_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    keycloak = _env("oidc-keycloak.env")
+    entra = _env("oidc-entra-id.env")
+    # Keycloak with every line (the internal ones too), and Entra ID with the four lines of
+    # `oidc-compose.yaml` only: the page has no internal lines for it.
+    assert _server_starts(monkeypatch, _compose_environment(keycloak))
+    four = set(_passed("oidc-compose.yaml"))
+    assert _server_starts(
+        monkeypatch, {k: v for k, v in _compose_environment(entra).items() if k in four}
+    )
+
+
+@pytest.mark.parametrize("left_out", ["LAKANA_OIDC__DISPLAY_NAME", "LAKANA_OIDC__ISSUER"])
+def test_a_setting_left_out_of_env_only_stops_the_server(
+    monkeypatch: pytest.MonkeyPatch, left_out: str
+) -> None:
+    env = {k: v for k, v in _env("oidc-keycloak.env").items() if k != left_out}
+    passed = _compose_environment(env)
+    # The line still in compose.yaml passes an empty value, which the server refuses ...
+    assert passed[left_out] == ""
+    assert not _server_starts(monkeypatch, passed)
+    # ... and with its line removed from compose.yaml too, the server starts.
+    if left_out == "LAKANA_OIDC__ISSUER":
+        passed = {}  # turning single sign-on off removes every LAKANA_OIDC__ line
+    else:
+        passed = {k: v for k, v in passed.items() if k != left_out}
+    assert _server_starts(monkeypatch, passed)
+
+
+def test_the_pages_say_to_leave_a_setting_out_of_both_files() -> None:
+    rule = "To leave a setting out, remove its line from both files."
+    for page in PAGES:
+        assert rule in " ".join((HOW_TO / page).read_text().split()), page
+    guide = " ".join((HOW_TO / "bring-your-team-onto-single-sign-on.md").read_text().split())
+    assert "means removing every `LAKANA_OIDC__` line from the `server` service's" in guide
+
+
+UI = ROOT / "ui/src"
+_ROW = re.compile(r"^\| `([a-z_]+)` \| (.+?) \| ", re.MULTILINE)
+"""A row of the Keycloak how-to's refusal table: the reason, then what the person reads."""
+
+
+def _ui_text(file: str, key: str, name: str = "Keycloak") -> str:
+    """Read a string of the interface, with the provider's name filled in.
+
+    Parameters
+    ----------
+    file
+        The locale file under `ui/src`.
+    key
+        The dotted key.
+    name
+        The provider's name, for ``<name/>`` and ``{{provider}}``.
+
+    Returns
+    -------
+    str
+        The string as the interface shows it.
+    """
+    value: object = json.loads((UI / file).read_text())
+    for part in key.split("."):
+        assert isinstance(value, dict), (file, key)
+        value = value[part]
+    assert isinstance(value, str), (file, key)
+    return value.replace("<name/>", name).replace("{{provider}}", name)
+
+
+def _page(name: str) -> str:
+    """Read a how-to with its line breaks as spaces.
+
+    Parameters
+    ----------
+    name
+        The file under `docs/site/how-to`.
+
+    Returns
+    -------
+    str
+        The text.
+    """
+    return " ".join((HOW_TO / name).read_text().split())
+
+
+def test_the_refusal_table_quotes_the_interface() -> None:
+    refused = json.loads((UI / "sign-in/oidc.en.json").read_text())["refused"]
+    reasons = {k for k in refused if k not in ("title", "confirmTitle", "tryAgain")}
+    rows = dict(_ROW.findall((HOW_TO / "sign-in-with-keycloak.md").read_text()))
+    rows.pop("reason")  # the table's head
+    assert set(rows) == reasons
+    for reason, sentence in rows.items():
+        assert sentence == refused[reason], reason
+
+
+QUOTED = [
+    ("sign-in-with-keycloak.md", "settings/configuration.en.json", "secretSet", "Keycloak"),
+    ("sign-in-with-keycloak.md", "settings/signIn.en.json", "provider.title", "Keycloak"),
+    ("sign-in-with-keycloak.md", "settings/signIn.en.json", "provider.name", "Keycloak"),
+    ("sign-in-with-keycloak.md", "settings/signIn.en.json", "provider.issuer", "Keycloak"),
+    ("sign-in-with-keycloak.md", "settings/signIn.en.json", "provider.linked", "Keycloak"),
+    ("sign-in-with-keycloak.md", "settings/signIn.en.json", "provider.unlinked", "Keycloak"),
+    ("sign-in-with-keycloak.md", "settings/signIn.en.json", "window.label", "Keycloak"),
+    ("sign-in-with-keycloak.md", "settings/signIn.en.json", "provider.oneLeft", "Keycloak"),
+    ("sign-in-with-keycloak.md", "i18n/en.json", "signIn.oidc.provider", "Keycloak"),
+    ("sign-in-with-keycloak.md", "i18n/en.json", "signIn.oidc.passkey", "Keycloak"),
+    ("sign-in-with-keycloak.md", "i18n/en.json", "signIn.oidc.passkeyHint", "Keycloak"),
+    ("sign-in-with-entra-id.md", "sign-in/oidc.en.json", "refused.auth_too_old", "Microsoft"),
+    ("sign-in-with-entra-id.md", "sign-in/oidc.en.json", "refused.not_linked", "Microsoft"),
+    ("sign-in-with-entra-id.md", "sign-in/oidc.en.json", "section.link", "Microsoft"),
+    ("sign-in-with-entra-id.md", "i18n/en.json", "signIn.oidc.provider", "Microsoft"),
+    (
+        "bring-your-team-onto-single-sign-on.md",
+        "i18n/en.json",
+        "notices.confirmed.step_up",
+        "Keycloak",
+    ),
+    (
+        "bring-your-team-onto-single-sign-on.md",
+        "sign-in/oidc.en.json",
+        "section.unlinked",
+        "Keycloak",
+    ),
+    ("bring-your-team-onto-single-sign-on.md", "sign-in/oidc.en.json", "section.link", "Keycloak"),
+    (
+        "bring-your-team-onto-single-sign-on.md",
+        "sign-in/oidc.en.json",
+        "section.linkTitle",
+        "Keycloak",
+    ),
+    (
+        "bring-your-team-onto-single-sign-on.md",
+        "sign-in/oidc.en.json",
+        "section.linked",
+        "Keycloak",
+    ),
+    (
+        "bring-your-team-onto-single-sign-on.md",
+        "sign-in/oidc.en.json",
+        "refused.not_linked",
+        "Keycloak",
+    ),
+    (
+        "bring-your-team-onto-single-sign-on.md",
+        "access/access.en.json",
+        "provider.title",
+        "Keycloak",
+    ),
+    ("bring-your-team-onto-single-sign-on.md", "i18n/en.json", "link.withProvider", "Keycloak"),
+    ("bring-your-team-onto-single-sign-on.md", "i18n/en.json", "link.providerOnly", "Keycloak"),
+]
+"""Strings of the interface that a how-to quotes: the page, the locale file, the key, the name."""
+
+
+@pytest.mark.parametrize(("page", "file", "key", "name"), QUOTED)
+def test_a_quoted_interface_string_is_the_interface_s(
+    page: str, file: str, key: str, name: str
+) -> None:
+    assert _ui_text(file, key, name) in _page(page)
+
+
+def test_the_other_quoted_sentences_are_the_code_s() -> None:
+    from lakana_core.identity.sessions import TOKEN_WINDOW_MESSAGE
+
+    guide = _page("bring-your-team-onto-single-sign-on.md")
+    assert TOKEN_WINDOW_MESSAGE.format(days=30) in guide
+    notice = _ui_text("i18n/en.json", "notices.oidc_unlinked.other")
+    assert notice.split("{{date}}")[0].replace("{{subject}}", "kim").rstrip() in guide
+    warning = _ui_text("settings/signIn.en.json", "provider.warningWord")
+    oneleft = _ui_text("settings/signIn.en.json", "provider.oneLeft")
+    assert f"{warning} {oneleft}" in _page("sign-in-with-keycloak.md")

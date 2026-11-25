@@ -1,8 +1,9 @@
 # Sign in through Keycloak
 
 After this guide the people of your team sign in to the web interface with the account they
-already have in Keycloak, and someone you disable in Keycloak loses access to Lakana without
-anyone doing anything in Lakana. Lakana still stores no password. It never creates an account
+already have in Keycloak. Someone you disable in Keycloak can no longer sign in to Lakana;
+what they already hold runs out on its own, and deactivating them in Lakana ends it at once
+([Offboard someone](bring-your-team-onto-single-sign-on.md#4-offboard-someone)). Lakana still stores no password. It never creates an account
 because Keycloak says so: only a person Lakana already knows signs in through Keycloak, once
 their account is linked to their Keycloak identity
 ([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md) links them).
@@ -98,8 +99,8 @@ LAKANA_OIDC__DISPLAY_NAME=Keycloak
 ```
 
 `LAKANA_OIDC__DISPLAY_NAME` is the name on the sign-in button ("Sign in with Keycloak"); a
-name your people know, such as your company's, reads better. Left out, the button names the
-issuer's host. The [settings reference](../reference/settings.md#lakana_oidc__) has every
+name your people know, such as your company's, reads better. Without the setting (its line left
+out of `.env` and of `compose.yaml`, below), the button names the issuer's host. The [settings reference](../reference/settings.md#lakana_oidc__) has every
 `LAKANA_OIDC__` setting with its default.
 
 The bundle's `compose.yaml` passes the server only the variables it names, so add the four to
@@ -117,6 +118,10 @@ services:
       LAKANA_OIDC__CLIENT_SECRET: ${LAKANA_OIDC__CLIENT_SECRET}
       LAKANA_OIDC__DISPLAY_NAME: ${LAKANA_OIDC__DISPLAY_NAME}
 ```
+
+Each line takes its value from `.env`, so every variable it names needs a line there: Compose
+passes a variable that `.env` lacks as an empty value, and the server does not start with an
+empty `LAKANA_OIDC__` setting. To leave a setting out, remove its line from both files.
 
 ### Keycloak on your internal network
 
