@@ -116,7 +116,10 @@ copied into both of its schemes in the same change, or `scripts/tests/test_docs_
 Every screen, every time (the end-to-end test `ui/e2e/layout.spec.ts` measures most of them):
 
 - **Full width.** A screen and its tables take the full width of the working area; only running
-  text (a paragraph) keeps `--reading-width`. No horizontal page scroll from 1280 px on, and no
+  text (a paragraph) keeps `--reading-width`. A paragraph that is a block spans its column: a
+  banner (`.step-error`, `.step-warning`, `.step-notice`, `.page-notice`) and Home's update note,
+  whose × ends the note; a new banner class joins the exemptions of `.page :where(p…)` in
+  `ui/src/shell/shell.css` (#820). No horizontal page scroll from 1280 px on, and no
   list that scrolls sideways there; at 320 px a table scrolls inside its own region.
 - **Title left, primary action right**, on the title's line (`Page`'s `action`, `.page-head`).
 - **One height for a row of controls**: buttons, fields, pickers and search are
@@ -162,6 +165,10 @@ Every screen, every time (the end-to-end test `ui/e2e/layout.spec.ts` measures m
 ## Accessibility (WCAG 2.2 AA)
 
 - Keyboard first: every action reachable, focus visible (`--focus-ring`), no traps.
+- A heading the interface focuses by script (`tabIndex={-1}`: a sign-in step's, a page's after a
+  navigation, a panel's after an action) shows the ring, since no pointer was used. Leave at
+  least `--space-2` between it and the text above and below, so the ring (2 px at a 2 px
+  offset) touches no line; `ui/e2e/heading-focus.spec.ts` checks it on every kind (#821).
 - React Aria for interactive patterns; a native element when it does the job.
 - Contrast: body text 7:1, other text 4.5:1, glyphs, edges and focus 3:1.
 - A decorative SVG is `aria-hidden`; one that stands alone has `role="img"` and a name.

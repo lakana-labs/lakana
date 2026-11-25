@@ -125,7 +125,45 @@ const shell = readFileSync(resolve(import.meta.dirname, "shell.css"), "utf8");
 it("lets a page take the full width, with a reading width for running text only", () => {
   expect(shell).toMatch(/\.page\s*{[^}]*min-width:\s*0;[^}]*}/);
   expect(shell).not.toMatch(/\.page\s*{[^}]*max-width/);
-  expect(shell).toMatch(/\.page :where\(p\)\s*{[^}]*max-width:\s*var\(--reading-width\);/);
+  expect(shell).toMatch(
+    /\.page :where\(p:not\([^{]*\)\)\s*{[^}]*max-width:\s*var\(--reading-width\);/,
+  );
+});
+
+it("lets a paragraph that is a block span its column: a banner, a notice, the update note (#820)", () => {
+  const cap = /\.page :where\(p:not\(([^{]*)\)\)\s*{/.exec(shell)?.[1] ?? "";
+  expect(cap.split(",").map((part) => part.trim())).toEqual([
+    ".step-error",
+    ".step-warning",
+    ".step-notice",
+    ".page-notice",
+    ".home-update > p",
+  ]);
+  // Every block drawn as a banner (a state's bar on the left, its tint behind). A new one is
+  // added here and, when a paragraph on a page wears it, to the exemptions above.
+  const root = resolve(import.meta.dirname, "..");
+  const banners = readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((path) => path.endsWith(".css"))
+    .flatMap((path) =>
+      [...readFileSync(resolve(root, path), "utf8").matchAll(/([^{}]+){([^}]*)}/g)]
+        .filter(([, , body = ""]) => /border-left:\s*3px/.test(body) && /background:/.test(body))
+        .flatMap(([, selectors = ""]) =>
+          selectors
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .split(",")
+            .map((one) => one.trim()),
+        ),
+    );
+  expect(banners.sort()).toEqual([
+    // Home's update note: a <div>, whose sentence is exempt above.
+    ".home-update",
+    // A sign-in notice: an <li> outside any page, with its own 720 px.
+    ".notice",
+    ".page-notice",
+    ".step-error",
+    ".step-notice",
+    ".step-warning",
+  ]);
 });
 
 it("gives the shared buttons --control-height and the working area --page-gutter", () => {

@@ -7,6 +7,7 @@ import { FAILED_ID, stubJobs, TIMED_OUT } from "./jobs";
 import { SALES_SQL, stubQueries } from "./queries";
 import { stubRepositories } from "./repositories";
 import { signInAsAdmin } from "./session";
+import { SHOTS } from "./visual/shots";
 
 // One compact density, full-width screens and the alignment rules of #782
 // (docs/agent/still-water.md, "Layout and rhythm"), measured in the browser.
@@ -473,3 +474,66 @@ for (const width of [1280, 1440]) {
     expect(tall).toEqual([]);
   });
 }
+
+/**
+ * Opens one of the visual suite's shots (its stubs, its address, and what shows it has loaded).
+ *
+ * @param page - The page.
+ * @param name - The shot's name.
+ */
+async function openShot(page: Page, name: string): Promise<void> {
+  const shot = SHOTS.find((each) => each.name === name);
+  if (shot === undefined) {
+    throw new Error(`no shot ${name}`);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await shot.stub(page);
+  await page.goto(shot.path);
+  await expect(shot.ready(page)).toBeVisible();
+}
+
+/**
+ * How far an element falls short of its parent's content box, on the right, in pixels.
+ *
+ * @param block - The element.
+ * @returns The gap between its right edge and its parent's content edge.
+ */
+function shortOfColumn(block: Locator): Promise<number> {
+  return block.evaluate((node) => {
+    const parent = node.parentElement;
+    if (parent === null) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const inner =
+      parent.getBoundingClientRect().right -
+      Number.parseFloat(getComputedStyle(parent).paddingRight) -
+      Number.parseFloat(getComputedStyle(parent).borderRightWidth);
+    return inner - node.getBoundingClientRect().right;
+  });
+}
+
+// #820: a paragraph that is a block (a banner, a notice, a note) spans its column; only running
+// text keeps the reading width.
+for (const [shot, selector] of [
+  ["catalog-error", ".page p.step-error"],
+  ["home-no-access", ".page p.page-notice"],
+  ["home", ".page .home-update > p"],
+] as const) {
+  test(`${shot}: ${selector} spans its column`, async ({ page }) => {
+    await openShot(page, shot);
+    const block = page.locator(selector).first();
+    await expect(block).toBeVisible();
+    // The update note's sentence ends where its × begins; the × sits at the note's end.
+    const measured = shot === "home" ? page.locator(".home-update-hide") : block;
+    expect(Math.abs(await shortOfColumn(measured))).toBeLessThanOrEqual(0.5);
+  });
+}
+
+test("running text keeps the reading width", async ({ page }) => {
+  await openShot(page, "settings-environments");
+  const widths = await page
+    .locator(".page p.page-purpose")
+    .evaluateAll((lines) => lines.map((line) => getComputedStyle(line).maxWidth));
+  expect(widths.length).toBeGreaterThan(0);
+  expect(new Set(widths)).toEqual(new Set(["720px"]));
+});
