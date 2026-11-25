@@ -19,6 +19,7 @@ SKIPPED_JOBS = {
         "ui-gate-proofs",
         "ui-e2e-smoke",
         "ui-e2e-server",
+        "ui-visual",
         "unit",
         "integration",
         "integration-services",

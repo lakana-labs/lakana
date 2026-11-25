@@ -1,0 +1,5 @@
+/* A phone's overlay scrollbars show for a moment and fade, so no two pictures of a region that
+   scrolls sideways agree; the pictures leave them out. Desktop scrollbars stay in. */
+* {
+  scrollbar-width: none !important;
+}
