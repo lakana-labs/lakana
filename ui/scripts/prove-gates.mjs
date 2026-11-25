@@ -41,10 +41,10 @@ const PROBE_UI = join(SCRATCH, "ui");
 const JSCPD_REPORT = join(SCRATCH, "jscpd-report-ui");
 // Marks a directory this script made, so it never empties one it did not.
 const MARKER = join(SCRATCH, ".lakana-ui-gate-probe");
-// How long one gate's run may take. The coverage probe runs the whole Vitest suite: it took
-// 182 s in CI on 2026-11-17 with the Queries screen's tests, over the 180 s this was before, so
-// the run was cut and its probe judged a leak. Six minutes leaves room, inside the job's 15.
-const TIMEOUT_MS = 360_000;
+// How long one gate's run may take. The slowest are ESLint (23-90 s in CI) and tsc (12-17 s); the
+// coverage probes run one small file. Three minutes is a wide margin over each, inside the job's
+// 10-minute budget, and a run cut by it is judged a leak.
+const TIMEOUT_MS = 180_000;
 const NOT_COPIED = new Set(["node_modules", "coverage", "test-results", "playwright-report"]);
 
 // An 80-token function: above jscpd's --min-tokens 70, so two copies are a clone.
@@ -90,6 +90,98 @@ export function summarise(values: readonly number[]): { total: number; largest: 
  */
 function npmRun(script) {
   return { program: "npm", args: ["run", "-s", script], cwd: PROBE_UI };
+}
+
+// The coverage probes measure a small file and its test, not the suite: the file has enough
+// covered lines that one untested branch lands the total between the ratchet's floor (90) and its
+// baseline (100), so only the baseline comparison can fail it, and the other probe (a fully
+// tested file stays at the baseline) shows the drop comes from that branch alone. A third probe
+// runs the project's own coverage settings, with no override, to show that a file no test loads
+// is still counted. The whole suite
+// ran 180-270 s on CI's runners and, under load, past the 360 s these runs get (#822); the
+// `ui (gates)` job still runs it with coverage in `npm run check`.
+const BRANCHES = {
+  "src/probe/branches.ts": `export function sign(value: number): string {
+${Array.from({ length: 20 }, (_, i) => `  const step${String(i)} = value + ${String(i)};\n  void step${String(i)};`).join("\n")}
+  if (value < 0) {
+    return "negative";
+  }
+  return "positive";
+}
+`,
+};
+const TESTED_ONE_BRANCH =
+  'import { expect, it } from "vitest";\n\nimport { sign } from "./branches";\n\nit("tells a positive number", () => {\n  expect(sign(1)).toBe("positive");\n});\n';
+const TESTED_BOTH_BRANCHES = `${TESTED_ONE_BRANCH}\nit("tells a negative number", () => {\n  expect(sign(-1)).toBe("negative");\n});\n`;
+
+/**
+ * Run Vitest with coverage over the probe's file and its test only.
+ *
+ * @returns {Command} the command
+ */
+function coverageRun() {
+  return {
+    program: "npm",
+    args: ["run", "-s", "test:coverage", "--", "--coverage.include=src/probe/**", "src/probe/"],
+    cwd: PROBE_UI,
+  };
+}
+
+/**
+ * Run Vitest with the project's own coverage settings over the probe folder only.
+ *
+ * @returns {Command} the command
+ */
+function projectCoverageRun() {
+  return {
+    program: "npm",
+    args: ["run", "-s", "test:coverage", "--", "src/probe/"],
+    cwd: PROBE_UI,
+  };
+}
+
+/**
+ * Check that the coverage summary lists the probe's unloaded file with no covered line.
+ *
+ * @returns {Command} the command
+ */
+function unloadedFileListed() {
+  const script = `
+    const summary = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
+    const key = Object.keys(summary).find((path) => path.endsWith("/src/probe/unloaded.ts"));
+    const lines = key === undefined ? undefined : summary[key].lines;
+    if (lines === undefined || lines.total === 0 || lines.covered !== 0) {
+      console.error("The coverage summary does not list src/probe/unloaded.ts as uncovered.");
+      process.exit(1);
+    }
+  `;
+  return {
+    program: process.execPath,
+    args: ["-e", script, join(PROBE_UI, "coverage", "coverage-summary.json")],
+    cwd: PROBE_UI,
+  };
+}
+
+/**
+ * Run the coverage ratchet on the report of the scratch copy.
+ *
+ * @returns {Command} the command
+ */
+function coverageRatchet() {
+  return {
+    program: "python3",
+    args: [
+      "-m",
+      "scripts.ui_coverage_ratchet",
+      "--summary",
+      join(PROBE_UI, "coverage", "coverage-summary.json"),
+      "--baseline",
+      join(REPO, "ui", ".coverage-baseline"),
+      "--source",
+      join(PROBE_UI, "src"),
+    ],
+    cwd: REPO,
+  };
 }
 
 /** @type {Probe[]} */
@@ -209,26 +301,34 @@ const PROBES = [
   },
   {
     gate: "Vitest + coverage ratchet",
+    files: { ...BRANCHES, "src/probe/branches.test.ts": TESTED_ONE_BRANCH },
+    before: [coverageRun()],
+    run: coverageRatchet(),
+    expect: ["below the baseline"],
+  },
+  {
+    // The other way round: the same file with both branches tested keeps the report at the
+    // baseline, so the probe above fails on the untested branch and on nothing else.
+    gate: "Vitest + coverage ratchet (every branch tested)",
+    files: { ...BRANCHES, "src/probe/branches.test.ts": TESTED_BOTH_BRANCHES },
+    before: [coverageRun()],
+    run: coverageRatchet(),
+    accept: true,
+    expect: [],
+  },
+  {
+    // A new file no test loads must still count as uncovered: that is what `coverage.include` of
+    // vitest.config.ts is for, and the probes above override it.
+    gate: "Vitest coverage include (a file no test loads)",
     files: {
-      "src/probe/branches.ts":
-        'export function sign(value: number): string {\n  if (value < 0) {\n    return "negative";\n  }\n  return "positive";\n}\n',
+      "src/probe/unloaded.ts": "export const unloaded = (): number => {\n  return 1;\n};\n",
+      "src/probe/other.test.ts":
+        'import { expect, it } from "vitest";\n\nit("runs", () => {\n  expect(1).toBe(1);\n});\n',
     },
-    before: [npmRun("test:coverage")],
-    run: {
-      program: "python3",
-      args: [
-        "-m",
-        "scripts.ui_coverage_ratchet",
-        "--summary",
-        join(PROBE_UI, "coverage", "coverage-summary.json"),
-        "--baseline",
-        join(REPO, "ui", ".coverage-baseline"),
-        "--source",
-        join(PROBE_UI, "src"),
-      ],
-      cwd: REPO,
-    },
-    expect: ["below"],
+    before: [projectCoverageRun()],
+    run: unloadedFileListed(),
+    accept: true,
+    expect: [],
   },
   {
     gate: "size-limit",
