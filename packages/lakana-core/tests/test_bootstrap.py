@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+import lakana_core.access.managed as managed_module
 import lakana_core.bootstrap as bootstrap_module
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import AllowAllAuthorization, PrincipalRef, Securable, SecurableKind
@@ -336,35 +337,47 @@ def test_reactivating_the_bootstrap_principal_removes_passkeys_sessions_and_link
     assert link is not None and link.withdrawn_at is not None
 
 
-def test_reactivating_the_bootstrap_principal_takes_the_admin_lock_first(
+def test_reactivating_the_bootstrap_principal_takes_the_access_lock_then_the_admin_lock_first(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Reactivation takes the administrator lock before it touches the row or the links.
+    """Reactivation takes the access lock, then the administrator lock, before anything else.
 
-    Using a link takes that lock, then the link's row, then the person's row
-    (`lakana_core.grants.admin_lock`); reactivating without it would lock them the other way.
+    Using a link takes the administrator lock, then the link's row, then the person's row; an
+    access apply takes the access lock, then the administrator lock
+    (`lakana_core.grants.admin_lock`). Reactivating takes both in that order before it touches
+    the row or the links, and the grant it makes afterwards (`guard_change`, which takes the
+    access lock again, shared) adds no lock out of order.
     """
     admin = ensure_bootstrap_principal(session, "admin")
     row = session.get(Principal, admin.id)
     assert row is not None
     row.is_active = False
     session.commit()
+    assert session.execute(select(Grant).where(Grant.principal_id == admin.id)).all() == []
     calls: list[str] = []
     real_withdraw = bootstrap_module.withdraw_open_links
 
+    def access(_session: Session, *, shared: bool) -> None:
+        calls.append(f"access shared={shared} active={row.is_active}")
+
     def lock(_session: Session) -> None:
-        calls.append(f"lock active={row.is_active}")
+        calls.append(f"admin active={row.is_active}")
 
     def withdraw(session: Session, principal_id: uuid.UUID, *, now: datetime, reason: str) -> int:
         calls.append("withdraw")
         return real_withdraw(session, principal_id, now=now, reason=reason)
 
+    monkeypatch.setattr(bootstrap_module, "lock_access", access)
     monkeypatch.setattr(bootstrap_module, "lock_admin_count", lock)
     monkeypatch.setattr(bootstrap_module, "withdraw_open_links", withdraw)
+    monkeypatch.setattr(managed_module, "lock_access", access)
 
     bootstrap_if_needed(session, "admin", key_id="testkey", secret="testsecret")
 
-    assert calls == ["lock active=False", "withdraw"]
+    assert calls[:3] == ["access shared=True active=False", "admin active=False", "withdraw"]
+    # The grant's own guard comes later and takes only the access lock, shared.
+    assert calls[3:] and all(call.startswith("access shared=True") for call in calls[3:])
+    assert holds_instance_admin(session, admin.id)
 
 
 def test_bootstrap_if_needed_regrants_after_the_only_admin_grant_was_revoked(

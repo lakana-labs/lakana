@@ -28,7 +28,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from lakana_core.access.managed import lockout_recovery
+from lakana_core.access.managed import lock_access, lockout_recovery
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import (
     AllowAllAuthorization,
@@ -419,9 +419,11 @@ def bootstrap_if_needed(
             f"Bootstrap principal {name!r} vanished immediately after being ensured."
         )
     if not principal_row.is_active:
-        # The administrator lock first, then the person's row, then their links: the order every
-        # use of a link takes (`lakana_core.grants.admin_lock`), so a redeem at the same moment
-        # waits instead of locking the two rows the other way round.
+        # The access lock (shared, as the grant below takes it), then the administrator lock,
+        # then the person's row, then their links: the order an access apply and every use of a
+        # link take (`lakana_core.grants.admin_lock`), so neither can wait on this the other way
+        # round.
+        lock_access(session, shared=True)
         lock_admin_count(session)
         principal_row.is_active = True
         # Reactivating an account removes its passkeys, ends its sessions and withdraws its

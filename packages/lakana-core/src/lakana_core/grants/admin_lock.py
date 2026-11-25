@@ -36,7 +36,8 @@ taken (review of #780):
 - an unlink (`lakana_core.identity.oidc_links.OidcLinkService.unlink`) takes it, then locks the
   person's row (`locked_principal`), then withdraws their open links;
 - the bootstrap principal's reactivation (`lakana_core.bootstrap.bootstrap_if_needed`, lockout
-  recovery) takes it, then sets the person's `is_active`, then withdraws their open links;
+  recovery) takes the access lock (shared, as the ADMIN grant it makes next takes it), then this
+  one, then sets the person's `is_active`, then withdraws their open links;
 - using a link (`lakana_core.identity.links.LinkService.redeem` and `claim_for_provider`) takes
   it, then claims the link's row, then locks its person's row in `_complete` or
   `_complete_for_provider`.
