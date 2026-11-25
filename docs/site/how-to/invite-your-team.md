@@ -23,6 +23,9 @@ once, for 7 days, and the account it creates has no rights at all until you gran
    another open invite holds, in any letter case, is refused: choose another.
 3. Choose **Create the invite**. If you have not touched your passkey in the last 15 minutes, your
    browser asks for it now; issuing an invite always needs a fresh touch.
+   Someone who signs in through the organisation's identity provider confirms there instead, then
+   presses the action again
+   ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 4. The interface shows the link **once**. Copy it with **Copy link** and send it to the person
    yourself, on a channel you trust: a chat with them, or a message that disappears. Whoever opens
    the link first gets the account. Choose **Done**; the link is not shown again, and Lakana keeps
@@ -30,6 +33,12 @@ once, for 7 days, and the account it creates has no rights at all until you gran
 
 The person opens the link, reads "Join Lakana as sam", chooses **Continue** and adds a passkey:
 their fingerprint, face, PIN or security key. From then on the passkey signs them in.
+
+When the server signs people in through your identity provider, the invite offers **Sign in
+with** and the provider's name beside **Add a passkey**. Choosing the provider creates the
+account linked to the person's account there, with no passkey, and from then on they sign in
+only through the provider
+([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md)).
 
 The open invites are listed on the same tab. **Withdraw** stops a link that is no longer wanted,
 for example one sent to the wrong address; its name is free again at once. An invite also stops
@@ -62,6 +71,11 @@ Open **Settings → Sign-in → Recovery links** and choose **Issue a recovery l
 under **Settings → Access → People** and choose the same action there. The link works once, for
 1 hour; using it removes all of the person's passkeys, ends their sessions, and every administrator
 gets a notice. Send it only after you have confirmed, as above, that the person asked for it.
+
+For a person linked to the identity provider, the recovery link offers only the provider ("Your
+account signs in through" and its name): recovery cannot give a passkey back to someone the
+provider manages. To move them off the provider, unlink them first
+([Take someone off single sign-on](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)).
 
 An administrator's account is recovered only by the **server operator**, the person who holds the
 instance's bootstrap token: for an administrator the interface shows the command to run where the

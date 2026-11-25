@@ -1,0 +1,10 @@
+services:
+  server:
+    # ... (image, command and the rest unchanged)
+    environment:
+      # ... (every entry that is there, and the four LAKANA_OIDC__ lines above, unchanged)
+      LAKANA_OIDC__ALLOW_HOSTS: ${LAKANA_OIDC__ALLOW_HOSTS}
+      LAKANA_OIDC__CA_BUNDLE: ${LAKANA_OIDC__CA_BUNDLE}
+    volumes:
+      - ./repos:/repos:ro                                   # unchanged
+      - ./certs/corp-ca.pem:/certs/corp-ca.pem:ro           # added

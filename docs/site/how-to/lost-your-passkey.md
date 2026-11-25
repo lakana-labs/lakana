@@ -28,6 +28,17 @@ and Forward steps as soon as the page opens, but the browser keeps it in its own
 and may suggest it in the address bar. A recovery link opened but not continued still works
 from there until its hour is over: use it, or ask the administrator to withdraw it.
 
+## You sign in through your organisation's identity provider
+
+If your account is linked to the identity provider (the sign-in page's first button, **Sign in
+with** and its name), you have no passkey to lose: your passkeys no longer sign you in, and you
+sign in at the provider. When the provider refuses you or is down, ask an administrator. A
+recovery link an administrator issues for you offers only the provider; to get a passkey back, an
+administrator unlinks you first and then sends the link
+([Take someone off single sign-on](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)).
+A linked administrator is recovered by the server operator, below: their recovery link unlinks the
+administrator from the provider and asks for a new passkey.
+
 ## You still have a passkey
 
 Add a second one before you need it, on another device or a security key: open the menu under
@@ -39,11 +50,15 @@ working one) and signs you out everywhere.
 
 In the interface, open **Settings → Sign-in → Recovery links** and choose **Issue a recovery link**,
 or open the person under **Settings → Access → People** and choose it there. Type the person's name; after a touch of
-your own passkey the interface shows the link once. Send it to that person on a channel you
-trust (the link is as good as a sign-in). The open links are listed on the same tab, where
-**Withdraw** stops one. From the command line, `recovery create` followed by the person's name
-does the same; the [CLI reference](../reference/cli/lakana-recovery.md) lists the commands that
-list the open links and withdraw one.
+your own passkey the interface shows the link once.
+Someone who signs in through the organisation's identity provider confirms there instead, then
+presses the action again
+([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). Send
+it to that person on a channel you trust (the link is as good as a sign-in). The open links are
+listed on the same tab, where **Withdraw** stops one. From the command line, `recovery create`
+followed by the person's name does the same; the [CLI
+reference](../reference/cli/lakana-recovery.md) lists the commands that list the open links and
+withdraw one.
 
 Confirm that the request really comes from that person before you send a link, for example by
 calling them: whoever holds the link becomes them for the next hour. A link you issued stops
@@ -65,6 +80,9 @@ bootstrap token:
   saved;
 - with the Compose bundle, the `team` profile, which `lakana bundle init` saved.
 
+For an administrator linked to the identity provider, using the operator's link also unlinks
+them from the provider and revokes their personal API tokens, whatever the provider says: it is
+the way back in when the provider is down or refuses them, and every administrator gets a notice.
 The link works for the instance's first administrator, too. On your own machine you rarely need
 it: `lakana server start --local` signs the browser in by itself, and the interface offers to add
 a passkey again.
