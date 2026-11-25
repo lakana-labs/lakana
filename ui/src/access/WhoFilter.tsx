@@ -10,7 +10,9 @@ import { useTranslation } from "react-i18next";
 
 import type { GrantWho } from "../api/grants";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
+import { NamePicker } from "../shell/NamePicker";
 import "./accessStrings";
+import { useWhoSearch } from "./suggest";
 
 /** How a filter change is kept in the history: a menu choice is a step, a typed name is not. */
 export type FilterStep = "push" | "replace";
@@ -87,9 +89,10 @@ export interface WhoFilterProps {
 }
 
 /**
- * Renders the Who menu and, for a person or a group, the name. A menu choice applies at once; a
- * typed name on Enter or when the field is left. A person or group without a name keeps the
- * list as it is.
+ * Renders the Who menu and, for a person or a group, the name, which suggests the principals or
+ * the groups to an administrator. A menu choice and a chosen suggestion apply at once; a typed
+ * name on Enter or when the field is left. A person or group without a name keeps the list as it
+ * is.
  *
  * @param props - Who and the handler.
  * @param props.who - Who the list shows.
@@ -99,13 +102,22 @@ export interface WhoFilterProps {
 export function WhoFilter({ who, onChange }: WhoFilterProps): JSX.Element {
   const { t } = useTranslation();
   const [kind, setKind] = useState<WhoKind>(who?.kind ?? "anyone");
+  // An administrator is offered the names; anyone else may not list them, and types one.
+  const suggest = useWhoSearch(kind === "group" ? "group" : "principal");
   const [name, setName] = useState(who?.name ?? "");
+  // The who last read from the list, and the one these fields last sent: the address changes
+  // after the send, so until then the list still shows the old who, which must not set the
+  // fields back (the Name would go with "anyone", and the focus with it).
   const [shownFor, setShownFor] = useState(who);
+  const [sent, setSent] = useState<GrantWho | null | undefined>(undefined);
   // A filter from elsewhere (Clear filters, Back) sets the fields again.
   if (JSON.stringify(shownFor) !== JSON.stringify(who)) {
     setShownFor(who);
-    setKind(who?.kind ?? "anyone");
-    setName(who?.name ?? "");
+    setSent(undefined);
+    if (JSON.stringify(sent) !== JSON.stringify(who)) {
+      setKind(who?.kind ?? "anyone");
+      setName(who?.name ?? "");
+    }
   }
   const apply = (chosen: WhoKind, typed: string, step: FilterStep): void => {
     const trimmed = typed.trim();
@@ -114,7 +126,7 @@ export function WhoFilter({ who, onChange }: WhoFilterProps): JSX.Element {
     else if (trimmed !== "") next = { kind: chosen, name: trimmed };
     if (next === undefined || JSON.stringify(next) === JSON.stringify(who)) return;
     // The fields already show it: the who that comes back must not set them again.
-    setShownFor(next);
+    setSent(next);
     onChange(next, step);
   };
   return (
@@ -134,12 +146,20 @@ export function WhoFilter({ who, onChange }: WhoFilterProps): JSX.Element {
         }}
       />
       {kind !== "anyone" && (
-        <AppliedField
+        <NamePicker
           label={t("access.grants.filters.name")}
           value={name}
           onChange={setName}
+          search={suggest.search}
+          noMatch={suggest.noMatch}
           help={t("access.grants.filters.nameHelp")}
-          onApply={() => {
+          onPick={(choice) => {
+            apply(kind, choice.name, "replace");
+          }}
+          onEnter={() => {
+            apply(kind, name, "replace");
+          }}
+          onBlur={() => {
             apply(kind, name, "replace");
           }}
         />
