@@ -9,7 +9,7 @@
  * host and the person's name are shown as text, with hidden characters marked.
  * @packageDocumentation
  */
-import { type JSX, useRef, useState } from "react";
+import { type JSX, useEffect, useRef, useState } from "react";
 import { Button, FieldError, Form, Input, Label, Text, TextField } from "react-aria-components";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
@@ -30,6 +30,7 @@ import { VisibleText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import "./cliSignInStrings";
 import { problemText } from "./messages";
+import { keepCode, takeKeptCode } from "./keptCode";
 import { ProviderNote } from "./ProviderNote";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
@@ -271,42 +272,6 @@ export function CliSignInPage({ navigate = assign }: CliSignInProps): JSX.Elemen
   );
 }
 
-/** The `sessionStorage` key of a typed device code while the browser confirms at the provider. */
-const KEPT_CODE_KEY = "lakana.cliSignIn.deviceCode";
-
-/**
- * Keeps a typed device code in this tab for the page's return from the identity provider, or
- * forgets it.
- *
- * @param code - The code, or null to forget it.
- */
-function keepCode(code: string | null): void {
-  try {
-    if (code === null) {
-      sessionStorage.removeItem(KEPT_CODE_KEY);
-    } else {
-      sessionStorage.setItem(KEPT_CODE_KEY, code);
-    }
-  } catch {
-    // Storage is blocked: the person types the code again.
-  }
-}
-
-/**
- * Takes the device code this tab kept, once.
- *
- * @returns The code, or empty.
- */
-function takeKeptCode(): string {
-  try {
-    const kept = sessionStorage.getItem(KEPT_CODE_KEY) ?? "";
-    sessionStorage.removeItem(KEPT_CODE_KEY);
-    return kept;
-  } catch {
-    return "";
-  }
-}
-
 /** Where the device page is. */
 type DevicePhase =
   | { readonly kind: "enter" }
@@ -325,6 +290,20 @@ export function CliDevicePage(): JSX.Element {
   const attempt = useAttempt();
   const [phase, setPhase] = useState<DevicePhase>({ kind: "enter" });
   const [code, setCode] = useState(takeKeptCode);
+  // The kept code is only for the return from the provider: leaving the page, or coming back to
+  // it from the browser's history (where it stays as it was), forgets it.
+  useEffect(() => {
+    const shown = (event: PageTransitionEvent): void => {
+      if (event.persisted) {
+        keepCode(null);
+      }
+    };
+    window.addEventListener("pageshow", shown);
+    return () => {
+      window.removeEventListener("pageshow", shown);
+      keepCode(null);
+    };
+  }, []);
   const [codeError, setCodeError] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
 
@@ -354,6 +333,7 @@ export function CliDevicePage(): JSX.Element {
           }
           keepCode(null);
         } else {
+          keepCode(null);
           await denyDevice(phase.code);
         }
         setPhase({ kind: approve ? "approved" : "denied" });

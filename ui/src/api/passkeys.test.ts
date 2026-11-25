@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { send } from "./client";
+import { send, setStepUp } from "./client";
 import { addPasskey, signInWithPasskey, stepUp } from "./passkeys";
 
 import { fakeServer } from "../test/server";
@@ -46,6 +46,31 @@ describe("passkeys", () => {
       publicKey: { parsed: "creation", options: { challenge: "abc" } },
     });
     expect(server.sent[1]?.body).toEqual({ ceremony_id: "c-1", credential: CREDENTIAL_JSON });
+  });
+
+  it("adding a passkey asks for the touch when the server wants one, and asks again", async () => {
+    fakeWebAuthn();
+    let asked = 0;
+    const server = fakeServer({
+      "POST /api/v1/principals/kim/passkeys/options": () => {
+        asked += 1;
+        return asked === 1
+          ? { status: 403, body: { detail: "Touch your passkey.", type: "StepUpRequired" } }
+          : { status: 200, body: OPTIONS };
+      },
+      "POST /api/v1/principals/kim/passkeys": { status: 201, body: { id: "p-1" } },
+    });
+    const ceremony = vi.fn(() => Promise.resolve());
+    setStepUp(ceremony);
+
+    await addPasskey("kim");
+
+    expect(ceremony).toHaveBeenCalledTimes(1);
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/principals/kim/passkeys/options",
+      "/api/v1/principals/kim/passkeys/options",
+      "/api/v1/principals/kim/passkeys",
+    ]);
   });
 
   it("confirms the session with a passkey touch (step-up)", async () => {

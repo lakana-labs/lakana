@@ -18,17 +18,21 @@ const CLI_CONFIRMATIONS = new Set(["/sign-in/cli", "/sign-in/device"]);
 const HIDDEN = /[\p{Cc}\p{Cf}]/u;
 
 /**
- * Decodes percent escapes once, keeping a malformed one as it is.
+ * Decodes percent escapes once, as Python's `urllib.parse.unquote` does: each run of `%XX`
+ * escapes is read as UTF-8 (a byte that is no UTF-8 becomes U+FFFD), and a `%` that starts no
+ * escape stays as it is, while the escapes around it are still decoded.
  *
  * @param text - The text.
  * @returns The decoded text.
  */
 function decodedOnce(text: string): string {
-  try {
-    return decodeURIComponent(text);
-  } catch {
-    return text;
-  }
+  return text.replace(/(?:%[0-9A-Fa-f]{2})+/g, (run) => {
+    const bytes = new Uint8Array(run.length / 3);
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Number.parseInt(run.slice(index * 3 + 1, index * 3 + 3), 16);
+    }
+    return new TextDecoder().decode(bytes);
+  });
 }
 
 /**

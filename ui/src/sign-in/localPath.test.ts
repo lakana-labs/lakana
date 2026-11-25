@@ -25,6 +25,8 @@ describe("isLocalPath", () => {
     ["an encoded double slash", "/%2F%2Fevil.example"],
     ["a twice-encoded backslash", "/%255Cevil.example"],
     ["an encoded tab", "/%09/evil.example"],
+    ["an encoded double slash beside a bad escape", "/%2F%2Fevil.example%zz"],
+    ["an encoded format character", "/jo%E2%80%AEbs"],
     ["a sign-in page", "/sign-in"],
     ["the confirmation page", "/sign-in/oidc/confirmed"],
     ["another spelling of a sign-in page", "/SIGN-IN/cli"],
@@ -39,5 +41,10 @@ describe("isLocalPath", () => {
 
   it("keeps a malformed escape as it is", () => {
     expect(isLocalPath("/100%")).toBe(true);
+    expect(isLocalPath("/a%zz%41")).toBe(true);
+  });
+
+  it("reads a byte that is no UTF-8 as a replacement character, as the server does", () => {
+    expect(isLocalPath("/caf%FF")).toBe(true);
   });
 });

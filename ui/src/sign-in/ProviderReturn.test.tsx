@@ -319,6 +319,22 @@ describe("ProviderConfirmed", () => {
     ).toBeInTheDocument();
   });
 
+  it("a refused confirmation forgets a device code kept for the return", async () => {
+    sessionStorage.setItem(
+      PROVIDER_TRIP_KEY,
+      JSON.stringify({ purpose: "step_up", back: "/sign-in/device" }),
+    );
+    sessionStorage.setItem("lakana.cliSignIn.deviceCode", "BCDF-GHJK");
+    renderAt(
+      "/sign-in/oidc/confirmed",
+      { "POST /api/v1/sign-in/oidc/finish-in-session": refusal("auth_too_old") },
+      signedIn(),
+    );
+
+    await screen.findByRole("heading", { level: 1, name: "This was not confirmed" });
+    expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBeNull();
+  });
+
   it("names a refusal, and Try again goes back to where it started", async () => {
     sessionStorage.setItem(
       PROVIDER_TRIP_KEY,

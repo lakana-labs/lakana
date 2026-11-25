@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -426,7 +426,12 @@ describe("CliDevicePage", () => {
     expect(fake.sent.map((request) => request.path)).not.toContain(
       "/api/v1/sign-in/cli/device/approve",
     );
+    const kept = sessionStorage.getItem("lakana.cliSignIn.deviceCode");
+    expect(kept).toBe("BCDF-GHJK");
+    // The browser leaves for the provider without unmounting the page; a test's cleanup does
+    // unmount it, which forgets the code, so the next page load is set up as the browser leaves it.
     cleanup();
+    sessionStorage.setItem("lakana.cliSignIn.deviceCode", kept ?? "");
     vi.unstubAllGlobals();
 
     renderAt(<CliDevicePage />, "/sign-in/device", undefined, {
@@ -484,6 +489,35 @@ describe("CliDevicePage", () => {
       setItem.mockRestore();
       removeItem.mockRestore();
     }
+  });
+
+  it.each([
+    ["Cancel", "deny"],
+    ["a return from the browser's history", "pageshow"],
+    ["leaving the page", "leave"],
+  ])("device: %s forgets a kept code", async (_, how) => {
+    deviceServer();
+    const user = renderAt(<CliDevicePage />, "/sign-in/device");
+    await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
+    await screen.findByRole("button", { name: "Create token" });
+    sessionStorage.setItem("lakana.cliSignIn.deviceCode", "BCDF-GHJK");
+
+    if (how === "deny") {
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await screen.findByRole("status");
+    } else if (how === "pageshow") {
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+      });
+      expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBe("BCDF-GHJK");
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+    } else {
+      cleanup();
+    }
+
+    expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBeNull();
   });
 
   it("the loopback page shows the confirmation's note, focused", async () => {

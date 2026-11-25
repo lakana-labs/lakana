@@ -22,6 +22,7 @@ import {
   takeProviderTrip,
 } from "../api/providerSession";
 import type { ProviderTrip } from "../api/oidc";
+import { forgetKeptCode } from "./keptCode";
 import { isLocalPath } from "./localPath";
 import { refusalText } from "./refusals";
 import { useSession } from "./SessionProvider";
@@ -250,6 +251,8 @@ export function ProviderConfirmed(): JSX.Element {
         state: { providerConfirmed: note },
       });
     } else {
+      // A device code kept for the return waits for nothing now.
+      forgetKeptCode();
       setRefused({ error: outcome.error });
     }
   });
