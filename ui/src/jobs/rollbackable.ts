@@ -55,9 +55,7 @@ export function currentDeploys(
   // `…:00.000005Z`), then by id, as the server breaks ties in its newest-first order, so every
   // order of the list marks the same row.
   const newestFirst = [...deploys].sort(
-    (a, b) =>
-      Date.parse(b.created_at) - Date.parse(a.created_at) ||
-      (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+    (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id.localeCompare(a.id, "en"),
   );
   for (const deploy of newestFirst) {
     if (
