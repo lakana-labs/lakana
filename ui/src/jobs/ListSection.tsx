@@ -82,67 +82,51 @@ export function ListSection({
   const id = useId();
   const section = useRef<HTMLElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
-  const inside = useRef(false);
-  // The element a blur to the page left, until the focus comes back into the section.
-  const leaving = useRef<Node | null>(null);
+  // The element the focus was last on in the section, until the focus is somewhere that shows the
+  // person left it (a control elsewhere, a click on a blank part of the page).
+  const last = useRef<Node | null>(null);
   useEffect(() => {
     const element = section.current;
-    // The dialog the focus went into from the section, until the focus goes anywhere else.
-    let dialog: Element | null = null;
-    const onDocumentFocusIn = (event: FocusEvent): void => {
-      const target = event.target as Node;
-      if (dialog !== null && !dialog.contains(target) && element?.contains(target) !== true) {
-        // On to something that is neither the section nor its question: the person has left.
-        dialog = null;
-        inside.current = false;
+    const onFocusIn = (event: FocusEvent): void => {
+      const target = event.target as Element;
+      if (element?.contains(target) === true) {
+        last.current = target;
+      } else if (target.closest('[role="dialog"]') === null) {
+        // Not the section, and not a question or palette the person went to from it and may come
+        // back from: they moved on.
+        last.current = null;
       }
-    };
-    document.addEventListener("focusin", onDocumentFocusIn);
-    const onFocusIn = (): void => {
-      inside.current = true;
-      leaving.current = null;
-      dialog = null;
     };
     const onFocusOut = (event: FocusEvent): void => {
-      const { target, relatedTarget } = event;
-      if (relatedTarget === null) {
-        // Focus left for the page: a click on a blank part of it, or a removed row (Chrome tells
-        // that blur too). Only an element still in the page was left by the person.
-        leaving.current = target as Node;
-        setTimeout(() => {
-          if (target instanceof Node && target.isConnected) {
-            inside.current = false;
-          }
-        });
+      if (event.relatedTarget !== null) {
         return;
       }
-      // A question the section's own control opened (a modal dialog) takes the focus out, and
-      // gives it back when it closes: the person is still in the section meanwhile, until the
-      // focus goes on to something that is neither the section nor that dialog.
-      const asked = (relatedTarget as Element).closest('[role="dialog"]');
-      if (asked !== null) {
-        dialog = asked;
-        return;
-      }
-      inside.current = element?.contains(relatedTarget as Node) === true;
+      // Focus left for the page: a click on a blank part of it, or a removed element (Chrome tells
+      // that blur too). Only an element still in the page was left by the person.
+      const target = event.target as Node;
+      setTimeout(() => {
+        if (target.isConnected) {
+          last.current = null;
+        }
+      });
     };
-    element?.addEventListener("focusin", onFocusIn);
-    element?.addEventListener("focusout", onFocusOut);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
     return () => {
-      document.removeEventListener("focusin", onDocumentFocusIn);
-      element?.removeEventListener("focusin", onFocusIn);
-      element?.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
     };
   }, []);
   useEffect(() => {
-    if (!inside.current) {
+    if (last.current === null) {
       return undefined;
     }
-    // On the next frame, after the dialog that just closed has handed the focus back to its
-    // button (it does so on a frame of its own): only a focus still on the page is lost.
+    // On the next frame, after a dialog that just closed has handed the focus back to its button
+    // (it does so on a frame of its own): the focus fell to the page because the element that held
+    // it left this section. A focus on the page while that element is still there was the
+    // person's own doing, and stays.
     const frame = requestAnimationFrame(() => {
-      const blank = leaving.current?.isConnected === true;
-      if (inside.current && !blank && document.activeElement === document.body) {
+      if (last.current?.isConnected === false && document.activeElement === document.body) {
         title.current?.focus();
       }
     });

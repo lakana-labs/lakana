@@ -163,26 +163,72 @@ describe("ListSection", () => {
     expect(document.activeElement).toBe(document.body);
   });
 
-  it("still gives the focus back to the heading while a dialog of the section is open and the row leaves", async () => {
-    const view = render(
+  it("gives the focus to the heading when the row and the question that held it both leave", async () => {
+    const page = (open: boolean): React.JSX.Element => (
       <>
-        {section(true)}
-        <div role="dialog" aria-label="Question">
-          <button type="button">Yes</button>
-        </div>
-      </>,
+        {section(open)}
+        {open && (
+          <div role="dialog" aria-label="Question">
+            <button type="button">Yes</button>
+          </div>
+        )}
+      </>
     );
+    const { rerender } = render(page(true));
     screen.getByRole("button", { name: "Cancel" }).focus();
     screen.getByRole("button", { name: "Yes" }).focus();
-    screen.getByRole("button", { name: "Yes" }).blur();
-    view.rerender(
+    // The answer comes: the question closes and the run has left the list.
+    rerender(page(false));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Running now" })).toHaveFocus();
+    });
+  });
+
+  it("keeps the focus where a person left it from a dialog with a click on a blank part, when the row leaves later", async () => {
+    const page = (row: boolean): React.JSX.Element => (
       <>
-        {section(false)}
-        <div role="dialog" aria-label="Question">
-          <button type="button">Yes</button>
+        {section(row)}
+        <div role="dialog" aria-label="Tour step">
+          <button type="button">Next</button>
         </div>
-      </>,
+      </>
     );
+    const { rerender } = render(page(true));
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    screen.getByRole("button", { name: "Next" }).focus();
+    // A click on a blank part of the page, straight from the dialog.
+    await act(async () => {
+      screen.getByRole("button", { name: "Next" }).blur();
+      await new Promise((done) => setTimeout(done));
+    });
+    rerender(page(false));
+    await aFrame();
+
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("gives the focus to the heading after a second dialog opened over the question and closed again", async () => {
+    const page = (open: boolean): React.JSX.Element => (
+      <>
+        {section(open)}
+        {open && (
+          <div role="dialog" aria-label="Question">
+            <button type="button">Yes</button>
+          </div>
+        )}
+        <div role="dialog" aria-label="Commands">
+          <button type="button">Run</button>
+        </div>
+      </>
+    );
+    const { rerender } = render(page(true));
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    screen.getByRole("button", { name: "Yes" }).focus();
+    // Ctrl+K, then Escape: the palette hands the focus back to the question.
+    screen.getByRole("button", { name: "Run" }).focus();
+    screen.getByRole("button", { name: "Yes" }).focus();
+    rerender(page(false));
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { level: 2, name: "Running now" })).toHaveFocus();
