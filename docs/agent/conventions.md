@@ -289,6 +289,31 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   beside it and register them with `addResourceBundle` in a module each of its files imports
   (the table page: `ui/src/catalog/table/table.en.json` and `tableStrings.ts`), so they stay out
   of the first load; a string the first load shows (a skeleton's, an error's) stays in `en.json`.
+  ESLint's local rule `lakana/no-literal-text` (`ui/build/no-literal-text.ts`) enforces it in
+  every `.tsx` file of `ui/src/` but the tests: it fails on JSX text with a letter in it (any
+  script), a string or template literal with a letter as a JSX child, and the same as the value
+  of an attribute a person reads or hears (`aria-label`, `aria-description`,
+  `aria-roledescription`, `aria-valuetext`, `aria-placeholder`, `title`, `placeholder`, `alt`,
+  and the props `label`, `description`, `errorMessage`, `textValue`), each also as a branch of
+  `?:`, `&&` or `||`. Glyphs and punctuation (`·`, `—`, `→`, `×`) pass, and so does every
+  attribute no one reads (`className`, `data-testid`, `key`, `style`, `id`, `href`, `type`).
+  `ui/scripts/lint-ban.test.ts` lints one fixture per form (`ui/scripts/lint-fixtures/text-*.tsx`)
+  and expects exactly one error each, and none for `text-allowed.tsx`. The escape hatch, for
+  text that is no sentence of the interface and the same in every language (a product
+  name in a logo), is a disable comment on that one line with the reason after
+  `--`: `// eslint-disable-next-line lakana/no-literal-text -- why`, or
+  `{/* eslint-disable-next-line lakana/no-literal-text -- why */}` inside JSX. Never disable it
+  for a file. An unused disable comment fails the lint (a warning, and the lint allows none).
+- **Numbers in a message are written for the language.** i18next calls `localeNumbers`
+  (`ui/src/i18n/numbers.ts`) for every interpolated value (`interpolation.alwaysFormat`), and it
+  writes every number with `Intl.NumberFormat` for the message's language: `{{count}}` with
+  12400 reads "12,400 rows" in English and "12.400" in German. Options go in the message:
+  `{{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s`; `number` is the
+  only format (`i18n.test.ts` checks every catalogue). Pass the number, never `toFixed` or
+  `String(n)` of an amount; a number that is a name rather than an amount (an artifact's version,
+  a port) is passed as a string so its digits stay as they are. A message holds the whole
+  sentence with its numbers, never a fragment to append (the Preview line has a key with the time
+  and one without).
 - **Licences.** The npm locks are checked like the Python one. The MPL-2.0 development tools
   (`axe-core`, `@axe-core/playwright`, `lightningcss` and its platform packages) and the OFL-1.1
   fonts are the only exceptions; see "Copyleft rule: none strong, weak only via a justified

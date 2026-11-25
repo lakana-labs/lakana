@@ -1278,7 +1278,7 @@ five).
 
 | Gate | Command | Where it runs |
 |---|---|---|
-| ESLint (strict type-checked, react-hooks, jsx-a11y strict, TSDoc, the server-only-through-`src/api/` rule, no `process`/`Buffer` in `src/`, no HTML sink: Vitest's `ui/scripts/lint-ban.test.ts` proves the ban fires once per fixture), no warning allowed | `npm --prefix ui run lint` | `check`, CI `ui (gates)` |
+| ESLint (strict type-checked, react-hooks, jsx-a11y strict, TSDoc, the server-only-through-`src/api/` rule, no `process`/`Buffer` in `src/`, no HTML sink, no text a person reads outside i18next (`lakana/no-literal-text`): Vitest's `ui/scripts/lint-ban.test.ts` proves each ban fires once per fixture), no warning allowed | `npm --prefix ui run lint` | `check`, CI `ui (gates)` |
 | Prettier | `npm --prefix ui run format:check` (`format` rewrites) | `check`, CI `ui (gates)` |
 | tsc (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`) | `npm --prefix ui run typecheck` | `check`, CI `ui (gates)` |
 | dependency-cruiser (no cycles, no orphans, `src/api/` a leaf, no dev dependency or test in shipped code) | `npm --prefix ui run depcruise` | `check`, CI `ui (gates)` |
