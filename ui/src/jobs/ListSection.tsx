@@ -100,6 +100,11 @@ export function ListSection({
         });
         return;
       }
+      // A question the section's own control opened (a modal dialog) takes the focus out, and
+      // gives it back when it closes: the person is still in the section meanwhile.
+      if (relatedTarget instanceof Element && relatedTarget.closest('[role="dialog"]') !== null) {
+        return;
+      }
       inside.current = element?.contains(relatedTarget as Node) === true;
     };
     element?.addEventListener("focusin", onFocusIn);
@@ -110,9 +115,19 @@ export function ListSection({
     };
   }, []);
   useEffect(() => {
-    if (inside.current && document.activeElement === document.body) {
-      title.current?.focus();
+    if (!inside.current) {
+      return undefined;
     }
+    // On the next frame, after the dialog that just closed has handed the focus back to its
+    // button (it does so on a frame of its own): only a focus still on the page is lost.
+    const frame = requestAnimationFrame(() => {
+      if (inside.current && document.activeElement === document.body) {
+        title.current?.focus();
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
   });
   return (
     <section className="flat-panel jobs-section" aria-labelledby={id} ref={section}>

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { LivePoll } from "../shell/useLivePoll";
@@ -66,7 +66,9 @@ describe("ListSection", () => {
     blurWithoutNext();
     rerender(section(false));
 
-    expect(screen.getByRole("heading", { level: 2, name: "Running now" })).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Running now" })).toHaveFocus();
+    });
     await act(() => new Promise((done) => setTimeout(done)));
   });
 
