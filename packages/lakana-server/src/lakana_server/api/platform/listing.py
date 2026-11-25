@@ -10,7 +10,11 @@ from typing import Annotated
 
 from fastapi import Query, Response
 
-from lakana_core.pagination import CURSOR_MAX_LENGTH
+from lakana_core.pagination import (
+    CURSOR_MAX_LENGTH,
+    NAMESPACE_CURSOR_MAX_LENGTH,
+    TABLE_CURSOR_MAX_LENGTH,
+)
 
 NEXT_CURSOR_HEADER = "X-Next-Cursor"
 """The response header that carries the cursor of the next page; absent on the last page."""
@@ -57,3 +61,9 @@ OrderParam = Annotated[str | None, Query(max_length=8)]
 
 CursorParam = Annotated[str | None, Query(max_length=CURSOR_MAX_LENGTH)]
 """The `cursor` of a list whose cursor holds names: as long as the longest one it issues."""
+
+NamespaceCursorParam = Annotated[str | None, Query(max_length=NAMESPACE_CURSOR_MAX_LENGTH)]
+"""The `cursor` of the namespaces list: as long as the cursor of the longest path."""
+
+TableCursorParam = Annotated[str | None, Query(max_length=TABLE_CURSOR_MAX_LENGTH)]
+"""The `cursor` of a list of tables, artifacts or orphans: as long as the longest one it issues."""

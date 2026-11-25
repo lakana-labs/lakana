@@ -13,7 +13,7 @@ from lakana_core.auth import PrincipalRef
 from lakana_core.catalog.service import CatalogService
 from lakana_core.identifiers import NamespacePath
 from lakana_server.api.platform.catalog import _no_nul
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import NamespaceCursorParam, set_next_cursor
 from lakana_server.api.platform.schemas import NamespaceCreate, NamespaceOut
 from lakana_server.api.responses import errors
 from lakana_server.api.routing import AuthenticateFirstRoute
@@ -131,7 +131,7 @@ def list_namespaces(
     parent: str | None = Query(default=None, max_length=255),
     depth: int | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: NamespaceCursorParam = None,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[NamespaceOut]:

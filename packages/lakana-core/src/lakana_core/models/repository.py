@@ -11,6 +11,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, TimestampMixin
 
+REPOSITORY_NAME_MAX = 255
+"""The longest repository name, in characters."""
+
 
 class RepositoryKind(enum.StrEnum):
     """How the worker reaches a repository.
@@ -38,7 +41,7 @@ class Repository(Base, TimestampMixin):
     __tablename__ = "repositories"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
-    name: Mapped[str] = mapped_column(String(255), unique=True)
+    name: Mapped[str] = mapped_column(String(REPOSITORY_NAME_MAX), unique=True)
     kind: Mapped[RepositoryKind] = mapped_column(
         SAEnum(RepositoryKind, native_enum=False, length=8)
     )

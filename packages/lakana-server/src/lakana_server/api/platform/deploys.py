@@ -15,7 +15,13 @@ from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.models import DeployKind
 from lakana_core.projects.deploys import DeploymentView, DeployRunView, DeployService
 from lakana_core.runs.operator import deploy_actions, operator_rights_each
-from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
+from lakana_server.api.platform.listing import (
+    CursorParam,
+    OrderParam,
+    SortParam,
+    TableCursorParam,
+    set_next_cursor,
+)
 from lakana_server.api.platform.schemas import (
     DeployAccepted,
     DeployCreate,
@@ -471,7 +477,7 @@ def get_project_version(
 def list_orphans(
     env: str,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: TableCursorParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
 ) -> OrphansOut:
