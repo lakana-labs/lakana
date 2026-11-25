@@ -31,7 +31,8 @@ function decodedOnce(text: string): string {
     for (let index = 0; index < bytes.length; index += 1) {
       bytes[index] = Number.parseInt(run.slice(index * 3 + 1, index * 3 + 3), 16);
     }
-    return new TextDecoder().decode(bytes);
+    // As `unquote`, a byte-order mark is kept as a character, never dropped.
+    return new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes);
   });
 }
 

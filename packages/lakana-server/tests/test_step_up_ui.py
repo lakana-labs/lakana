@@ -10,7 +10,9 @@ The paths are built from helpers in the interface (`connectionPath`, `tableApiPa
 calls cannot be matched to routes from the source alone. `UI_CALLERS` names, for every route in
 `STEP_UP_ROUTES`, the functions of `ui/src/api` that send it, or why the interface sends it not at
 all: a new step-up route fails here until it is placed, and each named function must call
-`guarded` (or, in `FALLBACK_ONLY`, `api.request`, with the reason).
+`guarded` (or, in `FALLBACK_ONLY`, `api.request`, with the reason). A new function of
+`ui/src/api` that sends a route already placed here is caught only once it is listed in
+`UI_CALLERS`.
 """
 
 from __future__ import annotations
@@ -151,6 +153,26 @@ def test_every_step_up_route_is_placed() -> None:
     assert set(UI_CALLERS) == set(STEP_UP_ROUTES)
 
 
+def _code(body: str) -> str:
+    """Take the comments out of a function's source.
+
+    Parameters
+    ----------
+    body
+        The source.
+
+    Returns
+    -------
+    str
+        The source without `//` and `/* */` comments.
+    """
+    return re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL))
+
+
+GUARDED_CALL = re.compile(r"\bguarded\s*(?:<[^()]*>)?\s*\(")
+"""A call of `guarded`, with or without its type argument."""
+
+
 @pytest.mark.parametrize(
     ("module", "function"),
     sorted(
@@ -163,11 +185,18 @@ def test_every_step_up_route_is_placed() -> None:
     ),
 )
 def test_each_caller_asks_for_the_touch_first(module: str, function: str) -> None:
-    body = _body(module, function)
+    code = _code(_body(module, function))
     if (module, function) in FALLBACK_ONLY:
-        assert "api.request" in body and "guarded" not in body
+        assert "api.request" in code and "guarded" not in code
     else:
-        assert re.search(r"\bguarded\s*<?", body), f"{module} {function} does not use guarded"
+        assert GUARDED_CALL.search(code), f"{module} {function} does not call guarded"
+
+
+def test_a_comment_or_a_word_is_no_call() -> None:
+    assert not GUARDED_CALL.search(
+        _code("// guarded(x)\n/* guarded<T>(y) */ const guardedNot = 1;")
+    )
+    assert GUARDED_CALL.search(_code('return guarded<{ readonly a: string }>("POST", p);'))
 
 
 def test_the_fallback_exceptions_are_callers() -> None:
