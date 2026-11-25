@@ -38,6 +38,7 @@ from lakana_core.auth import (
     SecurableKind,
 )
 from lakana_core.errors import ConflictError, ValidationError
+from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService, active_instance_admin_ids
 from lakana_core.identity.links import withdraw_open_links
@@ -418,6 +419,10 @@ def bootstrap_if_needed(
             f"Bootstrap principal {name!r} vanished immediately after being ensured."
         )
     if not principal_row.is_active:
+        # The administrator lock first, then the person's row, then their links: the order every
+        # use of a link takes (`lakana_core.grants.admin_lock`), so a redeem at the same moment
+        # waits instead of locking the two rows the other way round.
+        lock_admin_count(session)
         principal_row.is_active = True
         # Reactivating an account removes its passkeys, ends its sessions and withdraws its
         # links: whoever held them while it was deactivated must not get back in with them.

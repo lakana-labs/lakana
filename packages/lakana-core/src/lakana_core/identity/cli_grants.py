@@ -38,7 +38,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy import ColumnElement, delete, select, update
+from sqlalchemy import ColumnElement, delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -870,11 +870,26 @@ class CliGrantService:
             raise CliGrantRefused(DEVICE_REFUSED)
         now = self._clock()
         previous = grant.last_polled_at
+        earliest = now - (POLL_INTERVAL - POLL_TOLERANCE)
         # A poll too soon writes nothing (RFC 8628's slow_down: the interval counts from the last
         # accepted poll), so a fast poller cannot drive a commit per request.
-        if previous is not None and now - previous < POLL_INTERVAL - POLL_TOLERANCE:
+        if previous is not None and previous > earliest:
             raise CliPollTooFast(SLOW_DOWN)
-        grant.last_polled_at = now
+        # Polls that arrive together all pass the check above on the same read; the acceptance is
+        # one conditional UPDATE, so only one of them per interval writes and the others slow down.
+        accepted = self._session.execute(
+            update(CliGrant)
+            .where(
+                CliGrant.id == grant.id,
+                or_(CliGrant.last_polled_at.is_(None), CliGrant.last_polled_at <= earliest),
+            )
+            .values(last_polled_at=now)
+            .returning(CliGrant.id)
+            .execution_options(synchronize_session="fetch")
+        ).scalar_one_or_none()
+        if accepted is None:
+            self._session.rollback()
+            raise CliPollTooFast(SLOW_DOWN)
         self._session.commit()
         state = self._state(grant, now)
         if state != "approved":

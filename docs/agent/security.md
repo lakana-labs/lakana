@@ -7473,9 +7473,11 @@ sign-in (#32)".
   rate: at the default rates 600 waiting sign-ins per address and 2,400 per network;
   `test_polls_have_buckets_of_their_own`); a poll too soon answers `slow_down` without a write,
   the interval counting from the last accepted poll (`test_a_too_fast_poll_writes_nothing`), so
-  polls that arrive one after another drive no commit per request (polls of one device code that
-  arrive at once all read the same `last_polled_at` and may each be accepted; PR 4 bounds them with
-  one conditional `UPDATE`); the SDK reads any 429 as `slow_down`, the CLI waiting
+  polls that arrive one after another drive no commit per request. Polls of one device code that
+  arrive at once all pass that read; the acceptance itself is one conditional `UPDATE` (`WHERE
+  last_polled_at IS NULL OR last_polled_at <= now - 4 s`), and a poll whose `UPDATE` matches no row
+  answers `slow_down` too, so a burst drives one commit per interval
+  (`test_two_polls_at_once_accept_only_one`); the SDK reads any 429 as `slow_down`, the CLI waiting
   5 seconds more and at least `Retry-After` (whole seconds, at most 60, the SDK's capped parser).
   The CLI stops at the code's expiry even if every poll is refused
   (`test_device_stops_at_the_codes_expiry_when_every_poll_is_refused`). The age on the page is the
