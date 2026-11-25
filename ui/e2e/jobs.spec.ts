@@ -1057,7 +1057,7 @@ for (const theme of ["light", "dark"] as const) {
       await expect(ask).toBeHidden();
       const resume = page.getByRole("button", { name: "Resume schedule" });
       await expect(resume).toBeFocused();
-      await expect(page.getByText(/· paused$/)).toBeVisible();
+      await expect(page.getByText(/· paused since .+ by admin$/)).toBeVisible();
       await page.keyboard.press("Enter");
       await expect(pause).toBeFocused();
       await expect(page.getByText(/next run/)).toBeVisible();

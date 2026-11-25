@@ -60,7 +60,8 @@ interface ScheduleProps {
 }
 
 /**
- * A job's schedule in words with its zone, "paused" after it when paused, or "by hand" for a job
+ * A job's schedule in words with its zone, "paused" after it when paused (since when and by whom
+ * on hover), or "by hand" for a job
  * without a schedule here.
  *
  * @param props - The job.
@@ -78,7 +79,42 @@ function Schedule({ job }: ScheduleProps): JSX.Element {
       <span className={schedule.verbatim ? "jobs-verbatim" : undefined}>
         <VisibleText text={schedule.text} />
       </span>
-      {job.paused && ` · ${t("jobs.list.all.paused")}`}
+      {job.paused && (
+        <>
+          {" · "}
+          <PausedWord job={job} />
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * "paused", with since when and by whom in the shell's one tooltip on hover and on focus (the
+ * tooltip makes it a Tab stop) and for a screen reader; the job's page says the same in its
+ * facts. Without a time from the server, the word alone.
+ *
+ * @param props - The job.
+ * @param props.job - The job, whose schedule is paused.
+ * @returns The word.
+ */
+function PausedWord({ job }: ScheduleProps): JSX.Element {
+  const { t } = useTranslation();
+  const when = useWhen();
+  const word = t("jobs.list.all.paused");
+  if (job.paused_at === null) {
+    return <>{word}</>;
+  }
+  const sentence =
+    job.paused_by === null
+      ? t("jobs.list.all.pausedByDeleted", { when: when(job.paused_at) })
+      : t("jobs.list.all.pausedBy", { when: when(job.paused_at), who: job.paused_by });
+  return (
+    <>
+      <span className="jobs-paused" data-tip={sentence}>
+        {word}
+      </span>
+      <span className="visually-hidden"> {sentence}</span>
     </>
   );
 }

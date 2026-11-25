@@ -40,6 +40,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.identifiers import TableRef
+from lakana_core.identity.named import principal_name
 from lakana_core.models import (
     AttemptOutcome,
     AuditEventType,
@@ -1065,10 +1066,7 @@ class RunService:
         str or None
             Its name, or `None` if unset or deleted.
         """
-        if principal_id is None:
-            return None
-        row = self._session.get(Principal, principal_id)
-        return row.name if row is not None else None
+        return principal_name(self._session, principal_id)
 
     def _waiting(
         self, run: Run, tasks: Sequence[TaskRun], reader: PrincipalRef, environment: str

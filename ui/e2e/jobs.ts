@@ -252,6 +252,8 @@ function job(paused: boolean): JobOut {
     timezone: "Europe/Berlin",
     state: paused ? "paused" : "scheduled",
     paused,
+    paused_by: paused ? "admin" : null,
+    paused_at: paused ? "2026-11-16T14:20:00Z" : null,
     next_run_at: paused ? null : "2026-11-18T01:00:00Z",
     waiting_for: null,
     waits_for_run_id: null,

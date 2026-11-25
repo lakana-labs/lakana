@@ -28,6 +28,7 @@ from lakana_core.ci_oidc.scope import refuse_ci_token
 from lakana_core.db import db_now
 from lakana_core.errors import ConflictError, NotFoundError, ValidationError
 from lakana_core.grants.authorization import GrantAuthorization
+from lakana_core.identity.named import principal_name
 from lakana_core.jobs.audit import start_detail
 from lakana_core.jobs.cron import fire_times_between, next_fire_after
 from lakana_core.jobs.tz import load_zone
@@ -243,6 +244,11 @@ class JobView:
         ``no run principal`` or ``run principal unusable``.
     paused
         Whether the schedule is paused (also when ``waiting`` is shown).
+    paused_by
+        The name of the principal that paused it, for every reader of the environment as a
+        run's `triggered_by` is; `None` when it is not paused or that principal was deleted.
+    paused_at
+        When it was paused; `None` when it is not paused.
     next_run_at
         The next scheduled time (UTC), or `None`: none for a paused job, which will not fire.
     next_run_local
@@ -302,6 +308,8 @@ class JobView:
     notify: JobNotify | None = None
     commit_sha: str = ""
     source_url: str | None = None
+    paused_by: str | None = None
+    paused_at: datetime | None = None
 
 
 JOB_SORTS: dict[str, bool] = {"name": False, "status": False, "last_run": True, "next_run": False}
@@ -1558,6 +1566,8 @@ class JobService:
             .limit(1)
         ).first()
         patterns = entry.get("select")
+        # Who paused it and when, only while it is paused.
+        pause = row if paused else None
         return JobView(
             name=job,
             environment=env.name,
@@ -1589,6 +1599,8 @@ class JobService:
             source_url=browse_url(
                 repo.kind, repo.url, commit=version.commit_sha, path="lakana.yaml", line=SOURCE_LINE
             ),
+            paused_by=principal_name(self._session, pause.paused_by) if pause is not None else None,
+            paused_at=pause.paused_at if pause is not None else None,
         )
 
     def list(

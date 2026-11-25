@@ -111,6 +111,38 @@ describe("JobFacts", () => {
     expect(fact("Schedule")).toHaveTextContent("daily 02:00 Europe/Berlin · paused");
   });
 
+  it("says who paused the schedule and since when, with the name's hidden characters marked", () => {
+    renderFacts(
+      aJob({
+        paused: true,
+        state: "paused",
+        next_run_at: null,
+        paused_by: "maria.\u202Ekeller",
+        paused_at: "2026-11-16T08:30:00Z",
+      }),
+    );
+
+    expect(fact("Schedule")).toHaveTextContent(
+      `daily 02:00 Europe/Berlin · paused since ${when("2026-11-16T08:30:00Z")} by maria.U+202Ekeller`,
+    );
+  });
+
+  it("says a schedule was paused by an account since deleted", () => {
+    renderFacts(
+      aJob({
+        paused: true,
+        state: "paused",
+        next_run_at: null,
+        paused_by: null,
+        paused_at: "2026-11-16T08:30:00Z",
+      }),
+    );
+
+    expect(fact("Schedule")).toHaveTextContent(
+      `daily 02:00 Europe/Berlin · paused since ${when("2026-11-16T08:30:00Z")} by an account since deleted`,
+    );
+  });
+
   it("shows a selection without upstream or downstream", () => {
     renderFacts(aJob({ upstream: false }));
 

@@ -28,6 +28,9 @@ const JOB: DeployedJob = {
   secret: "alerts-webhook",
 };
 
+/** The schedule of {@link JOB} once the bootstrap administrator paused it: since when, by whom. */
+const PAUSED_BY_ADMIN = /^daily 02:00 Europe\/Berlin · paused since .+ by admin$/;
+
 /**
  * A new environment with a repository deployed in it that declares {@link JOB}, so that each
  * test reads its own job and runs on the run's one shared server.
@@ -119,14 +122,14 @@ test("Pause schedule and Resume schedule change the job's facts", async ({ brows
   const ask = page.getByRole("dialog", { name: `Pause the schedule of ${JOB.name}?` });
   await expect(ask).toContainText("A run that is running finishes.");
   await ask.getByRole("button", { name: "Pause schedule" }).click();
-  await expect(page.getByText("daily 02:00 Europe/Berlin · paused")).toBeVisible();
+  await expect(page.getByText(PAUSED_BY_ADMIN)).toBeVisible();
   await expect(
     page.getByRole("status").filter({ hasText: `Paused the schedule of ${JOB.name}.` }),
   ).toBeVisible();
 
   // A reload reads what the server keeps.
   await openJob(page, address);
-  await expect(page.getByText("daily 02:00 Europe/Berlin · paused")).toBeVisible();
+  await expect(page.getByText(PAUSED_BY_ADMIN)).toBeVisible();
   await page.getByRole("button", { name: "Resume schedule" }).click();
   await expect(page.getByText(/^daily 02:00 Europe\/Berlin · next run /)).toBeVisible();
   await expect(page.getByRole("button", { name: "Pause schedule" })).toBeFocused();

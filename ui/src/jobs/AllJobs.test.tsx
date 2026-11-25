@@ -152,6 +152,43 @@ describe("AllJobs", () => {
     );
   });
 
+  it("says who paused a schedule and since when on hover and to a screen reader", async () => {
+    renderAll(["prod"], {
+      [jobsOf("prod")]: {
+        status: 200,
+        body: [
+          aJob({
+            paused: true,
+            state: "paused",
+            next_run_at: null,
+            paused_by: "maria.\u202Ekeller",
+            paused_at: "2026-11-16T08:30:00Z",
+          }),
+          aJob({
+            name: "orphaned",
+            paused: true,
+            state: "paused",
+            next_run_at: null,
+            paused_by: null,
+            paused_at: "2026-11-16T08:30:00Z",
+          }),
+        ],
+      },
+    });
+
+    await screen.findByRole("region", { name: "Every job listed" });
+    const sentence = `Paused since ${when("2026-11-16T08:30:00Z")} by maria.U+202Ekeller.`;
+    const schedule = within(rowOf("nightly_sales")).getAllByRole("cell")[3] as HTMLElement;
+    expect(schedule).toHaveTextContent("daily 02:00 Europe/Berlin · paused");
+    expect(within(schedule).getByText("paused")).toHaveAttribute("data-tip", sentence);
+    expect(schedule.querySelector(".visually-hidden")).toHaveTextContent(sentence);
+    const orphaned = within(rowOf("orphaned")).getAllByRole("cell")[3] as HTMLElement;
+    expect(within(orphaned).getByText("paused")).toHaveAttribute(
+      "data-tip",
+      `Paused since ${when("2026-11-16T08:30:00Z")} by an account since deleted.`,
+    );
+  });
+
   it("shows the last run with glyph and word, and never without one", async () => {
     renderAll(["prod"], {
       [jobsOf("prod")]: {

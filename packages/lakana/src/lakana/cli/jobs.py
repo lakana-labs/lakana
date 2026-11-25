@@ -267,6 +267,10 @@ def show_job(ctx: typer.Context, name: _NAME, env: _ENV = None, repo: _REPO = No
         since = job.waiting_since.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
         how = f" ({_output.inline(job.waiting_trigger)})" if job.waiting_trigger else ""
         typer.echo(f"Waiting since {since}{how}.")
+    if state.output != "json" and job.paused_at is not None:
+        since = job.paused_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        who = _output.inline(job.paused_by) if job.paused_by else "an account since deleted"
+        typer.echo(f"Paused since {since} by {who}.")
 
 
 @job_app.command("run")

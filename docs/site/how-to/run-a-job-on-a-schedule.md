@@ -166,7 +166,8 @@ environment to anyone who may read it; `--repo` limits it to one repository.
 In the web interface, **Jobs** in the menu lists every job of the environments you may read under
 **All jobs**: its name, which opens the job's page, its repository and environment, its schedule
 in words ("daily 06:00 Europe/Berlin", with "paused" while it is paused, or "by hand" for a job
-without one), its last run and its next run. A job whose start waits for the run that holds its
+without one; pointing at "paused", or moving the focus to it with Tab, shows since when and by
+whom), its last run and its next run. A job whose start waits for the run that holds its
 project shows **Waiting** as its next run, while its last run keeps its result; pointing at
 **Waiting**, or moving the focus to it with Tab, shows what it waits for. **Environment** above the lists shows one
 environment instead of all, and the page remembers your choice; **Search jobs** narrows the lists
@@ -204,8 +205,10 @@ Resumed daily_silver in dev; next run 2026-10-15 06:00 Europe/Berlin (04:00 UTC)
   the next time and keeps the pause.
 
 In the web interface, the job's page has **Pause schedule**, which asks first, and **Resume
-schedule** once the schedule is paused. The **Schedule** line then says "paused", or when the next
-run is. Both buttons are there only for someone who may deploy in the environment.
+schedule** once the schedule is paused. The **Schedule** line then says since when and by whom it
+is paused ("paused since 16 Nov 2026, 14:20 by ana.nowak"), or when the next run is.
+`lakana job show` prints the same as a line of its own: `Paused since 2026-11-16 14:20 UTC by
+ana.nowak.` Everyone who may read the environment sees who paused it. Both buttons are there only for someone who may deploy in the environment.
 On the Jobs page, each row of **All jobs** has **Pause**, which asks first in the same way, or
 **Resume**, and **Run**, which starts the job at once.
 

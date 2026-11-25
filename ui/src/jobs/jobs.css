@@ -424,8 +424,10 @@
 /* A waiting job's pill (JobWaiting): a Tab stop above the row's link, so the pointer and the
    focus reach the shared tooltip that says what the start waits for, also where the pill comes
    before the link (the Runs tab), whose layer would otherwise cover it. A plain click on it still
-   opens the job (the row forwards it). */
-.jobs-waits {
+   opens the job (the row forwards it). The word "paused" in All jobs, whose tooltip says since
+   when and by whom, is such a Tab stop too. */
+.jobs-waits,
+.jobs-paused {
   position: relative;
   z-index: 1;
   display: inline-flex;

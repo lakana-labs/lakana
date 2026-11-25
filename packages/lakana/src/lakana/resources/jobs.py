@@ -117,6 +117,8 @@ def job_from_json(data: dict[str, Any]) -> Job:
         notify=_notify_from_json(data.get("notify")),
         waiting_since=_when(data.get("waiting_since")),
         waiting_trigger=data.get("waiting_trigger"),
+        paused_by=data.get("paused_by"),
+        paused_at=_when(data.get("paused_at")),
     )
 
 
