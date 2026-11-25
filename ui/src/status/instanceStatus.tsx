@@ -32,7 +32,7 @@ export const INSTANCE_GLYPHS: Record<InstanceStatusOut["state"], StatusKind> = {
  * @returns The words, such as "1.2 GiB".
  */
 function gib(t: TFunction, bytes: number): string {
-  return t("home.status.gib", { value: (bytes / GIB).toFixed(1) });
+  return t("home.status.gib", { value: bytes / GIB });
 }
 
 /**

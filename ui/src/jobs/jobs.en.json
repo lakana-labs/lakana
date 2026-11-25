@@ -15,7 +15,7 @@
   "duration": {
     "notFinished": "Not finished yet",
     "notStarted": "Not started yet",
-    "tenths": "{{n}} s",
+    "tenths": "{{n, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
     "seconds": "{{n}} s",
     "minutes": "{{n}} min",
     "hours": "{{h}} h {{m}} min"

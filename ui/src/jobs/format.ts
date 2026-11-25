@@ -17,7 +17,7 @@ import "./jobStrings";
  */
 export function formatDuration(seconds: number, t: TFunction): string {
   if (seconds < 10) {
-    return t("jobs.duration.tenths", { n: (Math.round(seconds * 10) / 10).toFixed(1) });
+    return t("jobs.duration.tenths", { n: seconds });
   }
   if (seconds < 60) {
     return t("jobs.duration.seconds", { n: Math.round(seconds) });

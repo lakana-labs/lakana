@@ -140,7 +140,7 @@ export function VersionFiles({ place, version, id, onGone }: VersionFilesProps):
       <div
         className="files-list"
         role="region"
-        aria-label={t("table.artifact.files.region", { version })}
+        aria-label={t("table.artifact.files.region", { version: String(version) })}
         ref={region}
       >
         <table className="list list-static">

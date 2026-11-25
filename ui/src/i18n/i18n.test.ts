@@ -200,3 +200,57 @@ it("the environment picker registers its own strings", async () => {
   expect(i18n.t("environment.protected")).toBe("protected");
   expect(i18n.t("environment.label")).toBe("Environment");
 });
+
+it("writes every number in a message for the language, with or without a format", () => {
+  const i18n = initI18n();
+  i18n.addResource("en", "translation", "probe.rows", "{{count}} rows of {{total, number}}");
+  i18n.addResource(
+    "en",
+    "translation",
+    "probe.share",
+    "{{share}} % · {{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
+  );
+
+  expect(i18n.t("probe.rows", { count: 12_400, total: 1_234_567 })).toBe(
+    "12,400 rows of 1,234,567",
+  );
+  expect(i18n.t("probe.share", { share: 12.5, seconds: 1234 })).toBe("12.5 % · 1,234.0 s");
+  // A string is left as it is: an identifier such as a version or a port is passed as one.
+  expect(i18n.t("probe.rows", { count: "12400", total: 5 })).toBe("12400 rows of 5");
+});
+
+it("writes numbers with the separators of the language", () => {
+  const i18n = initI18n();
+  i18n.addResourceBundle("de", "translation", {
+    probe: {
+      rows: "{{count}} Zeilen",
+      time: "{{seconds, number(minimumFractionDigits: 1; maximumFractionDigits: 1)}} s",
+    },
+  });
+  try {
+    const de = i18n.getFixedT("de");
+
+    expect(de("probe.rows", { count: 12_400 })).toBe("12.400 Zeilen");
+    expect(de("probe.time", { seconds: 1.25 })).toBe("1,3 s");
+  } finally {
+    i18n.removeResourceBundle("de", "translation");
+  }
+});
+
+it("uses only formats the formatter knows in the catalogues", () => {
+  const catalogues = import.meta.glob<{ default: unknown }>("../**/*.en.json", { eager: true });
+  const formats = new Set<string>();
+  const collect = (value: unknown): void => {
+    if (typeof value === "string") {
+      for (const [, format] of value.matchAll(/\{\{-?\s*[\w.]+\s*,\s*([^}]+)\}\}/g)) {
+        formats.add((format ?? "").replace(/\(.*\)$/, "").trim());
+      }
+    } else if (typeof value === "object" && value !== null) {
+      for (const item of Object.values(value)) collect(item);
+    }
+  };
+  collect(en);
+  for (const catalogue of Object.values(catalogues)) collect(catalogue.default);
+
+  expect([...formats]).toEqual(["number"]);
+});
