@@ -105,7 +105,9 @@ export function ListSection({
       // that blur too). Only an element still in the page was left by the person.
       const target = event.target as Node;
       setTimeout(() => {
-        if (target.isConnected) {
+        // A blank click puts the focus on the page; a window blur (a tab switch) leaves it where
+        // it was, and the person is still in the section.
+        if (target.isConnected && document.activeElement === document.body) {
           last.current = null;
         }
       });
@@ -126,8 +128,12 @@ export function ListSection({
     // it left this section. A focus on the page while that element is still there was the
     // person's own doing, and stays.
     const frame = requestAnimationFrame(() => {
-      if (last.current?.isConnected === false && document.activeElement === document.body) {
-        title.current?.focus();
+      if (last.current?.isConnected === false) {
+        // The element is gone either way: nothing may move the focus for it on a later render.
+        last.current = null;
+        if (document.activeElement === document.body) {
+          title.current?.focus();
+        }
       }
     });
     return () => {

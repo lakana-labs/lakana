@@ -234,4 +234,61 @@ describe("ListSection", () => {
       expect(screen.getByRole("heading", { level: 2, name: "Running now" })).toHaveFocus();
     });
   });
+
+  it("leaves the focus in a dialog the row's leaving finds it in, and on the page after it closes", async () => {
+    const page = (row: boolean, dialog: boolean): React.JSX.Element => (
+      <>
+        {section(row)}
+        {dialog && (
+          <div role="dialog" aria-label="Commands">
+            <input aria-label="Command" />
+          </div>
+        )}
+      </>
+    );
+    const { rerender } = render(page(true, true));
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    screen.getByRole("textbox", { name: "Command" }).focus();
+    // The run ends while the palette is open.
+    rerender(page(false, true));
+    await aFrame();
+    expect(screen.getByRole("textbox", { name: "Command" })).toHaveFocus();
+
+    // The palette closes and leaves the focus on the page; the next poll renders the section again.
+    rerender(page(false, false));
+    await aFrame();
+    rerender(page(false, false));
+    await aFrame();
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("does not take the focus for a row once the person went to a control elsewhere", async () => {
+    const page = (row: boolean): React.JSX.Element => (
+      <>
+        {section(row)}
+        {row && <button type="button">Elsewhere</button>}
+      </>
+    );
+    const { rerender } = render(page(true));
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+    // Both leave: the focus falls to the page, and it is not the section's doing.
+    rerender(page(false));
+    await aFrame();
+
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("still gives the focus to the heading after the window lost it and got it back", async () => {
+    const { rerender } = render(section(true));
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    // A tab switch: a blur that names no next element, the focus staying on the button.
+    blurWithoutNext();
+    await act(() => new Promise((done) => setTimeout(done)));
+    rerender(section(false));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Running now" })).toHaveFocus();
+    });
+  });
 });
