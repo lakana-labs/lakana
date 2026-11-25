@@ -1464,9 +1464,12 @@ regression.
   its **linux/amd64** manifest, with `--platform=linux/amd64` on every host: the arm64 build's
   Chromium draws other pixels, so a Mac with Apple silicon runs the amd64 image emulated (slower,
   the same pictures). The dependencies are installed inside the image (`npm ci --ignore-scripts`)
-  into a Docker volume named after the lock's hash (`lakana-ui-visual-<hash>`, labelled
-  `lakana.ui-visual`), once per lock, and mounted over `ui/node_modules`; the host's
-  `node_modules` is never used, since on macOS it holds darwin binaries. Old volumes stay until
+  into a Docker volume named after the hash of the lock and the image
+  (`lakana-ui-visual-<hash>`, labelled `lakana.ui-visual`), once per lock and image, and
+  mounted over `ui/node_modules`, read-only for the test run (so nothing a branch's tests write
+  there reaches a later run; `vite preview` reads its config with `--configLoader runner`, which
+  writes no bundle there); the host's `node_modules` is never used, since on macOS it holds
+  darwin binaries. Old volumes stay until
   you remove them: `docker volume ls --filter label=lakana.ui-visual`, then
   `docker volume rm …`. Never run `playwright.visual.config.ts` on the host: its pictures would
   differ.
@@ -1478,9 +1481,9 @@ regression.
     Desktop; Windows only from inside WSL 2.
   - **Files.** The repository is bind-mounted (`--mount`, so a `:` in its path is fine; a `,`
     is not, and the script stops with a message). The container runs as your user and group, so
-    the pictures it writes are yours. With rootless Docker, the container's user maps to a
-    subordinate id on the host: the files it writes belong to that id; `chown` them back, or
-    use rootful Docker.
+    the pictures it writes are yours. Rootless Docker is untested and probably fails: there the
+    container's root is your user, and `--user` makes the run a subordinate id that may not
+    write to the mounted repository. Use rootful Docker (or Docker Desktop).
   - **Playwright upgrades.** `scripts/tests/test_workflows.py` fails when the image's tag is not
     the version of `@playwright/test` or the platform is not pinned: a Dependabot bump of
     Playwright needs the image's new tag and amd64 digest (`docker buildx imagetools inspect
@@ -1514,9 +1517,12 @@ regression.
 - **Stable pictures.** Every screen is shown at one fixed moment (`NOW`: `page.clock.setFixedTime`
   in the browser, and a fixed `Date` in the test process, whose connection stubs write their
   times relative to now), in UTC, with reduced motion (the theme fade and the running pulse
-  stop), animations disabled and the caret hidden. A shot waits for its data (`ready`), for the
-  network to go quiet (so a place's Actions, which load on demand, are in the picture; a shot of
-  a loading state, whose request never answers, sets `waits`), and for the fonts, and the page
+  stop), animations disabled and the caret hidden. A shot waits for its data (`ready`), runs
+  its `act` (a dialog, a menu, a typed query, each waiting for what it opens), then waits until
+  no request of the page has been open for 500 ms, counting every request since the page
+  opened, those of `act` and of navigations inside the page included (so a place's Actions,
+  which load on demand, and a dialog's own read are in the picture; a shot of a loading state,
+  whose request never answers, sets `loadingState` and skips this wait), and for the fonts, and the page
   is painted once more in full before the picture (a heading focused by script sometimes left a
   pixel of its focus ring behind in dark). A phone's pictures leave out its overlay scrollbars,
   which fade (`e2e/visual/phone.css`). The stubs' data is fixed, so nothing is masked; a shot
@@ -1527,7 +1533,7 @@ regression.
   (1,409), let a swapped colour token pass: Still Water's closest pair of fills,
   `--color-ground` and `--color-surface`, differs by 37, every hairline gone by 424. The same
   page drawn twice differs by up to 10 (a rounded corner by one level). Controls on the build:
-  each changed token in one theme, one run of that theme's 83 desktop shots:
+  each changed token in one theme, one run of that theme's desktop shots (83 when measured):
 
   | change in the build | failed |
   |---|---|
@@ -1538,7 +1544,8 @@ regression.
   | `--space-2` 8 → 9 px (light) | 75 of 83 |
 
   (the shots that passed show no hairline, no muted text or no such gap). Three runs of
-  `--repeat-each=3` (1,683 comparisons) matched the baselines.
+  `--repeat-each=3` (1,683 comparisons) matched the baselines, and with the two link states
+  one more (573 tests).
 - **Widths.** Every shot at 1280 px wide (the main target) in `light` and `dark` (the
   projects' `colorScheme`, through the "system" theme), 1800 px tall so the sidebar reaches a
   long page's foot (a longer page is taken whole); the shots marked `phone` (Sign-in, Home,
@@ -1547,7 +1554,7 @@ regression.
 - **What it covers.** Every route of the router and the important states, each in light and
   dark:
   - signing in: the sign-in page with an identity provider and with passkeys only, an invite
-    link, `/sign-in/oidc` finishing and refused, `/sign-in/oidc/confirmed` finishing and
+    link, a recovery link, a link already used, `/sign-in/oidc` finishing and refused, `/sign-in/oidc/confirmed` finishing and
     refused, `lakana login`'s confirmation, the device code page;
   - Home (an administrator's, with every panel filled), Home of a person with no access yet,
     the first sign-in's tour (its welcome and its first step), the search palette, the user
@@ -1570,8 +1577,10 @@ regression.
 
   Left out, as they show no screen of their own: `/settings` and the groups of its places
   (`/settings/access`; they redirect to their first place), `/access/*` (redirects to
-  Settings) and `/queries/<env>/runs/<id>` (the screen of a query's result, which the shot
-  reaches by running the query).
+  Settings), `/settings/repositories/<name>/about` (the same page as
+  `/settings/repositories/<name>`, kept for a repository named `new`) and
+  `/queries/<env>/runs/<id>` (the screen of a query's result, which the shot reaches by running
+  the query).
 - **In CI.** `ui (visual)` builds the interface and runs `npm --prefix ui run visual`, which
   pulls the image, installs the dependencies into a fresh volume and fails on any difference;
   then it uploads `ui/test-results/visual` (each failed shot's expected, actual and diff image)
@@ -1584,8 +1593,8 @@ regression.
   shards: `playwright.config.ts` runs only `*.spec.ts`, and the suite is `*.visual.ts`.
 - **Size.** Playwright writes 8-bit RGB PNGs at its own compression; a smaller lossless
   encoding would save about 3 % and be rewritten by the next update, so the baselines are what
-  Playwright writes: 186 pictures (83 desktop shots in light and dark, 10 at the phone
-  width in both), about 11.8 MB in all, about 63 kB each.
+  Playwright writes: 190 pictures (85 desktop shots in light and dark, 10 at the phone
+  width in both), about 11.9 MB in all, about 63 kB each.
 
 ### Reviewing a part of the interface
 

@@ -101,7 +101,10 @@ export default defineConfig({
     { name: "baselines", testMatch: "baselines.visual.ts" },
   ],
   webServer: {
-    command: "node node_modules/vite/bin/vite.js preview --port 4173 --strictPort",
+    // The runner loader reads vite.config.ts without writing a bundle into node_modules, which
+    // scripts/visual.mjs mounts read-only.
+    command:
+      "node node_modules/vite/bin/vite.js preview --configLoader runner --port 4173 --strictPort",
     url: URL,
   },
 });

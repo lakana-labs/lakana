@@ -5,8 +5,8 @@
 // It needs Docker and a build (`npm --prefix ui run build`).
 //
 // The dependencies come from `npm ci` inside the image, kept in a Docker volume named after the
-// lock's hash, never the host's node_modules: on macOS those hold darwin binaries the Linux
-// container cannot load.
+// hash of the lock and the image, never the host's node_modules: on macOS those hold darwin
+// binaries the Linux container cannot load. The test run mounts that volume read-only.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -66,12 +66,16 @@ if (root.includes(",")) {
   process.exit(2);
 }
 
-const lock = createHash("sha256")
+// One volume per lock and image: an install made in another image is never reused.
+const key = createHash("sha256")
   .update(readFileSync(resolve(ui, "package-lock.json")))
+  .update(IMAGE)
   .digest("hex");
-const volume = `lakana-ui-visual-${lock.slice(0, 16)}`;
+const volume = `lakana-ui-visual-${key.slice(0, 16)}`;
 const repository = `--mount=type=bind,source=${root},target=/work`;
 const modules = `--mount=type=volume,source=${volume},target=/work/ui/node_modules`;
+// The test run cannot change the install it shares with every later run.
+const readOnlyModules = `${modules},readonly`;
 const owner =
   typeof process.getuid === "function" && typeof process.getgid === "function"
     ? `${String(process.getuid())}:${String(process.getgid())}`
@@ -138,7 +142,7 @@ const status = run("docker", [
   "--env=HOME=/tmp",
   ...(process.env["CI"] === undefined ? [] : ["--env=CI"]),
   repository,
-  modules,
+  readOnlyModules,
   "--workdir=/work/ui",
   IMAGE,
   "node",

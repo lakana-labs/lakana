@@ -35,10 +35,10 @@ export interface Shot {
   /** Taken at the phone width only: what only a phone shows, such as its Menu. */
   readonly phoneOnly?: boolean;
   /**
-   * A request stays open on purpose (a loading state), so the shot does not wait for the
+   * A loading state: a request stays open on purpose, so the shot does not wait for the
    * network to go quiet.
    */
-  readonly waits?: boolean;
+  readonly loadingState?: boolean;
 }
 
 /**
@@ -270,7 +270,7 @@ export const SHOTS: readonly Shot[] = [
     },
     path: "/sign-in/oidc",
     ready: (page) => page.getByRole("status"),
-    waits: true,
+    loadingState: true,
   },
   {
     name: "sign-in-oidc-refused",
@@ -286,7 +286,7 @@ export const SHOTS: readonly Shot[] = [
     stub: admin(finish("/api/v1/sign-in/oidc/finish-in-session", false)),
     path: "/sign-in/oidc/confirmed",
     ready: (page) => page.getByRole("status"),
-    waits: true,
+    loadingState: true,
   },
   {
     name: "sign-in-oidc-confirm-refused",
@@ -306,6 +306,33 @@ export const SHOTS: readonly Shot[] = [
     },
     path: "/sign-in#l=pub-1&s=sec-1",
     ready: text("Ada Berg"),
+  },
+  {
+    name: "sign-in-recovery",
+    stub: async (page) => {
+      await signedOut(page);
+      await page.route("**/api/v1/sign-in/links/describe", (route) =>
+        route.fulfill({
+          json: { kind: "recovery", name: "kim.schulz", display_name: "Kim Schulz", state: "open" },
+        }),
+      );
+    },
+    path: "/sign-in#l=pub-2&s=sec-2",
+    ready: text("Kim Schulz"),
+  },
+  {
+    name: "sign-in-link-used",
+    stub: async (page) => {
+      await signedOut(page);
+      await page.route("**/api/v1/sign-in/links/describe", (route) =>
+        route.fulfill({
+          status: 410,
+          json: { type: "LinkUnusable", detail: "This link was used.", state: "used" },
+        }),
+      );
+    },
+    path: "/sign-in#l=pub-3&s=sec-3",
+    ready: heading("This link was already used"),
   },
   {
     name: "sign-in-cli",
@@ -478,7 +505,7 @@ export const SHOTS: readonly Shot[] = [
     stub: admin(pending("**/api/v1/environments/prod/namespaces/gold.sales/tables/fact_sales")),
     path: TABLE,
     ready: (page) => page.locator(".table-skeleton-tabs"),
-    waits: true,
+    loadingState: true,
   },
   {
     name: "table-actions",
