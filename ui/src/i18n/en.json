@@ -781,7 +781,7 @@
     },
     "steps": {
       "home": {
-        "text": "Where every sign-in lands: whether the instance is well, what needs your attention, what you opened recently and your work.",
+        "text": "Where every sign-in lands: whether the instance is well, what needs your attention, what you opened recently, and your work if you deploy.",
         "guide": "What Home shows, box by box"
       },
       "catalog": {
@@ -793,16 +793,16 @@
         "guide": "How to write and run a query"
       },
       "jobs": {
-        "text": "Your jobs, their runs and their deploys: what runs now, what failed and what runs next.",
-        "guide": "How to find what failed"
+        "text": "The jobs, their runs and their deploys: what runs now, what failed and what runs next.",
+        "guide": "What the Jobs screen shows"
       },
       "connections": {
         "text": "The databases and services your projects load their data from, and whether each one answers.",
-        "guide": "How to load data from a source"
+        "guide": "What the Connections screen shows"
       },
       "settings": {
         "text": "The instance’s status and what you may do. For those who manage them, also environments, repositories, access, sign-in and configuration.",
-        "guide": "How to tell whether the instance is healthy"
+        "guide": "What the status tells you, and who sees what"
       },
       "search": {
         "text": "Press {{keys}} anywhere to go to a place or run a command by typing a few letters.",

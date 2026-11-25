@@ -64,11 +64,39 @@ test.describe("the first administrator", () => {
 
     await expect(page.getByRole("heading", { level: 1, name: "Home" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
-    // A first sign-in opens the welcome; Skip records on the server that it was seen.
+    // A first sign-in without an identity provider opens the welcome, and the tour runs through
+    // every place; Finish records on the server that it was seen.
     const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
     await expect(welcome).toBeVisible();
-    await welcome.getByRole("button", { name: "Skip" }).click();
-    await expect(welcome).toBeHidden();
+    await welcome.getByRole("button", { name: "Start the tour" }).click();
+    const seen: string[] = [];
+    for (;;) {
+      const step = page.getByRole("dialog", { name: /./ });
+      await expect(step).toBeVisible();
+      // The tour's own words name no way of signing in; the next step repeats Get started's.
+      const words = await step
+        .locator("h2, p, li")
+        .filter({ hasNotText: "Your next step:" })
+        .allTextContents();
+      expect(words.length).toBeGreaterThan(1);
+      expect(words.join(" ")).not.toMatch(/passkey|provider/i);
+      seen.push((await step.getByRole("heading", { level: 2 }).textContent()) ?? "");
+      const next = step.getByRole("button", { name: "Next" });
+      if ((await next.count()) === 0) break;
+      await next.click();
+    }
+    expect(seen).toEqual([
+      "Home",
+      "Catalog",
+      "Queries",
+      "Jobs",
+      "Connections",
+      "Settings",
+      "Search",
+      "Help",
+    ]);
+    await page.getByRole("button", { name: "Finish" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 
   test("passkey sign-in after sign out", async ({ browserName }) => {

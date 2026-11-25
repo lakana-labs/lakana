@@ -123,3 +123,52 @@ def test_the_anchors_of_a_page_are_its_slugged_headings() -> None:
     assert "a-symlinked-parent-directory-of-the-profile-file" in anchors
     assert "no-such-heading" not in anchors
     assert _URL.search(f"{BASE}how-to/projects.md").group(1) == "how-to/projects.md"
+
+
+TOUR_STEPS = ROOT / "ui" / "src" / "tour" / "steps.ts"
+"""The first-sign-in tour's steps, whose `TOUR_GUIDES` name a page of the site for each step."""
+_TOUR_GUIDES = re.compile(r"export const TOUR_GUIDES[^=]*=\s*\{(?P<body>.*?)\n\};", re.DOTALL)
+_TOUR_GUIDE = re.compile(r'^\s*(?P<step>\w+): "(?P<path>[^"#]*)(?:#(?P<anchor>[^"]*))?",$', re.M)
+
+
+def _tour_guides() -> dict[str, tuple[str, str | None]]:
+    """Return the tour's guide of each step, read from the interface's source.
+
+    Returns
+    -------
+    dict of str to (str, str or None)
+        Each step's path on the site and its anchor, if any.
+    """
+    block = _TOUR_GUIDES.search(TOUR_STEPS.read_text(encoding="utf-8"))
+    assert block is not None, f"no TOUR_GUIDES in {TOUR_STEPS}"
+    return {
+        match["step"]: (match["path"], match["anchor"])
+        for match in _TOUR_GUIDE.finditer(block["body"])
+    }
+
+
+def test_every_guide_of_the_tour_points_to_a_page_and_heading_that_exist() -> None:
+    """Each step's guide is a page of the site at a heading it has; a renamed one fails here.
+
+    The interface's tests run only when `ui/` changes, so the check lives with the
+    documentation's: a pull request that renames a page or a heading the tour links to fails.
+    """
+    guides = _tour_guides()
+    assert set(guides) == {
+        "home",
+        "catalog",
+        "queries",
+        "jobs",
+        "connections",
+        "settings",
+        "search",
+    }, "every step but Help has a guide"
+    missing = []
+    for step, (path, anchor) in guides.items():
+        if not re.fullmatch(r"(tutorials|how-to|reference)/[a-z0-9-]+/", path):
+            missing.append(f"{step}: {path} (a directory URL of a tutorial, how-to or reference)")
+        elif not _page_of(path).is_file():
+            missing.append(f"{step}: {path}")
+        elif anchor is not None and anchor not in _anchors(_page_of(path)):
+            missing.append(f"{step}: {path}#{anchor} (no such heading)")
+    assert missing == [], f"the tour links to pages or headings that do not exist: {missing}"

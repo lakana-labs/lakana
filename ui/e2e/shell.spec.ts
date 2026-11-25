@@ -476,19 +476,26 @@ test.describe("the theme switch", () => {
 });
 
 /**
- * Reads what moves around the tour: the page's running animations, every transition of the
- * open dialog and of the outlined place that lasts longer than nothing, and how far the page
- * has scrolled.
+ * Reads what moves in the tour itself: the animations of its own elements (the welcome's or
+ * the step's overlay and dialog, their content, and the outlined place), every transition of
+ * those that lasts longer than nothing, and how far the page has scrolled. A spinner or a
+ * pulsing glyph elsewhere on the page is not the tour's and is not read.
  *
  * @param page - A page showing the welcome or a step.
- * @returns The animations' names, the lasting transitions and the scroll offset.
+ * @returns Whether the dialog was among them, the animations' names, the lasting transitions
+ *   and the scroll offset.
  */
-async function tourMotion(
-  page: Page,
-): Promise<{ animations: string[]; transitions: string[]; scrolled: number }> {
+async function tourMotion(page: Page): Promise<{
+  dialog: boolean;
+  animations: string[];
+  transitions: string[];
+  scrolled: number;
+}> {
   return page.evaluate(() => {
     const nodes = [
-      ...document.querySelectorAll('[role="dialog"], [role="dialog"] *, .tour-target'),
+      ...document.querySelectorAll(
+        ".tour-overlay, .tour-overlay *, .tour-step, .tour-step *, .tour-target",
+      ),
     ];
     const transitions = nodes.flatMap((node) => {
       const style = getComputedStyle(node);
@@ -497,12 +504,20 @@ async function tourMotion(
         ? [`${node.tagName.toLowerCase()}.${node.className}: ${style.transitionDuration}`]
         : [];
     });
-    const animations = document
-      .getAnimations()
-      .map((animation) =>
-        animation instanceof CSSAnimation ? animation.animationName : animation.id,
-      );
-    return { animations, transitions, scrolled: window.scrollX + window.scrollY };
+    const animations = nodes.flatMap((node) =>
+      node
+        .getAnimations()
+        .map((animation) =>
+          animation instanceof CSSAnimation ? animation.animationName : animation.id,
+        ),
+    );
+    return {
+      // The tour's own dialog is among the elements read, so an empty list means something.
+      dialog: nodes.some((node) => node.matches('[role="dialog"]')),
+      animations,
+      transitions,
+      scrolled: window.scrollX + window.scrollY,
+    };
   });
 }
 
@@ -518,11 +533,14 @@ for (const width of [1280, 320]) {
     await page.goto("/");
     const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
     await expect(welcome).toBeVisible();
-    expect((await tourMotion(page)).animations, "welcome").toEqual([]);
+    expect(await tourMotion(page), "welcome").toMatchObject({ dialog: true, animations: [] });
     await welcome.getByRole("button", { name: "Start the tour" }).press("Enter");
     for (let index = 0; index < 8; index += 1) {
       await expect(page.getByRole("dialog", { name: /./ })).toBeVisible();
-      expect((await tourMotion(page)).animations, `step ${String(index + 1)}`).toEqual([]);
+      expect(await tourMotion(page), `step ${String(index + 1)}`).toMatchObject({
+        dialog: true,
+        animations: [],
+      });
       if (index < 7) {
         await page.getByRole("button", { name: "Next" }).press("Enter");
       }
@@ -533,6 +551,7 @@ for (const width of [1280, 320]) {
     await page.goto("/");
     await expect(welcome).toBeVisible();
     expect(await tourMotion(page), "welcome").toEqual({
+      dialog: true,
       animations: [],
       transitions: [],
       scrolled: 0,
@@ -543,6 +562,7 @@ for (const width of [1280, 320]) {
       await expect(step).toBeVisible();
       await step.getByRole("link").first().hover();
       expect(await tourMotion(page), `step ${String(index + 1)}`).toEqual({
+        dialog: true,
         animations: [],
         transitions: [],
         scrolled: 0,

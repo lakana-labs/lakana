@@ -245,9 +245,9 @@ describe("the tour", () => {
       `Home: What Home shows, box by box → ${docs}how-to/start-in-the-web-interface/#the-boxes-top-to-bottom`,
       `Catalog: How to find a table → ${docs}how-to/find-a-table/#in-the-web-interface`,
       `Queries: How to write and run a query → ${docs}how-to/start-in-the-web-interface/#queries`,
-      `Jobs: How to find what failed → ${docs}how-to/find-a-run/#find-what-failed-in-every-environment`,
-      `Connections: How to load data from a source → ${docs}how-to/load-data-from-a-source/#1-create-the-connection`,
-      `Settings: How to tell whether the instance is healthy → ${docs}how-to/instance-health/`,
+      `Jobs: What the Jobs screen shows → ${docs}how-to/start-in-the-web-interface/#jobs`,
+      `Connections: What the Connections screen shows → ${docs}reference/connections/#in-the-web-interface`,
+      `Settings: What the status tells you, and who sees what → ${docs}how-to/start-in-the-web-interface/#healthy-degraded-down`,
       `Search: Every keyboard shortcut → ${docs}how-to/start-in-the-web-interface/#keyboard-shortcuts`,
     ]);
   });

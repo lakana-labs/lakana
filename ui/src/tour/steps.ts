@@ -11,18 +11,20 @@ export type TourStepId =
   "home" | "catalog" | "queries" | "jobs" | "connections" | "settings" | "search" | "help";
 
 /**
- * The guide each step links to, as a path on the documentation site (`DOCS_URL`): the how-to
- * for its place, at the heading about the web interface where the page has one. Help, the last
- * step, links to the tutorial, the how-to guides and the overview instead. `steps.test.ts`
- * checks that each page and heading exists under `docs/site`.
+ * The guide each step links to, as a path on the documentation site (`DOCS_URL`): the section
+ * about its place in the web interface, written for everyone who sees the place. Help, the last
+ * step, links to the tutorial, the how-to guides and the overview instead.
+ * `scripts/tests/test_user_text_urls.py` reads these paths from this file and checks that each
+ * page and heading exists under `docs/site`, so a documentation change that breaks one fails
+ * there.
  */
 export const TOUR_GUIDES: Readonly<Record<Exclude<TourStepId, "help">, string>> = {
   home: "how-to/start-in-the-web-interface/#the-boxes-top-to-bottom",
   catalog: "how-to/find-a-table/#in-the-web-interface",
   queries: "how-to/start-in-the-web-interface/#queries",
-  jobs: "how-to/find-a-run/#find-what-failed-in-every-environment",
-  connections: "how-to/load-data-from-a-source/#1-create-the-connection",
-  settings: "how-to/instance-health/",
+  jobs: "how-to/start-in-the-web-interface/#jobs",
+  connections: "reference/connections/#in-the-web-interface",
+  settings: "how-to/start-in-the-web-interface/#healthy-degraded-down",
   search: "how-to/start-in-the-web-interface/#keyboard-shortcuts",
 };
 

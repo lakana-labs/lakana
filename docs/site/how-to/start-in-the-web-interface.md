@@ -14,7 +14,7 @@ has granted them a role). The tour shows the places in the menu on the left one 
 Home, Catalog, Queries, Jobs, Connections and Settings, then Search and Help. Each step outlines its place, says in a
 sentence or two what you find there, and links to the guide for that place on this site, in a new tab. A
 place you cannot use is not in the menu, and the tour leaves it out too; Settings shows everyone the status
-and what they may do, and administrators the rest.
+and what they may do, and the rest to those who manage it.
 
 - Nothing moves on by itself: **Next** and **Back** go through the steps, **Skip tour** or
   **Esc** leaves it at any step.
