@@ -755,12 +755,9 @@ def list_all_runs(
     cursor
         The `next_cursor` of the previous page.
     sort
-        What the list is sorted by: `created` (the default), `name` (the job's, else the
-        repository's, in any letter case) or `status`; runs of one name or state come newest
-        first.
+        What the list is sorted by, with the fields of the list of one environment.
     order
-        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the
-        others.
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service

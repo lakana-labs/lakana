@@ -129,10 +129,9 @@ class SavedQueries:
         environment
             Only this environment; `None` for every environment.
         sort
-            What the list is sorted by: ``name`` (the default, in any letter case), ``updated``
-            or ``created``; every sort lists the same saved queries.
+            The sort, as `list` takes it.
         order
-            ``asc`` or ``desc``; by default ``asc`` for ``name``, ``desc`` for the times.
+            ``asc`` or ``desc``, as `list` takes it.
 
         Yields
         ------

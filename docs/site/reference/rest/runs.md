@@ -509,8 +509,8 @@ Parameters:
 | `since` | query | no | text (date-time) or null | Narrow to runs created at or after this ISO 8601 time; a time zone is required. |
 | `limit` | query | no | whole number | Page size (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
-| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case) or `status`; runs of one name or state come newest first. |
-| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others. |
+| `sort` | query | no | text or null | What the list is sorted by, with the fields of the list of one environment. |
+| `order` | query | no | text or null | `asc` or `desc`, each field's way by default, as on the list of one environment. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

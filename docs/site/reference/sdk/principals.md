@@ -56,8 +56,8 @@ The principals of one page; `list_page` also returns the cursor of the next one,
 | `search` | `str | None` | `None` | Only principals whose name contains this text, in any letter case. |
 | `limit` | `int | None` | `None` | Most principals returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` and sort with every page. |
-| `sort` | `str | None` | `None` | What the principals are sorted by: ``created`` (the default), ``name`` (in any letter case) or ``status``, the active first, each by name. |
-| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
+| `sort` | `str | None` | `None` | The sort, as `list_page` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list_page` takes it. |
 
 Returns: `list of Principal`. Newest first.
 
@@ -87,8 +87,8 @@ Yield every matching principal, newest first, fetching pages as needed.
 |---|---|---|---|
 | `search` | `str | None` | `None` | Only principals whose name contains this text, in any letter case. |
 | `page_size` | `int` | `100` | Principals per request (1 to 200). |
-| `sort` | `str | None` | `None` | What the principals are sorted by: ``created`` (the default), ``name`` (in any letter case) or ``status``, the active first, each by name. |
-| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
+| `sort` | `str | None` | `None` | The sort, as `list_page` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list_page` takes it. |
 
 Returns: `Iterator of Principal`. Each principal, once.
 

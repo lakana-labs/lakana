@@ -3634,7 +3634,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `name` (the default, in any letter case), `updated` or `created`."
+            "description": "What the list is sorted by, with the fields of the list of one environment."
           },
           {
             "name": "order",
@@ -3652,7 +3652,7 @@
               ],
               "title": "Order"
             },
-            "description": "`asc` or `desc`; by default `asc` for `name`, `desc` for `updated` and `created` (the latest first)."
+            "description": "`asc` or `desc`, each field's way by default, as on the list of one environment."
           },
           {
             "name": "authorization",
@@ -16200,7 +16200,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the last test: failed first, then queued or running, then passed, never tested last; one state by name."
+            "description": "What the list is sorted by, with the fields of the list of one environment."
           },
           {
             "name": "order",
@@ -16218,7 +16218,7 @@
               ],
               "title": "Order"
             },
-            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
+            "description": "`asc` or `desc`, each field's way by default, as on the list of one environment."
           },
           {
             "name": "authorization",
@@ -18926,7 +18926,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `created` (the default) or `status`; deploys of one state come newest first."
+            "description": "What the list is sorted by, with the fields of the list of one environment."
           },
           {
             "name": "order",
@@ -18944,7 +18944,7 @@
               ],
               "title": "Order"
             },
-            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for `status`."
+            "description": "`asc` or `desc`, each field's way by default, as on the list of one environment."
           },
           {
             "name": "authorization",
@@ -21568,7 +21568,7 @@
               ],
               "title": "Sort"
             },
-            "description": "What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case) or `status`; runs of one name or state come newest first."
+            "description": "What the list is sorted by, with the fields of the list of one environment."
           },
           {
             "name": "order",
@@ -21586,7 +21586,7 @@
               ],
               "title": "Order"
             },
-            "description": "`asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others."
+            "description": "`asc` or `desc`, each field's way by default, as on the list of one environment."
           },
           {
             "name": "authorization",

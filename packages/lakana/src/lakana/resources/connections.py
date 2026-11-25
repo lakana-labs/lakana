@@ -520,11 +520,9 @@ class Connections:
         environment
             The environment.
         sort
-            What the connections are sorted by: ``created`` (the default), ``name`` (in any
-            letter case) or ``status``, the last test: failed first, then queued or running,
-            then passed, never tested last. Send the same sort with every page.
+            The sort, as `list` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
+            ``asc`` or ``desc``, as `list` takes it.
         page_size
             Connections per request (1 to 200).
 
@@ -563,11 +561,9 @@ class Connections:
         cursor
             A previous page's `next_cursor` of this list.
         sort
-            What the connections are sorted by: ``created`` (the default), ``name`` (in any
-            letter case) or ``status``, the last test: failed first, then queued or running,
-            then passed, never tested last. Send the same sort with every page.
+            The sort, as `list` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
+            ``asc`` or ``desc``, as `list` takes it.
 
         Returns
         -------
@@ -609,11 +605,9 @@ class Connections:
         environment
             Only this environment.
         sort
-            What the connections are sorted by: ``created`` (the default), ``name`` (in any
-            letter case) or ``status``, the last test: failed first, then queued or running,
-            then passed, never tested last. Send the same sort with every page.
+            The sort, as `list` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
+            ``asc`` or ``desc``, as `list` takes it.
         page_size
             Connections per request (1 to 200).
 

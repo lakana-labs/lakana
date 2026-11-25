@@ -413,11 +413,9 @@ def list_all_saved_queries(
     cursor
         The `next_cursor` of the previous page.
     sort
-        What the list is sorted by: `name` (the default, in any letter case), `updated` or
-        `created`.
+        What the list is sorted by, with the fields of the list of one environment.
     order
-        `asc` or `desc`; by default `asc` for `name`, `desc` for `updated` and `created` (the
-        latest first).
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service
@@ -436,8 +434,8 @@ def list_all_saved_queries(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the named environment does not exist.
     lakana_core.errors.ValidationError
-        Mapped to 422, for an unknown `sort` or `order`, a malformed cursor or a cursor of the
-        other list or another order.
+        Mapped to 422, for an unknown `sort` or `order`, or a cursor that is malformed, came
+        from the list of one environment or was read in another order.
     lakana_core.errors.AuditUnavailableError
         Mapped to 503, if the page shows someone else's private query and that could not be
         recorded in the audit log.

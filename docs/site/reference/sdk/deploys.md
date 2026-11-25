@@ -58,8 +58,8 @@ The deploys of one page; `list_page` also returns the cursor of the next one.
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
 | `limit` | `int | None` | `None` | Most deploys returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `repository` with every page. |
-| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
-| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
+| `sort` | `str | None` | `None` | The sort, as `list_page` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list_page` takes it. |
 
 Returns: `list of Deploy`. Newest first.
 
@@ -102,8 +102,8 @@ The environments are those where you hold `READ_ENVIRONMENT`; one where you do n
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
 | `limit` | `int | None` | `None` | Most deploys returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same `repository` with every page. |
-| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
-| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
+| `sort` | `str | None` | `None` | The sort, as `list_page` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list_page` takes it. |
 
 Returns: `DeployPage`. The deploys, newest first, and the cursor for the next page (`None` on the last).
 
@@ -123,8 +123,8 @@ Yield every deploy of every environment you may read, fetching pages as needed.
 |---|---|---|---|
 | `environment` | `str | None` | `None` | Only this environment. |
 | `repository` | `str | None` | `None` | Only this repository's deploys. |
-| `sort` | `str | None` | `None` | What the deploys are sorted by: ``created`` (the default) or ``status``, whose deploys of one state come newest first. Send the same sort with every page. |
-| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``. |
+| `sort` | `str | None` | `None` | The sort, as `list_page` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list_page` takes it. |
 | `page_size` | `int` | `100` | Deploys per request (1 to 200). |
 
 Yields: `Deploy`. Each deploy, once, in the order of `list_all`.

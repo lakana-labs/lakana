@@ -579,12 +579,9 @@ def list_all_connections(
     cursor
         The `next_cursor` of the previous page.
     sort
-        What the list is sorted by: `created` (the default), `name` (in any letter case) or
-        `status`, the last test: failed first, then queued or running, then passed, never
-        tested last; one state by name.
+        What the list is sorted by, with the fields of the list of one environment.
     order
-        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the
-        others.
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service

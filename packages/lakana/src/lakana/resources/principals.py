@@ -267,10 +267,9 @@ class Principals:
         cursor
             A previous page's `next_cursor`. Send the same `search` and sort with every page.
         sort
-            What the principals are sorted by: ``created`` (the default), ``name`` (in any
-            letter case) or ``status``, the active first, each by name.
+            The sort, as `list_page` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
+            ``asc`` or ``desc``, as `list_page` takes it.
 
         Returns
         -------
@@ -335,10 +334,9 @@ class Principals:
         search
             Only principals whose name contains this text, in any letter case.
         sort
-            What the principals are sorted by: ``created`` (the default), ``name`` (in any
-            letter case) or ``status``, the active first, each by name.
+            The sort, as `list_page` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
+            ``asc`` or ``desc``, as `list_page` takes it.
         page_size
             Principals per request (1 to 200).
 

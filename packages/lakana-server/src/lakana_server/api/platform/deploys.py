@@ -557,11 +557,9 @@ def list_all_deploys(
     cursor
         The `next_cursor` of the previous page.
     sort
-        What the list is sorted by: `created` (the default) or `status`; deploys of one state
-        come newest first.
+        What the list is sorted by, with the fields of the list of one environment.
     order
-        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for
-        `status`.
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service

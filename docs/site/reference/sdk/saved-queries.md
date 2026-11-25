@@ -44,8 +44,8 @@ Yield every saved query you see, fetching pages as needed.
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `environment` | `str | None` | `None` | Only this environment; `None` for every environment. |
-| `sort` | `str | None` | `None` | What the list is sorted by: ``name`` (the default, in any letter case), ``updated`` or ``created``; every sort lists the same saved queries. |
-| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``asc`` for ``name``, ``desc`` for the times. |
+| `sort` | `str | None` | `None` | The sort, as `list` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list` takes it. |
 
 Yields: `SavedQuery`. Each saved query, once, in the order of `list`.
 

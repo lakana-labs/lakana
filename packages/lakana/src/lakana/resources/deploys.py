@@ -249,10 +249,9 @@ class Deploys:
         cursor
             A previous page's `next_cursor`. Send the same `repository` with every page.
         sort
-            What the deploys are sorted by: ``created`` (the default) or ``status``, whose
-            deploys of one state come newest first. Send the same sort with every page.
+            The sort, as `list_page` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
+            ``asc`` or ``desc``, as `list_page` takes it.
 
         Returns
         -------
@@ -354,10 +353,9 @@ class Deploys:
             A previous page's `next_cursor` of this list. Send the same `repository` with every
             page.
         sort
-            What the deploys are sorted by: ``created`` (the default) or ``status``, whose
-            deploys of one state come newest first. Send the same sort with every page.
+            The sort, as `list_page` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
+            ``asc`` or ``desc``, as `list_page` takes it.
 
         Returns
         -------
@@ -411,10 +409,9 @@ class Deploys:
         repository
             Only this repository's deploys.
         sort
-            What the deploys are sorted by: ``created`` (the default) or ``status``, whose
-            deploys of one state come newest first. Send the same sort with every page.
+            The sort, as `list_page` takes it.
         order
-            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
+            ``asc`` or ``desc``, as `list_page` takes it.
         page_size
             Deploys per request (1 to 200).
 
