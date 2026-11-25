@@ -52,6 +52,7 @@ async function stationsIn(request: Parameters<typeof createEnvironment>[0]): Pro
  *
  * @param page - The page, on Row filters & masks.
  * @param fields - What to fill.
+ * @param fields.admin - Whether the person is an administrator, who is offered the names.
  * @param fields.mask - Whether it is a column mask.
  * @param fields.who - Who it is for.
  * @param fields.environment - The environment.
@@ -60,12 +61,24 @@ async function stationsIn(request: Parameters<typeof createEnvironment>[0]): Pro
  */
 async function addPolicy(
   page: Page,
-  fields: { mask: boolean; who: string; environment: string; column?: string; expression: string },
+  fields: {
+    admin: boolean;
+    mask: boolean;
+    who: string;
+    environment: string;
+    column?: string;
+    expression: string;
+  },
 ): Promise<void> {
   await page.getByRole("button", { name: "Add filter or mask" }).click();
   const dialog = page.getByRole("dialog", { name: "Add filter or mask" });
   if (fields.mask) await dialog.getByText("Column mask", { exact: true }).click();
-  await dialog.getByRole("textbox", { name: "Name", exact: true }).fill(fields.who);
+  // The Name is a name picker (#802): an administrator picks who from the suggestions; anyone
+  // else may not list principals, and the name is sent as typed.
+  await dialog.getByRole("combobox", { name: "Name", exact: true }).fill(fields.who);
+  if (fields.admin) {
+    await page.getByRole("option", { name: `${fields.who}, Person` }).click();
+  }
   // A person who may list no environment types its name; anyone else chooses it.
   const typed: Locator = dialog.getByRole("textbox", { name: "Environment" });
   const environment: Locator = dialog.getByRole("button", { name: /Environment$/ });
@@ -123,11 +136,18 @@ test("an administrator filters rows and masks a column", async ({
 
   await page.goto(`/settings/access/filters-and-masks?environment=${environment}`);
   await expect(page.getByText("No row filter matches these filters.")).toBeVisible();
-  await addPolicy(page, { mask: false, who: name, environment, expression: "region = 'EU'" });
+  await addPolicy(page, {
+    admin: true,
+    mask: false,
+    who: name,
+    environment,
+    expression: "region = 'EU'",
+  });
   const filters = page.getByRole("region", { name: "Row filters" });
   await expect(filters.getByText("region = 'EU'")).toBeVisible();
   await expect(page.getByText("Row filter created.")).toBeVisible();
   await addPolicy(page, {
+    admin: true,
     mask: true,
     who: name,
     environment,
@@ -136,6 +156,13 @@ test("an administrator filters rows and masks a column", async ({
   });
   const masks = page.getByRole("region", { name: "Column masks" });
   await expect(masks.getByText("'***'")).toBeVisible();
+  // The Table filter suggests the tables there by namespace and part of the name (#802).
+  await page
+    .getByRole("combobox", { name: "Table (namespace.table)", exact: true })
+    .fill("gold.stat");
+  await page.getByRole("option", { name: "gold.stations" }).click();
+  await expect(page).toHaveURL(/[?&]table=gold\.stations(&|$)/);
+  await expect(filters.getByText("region = 'EU'")).toBeVisible();
 
   await page.goto(`/catalog/${environment}/gold/stations/access`);
   await expect(page.getByText("region = 'EU'")).toBeVisible();
@@ -173,6 +200,7 @@ test("a person with MANAGE_POLICY alone", async ({ browser, browserName, request
   // Without READ_TABLE the server cannot check a column for them: a filter that reads none.
   await page.goto("/settings/access/filters-and-masks");
   await addPolicy(page, {
+    admin: false,
     mask: false,
     who: name,
     environment,
@@ -193,6 +221,8 @@ test("a person with MANAGE_POLICY alone", async ({ browser, browserName, request
     page.getByRole("heading", { level: 1, name: "You cannot use Access file" }),
   ).toBeVisible();
   expect(asked.filter((path) => /^\/api\/v1\/access\/(status|export)/.test(path))).toEqual([]);
+  // The Name asked for no principal or group, which they may not list (no refusal is logged).
+  expect(asked.filter((path) => /^\/api\/v1\/(principals|groups)$/.test(path))).toEqual([]);
   expect(errors).toEqual([]);
   await page.context().close();
 });

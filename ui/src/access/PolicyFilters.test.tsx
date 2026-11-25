@@ -69,7 +69,7 @@ describe("PolicyFilters", () => {
     await user.click(screen.getByRole("button", { name: /^Environment/ }));
     await user.click(await screen.findByRole("option", { name: "dev" }));
     expect(onChange).toHaveBeenLastCalledWith({ ...NO_POLICY_FILTER, environment: "dev" }, "push");
-    const table = screen.getByRole("textbox", { name: "Table (namespace.table)" });
+    const table = screen.getByRole("combobox", { name: "Table (namespace.table)" });
     await user.type(table, "gold.station_ranking{Enter}");
 
     expect(onChange).toHaveBeenLastCalledWith(
@@ -82,7 +82,7 @@ describe("PolicyFilters", () => {
   it("applies the table when the field is left, and clears it with the environment", async () => {
     const { onChange, user } = renderFilters({ ...NO_POLICY_FILTER, environment: "dev" });
 
-    await user.type(screen.getByRole("textbox", { name: "Table (namespace.table)" }), "a.b.c");
+    await user.type(screen.getByRole("combobox", { name: "Table (namespace.table)" }), "a.b.c");
     await user.tab();
     expect(onChange).toHaveBeenLastCalledWith(
       { ...NO_POLICY_FILTER, environment: "dev", namespace: "a.b", table: "c" },
@@ -92,18 +92,18 @@ describe("PolicyFilters", () => {
     await user.click(await screen.findByRole("option", { name: "All environments" }));
 
     expect(onChange).toHaveBeenLastCalledWith(NO_POLICY_FILTER, "push");
-    expect(screen.getByRole("textbox", { name: "Table (namespace.table)" })).toHaveValue("");
+    expect(screen.getByRole("combobox", { name: "Table (namespace.table)" })).toHaveValue("");
   });
 
   it("the table waits for an environment", () => {
     renderFilters();
 
-    expect(screen.getByRole("textbox", { name: "Table (namespace.table)" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Table (namespace.table)" })).toBeDisabled();
   });
 
   it("refuses a table without a namespace", async () => {
     const { onChange, user } = renderFilters({ ...NO_POLICY_FILTER, environment: "dev" });
-    const table = screen.getByRole("textbox", { name: "Table (namespace.table)" });
+    const table = screen.getByRole("combobox", { name: "Table (namespace.table)" });
 
     await user.type(table, "station_ranking{Enter}");
 
@@ -118,7 +118,7 @@ describe("PolicyFilters", () => {
   it("emptying the table lists every table again, and the same table changes nothing", async () => {
     const start = { ...NO_POLICY_FILTER, environment: "dev", namespace: "gold", table: "t" };
     const { onChange, user } = renderFilters(start);
-    const table = screen.getByRole("textbox", { name: "Table (namespace.table)" });
+    const table = screen.getByRole("combobox", { name: "Table (namespace.table)" });
 
     await user.type(table, "{Enter}");
     expect(onChange).not.toHaveBeenCalled();
@@ -136,7 +136,7 @@ describe("PolicyFilters", () => {
 
     await user.click(screen.getByRole("button", { name: /Who$/ }));
     await user.click(await screen.findByRole("option", { name: "A group" }));
-    await user.type(screen.getByRole("textbox", { name: "Name" }), "analysts{Enter}");
+    await user.type(screen.getByRole("combobox", { name: "Name" }), "analysts{Enter}");
 
     expect(onChange).toHaveBeenLastCalledWith(
       { ...NO_POLICY_FILTER, who: { kind: "group", name: "analysts" } },

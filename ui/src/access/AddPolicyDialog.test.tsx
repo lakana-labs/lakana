@@ -1,8 +1,10 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { areasFor } from "../shell/areas";
 import {
   aColumnMask,
+  aMember,
   anEnvironment,
   aRowFilter,
   freshSession,
@@ -13,7 +15,7 @@ import {
 import { item } from "../test/catalog";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
-import type { FakeRoute } from "../test/server";
+import { type FakeRoute, whoami } from "../test/server";
 import { fakeWebAuthn } from "../test/webauthn";
 
 const PATH = "/settings/access/filters-and-masks";
@@ -37,6 +39,8 @@ function policyRoutes(more: Record<string, FakeRoute> = {}): Record<string, Fake
     "GET /api/v1/row-filters": { status: 200, body: [] },
     "GET /api/v1/column-masks": { status: 200, body: [] },
     "GET /api/v1/tables": { status: 200, body: { items: [], next_cursor: null, capped: false } },
+    "GET /api/v1/principals": { status: 200, body: [] },
+    "GET /api/v1/groups": { status: 200, body: [] },
     ...more,
   };
 }
@@ -78,7 +82,7 @@ async function chooseEnvironment(shell: Opened, name: RegExp | string): Promise<
 async function fillFilter(shell: Opened, expression = "region = 'EU'"): Promise<void> {
   const { user, dialog } = shell;
   await user.click(within(dialog).getByRole("radio", { name: "Group" }));
-  await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "analysts");
+  await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "analysts{Escape}");
   await chooseEnvironment(shell, "dev");
   await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
   // Escape closes the list of suggestions and leaves the dialog open.
@@ -187,10 +191,92 @@ describe("AddPolicyDialog", () => {
     );
 
     expect(within(dialog).getByRole("radio", { name: "Person or service account" })).toBeChecked();
-    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("maria");
+    expect(within(dialog).getByRole("combobox", { name: "Name" })).toHaveValue("maria");
     expect(within(dialog).getByRole("button", { name: /Environment$/ })).toHaveTextContent("dev");
     expect(within(dialog).getByRole("textbox", { name: "Namespace" })).toHaveValue("gold");
     expect(within(dialog).getByRole("combobox", { name: "Table" })).toHaveValue("station_ranking");
+  });
+
+  it("suggests people and service accounts, or groups, by who it is for", async () => {
+    const shell = await openDialog(
+      PATH,
+      policyRoutes({
+        "GET /api/v1/principals": {
+          status: 200,
+          body: [aMember("maria"), aMember("marek-ci", "SERVICE_ACCOUNT")],
+        },
+        "GET /api/v1/groups": { status: 200, body: [{ name: "marketing" }] },
+      }),
+    );
+    const { user, dialog, server } = shell;
+    const name = within(dialog).getByRole("combobox", { name: "Name" });
+
+    await user.type(name, "mar");
+    expect(
+      (await screen.findAllByRole("option")).map((option) => option.getAttribute("aria-label")),
+    ).toEqual(["maria, Person", "marek-ci, Service account"]);
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog", { name: "Add filter or mask" })).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("radio", { name: "Group" }));
+    await user.click(name);
+    await user.keyboard("{ArrowDown}");
+
+    expect(await screen.findByRole("option", { name: "marketing" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^maria/ })).toBeNull();
+    await user.keyboard("{Enter}");
+    expect(name).toHaveValue("marketing");
+    expect(
+      server.sent
+        .map((request) => request.path)
+        .filter((path) => /^\/api\/v1\/(principals|groups)\?/.test(path)),
+    ).toEqual(["/api/v1/principals?limit=20&q=mar", "/api/v1/groups?limit=20&q=mar"]);
+  });
+
+  it("says when no principal or group has that name", async () => {
+    const shell = await openDialog();
+    const { user, dialog } = shell;
+    const name = within(dialog).getByRole("combobox", { name: "Name" });
+
+    await user.type(name, "mra");
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "No principal named “mra”. Check the spelling.",
+      );
+    });
+    await user.keyboard("{Escape}");
+    await user.click(within(dialog).getByRole("radio", { name: "Group" }));
+    await user.click(name);
+    await user.keyboard("{ArrowDown}");
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "No group named “mra”. Check the spelling.",
+      );
+    });
+  });
+
+  it("keeps the Name a plain field for a policy manager who may not list principals", async () => {
+    const { server, user } = renderShell(PATH, {
+      access: areasFor(false),
+      me: { name: "pat", admin: false },
+      routes: policyRoutes({
+        "GET /api/v1/whoami": { status: 200, body: whoami("pat", false, true, false, [], true) },
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Add filter or mask" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add filter or mask" });
+    // The same field, with no list: it asks the server nothing.
+    const name = within(dialog).getByRole("combobox", { name: "Name" });
+
+    await user.type(name, "mar");
+    await user.keyboard("{ArrowDown}");
+    await user.click(within(dialog).getByRole("radio", { name: "Group" }));
+    await user.type(name, "k");
+
+    expect(name).toHaveValue("mark");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(
+      server.sent.some((request) => /^\/api\/v1\/(principals|groups)\?/.test(request.path)),
+    ).toBe(false);
   });
 
   it("suggests the tables of the chosen environment and fills in the namespace of the chosen one", async () => {
@@ -292,7 +378,7 @@ describe("AddPolicyDialog", () => {
     const { user, dialog, server } = shell;
     const create = within(dialog).getByRole("button", { name: "Create" });
     expect(create).toHaveAccessibleDescription("Name who it is for.");
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     expect(create).toHaveAccessibleDescription("Choose the environment.");
     await chooseEnvironment(shell, "dev");
     expect(create).toHaveAccessibleDescription("Name the namespace.");
@@ -317,7 +403,7 @@ describe("AddPolicyDialog", () => {
 
     expect(within(dialog).queryByRole("button", { name: "Create" })).toBeNull();
     expect(dialog).toHaveTextContent("An access file manages prod: add this in team.yaml instead.");
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
     await user.type(within(dialog).getByRole("combobox", { name: "Table" }), "t{Enter}");
     expect(shell.server.sent.some((request) => request.method === "POST")).toBe(false);
@@ -419,7 +505,7 @@ describe("AddPolicyDialog", () => {
       }),
     );
     const { user, dialog, server } = shell;
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     const environment = within(dialog).getByRole("textbox", { name: "Environment" });
     await user.type(environment, " dev ");
     await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");

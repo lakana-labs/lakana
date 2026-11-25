@@ -97,11 +97,18 @@ from a server before this release) and `/api/v1/row-filters` in the REST API, wh
 whoever holds `MANAGE_POLICY` on the instance (the `ADMIN` role holds it). Filter the lists by
 environment, by table (written `namespace.table`, such as `gold.station_ranking`) and by who; a
 policy manager who may read no environment types the environment's name instead of choosing it.
-Each row names who the filter is for, its table (a link to the table's Access tab), the expression
-and when it was made. **Add filter or mask** asks for the table, who it is for and the expression;
-once you choose the environment, the **Table** field suggests, as you type, the tables there whose
-name contains what you typed and that you may read, and choosing one fills in its namespace too
-(a table you may not read is never suggested; the server still checks the name you send).
+Once an environment is chosen, the table filter suggests, as you type, the tables there that you
+may read: part of a table's name finds the tables whose name contains it, and a namespace and a
+dot (`gold.` or `gold.sta`) looks in that namespace and the ones beneath it; choosing one applies
+it. Each row names who the filter is for, its table (a link to the table's Access tab), the
+expression and when it was made. **Add filter or mask** asks for the table, who it is for and the
+expression; once you choose the environment, the **Table** field suggests, as you type, the tables
+there whose name contains what you typed and that you may read, and choosing one fills in its
+namespace too (a table you may not read is never suggested; the server still checks the name you
+send). An administrator also gets suggestions in the **Name** of who it is for, and in the Who
+filter's name: the people and service accounts, or the groups, whose name contains what you
+typed. A policy manager who is not an administrator may not list principals or groups, so these
+fields suggest nothing to them and take the name as typed.
 **Delete** says who then sees more. Both ask for a passkey touch first, like the other changes of
 access. The server checks the expression as it does for `lakana row-filter create`, and its reason
 for a refusal shows in the form, with what you typed kept. A filter in an environment an access
