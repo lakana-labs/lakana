@@ -188,8 +188,10 @@ class OidcSignInConfig(ProxyAndCaBundleChecks):
         `https://idp.example/realms/lakana` for a Keycloak realm. A port is allowed; no trailing
         slash. Empty (the default) turns OIDC sign-in off. People are linked to this issuer:
         after a change, or with it removed, everyone linked to the old one counts as unlinked
-        until they link again (their passkeys sign them in meanwhile); setting the old issuer
-        back counts their links again.
+        until they link again (their passkeys sign them in meanwhile, and their API tokens stop
+        at the end of the token window); setting the old issuer back counts their links again.
+        Deactivate in Lakana anyone who left at the old provider: the start-up log names the
+        people concerned.
     client_id
         The client id the provider gave Lakana. Required with an issuer.
     client_secret

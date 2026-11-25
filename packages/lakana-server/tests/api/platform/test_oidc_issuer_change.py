@@ -2,9 +2,10 @@
 
 The sign-in design ("Settings"): "Changing the issuer leaves the linked people unlinked until they
 link again." A link whose issuer is not `LAKANA_OIDC__ISSUER` counts as no link, and with OIDC
-sign-in off nobody is linked: the person's passkeys work again, step-up asks for a passkey, their
-tokens have no window, and they may link to the new provider from their profile. A stale link
-never signs anyone in at the new provider.
+sign-in off nobody is linked: the person's passkeys work again, step-up asks for a passkey, and
+they may link to the new provider from their profile. Their tokens keep the token window
+(maintainer decision on #809) until they do. A stale link never signs anyone in at the new
+provider.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 import lakana_server.ui
+from lakana_core.identity.provider_issuer import record_oidc_issuer
 from lakana_core.models import AuditEvent, AuditEventType, Principal
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, UiConfig
@@ -221,10 +223,11 @@ def _the_person_is_unlinked(client: TestClient, name: str, token: str) -> None:
         Their personal token.
     """
     bearer = {"Authorization": f"Bearer {token}"}
-    # The token window is a linked person's: 90 days without a provider sign-in no longer matter.
+    # The token window stays: 90 days without a provider sign-in, so the token stops, and the
+    # sentence says how to get it back.
     r = client.get("/api/v1/whoami", headers=bearer)
-    assert r.status_code == 200, r.text
-    assert r.json()["token_window_ends_at"] is None
+    assert r.status_code == 401, r.text
+    assert "no longer uses" in r.json()["detail"] and "profile" in r.json()["detail"]
     # Access > a person.
     r = client.get(f"/api/v1/principals/{name}", headers=AUTH_HEADER)
     assert (r.status_code, r.json()["provider_link"]) == (200, None), r.text
@@ -273,7 +276,7 @@ def test_provider_step_up_is_not_offered_for_a_stale_link(moved: TestClient) -> 
 
 
 def test_a_person_with_a_stale_link_links_to_the_new_provider(moved: TestClient) -> None:
-    _stale(moved, "alice")
+    token = _stale(moved, "alice")
     headers = _session(moved, "alice", touched=True)
     r = moved.post(LINK_START, headers=headers, json={})
     assert r.status_code == 200, r.text
@@ -287,6 +290,27 @@ def test_a_person_with_a_stale_link_links_to_the_new_provider(moved: TestClient)
     assert linked["replaces"] == {"iss": OLD_ISSUER, "sub": SUBJECT}
     r = moved.get("/api/v1/sign-in/session", headers=headers)
     assert r.json()["provider_linked"] is True
+    # Linking again opens the current window: the token from before works again.
+    r = moved.get("/api/v1/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    assert r.json()["token_window_ends_at"] is not None
+
+
+def test_a_provider_step_up_started_before_the_issuer_moved_is_refused(moved: TestClient) -> None:
+    """The step-up finish asks `is_linked` too: a link that stopped counting confirms nothing."""
+    _stale(moved, "alice", issuer=ISSUER)
+    headers = _session(moved, "alice", touched=False)
+    r = moved.post(STEP_UP_START, headers=headers, json={})
+    assert r.status_code == 200, r.text
+    # Another server of this database started with another issuer meanwhile.
+    app = cast(FastAPI, moved.app)
+    with Session(app.state.engine) as session:
+        record_oidc_issuer(session, OLD_ISSUER)
+    url = r.json()["authorization_url"]
+    assert _callback_to(moved, url, sub=SUBJECT, auth_time=_now()) == CONFIRMED
+    _refused(moved.post(FINISH_IN_SESSION, headers=headers, json={}), "identity_mismatch")
+    r = moved.get("/api/v1/sign-in/session", headers=headers)
+    assert r.json()["step_up_until"] is None
 
 
 def test_starting_with_another_issuer_is_audited_and_logged(
@@ -304,7 +328,8 @@ def test_starting_with_another_issuer_is_audited_and_logged(
         second = _started(_app(settings, tmp_path / "2", monkeypatch), None)
         second.__exit__(None, None, None)
     assert f"issuer is now {ISSUER}" in caplog.text
-    assert "1 people linked to another issuer now count as unlinked" in caplog.text
+    assert "1 people linked to another issuer now count as unlinked (alice)" in caplog.text
+    assert "Deactivate in Lakana anyone of them who left at the old provider" in caplog.text
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="lakana_server.app"):
         third = _started(_app(settings, tmp_path / "3", monkeypatch, on=False), None)

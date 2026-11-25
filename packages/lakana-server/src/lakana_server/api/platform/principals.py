@@ -396,7 +396,9 @@ def unlink_provider(
     then sign in with a passkey again until they link once more. To offboard someone, deactivate
     them instead. Needs the ADMIN role on the instance and, from the web interface, a passkey
     touch (or provider step-up) within the last 15 minutes (403 `StepUpRequired`). Answers 404
-    for an unknown name and 409 for yourself or a person who is not linked.
+    for an unknown name and 409 for yourself or a person with no link at all. A link to an issuer
+    the server no longer uses can be unlinked too: it still holds the person's tokens to the
+    token window.
 
     Parameters
     ----------

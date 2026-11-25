@@ -41,7 +41,12 @@ from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
-from lakana_core.identity.provider_issuer import is_linked, linked_clause, unlinked_clause
+from lakana_core.identity.provider_issuer import (
+    has_token_window,
+    is_linked,
+    linked_clause,
+    unlinked_clause,
+)
 from lakana_core.identity.sessions import (
     SessionService,
     principal_named,
@@ -453,7 +458,8 @@ class OidcLinkService:
         NotFoundError
             If no principal has the name.
         ConflictError
-            For oneself (use a recovery link instead) and for a person who is not linked.
+            For oneself (use a recovery link instead) and for a person with no stored link (a
+            link to another issuer is unlinked too: it still binds their tokens to the window).
         """
         # Unlinking revokes the person's tokens: administering tokens, an administrator's alone.
         authorize_admin_only(self._session, self._authz, p, Action.MANAGE_TOKEN)
@@ -467,7 +473,9 @@ class OidcLinkService:
                 "You cannot unlink yourself: you would lose every way in at once. Ask another "
                 "administrator, or ask the server operator for a recovery link."
             )
-        if not is_linked(self._session, target):
+        # Any stored link, a stale one too: it still binds their tokens to the window
+        # (`has_token_window`), and while OIDC sign-in is off this is the way to free them.
+        if not has_token_window(target):
             raise ConflictError(
                 f"{name!r} is not linked to the identity provider, so there is nothing to unlink."
             )

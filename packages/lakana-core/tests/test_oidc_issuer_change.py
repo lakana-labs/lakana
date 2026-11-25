@@ -12,7 +12,7 @@ from datetime import timedelta
 
 import pytest
 from oidc_link_test_helpers import ISSUER, identity
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from test_identity_links import World as LinkWorld
 from test_identity_links import _Clock as LinkClock
@@ -21,8 +21,9 @@ from test_identity_links import parts
 from test_oidc_links import World
 
 from lakana_core.auth import AllowAllAuthorization
+from lakana_core.errors import AuthenticationError, ConflictError
 from lakana_core.grants.break_glass import breaks, holds
-from lakana_core.grants.service import active_instance_admin_ids
+from lakana_core.grants.service import active_instance_admin_ids, assert_break_glass_on_raise
 from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
 from lakana_core.identity.oidc_links import (
     is_linked,
@@ -46,6 +47,7 @@ from lakana_core.models import (
     AuditEventType,
     InstanceSetting,
     PersonalAccessToken,
+    Principal,
 )
 
 NEW_ISSUER = "https://login.example.org/realms/lakana"
@@ -136,7 +138,9 @@ def test_a_link_to_another_issuer_counts_as_no_link(world: World) -> None:
     assert not is_linked(world.session, alice)
     assert linked_count(world.session) == 0
     assert provider_link_of(world.session, alice, days=30) is None
-    assert token_window_ends_at(world.session, alice) is None
+    # The token window stays (maintainer decision on #809): it ends 30 days after the last
+    # provider sign-in, unless they link again.
+    assert token_window_ends_at(world.session, alice) == world.clock.now + timedelta(days=30)
     assert world.links.refusal_for(alice) is None
     # The stored link is kept, not cleared: setting the issuer back counts it again.
     assert (alice.oidc_issuer, alice.oidc_subject) == (ISSUER, "alice")
@@ -150,7 +154,7 @@ def test_with_oidc_off_nobody_counts_as_linked(world: World) -> None:
     assert not is_linked(world.session, alice)
     assert linked_count(world.session) == 0
     assert provider_link_of(world.session, alice, days=30) is None
-    assert token_window_ends_at(world.session, alice) is None
+    assert token_window_ends_at(world.session, alice) is not None
 
 
 def test_setting_the_issuer_back_counts_the_links_again(world: World) -> None:
@@ -220,24 +224,85 @@ def test_the_break_glass_count_reads_stale_links_as_unlinked(world: World) -> No
     assert unlinked_admin_count(world.session) == 2
 
 
+def test_granting_admin_to_a_stale_linked_person_counts_them_as_unlinked(world: World) -> None:
+    """The raising side (`_linked_ids`): a stale link is no linked administrator."""
+    bob = world.person("bob", passkey=False)
+    world.link(bob)
+    # Linked, without a passkey, the only administrator would need the provider: refused.
+    with pytest.raises(ConflictError):
+        assert_break_glass_on_raise(world.session, principal_id=bob.id)
+    world.session.rollback()
+    record_oidc_issuer(world.session, NEW_ISSUER)
+    assert_break_glass_on_raise(world.session, principal_id=bob.id)
+
+
 # -- the token window -------------------------------------------------------------------------
 
 
-def test_a_stale_linked_persons_tokens_have_no_window(world: World) -> None:
+def _stale_token(world: World) -> tuple[Principal, str, str]:
+    """Give alice a token, link her, let her window run out 400 days ago, and move the issuer.
+
+    Parameters
+    ----------
+    world
+        The test's world.
+
+    Returns
+    -------
+    tuple of (Principal, str, str)
+        Alice, and her token's key id and secret.
+    """
     alice = world.person("alice")
     pats = PatService(world.session, AllowAllAuthorization())
     issued = pats.issue(world.ref(alice), "alice", name="laptop")
     world.link(alice)
     alice.last_provider_sign_in_at = world.clock.now - timedelta(days=400)
     world.session.commit()
+    record_oidc_issuer(world.session, NEW_ISSUER)
     key_id, secret = issued.token.removeprefix("lakana_pat_").split("_", 1)
+    return alice, key_id, secret
+
+
+def test_a_stale_linked_persons_token_stops_at_the_window(world: World) -> None:
+    """Maintainer decision on #809: a stale link keeps the window, or offboarding misses tokens."""
+    _, key_id, secret = _stale_token(world)
     pat = world.session.execute(
         select(PersonalAccessToken).where(PersonalAccessToken.key_id == key_id)
     ).scalar_one()
     assert not within_token_window(world.session, pat, world.clock.now)
-    record_oidc_issuer(world.session, NEW_ISSUER)
-    assert within_token_window(world.session, pat, world.clock.now)
-    assert pats.verify(key_id, secret).name == "alice"
+    with pytest.raises(AuthenticationError) as refused:
+        PatService(world.session, AllowAllAuthorization()).verify(key_id, secret)
+    assert "no longer uses" in str(refused.value) and "link" in str(refused.value)
+    # The token is not revoked: linking again opens the window.
+    assert pat.revoked_at is None
+
+
+def test_linking_again_gives_the_current_window(world: World) -> None:
+    alice, key_id, secret = _stale_token(world)
+    world.links.link(alice.id, _new("alice-new"), via="profile")
+    world.session.commit()
+    assert PatService(world.session, AllowAllAuthorization()).verify(key_id, secret).name == "alice"
+    assert token_window_ends_at(world.session, alice) == world.clock.now + timedelta(days=30)
+
+
+def test_with_oidc_off_a_linked_persons_token_stops_at_the_window(world: World) -> None:
+    _, key_id, secret = _stale_token(world)
+    record_oidc_issuer(world.session, None)
+    with pytest.raises(AuthenticationError):
+        PatService(world.session, AllowAllAuthorization()).verify(key_id, secret)
+
+
+def test_an_administrator_unlinks_a_stale_link(world: World) -> None:
+    """With OIDC off there is no provider to link again to: the unlink frees the tokens' window."""
+    ann = world.person("ann", admin=True)
+    alice, _, _ = _stale_token(world)
+    record_oidc_issuer(world.session, None)
+    world.links.unlink(world.signed_in(ann), "alice")
+    world.session.refresh(alice)
+    assert alice.oidc_subject is None
+    assert token_window_ends_at(world.session, alice) is None
+    [event] = world.events(AuditEventType.PRINCIPAL_OIDC_UNLINKED)
+    assert (event["iss"], event["reason"]) == (ISSUER, "administrator")
 
 
 # -- recording the issuer -----------------------------------------------------------------------
@@ -249,10 +314,10 @@ def test_recording_a_changed_issuer_audits_it_and_counts_the_stale_links(world: 
     world.link(alice)
     assert _settings_events(world.session) == []
     change = record_oidc_issuer(world.session, NEW_ISSUER)
-    assert change == IssuerChange(before=ISSUER, after=NEW_ISSUER, not_counted=1)
+    assert change == IssuerChange(before=ISSUER, after=NEW_ISSUER, not_counted=1, names=("alice",))
     assert record_oidc_issuer(world.session, NEW_ISSUER) is None
     off = record_oidc_issuer(world.session, None)
-    assert off == IssuerChange(before=NEW_ISSUER, after=None, not_counted=1)
+    assert off == IssuerChange(before=NEW_ISSUER, after=None, not_counted=1, names=("alice",))
     events = _settings_events(world.session)
     assert events == [
         {
@@ -276,6 +341,24 @@ def test_recording_a_changed_issuer_audits_it_and_counts_the_stale_links(world: 
     assert set(actors) == {None}
 
 
+def test_recording_reads_the_issuer_afresh_under_the_lock(world: World) -> None:
+    """Review of #814: a copy in the session's cache never decides; another server's record does."""
+    # Held, so the session's identity map keeps it (it holds rows only weakly).
+    cached = world.session.get(InstanceSetting, OIDC_ISSUER_KEY)
+    assert cached is not None and cached.value == {"issuer": ISSUER}
+    # Another server recorded OIDC off meanwhile, past this session's cache.
+    world.session.execute(
+        update(InstanceSetting)
+        .where(InstanceSetting.key == OIDC_ISSUER_KEY)
+        .values(value={"issuer": None})
+        .execution_options(synchronize_session=False)
+    )
+    change = record_oidc_issuer(world.session, NEW_ISSUER)
+    assert change is not None and change.before is None
+    assert cached.value == {"issuer": NEW_ISSUER}
+    assert _settings_events(world.session)[-1]["before"] == {"oidc_issuer": None}
+
+
 def test_the_first_record_audits_only_when_it_stops_a_link_from_counting(
     session: Session,
 ) -> None:
@@ -294,16 +377,27 @@ def test_the_first_record_audits_only_when_it_stops_a_link_from_counting(
     change = record_oidc_issuer(session, NEW_ISSUER)
     assert change is not None and change.not_counted == 1
     [event] = _settings_events(session)
-    assert event["before"] == {"oidc_issuer": None}
+    # Not `before: null`, which would read as "OIDC sign-in was off".
+    assert "before" not in event and event["first_record"] is True
     assert event["links_not_counted"] == 1
 
 
 def test_the_start_up_warning_names_the_change_and_the_way_back() -> None:
-    change = IssuerChange(before=ISSUER, after=NEW_ISSUER, not_counted=3)
+    change = IssuerChange(
+        before=ISSUER, after=NEW_ISSUER, not_counted=3, names=("alice", "bob", "carol")
+    )
     text = issuer_change_warning(change, linked=0, unlinked_admins=1, rule_holds=True)
     assert text is not None
-    assert NEW_ISSUER in text and "3 people" in text and "link again" in text
+    assert NEW_ISSUER in text and "3 people" in text and "(alice, bob, carol)" in text
+    assert "link again" in text and "token window" in text
     assert "recovery" in text  # someone without a passkey needs a recovery link
+    # Someone who left at the old provider gets their passkeys back: the operator acts.
+    assert "Deactivate in Lakana anyone of them who left at the old provider" in text
+    many = IssuerChange(
+        before=ISSUER, after=NEW_ISSUER, not_counted=25, names=tuple(f"p{i:02}" for i in range(25))
+    )
+    long = issuer_change_warning(many, linked=0, unlinked_admins=1, rule_holds=True)
+    assert long is not None and "p19 and 5 more" in long and "p20" not in long
     off = issuer_change_warning(
         IssuerChange(before=ISSUER, after=None, not_counted=1),
         linked=0,

@@ -398,9 +398,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                     token_file=resolved_settings.bootstrap_token_file,
                 )
+                # The issuer first: the relying party's warning counts the people linked to it.
+                _record_provider_issuer(session, resolved_settings.oidc.issuer)
                 if resolved_settings.ui.enabled or resolved_settings.ui.public_url is not None:
                     _record_relying_party(session, resolved_settings.public_origin().host)
-                _record_provider_issuer(session, resolved_settings.oidc.issuer)
             if token is not None:
                 configured_key_id = resolved_settings.bootstrap_pat_key_id
                 if configured_key_id is not None and (bootstrap_secret is not None):

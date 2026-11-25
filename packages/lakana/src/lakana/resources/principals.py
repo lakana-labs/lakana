@@ -468,6 +468,7 @@ class Principals:
         lakana.errors.NotFound
             If no principal of this name exists.
         lakana.errors.Conflict
-            For yourself, or a person who is not linked.
+            For yourself, or a person with no link at all (a link to an issuer the server no
+            longer uses can be unlinked).
         """
         self._transport.request(ROUTES["principals.unlink_provider"], path_params={"name": name})

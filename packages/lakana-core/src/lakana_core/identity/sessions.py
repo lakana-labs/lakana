@@ -46,7 +46,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.grants.admin import acts_as_instance_admin
-from lakana_core.identity.provider_issuer import is_linked
+from lakana_core.identity.provider_issuer import has_token_window
 from lakana_core.identity.tokens import hash_secret, verify_secret
 from lakana_core.models import (
     AuditEventType,
@@ -134,6 +134,15 @@ TOKEN_WINDOW_MESSAGE = (  # nosec B105 -- a sentence for a person, not a credent
     "in the browser once, then the token works again."
 )
 """The 401 detail of a linked person's personal token outside the window; it is not revoked."""
+
+STALE_TOKEN_WINDOW_MESSAGE = (  # nosec B105 -- a sentence for a person, not a credential
+    "This token belongs to an account that was linked to an identity provider Lakana no longer "
+    "uses, and its {days} days since the last sign-in there are over. Sign in to Lakana in the "
+    "browser with your passkey and link your account to the current provider on your profile "
+    "page (or ask an administrator for a recovery link), then the token works again."
+)
+"""The 401 detail of a token outside the window whose person's link is to another issuer, or
+while OIDC sign-in is off (`lakana_core.identity.provider_issuer`, #809)."""
 
 VIAS = frozenset({"setup", "invite", "recovery", "local", "passkey", "oidc"})
 """How a session may begin."""
@@ -323,12 +332,12 @@ def token_window_ends_at(
     Returns
     -------
     datetime or None
-        The end, or `None` for a person who is not linked
-        (`lakana_core.identity.provider_issuer.is_linked`: also one linked to another issuer, and
-        everyone while OIDC sign-in is off). A linked person who never signed in there has a
-        window that ended at the epoch.
+        The end, or `None` for a person who was never linked
+        (`lakana_core.identity.provider_issuer.has_token_window`): a link to another issuer, or
+        one while OIDC sign-in is off, keeps the window. A linked person who never signed in
+        there has a window that ended at the epoch.
     """
-    if not is_linked(session, principal):
+    if not has_token_window(principal):
         return None
     window = timedelta(days=days if days is not None else token_window_days(session))
     signed_in = principal.last_provider_sign_in_at or datetime.fromtimestamp(0, UTC)

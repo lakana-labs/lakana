@@ -4,8 +4,9 @@ A person's link keeps the issuer it was made with (`Principal.oidc_issuer`). The
 the issuer it is configured with (`LAKANA_OIDC__ISSUER`) at every start (`record_oidc_issuer`),
 and only a link to that issuer counts: a link to another issuer, or any link while OIDC sign-in
 is off, counts as no link (the sign-in design, "Settings": "Changing the issuer leaves the linked
-people unlinked until they link again"). Their passkeys sign them in again, their personal tokens
-have no window, and they may link to the new provider, which replaces the stale link.
+people unlinked until they link again"). Their passkeys sign them in again, and they may link to
+the new provider, which replaces the stale link; their personal tokens keep the token window
+(`has_token_window`) and stop at its end unless they do.
 
 Stale links are ignored, never cleared: an operator who starts the server once without the
 variable, or with a mistyped issuer, and then corrects it, gets every link back as it was. A
@@ -15,8 +16,9 @@ server verifies tokens of.
 
 Every question "is this person linked" asks `is_linked`, or filters with `linked_clause` and
 `unlinked_clause` in SQL: the passkey refusal, step-up's choice of ceremony, recovery links, the
-profile and Access > a person, the counts of Settings > Sign-in, the break-glass rule, the token
-window and the sessions a token started.
+profile and Access > a person, the counts of Settings > Sign-in and the break-glass rule. The
+token window alone asks `has_token_window`: a stale link keeps it, so a person's tokens still end
+with it unless they link to the current provider.
 
 Before a server has recorded an issuer (a database no server of this release started), every
 stored link counts, as it did before: the stricter reading, as a linked person has fewer ways in.
@@ -29,13 +31,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
 
-from sqlalchemy import ColumnElement, false, func, or_, select, true
+from sqlalchemy import ColumnElement, false, or_, select, true
 from sqlalchemy.orm import Session
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Securable
 from lakana_core.grants.admin_lock import lock_admin_count
 from lakana_core.models import AuditEventType, InstanceSetting, Principal
+
+_NAMES_SHOWN = 20
+"""How many names of people whose link stopped counting the start-up warning shows."""
 
 OIDC_ISSUER_KEY = "sign_in.oidc_issuer"
 """The instance setting that holds the issuer links count for, as ``{"issuer": <url or null>}``:
@@ -65,11 +70,14 @@ class IssuerChange:
         The issuer recorded now; `None` with OIDC sign-in off.
     not_counted
         Active people whose stored link no longer counts.
+    names
+        Their names, sorted, for the start-up warning.
     """
 
     before: str | _Unrecorded | None
     after: str | None
     not_counted: int
+    names: tuple[str, ...] = ()
 
 
 def recorded_issuer(session: Session) -> str | _Unrecorded | None:
@@ -164,20 +172,46 @@ def is_linked(session: Session, principal: Principal) -> bool:
     return issuer is not None and principal.oidc_issuer == issuer
 
 
+def has_token_window(principal: Principal) -> bool:
+    """Say whether a person's personal tokens are bound by the token window.
+
+    Everyone who was linked to some identity provider is, whether that link counts now or not
+    (maintainer decision on #809): a person whose link is to another issuer, or who is linked
+    while OIDC sign-in is off, signs in with a passkey (`is_linked` is false), but their tokens
+    still stop at the end of the window, counted from their last provider sign-in, unless they
+    link to the current provider, which opens it again. So a person offboarded only at the old
+    provider gets no token back that outlives the window.
+
+    Parameters
+    ----------
+    principal
+        The person.
+
+    Returns
+    -------
+    bool
+        Whether a provider identity is stored on them, of any issuer.
+    """
+    return principal.oidc_subject is not None
+
+
 def record_oidc_issuer(session: Session, issuer: str | None) -> IssuerChange | None:
     """Record the issuer links count for, at start-up, and audit a change; commits.
 
-    Takes the administrator-count lock first (`lakana_core.grants.admin_lock`): a change of the
-    issuer changes who counts as linked, so it takes turns with every break-glass decision, and
-    the lock is the first this transaction takes. A change writes one `SIGN_IN_SETTINGS_CHANGED`
-    event, attributed to nobody (the operator's configuration changed), with the issuers before
-    and after and how many people's links stopped counting. The first record on a database
-    writes one only when it stops some link from counting.
+    Takes the administrator-count lock (`lakana_core.grants.admin_lock`) before it reads the
+    recorded issuer, and reads the row afresh under it, never from the session's cache: a change
+    of the issuer changes who counts as linked, so it takes turns with every break-glass decision
+    and with another server recording its own issuer at the same moment. It takes no row lock, so
+    the lock order of `lakana_core.grants.admin_lock` is kept. A change writes one
+    `SIGN_IN_SETTINGS_CHANGED` event, attributed to nobody (the operator's configuration
+    changed), with the issuers before and after and how many people's links stopped counting;
+    the first record on a database has no `before` but ``first_record: true``, and writes an
+    event only when it stops some link from counting.
 
     Parameters
     ----------
     session
-        Database session.
+        Database session; the caller has nothing uncommitted in it.
     issuer
         The configured issuer (`LAKANA_OIDC__ISSUER`); `None` with OIDC sign-in off.
 
@@ -187,11 +221,15 @@ def record_oidc_issuer(session: Session, issuer: str | None) -> IssuerChange | N
         The change; `None` when the issuer recorded was the same.
     """
     lock_admin_count(session)
+    row = session.execute(
+        select(InstanceSetting)
+        .where(InstanceSetting.key == OIDC_ISSUER_KEY)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
     before = recorded_issuer(session)
     if before == issuer:
         session.commit()
         return None
-    row = session.get(InstanceSetting, OIDC_ISSUER_KEY)
     if row is None:
         row = InstanceSetting(key=OIDC_ISSUER_KEY)
         session.add(row)
@@ -199,31 +237,33 @@ def record_oidc_issuer(session: Session, issuer: str | None) -> IssuerChange | N
     row.updated_at = datetime.now(UTC)
     row.updated_by = None
     session.flush()
-    not_counted = int(
+    names = tuple(
         session.execute(
-            select(func.count())
-            .select_from(Principal)
+            select(Principal.name)
             .where(
                 Principal.oidc_subject.is_not(None),
                 Principal.is_active.is_(True),
                 unlinked_clause(session),
             )
-        ).scalar_one()
+            .order_by(Principal.name)
+        ).scalars()
     )
-    if before is not UNRECORDED or not_counted:
+    if before is not UNRECORDED or names:
+        detail: dict[str, object] = {"source": "start-up"}
+        if before is UNRECORDED:
+            detail["first_record"] = True
+        else:
+            detail["before"] = {"oidc_issuer": before}
+        detail["after"] = {"oidc_issuer": issuer}
+        detail["links_not_counted"] = len(names)
         AuditService(session).record(
             None,
             AuditEventType.SIGN_IN_SETTINGS_CHANGED,
             securable=Securable.instance_scope(),
-            detail={
-                "source": "start-up",
-                "before": {"oidc_issuer": None if before is UNRECORDED else before},
-                "after": {"oidc_issuer": issuer},
-                "links_not_counted": not_counted,
-            },
+            detail=detail,
         )
     session.commit()
-    return IssuerChange(before=before, after=issuer, not_counted=not_counted)
+    return IssuerChange(before=before, after=issuer, not_counted=len(names), names=names)
 
 
 def issuer_change_warning(
@@ -257,12 +297,19 @@ def issuer_change_warning(
         if change.after is not None
         else "OIDC sign-in is off (LAKANA_OIDC__ISSUER is not set)"
     )
+    shown = ", ".join(change.names[:_NAMES_SHOWN])
+    if len(change.names) > _NAMES_SHOWN:
+        shown += f" and {len(change.names) - _NAMES_SHOWN} more"
     text = (
-        f"{now}: {change.not_counted} people linked to another issuer now count as unlinked. "
-        "They sign in with a passkey and link again from their profile; someone without a "
-        "passkey needs a recovery link. Their old links are kept and count again if the issuer "
-        f"is set back. {linked} people are linked now, and {unlinked_admins} administrator(s) "
-        "can sign in with a passkey."
+        f"{now}: {change.not_counted} people linked to another issuer now count as unlinked"
+        + (f" ({shown})" if shown else "")
+        + ". They sign in with a passkey and link again from their profile; someone without a "
+        "passkey needs a recovery link. Their personal tokens keep the token window and stop at "
+        "its end unless they link again. Deactivate in Lakana anyone of them who left at the "
+        "old provider (lakana principal deactivate NAME): their passkeys sign them in again. "
+        "Their old links are kept and count again if the issuer is set back. "
+        f"{linked} people are linked now, and {unlinked_admins} administrator(s) can sign in "
+        "with a passkey."
     )
     if broken:
         text += (
