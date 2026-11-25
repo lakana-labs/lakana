@@ -77,15 +77,15 @@ function Waiting({ checking, status }: WaitingProps): JSX.Element {
  */
 function summary(page: ResultPageOut, t: ReturnType<typeof useTranslation>["t"]): string {
   const shown = page.rows.length;
-  const count =
-    shown < page.row_count
-      ? t("table.preview.partOf", { shown, count: page.row_count })
-      : page.row_count === PREVIEW_ROWS
-        ? t("table.preview.first", { count: page.row_count })
-        : t("table.preview.rows", { count: page.row_count });
-  return page.duration_ms === null
-    ? count
-    : count + t("table.preview.time", { seconds: page.duration_ms / 1_000 });
+  const timed = page.duration_ms === null ? "" : "Timed";
+  const values = {
+    shown,
+    count: page.row_count,
+    ...(page.duration_ms === null ? {} : { seconds: page.duration_ms / 1_000 }),
+  };
+  if (shown < page.row_count) return t(`table.preview.partOf${timed}`, values);
+  if (page.row_count === PREVIEW_ROWS) return t(`table.preview.first${timed}`, values);
+  return t(`table.preview.rows${timed}`, values);
 }
 
 /**
