@@ -106,7 +106,7 @@ def test_the_list_pages_with_next_cursor_and_capped(client: TestClient) -> None:
         ({"namespace": "a\x00b"}, "namespace"),
         ({"q": "a\x00b"}, "`q`"),
         ({"name": "a\x00b"}, "`name`"),
-        ({"name": " "}, "The name to look for must be between 1 and 200 characters"),
+        ({"name": " "}, "The name to look for must be between 1 and 255 characters"),
     ],
 )
 def test_a_bad_parameter_is_422_naming_the_next_step(

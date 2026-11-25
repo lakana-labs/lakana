@@ -58,7 +58,7 @@ Without NAMESPACE: one page of the tables you may read in the environment (or in
 | `--dropped` | flag | off | List the dropped tables that can still be restored, and until when: those of NAMESPACE, or without it those of every namespace. |
 | `--model-kind` | text | none | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
 | `--search` | text | none | Only tables whose name, label, description or grain, or a column's name, label, description or measure, contains this text (1 to 200 characters). |
-| `--name` | text | none | Only tables whose own name contains this text, in any letter case (1 to 200 characters); a namespace, a column or a description never matches it. |
+| `--name` | text | none | Only tables whose own name contains this text, ignoring the case of A to Z (1 to 255 characters); a namespace, a column or a description never matches it. |
 | `--under` | text | none | Only this namespace and the ones beneath it, dotted (no NAMESPACE). |
 | `--all-environments` | flag | off | List the tables of every environment you may read. |
 | `--sort` | text | none | What to sort by: name (the default), owner, health, rows, size, last_write, last_read or created. A table with no value comes last. |

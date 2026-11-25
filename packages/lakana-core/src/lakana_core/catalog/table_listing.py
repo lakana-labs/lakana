@@ -33,12 +33,7 @@ from lakana_core.catalog.health_summary import (
     shown_health,
 )
 from lakana_core.catalog.row_actions import place_actions_each, table_actions_each
-from lakana_core.catalog.search import (
-    MAX_QUERY_LENGTH,
-    CatalogSearch,
-    SearchHit,
-    _normalized_query,
-)
+from lakana_core.catalog.search import CatalogSearch, SearchHit, _normalized_query
 from lakana_core.db import db_now
 from lakana_core.errors import NotFoundError, ValidationError
 from lakana_core.identifiers import NAMESPACE_SEPARATOR, NamespacePath, TableRef
@@ -52,7 +47,7 @@ from lakana_core.models import (
     TableRead,
     TableType,
 )
-from lakana_core.models.table import table_kind
+from lakana_core.models.table import TABLE_NAME_MAX, table_kind
 from lakana_core.pagination import (
     BIGINT_KEY,
     SMALLINT_KEY,
@@ -475,12 +470,13 @@ def _name_needle(name: str) -> str:
     Raises
     ------
     ValidationError
-        If it is empty after trimming or longer than `MAX_QUERY_LENGTH`.
+        If it is empty after trimming or longer than a table's name may be (`TABLE_NAME_MAX`),
+        so that a whole name pasted in is always a valid one.
     """
     needle = name.strip()
-    if not 1 <= len(needle) <= MAX_QUERY_LENGTH:
+    if not 1 <= len(needle) <= TABLE_NAME_MAX:
         raise ValidationError(
-            f"The name to look for must be between 1 and {MAX_QUERY_LENGTH} characters after "
+            f"The name to look for must be between 1 and {TABLE_NAME_MAX} characters after "
             "trimming; give a table's name or a part of it, or leave `name` out."
         )
     return needle
@@ -667,9 +663,10 @@ class TableListing:
             Only tables whose name, label, description, grain, or a column's name, label,
             description or measure, contains this text; trimmed, 1 to 200 characters.
         name
-            Only tables whose own name contains this text, in any letter case, ``%`` and ``_``
-            taken literally; trimmed, 1 to 200 characters. A namespace, a column or a text
-            never matches it: a name picker asks with it.
+            Only tables whose own name contains this text, ``%``, ``_`` and the backslash taken
+            literally, the case ignored as `name_contains` does; trimmed, 1 to `TABLE_NAME_MAX`
+            characters. A namespace, a column or a text never matches it: a name picker asks
+            with it.
         model_kind
             Only tables whose asset header declares this ``kind``.
         sort

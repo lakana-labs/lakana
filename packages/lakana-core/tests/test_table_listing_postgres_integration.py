@@ -268,7 +268,7 @@ def test_name_matches_the_table_name_alone_in_any_case_and_only_where_readable(
 ) -> None:
     admin, reader = _world(session)
     silver = session.scalars(select(Namespace).where(Namespace.path == "silver")).one()
-    for name in ("Daily_Orders", "dailyxorders", "100%_sure"):
+    for name in ("Daily_Orders", "dailyxorders", "100%_sure", "a\\b", "a_b"):
         session.add(
             Table(id=uuid.uuid4(), namespace_id=silver.id, name=name, table_type=TableType.ICEBERG)
         )
@@ -276,6 +276,9 @@ def test_name_matches_the_table_name_alone_in_any_case_and_only_where_readable(
     listing = TableListing(session, GrantAuthorization(session))
     assert [i.name for i in listing.list(admin, name="DAILY_o").items] == ["Daily_Orders"]
     assert [i.name for i in listing.list(admin, name="%_").items] == ["100%_sure"]
+    # the escape character itself is a literal too, under the server's standard strings
+    assert [i.name for i in listing.list(admin, name="\\").items] == ["a\\b"]
+    assert [i.name for i in listing.list(admin, name="a\\").items] == ["a\\b"]
     # `c0_0` is a column of every table and `silver.c` the start of a dotted table: no table's own
     # name holds either
     assert listing.list(admin, name="c0_").items == []

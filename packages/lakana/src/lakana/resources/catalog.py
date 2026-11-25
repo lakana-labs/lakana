@@ -103,8 +103,9 @@ class Catalog:
             Only tables whose name, label, description, grain, or a column's name, label,
             description or measure contains this text; 1 to 200 characters.
         name
-            Only tables whose own name contains this text, in any letter case; 1 to 200
-            characters. A namespace, a column or a description never matches it.
+            Only tables whose own name contains this text, ignoring the case of A to Z (and of
+            other letters on PostgreSQL, as its locale folds them); 1 to 255 characters. A
+            namespace, a column or a description never matches it.
         model_kind
             Only tables whose asset header declares this kind: fact, dimension, wide or staging.
         sort

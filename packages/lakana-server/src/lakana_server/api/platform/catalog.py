@@ -98,8 +98,9 @@ def list_tables(
     ),
     name: str | None = Query(
         default=None,
-        description="Only tables whose own name contains this text, in any letter case; "
-        "1 to 200 characters. A namespace, a column or a description never matches it.",
+        description="Only tables whose own name contains this text, ignoring the case of A to Z "
+        "(and of other letters on PostgreSQL, as its locale folds them); 1 to 255 characters. A "
+        "namespace, a column or a description never matches it.",
     ),
     model_kind: str | None = Query(
         default=None,
@@ -135,8 +136,9 @@ def list_tables(
     the last 7 UTC days (never who), and its health in one word. A table with no known value for
     the sort key comes last. A search text matches the same texts as the environment search,
     only in tables you may read; `capped` says it stopped early, at 5,000 readable candidates, so
-    narrow it. `name` matches a table's own name alone, in any letter case (a name picker, such
-    as the table of a row filter, asks with it), under the same rights. Answers 404 when
+    narrow it. `name` matches a table's own name alone, ignoring the case of A to Z (a name
+    picker, such as the table of a row filter, asks with it), under the same rights. Answers 404
+    when
     `environment` does not exist (to someone who may read environments; anyone else gets an
     empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`, `name`,
     `model_kind`, `lang` or `cursor` that is not valid.
@@ -152,7 +154,7 @@ def list_tables(
     q
         The text to find, trimmed, 1 to 200 characters.
     name
-        The text a table's own name must contain, trimmed, 1 to 200 characters.
+        The text a table's own name must contain, trimmed, 1 to 255 characters.
     model_kind
         Only tables that declare this kind in their asset header.
     sort

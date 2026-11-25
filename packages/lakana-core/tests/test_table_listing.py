@@ -687,6 +687,13 @@ def test_name_takes_percent_and_underscore_literally(session: Session) -> None:
     assert _names(listing.list(admin, name=" orders ")) == ["dev:gold.orders"]
 
 
+def test_name_takes_a_name_as_long_as_a_table_may_have(session: Session) -> None:
+    # a table's name may be 255 characters long, so pasting a whole one is a valid name
+    long = "t" * 255
+    admin, listing = _admin_listing(session, {"gold": long})
+    assert [item.name for item in listing.list(admin, name=long).items] == [long]
+
+
 def _admin_listing(
     session: Session, namespaces: dict[str, str]
 ) -> tuple[PrincipalRef, TableListing]:
@@ -922,8 +929,8 @@ def test_a_table_found_by_its_name_and_its_column_is_one_item(world: ListingWorl
         ({"limit": 0}, "limit must be between 1 and 200"),
         ({"limit": MAX_LIMIT + 1}, "limit must be between 1 and 200"),
         ({"q": "  "}, "between 1 and 200 characters"),
-        ({"name": "  "}, "The name to look for must be between 1 and 200 characters"),
-        ({"name": "x" * 201}, "The name to look for must be between 1 and 200 characters"),
+        ({"name": "  "}, "The name to look for must be between 1 and 255 characters"),
+        ({"name": "x" * 256}, "The name to look for must be between 1 and 255 characters"),
         ({"model_kind": "cube"}, "cube"),
         ({"cursor": "!"}, "cursor is not valid"),
     ],

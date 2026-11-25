@@ -22,7 +22,7 @@ What you may not read is left out, not refused. Every table shows its owner, whe
 | `environment` | `str | None` | `None` | Only this environment. |
 | `namespace` | `str | None` | `None` | Only this namespace and the ones beneath it, dotted. |
 | `q` | `str | None` | `None` | Only tables whose name, label, description, grain, or a column's name, label, description or measure contains this text; 1 to 200 characters. |
-| `name` | `str | None` | `None` | Only tables whose own name contains this text, in any letter case; 1 to 200 characters. A namespace, a column or a description never matches it. |
+| `name` | `str | None` | `None` | Only tables whose own name contains this text, ignoring the case of A to Z (and of other letters on PostgreSQL, as its locale folds them); 1 to 255 characters. A namespace, a column or a description never matches it. |
 | `model_kind` | `str | None` | `None` | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
 | `sort` | `str` | `'name'` | What the list is sorted by: ``name``, ``owner``, ``health``, ``rows``, ``size``, ``last_write``, ``last_read`` or ``created``. A table with no value comes last. |
 | `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``asc`` for name, owner and health, ``desc`` for the rest. |

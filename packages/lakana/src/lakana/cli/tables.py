@@ -363,8 +363,8 @@ def list_tables(
         str | None,
         typer.Option(
             "--name",
-            help="Only tables whose own name contains this text, in any letter case (1 to 200 "
-            "characters); a namespace, a column or a description never matches it.",
+            help="Only tables whose own name contains this text, ignoring the case of A to Z (1 "
+            "to 255 characters); a namespace, a column or a description never matches it.",
         ),
     ] = None,
     under: Annotated[
