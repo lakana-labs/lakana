@@ -1308,12 +1308,13 @@ five).
   must have words for; a test reading another file outside `ui/` adds it there), writes one
   violation per gate (an unsafe `any`, a conditional hook, an
   image without alt text, an undocumented export, a `fetch`, `window.fetch`, `navigator.sendBeacon`
-  or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, bad formatting, three type
+  or `axios` outside `src/api/`, `process` and `Buffer` in `src/`, words and an `aria-label`
+  written in a component, bad formatting, three type
   errors, an import out of `src/api/` and a cycle, an unused file, an untested branch, a size limit
-  of 1 B, an 80-token copy), runs the gate and requires it to fail with the expected message; three
-  probes check the other way round: that a `fetch` inside `src/api/` is accepted, that a file whose
+  of 1 B, an 80-token copy), runs the gate and requires it to fail with the expected message; four
+  probes check the other way round: that a `fetch` inside `src/api/` and words in a test are accepted, that a file whose
   branches are all tested keeps the coverage ratchet at its baseline, and that a file no test loads
-  is still listed as uncovered by the project's own coverage settings. The nine ESLint
+  is still listed as uncovered by the project's own coverage settings. The eleven ESLint
   probes share one ESLint run (one run takes 15 s locally, about 23 s in CI; nine runs made the
   proofs take 290 s of what was then one `ui` job, #586): all their files are written at once and each probe must
   find its rules in the lines ESLint prints about its own files. ESLint runs with `--max-warnings

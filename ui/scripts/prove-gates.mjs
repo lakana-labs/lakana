@@ -261,6 +261,27 @@ const PROBES = [
     expect: ["no-restricted-imports"],
   },
   {
+    gate: "ESLint literal text",
+    files: {
+      "src/probe/Words.tsx":
+        'import type { JSX } from "react";\n\n/**\n * Probe.\n *\n * @returns A button.\n */\nexport function Probe(): JSX.Element {\n  return <button type="button" aria-label="Close the dialog">Close</button>;\n}\n',
+    },
+    run: npmRun("lint"),
+    eslint: true,
+    expect: ["lakana/no-literal-text", "lakana/no-literal-text"],
+  },
+  {
+    gate: "ESLint literal text (tests exempt)",
+    files: {
+      "src/probe/Words.test.tsx":
+        'import { render } from "@testing-library/react";\nimport { it } from "vitest";\n\nit("renders", () => {\n  render(<button type="button" aria-label="Close the dialog">Close</button>);\n});\n',
+    },
+    run: npmRun("lint"),
+    eslint: true,
+    accept: true,
+    expect: [],
+  },
+  {
     gate: "ESLint fetch rule (src/api/ exempt)",
     files: { "src/api/whoami.ts": 'void fetch("/api/v1/whoami");\n' },
     run: npmRun("lint"),
