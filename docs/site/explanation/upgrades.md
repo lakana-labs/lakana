@@ -896,8 +896,12 @@ Its owner creates the view again with `ORDER BY` in place of `SORT BY`
 - Changing `LAKANA_OIDC__ISSUER`, or removing it, unlinks everyone linked to the old issuer until
   they link again: their passkeys sign them in again and they link to the new provider from their
   profile (someone without a passkey needs a recovery link). Their personal API tokens keep the
-  token window and stop at its end unless they link again; with OIDC sign-in off, an administrator
-  unlinks those who should keep using tokens (`lakana principal unlink-provider`). **Deactivate in
+  token window and stop at its end unless they link again. With OIDC sign-in off there is nothing
+  to link to: to let someone use tokens again, an administrator unlinks them (`lakana principal
+  unlink-provider NAME`, or **Unlink** on their page, which shows the link as no longer
+  configured). That deletes their passkeys and revokes their tokens, so they come back with a
+  recovery link, add a passkey and create new tokens, which have no window; a sole administrator
+  is unlinked by the server operator with the bootstrap token. **Deactivate in
   Lakana (`lakana principal deactivate NAME`) anyone who left at the old provider**: their passkeys
   sign them in again. The links are kept, not deleted: setting the old issuer back counts them
   again. The server records its issuer at every start (the instance setting `sign_in.oidc_issuer`,

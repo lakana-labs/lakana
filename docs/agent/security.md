@@ -7424,12 +7424,21 @@ token window. Threat model: "OIDC sign-in (#32)".
     (any stored identity, of any issuer): `token_window_ends_at`, so `PatService.verify`, task
     tokens minted with a PAT, `lakana login` tokens and `token_window` session ends. A stale-linked
     person's tokens stop at the end of the window counted from their last provider sign-in, with
-    `STALE_TOKEN_WINDOW_MESSAGE` (sign in with a passkey and link to the current provider); linking
-    again opens the current window (`test_a_stale_linked_persons_token_stops_at_the_window`,
+    `STALE_TOKEN_WINDOW_MESSAGE` (sign in with a passkey and link to the current provider), or
+    with OIDC off `OIDC_OFF_TOKEN_WINDOW_MESSAGE` (ask an administrator to unlink you, then the
+    recovery link and new tokens); linking again opens the current window
+    (`test_a_stale_linked_persons_token_stops_at_the_window`,
+    `test_with_oidc_off_a_linked_persons_token_stops_at_the_window`,
     `test_linking_again_gives_the_current_window`, and the server's
     `test_a_person_linked_to_another_issuer_counts_as_unlinked`). With OIDC off there is no
-    provider to link to: an administrator's unlink (L6) accepts any stored link and frees them
-    (`test_an_administrator_unlinks_a_stale_link`).
+    provider to link to: an administrator's unlink (L6) accepts any stored link, and as always
+    deletes the passkeys and revokes the tokens, so the person comes back with a recovery link and
+    new tokens without a window (`test_an_administrator_unlinks_a_stale_link`). Nobody unlinks
+    themselves; a sole administrator is unlinked by the server operator with the bootstrap token
+    (a token caller needs no step-up, `test_the_operator_unlinks_a_stale_linked_sole_administrator`).
+    `provider_link_of` shows a stale link to an administrator and the person, `stale: true` with
+    the window's end, so Access › a person offers **Unlink** for it ("Linked to a provider that is
+    no longer configured", `ProviderLink.tsx`).
   - **Ignored, never cleared.** Clearing would be irreversible on a start without the variable or
     with a typo, and an operator's unlink revokes tokens and deletes passkeys, which the design
     does not ask for here. So nothing is written to `principals`; the record writes one

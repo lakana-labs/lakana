@@ -36369,7 +36369,7 @@
           "is_active"
         ],
         "title": "PrincipalOut",
-        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance).\nprovider_link\n    The person's link to the identity provider; `null` when they are not linked, or for a\n    caller who is neither an administrator nor the person."
+        "description": "Response body for a principal.\n\nParameters\n----------\nname\n    Principal name.\ntype\n    Whether this is a human user or a service account.\nis_active\n    Whether this principal can currently authenticate.\npicture\n    The etag of the principal's profile picture (`GET /api/v1/principals/{name}/picture`),\n    or `null` without one; it changes whenever the picture does.\nheld_admin\n    Whether the principal holds or has ever held the `ADMIN` role on the instance, directly\n    or through a group. Such a person is recovered only by the server operator. `null`\n    unless the caller is an administrator (the `ADMIN` role on the instance).\nprovider_link\n    The person's link to the identity provider; `null` when they have none, or for a\n    caller who is neither an administrator nor the person. A link to an issuer the server no\n    longer uses is there, with `stale` true."
       },
       "ProfileIn": {
         "properties": {
@@ -36508,6 +36508,11 @@
               }
             ],
             "title": "Token Window Ends At"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
           }
         },
         "type": "object",
@@ -36519,7 +36524,7 @@
           "token_window_ends_at"
         ],
         "title": "ProviderLinkOut",
-        "description": "A person's link to the organisation's identity provider (#32).\n\nParameters\n----------\nissuer\n    The provider's issuer the person is linked to.\nemail\n    The e-mail address of their last provider sign-in, for showing only: Lakana never\n    matches by it.\nname\n    The name of their last provider sign-in, for showing only.\nlast_sign_in_at\n    When they last signed in through the provider.\ntoken_window_ends_at\n    Until when their personal API tokens work without another provider sign-in."
+        "description": "A person's link to the organisation's identity provider (#32).\n\nParameters\n----------\nissuer\n    The provider's issuer the person is linked to.\nemail\n    The e-mail address of their last provider sign-in, for showing only: Lakana never\n    matches by it.\nname\n    The name of their last provider sign-in, for showing only.\nlast_sign_in_at\n    When they last signed in through the provider.\ntoken_window_ends_at\n    Until when their personal API tokens work without another provider sign-in.\nstale\n    Whether the link is to an issuer this server no longer uses, or OIDC sign-in is off:\n    it signs nobody in (the person signs in with a passkey and may link again), but their\n    personal API tokens still stop at `token_window_ends_at`. An administrator may unlink it."
       },
       "QueryEnvironmentOut": {
         "properties": {

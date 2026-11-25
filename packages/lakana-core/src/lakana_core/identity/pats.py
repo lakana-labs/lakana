@@ -16,8 +16,9 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.errors import AuthenticationError, ConflictError, NotFoundError, PermissionDenied
 from lakana_core.grants.admin import authorize_admin_only, may_manage_tokens
 from lakana_core.identifiers import refuse_hidden_characters, refuse_outer_whitespace
-from lakana_core.identity.provider_issuer import is_linked
+from lakana_core.identity.provider_issuer import is_linked, recorded_issuer
 from lakana_core.identity.sessions import (
+    OIDC_OFF_TOKEN_WINDOW_MESSAGE,
     STALE_TOKEN_WINDOW_MESSAGE,
     TOKEN_WINDOW_MESSAGE,
     require_step_up,
@@ -536,11 +537,12 @@ class PatService:
         ends = token_window_ends_at(self._session, principal, days=days)
         if ends is not None and now >= ends:
             # Not revoked: a provider sign-in opens the window again.
-            message = (
-                TOKEN_WINDOW_MESSAGE
-                if is_linked(self._session, principal)
-                else STALE_TOKEN_WINDOW_MESSAGE
-            )
+            if is_linked(self._session, principal):
+                message = TOKEN_WINDOW_MESSAGE
+            elif recorded_issuer(self._session) is None:
+                message = OIDC_OFF_TOKEN_WINDOW_MESSAGE
+            else:
+                message = STALE_TOKEN_WINDOW_MESSAGE
             raise AuthenticationError(message.format(days=days))
         pat.last_used_at = now
         self._session.commit()

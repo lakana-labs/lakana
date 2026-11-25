@@ -205,9 +205,17 @@ link again:
   **Sign in with Keycloak**. An administrator's recovery link comes from the server operator.
 - Their personal API tokens keep the token window: they stop working once the window since their
   last sign-in at the old realm is over, and work again once the person has linked to the new
-  one. With single sign-on turned off there is nothing to link to: an administrator unlinks the
-  people who should keep using tokens
-  ([the team guide](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)).
+  one.
+- With single sign-on turned off there is nothing to link to, so those tokens stay stopped. To
+  let someone use API tokens again, an administrator unlinks them: their page under
+  **Settings → Access → People** shows **Linked to a provider that is no longer configured**,
+  with **Unlink** (or the command in
+  [the team guide](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)). An
+  unlink deletes their passkeys and revokes their tokens, so the administrator then sends them a
+  recovery link; they add a passkey and create new tokens, which have no window. An
+  administrator cannot unlink themselves: a sole administrator asks the server operator, who runs
+  `lakana principal unlink-provider NAME` with the bootstrap token and then
+  `lakana recovery create NAME`.
 - **Deactivate in Lakana anyone who left at the old realm** (`lakana principal deactivate NAME`):
   with the issuer change their passkeys sign them in again. The server's start-up log names
   everyone whose link stopped counting; the audit log has the change as

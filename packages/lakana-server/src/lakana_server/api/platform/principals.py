@@ -104,6 +104,7 @@ def _link_out(link: ProviderLink | None) -> ProviderLinkOut | None:
         name=link.name,
         last_sign_in_at=link.last_sign_in_at,
         token_window_ends_at=link.token_window_ends_at,
+        stale=link.stale,
     )
 
 

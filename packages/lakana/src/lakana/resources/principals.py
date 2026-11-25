@@ -79,6 +79,7 @@ def _provider_link_from_json(data: dict[str, Any]) -> ProviderLink:
         name=data.get("name"),
         last_sign_in_at=_when(data.get("last_sign_in_at")),
         token_window_ends_at=_when(data.get("token_window_ends_at")),
+        stale=bool(data.get("stale")),
     )
 
 

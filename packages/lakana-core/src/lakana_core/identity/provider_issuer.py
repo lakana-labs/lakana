@@ -303,11 +303,21 @@ def issuer_change_warning(
     text = (
         f"{now}: {change.not_counted} people linked to another issuer now count as unlinked"
         + (f" ({shown})" if shown else "")
-        + ". They sign in with a passkey and link again from their profile; someone without a "
-        "passkey needs a recovery link. Their personal tokens keep the token window and stop at "
-        "its end unless they link again. Deactivate in Lakana anyone of them who left at the "
-        "old provider (lakana principal deactivate NAME): their passkeys sign them in again. "
-        "Their old links are kept and count again if the issuer is set back. "
+        + "."
+        + (
+            " They sign in with a passkey and link again from their profile; someone without a "
+            "passkey needs a recovery link. Their personal tokens keep the token window and stop "
+            "at its end unless they link again."
+            if change.after is not None
+            else " They sign in with a passkey; someone without one needs a recovery link. Their "
+            "personal tokens keep the token window and stop at its end, as there is no provider "
+            "to link to: to let someone use tokens again, unlink them (lakana principal "
+            "unlink-provider NAME), which deletes their passkeys and revokes their tokens, and "
+            "send them a recovery link."
+        )
+        + " Deactivate in Lakana anyone of them who left at the old provider (lakana principal "
+        "deactivate NAME): their passkeys sign them in again. Their old links are kept and count "
+        "again if the issuer is set back. "
         f"{linked} people are linked now, and {unlinked_admins} administrator(s) can sign in "
         "with a passkey."
     )

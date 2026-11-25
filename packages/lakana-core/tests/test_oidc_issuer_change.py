@@ -137,7 +137,9 @@ def test_a_link_to_another_issuer_counts_as_no_link(world: World) -> None:
     world.session.refresh(alice)
     assert not is_linked(world.session, alice)
     assert linked_count(world.session) == 0
-    assert provider_link_of(world.session, alice, days=30) is None
+    # Shown, marked stale, so an administrator sees it and may unlink it.
+    shown = provider_link_of(world.session, alice, days=30)
+    assert shown is not None and shown.stale and shown.issuer == ISSUER
     # The token window stays (maintainer decision on #809): it ends 30 days after the last
     # provider sign-in, unless they link again.
     assert token_window_ends_at(world.session, alice) == world.clock.now + timedelta(days=30)
@@ -153,7 +155,8 @@ def test_with_oidc_off_nobody_counts_as_linked(world: World) -> None:
     assert recorded_issuer(world.session) is None
     assert not is_linked(world.session, alice)
     assert linked_count(world.session) == 0
-    assert provider_link_of(world.session, alice, days=30) is None
+    shown = provider_link_of(world.session, alice, days=30)
+    assert shown is not None and shown.stale
     assert token_window_ends_at(world.session, alice) is not None
 
 
@@ -272,7 +275,10 @@ def test_a_stale_linked_persons_token_stops_at_the_window(world: World) -> None:
     assert not within_token_window(world.session, pat, world.clock.now)
     with pytest.raises(AuthenticationError) as refused:
         PatService(world.session, AllowAllAuthorization()).verify(key_id, secret)
-    assert "no longer uses" in str(refused.value) and "link" in str(refused.value)
+    # OIDC on: the way back is linking to the current provider.
+    assert "no longer uses" in str(refused.value)
+    assert "link your account to the current provider" in str(refused.value)
+    assert "unlink" not in str(refused.value)
     # The token is not revoked: linking again opens the window.
     assert pat.revoked_at is None
 
@@ -288,8 +294,11 @@ def test_linking_again_gives_the_current_window(world: World) -> None:
 def test_with_oidc_off_a_linked_persons_token_stops_at_the_window(world: World) -> None:
     _, key_id, secret = _stale_token(world)
     record_oidc_issuer(world.session, None)
-    with pytest.raises(AuthenticationError):
+    with pytest.raises(AuthenticationError) as refused:
         PatService(world.session, AllowAllAuthorization()).verify(key_id, secret)
+    # OIDC off: there is no provider to link to, only an administrator's unlink.
+    assert "ask an administrator to unlink you" in str(refused.value)
+    assert "recovery link" in str(refused.value) and "current provider" not in str(refused.value)
 
 
 def test_an_administrator_unlinks_a_stale_link(world: World) -> None:
@@ -303,6 +312,21 @@ def test_an_administrator_unlinks_a_stale_link(world: World) -> None:
     assert token_window_ends_at(world.session, alice) is None
     [event] = world.events(AuditEventType.PRINCIPAL_OIDC_UNLINKED)
     assert (event["iss"], event["reason"]) == (ISSUER, "administrator")
+
+
+def test_the_operator_unlinks_a_stale_linked_sole_administrator(world: World) -> None:
+    """With OIDC off, the sole administrator cannot unlink themselves: the bootstrap token can."""
+    ann = world.person("ann", admin=True)
+    # Stored directly: linking the last administrator who signs in with a passkey is refused.
+    ann.oidc_issuer, ann.oidc_subject = ISSUER, "ann"
+    world.session.commit()
+    record_oidc_issuer(world.session, None)
+    with pytest.raises(ConflictError):
+        world.links.unlink(world.signed_in(ann), "ann")
+    operator = PatService(world.session, AllowAllAuthorization()).verify("opkey", "opsecret")
+    world.links.unlink(operator, "ann")
+    world.session.refresh(ann)
+    assert ann.oidc_subject is None and token_window_ends_at(world.session, ann) is None
 
 
 # -- recording the issuer -----------------------------------------------------------------------
@@ -405,6 +429,10 @@ def test_the_start_up_warning_names_the_change_and_the_way_back() -> None:
         rule_holds=True,
     )
     assert off is not None and "LAKANA_OIDC__ISSUER" in off
+    # With OIDC off there is no profile link: the warning says what an unlink does instead.
+    assert "link again from their profile" not in off
+    assert "lakana principal unlink-provider NAME" in off and "deletes their passkeys" in off
+    assert "unlink-provider" not in text
     quiet = IssuerChange(before=None, after=ISSUER, not_counted=0)
     assert issuer_change_warning(quiet, linked=2, unlinked_admins=1, rule_holds=True) is None
     broken = issuer_change_warning(quiet, linked=2, unlinked_admins=0, rule_holds=False)

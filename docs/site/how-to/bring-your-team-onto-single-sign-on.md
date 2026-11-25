@@ -196,5 +196,11 @@ Successful sign-ins are `SIGN_IN_OIDC`, links and unlinks `PRINCIPAL_OIDC_LINKED
   service's `environment:` in `compose.yaml` as well as from `.env`: a line left in `compose.yaml`
   passes an empty value, and the server does not start with any empty `LAKANA_OIDC__` setting
   but `LAKANA_OIDC__ALLOW_HOSTS`. Everyone linked then signs in with their passkeys again (deactivate
-  first anyone who should not), while their API tokens stop at the end of the token window:
-  unlink those who should keep using tokens. Someone without a passkey needs a recovery link.
+  first anyone who should not), and someone without a passkey needs a recovery link. Their API
+  tokens stop at the end of the token window and stay stopped, as there is nothing to link to.
+  To let someone use tokens again, unlink them as in
+  [Take someone off single sign-on](#take-someone-off-single-sign-on): that deletes their
+  passkeys and revokes their tokens, so send them a recovery link, and they add a passkey and
+  create new tokens, which have no window. A sole administrator cannot unlink themselves: the
+  server operator runs `lakana principal unlink-provider NAME` with the bootstrap token and then
+  `lakana recovery create NAME`.

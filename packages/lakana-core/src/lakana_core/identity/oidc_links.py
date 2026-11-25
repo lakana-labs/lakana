@@ -208,6 +208,10 @@ class ProviderLink:
         When the person last signed in there.
     token_window_ends_at
         Until when the person's personal tokens work without another provider sign-in.
+    stale
+        Whether the link is to an issuer the server no longer uses, or OIDC sign-in is off
+        (`lakana_core.identity.provider_issuer.is_linked` is false): it signs nobody in, but
+        still holds the person's tokens to the window, and an administrator may unlink it.
     """
 
     issuer: str
@@ -215,6 +219,7 @@ class ProviderLink:
     name: str | None
     last_sign_in_at: datetime | None
     token_window_ends_at: datetime | None
+    stale: bool = False
 
 
 def provider_link_of(session: Session, principal: Principal, *, days: int) -> ProviderLink | None:
@@ -232,9 +237,10 @@ def provider_link_of(session: Session, principal: Principal, *, days: int) -> Pr
     Returns
     -------
     ProviderLink or None
-        The link; `None` for a person who is not linked.
+        The link, marked `stale` when it is to another issuer or OIDC sign-in is off; `None`
+        for a person with no stored link.
     """
-    if principal.oidc_issuer is None or not is_linked(session, principal):
+    if principal.oidc_issuer is None or not has_token_window(principal):
         return None
     return ProviderLink(
         issuer=principal.oidc_issuer,
@@ -242,6 +248,7 @@ def provider_link_of(session: Session, principal: Principal, *, days: int) -> Pr
         name=principal.oidc_name,
         last_sign_in_at=principal.last_provider_sign_in_at,
         token_window_ends_at=token_window_ends_at(session, principal, days=days),
+        stale=not is_linked(session, principal),
     )
 
 

@@ -222,6 +222,9 @@
     "unlinkGoes": "This deletes the passkeys of {{name}}, revokes every personal API token of theirs and ends every session they have. Their account and grants stay.",
     "unlinkThen": "{{name}} then needs a recovery link to sign in again, which you can issue on this page.",
     "offboard": "To offboard someone, deactivate them instead.",
-    "unlinkConfirm": "Unlink"
+    "unlinkConfirm": "Unlink",
+    "staleTitle": "Linked to a provider that is no longer configured",
+    "staleHint": "{{name}} was linked to <issuer/>, which this server no longer uses. The link signs nobody in: {{name}} signs in with a passkey and may link to the current provider. Until then their personal API tokens stop when the token window ends. Unlinking clears the link, and also deletes their passkeys and revokes their tokens.",
+    "tokensUntil": "Personal API tokens work until"
   }
 }

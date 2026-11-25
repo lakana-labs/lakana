@@ -210,7 +210,7 @@ def _session(client: TestClient, name: str, *, touched: bool) -> dict[str, str]:
     return {"X-Lakana-CSRF": csrf}
 
 
-def _the_person_is_unlinked(client: TestClient, name: str, token: str) -> None:
+def _the_person_is_unlinked(client: TestClient, name: str, token: str, *, oidc_on: bool) -> None:
     """Check every place that says whether a person is linked says they are not.
 
     Parameters
@@ -221,16 +221,22 @@ def _the_person_is_unlinked(client: TestClient, name: str, token: str) -> None:
         The person, with a stale link and a provider sign-in 90 days ago.
     token
         Their personal token.
+    oidc_on
+        Whether the server runs with an issuer, which decides the token's refusal sentence.
     """
     bearer = {"Authorization": f"Bearer {token}"}
     # The token window stays: 90 days without a provider sign-in, so the token stops, and the
     # sentence says how to get it back.
     r = client.get("/api/v1/whoami", headers=bearer)
     assert r.status_code == 401, r.text
-    assert "no longer uses" in r.json()["detail"] and "profile" in r.json()["detail"]
+    detail = r.json()["detail"]
+    assert ("current provider" in detail) is oidc_on and ("unlink you" in detail) is not oidc_on
     # Access > a person.
     r = client.get(f"/api/v1/principals/{name}", headers=AUTH_HEADER)
-    assert (r.status_code, r.json()["provider_link"]) == (200, None), r.text
+    # Access > a person: the link is shown, marked stale, with the end of the token window.
+    link = r.json()["provider_link"]
+    assert r.status_code == 200 and link["stale"] is True, r.text
+    assert link["token_window_ends_at"] is not None
     # The profile: the browser session tells the interface to offer a passkey, not the provider.
     headers = _session(client, name, touched=True)
     r = client.get("/api/v1/sign-in/session", headers=headers)
@@ -248,14 +254,14 @@ def _the_person_is_unlinked(client: TestClient, name: str, token: str) -> None:
 
 def test_a_person_linked_to_another_issuer_counts_as_unlinked(moved: TestClient) -> None:
     token = _stale(moved, "alice")
-    _the_person_is_unlinked(moved, "alice", token)
+    _the_person_is_unlinked(moved, "alice", token, oidc_on=True)
     r = moved.get("/api/v1/settings/sign-in", headers=AUTH_HEADER)
     assert r.json()["provider"]["linked_people"] == 0
 
 
 def test_with_oidc_off_a_linked_person_counts_as_unlinked(off: TestClient) -> None:
     token = _stale(off, "alice", issuer=ISSUER)
-    _the_person_is_unlinked(off, "alice", token)
+    _the_person_is_unlinked(off, "alice", token, oidc_on=False)
 
 
 def test_a_stale_link_signs_nobody_in_at_the_new_provider(moved: TestClient) -> None:

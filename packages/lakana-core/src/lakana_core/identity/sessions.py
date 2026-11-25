@@ -137,12 +137,22 @@ TOKEN_WINDOW_MESSAGE = (  # nosec B105 -- a sentence for a person, not a credent
 
 STALE_TOKEN_WINDOW_MESSAGE = (  # nosec B105 -- a sentence for a person, not a credential
     "This token belongs to an account that was linked to an identity provider Lakana no longer "
-    "uses, and its {days} days since the last sign-in there are over. Sign in to Lakana in the "
+    "uses, and the {days} days since your last sign-in there are over. Sign in to Lakana in the "
     "browser with your passkey and link your account to the current provider on your profile "
-    "page (or ask an administrator for a recovery link), then the token works again."
+    "page, then the token works again."
 )
-"""The 401 detail of a token outside the window whose person's link is to another issuer, or
-while OIDC sign-in is off (`lakana_core.identity.provider_issuer`, #809)."""
+"""The 401 detail of a token outside the window whose person's link is to another issuer
+(`lakana_core.identity.provider_issuer`, #809)."""
+
+OIDC_OFF_TOKEN_WINDOW_MESSAGE = (  # nosec B105 -- a sentence for a person, not a credential
+    "This token belongs to an account that was linked to an identity provider, and the {days} "
+    "days since your last sign-in there are over. Lakana no longer signs anyone in through an "
+    "identity provider, so ask an administrator to unlink you: that also revokes this token and "
+    "deletes your passkeys. Then sign in with the recovery link they send you, add a passkey "
+    "and create a new token."
+)
+"""The 401 detail of a token outside the window of a person linked while OIDC sign-in is off
+(#809): there is no provider to link to, only an administrator's unlink frees the window."""
 
 VIAS = frozenset({"setup", "invite", "recovery", "local", "passkey", "oidc"})
 """How a session may begin."""
