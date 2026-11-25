@@ -6,7 +6,8 @@ those blocks from `docs/examples/oidc-*`. This test fails when a line names a se
 `OidcSignInConfig` does not have or a value it refuses, when a setting of the `.env` lines is not
 passed to the server, when a variable the snippet passes does not exist in the bundle's
 `compose.yaml` service, or when the client's redirect URI, flow or PKCE method differs from what
-the server sends.
+the server sends, or from the client of the realm that
+`packages/lakana-server/tests/test_oidc_keycloak_integration.py` signs in through.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 EXAMPLES = ROOT / "docs/examples"
 HOW_TO = ROOT / "docs/site/how-to"
 COMPOSE = ROOT / "packages/lakana/src/lakana/cli/deploy/compose.yaml"
+REALM = ROOT / "packages/lakana-server/tests/keycloak/lakana-realm.json"
 PREFIX = "LAKANA_OIDC__"
 ENV_FILES = ("oidc-keycloak.env", "oidc-entra-id.env")
 COMPOSE_SNIPPETS = ("oidc-compose.yaml", "oidc-compose-internal.yaml")
@@ -138,3 +140,20 @@ def test_the_keycloak_client_matches_what_the_server_sends() -> None:
 def test_each_how_to_names_the_redirect_uri(page: str) -> None:
     text = (HOW_TO / page).read_text()
     assert f"https://lakana.example.com{CALLBACK_PATH}" in text, page
+
+
+def test_the_how_to_s_client_is_the_tested_realm_s() -> None:
+    shown = json.loads((EXAMPLES / "oidc-keycloak-client.json").read_text())
+    realm = json.loads(REALM.read_text())
+    [tested] = [c for c in realm["clients"] if c["clientId"] == shown["clientId"]]
+    # Every setting is the same, but the address: the test's Lakana is at its own.
+    for key, value in shown.items():
+        if key == "rootUrl":
+            continue
+        if key == "redirectUris":
+            assert [u.removeprefix(tested["rootUrl"]) for u in tested[key]] == [
+                u.removeprefix(shown["rootUrl"]) for u in value
+            ]
+            continue
+        assert tested[key] == value, key
+    assert tested["redirectUris"] == [tested["rootUrl"] + CALLBACK_PATH]
