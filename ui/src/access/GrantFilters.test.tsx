@@ -68,7 +68,7 @@ describe("GrantFilters", () => {
 
     await choose(user, /Who$/, "A group");
     expect(onChange).not.toHaveBeenCalled();
-    const name = screen.getByRole("textbox", { name: "Name" });
+    const name = screen.getByRole("combobox", { name: "Name" });
     expect(name).toHaveAccessibleDescription("Applied on Enter or when you leave the field.");
     await user.type(name, "analysts{Enter}");
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -82,7 +82,7 @@ describe("GrantFilters", () => {
     const filter: GrantFilter = { ...NO_FILTER, who: { kind: "group", name: "analysts" } };
     const { onChange, user } = renderFilters(filter);
 
-    const name = screen.getByRole("textbox", { name: "Name" });
+    const name = screen.getByRole("combobox", { name: "Name" });
     await user.type(name, "{Enter}");
     await user.tab();
     expect(onChange).not.toHaveBeenCalled();

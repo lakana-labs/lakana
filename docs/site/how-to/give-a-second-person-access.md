@@ -78,7 +78,8 @@ was created.` To take the access away, revoke that one grant with `lakana grant 
 In the web interface, an administrator does the same under **Settings → Access → Grants**: **Add
 grant** asks who (a person or a group, whose name it suggests as you type), a role or a single
 action, and where, and it asks for the
-environment unless the grant is on the whole instance. **Settings → Access → Groups** creates a
+environment unless the grant is on the whole instance; the list's Who filter suggests the names
+the same way. **Settings → Access → Groups** creates a
 group and adds or removes its members; as you type a member's name, it suggests the people and
 service accounts whose name contains it, and a name nobody has is named before you save. Both ask for a passkey touch before a change, and a scope
 that an access file manages carries the "⌂ Git" mark and changes only through the file.

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { areasFor } from "../shell/areas";
 import {
   aColumnMask,
+  aMember,
   anEnvironment,
   aRowFilter,
   freshSession,
@@ -11,6 +12,7 @@ import {
   STALE_SESSION,
   STEP_UP_ROUTES,
 } from "../test/access";
+import { item } from "../test/catalog";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { type FakeRoute, whoami } from "../test/server";
@@ -34,6 +36,8 @@ function policyRoutes(more: Record<string, FakeRoute> = {}): Record<string, Fake
     },
     "GET /api/v1/row-filters": { status: 200, body: [aRowFilter()] },
     "GET /api/v1/column-masks": { status: 200, body: [aColumnMask()] },
+    "GET /api/v1/principals": { status: 200, body: [] },
+    "GET /api/v1/groups": { status: 200, body: [] },
     ...more,
   };
 }
@@ -64,7 +68,7 @@ describe("FiltersAndMasksPage", () => {
         `/api/v1/${list}?group_name=analysts&environment=dev&limit=50`,
       ]);
     }
-    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("analysts");
+    expect(screen.getByRole("combobox", { name: "Name" })).toHaveValue("analysts");
   });
 
   it("shows each policy's who, table, expression and when", async () => {
@@ -364,6 +368,160 @@ describe("FiltersAndMasksPage", () => {
         name: "Delete the row filter on dev › gold › station_ranking for anU+202Eal",
       }),
     ).toBeInTheDocument();
+  });
+
+  it("suggests the tables of the chosen environment as namespace.table, and a choice applies", async () => {
+    const { server, user, router } = renderShell(`${PATH}?environment=dev`, {
+      routes: policyRoutes({
+        "GET /api/v1/tables": {
+          status: 200,
+          body: {
+            items: [
+              item({ environment: "dev", namespace: "gold", name: "station_ranking" }),
+              item({ environment: "dev", namespace: "silver.weather", name: "station_daily" }),
+            ],
+            next_cursor: null,
+            capped: false,
+          },
+        },
+      }),
+    });
+    const table = await screen.findByRole("combobox", { name: "Table (namespace.table)" });
+    expect(table).toHaveAccessibleDescription(
+      "Type part of its name, or its namespace and a dot, to see the tables you may read; applied on Enter.",
+    );
+
+    await user.type(table, "station");
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
+      "gold.station_ranking",
+      "silver.weather.station_daily",
+    ]);
+    await user.click(options[1] as HTMLElement);
+
+    expect(table).toHaveValue("silver.weather.station_daily");
+    await waitFor(() => {
+      expect(router.state.location.search).toBe(
+        "?environment=dev&table=silver.weather.station_daily",
+      );
+    });
+    expect(table).toHaveFocus();
+    expect(listReads(server.sent, "row-filters")).toContain(
+      "/api/v1/row-filters?environment=dev&namespace=silver.weather&table=station_daily&limit=50",
+    );
+
+    await user.clear(table);
+    await user.type(table, "gold.sta");
+    await screen.findAllByRole("option");
+    expect(listReads(server.sent, "tables")).toEqual([
+      "/api/v1/tables?environment=dev&sort=name&limit=20&name=station",
+      "/api/v1/tables?environment=dev&sort=name&limit=20&namespace=gold&name=sta",
+    ]);
+  });
+
+  it("says when no table matches in the environment", async () => {
+    const { user } = renderShell(`${PATH}?environment=prod`, {
+      routes: policyRoutes({
+        "GET /api/v1/tables": {
+          status: 200,
+          body: { items: [], next_cursor: null, capped: false },
+        },
+      }),
+    });
+
+    await user.type(
+      await screen.findByRole("combobox", { name: "Table (namespace.table)" }),
+      "gold.secret_salaries",
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "No table named “gold.secret_salaries” that you may read in prod.",
+      );
+    });
+    expect(screen.queryAllByRole("option")).toEqual([]);
+  });
+
+  it("suggests no table for an environment typed by a person who may list none", async () => {
+    const { server, user, router } = renderShell(`${PATH}?environment=dev`, {
+      routes: policyRoutes({ "GET /api/v1/environments": { status: 200, body: [] } }),
+    });
+    const table = await screen.findByRole("combobox", { name: "Table (namespace.table)" });
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "Environment" })).toHaveValue("dev");
+    });
+
+    await user.type(table, "gold.station_ranking{ArrowDown}{Enter}");
+
+    expect(router.state.location.search).toBe("?environment=dev&table=gold.station_ranking");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(listReads(server.sent, "tables")).toEqual([]);
+  });
+
+  it("suggests principals or groups for Who to an administrator, and a choice applies", async () => {
+    const { server, user, router } = renderShell(PATH, {
+      routes: policyRoutes({
+        "GET /api/v1/principals": { status: 200, body: [aMember("maria"), aMember("marek")] },
+        "GET /api/v1/groups": { status: 200, body: [{ name: "marketing" }] },
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: /Who$/ }));
+    await user.click(await screen.findByRole("option", { name: "A person" }));
+    const name = screen.getByRole("combobox", { name: "Name" });
+
+    await user.type(name, "mar");
+    await user.click(await screen.findByRole("option", { name: "marek, Person" }));
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe("?principal=marek");
+    });
+    // The field stays, with the focus in it.
+    expect(name).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: /Who$/ }));
+    await user.click(await screen.findByRole("option", { name: "A group" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("option", { name: "A group" })).toBeNull();
+    });
+    await user.click(name);
+    await user.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("option", { name: "marketing" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^marek/ })).toBeNull();
+    expect(listReads(server.sent, "principals?")).toEqual(["/api/v1/principals?limit=20&q=mar"]);
+  });
+
+  it("keeps the focus in Who's Name once a typed name applies", async () => {
+    const { user, router } = renderShell(PATH, { routes: policyRoutes() });
+    await user.click(await screen.findByRole("button", { name: /Who$/ }));
+    await user.click(await screen.findByRole("option", { name: "A group" }));
+    const name = screen.getByRole("combobox", { name: "Name" });
+
+    await user.type(name, "analysts{Enter}");
+
+    await waitFor(() => {
+      expect(router.state.location.search).toBe("?group=analysts");
+    });
+    expect(name).toHaveFocus();
+    expect(name).toHaveValue("analysts");
+  });
+
+  it("keeps Who's Name a plain field for a policy manager who may not list principals", async () => {
+    const { server, user, router } = renderShell(PATH, {
+      access: areasFor(false),
+      me: { name: "pat", admin: false },
+      routes: policyRoutes({
+        "GET /api/v1/whoami": { status: 200, body: whoami("pat", false, true, false, [], true) },
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: /Who$/ }));
+    await user.click(await screen.findByRole("option", { name: "A group" }));
+
+    await user.type(screen.getByRole("combobox", { name: "Name" }), "analysts{ArrowDown}{Enter}");
+
+    expect(router.state.location.search).toBe("?group=analysts");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(
+      server.sent.some((request) => /^\/api\/v1\/(principals|groups)\?/.test(request.path)),
+    ).toBe(false);
   });
 
   it("Clear filters goes back to every policy", async () => {
