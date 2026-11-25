@@ -116,7 +116,7 @@ test("an administrator with a passkey creates a namespace, sees it in the tree a
   await page.context().close();
 });
 
-test("Delete namespace after the passkey touch went stale asks for a new touch, sends again and lands on the environment", async ({
+test("Delete namespace after the passkey touch went stale asks for a new touch first and lands on the environment", async ({
   browser,
   browserName,
   request,
@@ -146,9 +146,8 @@ test("Delete namespace after the passkey touch went stale asks for a new touch, 
   await expect(placeNote(page, "Deleted namespace landing.")).toBeFocused();
   expect(await namespaceStatus(request, environment, "landing")).toBe(404);
   const deletion = `DELETE /api/v1/environments/${environment}/namespaces/landing`;
-  // Refused for the stale touch, touched again, then sent once more.
+  // The stale touch is renewed before the deletion is sent (`guarded`), which is sent once.
   expect(sent.filter((line) => !line.endsWith("/recent"))).toEqual([
-    deletion,
     "POST /api/v1/sign-in/step-up/options",
     "POST /api/v1/sign-in/step-up",
     deletion,

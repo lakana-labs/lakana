@@ -52,17 +52,11 @@ export function ProviderNote(): JSX.Element | null {
     if (key === null) {
       return;
     }
-    let live = true;
     // After every effect of this commit: the shell's or a sign-in step's own move to its
     // heading comes first, and the note takes the focus from it.
     queueMicrotask(() => {
-      if (live) {
-        ref.current?.focus();
-      }
+      ref.current?.focus();
     });
-    return () => {
-      live = false;
-    };
   }, [key]);
   if (note === null) {
     return null;

@@ -459,6 +459,33 @@ describe("CliDevicePage", () => {
     expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBeNull();
   });
 
+  it("device: blocked storage keeps nothing and the page works", async () => {
+    deviceServer();
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const removeItem = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    try {
+      const user = renderAt(<CliDevicePage />, "/sign-in/device");
+      expect(screen.getByRole("textbox", { name: "Code" })).toHaveValue("");
+      await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
+      await user.click(await screen.findByRole("button", { name: "Create token" }));
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Done. Go back to the terminal: lakana login finishes there.",
+      );
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+      removeItem.mockRestore();
+    }
+  });
+
   it("the loopback page shows the confirmation's note, focused", async () => {
     renderAt(<CliSignInPage />, link(), undefined, {
       providerConfirmed: { purpose: "step_up", provider: "Okta" },

@@ -983,6 +983,21 @@ export async function signInAsAdmin(page: Page): Promise<void> {
 }
 
 /**
+ * Answers the session with a passkey touch from a moment ago, on top of `signInAsAdmin`: a write
+ * that `guarded` sends (a drop, a namespace's deletion, a connection's save) goes at once, as for
+ * a person who just confirmed. A check of the touch itself stubs a stale one, or a 403.
+ *
+ * @param page - The page.
+ */
+export async function freshTouch(page: Page): Promise<void> {
+  await page.route("**/api/v1/sign-in/session", (route) =>
+    route.fulfill({
+      json: { ...ADMIN_SESSION, step_up_until: new Date(Date.now() + 3_600_000).toISOString() },
+    }),
+  );
+}
+
+/**
  * Runs axe over the page with the WCAG 2.2 AA tags.
  *
  * @param page - The page to check.

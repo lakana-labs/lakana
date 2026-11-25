@@ -44,7 +44,8 @@ export function isLocalPath(path: unknown): path is string {
   if (typeof path !== "string" || path.length > MAX_PATH || !path.startsWith("/")) {
     return false;
   }
-  const confirmation = CLI_CONFIRMATIONS.has(path.split("?")[0] ?? "");
+  const query = path.indexOf("?");
+  const confirmation = CLI_CONFIRMATIONS.has(query === -1 ? path : path.slice(0, query));
   let spelling = path;
   for (let round = 0; round < 4; round += 1) {
     if (
