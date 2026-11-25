@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lakana_core.models import Environment, Namespace, Table
-from lakana_core.models.table import TABLE_NAME_MAX, TableType
 from lakana_core.models.namespace import NAMESPACE_PATH_MAX
+from lakana_core.models.table import TABLE_NAME_MAX, TableType
 from lakana_core.pagination import NAMESPACE_CURSOR_MAX_LENGTH, TABLE_CURSOR_MAX_LENGTH
 from lakana_server.api.platform.listing import NEXT_CURSOR_HEADER
 from tests.conftest import AUTH_HEADER

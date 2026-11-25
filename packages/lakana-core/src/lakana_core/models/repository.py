@@ -11,7 +11,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from lakana_core.models.base import Base, TimestampMixin
 
-
 REPOSITORY_NAME_MAX = 255
 """The longest repository name, in characters."""
 
