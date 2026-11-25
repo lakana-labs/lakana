@@ -26,6 +26,7 @@ No step logs the code, a token, the state or the client secret.
 from __future__ import annotations
 
 import base64
+import logging
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
@@ -41,10 +42,40 @@ from lakana_core.identity.oidc_flows import IN_SESSION_PURPOSES, OidcFlowStore
 from lakana_core.net.https_json import FetchFailed
 from lakana_core.oidc.config import OidcSignInConfig
 from lakana_core.oidc.errors import IdTokenRefused
-from lakana_core.oidc.provider import OidcProvider, ProviderMetadata, ProviderUnavailable
+from lakana_core.oidc.provider import (
+    LOG_THROTTLE,
+    OidcProvider,
+    ProviderMetadata,
+    ProviderUnavailable,
+)
 from lakana_server.browser_session import flow_cookie_name
 from lakana_server.deps import get_clock, record_refused_oidc
 from lakana_server.settings import PublicOrigin
+
+_log = logging.getLogger(__name__)
+
+PROVIDER_ERRORS = frozenset(
+    {
+        "invalid_request",
+        "unauthorized_client",
+        "access_denied",
+        "unsupported_response_type",
+        "invalid_scope",
+        "server_error",
+        "temporarily_unavailable",
+        "interaction_required",
+        "login_required",
+        "account_selection_required",
+        "consent_required",
+        "invalid_request_uri",
+        "invalid_request_object",
+        "request_not_supported",
+        "request_uri_not_supported",
+        "registration_not_supported",
+    }
+)
+"""The error codes of RFC 6749 and OpenID Connect Core that the callback names in its log line;
+any other value of the ``error`` parameter is the browser's to forge, so it is never quoted."""
 
 CALLBACK_PATH = "/api/v1/sign-in/oidc/callback"
 """Where the provider sends the browser back; registered with the provider as the redirect URI."""
@@ -183,6 +214,53 @@ def _basic(client_id: str, client_secret: str) -> str:
     return "Basic " + base64.b64encode(pair.encode("utf-8")).decode("ascii")
 
 
+def _log_token_failure(config: OidcSignInConfig, reason: str, status: int | None) -> None:
+    """Log why the token request failed, with the next step, at most once per interval.
+
+    A refusal is also what a made-up code earns, and the callback takes no credential, so each
+    cause is throttled (`lakana_core.oidc.provider.LOG_THROTTLE`).
+
+    Parameters
+    ----------
+    config
+        The sign-in settings, for the issuer.
+    reason
+        The failure's fixed reason (`lakana_core.net.https_json.FetchFailed.reason`); never a
+        URL, a code, a token or the client secret.
+    status
+        The status of the answer, or `None` when there was none.
+    """
+    kind = "refused" if status is not None and 400 <= status < 500 else "failed"
+    if status is None:
+        kind = "unreachable"
+    if not LOG_THROTTLE.allow(f"token {config.issuer} {kind}"):
+        return
+    if status is not None and 400 <= status < 500:
+        _log.warning(
+            "the OIDC sign-in token endpoint of %s refused the code (%d); check that "
+            "LAKANA_OIDC__CLIENT_ID and LAKANA_OIDC__CLIENT_SECRET are the client's at the "
+            "provider and that the redirect URI of this server is registered with it",
+            config.issuer,
+            status,
+        )
+    elif status is not None:
+        _log.warning(
+            "the OIDC sign-in token endpoint of %s answered %d; the provider failed, so check "
+            "the provider's own log and try again",
+            config.issuer,
+            status,
+        )
+    else:
+        _log.warning(
+            "could not reach the OIDC sign-in token endpoint of %s: %s; check "
+            "LAKANA_OIDC__ALLOW_HOSTS (its host must be the issuer's or listed), the server's "
+            "name resolution and its outbound https access (LAKANA_OIDC__PROXY, "
+            "LAKANA_OIDC__CA_BUNDLE)",
+            config.issuer,
+            reason,
+        )
+
+
 def exchange_code(
     provider: OidcProvider,
     config: OidcSignInConfig,
@@ -234,17 +312,26 @@ def exchange_code(
         form.update({"client_id": client_id, "client_secret": secret})
     answer: object = None
     status: int | None = None
+    reason = ""
     failed = False
     try:
         answer = provider.post(meta.token_endpoint, form, headers)
     except FetchFailed as error:
-        failed, status = True, error.status
+        failed, status, reason = True, error.status, error.reason
+    if failed:
+        _log_token_failure(config, reason, status)
     if failed and status is not None and 400 <= status < 500:
         raise OidcSignInRefused("provider_refused")
     if failed:
         raise ProviderUnavailable(TOKEN_UNREACHABLE)
     id_token = answer.get("id_token") if isinstance(answer, dict) else None
     if not isinstance(id_token, str) or not id_token:
+        if LOG_THROTTLE.allow(f"token {config.issuer} no id token"):
+            _log.warning(
+                "the OIDC sign-in token endpoint of %s answered no ID token; check that the "
+                "client may ask for the openid scope (LAKANA_OIDC__SCOPES) at the provider",
+                config.issuer,
+            )
         raise OidcSignInRefused("provider_refused")
     return id_token
 
@@ -363,6 +450,41 @@ def _verified_outcome(
     }
 
 
+def _log_provider_refusal(config: OidcSignInConfig, error: str) -> None:
+    """Log that the provider sent the browser back with an error or no code.
+
+    This is a person who declined, or a client the provider does not accept, so it is an
+    information line, not a warning; anyone can cause it, so it is throttled like the warnings.
+
+    Parameters
+    ----------
+    config
+        The sign-in settings, for the issuer.
+    error
+        The ``error`` parameter; quoted only when it is a code of `PROVIDER_ERRORS`.
+    """
+    if not LOG_THROTTLE.allow(
+        f"callback {config.issuer} {error if error in PROVIDER_ERRORS else bool(error)}"
+    ):
+        return
+    if error in PROVIDER_ERRORS:
+        _log.info(
+            "the OIDC sign-in provider %s sent the browser back with the error %s; the person "
+            "may have declined, otherwise check the client's settings at the provider",
+            config.issuer,
+            error,
+        )
+    elif error:
+        _log.info(
+            "the OIDC sign-in provider %s sent the browser back with an error of its own",
+            config.issuer,
+        )
+    else:
+        _log.info(
+            "the OIDC sign-in provider %s sent the browser back without a code", config.issuer
+        )
+
+
 def complete_callback(
     request: Request,
     session: Session,
@@ -406,7 +528,9 @@ def complete_callback(
     purpose = flow.purpose
     session.commit()
     given = _parameter(code)
-    if _parameter(error) or not given:
+    sent = _parameter(error)
+    if sent or not given:
+        _log_provider_refusal(provider.config, sent)
         outcome: dict[str, Any] = {"ok": False, "reason": "provider_refused"}
     else:
         outcome = _verified_outcome(
