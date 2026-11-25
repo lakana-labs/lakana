@@ -148,11 +148,13 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     }
   }, [pages.items, deployments.data]);
   const rows = pages.items ?? [];
-  // Nothing is marked while a read is on its way: after a new sort the rows of the old one stay
-  // until the new first page arrives. In another order than the newest first, a page still to be
-  // read may hold a repository's newest deploy: nothing is marked until every page is read.
+  // Nothing is marked while a first page is on its way: after a new sort the rows of the old one
+  // stay until it arrives. Show more keeps the mark (its rows only add older ones in the newest
+  // first order). In another order than the newest first, a page still to be read may hold a
+  // repository's newest deploy: nothing is marked until every page is read.
+  const firstRead = pages.busy && !pages.hasMore;
   const marked =
-    !pages.busy && (sort === null || !pages.hasMore)
+    !firstRead && (sort === null || !pages.hasMore)
       ? currentDeploys(rows, current)
       : new Set<string>();
   const steadyMore = useSteadyMore(pages.hasMore, pages.busy);

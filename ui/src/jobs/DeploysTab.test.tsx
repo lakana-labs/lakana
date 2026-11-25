@@ -476,4 +476,23 @@ describe("DeploysTab's current mark in another order", () => {
       expect(region).toHaveTextContent("current");
     });
   });
+
+  it("keeps the mark while Show more reads in the newest-first order", async () => {
+    const more = held();
+    const route: FakeRoute = (request) =>
+      request.path.includes("cursor=d2") ? more.route() : list([NOW], "d2");
+    const { user } = renderTab(route, "/jobs/deploys?environment=prod");
+    const region = await screen.findByRole("region", { name: /Deploys/u });
+    await waitFor(() => {
+      expect(region).toHaveTextContent("current");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+    expect(region).toHaveTextContent("current");
+    more.release(list([aDeploy({ id: "d-old", created_at: "2026-11-01T08:00:00Z" })]));
+    await waitFor(() => {
+      expect(within(region).getAllByRole("row")).toHaveLength(3);
+    });
+    expect(region).toHaveTextContent("current");
+  });
 });
