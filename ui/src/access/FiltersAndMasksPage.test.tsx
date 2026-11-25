@@ -20,6 +20,9 @@ import { fakeWebAuthn } from "../test/webauthn";
 
 const PATH = "/settings/access/filters-and-masks";
 
+/** The Table filter's help line once it suggests the tables of a listed environment. */
+const SUGGESTING = "Part of its name, or its namespace and a dot; applied on Enter.";
+
 /**
  * The routes of Row filters & masks: dev and prod, nothing managed, one policy of each kind.
  *
@@ -387,9 +390,10 @@ describe("FiltersAndMasksPage", () => {
       }),
     });
     const table = await screen.findByRole("combobox", { name: "Table (namespace.table)" });
-    expect(table).toHaveAccessibleDescription(
-      "Part of its name, or its namespace and a dot; applied on Enter.",
-    );
+    // The field shows before the environments are read; it suggests once dev is among them.
+    await waitFor(() => {
+      expect(table).toHaveAccessibleDescription(SUGGESTING);
+    });
 
     await user.type(table, "station");
     const options = await screen.findAllByRole("option");
@@ -432,10 +436,11 @@ describe("FiltersAndMasksPage", () => {
       }),
     });
 
-    await user.type(
-      await screen.findByRole("combobox", { name: "Table (namespace.table)" }),
-      "gold.secret_salaries",
-    );
+    const table = await screen.findByRole("combobox", { name: "Table (namespace.table)" });
+    await waitFor(() => {
+      expect(table).toHaveAccessibleDescription(SUGGESTING);
+    });
+    await user.type(table, "gold.secret_salaries");
 
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent(
