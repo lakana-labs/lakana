@@ -133,8 +133,7 @@ for (const theme of ["light", "dark"] as const) {
             json: { tour_seen: false, get_started_hidden: true, update_note_seen: null },
           }),
       );
-      // Get started as the server answers it today for such a person: "Add a passkey" still open
-      // (#813 takes it out on the server), so the passkey check below has something to catch.
+      // Get started as the server answers it for such a person: no "Add a passkey" step.
       await page.route(
         (url) => url.pathname === "/api/v1/home/get-started",
         (route) =>
@@ -145,7 +144,6 @@ for (const theme of ["light", "dark"] as const) {
               steps: [
                 { id: "connect_repository", done: true },
                 { id: "invite_team", done: true },
-                { id: "add_passkey", done: false },
                 { id: "deploy_project", done: false },
               ],
               hidden: true,
@@ -166,12 +164,9 @@ for (const theme of ["light", "dark"] as const) {
       for (;;) {
         const step = page.getByRole("dialog", { name: /./ });
         await expect(step).toBeVisible();
-        // The tour's own words name neither the way in nor the provider; only the next step,
-        // which repeats Get started's answer, may (here "Add a passkey", until #813).
-        const words = await step
-          .locator("h2, p, li")
-          .filter({ hasNotText: "Your next step:" })
-          .allTextContents();
+        // The tour's own words, and the next step it repeats from Get started, name neither the
+        // way in nor the provider.
+        const words = await step.locator("h2, p, li").allTextContents();
         expect(words.length).toBeGreaterThan(1);
         expect(words.join(" ")).not.toMatch(/passkey|provider|Okta/i);
         seen.push((await step.getByRole("heading", { level: 2 }).textContent()) ?? "");
@@ -189,7 +184,9 @@ for (const theme of ["light", "dark"] as const) {
         "Search",
         "Help",
       ]);
-      await expect(page.getByText("Your next step:")).toContainText("Add a passkey");
+      // A linked person is not asked for a passkey: the step after it is their next one.
+      await expect(page.getByText("Your next step:")).toContainText("Open the tutorial");
+      await expect(page.getByText("Your next step:")).not.toContainText(/passkey/i);
       await page.getByRole("button", { name: "Finish" }).click();
       await expect(page.getByRole("dialog")).toHaveCount(0);
       expect(unstubbed(world)).toEqual([]);
