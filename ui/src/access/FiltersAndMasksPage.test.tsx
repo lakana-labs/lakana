@@ -388,7 +388,7 @@ describe("FiltersAndMasksPage", () => {
     });
     const table = await screen.findByRole("combobox", { name: "Table (namespace.table)" });
     expect(table).toHaveAccessibleDescription(
-      "Type part of its name, or its namespace and a dot, to see the tables you may read; applied on Enter.",
+      "Part of its name, or its namespace and a dot; applied on Enter.",
     );
 
     await user.type(table, "station");

@@ -7,7 +7,7 @@
     "all": "All environments",
     "table": "Table (namespace.table)",
     "tableHelp": "Choose an environment first; applied on Enter.",
-    "tableHelpSuggest": "Type part of its name, or its namespace and a dot, to see the tables you may read; applied on Enter.",
+    "tableHelpSuggest": "Part of its name, or its namespace and a dot; applied on Enter.",
     "tableHelpTyped": "Write it as namespace.table; applied on Enter.",
     "tableDotted": "Write the table as namespace.table, such as gold.station_ranking.",
     "environmentHelp": "You may list no environment here: type its name; applied on Enter."
