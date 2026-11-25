@@ -42,7 +42,12 @@ from lakana_core.identity.oidc_flows import IN_SESSION_PURPOSES, OidcFlowStore
 from lakana_core.net.https_json import FetchFailed
 from lakana_core.oidc.config import OidcSignInConfig
 from lakana_core.oidc.errors import IdTokenRefused
-from lakana_core.oidc.provider import OidcProvider, ProviderMetadata, ProviderUnavailable
+from lakana_core.oidc.provider import (
+    LOG_THROTTLE,
+    OidcProvider,
+    ProviderMetadata,
+    ProviderUnavailable,
+)
 from lakana_server.browser_session import flow_cookie_name
 from lakana_server.deps import get_clock, record_refused_oidc
 from lakana_server.settings import PublicOrigin
@@ -210,7 +215,10 @@ def _basic(client_id: str, client_secret: str) -> str:
 
 
 def _log_token_failure(config: OidcSignInConfig, reason: str, status: int | None) -> None:
-    """Log why the token request failed, once, with the next step.
+    """Log why the token request failed, with the next step, at most once per interval.
+
+    A refusal is also what a made-up code earns, and the callback takes no credential, so each
+    cause is throttled (`lakana_core.oidc.provider.LOG_THROTTLE`).
 
     Parameters
     ----------
@@ -222,6 +230,11 @@ def _log_token_failure(config: OidcSignInConfig, reason: str, status: int | None
     status
         The status of the answer, or `None` when there was none.
     """
+    kind = "refused" if status is not None and 400 <= status < 500 else "failed"
+    if status is None:
+        kind = "unreachable"
+    if not LOG_THROTTLE.allow(f"token {config.issuer} {kind}"):
+        return
     if status is not None and 400 <= status < 500:
         _log.warning(
             "the OIDC sign-in token endpoint of %s refused the code (%d); check that "
@@ -313,11 +326,12 @@ def exchange_code(
         raise ProviderUnavailable(TOKEN_UNREACHABLE)
     id_token = answer.get("id_token") if isinstance(answer, dict) else None
     if not isinstance(id_token, str) or not id_token:
-        _log.warning(
-            "the OIDC sign-in token endpoint of %s answered no ID token; check that the client "
-            "may ask for the openid scope (LAKANA_OIDC__SCOPES) at the provider",
-            config.issuer,
-        )
+        if LOG_THROTTLE.allow(f"token {config.issuer} no id token"):
+            _log.warning(
+                "the OIDC sign-in token endpoint of %s answered no ID token; check that the "
+                "client may ask for the openid scope (LAKANA_OIDC__SCOPES) at the provider",
+                config.issuer,
+            )
         raise OidcSignInRefused("provider_refused")
     return id_token
 
@@ -440,7 +454,7 @@ def _log_provider_refusal(config: OidcSignInConfig, error: str) -> None:
     """Log that the provider sent the browser back with an error or no code.
 
     This is a person who declined, or a client the provider does not accept, so it is an
-    information line, not a warning.
+    information line, not a warning; anyone can cause it, so it is throttled like the warnings.
 
     Parameters
     ----------
@@ -449,6 +463,10 @@ def _log_provider_refusal(config: OidcSignInConfig, error: str) -> None:
     error
         The ``error`` parameter; quoted only when it is a code of `PROVIDER_ERRORS`.
     """
+    if not LOG_THROTTLE.allow(
+        f"callback {config.issuer} {error if error in PROVIDER_ERRORS else bool(error)}"
+    ):
+        return
     if error in PROVIDER_ERRORS:
         _log.info(
             "the OIDC sign-in provider %s sent the browser back with the error %s; the person "

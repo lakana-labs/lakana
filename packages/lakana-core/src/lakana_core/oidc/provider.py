@@ -19,6 +19,7 @@ never quotes a value from the provider.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -34,9 +35,57 @@ from lakana_core.oidc.id_token import (
     VerifiedIdToken,
     verify_id_token,
 )
-from lakana_core.oidc.keys import JwksCache, KeySource, https_url_on
+from lakana_core.oidc.keys import REFRESH_INTERVAL_SECONDS, JwksCache, KeySource, https_url_on
 
 _log = logging.getLogger(__name__)
+
+
+class CauseThrottle:
+    """Let one log line per cause through in each `REFRESH_INTERVAL_SECONDS`.
+
+    The sign-in's start and callback take no credential, so a caller can repeat a failure as
+    often as the start limiter allows; the keys line is bounded the same way, by the refresh
+    interval, so the lines of this module are too. A cause is any text; a line is allowed the
+    first time and again once the interval has passed.
+
+    Parameters
+    ----------
+    clock
+        A monotonic clock in seconds.
+    """
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._last: dict[str, float] = {}
+
+    def allow(self, cause: str) -> bool:
+        """Say whether a line for this cause may be written now.
+
+        Parameters
+        ----------
+        cause
+            What the line is about, with the issuer.
+
+        Returns
+        -------
+        bool
+            `True` for the first line of a cause and for one after the interval; the time is
+            then taken.
+        """
+        now = self._clock()
+        last = self._last.get(cause)
+        if last is not None and now - last < REFRESH_INTERVAL_SECONDS:
+            return False
+        self._last[cause] = now
+        return True
+
+    def reset(self) -> None:
+        """Forget every cause (for tests)."""
+        self._last.clear()
+
+
+LOG_THROTTLE = CauseThrottle()
+"""The process's throttle of the sign-in's failure lines (this module's and the flow's)."""
 
 ID_TOKEN_MAX_AGE_SECONDS = 600
 """The oldest ID token a sign-in accepts, counted from ``iat``: the flow's own lifetime."""
@@ -130,7 +179,10 @@ def key_source(config: OidcSignInConfig) -> KeySource:
 
 
 def _logged(issuer: str, reason: str) -> str:
-    """Log why the provider cannot be used, once, and hand the reason back.
+    """Log why the provider cannot be used, and hand the reason back.
+
+    `metadata` runs on every start and every callback, so the line is throttled
+    (`LOG_THROTTLE`): the first one, then at most one per interval for each reason.
 
     The reason is a fixed sentence naming the setting to check, never a value from the
     provider; the issuer is the configured one. The discovery and key fetches log their own
@@ -148,7 +200,8 @@ def _logged(issuer: str, reason: str) -> str:
     str
         The reason, for `ProviderUnavailable`.
     """
-    _log.warning("could not use the OIDC sign-in provider %s: %s", issuer, reason)
+    if LOG_THROTTLE.allow(f"metadata {issuer} {reason}"):
+        _log.warning("could not use the OIDC sign-in provider %s: %s", issuer, reason)
     return reason
 
 

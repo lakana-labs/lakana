@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 import lakana_server.ui
 from lakana_core.models import AuditEvent, AuditEventType, OidcFlow, Passkey, Principal
 from lakana_core.net.https_json import FetchFailed
-from lakana_core.oidc.provider import OidcProvider
+from lakana_core.oidc.provider import LOG_THROTTLE, OidcProvider
 from lakana_server.app import create_app
 from lakana_server.auth_rate_limit import AuthAuditLimiter
 from lakana_server.browser_session import flow_cookie_name, set_flow_cookie
@@ -503,6 +503,12 @@ def test_the_client_secret_is_posted_when_basic_is_not_offered(
 UNUSABLE = f"could not use the OIDC sign-in provider {ISSUER}: the identity provider "
 
 
+@pytest.fixture(autouse=True)
+def _fresh_throttle() -> None:
+    """Start each test with every failure line allowed again."""
+    LOG_THROTTLE.reset()
+
+
 def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     """Read what the sign-in wrote at warning level or above.
 
@@ -637,7 +643,12 @@ def test_a_provider_error_that_is_no_known_code_is_not_quoted(
     caplog.set_level(logging.INFO)
     state = parse_qs(urlsplit(_start(client)).query)["state"][0]
     _callback(client, error="forged\nline", state=state)
-    assert "forged" not in _lakana_log(caplog)
+    shown = _lakana_log(caplog)
+    assert (
+        f"the OIDC sign-in provider {ISSUER} sent the browser back with an error of its own"
+        in shown
+    )
+    assert "forged" not in shown
 
 
 def test_a_callback_without_a_code_is_logged(
@@ -691,11 +702,41 @@ def test_a_discovery_that_cannot_be_fetched_is_logged_once(
     assert f"could not fetch the OIDC sign-in keys of {ISSUER}: the host name" in line
 
 
+def test_a_burst_of_forged_callbacks_logs_a_bounded_number_of_lines(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    for _ in range(12):
+        state = parse_qs(urlsplit(_start(client)).query)["state"][0]
+        _callback(client, code="a-made-up-code", state=state)
+    assert len(_warnings(caplog)) == 1
+    for _ in range(12):
+        state = parse_qs(urlsplit(_start(client)).query)["state"][0]
+        _callback(client, error="access_denied", state=state)
+    lines = [r for r in caplog.records if r.name == "lakana_server.oidc_flow"]
+    assert len(lines) == 2
+
+
+def test_a_failure_line_comes_again_after_the_interval(
+    client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
+) -> None:
+    now = [0.0]
+    LOG_THROTTLE._clock = lambda: now[0]
+    for second in (0.0, 1.0, 61.0):
+        now[0] = second
+        _fail_at_the_token_endpoint(
+            client, fake, FetchFailed("the server answered 503", status=503)
+        )
+    assert len(_warnings(caplog)) == 2
+
+
 def test_no_failure_line_holds_a_secret_a_code_a_state_or_a_token(
     client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG)
     seen: list[str] = []
+    basic = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
+    original = dict(cast(dict[str, object], fake.documents[DISCOVERY]))
     for failure in (
         FetchFailed("the host name does not resolve"),
         FetchFailed("the server answered 503", status=503),
@@ -709,10 +750,24 @@ def test_no_failure_line_holds_a_secret_a_code_a_state_or_a_token(
     seen += [code, state]
     fake.token_answer = {"id_token": "", "access_token": "an-access-token-sentinel"}
     _callback(client, code=code, state=state)
-    assert len(_warnings(caplog)) == 4
+    for changes in (
+        {"id_token_signing_alg_values_supported": ["ES256"]},
+        {"token_endpoint_auth_methods_supported": ["private_key_jwt"]},
+        {"token_endpoint": "https://evil.example.net/token"},
+    ):
+        fake.documents[DISCOVERY] = original
+        _discovery_with(fake, client, **changes)
+        client.post(START, json={})
+    fake.documents[DISCOVERY] = original
+    cast(FastAPI, client.app).state.oidc_provider = fake.provider()
+    fake.token_answer = None
+    for params in ({"error": "invalid_scope"}, {"error": "forged"}, {}):
+        state = parse_qs(urlsplit(_start(client)).query)["state"][0]
+        _callback(client, state=state, **params)
     shown = _lakana_log(caplog)
+    assert shown.count("\n") >= 9
     assert ISSUER in shown
-    for forbidden in [CLIENT_SECRET, "an-access-token-sentinel", *seen]:
+    for forbidden in [CLIENT_SECRET, basic, "an-access-token-sentinel", *seen]:
         assert forbidden not in shown
 
 
