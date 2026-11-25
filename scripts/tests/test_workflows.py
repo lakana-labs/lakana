@@ -832,7 +832,7 @@ def test_the_visual_job_compares_screenshots_in_the_image_and_keeps_the_differen
 
 
 def test_the_visual_image_is_the_version_of_playwright_the_interface_pins() -> None:
-    """The image's tag is ``@playwright/test``'s version, its digest pinned (#506).
+    """The image's tag is ``@playwright/test``'s version, its amd64 digest pinned (#506).
 
     A Dependabot bump of Playwright fails here until the image and the baselines follow it.
     """
@@ -841,6 +841,9 @@ def test_the_visual_image_is_the_version_of_playwright_the_interface_pins() -> N
     script = (ROOT / "ui" / "scripts" / "visual.mjs").read_text()
     images = re.findall(r'"(mcr\.microsoft\.com/playwright:[^"]+)"', script)
     assert images == [images[0]]
+    # The amd64 build on every host: the arm64 build's Chromium draws other pixels.
+    assert 'const PLATFORM = "linux/amd64";' in script
+    assert script.count("`--platform=${PLATFORM}`") == 3
     assert re.fullmatch(
         rf"mcr\.microsoft\.com/playwright:v{re.escape(version)}-noble@sha256:[0-9a-f]{{64}}",
         images[0],

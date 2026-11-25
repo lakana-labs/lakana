@@ -11,6 +11,30 @@ const DESKTOP = { width: 1280, height: 1800 };
 /** A phone's width, for the main places only. */
 const PHONE = { width: 390, height: 844 };
 
+/** The screenshots; the projects below say which shots each takes. */
+const SCREENS = "screens.visual.ts";
+
+/** How every picture is taken and compared. */
+const SCREENSHOT = {
+  // No pixel may differ by more than a YIQ delta of 14 (pixelmatch's 35,215 × 0.02²): the
+  // default threshold, 0.2 (a delta of 1,409), let a swapped colour token pass (#506), the
+  // smallest swap of Still Water's tokens is a delta of 37, and the same page drawn twice
+  // differs by up to 10 (rounded corners by one level, a pixel beside a focused heading in dark).
+  maxDiffPixels: 0,
+  threshold: 0.02,
+  animations: "disabled",
+  caret: "hide",
+  scale: "css",
+} as const;
+
+/** A phone's pictures leave out its fading overlay scrollbars (e2e/visual/phone.css). */
+const PHONE_EXPECT = {
+  toHaveScreenshot: { ...SCREENSHOT, stylePath: "e2e/visual/phone.css" },
+};
+
+/** What only a phone shows (its Menu): the desktop projects leave it out. */
+const PHONE_ONLY = /@phone-only/;
+
 // The visual regression suite (docs/agent/testing.md, "Visual regression"): screenshots of every
 // screen against the stubs of e2e/, compared with the baselines committed in
 // e2e/visual/screenshots/. It runs inside the pinned Playwright image only (scripts/visual.mjs),
@@ -27,16 +51,7 @@ export default defineConfig({
   // CI's runners have four CPUs; the local run stays inside its container's memory.
   workers: 4,
   reporter: process.env["CI"] === undefined ? "list" : [["list"], ["github"]],
-  expect: {
-    toHaveScreenshot: {
-      // The same image draws the same pixels; the default per-pixel threshold absorbs
-      // anti-aliasing noise, and no pixel beyond it may differ.
-      maxDiffPixels: 0,
-      animations: "disabled",
-      caret: "hide",
-      scale: "css",
-    },
-  },
+  expect: { toHaveScreenshot: SCREENSHOT },
   use: {
     baseURL: URL,
     locale: "en-GB",
@@ -46,15 +61,21 @@ export default defineConfig({
   projects: [
     {
       name: "light",
+      testMatch: SCREENS,
+      grepInvert: PHONE_ONLY,
       use: { ...devices["Desktop Chrome"], viewport: DESKTOP, colorScheme: "light" },
     },
     {
       name: "dark",
+      testMatch: SCREENS,
+      grepInvert: PHONE_ONLY,
       use: { ...devices["Desktop Chrome"], viewport: DESKTOP, colorScheme: "dark" },
     },
     {
       name: "phone-light",
+      testMatch: SCREENS,
       grep: /@phone/,
+      expect: PHONE_EXPECT,
       use: {
         ...devices["Desktop Chrome"],
         viewport: PHONE,
@@ -65,7 +86,9 @@ export default defineConfig({
     },
     {
       name: "phone-dark",
+      testMatch: SCREENS,
       grep: /@phone/,
+      expect: PHONE_EXPECT,
       use: {
         ...devices["Desktop Chrome"],
         viewport: PHONE,
@@ -74,6 +97,8 @@ export default defineConfig({
         colorScheme: "dark",
       },
     },
+    // Every picture on disk belongs to a shot: no browser, once per run.
+    { name: "baselines", testMatch: "baselines.visual.ts" },
   ],
   webServer: {
     command: "node node_modules/vite/bin/vite.js preview --port 4173 --strictPort",

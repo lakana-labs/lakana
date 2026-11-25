@@ -1450,24 +1450,42 @@ five).
 ### Visual regression
 
 `ui/e2e/visual/screens.visual.ts` (#506) takes a screenshot of every screen of the interface
-against the stubs of `ui/e2e/*.ts` and compares it with a baseline committed in
-`ui/e2e/visual/screenshots/<project>/<screen>.png`. A changed screenshot shows in the pull
-request's diff as a changed image and **is reviewed like code**: a pull request that changes how
-a screen looks commits the new baselines, and the reviewer looks at each one (GitHub shows the
-old and the new image side by side); a baseline that changed without a reason in the pull
-request is a regression.
+against the stubs of `ui/e2e/*.ts` (the shots are listed in `ui/e2e/visual/shots.ts`) and
+compares it with a baseline committed in `ui/e2e/visual/screenshots/<project>/<shot>.png`. A
+changed screenshot shows in the pull request's diff as a changed image and **is reviewed like
+code**: a pull request that changes how a screen looks commits the new baselines and lists each
+changed one with the reason, and the reviewer looks at each (GitHub shows the old and the new
+image side by side); a baseline that changed without a reason in the pull request is a
+regression.
 
-- **Always inside the pinned Playwright image.** `npm --prefix ui run visual` (`ui/scripts/visual.mjs`)
-  runs the suite with `docker run` in `mcr.microsoft.com/playwright`, tagged with the version of
-  `@playwright/test` in `ui/package.json` and pinned by digest, the same image locally and in CI,
-  so the fonts and the renderer are the same and the pictures match pixel for pixel. Never run
-  `playwright.visual.config.ts` on the host: its pictures would differ. The container runs as
-  your user (the files it writes are yours), with 6 GB of memory and its temporary files inside
-  itself; it needs Docker and a build (`npm --prefix ui run build`) and mounts the repository.
-  `scripts/tests/test_workflows.py` fails when the image's tag is not the version of
-  `@playwright/test`: a Dependabot bump of Playwright needs the image's new tag and digest
-  (`docker pull mcr.microsoft.com/playwright:vX.Y.Z-noble`, then `docker image inspect --format
-  '{{index .RepoDigests 0}}'`) and new baselines in the same pull request.
+- **Always inside the pinned Playwright image.** `npm --prefix ui run visual`
+  (`ui/scripts/visual.mjs`) runs the suite with `docker run` in `mcr.microsoft.com/playwright`,
+  tagged with the version of `@playwright/test` in `ui/package.json` and pinned by the digest of
+  its **linux/amd64** manifest, with `--platform=linux/amd64` on every host: the arm64 build's
+  Chromium draws other pixels, so a Mac with Apple silicon runs the amd64 image emulated (slower,
+  the same pictures). The dependencies are installed inside the image (`npm ci --ignore-scripts`)
+  into a Docker volume named after the lock's hash (`lakana-ui-visual-<hash>`, labelled
+  `lakana.ui-visual`), once per lock, and mounted over `ui/node_modules`; the host's
+  `node_modules` is never used, since on macOS it holds darwin binaries. Old volumes stay until
+  you remove them: `docker volume ls --filter label=lakana.ui-visual`, then
+  `docker volume rm …`. Never run `playwright.visual.config.ts` on the host: its pictures would
+  differ.
+  - **What it needs:** Docker (Docker Engine on Linux, Docker Desktop on macOS or Windows with
+    WSL 2), a build (`npm --prefix ui run build`) and 6 GB of memory for the container
+    (`--memory=6g --memory-swap=6g`, a hard cap). Docker Desktop's VM often has less by default:
+    raise it under Settings › Resources, or the run is killed. Supported: Linux amd64 (CI's
+    runners and this project's machines), and macOS on Apple silicon or Intel through Docker
+    Desktop; Windows only from inside WSL 2.
+  - **Files.** The repository is bind-mounted (`--mount`, so a `:` in its path is fine; a `,`
+    is not, and the script stops with a message). The container runs as your user and group, so
+    the pictures it writes are yours. With rootless Docker, the container's user maps to a
+    subordinate id on the host: the files it writes belong to that id; `chown` them back, or
+    use rootful Docker.
+  - **Playwright upgrades.** `scripts/tests/test_workflows.py` fails when the image's tag is not
+    the version of `@playwright/test` or the platform is not pinned: a Dependabot bump of
+    Playwright needs the image's new tag and amd64 digest (`docker buildx imagetools inspect
+    mcr.microsoft.com/playwright:vX.Y.Z-noble`, the `linux/amd64` line) and new baselines in the
+    same pull request.
 - **Updating the baselines.** After a deliberate change to a screen:
 
   ```bash
@@ -1477,38 +1495,70 @@ request is a regression.
   ```
 
   `visual:update` passes `--update-snapshots=changed`: it rewrites only the pictures that
-  differ, and writes the missing ones of a new shot. Look at every rewritten picture before you
-  commit it, in light and dark. Extra arguments go to `playwright test`
-  (`npm --prefix ui run visual -- --grep catalog --project=light`).
-- **Stable pictures.** Every screen is shown at one fixed moment (`NOW` in the spec:
-  `page.clock.setFixedTime` in the browser, and a fixed `Date` in the test process, whose
-  connection stubs write their times relative to now), in UTC, with reduced motion (the theme
-  fade and the running pulse stop), animations disabled and the caret hidden; it waits for its
-  data (`ready`) and for the fonts. The stubs' data is fixed, so nothing is masked. A shot that
-  shows something that cannot be stable masks it (`toHaveScreenshot`'s `mask`) rather than
+  differ, writes the missing ones of a new shot, and ends by printing `git status` of the
+  screenshots, the pictures it changed. It rewrites a picture whatever made it differ, so look
+  at every one before you commit it, in light and dark. Extra arguments go to
+  `playwright test` (`npm --prefix ui run visual -- --grep catalog --project=light`).
+- **A failed comparison, locally.** Each failed shot leaves its `-expected.png`,
+  `-actual.png` and `-diff.png` (the differing pixels in red) in
+  `ui/test-results/visual/<shot>-<project>/`.
+- **Changes that move baselines.** A change to a screen, a stylesheet or a token does; so does
+  a change to the shared stubs `ui/e2e/*.ts` (another row, another name, another time), which
+  the smoke tests use too: whoever changes a stub runs `visual` and commits the pictures it
+  moves. So does a Playwright upgrade (above).
+- **Adding, renaming or removing a shot.** A new screen, tab, dialog or state adds its shot to
+  `SHOTS` in `shots.ts` (`phone: true` for a main place, `phoneOnly: true` for what only a phone
+  shows) and commits its baselines. A renamed or removed shot leaves its old pictures behind:
+  delete them by hand. The project `baselines` (`baselines.visual.ts`, in every run) fails on
+  any picture under `screenshots/` that no shot of a project takes, naming it.
+- **Stable pictures.** Every screen is shown at one fixed moment (`NOW`: `page.clock.setFixedTime`
+  in the browser, and a fixed `Date` in the test process, whose connection stubs write their
+  times relative to now), in UTC, with reduced motion (the theme fade and the running pulse
+  stop), animations disabled and the caret hidden. A shot waits for its data (`ready`), for the
+  network to go quiet (so a place's Actions, which load on demand, are in the picture; a shot of
+  a loading state, whose request never answers, sets `waits`), and for the fonts, and the page
+  is painted once more in full before the picture (a heading focused by script sometimes left a
+  pixel of its focus ring behind in dark). A phone's pictures leave out its overlay scrollbars,
+  which fade (`e2e/visual/phone.css`). The stubs' data is fixed, so nothing is masked; a shot
+  that shows something that cannot be stable masks it (`toHaveScreenshot`'s `mask`) rather than
   loosen the comparison.
-- **The comparison.** `maxDiffPixels: 0` with Playwright's default per-pixel threshold (0.2):
-  anti-aliasing noise passes, a moved line, a changed colour or a changed word fails. Three runs
-  in a row (`--repeat-each=3`, 498 comparisons) matched exactly; a spacing token changed by one
-  pixel failed 71 of the 74 desktop light shots.
+- **The comparison.** `maxDiffPixels: 0` and a per-pixel `threshold` of 0.02: a pixel fails
+  when its YIQ difference passes 14 (pixelmatch's 35,215 × 0.02²). Playwright's default, 0.2
+  (1,409), let a swapped colour token pass: Still Water's closest pair of fills,
+  `--color-ground` and `--color-surface`, differs by 37, every hairline gone by 424. The same
+  page drawn twice differs by up to 10 (a rounded corner by one level). Controls on the build:
+  each changed token in one theme, one run of that theme's 83 desktop shots:
+
+  | change in the build | failed |
+  |---|---|
+  | light `--color-ground` → `--color-surface` (a delta of 37) | 83 of 83 |
+  | light `--color-line` → `--color-ground` (every hairline gone) | 74 of 83 |
+  | dark `--color-text-muted` → `--color-text-faint` | 80 of 83 |
+  | dark `--color-line` → `--color-surface` | 74 of 83 |
+  | `--space-2` 8 → 9 px (light) | 75 of 83 |
+
+  (the shots that passed show no hairline, no muted text or no such gap). Three runs of
+  `--repeat-each=3` (1,683 comparisons) matched the baselines.
 - **Widths.** Every shot at 1280 px wide (the main target) in `light` and `dark` (the
   projects' `colorScheme`, through the "system" theme), 1800 px tall so the sidebar reaches a
-  long page's foot (a longer page is taken whole); the shots tagged `@phone` (Sign-in, Home,
-  Catalog, a table, Queries, Jobs, a run, Connections, Status) also at 390 px in `phone-light` and
-  `phone-dark`.
+  long page's foot (a longer page is taken whole); the shots marked `phone` (Sign-in, Home,
+  Catalog, a table, Queries, Jobs, a run, Connections, Status) and the open phone Menu at 390 px
+  in `phone-light` and `phone-dark`.
 - **What it covers.** Every route of the router and the important states, each in light and
   dark:
-  - signing in: the sign-in page (with an identity provider), an invite link, `lakana login`'s
-    confirmation, the device code page;
+  - signing in: the sign-in page with an identity provider and with passkeys only, an invite
+    link, `/sign-in/oidc` finishing and refused, `/sign-in/oidc/confirmed` finishing and
+    refused, `lakana login`'s confirmation, the device code page;
   - Home (an administrator's, with every panel filled), Home of a person with no access yet,
-    the search palette, the user menu, the keyboard shortcuts dialog, the not-found page, an area
-    the person may not use (Catalog without access);
+    the first sign-in's tour (its welcome and its first step), the search palette, the user
+    menu, the keyboard shortcuts dialog, the phone's open Menu, the not-found page, an area the
+    person may not use (Catalog without access);
   - Catalog: a namespace's tables, a search with hits, no hits, an empty namespace, a list that
     failed to load (503), the Dropped, Expiring and Orphans views, the New namespace dialog;
   - a table's page: Overview, Columns, Preview, Lineage, References, Health, Access, the
-    loading skeleton, the Actions menu, the Retention dialog; an artifact's Overview and
-    Versions;
-  - Queries: the editor, a query's result, a saved query;
+    loading skeleton, the Actions menu, the Retention dialog; an artifact's Overview, Versions,
+    Lineage and Access;
+  - Queries: the editor, a query's result (the completions closed), a saved query;
   - Jobs: the Jobs list, Runs, Deploys, Deploys with none yet, the rollback dialog, a job's
     page, its Pause dialog, a failed run, a task with its log, a run that does not exist;
   - Connections: the list, the list with none yet, a connection, Edit, Add, the Delete dialog;
@@ -1518,20 +1568,22 @@ request is a regression.
     Recovery links, Configuration;
   - one's own account.
 
-  **A new screen, tab, dialog or state adds its shot** to `SHOTS` (with `phone: true` for a main
-  place) and commits its baselines.
+  Left out, as they show no screen of their own: `/settings` and the groups of its places
+  (`/settings/access`; they redirect to their first place), `/access/*` (redirects to
+  Settings) and `/queries/<env>/runs/<id>` (the screen of a query's result, which the shot
+  reaches by running the query).
 - **In CI.** `ui (visual)` builds the interface and runs `npm --prefix ui run visual`, which
-  pulls the image and fails on any difference; then it uploads `ui/test-results/visual` (each
-  failed shot's expected, actual and diff image) as the artifact `visual-differences` (kept
-  7 days). `ui` waits for it, so it is required: the image is pinned by digest, so the same
-  commit draws the same pixels on every run, and a screen that changed without new baselines is
-  exactly what review must see. Its share of the time: the image pull, then the shots in four
-  workers, within the `"ui (*)"` budget of 10 minutes. It adds nothing to the smoke shards:
-  `playwright.config.ts` runs only `*.spec.ts`, and the spec is `*.visual.ts`.
+  pulls the image, installs the dependencies into a fresh volume and fails on any difference;
+  then it uploads `ui/test-results/visual` (each failed shot's expected, actual and diff image)
+  as the artifact `visual-differences` (kept 7 days). `ui` waits for it, so it is required: the
+  image is pinned by digest and platform, so the same commit draws the same pixels on every run,
+  and a screen that changed without new baselines is exactly what review must see. Its share of
+  the time: the image pull (about 50 s), the install into the volume (about 10 s) and the shots in four workers (about a minute), within the `"ui (*)"` budget of 10 minutes. It adds nothing to the smoke
+  shards: `playwright.config.ts` runs only `*.spec.ts`, and the suite is `*.visual.ts`.
 - **Size.** Playwright writes 8-bit RGB PNGs at its own compression; a smaller lossless
   encoding would save about 3 % and be rewritten by the next update, so the baselines are what
-  Playwright writes: 166 pictures (74 shots in light and dark, 9 at the phone width in both),
-  about 10.5 MB in all, about 63 kB each.
+  Playwright writes: 186 pictures (83 desktop shots in light and dark, 10 at the phone
+  width in both), about 11.8 MB in all, about 63 kB each.
 
 ### Reviewing a part of the interface
 
