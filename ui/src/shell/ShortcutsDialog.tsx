@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import { shortcutLabel } from "./shortcut";
 
 /** The shortcuts, in the order a person meets them; each `shortcuts.<id>` in `en.json`. */
-const SHORTCUTS = ["search", "escape", "tab", "enter", "back"] as const;
+const SHORTCUTS = ["search", "escape", "tab", "enter", "back", "newQuery"] as const;
 
 /** Properties of {@link ShortcutsDialog}. */
 export interface ShortcutsDialogProps {
@@ -28,6 +28,14 @@ export interface ShortcutsDialogProps {
  */
 export function ShortcutsDialog({ onClose }: ShortcutsDialogProps): JSX.Element {
   const { t } = useTranslation();
+  // Keys that differ on a Mac are named as the platform names them.
+  const keys = (id: (typeof SHORTCUTS)[number]): string => {
+    const platform = shortcutLabel(navigator);
+    if (id === "search") {
+      return t(`shell.searchShortcut.${platform}`);
+    }
+    return id === "newQuery" ? t(`shortcuts.newQuery.keys.${platform}`) : t(`shortcuts.${id}.keys`);
+  };
   return (
     <ModalOverlay className="palette-overlay" isOpen isDismissable onOpenChange={onClose}>
       <Modal className="float dialog">
@@ -39,11 +47,7 @@ export function ShortcutsDialog({ onClose }: ShortcutsDialogProps): JSX.Element 
             {SHORTCUTS.map((id) => (
               <div key={id}>
                 <dt>
-                  <kbd>
-                    {id === "search"
-                      ? t(`shell.searchShortcut.${shortcutLabel(navigator)}`)
-                      : t(`shortcuts.${id}.keys`)}
-                  </kbd>
+                  <kbd>{keys(id)}</kbd>
                 </dt>
                 <dd>{t(`shortcuts.${id}.text`)}</dd>
               </div>

@@ -70,6 +70,22 @@ describe("RollbackDialog", () => {
     expect(await within(dialog).findByRole("button", { name: "Roll back" })).toBeInTheDocument();
   });
 
+  it("names the commit's subject when the deploy has one", () => {
+    fakeServer({ [JOBS]: CURRENT_JOBS, [DEPLOY]: TARGET });
+    render(
+      <RollbackDialog
+        environment="prod"
+        deploy={aDeploy({ commit_subject: "Review 4-6: four jobs" }) as RollbackTarget}
+        protectedEnvironment={false}
+        onAccepted={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      `This makes 4f9d2a7 · “Review 4-6: four jobs”, deployed ${when(aDeploy().created_at)} by ana.nowak, the current version of analytics in prod again.`,
+    );
+  });
+
   it("names an account since deleted for a submitter that is gone", () => {
     fakeServer({ [JOBS]: CURRENT_JOBS, [DEPLOY]: TARGET });
     render(

@@ -28,6 +28,13 @@
   "rowsLost": "The rows of the result could not be read: {{problem}}",
   "tryAgain": "Try again",
   "newQuery": "Start a new query",
+  "new": {
+    "open": "New query",
+    "title": "Start a new query?",
+    "text": "The editor holds changes that are not saved. A new query clears them; runs stay in Recent.",
+    "confirm": "Discard changes",
+    "done": "A new, empty query is open."
+  },
   "cancelRefused": "The query was not cancelled and runs on: {{problem}} Press Cancel to try again.",
   "download": {
     "csv": "Download CSV",
@@ -83,9 +90,9 @@
   "delete": {
     "open": "Delete…",
     "title": "Delete the saved query {{name}}?",
-    "text": "The SQL stays in the editor, and its runs stay in Recent.",
+    "text": "Its runs stay in Recent.",
     "confirm": "Delete",
-    "done": "Deleted {{name}}."
+    "done": "Deleted {{name}}. A new, empty query is open."
   },
   "notReadable": "You may not read the SQL of this query.",
   "notAllowed": "You may not run queries in {{environment}}."

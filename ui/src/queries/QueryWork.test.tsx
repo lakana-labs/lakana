@@ -759,7 +759,7 @@ describe("the Queries screen's work", () => {
     expect(sent(shell).filter((request) => request.startsWith("POST"))).toEqual([]);
   });
 
-  it("after a delete the note is focused and the SQL stays", async () => {
+  it("after a delete the editor opens a new, empty query with the focus, and the status says so", async () => {
     const shell = renderShell(SAVED_PATH, {
       routes: routes({ [`DELETE ${SAVED_ONE}`]: { status: 204 } }),
     });
@@ -776,15 +776,18 @@ describe("the Queries screen's work", () => {
 
     await shell.user.click(screen.getByRole("button", { name: "Delete…" }));
     const dialog = screen.getByRole("dialog", { name: "Delete the saved query Daily sales?" });
+    expect(dialog).toHaveTextContent("Its runs stay in Recent.");
     await shell.user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    const note = await screen.findByText("Deleted Daily sales.");
-    await waitFor(() => {
-      expect(note).toHaveFocus();
-    });
+    const note = await screen.findByText("Deleted Daily sales. A new, empty query is open.");
     expect(note).toHaveAttribute("role", "status");
+    // Changes of a mounted status line are announced; the line was there, empty, before.
+    expect(note).toHaveClass("queries-note");
     expect(shell.router.state.location.pathname).toBe("/queries");
-    expect((await editor()).state.doc.toString()).toBe("select 2 as two");
+    expect((await editor()).state.doc.toString()).toBe("");
+    await waitFor(() => {
+      expect(view.hasFocus).toBe(true);
+    });
     expect(screen.queryByRole("button", { name: "Delete…" })).toBeNull();
     expect(screen.getByText("Untitled query")).toBeInTheDocument();
     await waitFor(() => {
@@ -800,28 +803,28 @@ describe("the Queries screen's work", () => {
     const dialog = screen.getByRole("dialog", { name: "Delete the saved query Daily sales?" });
     await shell.user.click(within(dialog).getByRole("button", { name: "Delete" }));
 
-    const note = await screen.findByText("Deleted Daily sales.");
+    const note = await screen.findByText("Deleted Daily sales. A new, empty query is open.");
     await waitFor(() => {
       expect(shell.router.state.location.state).toMatchObject({
         note: { kind: "deleted", name: "Daily sales" },
         seen: true,
       });
     });
-    // The same line, still focused: marking the entry does not show the note again.
-    expect(screen.getByText("Deleted Daily sales.")).toBe(note);
-    expect(note).toHaveFocus();
+    // The same line: marking the entry does not show the note again.
+    expect(document.querySelector(".queries-note")).toBe(note);
+    expect(note).toHaveTextContent("Deleted Daily sales. A new, empty query is open.");
     expect(shell.router.state.location.pathname).toBe("/queries");
 
     await act(async () => {
       await shell.router.navigate(RUN_PATH);
     });
-    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+    expect(screen.queryByText(/^Deleted Daily sales/)).toBeNull();
     await act(async () => {
       await shell.router.navigate(-1);
     });
     expect(shell.router.state.location.pathname).toBe("/queries");
     await editor();
-    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+    expect(screen.queryByText(/^Deleted Daily sales/)).toBeNull();
   });
 
   it("shows no note for an entry whose note was already shown, as after a reload", async () => {
@@ -835,7 +838,7 @@ describe("the Queries screen's work", () => {
     });
 
     expect(await screen.findByText("Untitled query")).toBeInTheDocument();
-    expect(screen.queryByText("Deleted Daily sales.")).toBeNull();
+    expect(screen.queryByText(/^Deleted Daily sales/)).toBeNull();
   });
 
   it("after save as the address is the saved query's and the Saved list shows it", async () => {
@@ -1068,6 +1071,353 @@ describe("the Queries screen's work", () => {
     expect(screen.queryByRole("grid")).toBeNull();
     expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
     expect(screen.getByText("Untitled query")).toBeInTheDocument();
+  });
+});
+
+/**
+ * Presses the New query keys (Alt Shift N) on an element, as a Mac does: Option turns the letter
+ * into "˜", so only the key's place says N.
+ *
+ * @param target - Where the keys are pressed.
+ * @param over - Keys that differ, such as Ctrl held as well.
+ * @returns The event, to see whether the screen took it.
+ */
+function pressNewQuery(target: EventTarget, over: KeyboardEventInit = {}): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", {
+    key: "˜",
+    code: "KeyN",
+    altKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    ...over,
+  });
+  act(() => {
+    target.dispatchEvent(event);
+  });
+  return event;
+}
+
+describe("New query", () => {
+  it("stands in the editor bar before Save…, names its keys, and on a clean saved query opens an empty one at once", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    const button = screen.getByRole("button", { name: "New query" });
+    expect(button).toHaveAttribute("aria-keyshortcuts", "Alt+Shift+N");
+    expect(button).not.toHaveClass("button-primary");
+    expect(button.nextElementSibling).toBe(screen.getByRole("button", { name: "Save…" }));
+
+    await shell.user.click(button);
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(shell.router.state.location.pathname).toBe("/queries");
+    });
+    expect(view.state.doc.toString()).toBe("");
+    expect(screen.getByText("Untitled query")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete…" })).toBeNull();
+    expect(document.querySelector(".queries-note")).toHaveTextContent(
+      /^A new, empty query is open\.$/,
+    );
+    await waitFor(() => {
+      expect(view.hasFocus).toBe(true);
+    });
+    // The move pushes: Back opens the saved query again, with its SQL.
+    await act(async () => {
+      await shell.router.navigate(-1);
+    });
+    expect(shell.router.state.location.pathname).toBe(SAVED_PATH);
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+  });
+
+  it("asks first when a saved query has changes, and Cancel keeps the text and the address and returns the focus", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    type(view, "select 2 as two");
+    const button = screen.getByRole("button", { name: "New query" });
+
+    await shell.user.click(button);
+
+    const dialog = screen.getByRole("dialog", { name: "Start a new query?" });
+    expect(dialog).toHaveTextContent(
+      "The editor holds changes that are not saved. A new query clears them; runs stay in Recent.",
+    );
+    expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((each) => each.textContent),
+    ).toEqual(["Discard changes", "Cancel"]);
+    await shell.user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(view.state.doc.toString()).toBe("select 2 as two");
+    expect(shell.router.state.location.pathname).toBe(SAVED_PATH);
+    await waitFor(() => {
+      expect(button).toHaveFocus();
+    });
+  });
+
+  it("Discard changes clears the editor, the result and the saved query of a run's address", async () => {
+    const shell = renderShell(RUN_PATH, { routes: routes() });
+    expect(await screen.findByRole("grid")).toBeInTheDocument();
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    type(view, "select 2 as two");
+
+    await shell.user.click(screen.getByRole("button", { name: "New query" }));
+    const dialog = screen.getByRole("dialog", { name: "Start a new query?" });
+    await shell.user.click(within(dialog).getByRole("button", { name: "Discard changes" }));
+
+    await waitFor(() => {
+      expect(shell.router.state.location.pathname).toBe("/queries");
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(view.state.doc.toString()).toBe("");
+    expect(screen.getByText("Untitled query")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(view.hasFocus).toBe(true);
+    });
+  });
+
+  it("opens at once on a run's address whose SQL is as the run's", async () => {
+    const shell = renderShell(RUN_PATH, { routes: routes() });
+    expect(await screen.findByRole("grid")).toBeInTheDocument();
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+
+    await shell.user.click(screen.getByRole("button", { name: "New query" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(shell.router.state.location.pathname).toBe("/queries");
+    });
+    expect(screen.queryByRole("grid")).toBeNull();
+    expect(view.state.doc.toString()).toBe("");
+  });
+
+  it("asks first for a new query's text, and its confirm replaces the entry and clears a refusal", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({
+        "POST /api/v1/environments/dev/queries": {
+          status: 422,
+          body: { detail: "Only one statement may run at a time.", type: "QueryRefused" },
+        },
+      }),
+    });
+    const view = await editor();
+    await act(async () => {
+      await shell.router.navigate("/queries");
+    });
+    type(view, "select 1; select 2");
+    await shell.user.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Only one statement");
+
+    await shell.user.click(screen.getByRole("button", { name: "New query" }));
+    const dialog = screen.getByRole("dialog", { name: "Start a new query?" });
+    await shell.user.click(within(dialog).getByRole("button", { name: "Discard changes" }));
+
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("");
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(shell.router.state.location.pathname).toBe("/queries");
+    // Replaced: Back goes past it, to the saved query before.
+    await act(async () => {
+      await shell.router.navigate(-1);
+    });
+    expect(shell.router.state.location.pathname).toBe(SAVED_PATH);
+  });
+
+  it("an empty editor needs no question", async () => {
+    const shell = renderShell("/queries", { routes: routes() });
+    const view = await editor();
+    type(view, "  \n");
+
+    await shell.user.click(screen.getByRole("button", { name: "New query" }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(view.state.doc.toString()).toBe("");
+  });
+
+  it("the keys work outside the editor, and inside it without typing into it", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+
+    // Outside the editor, on a clean query: at once.
+    const outside = pressNewQuery(document.body, { key: "N" });
+    expect(outside.defaultPrevented).toBe(true);
+    await waitFor(() => {
+      expect(shell.router.state.location.pathname).toBe("/queries");
+    });
+    expect(view.state.doc.toString()).toBe("");
+
+    // Inside the editor, with text: it asks, the editor keeps its text, and Cancel returns there.
+    type(view, "select 2 as two");
+    act(() => {
+      view.focus();
+    });
+    const inside = pressNewQuery(view.contentDOM);
+    expect(inside.defaultPrevented).toBe(true);
+    const dialog = await screen.findByRole("dialog", { name: "Start a new query?" });
+    expect(view.state.doc.toString()).toBe("select 2 as two");
+
+    // While the question is open, the keys do nothing more.
+    const again = pressNewQuery(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(again.defaultPrevented).toBe(false);
+    await shell.user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => {
+      expect(view.hasFocus).toBe(true);
+    });
+    expect(view.state.doc.toString()).toBe("select 2 as two");
+  });
+
+  it("other keys with N leave the page alone: AltGr (Ctrl Alt), Alt N alone, ⌘ Shift N", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+
+    for (const over of [
+      { ctrlKey: true, key: "ń" },
+      { shiftKey: false, key: "n" },
+      { altKey: false, metaKey: true, key: "N" },
+    ]) {
+      expect(pressNewQuery(document.body, over).defaultPrevented).toBe(false);
+    }
+
+    expect(shell.router.state.location.pathname).toBe(SAVED_PATH);
+    expect(view.state.doc.toString()).toBe("select 1 as one");
+  });
+
+  it("held-down keys and keys an input method composes leave the page alone", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+
+    expect(pressNewQuery(document.body, { key: "N", repeat: true }).defaultPrevented).toBe(false);
+    expect(
+      pressNewQuery(view.contentDOM, { key: "Process", isComposing: true }).defaultPrevented,
+    ).toBe(false);
+
+    expect(shell.router.state.location.pathname).toBe(SAVED_PATH);
+    expect(view.state.doc.toString()).toBe("select 1 as one");
+  });
+
+  it("a second New query in a row is said again: the line empties for a moment first", async () => {
+    const shell = renderShell("/queries", { routes: routes() });
+    const view = await editor();
+    const button = screen.getByRole("button", { name: "New query" });
+    await shell.user.click(button);
+    const line = await screen.findByText("A new, empty query is open.");
+    const seen: string[] = [];
+    const watch = new MutationObserver(() => {
+      seen.push(line.textContent);
+    });
+    watch.observe(line, { childList: true, characterData: true, subtree: true });
+
+    await shell.user.click(button);
+
+    await waitFor(() => {
+      expect(seen).toEqual(["", "A new, empty query is open."]);
+    });
+    watch.disconnect();
+    expect(view.state.doc.toString()).toBe("");
+  });
+
+  it("the note goes once the person types", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    await shell.user.click(screen.getByRole("button", { name: "New query" }));
+    const line = await screen.findByText("A new, empty query is open.");
+
+    type(view, "select 2 as two");
+
+    expect(line).toBeEmptyDOMElement();
+    expect(line).toHaveClass("visually-hidden");
+  });
+
+  it("the note after a delete goes once the person runs a query", async () => {
+    const shell = renderShell(SAVED_PATH, {
+      routes: routes({ [`DELETE ${SAVED_ONE}`]: { status: 204 } }),
+    });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    await shell.user.click(screen.getByRole("button", { name: "Delete…" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete the saved query Daily sales?" });
+    await shell.user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    const line = await screen.findByText("Deleted Daily sales. A new, empty query is open.");
+
+    act(() => {
+      view.contentDOM.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true }),
+      );
+    });
+
+    expect(line).toBeEmptyDOMElement();
+  });
+
+  it("the keys do nothing while another dialog is open", async () => {
+    const shell = renderShell(SAVED_PATH, { routes: routes() });
+    const view = await editor();
+    await waitFor(() => {
+      expect(view.state.doc.toString()).toBe("select 1 as one");
+    });
+    await shell.user.click(screen.getByRole("button", { name: "Save…" }));
+    const save = screen.getByRole("dialog", { name: "Save the query" });
+
+    const pressed = pressNewQuery(within(save).getByRole("textbox", { name: "Name" }));
+
+    expect(pressed.defaultPrevented).toBe(false);
+    expect(shell.router.state.location.pathname).toBe(SAVED_PATH);
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+  });
+
+  it("leaves a running query running, as leaving the page does: no cancel, and Recent opens it again", async () => {
+    const shell = renderShell(RUN_PATH, {
+      routes: routes({
+        [`GET ${STATUS}`]: {
+          status: 200,
+          body: aRun({ status: "RUNNING", finished_at: null, result_rows: null }),
+        },
+      }),
+    });
+    expect(await screen.findByRole("button", { name: "Cancel" })).toBeInTheDocument();
+
+    await shell.user.click(screen.getByRole("button", { name: "New query" }));
+
+    await waitFor(() => {
+      expect(shell.router.state.location.pathname).toBe("/queries");
+    });
+    expect(screen.getByRole("button", { name: "Run" })).toBeInTheDocument();
+    expect(screen.queryByText("Running")).toBeNull();
+    expect((await editor()).state.doc.toString()).toBe("");
+    expect(sent(shell).filter((request) => request.endsWith("/cancel"))).toEqual([]);
   });
 });
 

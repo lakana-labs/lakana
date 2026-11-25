@@ -210,8 +210,8 @@ offers only **Save as new**, as your own copy. If you moved **Environment** to a
 only **Save as new** is offered, in that environment: a saved query's environment never changes.
 
 **Delete one:** open it, press **Delete…**, and **Delete** in the window that asks "Delete the saved
-query …?". The SQL stays in the editor and its runs stay under **Recent**; the screen says
-"Deleted …".
+query …?". Its runs stay under **Recent**; the screen says "Deleted …" and opens a new, empty
+query, with the cursor in the editor.
 
 An administrator who opens someone else's private saved query sees its name, its owner and its
 environment, the line "You may not read the SQL of this query.", an empty editor and **Delete…**;

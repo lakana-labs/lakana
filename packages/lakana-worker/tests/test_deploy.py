@@ -396,6 +396,25 @@ def test_rollback_moves_the_pointer_without_fetching(
     )
 
 
+def test_each_run_records_its_commit_subject_and_a_rollback_repeats_its_target_s(
+    session: Session, principal: PrincipalRef, world: World
+) -> None:
+    """A deploy and a dry run store their commit's first line; a rollback, its target's (#783)."""
+    first = _submit_and_run(session, principal, world)
+    assert first.commit_subject == "change"
+    commit(
+        world.repo_path,
+        {"assets/silver/more.sql": "SELECT id FROM bronze.events\n"},
+        "Review 4-6: four jobs\n\nAdds silver.more.",
+    )
+    second = _submit_and_run(session, principal, world)
+    dry = _submit_and_run(session, principal, world, DeployKind.DRY_RUN)
+    assert (second.commit_subject, dry.commit_subject) == ("Review 4-6: four jobs",) * 2
+    back = _submit_and_run(session, principal, world, DeployKind.ROLLBACK, to_previous=True)
+    assert (back.status, back.resolved_sha) == (DeployStatus.SUCCEEDED, world.sha)
+    assert back.commit_subject == "change"
+
+
 def test_unexpected_errors_do_not_leak(
     session: Session,
     principal: PrincipalRef,

@@ -60,7 +60,8 @@ function Reading({ label }: ReadingProps): JSX.Element {
  * of jobs, sorted, each marked as kept, removed by the rollback or back with it; a protected
  * environment is named so. Roll back sends one rollback to the deploy's commit and hands back the
  * id the server accepted; a refusal stays in the dialog with the server's sentence. While it is
- * sent, Escape and Cancel do nothing.
+ * sent, Escape and Cancel do nothing. The commit is named by its ID and, when the deploy stored
+ * one, its subject.
  *
  * @param props - The environment, the deploy, the protection and the handlers.
  * @param props.environment - The environment.
@@ -124,7 +125,13 @@ export function RollbackDialog({
       )}
       <p>
         {t("jobs.deploys.dialog.text", {
-          commit,
+          commit:
+            deploy.commit_subject === null
+              ? commit
+              : t("jobs.deploys.dialog.commitWithSubject", {
+                  commit,
+                  subject: deploy.commit_subject,
+                }),
           when: when(deploy.created_at),
           who: deploy.submitted_by ?? t("jobs.deploys.deletedAccount"),
           repository,

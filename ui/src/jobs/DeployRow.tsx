@@ -43,8 +43,9 @@ export interface DeployRowProps {
 
 /**
  * Renders the row: the result in a glyph and a word (with the first line of a failed deploy's
- * message under it), the kind, the commit in monospace with "current" in words beside the
- * repository's current version, the repository, who asked for it and when, and Roll back to
+ * message under it), the kind, the commit in monospace with its subject after it (cut with an
+ * ellipsis when long) and "current" in words beside the newest run of the repository's current
+ * version, the repository, who asked for it and when, and Roll back to
  * this… where it is offered.
  *
  * @param props - The deploy, whether it is current and the rollback's opener.
@@ -82,6 +83,14 @@ export function DeployRow({
           <code className="jobs-commit">
             <VisibleText text={commit} />
           </code>
+        )}
+        {deploy.commit_subject !== null && (
+          <>
+            {" · "}
+            <span className="truncate">
+              <VisibleText text={deploy.commit_subject} />
+            </span>
+          </>
         )}
         {current && <span className="jobs-current"> · {t("jobs.deploys.current")}</span>}
       </td>

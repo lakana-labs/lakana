@@ -33,3 +33,36 @@ export function mayRollBackTo(
     now !== deploy.project_version_id
   );
 }
+
+/**
+ * The deploys marked current: for each repository, the newest successful deploy or rollback in
+ * the list, when it made the repository's current version. One row at most per repository, so
+ * after a rollback to an earlier version only the rollback is current, not the deploy that first
+ * made that version as well.
+ *
+ * @param deploys - The listed deploys, newest first.
+ * @param current - Each deployed repository's current project version.
+ * @returns The ids of the deploys marked current.
+ */
+export function currentDeploys(
+  deploys: readonly DeployOut[],
+  current: ReadonlyMap<string, string>,
+): ReadonlySet<string> {
+  const marked = new Set<string>();
+  const seen = new Set<string>();
+  for (const deploy of deploys) {
+    if (
+      seen.has(deploy.repository) ||
+      deploy.kind === "dry_run" ||
+      deploy.status !== "succeeded" ||
+      deploy.project_version_id === null
+    ) {
+      continue;
+    }
+    seen.add(deploy.repository);
+    if (current.get(deploy.repository) === deploy.project_version_id) {
+      marked.add(deploy.id);
+    }
+  }
+  return marked;
+}
