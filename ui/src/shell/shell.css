@@ -101,9 +101,11 @@
 
 .sidebar-search:hover,
 .user-menu-button[data-hovered],
-/* A link drawn as a button gets no data-hovered from React Aria, so it takes :hover. */
+/* A link drawn as a button, and a native button (one that names its keys, which React Aria's
+   Button drops), get no data-hovered from React Aria, so they take :hover. */
 .button[data-hovered],
-a.button:hover {
+a.button:hover,
+button.button:not([data-rac]):hover {
   background: var(--color-sunk);
 }
 
