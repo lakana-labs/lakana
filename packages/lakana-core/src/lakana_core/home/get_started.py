@@ -5,7 +5,8 @@ local mode (`lakana server start --local`: one person on one machine, so no invi
 no repository to connect). A step is done from the instance's or the person's own state, never
 from a click in the interface: a repository exists, a deploy succeeded, the person ran a query.
 Instance-wide steps tick for every administrator alike; the person's own steps (a passkey, a
-table opened, a query run) only for that person.
+table opened, a query run) only for that person. A person who signs in through the identity
+provider (`is_linked`) is not offered a passkey: it is no way in for them.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 from lakana_core.auth import PrincipalRef
 from lakana_core.grants.service import GrantService
 from lakana_core.identity.interface_state import refuse_tokens
+from lakana_core.identity.provider_issuer import is_linked
 from lakana_core.identity.sessions import utc_now
 from lakana_core.models import (
     CiTrustRule,
@@ -239,7 +241,12 @@ def get_started(
     refuse_tokens(p, "Get started list")
     audience = _audience(grants, p)
     checks = _checks(session, p.id)
-    steps = tuple((step, checks[step]()) for step in _STEPS[audience, local])
+    ids = _STEPS[audience, local]
+    person = session.get(Principal, p.id)
+    if person is not None and is_linked(session, person):
+        # Signs in through the identity provider: a passkey is no way in for them.
+        ids = tuple(step for step in ids if step != "add_passkey")
+    steps = tuple((step, checks[step]()) for step in ids)
     state = session.get(InterfaceState, p.id)
     return GetStarted(
         audience=audience,
