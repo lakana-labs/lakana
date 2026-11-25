@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -245,5 +245,149 @@ describe("LinkLanding", () => {
         "This browser is signed in as admin; continuing signs that session out.",
       ),
     ).toBeInTheDocument();
+  });
+
+  const OKTA = { status: 200, body: { enabled: true, display_name: "Okta" } };
+  const STARTED = { status: 200, body: { authorization_url: "https://id.example.org/authorize" } };
+
+  it("an invite offers the provider beside a passkey", async () => {
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: {
+          kind: "invite",
+          name: "kim",
+          display_name: null,
+          state: "open",
+          offers_provider: true,
+        },
+      },
+      "GET /api/v1/sign-in/oidc": OKTA,
+    });
+    renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    const provider = await screen.findByRole("button", { name: "Sign in with Okta" });
+    const passkey = screen.getByRole("button", { name: "Add a passkey" });
+    expect(provider.compareDocumentPosition(passkey) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    expect(provider.className).toBe(passkey.className.replace("button", "button button-wrap"));
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
+  });
+
+  it("a linked person's recovery offers only the provider", async () => {
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: {
+          kind: "recovery",
+          name: "kim",
+          display_name: null,
+          state: "open",
+          provider_only: true,
+          offers_provider: true,
+        },
+      },
+      "GET /api/v1/sign-in/oidc": OKTA,
+    });
+    renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    expect(await screen.findByText("Your account signs in through Okta.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in with Okta" })).toHaveClass("button-primary");
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("a recovery link that works only through the provider names it in general words while its name is unknown", async () => {
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: {
+          kind: "recovery",
+          name: "kim",
+          display_name: null,
+          state: "open",
+          provider_only: true,
+        },
+      },
+      "GET /api/v1/sign-in/oidc": { status: 503, body: { detail: "Busy.", type: "Busy" } },
+    });
+    renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    expect(
+      await screen.findByRole("button", { name: "Sign in with the identity provider" }),
+    ).toBeInTheDocument();
+  });
+
+  it("choosing the provider sends the link and removes the secret from history first", async () => {
+    window.history.replaceState(null, "", "/sign-in");
+    const server = fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: {
+          kind: "recovery",
+          name: "kim",
+          display_name: null,
+          state: "open",
+          offers_provider: true,
+        },
+      },
+      "GET /api/v1/sign-in/oidc": OKTA,
+      "POST /api/v1/sign-in/oidc/start": STARTED,
+    });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    const { user } = renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    await user.click(await screen.findByRole("button", { name: "Sign in with Okta" }));
+
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("https://id.example.org/authorize");
+    });
+    const start = server.sent.find((request) => request.path === "/api/v1/sign-in/oidc/start");
+    expect(start?.body).toEqual({ purpose: "recovery", link_id: "pub-1", secret: "sec-1" });
+    expect(server.sent.filter((request) => request.path.includes("sec-1"))).toEqual([]);
+    expect(window.history.state).toBeNull();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("a link used since it was opened says so when the provider is chosen", async () => {
+    fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: {
+          kind: "invite",
+          name: "kim",
+          display_name: null,
+          state: "open",
+          offers_provider: true,
+        },
+      },
+      "GET /api/v1/sign-in/oidc": OKTA,
+      "POST /api/v1/sign-in/oidc/start": {
+        status: 410,
+        body: { detail: "Used.", type: "LinkUnusableError", state: "used" },
+      },
+    });
+    const { user } = renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    await user.click(await screen.findByRole("button", { name: "Sign in with Okta" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "This link was already used" }),
+    ).toBeInTheDocument();
+  });
+
+  it("without the provider the landing is unchanged", async () => {
+    const server = fakeServer({
+      "POST /api/v1/sign-in/links/describe": {
+        status: 200,
+        body: { kind: "invite", name: "kim", display_name: null, state: "open" },
+      },
+    });
+    renderLanding({ linkId: "pub-1", secret: "sec-1" });
+
+    expect(await screen.findByRole("button", { name: "Continue" })).toHaveClass("button-primary");
+    expect(server.sent.map((request) => request.path)).toEqual(["/api/v1/sign-in/links/describe"]);
+    expect(document.body).not.toHaveTextContent(/provider/i);
   });
 });

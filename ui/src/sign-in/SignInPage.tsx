@@ -4,43 +4,18 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useEffect, useState } from "react";
+import { type JSX, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 
 import { ApiError, signInWithPasskey } from "../api";
-import { getProvider, goToProvider, startProviderSignIn } from "../api/oidc";
+import { goToProvider, startProviderSignIn } from "../api/oidc";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import { problemText } from "./messages";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
+import { useProviderName } from "./useProviderName";
 import { PendingButton } from "../shell/PendingButton";
 import { VisibleText } from "../shell/VisibleText";
-
-/**
- * Reads, once per visit, the name of the identity provider people sign in through.
- *
- * @returns The provider's name, or null while it is off, unknown or cannot be read.
- */
-export function useProviderName(): string | null {
-  const [name, setName] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    getProvider().then(
-      (info) => {
-        if (live && info.enabled && info.display_name !== null) {
-          setName(info.display_name);
-        }
-      },
-      () => {
-        // Without the answer the page is the passkey page it always was.
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-  return name;
-}
 
 /** Properties of {@link SignInPage}. */
 export interface SignInPageProps {
