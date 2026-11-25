@@ -576,6 +576,7 @@ describe("PersonPage", () => {
   const STALE = {
     ...LINK,
     issuer: "https://old-idp.example.com/realms/lakana",
+    token_window_ends_at: "2099-01-01T08:30:00Z",
     stale: true,
   };
 
@@ -603,12 +604,40 @@ describe("PersonPage", () => {
       .getAllByRole("term")
       .map((term) => [term.textContent, term.nextElementSibling?.textContent]);
     expect(facts.at(-1)?.[0]).toBe("Personal API tokens work until");
-    expect(facts.at(-1)?.[1]).toMatch(/2026/);
+    expect(facts.at(-1)?.[1]).toMatch(/2099/);
 
     await user.click(within(panel).getByRole("button", { name: "Unlink" }));
     expect(
       await screen.findByRole("dialog", { name: "Unlink kim from old-idp.example.com?" }),
     ).toBeVisible();
+  });
+
+  it("with single sign-on off, a stale link says only an unlink frees the tokens, which stopped", async () => {
+    renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked({
+          ...STALE,
+          token_window_ends_at: "2020-01-01T08:30:00Z",
+        }),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/oidc": { status: 200, body: { enabled: false, display_name: null } },
+      },
+    });
+
+    const panel = await screen.findByRole("region", {
+      name: "Linked to a provider that is no longer configured",
+    });
+    await waitFor(() => {
+      expect(panel).toHaveTextContent("but single sign-on is off now");
+    });
+    expect(panel).toHaveTextContent("only an unlink frees them");
+    expect(panel).not.toHaveTextContent("may link to the current provider");
+    const facts = within(panel)
+      .getAllByRole("term")
+      .map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(facts.at(-1)?.[0]).toBe("Personal API tokens stopped working on");
+    expect(facts.at(-1)?.[1]).toMatch(/2020/);
   });
 
   it("a stale link without a token window shows no tokens' end", async () => {

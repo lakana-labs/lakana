@@ -225,6 +225,8 @@
     "unlinkConfirm": "Unlink",
     "staleTitle": "Linked to a provider that is no longer configured",
     "staleHint": "{{name}} was linked to <issuer/>, which this server no longer uses. The link signs nobody in: {{name}} signs in with a passkey and may link to the current provider. Until then their personal API tokens stop when the token window ends. Unlinking clears the link, and also deletes their passkeys and revokes their tokens.",
-    "tokensUntil": "Personal API tokens work until"
+    "staleHintOff": "{{name}} was linked to <issuer/>, but single sign-on is off now. The link signs nobody in: {{name}} signs in with a passkey. Their personal API tokens stop when the token window ends, and as there is no provider to link to, only an unlink frees them: it clears the link, and also deletes their passkeys and revokes their tokens, so {{name}} then needs a recovery link and new tokens.",
+    "tokensUntil": "Personal API tokens work until",
+    "tokensStopped": "Personal API tokens stopped working on"
   }
 }

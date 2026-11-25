@@ -261,7 +261,8 @@ export async function stubLinkedKim(
                 email: "kim.lindqvist@example.org",
                 name: "Kim Lindqvist",
                 last_sign_in_at: "2026-11-24T08:30:00Z",
-                token_window_ends_at: "2026-12-24T08:30:00Z",
+                // A stale link's window is far ahead, so "work until" does not age into "stopped".
+                token_window_ends_at: stale ? "2099-12-24T08:30:00Z" : "2026-12-24T08:30:00Z",
                 stale,
               },
         },

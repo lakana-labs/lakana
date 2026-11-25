@@ -59,12 +59,14 @@ export function ProviderLink({ name, link, own, onUnlinked }: ProviderLinkProps)
   const { t } = useTranslation();
   const when = useWhen();
   const heading = useId();
-  const load = useCallback(async () => {
-    const info = await getProvider().catch(() => null);
-    return info?.display_name ?? null;
-  }, []);
+  const load = useCallback(async () => getProvider().catch(() => null), []);
+  const info = useResource(load).data ?? null;
   const stale = link.stale === true;
-  const configured = useResource(load).data ?? t("notices.confirmed.provider");
+  const configured = info?.display_name ?? t("notices.confirmed.provider");
+  // With single sign-on off there is nothing to link to: only an administrator's unlink helps.
+  const off = info?.enabled === false;
+  const ends = link.token_window_ends_at;
+  const ended = ends !== null && Date.parse(ends) <= Date.now();
   const provider = stale ? issuerHost(link.issuer) : configured;
   const [unlinking, setUnlinking] = useState(false);
   return (
@@ -96,7 +98,7 @@ export function ProviderLink({ name, link, own, onUnlinked }: ProviderLinkProps)
         <p className="step-hint">
           <Trans
             t={t}
-            i18nKey="access.provider.staleHint"
+            i18nKey={off ? "access.provider.staleHintOff" : "access.provider.staleHint"}
             values={{ name: markedText(name) }}
             components={{ issuer: <VisibleText text={provider} breakable /> }}
           />
@@ -123,10 +125,10 @@ export function ProviderLink({ name, link, own, onUnlinked }: ProviderLinkProps)
         <dd>
           {link.last_sign_in_at === null ? t("access.provider.never") : when(link.last_sign_in_at)}
         </dd>
-        {stale && link.token_window_ends_at !== null && (
+        {stale && ends !== null && (
           <>
-            <dt>{t("access.provider.tokensUntil")}</dt>
-            <dd>{when(link.token_window_ends_at)}</dd>
+            <dt>{t(ended ? "access.provider.tokensStopped" : "access.provider.tokensUntil")}</dt>
+            <dd>{when(ends)}</dd>
           </>
         )}
       </dl>
