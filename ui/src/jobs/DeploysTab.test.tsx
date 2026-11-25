@@ -448,3 +448,12 @@ describe("DeploysTab's sort", () => {
     );
   });
 });
+
+describe("DeploysTab's current mark in another order", () => {
+  it("marks nothing current while a later page could hold a newer deploy", async () => {
+    renderTab(list([NOW], "next"), "/jobs/deploys?environment=prod&sort=status");
+    const region = await screen.findByRole("region", { name: /Deploys/u });
+    await within(region).findAllByRole("row");
+    expect(region).not.toHaveTextContent("current");
+  });
+});

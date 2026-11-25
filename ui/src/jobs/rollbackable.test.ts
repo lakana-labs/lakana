@@ -47,4 +47,22 @@ describe("currentDeploys", () => {
     expect(currentDeploys(rows, CURRENT)).toEqual(new Set());
     expect(currentDeploys(rows, new Map())).toEqual(new Set());
   });
+
+  it("marks the newest by time whatever order the list is in", () => {
+    const rows = [
+      aDeploy({ id: "first", project_version_id: now, created_at: "2026-11-10T08:00:00Z" }),
+      aDeploy({
+        id: "middle",
+        project_version_id: DEPLOY_VERSION,
+        created_at: "2026-11-12T08:00:00Z",
+      }),
+      aDeploy({
+        id: "back",
+        kind: "rollback",
+        project_version_id: now,
+        created_at: "2026-11-14T08:00:00Z",
+      }),
+    ];
+    expect(currentDeploys(rows, CURRENT)).toEqual(new Set(["back"]));
+  });
 });

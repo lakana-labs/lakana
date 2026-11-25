@@ -138,7 +138,10 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     }
   }, [pages.items, deployments.data]);
   const rows = pages.items ?? [];
-  const marked = currentDeploys(rows, current);
+  // In another order than the newest first, a page still to be read may hold a repository's
+  // newest deploy: nothing is marked current until every page is read.
+  const marked =
+    sort === null || !pages.hasMore ? currentDeploys(rows, current) : new Set<string>();
   const steadyMore = useSteadyMore(pages.hasMore, pages.busy);
   return (
     <div ref={area}>
