@@ -2993,7 +2993,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -3608,7 +3608,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -11188,7 +11188,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -15458,7 +15458,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -16174,7 +16174,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -17959,7 +17959,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -18900,7 +18900,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -19253,7 +19253,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
@@ -21542,7 +21542,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "maxLength": 512
+                  "maxLength": 5244
                 },
                 {
                   "type": "null"
