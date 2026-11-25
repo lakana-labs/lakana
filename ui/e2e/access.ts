@@ -628,6 +628,7 @@ export const LONG_EXPRESSION = `region IN (${"'EU', ".repeat(570)}'US')`.slice(0
 /** The paths {@link stubPolicies} answers, beside those of `session.ts`. */
 export const POLICIES_STUBBED = [
   "/api/v1/access/managed-scopes",
+  "/api/v1/groups",
   "/api/v1/access/status",
   "/api/v1/access/export",
   "/api/v1/environments",
@@ -753,6 +754,17 @@ export async function stubPolicies(page: Page, options: PoliciesStubOptions = {}
           purge_after: null,
         })),
       ),
+  );
+  // Who a policy is for: an administrator's Name suggests the groups.
+  await page.route(
+    (url) => url.pathname === "/api/v1/groups",
+    (route) => {
+      const q = new URL(route.request().url()).searchParams.get("q") ?? "";
+      return answer(
+        route,
+        GROUPS.filter((group) => group.includes(q)).map((name) => ({ name })),
+      );
+    },
   );
   await page.route("**/api/v1/access/managed-scopes", (route) =>
     answer(

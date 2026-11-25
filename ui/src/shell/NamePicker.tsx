@@ -1,6 +1,8 @@
 /**
  * A text field that suggests the names of things that exist as one types: the principals of
- * a group's Add a member and the tokens' Owner, the tables of Add filter or mask. The server
+ * a group's Add a member and the tokens' Owner; the principals or groups of Add grant's and Add
+ * filter or mask's Name and of the Who filter of Grants and Row filters & masks; the tables of
+ * Add filter or mask and of Row filters & masks' Table filter. The server
  * filters, under the person's own rights, so a name they may not see is never suggested; the
  * suggestion is help, and the server still checks what is sent.
  *
@@ -257,13 +259,18 @@ export function NamePicker<T>({
   // emptied after an add, a filter from the address) shows none and opens no list.
   const found: Found<T> =
     asked.state !== "idle" && asked.text === value ? asked : { state: "idle" };
-  // The chosen suggestion, with the search it came from: another search (another environment's
-  // tables, groups after people) chose nothing.
+  // The chosen suggestion, with the search it came from and the name it put in the field:
+  // another search (another environment's tables, groups after people) chose nothing, and nor
+  // does a field whose text changed since (emptied from outside after an add).
   const [selected, setSelected] = useState<{
     readonly key: Key;
+    readonly name: string;
     readonly search: NameSearch<T> | null;
   } | null>(null);
-  const selectedKey = selected !== null && selected.search === search ? selected.key : null;
+  const selectedKey =
+    selected !== null && selected.search === search && selected.name === value
+      ? selected.key
+      : null;
   const open = useRef(false);
   const openAtKey = useRef(false);
   const pickedByKey = useRef(false);
@@ -271,11 +278,14 @@ export function NamePicker<T>({
   const line = stateLine(t, found, noMatch);
   const shown = markedName(value);
   const choose = (key: Key | null): void => {
-    // React Aria also sends null when a list is left without a choice (a custom value).
+    // React Aria also sends null when a list is left without a choice (a custom value), should
+    // its selection ever differ from the one given here; since the choice stays selected only
+    // while the list holds it, no path is known to reach this, and the guard stays (#801).
     const choice = choices.find((one) => one.key === key);
+    /* v8 ignore next -- defensive: see above */
     if (choice === undefined) return;
     pickedByKey.current = true;
-    setSelected({ key: choice.key, search });
+    setSelected({ key: choice.key, name: choice.name, search });
     settle(choice);
     onChange(choice.name);
     onPick?.(choice);
@@ -286,7 +296,9 @@ export function NamePicker<T>({
         className="field"
         items={choices}
         inputValue={value}
-        value={found.state === "done" ? selectedKey : null}
+        // The choice stays selected while the list holds it, the answer to Arrow Down after it
+        // too: a selection that left and came back would read as a new one, and close the list.
+        value={choices.some((one) => one.key === selectedKey) ? selectedKey : null}
         allowsCustomValue
         allowsEmptyCollection={search !== null && found.state !== "idle"}
         isRequired={isRequired}

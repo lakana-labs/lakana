@@ -61,7 +61,7 @@ describe("GrantsPage", () => {
       "/api/v1/grants?principal_name=maria&role=ANALYST&limit=50",
     ]);
     expect(screen.getByRole("button", { name: /^A person/ })).toBeInTheDocument();
-    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("maria");
+    expect(screen.getByRole("combobox", { name: "Name" })).toHaveValue("maria");
     expect(screen.getByRole("button", { name: /^ANALYST/ })).toBeInTheDocument();
   });
 
@@ -121,7 +121,7 @@ describe("GrantsPage", () => {
         "/api/v1/grants?principal_name=maria&role=ANALYST&limit=50",
       ]);
     });
-    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("maria");
+    expect(screen.getByRole("combobox", { name: "Name" })).toHaveValue("maria");
     expect(screen.getByRole("button", { name: /^ANALYST/ })).toBeInTheDocument();
   });
 

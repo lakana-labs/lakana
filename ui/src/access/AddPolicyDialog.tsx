@@ -38,7 +38,7 @@ import { Choice } from "./Choice";
 import { FormFoot } from "./FormFoot";
 import { GitMark } from "./GitMark";
 import { managedScopeOf } from "./managed";
-import { tableSearch } from "./suggest";
+import { tableSearch, useWhoSearch } from "./suggest";
 import "./policies.css";
 import "./policyStrings";
 
@@ -148,8 +148,10 @@ function PlainField({ label, value, onChange, help }: PlainFieldProps): JSX.Elem
 }
 
 /**
- * Renders the form. Once a listed environment is chosen, the table field suggests the tables of
- * it that the person may read, and choosing one fills the namespace too. Create is held, and
+ * Renders the form. The Name suggests principals or groups, by who the policy is for, to an
+ * administrator (anyone else may not list them, and types the name). Once a listed environment
+ * is chosen, the table field suggests the tables of it that the person may read, and choosing
+ * one fills the namespace too. Create is held, and
  * says why, until every field is filled; a managed
  * environment shows the managed sentence in place of Create. Create asks for the passkey touch
  * first; the server's refusal (an unknown name, table or column, an expression it cannot take)
@@ -185,6 +187,9 @@ export function AddPolicyDialog({
   // Tables are suggested once a listed environment is chosen; a typed one may not exist.
   const known = listed.find((choice) => choice.name === environment)?.name ?? null;
   const suggest = useMemo(() => (known === null ? null : tableSearch(known)), [known]);
+  // Principals or groups, for an administrator; a policy manager who is not one may not list
+  // them, and gets the plain field.
+  const whoSuggest = useWhoSearch(who);
   const create = async (): Promise<void> => {
     const body: RowFilterCreateIn = {
       principal: who === "principal" ? name.trim() : null,
@@ -245,12 +250,15 @@ export function AddPolicyDialog({
             <RadioButton className="radio">{t("policies.addDialog.group")}</RadioButton>
           </RadioField>
         </RadioGroup>
-        <PlainField
+        <NamePicker
           label={t("policies.addDialog.name")}
           value={name}
           onChange={(value) => {
             set({ name: value });
           }}
+          search={whoSuggest.search}
+          noMatch={whoSuggest.noMatch}
+          isRequired
         />
         {environments !== null && environments.length === 0 ? (
           <PlainField
