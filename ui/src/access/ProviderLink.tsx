@@ -66,7 +66,9 @@ export function ProviderLink({ name, link, own, onUnlinked }: ProviderLinkProps)
   // With single sign-on off there is nothing to link to: only an administrator's unlink helps.
   const off = info?.enabled === false;
   const ends = link.token_window_ends_at;
-  const ended = ends !== null && Date.parse(ends) <= Date.now();
+  // Read once, when the panel first shows: a render must not read the clock.
+  const [now] = useState(() => Date.now());
+  const ended = ends !== null && Date.parse(ends) <= now;
   const provider = stale ? issuerHost(link.issuer) : configured;
   const [unlinking, setUnlinking] = useState(false);
   return (
