@@ -39,9 +39,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, NoReturn
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import Select, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.selectable import ScalarSelect
 
 from lakana_core.audit.service import AuditService
 from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securable, permits_each
@@ -83,7 +84,17 @@ from lakana_core.models import (
     SecretUseKind,
 )
 from lakana_core.models.base import utcnow
-from lakana_core.pagination import Page, newest_first
+from lakana_core.pagination import (
+    SMALLINT_KEY,
+    ListSort,
+    Page,
+    SortField,
+    SortKey,
+    name_order,
+    newest_first,
+    parse_sort,
+    sorted_page,
+)
 from lakana_core.projects.manifest import manifest_assets, read_entry_connections
 from lakana_core.runs.connection_failures import LastRunFailure, last_run_failures, run_readers
 from lakana_core.secrets.keys import KeyProvider
@@ -178,6 +189,109 @@ class LastTest:
     outcome: ConnectionTestOutcome | None
     finished_at: datetime | None
     detail: LastTestDetail | None
+
+
+CONNECTION_SORTS: dict[str, bool] = {"created": True, "name": False, "status": False}
+"""The fields the connections lists sort by, each with whether it runs from the largest down by
+default: the newest first, names from A, problems first."""
+
+
+def _last_test_rank() -> ScalarSelect[int]:
+    """Rank a connection by its newest test, for the sort by state.
+
+    Returns
+    -------
+    ScalarSelect
+        0 when the newest test failed, 1 while it is queued or running, 2 when it passed, and
+        null for a connection never tested; the newest is the one `last_tests` reads.
+    """
+    return (
+        select(
+            case(
+                (ConnectionTest.state != ConnectionTestState.DONE, 1),
+                (ConnectionTest.outcome == ConnectionTestOutcome.OK, 2),
+                else_=0,
+            )
+        )
+        .where(ConnectionTest.connection_id == Connection.id)
+        .order_by(ConnectionTest.created_at.desc(), ConnectionTest.id.desc())
+        .limit(1)
+        .correlate(Connection)
+        .scalar_subquery()
+    )
+
+
+def _connection_page(
+    session: Session,
+    query: Select[Any],
+    *,
+    kind: str,
+    sort: ListSort,
+    limit: int,
+    cursor: str | None,
+) -> Page[Connection]:
+    """Read one page of connections in a sort.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    query
+        The connections listed, filtered.
+    kind
+        The list, as the cursor names it.
+    sort
+        The sort; the newest first keeps the cursor of a time and an id.
+    limit
+        Most connections returned.
+    cursor
+        The `next_cursor` of the previous page.
+
+    Returns
+    -------
+    Page of Connection
+        The rows and the cursor of the next page. By name: in any letter case. By state: the
+        rank of `_last_test_rank`, never tested last, then by name.
+
+    Raises
+    ------
+    ValidationError
+        If `limit` is below 1 or `cursor` is not one this server issued for `kind` in this
+        sort.
+    """
+    if sort == ("created", True):
+        return newest_first(
+            session,
+            query,
+            kind=kind,
+            at=Connection.created_at,
+            row_id=Connection.id,
+            at_of=lambda row: row.created_at,
+            limit=limit,
+            cursor=cursor,
+        )
+    by_name = SortKey(name_order(session, Connection.name), str)
+    fields = {
+        "created": SortField((SortKey(Connection.created_at, datetime),), descending=True),
+        "name": SortField((by_name,), descending=False),
+        "status": SortField(
+            (
+                SortKey(_last_test_rank(), SMALLINT_KEY, nullable=True),
+                by_name._replace(descending=False),
+            ),
+            descending=False,
+        ),
+    }
+    return sorted_page(
+        session,
+        query,
+        kind=kind,
+        sort=sort,
+        field=fields[sort.field],
+        row_id=Connection.id,
+        limit=limit,
+        cursor=cursor,
+    )
 
 
 def last_tests(
@@ -1044,7 +1158,14 @@ class ConnectionService:
         )
 
     def list(
-        self, p: PrincipalRef, environment: str, *, limit: int = 100, cursor: str | None = None
+        self,
+        p: PrincipalRef,
+        environment: str,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[ConnectionView]:
         """List an environment's connections, newest first, one page at a time.
 
@@ -1057,13 +1178,19 @@ class ConnectionService:
         limit
             Most connections returned.
         cursor
-            The `next_cursor` of the previous page.
+            The `next_cursor` of the previous page, sent with the same sort.
+        sort
+            What the list is sorted by: ``created`` (the default), ``name`` (in any letter case)
+            or ``status``, the newest test: failed first, then open, then passed, never tested
+            last; one state by name.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
         Page of ConnectionView
-            The connections by creation time, newest first, equal times by id, and the cursor
-            of the next page.
+            The connections by creation time, newest first, equal times by id (or in the sort
+            asked for), and the cursor of the next page.
 
         Raises
         ------
@@ -1073,18 +1200,18 @@ class ConnectionService:
         NotFoundError
             If the environment does not exist.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for this list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for this list in this sort.
         """
         _refuse_task(p)
+        chosen = parse_sort(sort, order, CONNECTION_SORTS, "created")
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         env = self._environment(environment)
-        page = newest_first(
+        page = _connection_page(
             self._session,
             select(Connection).where(Connection.environment_id == env.id),
             kind="connections",
-            at=Connection.created_at,
-            row_id=Connection.id,
-            at_of=lambda row: row.created_at,
+            sort=chosen,
             limit=limit,
             cursor=cursor,
         )
@@ -1107,6 +1234,8 @@ class ConnectionService:
         environment: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[ConnectionView]:
         """List the connections of every environment the caller may read, one page at a time.
 
@@ -1126,7 +1255,11 @@ class ConnectionService:
         limit
             Most connections returned.
         cursor
-            The `next_cursor` of the previous page.
+            The `next_cursor` of the previous page, sent with the same sort.
+        sort
+            The field the list is sorted by, as `list` names them.
+        order
+            ``asc`` or ``desc``, as `list` takes it.
 
         Returns
         -------
@@ -1141,19 +1274,19 @@ class ConnectionService:
         NotFoundError
             With `environment` only, if it does not exist.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for this list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for this list in this sort.
         """
         _refuse_task(p)
         if environment is not None:
-            return self.list(p, environment, limit=limit, cursor=cursor)
+            return self.list(p, environment, limit=limit, cursor=cursor, sort=sort, order=order)
+        chosen = parse_sort(sort, order, CONNECTION_SORTS, "created")
         readable = self._readable_environments(p)
-        page = newest_first(
+        page = _connection_page(
             self._session,
             select(Connection).where(Connection.environment_id.in_(builtins.list(readable))),
             kind="all-connections",
-            at=Connection.created_at,
-            row_id=Connection.id,
-            at_of=lambda row: row.created_at,
+            sort=chosen,
             limit=limit,
             cursor=cursor,
         )

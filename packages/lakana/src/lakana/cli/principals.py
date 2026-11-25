@@ -10,7 +10,7 @@ import typer
 
 from lakana.cli import _output
 from lakana.cli._override import OVERRIDE_MANAGED, OVERRIDE_REASON, override_reason
-from lakana.cli._paging import CURSOR, LIMIT, SEARCH, more_results
+from lakana.cli._paging import CURSOR, LIMIT, ORDER, SEARCH, more_results, sort_option
 from lakana.cli._state import confirm, state_of
 
 principal_app = typer.Typer(help="Manage principals.", no_args_is_help=True)
@@ -65,9 +65,17 @@ def create(
 
 @principal_app.command("list")
 def list_principals(
-    ctx: typer.Context, search: SEARCH = None, limit: LIMIT = None, cursor: CURSOR = None
+    ctx: typer.Context,
+    search: SEARCH = None,
+    limit: LIMIT = None,
+    cursor: CURSOR = None,
+    sort: Annotated[
+        str | None,
+        sort_option("created (the default, newest first), name or status (the active first)"),
+    ] = None,
+    order: ORDER = None,
 ) -> None:
-    """List principals, newest first.
+    """List principals, newest first, or sorted by --sort and --order.
 
     `--search TEXT` lists those whose name contains TEXT, in any letter case. A long list
     prints a "More results" line with the command that shows the next page.
@@ -82,15 +90,21 @@ def list_principals(
         Most principals returned (1 to 200); the server's default when omitted.
     cursor
         The cursor of the page to show.
+    sort
+        The field the principals are sorted by.
+    order
+        ``asc`` or ``desc``.
     """
     state = state_of(ctx)
-    page = state.client().principals.list_page(search=search, limit=limit, cursor=cursor)
+    page = state.client().principals.list_page(
+        search=search, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     # The link to the identity provider is a record of its own: `principal get` shows it.
     _output.emit(state, page.items, columns=("name", "type", "is_active", "held_admin"))
     more_results(
         state,
         ["lakana", "principal", "list"],
-        {"--search": search, "--limit": limit},
+        {"--search": search, "--limit": limit, "--sort": sort, "--order": order},
         page.next_cursor,
     )
 

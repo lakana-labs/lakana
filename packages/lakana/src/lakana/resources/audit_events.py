@@ -61,6 +61,8 @@ class AuditEvents:
         limit: int = 100,
         cursor: str | None = None,
         kind: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> AuditEventPage:
         """List one page of audit events, newest first, optionally filtered.
 
@@ -89,6 +91,11 @@ class AuditEvents:
         kind
             Only return events of this kind, if given: ``connection`` is every
             ``CONNECTION_*`` type. With `event_type`, the type must be of the kind.
+        sort
+            What the log is sorted by: ``occurred``, the only field.
+        order
+            ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order
+            lists the same events.
 
         Returns
         -------
@@ -100,8 +107,8 @@ class AuditEvents:
         lakana.errors.PermissionDenied
             If the caller may not read the audit log.
         lakana.errors.ValidationError
-            If `cursor` is not one the server issued, `kind` is not a kind, or `event_type`
-            is not of `kind`.
+            If `cursor` is not one the server issued in this order, `kind` is not a kind,
+            `event_type` is not of `kind`, or `sort` or `order` is unknown.
         """
         response = self._transport.request(
             ROUTES["audit_events.list"],
@@ -114,6 +121,8 @@ class AuditEvents:
                 limit=limit,
                 cursor=cursor,
                 kind=kind,
+                sort=sort,
+                order=order,
             ),
         )
         body = response.json()
@@ -132,6 +141,8 @@ class AuditEvents:
         until: datetime | None = None,
         page_size: int = 100,
         kind: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Iterator[AuditEvent]:
         """Yield every matching audit event, newest first, fetching pages as needed.
 
@@ -152,6 +163,11 @@ class AuditEvents:
         kind
             Only yield events of this kind, if given: ``connection`` is every
             ``CONNECTION_*`` type.
+        sort
+            What the log is sorted by: ``occurred``, the only field.
+        order
+            ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order
+            lists the same events.
 
         Yields
         ------
@@ -174,6 +190,8 @@ class AuditEvents:
                 limit=page_size,
                 cursor=cursor,
                 kind=kind,
+                sort=sort,
+                order=order,
             )
             yield from page.items
             if page.next_cursor is None:

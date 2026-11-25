@@ -254,3 +254,95 @@ def test_environment_names_compare_by_code_point_on_each_database(url: str, coll
         engine.dispose()
     assert compiled.endswith('COLLATE "C"') is collated
     assert compiled.startswith("environments.name")
+
+
+def _sorted_walk(
+    session: Session,
+    caller: PrincipalRef,
+    environment: str | None,
+    limit: int,
+    sort: str,
+    order: str,
+) -> list | str:
+    """Read every page of a saved-query list in a sort.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    caller
+        The caller.
+    environment
+        The list's environment, or `None` for every one.
+    limit
+        The page size.
+    sort
+        The field.
+    order
+        The direction.
+
+    Returns
+    -------
+    list or str
+        The views in the order the pages gave them, or the name of the error the list raised.
+    """
+    service = SavedQueryService(session, GrantAuthorization(session))
+    views: list = []
+    cursor: str | None = None
+    while True:
+        try:
+            page = service.list_page(
+                caller, environment=environment, limit=limit, cursor=cursor, sort=sort, order=order
+            )
+        except Exception as exc:
+            return type(exc).__name__
+        assert all(v.sql is None for v in page.items)
+        views += page.items
+        cursor = page.next_cursor
+        if cursor is None:
+            return views
+
+
+@pytest.mark.parametrize(
+    ("sort", "order"), [("updated", "desc"), ("created", "asc"), ("name", "desc")]
+)
+def test_a_sorted_list_shows_each_caller_exactly_what_the_list_by_name_shows(
+    session: Session, tmp_path: Path, sort: str, order: str
+) -> None:
+    """A sort is an order, never a way to see more or less: the same items, once each."""
+    callers = build_world(session, tmp_path)
+    for caller in callers:
+        for environment in LISTS:
+            expected = new_pages(session, caller, environment, 200)
+            for limit in (1, 3):
+                got = _sorted_walk(session, caller.ref, environment, limit, sort, order)
+                if isinstance(expected, str):
+                    assert got == expected, (caller.label, environment)
+                    continue
+                assert not isinstance(got, str)
+                ids = [v.id for v in got]
+                assert len(set(ids)) == len(ids)
+                assert set(ids) == {item[0] for page, _ in expected for item in page}
+                if sort == "name":
+                    keys = [v.name.casefold() for v in got]
+                else:
+                    keys = [getattr(v, f"{sort}_at") for v in got]
+                assert keys == sorted(keys, reverse=order == "desc"), (caller.label, environment)
+
+
+def test_a_sorted_lists_cursor_is_refused_by_the_list_by_name(
+    session: Session, tmp_path: Path
+) -> None:
+    callers = build_world(session, tmp_path)
+    owner = next(c for c in callers if c.label == "administrator, owner")
+    service = SavedQueryService(session, GrantAuthorization(session))
+    page = service.list_page(owner.ref, limit=1, sort="updated")
+    assert page.next_cursor is not None
+    with pytest.raises(ValidationError, match="in its default order"):
+        service.list_page(owner.ref, cursor=page.next_cursor)
+    by_name = service.list_page(owner.ref, limit=1)
+    assert by_name.next_cursor is not None
+    with pytest.raises(ValidationError, match="sorted by `updated:desc`"):
+        service.list_page(owner.ref, cursor=by_name.next_cursor, sort="updated")
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, name, updated"):
+        service.list_page(owner.ref, sort="owner")

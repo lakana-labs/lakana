@@ -33,6 +33,14 @@ describe("connections api", () => {
     expect(ENVIRONMENTS_ROUTE).toContain("environments");
   });
 
+  it("sends a sort", async () => {
+    const server = fakeServer(connectionRoutes([aConnection()], ENVIRONMENTS));
+
+    await listConnections(null, null, 100, {}, { sort: "status", order: "asc" });
+
+    expect(server.sent[0]?.path).toBe("/api/v1/connections?limit=100&sort=status&order=asc");
+  });
+
   it("encodes the environment and the name", async () => {
     const server = fakeServer({
       "GET /api/v1/environments/a b/connections/crm/db": { status: 200, body: aConnection() },

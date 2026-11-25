@@ -451,3 +451,156 @@ def test_all_runs_with_an_unknown_repository_is_not_found(
     _three_environments(session)
     with pytest.raises(NotFoundError):
         RunService(session, _grants(session)).list_all_runs_page(admin, repository="ghost")
+
+
+def _walk(
+    service: RunService, principal: PrincipalRef, sort: str, order: str | None = None
+) -> list[uuid.UUID]:
+    """Read every page of the `dev` runs, one run a page, in a sort.
+
+    Parameters
+    ----------
+    service
+        The run service.
+    principal
+        The caller.
+    sort
+        The field.
+    order
+        The direction; the field's own without it.
+
+    Returns
+    -------
+    list of uuid.UUID
+        The ids, in the order the pages gave them.
+    """
+    seen: list[uuid.UUID] = []
+    cursor = None
+    while True:
+        page, cursor = service.list_runs_page(
+            principal, "dev", limit=1, cursor=cursor, sort=sort, order=order
+        )
+        seen += [v.id for v in page]
+        if cursor is None:
+            return seen
+
+
+def test_runs_sort_by_creation_oldest_first_across_pages(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    runs = [_make_run(session, principal, minutes=m) for m in (3, 1, 2, 2)]
+    tied = sorted((runs[2].id, runs[3].id))
+    expected = [runs[1].id, *tied, runs[0].id]
+    service = _service(session)
+    assert _walk(service, principal, sort="created", order="asc") == expected
+    whole, _ = service.list_runs_page(principal, "dev", sort="created", order="asc")
+    assert [v.id for v in whole] == expected
+
+
+def test_runs_sort_by_state_newest_first_within_a_state(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    ok_old = _make_run(session, principal, minutes=1)
+    bad = _make_run(session, principal, minutes=2, status=RunStatus.FAILED)
+    ok_new = _make_run(session, principal, minutes=3)
+    gone = _make_run(session, principal, minutes=4, status=RunStatus.CANCELLED)
+    service = _service(session)
+    assert _walk(service, principal, sort="status") == [gone.id, bad.id, ok_new.id, ok_old.id]
+    assert _walk(service, principal, sort="status", order="desc") == [
+        ok_new.id,
+        ok_old.id,
+        bad.id,
+        gone.id,
+    ]
+
+
+def test_runs_sort_by_name_is_the_job_else_the_repository_in_any_case(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    beta = _make_run(session, principal, minutes=1, job="Beta")
+    adhoc = _make_run(session, principal, minutes=2)
+    alpha = _make_run(session, principal, minutes=3, job="alpha")
+    zeta = _make_run(session, principal, minutes=4, job="zeta")
+    service = _service(session)
+    # The run of no job is named after its repository, `analytics`.
+    assert _walk(service, principal, sort="name") == [alpha.id, adhoc.id, beta.id, zeta.id]
+    assert _walk(service, principal, sort="name", order="desc") == [
+        zeta.id,
+        beta.id,
+        adhoc.id,
+        alpha.id,
+    ]
+
+
+def test_runs_sort_keeps_the_filters(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    _make_run(session, principal, minutes=1, status=RunStatus.FAILED)
+    first = _make_run(session, principal, minutes=2)
+    second = _make_run(session, principal, minutes=3)
+    page, cursor = _service(session).list_runs_page(
+        principal, "dev", status=["succeeded"], sort="created", order="asc"
+    )
+    assert ([v.id for v in page], cursor) == ([first.id, second.id], None)
+
+
+def test_an_unknown_sort_or_order_is_refused_with_the_choices(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    service = _service(session)
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, name, status"):
+        service.list_runs_page(principal, "dev", sort="duration")
+    with pytest.raises(ValidationError, match="`order` must be asc or desc; got 'up'"):
+        service.list_runs_page(principal, "dev", sort="name", order="up")
+
+
+def test_a_cursor_of_another_sort_is_refused_not_misread(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    for m in (1, 2, 3):
+        _make_run(session, principal, minutes=m, job=f"job{m}")
+    service = _service(session)
+    _, by_name = service.list_runs_page(principal, "dev", limit=1, sort="name")
+    _, newest = service.list_runs_page(principal, "dev", limit=1)
+    _, oldest = service.list_runs_page(principal, "dev", limit=1, sort="created", order="asc")
+    assert by_name is not None and newest is not None and oldest is not None
+    with pytest.raises(
+        ValidationError, match="sorted by `name:desc`: it came from the list sorted by `name:asc`"
+    ):
+        service.list_runs_page(principal, "dev", sort="name", order="desc", cursor=by_name)
+    with pytest.raises(ValidationError, match="in its default order: it came from the list sorted"):
+        service.list_runs_page(principal, "dev", cursor=oldest)
+    with pytest.raises(
+        ValidationError, match="sorted by `status:asc`: it came from the list in its default order"
+    ):
+        service.list_runs_page(principal, "dev", sort="status", cursor=newest)
+
+
+def test_the_default_sort_named_is_the_default_list(
+    session: Session, version: JobVersion, principal: PrincipalRef
+) -> None:
+    for m in (1, 2, 3):
+        _make_run(session, principal, minutes=m)
+    service = _service(session)
+    plain = service.list_runs_page(principal, "dev", limit=2)
+    named = service.list_runs_page(principal, "dev", limit=2, sort="created", order="desc")
+    assert ([v.id for v in plain[0]], plain[1]) == ([v.id for v in named[0]], named[1])
+
+
+def test_all_runs_sort_across_environments(session: Session, admin: PrincipalRef) -> None:
+    runs = _three_environments(session)
+    service = RunService(session, _grants(session))
+    seen: list[uuid.UUID] = []
+    cursor = None
+    while True:
+        page, cursor = service.list_all_runs_page(
+            admin, limit=2, cursor=cursor, sort="created", order="asc"
+        )
+        seen += [v.id for v in page]
+        if cursor is None:
+            break
+    assert seen == [r.id for r in runs]
+    _, by_name = service.list_all_runs_page(admin, limit=1, sort="name")
+    assert by_name is not None
+    with pytest.raises(ValidationError, match="came from the `all-runs` list"):
+        service.list_runs_page(admin, "dev", sort="name", cursor=by_name)

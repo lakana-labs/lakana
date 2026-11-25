@@ -11,7 +11,7 @@ import typer
 
 from lakana._models import CheckResult, FailedRun, Notification, Run, RunTask, WorkerInfo
 from lakana.cli import _output
-from lakana.cli._paging import more_results, parse_since
+from lakana.cli._paging import ORDER, more_results, parse_since, sort_option
 from lakana.cli._state import CliError, CliState, resolve_environment, state_of
 from lakana.cli.artifacts import human_size
 from lakana.cli.checks import check_shown, withheld_line
@@ -833,8 +833,16 @@ def list_runs(
         str | None,
         typer.Option("--cursor", help="Continue after the page that printed this cursor."),
     ] = None,
+    sort: Annotated[
+        str | None,
+        sort_option(
+            "created (the default, newest first), name (the job's, else the repository's) or "
+            "status; runs of one name or state come newest first"
+        ),
+    ] = None,
+    order: ORDER = None,
 ) -> None:
-    """List runs, newest first.
+    """List runs, newest first, or sorted by --sort and --order.
 
     --all-environments lists the runs of every environment you may read at once. A long list
     prints a "More results" line with the command that shows the next page.
@@ -861,6 +869,10 @@ def list_runs(
         Most runs returned (1 to 200); the server's default when omitted.
     cursor
         The cursor of the page to show.
+    sort
+        The field the runs are sorted by.
+    order
+        ``asc`` or ``desc``.
 
     Raises
     ------
@@ -882,6 +894,8 @@ def list_runs(
             since=since_at,
             limit=limit,
             cursor=cursor,
+            sort=sort,
+            order=order,
         )
     else:
         page = runs.list_page(
@@ -893,6 +907,8 @@ def list_runs(
             since=since_at,
             limit=limit,
             cursor=cursor,
+            sort=sort,
+            order=order,
         )
     columns = (
         [_RUN_COLUMNS[0], "environment", *_RUN_COLUMNS[1:]] if all_environments else _RUN_COLUMNS
@@ -910,6 +926,8 @@ def list_runs(
             "--job": job,
             "--since": since,
             "--limit": limit,
+            "--sort": sort,
+            "--order": order,
         },
         page.next_cursor,
     )

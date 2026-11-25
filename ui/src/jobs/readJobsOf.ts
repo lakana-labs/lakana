@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { type JobOut, listJobs } from "../api/jobs";
+import type { ListSortChoice } from "../api/sorting";
 
 /** The most environments whose jobs are read at once, so many environments do not flood. */
 export const JOBS_READS_IN_FLIGHT = 4;
@@ -41,11 +42,13 @@ function within<T>(read: Promise<T>, ms: number | undefined): Promise<T> {
  *
  * @param names - The environments.
  * @param timeoutMs - How long one environment's read may take; undefined for no limit.
+ * @param sort - The sort each environment's jobs are read in; null for repository, then name.
  * @returns One answer per environment, in order.
  */
 export async function readJobsOf(
   names: readonly string[],
   timeoutMs?: number,
+  sort: ListSortChoice | null = null,
 ): Promise<JobsAnswer[]> {
   const answers: JobsAnswer[] = [];
   let next = 0;
@@ -54,7 +57,9 @@ export async function readJobsOf(
       const index = next;
       next += 1;
       try {
-        answers[index] = { jobs: await within(listJobs(names[index] as string), timeoutMs) };
+        answers[index] = {
+          jobs: await within(listJobs(names[index] as string, undefined, sort), timeoutMs),
+        };
       } catch (failure: unknown) {
         answers[index] = { failure };
       }

@@ -35,7 +35,7 @@ Returns: `Connection`. The created connection.
 
 ### `client.connections.list`
 
-Signature: `client.connections.list(environment: str, *, limit: int | None = None, cursor: str | None = None) -> ConnectionPage`
+Signature: `client.connections.list(environment: str, *, limit: int | None = None, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> ConnectionPage`
 
 List one page of an environment's connections, newest first.
 
@@ -44,12 +44,14 @@ List one page of an environment's connections, newest first.
 | `environment` | `str` | required | The environment. |
 | `limit` | `int | None` | `None` | Most connections returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. |
+| `sort` | `str | None` | `None` | What the connections are sorted by: ``created`` (the default), ``name`` (in any letter case) or ``status``, the last test: failed first, then queued or running, then passed, never tested last. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 
 Returns: `ConnectionPage`. The connections, and the cursor of the next page (`None` on the last).
 
 ### `client.connections.iter`
 
-Signature: `client.connections.iter(environment: str, *, page_size: int = 100) -> Iterator[Connection]`
+Signature: `client.connections.iter(environment: str, *, page_size: int = 100, sort: str | None = None, order: str | None = None) -> Iterator[Connection]`
 
 Yield every connection of an environment, newest first, fetching pages as needed.
 
@@ -57,12 +59,14 @@ Yield every connection of an environment, newest first, fetching pages as needed
 |---|---|---|---|
 | `environment` | `str` | required | The environment. |
 | `page_size` | `int` | `100` | Connections per request (1 to 200). |
+| `sort` | `str | None` | `None` | The sort, as `list` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list` takes it. |
 
 Returns: `Iterator of Connection`. Each connection, once.
 
 ### `client.connections.list_all`
 
-Signature: `client.connections.list_all(*, environment: str | None = None, limit: int | None = None, cursor: str | None = None) -> ConnectionPage`
+Signature: `client.connections.list_all(*, environment: str | None = None, limit: int | None = None, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> ConnectionPage`
 
 List one page of the connections of every environment you may read, newest first.
 
@@ -73,6 +77,8 @@ The environments are those where you hold `READ_ENVIRONMENT`; one where you do n
 | `environment` | `str | None` | `None` | Only this environment; then a missing right or environment is refused as by `list`. |
 | `limit` | `int | None` | `None` | Most connections returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. |
+| `sort` | `str | None` | `None` | The sort, as `list` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list` takes it. |
 
 Returns: `ConnectionPage`. The connections, and the cursor of the next page (`None` on the last).
 
@@ -84,7 +90,7 @@ Returns: `ConnectionPage`. The connections, and the cursor of the next page (`No
 
 ### `client.connections.iter_all`
 
-Signature: `client.connections.iter_all(*, environment: str | None = None, page_size: int = 100) -> Iterator[Connection]`
+Signature: `client.connections.iter_all(*, environment: str | None = None, page_size: int = 100, sort: str | None = None, order: str | None = None) -> Iterator[Connection]`
 
 Yield every connection of every environment you may read, fetching pages as needed.
 
@@ -92,6 +98,8 @@ Yield every connection of every environment you may read, fetching pages as need
 |---|---|---|---|
 | `environment` | `str | None` | `None` | Only this environment. |
 | `page_size` | `int` | `100` | Connections per request (1 to 200). |
+| `sort` | `str | None` | `None` | The sort, as `list` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list` takes it. |
 
 Returns: `Iterator of Connection`. Each connection, once, in the order of `list_all`.
 

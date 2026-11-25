@@ -55,12 +55,14 @@ Usage: `lakana connection list [OPTIONS]`
 
 List the connections of an environment, newest first, with each one's last test.
 
-With --all-environments, the connections of every environment you may read, newest first over all of them.
+With --all-environments, the connections of every environment you may read, newest first over all of them. --sort and --order sort them otherwise.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `--env` | text | none | Environment (default: the profile's). |
 | `--all-environments` | flag | off | The connections of every environment you may read, with an environment column. |
+| `--sort` | text | none | What to sort by: created (the default, newest first), name or status (the last test: failed first, then queued or running, then passed, never tested last). |
+| `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ## `lakana connection show`
 

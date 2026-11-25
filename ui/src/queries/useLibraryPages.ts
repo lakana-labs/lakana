@@ -17,15 +17,20 @@ import { type CursorPages, useCursorPages } from "../catalog/views/useCursorPage
  * @param filter - The environment the list is filtered by, or null for all of them.
  * @param reloadKey - A number that changes when the list must be read again.
  * @param load - Reads a page from a cursor; null for the first.
+ * @param order - The order the list is read in; a new one reads it again, the rows shown until
+ *   the new ones arrive.
+ * @param idOf - A row's identity, so a row a later page repeats is shown once.
  * @returns The rows, the state of the read and the two ways to read on.
  */
 export function useLibraryPages<T>(
   filter: string | null,
   reloadKey: number,
   load: (cursor: string | null) => Promise<CursorPage<T>>,
+  order = "",
+  idOf?: (item: T) => string,
 ): CursorPages<T> {
   // No environment's name is empty, so "" stands for all of them.
-  const pages = useCursorPages(filter ?? "", load);
+  const pages = useCursorPages(filter ?? "", load, order, idOf);
   const { reload } = pages;
   const seen = useRef(reloadKey);
   useEffect(() => {

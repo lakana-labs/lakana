@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from sqlalchemy import Select, and_, delete, func, insert, or_, select, update
+from sqlalchemy import Select, String, and_, delete, func, insert, or_, select, type_coerce, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -96,9 +96,14 @@ from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.models.table import table_kind
 from lakana_core.pagination import (
     LIST_LIMIT_DEFAULT,
+    ListSort,
+    SortField,
+    SortKey,
     decode_cursor,
     encode_cursor,
     page_in_order,
+    parse_sort,
+    sorted_page,
 )
 from lakana_core.projects.asset_model import KEY_NONE, ResolvedReference, key_columns
 from lakana_core.projects.checks import ParsedCheck, check_sql_references, may_read_every
@@ -1010,6 +1015,23 @@ class DeploymentMoved(ConflictError):
     A `ConflictError`, so the API answers 409 as it did; a caller that can read the pointer
     again catches this one and does.
     """
+
+
+DEPLOY_SORTS: dict[str, bool] = {"created": True, "status": False}
+"""The fields the deploys lists sort by, each with whether it runs from the largest down by
+default: the newest first, states from A."""
+
+_DEPLOY_STATUS_FIELD = SortField(
+    (
+        SortKey(type_coerce(DeployRun.status, String), str),
+        SortKey(DeployRun.created_at, datetime, descending=True),
+    ),
+    descending=False,
+)
+"""Deploys by their stored state, those of one state the newest first."""
+
+_DEPLOY_CREATED_FIELD = SortField((SortKey(DeployRun.created_at, datetime),), descending=True)
+"""Deploys by when they were asked for."""
 
 
 class DeployService:
@@ -2351,11 +2373,13 @@ class DeployService:
         repository: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> tuple[list[DeployRunView], str | None]:
         """List an environment's deploy history, newest first, one page at a time.
 
-        Runs are ordered by creation time, then id, newest first; a page continues strictly
-        after the last run of the previous one.
+        Runs are ordered by creation time, then id, newest first, unless `sort` names another
+        order; a page continues strictly after the last run of the previous one.
 
         Parameters
         ----------
@@ -2368,7 +2392,13 @@ class DeployService:
         limit
             Most runs returned.
         cursor
-            The `next_cursor` of the previous page. Send the same `repository` with every page.
+            The `next_cursor` of the previous page. Send the same `repository` and sort with
+            every page.
+        sort
+            What the list is sorted by: ``created`` (the default) or ``status``, whose deploys
+            of one state come newest first.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created`` and ``asc`` for ``status``.
 
         Returns
         -------
@@ -2382,11 +2412,13 @@ class DeployService:
         NotFoundError
             If the environment or the repository does not exist.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for the deploys list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for the deploys list in this sort.
         """
+        chosen = parse_sort(sort, order, DEPLOY_SORTS, "created")
         env = self._authorize_read(p, environment)
         page, next_cursor = self._deploys_page(
-            "deploys", [env.id], repository=repository, limit=limit, cursor=cursor
+            "deploys", [env.id], repository=repository, limit=limit, cursor=cursor, sort=chosen
         )
         reads = _WarningReads()
         names = self._names_of([run for run, _ in page])
@@ -2400,6 +2432,8 @@ class DeployService:
         repository: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> tuple[list[DeployRunView], str | None]:
         """List the deploys of every environment the caller may read, one page at a time.
 
@@ -2423,7 +2457,11 @@ class DeployService:
             Page size, at least 1.
         cursor
             What the previous page returned as its `next_cursor`, sent with the same
-            `repository`.
+            `repository` and sort.
+        sort
+            The field the list is sorted by, as `history_page` names them.
+        order
+            ``asc`` or ``desc``, as `history_page` takes it.
 
         Returns
         -------
@@ -2437,15 +2475,28 @@ class DeployService:
         NotFoundError
             If `environment` or the repository does not exist.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for this list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for this list in this sort.
         """
         if environment is not None:
             return self.history_page(
-                p, environment, repository=repository, limit=limit, cursor=cursor
+                p,
+                environment,
+                repository=repository,
+                limit=limit,
+                cursor=cursor,
+                sort=sort,
+                order=order,
             )
+        chosen = parse_sort(sort, order, DEPLOY_SORTS, "created")
         names = run_environments(self._session, self._authz, p)
         page, next_cursor = self._deploys_page(
-            "all-deploys", list(names), repository=repository, limit=limit, cursor=cursor
+            "all-deploys",
+            list(names),
+            repository=repository,
+            limit=limit,
+            cursor=cursor,
+            sort=chosen,
         )
         reads = _WarningReads()
         names = self._names_of([run for run, _ in page])
@@ -2459,8 +2510,9 @@ class DeployService:
         repository: str | None,
         limit: int,
         cursor: str | None,
+        sort: ListSort,
     ) -> tuple[list[Any], str | None]:
-        """Read one page of the deploy runs of some environments, newest first, in one statement.
+        """Read one page of the deploy runs of some environments, in one statement.
 
         Parameters
         ----------
@@ -2474,6 +2526,9 @@ class DeployService:
             Most runs returned.
         cursor
             The `next_cursor` of the previous page.
+        sort
+            The sort; the newest first (``created:desc``) keeps the cursor of a time and an id,
+            any other is read by `sorted_page`.
 
         Returns
         -------
@@ -2486,14 +2541,28 @@ class DeployService:
         NotFoundError
             If the repository does not exist.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for `kind`.
+            If `limit` is below 1 or `cursor` is not one this server issued for `kind` in this
+            sort.
         """
         if limit < 1:
             raise ValidationError(f"limit must be at least 1, got {limit}.")
-        position = None if cursor is None else decode_cursor(kind, cursor)
         query = self._runs_with_submitter().where(DeployRun.environment_id.in_(environment_ids))
         if repository is not None:
             query = query.where(DeployRun.repository_id == self._repository(repository).id)
+        if sort != ("created", True):
+            field = _DEPLOY_STATUS_FIELD if sort.field == "status" else _DEPLOY_CREATED_FIELD
+            found = sorted_page(
+                self._session,
+                query,
+                kind=kind,
+                sort=sort,
+                field=field,
+                row_id=DeployRun.id,
+                limit=limit,
+                cursor=cursor,
+            )
+            return found.items, found.next_cursor
+        position = None if cursor is None else decode_cursor(kind, cursor)
         if position is not None:
             query = query.where(
                 or_(

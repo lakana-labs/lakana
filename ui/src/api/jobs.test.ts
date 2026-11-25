@@ -261,6 +261,28 @@ describe("the job calls", () => {
 });
 
 describe("the Jobs list's calls", () => {
+  it("sends a sort to every list of the Jobs area", async () => {
+    const server = fakeServer({
+      "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
+      "GET /api/v1/environments/prod/runs": { status: 200, body: [] },
+      "GET /api/v1/environments/prod/deploys": { status: 200, body: [] },
+      "GET /api/v1/runs": { status: 200, body: { items: [], next_cursor: null } },
+    });
+    const byState = { sort: "status", order: "asc" } as const;
+
+    await listJobs("prod", undefined, { sort: "last_run", order: "desc" });
+    await listJobRuns("prod", "analytics", "nightly", { ...NO_FILTER, sort: byState }, null);
+    await listDeploys("prod", null, null, byState);
+    await listAllRuns({ ...ALL_RUNS, sort: { sort: "name", order: "desc" } }, null);
+
+    expect(server.sent.map((request) => request.path)).toEqual([
+      "/api/v1/environments/prod/jobs?sort=last_run&order=desc",
+      "/api/v1/environments/prod/runs?job=nightly&repository=analytics&sort=status&order=asc&limit=50",
+      "/api/v1/environments/prod/deploys?sort=status&order=asc&limit=50",
+      "/api/v1/runs?sort=name&order=desc&limit=50",
+    ]);
+  });
+
   it("lists an environments jobs of one repository", async () => {
     const server = fakeServer({
       "GET /api/v1/environments/prod/jobs": { status: 200, body: [aJob()] },

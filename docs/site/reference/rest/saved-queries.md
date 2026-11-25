@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List the saved queries of an environment you see
 
-You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. The items have no `sql` key: read a saved query (`GET .../saved-queries/{saved_query_id}`) for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.
+You see your own saved queries (also if you may no longer query the environment), the shared ones (`visibility` `everyone`) if you hold `SUBMIT_QUERY` on it, and, as an instance administrator with a personal token or a session, every one. The items have no `sql` key: read a saved query (`GET .../saved-queries/{saved_query_id}`) for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The order is the name in any letter case, then the id, unless `sort` and `order` ask for another; every order shows the same saved queries. Answers 403 if you may not query the environment, own no saved query there and are not an administrator, 404 if it does not exist, and 403 for a task's token. Send `next_cursor` back as `cursor` with the same sort for the next page.
 
 Parameters:
 
@@ -18,6 +18,8 @@ Parameters:
 | `env` | path | yes | text | Environment name. |
 | `limit` | query | no | whole number | Most items returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by: `name` (the default, in any letter case), `updated` or `created`. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `asc` for `name`, `desc` for `updated` and `created` (the latest first). |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -201,7 +203,7 @@ Answers:
 
 List the saved queries of every environment you see
 
-Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. The items have no `sql` key: read a saved query in its environment for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.
+Without `environment`, those of every live environment, one cursor across all of them: your own, the shared ones of the environments where you hold `SUBMIT_QUERY`, and, as an instance administrator with a personal token or a session, every one. An environment where you see nothing contributes nothing, so this is never a 403 or a 404, except for a task's token. The items have no `sql` key: read a saved query in its environment for its SQL. A page that shows someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`, one event per environment shown); if that fails the answer is 503 and lists nothing. With `environment` it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its 403 and 404. Each item names its `environment`. The order is the name in any letter case, then the environment, then the id, unless `sort` and `order` ask for another. Send `next_cursor` back as `cursor` with the same sort for the next page; a cursor of the list of one environment or of another order is refused with 422 here.
 
 Parameters:
 
@@ -210,6 +212,8 @@ Parameters:
 | `environment` | query | no | text or null | Only this environment. |
 | `limit` | query | no | whole number | Most items returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by, with the fields of the list of one environment. |
+| `order` | query | no | text or null | `asc` or `desc`, each field's way by default, as on the list of one environment. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

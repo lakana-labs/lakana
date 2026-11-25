@@ -26,7 +26,7 @@ Create principal NAME.
 
 Usage: `lakana principal list [OPTIONS]`
 
-List principals, newest first.
+List principals, newest first, or sorted by --sort and --order.
 
 `--search TEXT` lists those whose name contains TEXT, in any letter case. A long list prints a "More results" line with the command that shows the next page.
 
@@ -35,6 +35,8 @@ List principals, newest first.
 | `--search` | text | none | Only names that contain this text, in any letter case. |
 | `--limit` | whole number, 1 to 200 | none | Most rows to list (default 100). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
+| `--sort` | text | none | What to sort by: created (the default, newest first), name or status (the active first). |
+| `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ## `lakana principal get`
 

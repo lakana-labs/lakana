@@ -18,6 +18,7 @@ from lakana_core.catalog.saved_queries import (
     SavedQueryService,
     SavedQueryView,
 )
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam
 from lakana_server.api.platform.schemas import (
     SavedQueryIn,
     SavedQueryOut,
@@ -83,7 +84,9 @@ def _out(view: SavedQueryView) -> SavedQueryOut:
 def list_saved_queries(
     env: str,
     limit: int = Query(default=SAVED_QUERY_LIST_DEFAULT, ge=1, le=SAVED_QUERY_LIST_MAX),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: SavedQueryService = Depends(get_saved_query_service),
 ) -> SavedQueryPageOut:
@@ -95,9 +98,11 @@ def list_saved_queries(
     read a saved query (`GET .../saved-queries/{saved_query_id}`) for its SQL. A page that shows
     someone else's private query is recorded in the audit log (`ACTIVITY_VIEWED`); if that fails
     the answer is 503 and lists nothing. Each item's `actions` says what you may do with it. The
-    order is the name in any letter case, then the id. Answers 403 if you may not query the
+    order is the name in any letter case, then the id, unless `sort` and `order` ask for
+    another; every order shows the same saved queries. Answers 403 if you may not query the
     environment, own no saved query there and are not an administrator, 404 if it does not
-    exist, and 403 for a task's token. Send `next_cursor` back as `cursor` for the next page.
+    exist, and 403 for a task's token. Send `next_cursor` back as `cursor` with the same sort
+    for the next page.
 
     Parameters
     ----------
@@ -107,6 +112,12 @@ def list_saved_queries(
         Most items returned (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by: `name` (the default, in any letter case), `updated` or
+        `created`.
+    order
+        `asc` or `desc`; by default `asc` for `name`, `desc` for `updated` and `created` (the
+        latest first).
     principal
         The authenticated caller.
     service
@@ -125,12 +136,15 @@ def list_saved_queries(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the environment does not exist.
     lakana_core.errors.ValidationError
-        Mapped to 422, for a malformed cursor or a cursor of the other list.
+        Mapped to 422, for an unknown `sort` or `order`, a malformed cursor or a cursor of the
+        other list or another order.
     lakana_core.errors.AuditUnavailableError
         Mapped to 503, if the page shows someone else's private query and that could not be
         recorded in the audit log.
     """
-    page = service.list_page(principal, environment=env, limit=limit, cursor=cursor)
+    page = service.list_page(
+        principal, environment=env, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     return SavedQueryPageOut(items=[_out(v) for v in page.items], next_cursor=page.next_cursor)
 
 
@@ -368,7 +382,9 @@ def delete_saved_query(
 def list_all_saved_queries(
     environment: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=SAVED_QUERY_LIST_DEFAULT, ge=1, le=SAVED_QUERY_LIST_MAX),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: SavedQueryService = Depends(get_saved_query_service),
 ) -> SavedQueryPageOut:
@@ -384,8 +400,9 @@ def list_all_saved_queries(
     it is the list of that environment (`GET /api/v1/environments/{env}/saved-queries`), with its
     403 and 404.
     Each item names its `environment`. The order is the name in any letter case, then the
-    environment, then the id. Send `next_cursor` back as `cursor` for the next page; a cursor of
-    the list of one environment is refused with 422 here.
+    environment, then the id, unless `sort` and `order` ask for another. Send `next_cursor`
+    back as `cursor` with the same sort for the next page; a cursor of the list of one
+    environment or of another order is refused with 422 here.
 
     Parameters
     ----------
@@ -395,6 +412,10 @@ def list_all_saved_queries(
         Most items returned (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by, with the fields of the list of one environment.
+    order
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service
@@ -413,10 +434,13 @@ def list_all_saved_queries(
     lakana_core.errors.NotFoundError
         Mapped to 404, if the named environment does not exist.
     lakana_core.errors.ValidationError
-        Mapped to 422, for a malformed cursor or a cursor of the other list.
+        Mapped to 422, for an unknown `sort` or `order`, or a cursor that is malformed, came
+        from the list of one environment or was read in another order.
     lakana_core.errors.AuditUnavailableError
         Mapped to 503, if the page shows someone else's private query and that could not be
         recorded in the audit log.
     """
-    page = service.list_page(principal, environment=environment, limit=limit, cursor=cursor)
+    page = service.list_page(
+        principal, environment=environment, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     return SavedQueryPageOut(items=[_out(v) for v in page.items], next_cursor=page.next_cursor)

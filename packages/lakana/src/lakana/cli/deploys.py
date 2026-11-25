@@ -10,7 +10,7 @@ import typer
 
 from lakana._models import Deploy, DeployJobStart, ProjectVersion
 from lakana.cli import _output
-from lakana.cli._paging import CURSOR, LIMIT, more_results
+from lakana.cli._paging import CURSOR, LIMIT, ORDER, more_results, sort_option
 from lakana.cli._project import find_project_root, is_dirty, project_repo
 from lakana.cli._state import CliError, CliState, confirm, resolve_environment, state_of
 from lakana.cli._waiting import WaitLine, clock
@@ -450,8 +450,15 @@ def list_deploys(
         str | None,
         typer.Option("--cursor", help="Continue after the page that printed this cursor."),
     ] = None,
+    sort: Annotated[
+        str | None,
+        sort_option(
+            "created (the default, newest first) or status; deploys of one state come newest first"
+        ),
+    ] = None,
+    order: ORDER = None,
 ) -> None:
-    """List deploy history, newest first.
+    """List deploy history, newest first, or sorted by --sort and --order.
 
     --all-environments lists the deploys of every environment you may read at once. A long
     list prints a "More results" line with the command that shows the next page.
@@ -470,6 +477,10 @@ def list_deploys(
         Most deploys returned (1 to 200); the server's default when omitted.
     cursor
         The cursor of the page to show.
+    sort
+        The field the deploys are sorted by.
+    order
+        ``asc`` or ``desc``.
 
     Raises
     ------
@@ -482,9 +493,11 @@ def list_deploys(
     deploys = state.client().deploys
     environment = None if all_environments else resolve_environment(state, env)
     if environment is None:
-        page = deploys.list_all(repository=repo, limit=limit, cursor=cursor)
+        page = deploys.list_all(repository=repo, limit=limit, cursor=cursor, sort=sort, order=order)
     else:
-        page = deploys.list_page(environment, repository=repo, limit=limit, cursor=cursor)
+        page = deploys.list_page(
+            environment, repository=repo, limit=limit, cursor=cursor, sort=sort, order=order
+        )
     columns = [
         "id",
         "repository",
@@ -510,6 +523,8 @@ def list_deploys(
             "--all-environments": all_environments,
             "--repo": repo,
             "--limit": limit,
+            "--sort": sort,
+            "--order": order,
         },
         page.next_cursor,
     )

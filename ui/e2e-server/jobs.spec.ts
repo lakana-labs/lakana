@@ -289,7 +289,8 @@ test("a reader of one environment sees only its jobs on the list, with no contro
   await expect(all.getByRole("link", { name: JOB.name })).toHaveCount(1);
   await expect(all).toContainText(first);
   await expect(all).not.toContainText(second);
-  await expect(all.getByRole("button")).toHaveCount(0);
+  // The column headers sort the list; no row holds a control.
+  await expect(all.locator("tbody").getByRole("button")).toHaveCount(0);
   await page.getByRole("button", { name: "Environment: All environments" }).click();
   await expect(page.getByRole("option")).toHaveText(["All environments", first]);
   await page.keyboard.press("Escape");
@@ -388,7 +389,8 @@ test("a reader of the environment sees its deploys with no rollback", async ({
   const region = page.getByRole("region", { name: `Deploys of ${environment}` });
   await expect(region.getByRole("row")).toHaveCount(3);
   await expect(region.getByRole("row").nth(1)).toContainText("9c1e5b3 · current");
-  await expect(region.getByRole("button")).toHaveCount(0);
+  // The column headers sort the list; no row holds a control.
+  await expect(region.locator("tbody").getByRole("button")).toHaveCount(0);
   await expect(rollBackButton(page, repository)).toHaveCount(0);
   await page.context().close();
 });
@@ -467,7 +469,7 @@ test("an administrator rolls back to the older version, naming the jobs it chang
   const region = page.getByRole("region", { name: `Deploys of ${environment}` });
   await expect(region.getByRole("row")).toHaveCount(3);
   await expect(region.getByRole("row").nth(1)).toContainText("9c1e5b3 · current");
-  await expect(region.getByRole("button")).toHaveCount(1);
+  await expect(region.locator("tbody").getByRole("button")).toHaveCount(1);
   const button = rollBackButton(page, repository);
   await expect(region.getByRole("row").nth(2)).toContainText("4f9d2a7");
   await expect(region.getByRole("row").nth(2)).toContainText("an account since deleted");

@@ -115,7 +115,7 @@ Saving does not run the query. Whoever runs it later does so with their own righ
 
 Usage: `lakana query saved list [OPTIONS]`
 
-List the saved queries you see in an environment, by name.
+List the saved queries you see in an environment, by name or by --sort and --order.
 
 You see your own, and those shared with everyone who may run queries in the environment. The SQL is not listed: read it with 'lakana query saved show ID'.
 
@@ -125,6 +125,8 @@ You see your own, and those shared with everyone who may run queries in the envi
 | `--all-environments` | flag | off | The saved queries of every environment you may query, with an environment column. |
 | `--limit` | whole number, 1 to 200 | `50` | Most saved queries to list. |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
+| `--sort` | text | none | What to sort by: name (the default), updated or created (the latest first). |
+| `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ### `lakana query saved show`
 
