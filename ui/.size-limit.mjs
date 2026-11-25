@@ -206,9 +206,10 @@ const NAMED_LIMITS = [
   // Measured 3.54 kB (2026-11-18) after review: the focus kept off the page whichever read
   // answers first, and every Roll back to this… held, with the note as its description, while
   // a rollback is followed; the limit holds.
-  // Raised to the measured 3.81 kB (2026-11-24) + 10 %: its columns sort on the server, the order
-  // kept in the address (#787).
-  { name: "the Deploys tab", prefix: "DeploysTab-", limit: "4.19 kB" },
+  // Raised to the measured 3.8 kB (2026-11-22) + 10 %: each row's commit subject after its ID,
+  // and current marked only on the newest successful run of each repository's current version
+  // (#783).
+  { name: "the Deploys tab", prefix: "DeploysTab-", limit: "4.18 kB" },
   // Measured 1.22 kB (2026-11-18) + 10 %: the rollback's question, loaded on the first press of
   // Roll back to this…: the two reads at once with their wait and Try again, what the rollback makes
   // current, the union of the jobs marked kept, removed or back, the protected environment named,

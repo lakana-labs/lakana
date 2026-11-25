@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DeployOut } from "../api/jobs";
 import { aDeploy, aDeployment, DEPLOY_VERSION } from "../test/jobs";
-import { mayRollBackTo } from "./rollbackable";
+import { currentDeploys, mayRollBackTo } from "./rollbackable";
 
 const CURRENT = new Map([["analytics", aDeployment().project_version_id]]);
 
@@ -23,5 +23,28 @@ describe("mayRollBackTo", () => {
     expect(mayRollBackTo(aDeploy({ resolved_sha: null }), CURRENT)).toBe(false);
     expect(mayRollBackTo(aDeploy(), new Map())).toBe(false);
     expect(mayRollBackTo(aDeploy(), new Map([["analytics", DEPLOY_VERSION]]))).toBe(false);
+  });
+});
+
+describe("currentDeploys", () => {
+  const now = aDeployment().project_version_id;
+
+  it("marks only the newest successful deploy or rollback of each repository at its version", () => {
+    const rows = [
+      aDeploy({ id: "dry", kind: "dry_run", project_version_id: null }),
+      aDeploy({ id: "failed", status: "failed", project_version_id: null }),
+      aDeploy({ id: "back", kind: "rollback", requested_ref: null, project_version_id: now }),
+      aDeploy({ id: "middle", project_version_id: DEPLOY_VERSION }),
+      aDeploy({ id: "first", project_version_id: now }),
+      aDeploy({ id: "other", repository: "finance", project_version_id: "v-finance" }),
+    ];
+    const current = new Map([...CURRENT, ["finance", "v-finance"]]);
+    expect(currentDeploys(rows, current)).toEqual(new Set(["back", "other"]));
+  });
+
+  it("marks nothing when the newest successful run is not at the current version", () => {
+    const rows = [aDeploy({ id: "newer" }), aDeploy({ id: "older", project_version_id: now })];
+    expect(currentDeploys(rows, CURRENT)).toEqual(new Set());
+    expect(currentDeploys(rows, new Map())).toEqual(new Set());
   });
 });

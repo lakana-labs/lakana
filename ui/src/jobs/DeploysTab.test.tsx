@@ -176,6 +176,25 @@ describe("DeploysTab", () => {
     expect(buttons[1]).toHaveAccessibleName("Roll back to this… (analytics at 0be1f6a)");
   });
 
+  it("marks only the newest run of the current version current after a rollback to it", async () => {
+    const back = aDeploy({
+      id: "d-back",
+      kind: "rollback",
+      requested_ref: null,
+      project_version_id: CURRENT.project_version_id,
+      resolved_sha: CURRENT.commit_sha,
+      created_at: "2026-11-18T08:00:00Z",
+    });
+    renderTab(list([back, aDeploy(), NOW]));
+
+    const region = await screen.findByRole("region", { name: "Deploys of dev" });
+    const rows = within(region).getAllByRole("row");
+    await waitFor(() => {
+      expect(rows[1]).toHaveTextContent("current");
+    });
+    expect(rows[3]).not.toHaveTextContent("current");
+  });
+
   it("marks nothing current and offers no rollback while the current versions cannot be read", async () => {
     const { server, user } = renderTab(list([NOW, aDeploy()]), "/jobs/deploys", {
       status: 503,

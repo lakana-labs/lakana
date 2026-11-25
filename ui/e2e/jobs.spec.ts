@@ -642,7 +642,10 @@ for (const theme of ["light", "dark"] as const) {
       const rows = page.getByRole("region", { name: `Deploys of ${ENV}` }).getByRole("row");
       // The dry run, the current deploy, the failed one, the older deploy and the rollback.
       await expect(rows).toHaveCount(6);
-      await expect(rows.nth(2)).toContainText("current");
+      await expect(rows.nth(2)).toContainText("9c1e5b3 · Review 4-6: four jobs · current");
+      // A rollback from before subjects were stored shows its commit's ID alone.
+      await expect(rows.nth(5)).toContainText("0be1f6a");
+      await expect(rows.nth(5)).not.toContainText("·");
       await expect(rows.nth(4)).toContainText("an account since deleted");
       await expect(page.getByRole("button", { name: /^Roll back to this… / })).toHaveCount(2);
 
@@ -665,7 +668,10 @@ for (const theme of ["light", "dark"] as const) {
       // The list was read again: the rollback heads it, and the older version is current.
       await expect(rows).toHaveCount(7);
       await expect(rows.nth(1)).toContainText("Rollback");
-      await expect(rows.nth(1)).toContainText("current");
+      await expect(rows.nth(1)).toContainText("4f9d2a7 · Rank stations by daily riders · current");
+      // The older deploy made the same version, but only the newest run of it is current.
+      await expect(rows.nth(5)).toContainText("4f9d2a7 · Rank stations by daily riders");
+      await expect(rows.nth(5)).not.toContainText("current");
       await expect(page.getByRole("button", { name: ROLL_BACK })).toHaveCount(0);
     });
 

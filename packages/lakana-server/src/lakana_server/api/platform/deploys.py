@@ -92,6 +92,7 @@ def _to_out(view: DeployRunView, actions: Sequence[str] = ()) -> DeployOut:
         status=view.status.value,
         requested_ref=view.requested_ref,
         resolved_sha=view.resolved_sha,
+        commit_subject=view.commit_subject,
         rollback_to_project_version_id=view.rollback_to_job_version_id,
         error_message=view.error_message,
         diff=view.diff,

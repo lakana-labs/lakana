@@ -108,6 +108,7 @@ Answer fields: `DeployOut`
 | `status` | text | yes |  |
 | `requested_ref` | text or null | yes |  |
 | `resolved_sha` | text or null | yes |  |
+| `commit_subject` | text or null | no |  |
 | `rollback_to_project_version_id` | text (uuid) or null | yes |  |
 | `error_message` | text or null | yes |  |
 | `diff` | mapping of text to list of text or null | yes |  |

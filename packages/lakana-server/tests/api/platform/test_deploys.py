@@ -764,6 +764,32 @@ def test_deploy_actions_offer_rollback_to_deployers_only(client: TestClient) -> 
 _ALL = "/api/v1/deploys"
 
 
+def test_deploys_answer_the_commit_subject_and_null_without_one(client: TestClient) -> None:
+    """The history and the single read carry the commit's first line; a run without one, null."""
+    _setup(client)
+    plain = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    done = client.post(
+        "/api/v1/environments/dev/deploys", headers=AUTH_HEADER, json={"repository": "analytics"}
+    ).json()
+    with Session(client.app.state.engine) as session:
+        run = session.get(DeployRun, uuid.UUID(done["id"]))
+        assert run is not None
+        run.resolved_sha, run.commit_subject = "a" * 40, "Review 4-6: four jobs"
+        session.commit()
+
+    shown = client.get(f"/api/v1/environments/dev/deploys/{done['id']}", headers=AUTH_HEADER)
+    queued = client.get(f"/api/v1/environments/dev/deploys/{plain['id']}", headers=AUTH_HEADER)
+    history = client.get("/api/v1/environments/dev/deploys", headers=AUTH_HEADER).json()
+    everywhere = client.get(_ALL, headers=AUTH_HEADER).json()["items"]
+
+    assert shown.json()["commit_subject"] == "Review 4-6: four jobs"
+    assert queued.json()["commit_subject"] is None
+    assert [d["commit_subject"] for d in history] == ["Review 4-6: four jobs", None]
+    assert [d["commit_subject"] for d in everywhere] == ["Review 4-6: four jobs", None]
+
+
 def test_get_all_deploys_answers_items_next_cursor_actions_and_who(client: TestClient) -> None:
     """Deploys come newest first with their environment, actions and submitter, one cursor."""
     _setup(client)

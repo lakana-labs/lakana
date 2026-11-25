@@ -217,7 +217,7 @@ export const READ_AS: Readonly<Record<string, string>> = {
   "[]": "-",
   // An environment's properties (Settings › Environments): keys and values are data.
   '["cost-centre"]': "-",
-  '["actions","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
+  '["actions","commit_subject","created_at","environment","error_message","finished_at","id","jobs","kind","project_version_id","repository","requested_ref","resolved_sha","started_at","status","submitted_by"]':
     "DeployOut",
   '["commit_sha","project_version_id","repository","updated_at"]': "DeploymentOut",
   '["id","status"]': "DeployAcceptedOut",

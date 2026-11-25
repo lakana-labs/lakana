@@ -57,6 +57,7 @@ from typing import Any
 from lakana_core.config import validate_proxy_url
 from lakana_core.errors import ValidationError
 from lakana_core.models import ProbeOutcome, RepositoryKind
+from lakana_core.models.deploy import COMMIT_SUBJECT_CHARS
 from lakana_core.net.egress import is_never_reachable
 from lakana_core.projects.git_input import (
     is_full_sha,
@@ -85,6 +86,9 @@ _MAX_STDERR = 2000
 _MAX_STDOUT = 16 * 1024 * 1024
 """Most stdout kept from one git command; the largest legitimate output is a
 `ls-remote` listing of `fetch_refs` branches and tags."""
+_SUBJECT_COMMIT_BYTES = 64 * 1024
+"""The largest commit object whose message is read for its subject; a larger one (a crafted
+message, far past any real one) has none, so the read stays small."""
 _MAX_STDERR_READ = 64 * 1024
 """Most stderr kept in memory; messages are cut to `_MAX_STDERR` when shown."""
 _WATCH_SECONDS = 0.5
@@ -143,11 +147,40 @@ class FetchedCommit:
         `git archive` of the commit (tar, no `.git`).
     tree
         The archive, extracted.
+    subject
+        The first line of the commit's message (`commit_subject`); `None` when it is blank or
+        git could not read it.
     """
 
     sha: str
     archive: Path
     tree: Path
+    subject: str | None = None
+
+
+def commit_subject(message: str) -> str | None:
+    """Return the first line of a commit message, as a deploy stores it.
+
+    Parameters
+    ----------
+    message
+        The message, as git prints it.
+
+    Returns
+    -------
+    str or None
+        Its first line that is not blank (git's own subject skips leading blank lines too),
+        without the spaces around it, a NUL (which Postgres cannot store) replaced by U+FFFD,
+        cut to `COMMIT_SUBJECT_CHARS` with an ellipsis as the last character; `None` for a
+        blank message.
+    """
+    subject = next((line.strip() for line in message.splitlines() if line.strip()), "")
+    if not subject:
+        return None
+    subject = subject.replace("\x00", "\ufffd")
+    if len(subject) > COMMIT_SUBJECT_CHARS:
+        return subject[: COMMIT_SUBJECT_CHARS - 1] + "\u2026"
+    return subject
 
 
 def git_environment(
@@ -1017,7 +1050,63 @@ def fetch_commit(
         )
         tree = run / "tree"
         _extract(archive, tree, limit=limits.checkout_bytes, max_members=limits.checkout_members)
-        return FetchedCommit(sha=sha, archive=archive, tree=tree)
+        subject = _subject_of(sha, repo=repo, env=env, limits=limits, deadline=deadline)
+        return FetchedCommit(sha=sha, archive=archive, tree=tree, subject=subject)
+
+
+def _subject_of(
+    sha: str, *, repo: Path, env: Mapping[str, str], limits: DeployLimits, deadline: float
+) -> str | None:
+    """Read the first line of a fetched commit's message.
+
+    The commit object's size is asked first, and the message is read only when the object is at
+    most `_SUBJECT_COMMIT_BYTES`, so a crafted message of many megabytes is never read. git
+    writes the message in UTF-8 whatever encoding the commit names. Nothing here fails the
+    deploy: the subject is only shown beside the commit's ID, so a failed command, a timeout,
+    the output cap or a passed deadline leave it `None` (a passed deadline still ends the deploy
+    at its next step).
+
+    Parameters
+    ----------
+    sha
+        The fetched commit.
+    repo
+        The bare repository.
+    env
+        Git environment.
+    limits
+        Limits.
+    deadline
+        Job deadline.
+
+    Returns
+    -------
+    str or None
+        `commit_subject` of the message; `None` if git could not read it or the commit is too
+        large.
+    """
+    try:
+        size = _run(
+            ["git", "cat-file", "-s", "--end-of-options", sha],
+            cwd=repo,
+            env=env,
+            timeout=_timeout(limits, deadline),
+        )
+        if size.returncode != 0 or not size.stdout.strip().isdigit():
+            return None
+        if int(size.stdout.strip()) > _SUBJECT_COMMIT_BYTES:
+            return None
+        shown = _run(
+            ["git", "log", "-1", "--no-show-signature", "--format=%B", "--end-of-options", sha],
+            cwd=repo,
+            env=env,
+            timeout=_timeout(limits, deadline),
+        )
+    except GitError:
+        return None
+    if shown.returncode != 0:
+        return None
+    return commit_subject(shown.stdout)
 
 
 def _neutralise_export_subst(repo: Path) -> None:
