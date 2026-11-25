@@ -15,14 +15,17 @@ from lakana_core.grants.authorization import GrantAuthorization
 from lakana_core.grants.roles import Role
 from lakana_core.grants.service import GrantService
 from lakana_core.home.get_started import GetStarted, get_started
+from lakana_core.identity.provider_issuer import OIDC_ISSUER_KEY
 from lakana_core.models import (
     CiTrustRule,
     DeployKind,
     DeployRun,
     DeployStatus,
     Environment,
+    InstanceSetting,
     InterfaceState,
     Passkey,
+    Principal,
     PrincipalType,
     QueryRunStatus,
     RecentOpen,
@@ -347,3 +350,76 @@ def test_get_started_says_when_the_person_hid_it(session: Session) -> None:
     )
     session.commit()
     assert _started(session, reader).hidden is True
+
+
+IDP = "https://idp.example.com"
+
+
+def _link(
+    session: Session, ref: PrincipalRef, *, issuer: str | None, server_issuer: str | None
+) -> None:
+    """Store a provider identity on a person and record the issuer the server is configured with.
+
+    Parameters
+    ----------
+    session
+        Database session.
+    ref
+        The person; `None` as `issuer` stores no identity.
+    issuer
+        The issuer of the person's stored identity.
+    server_issuer
+        The issuer links count for now; `None` while OIDC sign-in is off.
+    """
+    row = session.get(Principal, ref.id)
+    assert row is not None
+    if issuer is not None:
+        row.oidc_issuer, row.oidc_subject = issuer, "sub-1"
+    session.merge(
+        InstanceSetting(
+            key=OIDC_ISSUER_KEY,
+            value={"issuer": server_issuer},
+            updated_at=datetime.now(UTC),
+            updated_by=None,
+        )
+    )
+    session.commit()
+
+
+@pytest.mark.parametrize("local", [False, True])
+def test_a_person_linked_to_the_provider_is_not_asked_for_a_passkey(
+    session: Session, local: bool
+) -> None:
+    admin = _setup(session, "admin")
+    before = _ids(_started(session, admin, local=local))
+    _link(session, admin, issuer=IDP, server_issuer=IDP)
+    answer = _started(session, admin, local=local)
+    assert "add_passkey" in before
+    assert _ids(answer) == [step for step in before if step != "add_passkey"]
+
+
+@pytest.mark.parametrize(
+    ("issuer", "server_issuer"),
+    [
+        (IDP, "https://other.example.com"),  # stale: the issuer changed
+        (IDP, None),  # stale: OIDC sign-in is off
+        (None, IDP),  # never linked
+        (None, None),  # OIDC off, never linked
+    ],
+)
+def test_a_person_who_signs_in_by_passkey_keeps_the_passkey_step(
+    session: Session, issuer: str | None, server_issuer: str | None
+) -> None:
+    admin = _setup(session, "admin")
+    _link(session, admin, issuer=issuer, server_issuer=server_issuer)
+    answer = _started(session, admin)
+    assert "add_passkey" in _ids(answer)
+    assert "add_passkey" not in _done(answer)
+
+
+def test_a_linked_person_has_no_passkey_step_to_leave_the_list_open(session: Session) -> None:
+    admin = _setup(session, "admin")
+    _link(session, admin, issuer=IDP, server_issuer=IDP)
+    answer = _started(session, admin, local=True)
+    assert _ids(answer) == ["deploy_project_local", "open_table", "run_query"]
+    assert answer.complete is False
