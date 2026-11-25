@@ -717,11 +717,23 @@ def test_a_burst_of_forged_callbacks_logs_a_bounded_number_of_lines(
     assert len(lines) == 2
 
 
-def test_a_failure_line_comes_again_after_the_interval(
+def test_several_starts_against_an_unusable_discovery_document_log_one_warning(
     client: TestClient, fake: FakeProvider, caplog: pytest.LogCaptureFixture
 ) -> None:
+    _discovery_with(fake, client, id_token_signing_alg_values_supported=["ES256"])
+    for _ in range(5):
+        assert client.post(START, json={}).json()["reason"] == "provider_unreachable"
+    assert len(_warnings(caplog)) == 1
+
+
+def test_a_failure_line_comes_again_after_the_interval(
+    client: TestClient,
+    fake: FakeProvider,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     now = [0.0]
-    LOG_THROTTLE._clock = lambda: now[0]
+    monkeypatch.setattr(LOG_THROTTLE, "_clock", lambda: now[0])
     for second in (0.0, 1.0, 61.0):
         now[0] = second
         _fail_at_the_token_endpoint(
