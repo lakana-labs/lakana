@@ -7298,7 +7298,7 @@ token window. Threat model: "OIDC sign-in (#32)".
   `test_bootstrap_principal_can_never_be_linked`), `already_linked`, `auth_too_old`. Each is a 403
   `OidcSignInRefused` with one rate-limited `SIGN_IN_OIDC_REFUSED` row carrying `iss` and `sub`.
 - **One identity per account.** `OidcLinkService.link` updates the row only while it is unlinked
-  (`oidc_subject IS NULL`), so a second finish for one person never overwrites a link made
+  (`unlinked_clause`: no subject, or a link to another issuer, L9), so a second finish for one person never overwrites a link made
   meanwhile and is refused `already_linked` (`test_a_link_made_meanwhile_is_not_overwritten`, on
   Postgres `test_two_finishes_linking_one_person_at_once`). It looks the identity up and refuses
   `identity_taken`; the unique constraint on `(oidc_issuer, oidc_subject)` decides a race, in a
@@ -7400,6 +7400,47 @@ token window. Threat model: "OIDC sign-in (#32)".
   through for a linked administrator after a provider step-up
   (`test_a_linked_administrator_steps_up_through_the_provider`). `SessionOut.provider_linked` tells
   the interface which ceremony to offer.
+- **L9, one definition of "linked", and the issuer change** (#809,
+  `lakana_core.identity.provider_issuer`). A link keeps the issuer it was made with; the server
+  records `LAKANA_OIDC__ISSUER` at every start (`record_oidc_issuer`, instance setting
+  `sign_in.oidc_issuer`, `{"issuer": null}` with OIDC off) and only a link to that issuer counts.
+  Every question asks `is_linked(session, principal)` or filters with `linked_clause` /
+  `unlinked_clause`: the passkey sign-in and registration refusal (L8), passkey vs provider
+  step-up (`/step-up/options`, `/oidc/step-up/start`, and the step-up finish, which also refuses
+  `identity_mismatch` for a link that does not count), `linking_refusal` (`already_linked`), the
+  recovery paths (`_linked_needs_provider`, `_complete`, `_complete_for_provider`, the operator's
+  unlink), `provider_link_of` (profile, Access › a person), `SessionOut.provider_linked`,
+  `linked_count`, the break-glass count (`unlinked_admin_ids`, `_linked_ids`), the token window
+  (`token_window_ends_at`, so `PatService.verify`, task tokens and `token_window` session ends) and
+  `linked_principal_for_sign_in`. After a change, or with OIDC off, a formerly linked person signs
+  in with their passkeys, steps up with a passkey, has no token window, and may link again; the
+  new link replaces the stale one and `PRINCIPAL_OIDC_LINKED` names it in `replaces`
+  (`test_oidc_issuer_change.py` in core and server). A database no server of this release started
+  (no row) counts every stored link, the stricter reading.
+  - **Ignored, never cleared.** Clearing would be irreversible on a start without the variable or
+    with a typo, and an operator's unlink revokes tokens and deletes passkeys, which the design
+    does not ask for here. So nothing is written to `principals`; the record writes one
+    `SIGN_IN_SETTINGS_CHANGED` (actor none, `source: start-up`, `before`/`after.oidc_issuer`,
+    `links_not_counted`) and the start-up log names the count, and warns with the recovery command
+    when the break-glass rule no longer holds (setting an old issuer back can count
+    administrators' links again after their passkeys were removed meanwhile).
+  - **Locks.** `record_oidc_issuer` takes `lock_admin_count` first, as the first lock of its
+    transaction, then writes the setting: it changes who counts as linked, so it takes turns with
+    every break-glass decision and keeps the admin lock's order (no row lock is taken). `link`'s
+    conditional `UPDATE` uses `unlinked_clause`, so a link committed meanwhile is still never
+    overwritten.
+  - **No way in through a stale link.** A provider identity is matched by issuer and subject
+    together, and the issuer is the configured one, so someone at the new provider with a stale
+    link's `sub` finds nobody (`not_linked`) and may link their own account
+    (`test_a_stale_link_signs_nobody_in_at_the_new_provider`,
+    `test_a_stale_link_never_matches_an_identity_of_the_new_issuer`); a server still verifying the
+    old issuer while another recorded a new one finds nobody either
+    (`test_a_stale_link_signs_nobody_in_even_with_its_own_identity`). Step-up never accepts the
+    provider for a stale link (`test_provider_step_up_is_not_offered_for_a_stale_link`).
+  - **Residual:** a person offboarded only at the old provider, not deactivated in Lakana, gets
+    their passkeys and unwindowed tokens back with the change, as the design's "unlinked until
+    they link again" implies; offboarding is deactivation. Servers of one database with different
+    issuers: the last one started decides, as for the public address.
 - **Residuals:** a passkey disabled as a copy can take the last unlinked administrator (a security
   response, never refused); the operator's recovery is then the way in. A local sign-in link
   (`lakana server start --local`) still signs a linked person in, but only with their own personal

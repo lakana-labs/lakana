@@ -41,6 +41,7 @@ from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity, principal_for
+from lakana_core.identity.provider_issuer import is_linked, linked_clause, unlinked_clause
 from lakana_core.identity.sessions import (
     SessionService,
     principal_named,
@@ -134,7 +135,8 @@ def linked_principal_for_sign_in(session: Session, identity: ProviderIdentity) -
     -------
     Principal or None
         The linked person, read afresh under the row lock, still linked to this identity;
-        `None` when nobody is (also when an unlink committed meanwhile).
+        `None` when nobody is (also when an unlink committed meanwhile, and when the identity's
+        issuer is not the one the server recorded, `is_linked`).
     """
     found = principal_for(session, identity)
     if found is None:
@@ -142,23 +144,9 @@ def linked_principal_for_sign_in(session: Session, identity: ProviderIdentity) -
     locked = locked_principal(session, found.id)
     if (locked.oidc_issuer, locked.oidc_subject) != (identity.issuer, identity.subject):
         return None
+    if not is_linked(session, locked):
+        return None
     return locked
-
-
-def is_linked(principal: Principal) -> bool:
-    """Say whether a person signs in through the identity provider.
-
-    Parameters
-    ----------
-    principal
-        The person.
-
-    Returns
-    -------
-    bool
-        Whether a provider identity is stored on them.
-    """
-    return principal.oidc_subject is not None
 
 
 def linked_count(session: Session) -> int:
@@ -178,7 +166,7 @@ def linked_count(session: Session) -> int:
         session.execute(
             select(func.count())
             .select_from(Principal)
-            .where(Principal.oidc_subject.is_not(None), Principal.is_active.is_(True))
+            .where(linked_clause(session), Principal.is_active.is_(True))
         ).scalar_one()
     )
 
@@ -241,7 +229,7 @@ def provider_link_of(session: Session, principal: Principal, *, days: int) -> Pr
     ProviderLink or None
         The link; `None` for a person who is not linked.
     """
-    if principal.oidc_issuer is None or not is_linked(principal):
+    if principal.oidc_issuer is None or not is_linked(session, principal):
         return None
     return ProviderLink(
         issuer=principal.oidc_issuer,
@@ -252,11 +240,15 @@ def provider_link_of(session: Session, principal: Principal, *, days: int) -> Pr
     )
 
 
-def linking_refusal(principal: Principal, *, bootstrap_name: str) -> OidcSignInRefused | None:
+def linking_refusal(
+    session: Session, principal: Principal, *, bootstrap_name: str
+) -> OidcSignInRefused | None:
     """Say why a person cannot be linked at all, before anyone goes to the provider.
 
     Parameters
     ----------
+    session
+        Database session.
     principal
         The person.
     bootstrap_name
@@ -266,11 +258,12 @@ def linking_refusal(principal: Principal, *, bootstrap_name: str) -> OidcSignInR
     -------
     OidcSignInRefused or None
         ``cannot_link_operator`` for the bootstrap principal or a service account,
-        ``already_linked`` for a linked person; `None` otherwise.
+        ``already_linked`` for a linked person; `None` otherwise, also for a person whose stored
+        link is to another issuer (`is_linked`): linking replaces it.
     """
     if principal.type is not PrincipalType.USER or principal.name == bootstrap_name:
         return OidcSignInRefused("cannot_link_operator")
-    if is_linked(principal):
+    if is_linked(session, principal):
         return OidcSignInRefused("already_linked")
     return None
 
@@ -346,13 +339,19 @@ class OidcLinkService:
         holder = principal_for(self._session, identity)
         if holder is not None and holder.id != principal.id:
             raise OidcSignInRefused("identity_taken")
+        # A stored link to another issuer counts as none (`is_linked`); linking replaces it.
+        stale = (
+            {"iss": principal.oidc_issuer, "sub": principal.oidc_subject}
+            if principal.oidc_subject is not None
+            else None
+        )
         try:
             with self._session.begin_nested():
                 # Only while still unlinked: a link another finish committed meanwhile (this
                 # session may have read the row before it) is never overwritten.
                 linked = self._session.execute(
                     update(Principal)
-                    .where(Principal.id == principal.id, Principal.oidc_subject.is_(None))
+                    .where(Principal.id == principal.id, unlinked_clause(self._session))
                     .values(
                         oidc_issuer=identity.issuer,
                         oidc_subject=identity.subject,
@@ -367,15 +366,16 @@ class OidcLinkService:
         if linked != 1:
             raise OidcSignInRefused("already_linked")
         self._session.refresh(principal)
+        detail: dict[str, object] = {
+            "principal": principal.name,
+            "iss": identity.issuer,
+            "sub": identity.subject,
+            "via": via,
+        }
+        if stale is not None:
+            detail["replaces"] = stale
         AuditService(self._session).record(
-            principal.id,
-            AuditEventType.PRINCIPAL_OIDC_LINKED,
-            detail={
-                "principal": principal.name,
-                "iss": identity.issuer,
-                "sub": identity.subject,
-                "via": via,
-            },
+            principal.id, AuditEventType.PRINCIPAL_OIDC_LINKED, detail=detail
         )
         return principal
 
@@ -396,7 +396,7 @@ class OidcLinkService:
             `linking_refusal`'s, or ``last_unlinked_admin`` for the last administrator who signs
             in with a passkey; `None` when they may be linked.
         """
-        refusal = linking_refusal(principal, bootstrap_name=self._bootstrap_name)
+        refusal = linking_refusal(self._session, principal, bootstrap_name=self._bootstrap_name)
         if refusal is not None:
             return refusal
         admins = active_instance_admin_ids(self._session)
@@ -467,7 +467,7 @@ class OidcLinkService:
                 "You cannot unlink yourself: you would lose every way in at once. Ask another "
                 "administrator, or ask the server operator for a recovery link."
             )
-        if not is_linked(target):
+        if not is_linked(self._session, target):
             raise ConflictError(
                 f"{name!r} is not linked to the identity provider, so there is nothing to unlink."
             )

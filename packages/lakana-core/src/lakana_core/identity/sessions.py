@@ -46,6 +46,7 @@ from lakana_core.errors import (
     ValidationError,
 )
 from lakana_core.grants.admin import acts_as_instance_admin
+from lakana_core.identity.provider_issuer import is_linked
 from lakana_core.identity.tokens import hash_secret, verify_secret
 from lakana_core.models import (
     AuditEventType,
@@ -322,10 +323,12 @@ def token_window_ends_at(
     Returns
     -------
     datetime or None
-        The end, or `None` for a person who is not linked. A linked person who never signed
-        in there has a window that ended at the epoch.
+        The end, or `None` for a person who is not linked
+        (`lakana_core.identity.provider_issuer.is_linked`: also one linked to another issuer, and
+        everyone while OIDC sign-in is off). A linked person who never signed in there has a
+        window that ended at the epoch.
     """
-    if principal.oidc_subject is None:
+    if not is_linked(session, principal):
         return None
     window = timedelta(days=days if days is not None else token_window_days(session))
     signed_in = principal.last_provider_sign_in_at or datetime.fromtimestamp(0, UTC)

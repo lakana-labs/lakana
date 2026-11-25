@@ -147,6 +147,9 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         "language",
         # the sign-in link a browser session began with (`lakana_core.identity.sessions`)
         "link_id",
+        # how many people's links to the identity provider stopped counting when the server
+        # started with another issuer, or with OIDC sign-in off (#809)
+        "links_not_counted",
         # how many open sign-in links an unlink from the identity provider withdrew (#32)
         "links_withdrawn",
         "location",
@@ -247,6 +250,8 @@ SHOWN_FIELDS: frozenset[str] = frozenset(
         # the scopes an access apply stopped managing
         "released",
         "replaced",
+        # the stale link to another issuer that a new link replaced: its `iss` and `sub` (#809)
+        "replaces",
         "request_trigger",
         "reset",
         "rows_only",

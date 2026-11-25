@@ -72,7 +72,8 @@ from lakana_core.identifiers import HIDDEN_CHARACTER_CATEGORIES
 from lakana_core.identity.link_withdrawal import withdraw_open_links
 from lakana_core.identity.notices import NoticeService
 from lakana_core.identity.oidc_flows import ProviderIdentity
-from lakana_core.identity.oidc_links import OidcLinkService, is_linked, locked_principal
+from lakana_core.identity.oidc_links import OidcLinkService, locked_principal
+from lakana_core.identity.provider_issuer import is_linked
 from lakana_core.identity.sessions import (
     SessionService,
     StartedSession,
@@ -1042,7 +1043,7 @@ class LinkService:
         return (
             row.kind == "recovery"
             and principal is not None
-            and is_linked(principal)
+            and is_linked(self._session, principal)
             and not self._issued_by_operator(row)
         )
 
@@ -1365,7 +1366,7 @@ class LinkService:
                     ),
                     "became_admin",
                 )
-            if not is_linked(principal):
+            if not is_linked(self._session, principal):
                 oidc.link(principal.id, identity, via="recovery")
             elif (principal.oidc_issuer, principal.oidc_subject) != (
                 identity.issuer,
@@ -1666,12 +1667,16 @@ class LinkService:
                 PermissionDenied(f"{not_operator_recovery(principal.name)} This link was closed."),
                 "became_admin",
             )
-        if kind == "recovery" and is_linked(principal) and not self._issued_by_operator(row):
+        if (
+            kind == "recovery"
+            and is_linked(self._session, principal)
+            and not self._issued_by_operator(row)
+        ):
             # `redeem` refused this before the claim; the person may have linked since, and the
             # row is read afresh under its lock. An administrator's link stays usable through
             # the provider, so it is not closed.
             raise ProviderSignInRequired(PROVIDER_RECOVERY_MESSAGE)
-        if kind == "recovery" and is_linked(principal):
+        if kind == "recovery" and is_linked(self._session, principal):
             # Only the operator's link gets here: the break-glass path.
             OidcLinkService(
                 self._session, self._authz, clock=self._clock, bootstrap_name=self._bootstrap_name

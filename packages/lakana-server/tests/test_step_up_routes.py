@@ -50,7 +50,7 @@ from lakana_core.models import (
 from lakana_server.app import create_app
 from lakana_server.settings import Settings, UiConfig
 from tests.conftest import _TEST_MASTER_KEY, AUTH_HEADER, PUBLIC, write_ui_dist
-from tests.oidc_fake import ISSUER, FakeProvider
+from tests.oidc_fake import ISSUER, FakeProvider, config
 from tests.server_test_helpers import (
     create_environment,
     create_namespace,
@@ -139,7 +139,7 @@ def _linked_person(client: TestClient) -> str:
     app = cast(FastAPI, client.app)
     with Session(app.state.engine) as session:
         row = session.execute(select(Principal).where(Principal.name == name)).scalar_one()
-        row.oidc_issuer, row.oidc_subject = "https://idp.example.com", name
+        row.oidc_issuer, row.oidc_subject = ISSUER, name
         session.commit()
     return name
 
@@ -1205,8 +1205,11 @@ def client(
         bootstrap_pat_key_id="testkey",
         bootstrap_pat_secret="testsecret",
         secrets=SecretsConfig(master_key=_TEST_MASTER_KEY),
-        ui=UiConfig(enabled=True),
+        ui=UiConfig(enabled=True, public_url=PUBLIC),
         ci_oidc=CiOidcConfig(issuers=["github"], audience="https://l.example"),
+        # On, so that a link to its issuer counts (#809); `_linked_administrator` puts the fake
+        # provider in front of it.
+        oidc=config(),
     )
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(lakana_server.ui, "UI_DIST", write_ui_dist(root))
