@@ -158,9 +158,11 @@ def _connections(session: Session) -> None:
     """
     env_id = environment(session, "prod")
     owner = person(session, "owner")
-    rank = {"bad": 0, "open": 1, "good": 2, "never": None}
+    # Two share each tested state and two were never tested, so a page ends on a tie and on a
+    # null, and the next page resumes from there.
+    names = ("bad-a", "bad-b", "open", "good", "never-a", "never-b")
     ids = {}
-    for name in rank:
+    for name in names:
         row = Connection(
             id=uuid.uuid4(),
             environment_id=env_id,
@@ -174,7 +176,8 @@ def _connections(session: Session) -> None:
         ids[name] = row.id
     session.flush()
     tests = {
-        "bad": (ConnectionTestState.DONE, ConnectionTestOutcome.TIMEOUT),
+        "bad-a": (ConnectionTestState.DONE, ConnectionTestOutcome.TIMEOUT),
+        "bad-b": (ConnectionTestState.DONE, ConnectionTestOutcome.DNS),
         "open": (ConnectionTestState.QUEUED, None),
         "good": (ConnectionTestState.DONE, ConnectionTestOutcome.OK),
     }
@@ -192,20 +195,21 @@ def _connections(session: Session) -> None:
         )
     session.commit()
     for descending, expected in (
-        (False, ["bad", "open", "good", "never"]),
-        (True, ["good", "open", "bad", "never"]),
+        (False, ["bad-a", "bad-b", "open", "good", "never-a", "never-b"]),
+        (True, ["good", "open", "bad-a", "bad-b", "never-a", "never-b"]),
     ):
-        rows = _walk(
-            lambda c, d=descending: _connection_page(
-                session,
-                select(Connection),
-                kind="all-connections",
-                sort=ListSort("status", d),
-                limit=1,
-                cursor=c,
+        for limit in (1, 2):
+            rows = _walk(
+                lambda c, d=descending, n=limit: _connection_page(
+                    session,
+                    select(Connection),
+                    kind="all-connections",
+                    sort=ListSort("status", d),
+                    limit=n,
+                    cursor=c,
+                )
             )
-        )
-        assert [r.name for r in rows] == expected
+            assert [r.name for r in rows] == expected, (descending, limit)
 
 
 def _audit(session: Session) -> None:
