@@ -9,7 +9,7 @@
  * The page the person comes back to is kept on the server, never in the provider's URL.
  * @packageDocumentation
  */
-import { api } from "./client";
+import { api, ApiError } from "./client";
 
 /** Whether people sign in through a provider, as `GET /api/v1/sign-in/oidc` answers it. */
 export interface OidcInfoOut {
@@ -35,6 +35,11 @@ export interface ProviderTrip {
   /** The page the flow was started from, to go back to after a refusal. */
   readonly back: string;
 }
+
+/** The sentence for a provider sign-in address that is no web address. */
+const PROVIDER_ADDRESS_REFUSED =
+  "The identity provider's sign-in address is not a web address (https), so the browser was not " +
+  "sent there. Tell the server operator: the provider's discovery document names it.";
 
 /**
  * Thrown by an action that sent the browser to the provider instead of sending its request: the
@@ -75,13 +80,24 @@ export async function startFlow(path: string, body: unknown): Promise<string> {
 
 /**
  * Sends the browser to the provider: remembers the in-session flow for its return page first,
- * when there is one.
+ * when there is one. Only a web address (`https:` or `http:`) is followed: a `javascript:` or
+ * `data:` address from a broken discovery document is refused, and the page stays.
  *
  * @param url - The provider's sign-in page.
  * @param trip - The in-session flow, or undefined for a sign-in.
  * @returns The error the caller throws, so that nothing after it runs.
+ * @throws {ApiError} `ProviderAddressRefused` for an address that is no web address.
  */
 export function goToProvider(url: string, trip?: ProviderTrip): ProviderRedirect {
+  let scheme = "";
+  try {
+    scheme = new URL(url).protocol;
+  } catch {
+    scheme = "";
+  }
+  if (scheme !== "https:" && scheme !== "http:") {
+    throw new ApiError(502, "ProviderAddressRefused", PROVIDER_ADDRESS_REFUSED);
+  }
   if (trip !== undefined) {
     try {
       sessionStorage.setItem(PROVIDER_TRIP_KEY, JSON.stringify(trip));

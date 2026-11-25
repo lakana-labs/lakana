@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -244,5 +244,32 @@ describe("SignInPage", () => {
     });
     expect(screen.getByRole("button", { name: "Sign in with a passkey" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("stays pending while the browser leaves for the provider, until a return from history", async () => {
+    fakeServer({
+      "GET /api/v1/sign-in/oidc": OKTA,
+      "POST /api/v1/sign-in/oidc/start": STARTED,
+    });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    const { user } = renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Sign in with Okta" }));
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledTimes(1);
+    });
+
+    expectPending(screen.getByRole("button", { name: /^Sign in with Okta/ }));
+    expect(screen.getByRole("status")).toHaveTextContent("Going to the identity provider…");
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+    });
+    expectPending(screen.getByRole("button", { name: /^Sign in with Okta/ }));
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    expect(screen.getByRole("button", { name: "Sign in with Okta" })).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent("");
   });
 });

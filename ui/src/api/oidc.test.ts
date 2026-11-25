@@ -72,4 +72,25 @@ describe("the provider's first calls", () => {
     setItem.mockRestore();
     expect(assign).toHaveBeenLastCalledWith("https://id.example.org/b");
   });
+
+  it.each(["javascript:alert(1)", "data:text/html,x", "/relative", "not a url"])(
+    "refuses to follow %s",
+    (url) => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { assign });
+
+      expect(() => goToProvider(url, { purpose: "link", back: "/account" })).toThrow(
+        /not a web address/,
+      );
+      expect(assign).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(PROVIDER_TRIP_KEY)).toBeNull();
+    },
+  );
+
+  it("follows an http address", () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    goToProvider("http://keycloak.internal:8080/realms/corp/auth");
+    expect(assign).toHaveBeenCalledWith("http://keycloak.internal:8080/realms/corp/auth");
+  });
 });

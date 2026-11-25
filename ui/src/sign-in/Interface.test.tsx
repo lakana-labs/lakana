@@ -405,6 +405,7 @@ describe("Interface", () => {
   it.each([
     ["//evil.example/x", "/"],
     ["/\\evil.example/x", "/"],
+    ["/\t/evil.example", "/"],
     ["https://evil.example/x", "/"],
     ["", "/"],
     ["/jobs", "/jobs"],

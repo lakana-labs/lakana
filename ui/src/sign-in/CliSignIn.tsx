@@ -15,6 +15,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
 import { ApiError } from "../api/client";
+import { ProviderRedirect } from "../api/oidc";
 import {
   approveCli,
   type CliDeviceHostOut,
@@ -29,6 +30,7 @@ import { VisibleText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import "./cliSignInStrings";
 import { problemText } from "./messages";
+import { ProviderNote } from "./ProviderNote";
 import { useSession } from "./SessionProvider";
 import { Step } from "./Step";
 
@@ -240,6 +242,7 @@ export function CliSignInPage({ navigate = assign }: CliSignInProps): JSX.Elemen
   };
   return (
     <Step title={t("cliSignIn.title")} heading={<TokenQuestion host={request.host} />}>
+      <ProviderNote />
       <HostNote host={request.host} />
       <TokenEffect />
       <p className="step-warning">{t("cliSignIn.warning")}</p>
@@ -268,6 +271,42 @@ export function CliSignInPage({ navigate = assign }: CliSignInProps): JSX.Elemen
   );
 }
 
+/** The `sessionStorage` key of a typed device code while the browser confirms at the provider. */
+const KEPT_CODE_KEY = "lakana.cliSignIn.deviceCode";
+
+/**
+ * Keeps a typed device code in this tab for the page's return from the identity provider, or
+ * forgets it.
+ *
+ * @param code - The code, or null to forget it.
+ */
+function keepCode(code: string | null): void {
+  try {
+    if (code === null) {
+      sessionStorage.removeItem(KEPT_CODE_KEY);
+    } else {
+      sessionStorage.setItem(KEPT_CODE_KEY, code);
+    }
+  } catch {
+    // Storage is blocked: the person types the code again.
+  }
+}
+
+/**
+ * Takes the device code this tab kept, once.
+ *
+ * @returns The code, or empty.
+ */
+function takeKeptCode(): string {
+  try {
+    const kept = sessionStorage.getItem(KEPT_CODE_KEY) ?? "";
+    sessionStorage.removeItem(KEPT_CODE_KEY);
+    return kept;
+  } catch {
+    return "";
+  }
+}
+
 /** Where the device page is. */
 type DevicePhase =
   | { readonly kind: "enter" }
@@ -285,7 +324,7 @@ export function CliDevicePage(): JSX.Element {
   const { t } = useTranslation();
   const attempt = useAttempt();
   const [phase, setPhase] = useState<DevicePhase>({ kind: "enter" });
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(takeKeptCode);
   const [codeError, setCodeError] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
 
@@ -302,7 +341,18 @@ export function CliDevicePage(): JSX.Element {
     const decide = (approve: boolean): void => {
       attempt.run(async () => {
         if (approve) {
-          await approveDevice(phase.code);
+          // A person who confirms at the identity provider comes back to this page: the code
+          // they typed waits for them in this tab, and goes once the approval is answered.
+          keepCode(phase.code);
+          try {
+            await approveDevice(phase.code);
+          } catch (error) {
+            if (!(error instanceof ProviderRedirect)) {
+              keepCode(null);
+            }
+            throw error;
+          }
+          keepCode(null);
         } else {
           await denyDevice(phase.code);
         }
@@ -360,6 +410,7 @@ export function CliDevicePage(): JSX.Element {
   };
   return (
     <Step title={t("cliSignIn.device.title")}>
+      <ProviderNote />
       <p>{t("cliSignIn.device.intro")}</p>
       <p className="step-warning">{t("cliSignIn.device.warning")}</p>
       <Form

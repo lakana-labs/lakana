@@ -160,7 +160,7 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
           />
         </section>
       )}
-      {own && <OwnRecoveryNote name={name} />}
+      {own && <OwnRecoveryNote name={name} linked={about?.link != null} />}
       <Suspense fallback={null}>
         <PersonGrants name={name} />
       </Suspense>

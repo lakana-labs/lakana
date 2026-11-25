@@ -33,6 +33,7 @@
     "linkBody": "From then on you sign in only through <name/>. Your passkeys stay stored but no longer sign you in.",
     "continue": "Continue",
     "keptPasskeys": "Your passkeys are kept but no longer sign you in.",
-    "linkFirst": "You confirm with your passkey first, then sign in at <name/>."
+    "linkFirst": "You confirm with your passkey first, then sign in at <name/>.",
+    "operatorForYou": "If you cannot sign in through the identity provider (it is down, or it refuses you), only the server operator can let you back in, because you are an administrator: they run this where the server runs, with the bootstrap token. Their recovery link unlinks your account from the provider and revokes your personal API tokens, and you then sign in with a new passkey."
   }
 }

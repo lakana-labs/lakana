@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { endSessions, listPasskeys, listSessions, removePasskey } from "./account";
 
-import { fakeServer } from "../test/server";
+import { fakeServer, withoutSessionReads } from "../test/server";
 
 describe("account", () => {
   it("lists and removes a person's passkeys", async () => {
@@ -14,7 +14,9 @@ describe("account", () => {
     expect(await listPasskeys("a b")).toEqual([]);
     await removePasskey("a b", "p 1");
 
-    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => `${request.method} ${request.path}`),
+    ).toEqual([
       "GET /api/v1/principals/a%20b/passkeys",
       "DELETE /api/v1/principals/a%20b/passkeys/p%201",
     ]);
@@ -29,7 +31,9 @@ describe("account", () => {
     expect(await listSessions("a b")).toEqual([]);
     await endSessions("a b");
 
-    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => `${request.method} ${request.path}`),
+    ).toEqual([
       "GET /api/v1/principals/a%20b/sessions",
       "DELETE /api/v1/principals/a%20b/sessions",
     ]);

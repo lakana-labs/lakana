@@ -31,7 +31,7 @@ export function AccountScreen(): JSX.Element {
   return (
     <Page title={t("account.title")}>
       <p className="page-purpose">{t("account.purpose")}</p>
-      <OwnRecoveryNote name={name} />
+      <OwnRecoveryNote name={name} linked={linked} />
       {account !== null && <ProviderSection account={account} />}
       <PasskeysPanel name={name} own readOnly={linked} />
       <SessionsPanel name={name} own />

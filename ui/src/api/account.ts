@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 import { api } from "./client";
+import { guarded } from "./stepUpFirst";
 
 /** One passkey, as `GET /api/v1/principals/{name}/passkeys` lists it; never its key. */
 export interface PasskeyOut {
@@ -73,13 +74,13 @@ export async function listPasskeys(name: string): Promise<readonly PasskeyOut[]>
 }
 
 /**
- * Removes a passkey; needs a passkey touch.
+ * Removes a passkey, after the touch (`guarded`).
  *
  * @param name - The person's principal name.
  * @param id - The passkey's id.
  */
 export async function removePasskey(name: string, id: string): Promise<void> {
-  await api.request("DELETE", principalPath(name, `/passkeys/${encodeURIComponent(id)}`));
+  await guarded("DELETE", principalPath(name, `/passkeys/${encodeURIComponent(id)}`));
 }
 
 /**
@@ -93,10 +94,10 @@ export async function listSessions(name: string): Promise<readonly BrowserSessio
 }
 
 /**
- * Ends every browser session of another person; needs a passkey touch.
+ * Ends every browser session of another person, after the touch (`guarded`).
  *
  * @param name - The person's principal name.
  */
 export async function endSessions(name: string): Promise<void> {
-  await api.request("DELETE", principalPath(name, "/sessions"));
+  await guarded("DELETE", principalPath(name, "/sessions"));
 }

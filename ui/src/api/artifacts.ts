@@ -7,6 +7,7 @@
  * @packageDocumentation
  */
 import { api, DownloadCut, DownloadTooLong } from "./client";
+import { guarded } from "./stepUpFirst";
 import {
   artifactApiPath,
   breakGlassQuery,
@@ -200,7 +201,7 @@ export function deleteVersion(
   breakGlassReason: string | null,
 ): Promise<ArtifactVersionDeletedOut> {
   const path = artifactApiPath(ref, `/versions/${String(version)}`);
-  return api.request<ArtifactVersionDeletedOut>(
+  return guarded<ArtifactVersionDeletedOut>(
     "DELETE",
     withQuery(path, breakGlassQuery(breakGlassReason)),
   );

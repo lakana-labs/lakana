@@ -2,13 +2,14 @@
  * Actions the server guards with a passkey touch, asked for before the request.
  *
  * @remarks
- * Its own module, loaded only with the places that use it, so the first load does not carry
- * it. The 403 `StepUpRequired` retry of {@link api}.request stays as the fallback, for a touch
- * that ends between the check and the request.
+ * The 403 `StepUpRequired` retry of {@link api}.request stays as the fallback, for a touch
+ * that ends between the check and the request; its ceremony is {@link confirmPresence}, which
+ * sends a person linked to the identity provider there as `guarded` does.
  * @packageDocumentation
  */
-import { api, send, stepUpNow } from "./client";
-import { goToProvider, startFlow } from "./oidc";
+import { api, ApiError, send, stepUpNow } from "./client";
+import { goToProvider, type ProviderRedirect, startFlow } from "./oidc";
+import { stepUp } from "./passkeys";
 
 /** How long before the session's passkey touch ends a guarded action asks for a new one. */
 export const STEP_UP_MARGIN_MS = 60_000;
@@ -24,6 +25,38 @@ export const STEP_UP_MARGIN_MS = 60_000;
  */
 async function startProviderStepUp(returnTo: string): Promise<string> {
   return startFlow("/api/v1/sign-in/oidc/step-up/start", { return_to: returnTo });
+}
+
+/**
+ * Sends the browser to the identity provider to confirm the session, back to this page.
+ *
+ * @returns The error the caller throws, so that nothing is sent.
+ * @throws {ApiError} when the provider step-up cannot start.
+ */
+async function toProvider(): Promise<ProviderRedirect> {
+  const back = window.location.pathname + window.location.search;
+  return goToProvider(await startProviderStepUp(back), { purpose: "step_up", back });
+}
+
+/**
+ * The step-up ceremony: a passkey touch, or for a person linked to the identity provider (the
+ * server answers the passkey's options with 409 `ProviderStepUpRequired`) the trip to the
+ * provider. It is what {@link api}.request runs on a 403 `StepUpRequired`, so a write sent
+ * without `guarded`, or whose touch ran out after `guarded`'s check, is not sent again: the
+ * person presses it again after the provider.
+ *
+ * @throws {ApiError} for a refusal; whatever the touch throws; `ProviderRedirect` (`oidc.ts`)
+ *   once the browser is on its way to the provider.
+ */
+export async function confirmPresence(): Promise<void> {
+  try {
+    await stepUp();
+  } catch (error) {
+    if (error instanceof ApiError && error.type === "ProviderStepUpRequired") {
+      throw await toProvider();
+    }
+    throw error;
+  }
 }
 
 /**
@@ -46,9 +79,7 @@ async function touchIfStale(): Promise<void> {
     return;
   }
   if (session.provider_linked === true) {
-    const back = window.location.pathname + window.location.search;
-    const url = await startProviderStepUp(back);
-    throw goToProvider(url, { purpose: "step_up", back });
+    throw await toProvider();
   }
   await stepUpNow();
 }

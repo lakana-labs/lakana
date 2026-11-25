@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { send, setStepUp } from "./client";
 import { PROVIDER_TRIP_KEY, ProviderRedirect } from "./oidc";
-import { guarded, STEP_UP_MARGIN_MS } from "./stepUpFirst";
+import { confirmPresence, guarded, STEP_UP_MARGIN_MS } from "./stepUpFirst";
 
 import { fakeServer } from "../test/server";
 
@@ -193,5 +193,56 @@ describe("guarded", () => {
     await guarded("DELETE", "/api/v1/grants/g-1");
 
     expect(server.sent.map((request) => request.method)).toEqual(["GET", "DELETE"]);
+  });
+
+  it("a guarded call whose touch runs out inside the margin goes to the provider and is not sent again", async () => {
+    let deletes = 0;
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": {
+        status: 200,
+        body: {
+          step_up_until: new Date(Date.now() + 10 * 60_000).toISOString(),
+          provider_linked: true,
+        },
+      },
+      "DELETE /api/v1/grants/g-1": () => {
+        deletes += 1;
+        return STEP_UP;
+      },
+      "POST /api/v1/sign-in/step-up/options": {
+        status: 409,
+        body: { detail: "Confirm at the provider.", type: "ProviderStepUpRequired" },
+      },
+      "POST /api/v1/sign-in/oidc/step-up/start": {
+        status: 200,
+        body: { authorization_url: "https://id.example.org/authorize?state=t" },
+      },
+    });
+    setStepUp(confirmPresence);
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign, pathname: "/settings/access/grants", search: "" });
+
+    await expect(guarded("DELETE", "/api/v1/grants/g-1")).rejects.toBeInstanceOf(ProviderRedirect);
+
+    expect(deletes).toBe(1);
+    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([
+      "GET /api/v1/sign-in/session",
+      "DELETE /api/v1/grants/g-1",
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/oidc/step-up/start",
+    ]);
+    expect(assign).toHaveBeenCalledWith("https://id.example.org/authorize?state=t");
+    sessionStorage.clear();
+  });
+
+  it("the ceremony passes any other refusal of the passkey's options on", async () => {
+    fakeServer({
+      "POST /api/v1/sign-in/step-up/options": {
+        status: 409,
+        body: { detail: "No passkey.", type: "NoPasskeyError" },
+      },
+    });
+
+    await expect(confirmPresence()).rejects.toMatchObject({ type: "NoPasskeyError" });
   });
 });

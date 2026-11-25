@@ -2,6 +2,8 @@ import { act, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { renderShell } from "../test/render";
+import { ADMIN_SESSION } from "../test/server";
+import { signedIn } from "../test/session";
 
 /**
  * The routes of one's own page, as an administrator or not.
@@ -27,6 +29,25 @@ describe("OwnRecoveryNote", () => {
     expect(
       await screen.findByText(/If you lose every passkey, only the server operator/),
     ).toBeInTheDocument();
+    expect(screen.getByText("lakana recovery create admin")).toBeInTheDocument();
+  });
+
+  it("tells a linked administrator that the operator's recovery unlinks them", async () => {
+    renderShell("/account", {
+      session: signedIn({ session: { ...ADMIN_SESSION, provider_linked: true } }),
+      routes: {
+        ...ownRoutes(true),
+        "GET /api/v1/sign-in/oidc": { status: 200, body: { enabled: true, display_name: "Okta" } },
+        "GET /api/v1/whoami": { status: 200, body: { token_window_ends_at: null } },
+      },
+    });
+
+    expect(
+      await screen.findByText(
+        /^If you cannot sign in through the identity provider .* only the server operator can let you back in.* unlinks your account from the provider/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/If you lose every passkey/)).not.toBeInTheDocument();
     expect(screen.getByText("lakana recovery create admin")).toBeInTheDocument();
   });
 

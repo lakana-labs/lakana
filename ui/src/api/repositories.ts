@@ -218,7 +218,7 @@ export async function waitForProbe(id: string, signal: AbortSignal): Promise<Rep
  * @returns When it is registered.
  */
 export async function createRepository(body: RepositoryCreate): Promise<void> {
-  await api.request("POST", "/api/v1/repositories", body);
+  await guarded("POST", "/api/v1/repositories", body);
 }
 
 /**
