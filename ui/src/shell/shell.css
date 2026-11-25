@@ -395,7 +395,9 @@ button.button:not([data-rac]):hover {
   min-width: 0;
 }
 
-.page :where(p) {
+/* A paragraph that is a block spans its column (#820): a banner (an error, a warning, a notice)
+   and the sentence of Home's update note, whose × ends the note. */
+.page :where(p:not(.step-error, .step-warning, .step-notice, .page-notice, .home-update > p)) {
   max-width: var(--reading-width);
 }
 

@@ -11,6 +11,12 @@
   font-weight: var(--type-section-weight);
 }
 
+/* Every step focuses its heading (Step.tsx), so its ring shows: 2 px at a 2 px offset. The space
+   under the heading keeps the ring clear of the line below it (#821). */
+.step .page-title {
+  margin-bottom: var(--space-2);
+}
+
 .step p {
   margin: 0 0 var(--space-3);
 }
