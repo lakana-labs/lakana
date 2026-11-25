@@ -29,10 +29,10 @@
     "window": "Your API tokens work until {{when}}; signing in through <name/> renews this.",
     "unlinked": "You sign in with a passkey. You can sign in through <name/> instead.",
     "link": "Use <name/> to sign in",
-    "linkTitle": "Sign in through <name/> from now on?",
+    "linkTitle": "Sign in through {{provider}} from now on?",
     "linkBody": "From then on you sign in only through <name/>. Your passkeys stay stored but no longer sign you in.",
-    "linkFirst": "You confirm with your passkey first, then sign in at <name/>.",
     "continue": "Continue",
-    "keptPasskeys": "Your passkeys are kept but no longer sign you in."
+    "keptPasskeys": "Your passkeys are kept but no longer sign you in.",
+    "linkFirst": "You confirm with your passkey first, then sign in at <name/>."
   }
 }

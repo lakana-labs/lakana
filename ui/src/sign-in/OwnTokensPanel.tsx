@@ -37,11 +37,14 @@ import { useResource } from "../shell/useResource";
 import { useWhen } from "../shell/useWhen";
 import { markedText, VisibleText } from "../shell/VisibleText";
 import { AttemptStatus, useAttempt } from "./Attempt";
+import { type ProviderAccount, TokenWindowLine } from "./ProviderSection";
 
 /** Properties of {@link OwnTokensPanel}. */
 export interface OwnTokensPanelProps {
   /** The person's own principal name. */
   readonly name: string;
+  /** What the profile knows about the identity provider, for the tokens' window; or null. */
+  readonly account?: ProviderAccount | null;
 }
 
 /**
@@ -151,15 +154,17 @@ function CreateTokenDialog({ owner, onClose }: CreateTokenDialogProps): JSX.Elem
 }
 
 /**
- * Renders the panel "API tokens": the purpose, every token of the person's with its state and
+ * Renders the panel "API tokens": the purpose, for a linked person until when the tokens work,
+ * every token of the person's with its state and
  * Revoke on the live ones, and Create a token. After a token is made or revoked the list is read
  * again and the focus moves to the panel's heading.
  *
  * @param props - The person.
  * @param props.name - The person's own principal name.
+ * @param props.account - The identity provider and the tokens' window, for a linked person.
  * @returns The panel.
  */
-export function OwnTokensPanel({ name }: OwnTokensPanelProps): JSX.Element {
+export function OwnTokensPanel({ name, account = null }: OwnTokensPanelProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const heading = useId();
@@ -188,6 +193,7 @@ export function OwnTokensPanel({ name }: OwnTokensPanelProps): JSX.Element {
         </Button>
       </div>
       <p className="page-purpose">{t("tokens.own.purpose")}</p>
+      {account !== null && <TokenWindowLine account={account} />}
       <Loaded resource={tokens}>
         {({ tokens: found, now }) =>
           found.length === 0 ? (

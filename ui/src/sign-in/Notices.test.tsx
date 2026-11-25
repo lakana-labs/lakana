@@ -57,6 +57,28 @@ describe("Notices", () => {
     expect(texts[4]).toMatch(/^Something changed about signing in to your account on /);
   });
 
+  it("the operator recovery notice names the person", async () => {
+    fakeServer({
+      "GET /api/v1/sign-in/notices": {
+        status: 200,
+        body: [
+          { id: "1", kind: "oidc_unlinked", subject: "k\u202Eim", created_at: AT },
+          { id: "2", kind: "oidc_unlinked", subject: "admin", created_at: AT },
+        ],
+      },
+    });
+    renderNotices();
+
+    const region = await screen.findByRole("region", { name: "Sign-in notices" });
+    const texts = within(region)
+      .getAllByRole("listitem")
+      .map((item) => item.querySelector("p")?.textContent);
+    expect(texts[0]).toMatch(
+      /^kU\+202Eim was unlinked from the identity provider by the server operator's recovery link on .+2026/,
+    );
+    expect(texts[1]).toMatch(/^Your account was unlinked from the identity provider/);
+  });
+
   it("dismisses a notice and moves focus on", async () => {
     const server = fakeServer({
       "GET /api/v1/sign-in/notices": {
