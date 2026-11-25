@@ -6,6 +6,7 @@
  */
 import { api } from "./client";
 import { environmentPath, withQuery, type CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 
 /** Who may run a saved query: its owner alone, or everyone who may query its environment. */
 export type SavedQueryVisibility = "private" | "everyone";
@@ -69,17 +70,20 @@ function savedPath(environment: string, id?: string): string {
  *
  * @param environment - Only this environment; null for all.
  * @param cursor - The cursor of the page, or null for the first.
+ * @param sort - The sort (`name`, `updated`); null for the name, A to Z.
  * @returns The page.
  * @throws {ApiError} for a refusal.
  */
 export async function listSavedQueries(
   environment: string | null,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<SavedQueryOut>> {
   const query = new URLSearchParams({ limit: String(PAGE_SIZE) });
   if (environment !== null) {
     query.set("environment", environment);
   }
+  setSort(query, sort);
   if (cursor !== null) {
     query.set("cursor", cursor);
   }

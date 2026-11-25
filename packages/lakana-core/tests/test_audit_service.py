@@ -383,3 +383,46 @@ def test_query_cursor_resumes_strictly_after_the_given_position(session: Session
 
     assert seen == expected
     assert len(seen) == 5
+
+
+def test_query_oldest_first_pages_every_event_once(session: Session) -> None:
+    """`order="asc"` reverses the order, ties on `occurred_at` included, and pages by its cursor."""
+    admin = _add_principal(session, "admin")
+    service = AuditService(session, AllowAllAuthorization())
+    tied = datetime.now(UTC) - timedelta(minutes=1)
+    events = [
+        service.record(admin.id, AuditEventType.AUTHENTICATION_SUCCEEDED, commit=True)
+        for _ in range(5)
+    ]
+    for event in events[:3]:
+        event.occurred_at = tied
+    session.commit()
+    newest_first = [e.id for e in service.query(admin).items]
+
+    seen: list[uuid.UUID] = []
+    cursor: AuditCursor | None = None
+    while True:
+        page = service.query(admin, limit=2, cursor=cursor, sort="occurred", order="asc")
+        seen.extend(e.id for e in page.items)
+        if page.next_cursor is None:
+            break
+        cursor = page.next_cursor
+        assert cursor.sort == "occurred:asc"
+
+    assert seen == newest_first[::-1]
+
+
+def test_query_refuses_a_cursor_of_the_other_order_and_an_unknown_sort(session: Session) -> None:
+    admin = _add_principal(session, "admin")
+    service = AuditService(session, AllowAllAuthorization())
+    for _ in range(2):
+        service.record(admin.id, AuditEventType.AUTHENTICATION_SUCCEEDED, commit=True)
+    newest = service.query(admin, limit=1).next_cursor
+    assert newest is not None and newest.sort == "occurred:desc"
+    with pytest.raises(
+        ValidationError,
+        match="sorted by `occurred:asc`: it came from the list sorted by `occurred:desc`",
+    ):
+        service.query(admin, cursor=newest, order="asc")
+    with pytest.raises(ValidationError, match="`sort` must be one of: occurred; got 'principal'"):
+        service.query(admin, sort="principal")

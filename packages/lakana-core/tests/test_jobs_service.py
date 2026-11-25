@@ -21,11 +21,11 @@ from lakana_core.auth import (
     SecurableKind,
 )
 from lakana_core.db import db_now
-from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied
+from lakana_core.errors import ConflictError, NotFoundError, PermissionDenied, ValidationError
 from lakana_core.grants.roles import Role
 from lakana_core.identifiers import NamespacePath, TableRef
 from lakana_core.jobs.cron import next_fire_after
-from lakana_core.jobs.service import JobService
+from lakana_core.jobs.service import JobService, JobView, sorted_jobs
 from lakana_core.models import (
     AuditEvent,
     AuditEventType,
@@ -1507,6 +1507,129 @@ def test_get_shows_one_job_and_says_what_is_wrong_otherwise(
     monkeypatch.setattr(JobService, "list", lambda *_args: [])
     with pytest.raises(NotFoundError, match="No job is deployed there"):
         service.get(principal, "dev", "daily")
+
+
+def _job_view(name: str, repository: str = "analytics", **facts: object) -> JobView:
+    """Build a job as the list shows it, with only the facts a sort reads set.
+
+    Parameters
+    ----------
+    name
+        The job's name.
+    repository
+        Its repository.
+    **facts
+        `last_run_status`, `last_run_at` or `next_run_at`.
+
+    Returns
+    -------
+    JobView
+        The view.
+    """
+    base = JobView(
+        name=name,
+        environment="dev",
+        repository=repository,
+        select=(),
+        upstream=False,
+        downstream=False,
+        cron=None,
+        timezone=None,
+        state="no schedule",
+        paused=False,
+        next_run_at=None,
+        next_run_local=None,
+        waiting_for=None,
+        waits_for_run_id=None,
+        last_run_id=None,
+        last_run_status=None,
+        last_run_trigger=None,
+        last_run_at=None,
+    )
+    return dataclasses.replace(base, **facts)  # type: ignore[arg-type]
+
+
+def test_jobs_sort_by_each_field_with_the_unknown_last() -> None:
+    t0 = datetime(2026, 11, 1, tzinfo=UTC)
+    beta = _job_view("Beta", last_run_status="succeeded", last_run_at=t0, next_run_at=t0)
+    alpha = _job_view("alpha", last_run_status="failed", last_run_at=t0 + timedelta(hours=1))
+    gamma = _job_view("gamma", next_run_at=t0 - timedelta(hours=1))
+    other = _job_view("alpha", "ml", last_run_status="failed", last_run_at=t0)
+    jobs = [gamma, beta, other, alpha]
+
+    def names(sort: str | None, order: str | None = None) -> list[tuple[str, str]]:
+        """Sort the jobs and name them.
+
+        Parameters
+        ----------
+        sort
+            The field.
+        order
+            The direction.
+
+        Returns
+        -------
+        list of tuple of (str, str)
+            Each job's name and repository, in order.
+        """
+        return [(v.name, v.repository) for v in sorted_jobs(jobs, sort, order)]
+
+    assert names(None) == [(v.name, v.repository) for v in jobs]
+    assert names("name") == [
+        ("alpha", "analytics"),
+        ("alpha", "ml"),
+        ("Beta", "analytics"),
+        ("gamma", "analytics"),
+    ]
+    assert names("name", "desc") == [
+        ("gamma", "analytics"),
+        ("Beta", "analytics"),
+        ("alpha", "analytics"),
+        ("alpha", "ml"),
+    ]
+    assert names("status") == [
+        ("alpha", "analytics"),
+        ("alpha", "ml"),
+        ("Beta", "analytics"),
+        ("gamma", "analytics"),
+    ]
+    assert names("status", "desc") == [
+        ("Beta", "analytics"),
+        ("alpha", "analytics"),
+        ("alpha", "ml"),
+        ("gamma", "analytics"),
+    ]
+    assert names("last_run") == [
+        ("alpha", "analytics"),
+        ("alpha", "ml"),
+        ("Beta", "analytics"),
+        ("gamma", "analytics"),
+    ]
+    assert names("last_run", "asc") == [
+        ("alpha", "ml"),
+        ("Beta", "analytics"),
+        ("alpha", "analytics"),
+        ("gamma", "analytics"),
+    ]
+    assert names("next_run") == [
+        ("gamma", "analytics"),
+        ("Beta", "analytics"),
+        ("alpha", "analytics"),
+        ("alpha", "ml"),
+    ]
+    with pytest.raises(
+        ValidationError, match="`sort` must be one of: last_run, name, next_run, status"
+    ):
+        sorted_jobs(jobs, "schedule", None)
+
+
+def test_list_takes_the_sort(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    service = _service(session)
+    assert [v.name for v in service.list(principal, "dev", sort="name", order="desc")] == sorted(
+        (v.name for v in service.list(principal, "dev")), key=str.casefold, reverse=True
+    )
 
 
 def test_a_waiting_job_says_since_when_and_how_it_was_first_asked_for(

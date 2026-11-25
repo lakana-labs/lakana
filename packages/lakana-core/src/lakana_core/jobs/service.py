@@ -51,6 +51,7 @@ from lakana_core.models.base import utcnow
 from lakana_core.models.run import ACTIVE_RUN_STATUSES
 from lakana_core.notifications.events import new_delivery
 from lakana_core.notifications.views import DeliveryView, delivery_view
+from lakana_core.pagination import parse_sort
 from lakana_core.projects.browse import browse_url
 from lakana_core.projects.deploys import DeploymentMoved, DeployService
 from lakana_core.projects.lookups import deployment_row, environment_by_name, repository_by_name
@@ -301,6 +302,54 @@ class JobView:
     notify: JobNotify | None = None
     commit_sha: str = ""
     source_url: str | None = None
+
+
+JOB_SORTS: dict[str, bool] = {"name": False, "status": False, "last_run": True, "next_run": False}
+"""The fields the jobs list sorts by, each with whether it runs from the largest down by default:
+names and the last run's state from A, the latest last run first, the soonest next run first."""
+
+
+def sorted_jobs(views: Sequence[JobView], sort: str | None, order: str | None) -> Sequence[JobView]:
+    """Sort an environment's jobs by a field of the list.
+
+    The list is not paged: it is sorted whole, a job without a value (never run, no next run)
+    last in either direction, equal values by name in any letter case and then repository.
+
+    Parameters
+    ----------
+    views
+        The jobs, in the list's own order.
+    sort
+        ``name``, ``status`` (the last run's state), ``last_run`` or ``next_run``; with `order`
+        also `None`, the list's own order: by repository, then name.
+    order
+        ``asc`` or ``desc``; by default ``desc`` for ``last_run``, ``asc`` for the others.
+
+    Returns
+    -------
+    Sequence of JobView
+        The jobs in that order.
+
+    Raises
+    ------
+    ValidationError
+        If `sort` or `order` is unknown; the message names the choices.
+    """
+    if sort is None and order is None:
+        return views
+    chosen = parse_sort(sort, order, JOB_SORTS, "name")
+    ties = sorted(views, key=lambda v: (v.name.casefold(), v.name, v.repository))
+    if chosen.field == "name":
+        return sorted(ties, key=lambda v: v.name.casefold(), reverse=chosen.descending)
+    value_of = {
+        "status": lambda v: v.last_run_status,
+        "last_run": lambda v: v.last_run_at,
+        "next_run": lambda v: v.next_run_at,
+    }[chosen.field]
+    known = [v for v in ties if value_of(v) is not None]
+    unknown = [v for v in ties if value_of(v) is None]
+    # A sort is stable, also in reverse: equal values keep the order of `ties`.
+    return [*sorted(known, key=value_of, reverse=chosen.descending), *unknown]
 
 
 PROBLEM_NONE = "none"
@@ -1543,7 +1592,13 @@ class JobService:
         )
 
     def list(
-        self, p: PrincipalRef, environment: str, repository: str | None = None
+        self,
+        p: PrincipalRef,
+        environment: str,
+        repository: str | None = None,
+        *,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Sequence[JobView]:
         """List the jobs of the deployed repositories of an environment.
 
@@ -1557,11 +1612,16 @@ class JobService:
             Environment name.
         repository
             Only this repository's jobs.
+        sort
+            What the list is sorted by (`sorted_jobs`): ``name``, ``status``, ``last_run`` or
+            ``next_run``.
+        order
+            ``asc`` or ``desc``; the field's own direction without it.
 
         Returns
         -------
         Sequence of JobView
-            By repository name, then job name.
+            By repository name, then job name, unless `sort` or `order` is given.
 
         Raises
         ------
@@ -1569,8 +1629,12 @@ class JobService:
             Without READ_ENVIRONMENT.
         NotFoundError
             If the environment (or the repository asked for) does not exist.
+        ValidationError
+            If `sort` or `order` is unknown.
         """
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
+        if sort is not None or order is not None:
+            parse_sort(sort, order, JOB_SORTS, "name")
         env = environment_by_name(self._session, environment)
         query = (
             select(Repository, JobVersion)
@@ -1593,7 +1657,7 @@ class JobService:
         for repo, version in self._session.execute(query).all():
             for name, entry in sorted(manifest_jobs(version.manifest_json).items()):
                 views.append(self._view(env, repo, name, entry, rows.get((repo.id, name)), version))
-        return views
+        return sorted_jobs(views, sort, order)
 
     def get(
         self, p: PrincipalRef, environment: str, job: str, repository: str | None = None

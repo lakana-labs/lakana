@@ -262,3 +262,43 @@ def test_held_admin_of_is_none_for_a_caller_who_is_not_an_administrator(session:
     service = PrincipalService(session, GrantAuthorization(session))
     rows = service.list_principals(as_clerk).items
     assert service.held_admin_of(as_clerk, rows) is None
+
+
+def test_list_principals_sorts_by_name_by_state_and_oldest_first(session: Session) -> None:
+    """Names in any letter case; the active first; every sort pages without a gap or a repeat."""
+    admin = _admin(session)
+    service = PrincipalService(session, AllowAllAuthorization())
+    for name in ("Carol", "alice", "bob"):
+        service.create_principal(admin, name=name, type=PrincipalType.USER)
+    service.deactivate_principal(admin, "alice")
+
+    def walk(**sort: str) -> list[str]:
+        """Read every page, one principal a page.
+
+        Parameters
+        ----------
+        **sort
+            `sort` and `order`.
+
+        Returns
+        -------
+        list of str
+            The names in the order the pages gave them.
+        """
+        seen: list[str] = []
+        cursor = None
+        while True:
+            page = service.list_principals(admin, limit=1, cursor=cursor, **sort)
+            seen += [p.name for p in page.items]
+            cursor = page.next_cursor
+            if cursor is None:
+                return seen
+
+    assert walk(sort="name") == [admin.name, "alice", "bob", "Carol"]
+    assert walk(sort="name", order="desc") == ["Carol", "bob", "alice", admin.name]
+    assert walk(sort="status") == [admin.name, "bob", "Carol", "alice"]
+    assert walk(sort="status", order="desc") == ["alice", admin.name, "bob", "Carol"]
+    oldest = walk(sort="created", order="asc")
+    assert oldest[0] == admin.name and sorted(oldest) == sorted(walk())
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, name, status"):
+        service.list_principals(admin, sort="type")

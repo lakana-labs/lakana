@@ -55,7 +55,7 @@ Answer fields: `PrincipalOut`
 
 List principals
 
-Lists the principals, newest first. Needs `MANAGE_PRINCIPAL` on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page.
+Lists the principals, newest first, or in the order `sort` and `order` ask for. Needs `MANAGE_PRINCIPAL` on the instance. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same `q` and sort with every page. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in this order.
 
 Parameters:
 
@@ -64,6 +64,8 @@ Parameters:
 | `q` | query | no | text or null | Only principals whose name contains this text, in any letter case. |
 | `limit` | query | no | whole number | Most principals returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page; send the same `q`. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the active first, each by name. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

@@ -11,6 +11,7 @@
 import { api } from "./client";
 import { guarded } from "./stepUpFirst";
 import { environmentPath, withQuery, type CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 
 /** The kinds of connection the server knows. */
 export type ConnectionKind =
@@ -205,6 +206,7 @@ function connectionPath(environment: string, name: string | null, suffix = ""): 
  * @param cursor - The cursor of the page, or null for the first.
  * @param limit - The page's size.
  * @param options - `background` for a poll, which never asks for a passkey touch.
+ * @param sort - The sort (`name`, `status`); null for the newest first.
  * @returns The page.
  * @throws {ApiError} for a refusal.
  */
@@ -213,11 +215,13 @@ export async function listConnections(
   cursor: string | null,
   limit = 100,
   options: ReadOptions = {},
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<ConnectionOut>> {
   const query = new URLSearchParams({ limit: String(limit) });
   if (environment !== null) {
     query.set("environment", environment);
   }
+  setSort(query, sort);
   if (cursor !== null) {
     query.set("cursor", cursor);
   }

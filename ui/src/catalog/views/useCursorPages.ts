@@ -34,17 +34,45 @@ interface State<T> {
 }
 
 /**
+ * The rows of a later page that are not shown yet.
+ *
+ * @template T - A row.
+ * @param shown - The rows shown.
+ * @param page - The rows of the page read.
+ * @param idOf - A row's identity; without it, every row of the page.
+ * @returns The rows to append.
+ */
+function newRows<T>(
+  shown: readonly T[],
+  page: readonly T[],
+  idOf: ((item: T) => string) | undefined,
+): readonly T[] {
+  if (idOf === undefined) {
+    return page;
+  }
+  const seen = new Set(shown.map(idOf));
+  return page.filter((item) => !seen.has(idOf(item)));
+}
+
+/**
  * Reads the first page whenever `key` changes and the next pages on `loadMore`. A new key
  * starts again and shows none of the old rows; an answer for an older key or round is dropped.
  *
  * @template T - A row.
  * @param key - What the list is of (an environment and a namespace); a new one starts again.
  * @param load - Reads a page from a cursor; null for the first.
+ * @param order - The order the list is read in; a new one reads the first page again, and the
+ *   rows shown stay, marked busy, until it arrives, so the header that sorted keeps the focus.
+ * @param idOf - A row's identity. With it, a row a later page repeats is shown once: in an
+ *   order by a value that changes (a state, a time of change), a row can move from one page to
+ *   the next while the list is paged.
  * @returns The rows, the state of the read and the two ways to read on.
  */
 export function useCursorPages<T>(
   key: string,
   load: (cursor: string | null) => Promise<CursorPage<T>>,
+  order = "",
+  idOf?: (item: T) => string,
 ): CursorPages<T> {
   const { t } = useTranslation();
   const [state, setState] = useState<State<T>>({
@@ -95,7 +123,7 @@ export function useCursorPages<T>(
         }
       },
     );
-  }, [key, round, t]);
+  }, [key, order, round, t]);
 
   const current = state.key === key;
   const { next, items } = state;
@@ -110,7 +138,7 @@ export function useCursorPages<T>(
       if (mine === generation.current) {
         setState({
           key,
-          items: [...items, ...more.items],
+          items: [...items, ...newRows(items, more.items, idOf)],
           next: more.nextCursor,
           error: null,
           loading: null,
@@ -121,7 +149,7 @@ export function useCursorPages<T>(
         setState((previous) => ({ ...previous, error: problemText(t, failure), loading: null }));
       }
     }
-  }, [current, key, next, items, t]);
+  }, [current, key, next, items, t, idOf]);
 
   const reload = useCallback(() => {
     setRound((previous) => previous + 1);

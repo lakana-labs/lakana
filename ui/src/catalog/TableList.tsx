@@ -5,13 +5,13 @@
  * @packageDocumentation
  */
 import type { JSX } from "react";
-import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { TABLE_SORTS } from "../api";
 import type { TableListItemOut, TableSort } from "../api";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
+import { SortHeader } from "../shell/SortHeader";
 import { markedName, VisibleText } from "../shell/VisibleText";
 import { kindWord, openFromCell, OwnerName, RowCount, Unknown, When } from "./cells";
 import { formatBytes } from "./format";
@@ -67,26 +67,15 @@ export function TableList({ items, view, onSort, busy }: TableListProps): JSX.El
         <thead>
           <tr>
             {COLUMNS.map((sort) => (
-              <th
-                scope="col"
+              <SortHeader
                 key={sort}
+                field={sort}
+                sort={{ field: view.sort, order: view.order }}
+                onSort={onSort}
                 className={NUMBERS.includes(sort) ? "number" : undefined}
-                {...(view.sort === sort
-                  ? { "aria-sort": view.order === "asc" ? "ascending" : "descending" }
-                  : {})}
               >
-                <Button
-                  className="sort-head"
-                  onPress={() => {
-                    onSort(sort);
-                  }}
-                >
-                  {t(`catalog.columns.${sort}`)}
-                  {view.sort === sort && (
-                    <span aria-hidden="true">{view.order === "asc" ? "▲" : "▼"}</span>
-                  )}
-                </Button>
-              </th>
+                {t(`catalog.columns.${sort}`)}
+              </SortHeader>
             ))}
             <th scope="col">
               <span className="visually-hidden">{t("catalog.open")}</span>

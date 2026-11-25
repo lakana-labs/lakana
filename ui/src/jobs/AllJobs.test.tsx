@@ -454,3 +454,48 @@ describe("AllJobs", () => {
     expect(await screen.findByText("Nothing here matches the search.")).toBeInTheDocument();
   });
 });
+
+describe("AllJobs' sort", () => {
+  it("sorts every environment's jobs by the column pressed, a job without a value last", async () => {
+    const { server, user } = renderAll(["dev", "prod"], {
+      [jobsOf("dev")]: {
+        status: 200,
+        body: [
+          aJob({ name: "audit", environment: "dev", last_run_at: "2026-11-16T01:00:00Z" }),
+          aJob({ environment: "dev", last_run_status: null, last_run_at: null }),
+        ],
+      },
+      [jobsOf("prod")]: {
+        status: 200,
+        body: [aJob({ last_run_at: "2026-11-17T01:00:00Z" })],
+      },
+    });
+    await screen.findByRole("region", { name: "Every job listed" });
+    expect(screen.getByRole("columnheader", { name: /Name/u })).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+
+    await user.click(screen.getByRole("button", { name: /Last run/u }));
+    await waitFor(() => {
+      expect(names()).toEqual([
+        "nightly_sales analytics Environment prod",
+        "audit analytics Environment dev",
+        "nightly_sales analytics Environment dev",
+      ]);
+    });
+    expect(server.sent.at(-1)?.path).toContain("sort=last_run&order=desc");
+
+    await user.click(screen.getByRole("button", { name: /Last run/u }));
+    await waitFor(() => {
+      expect(names()[0]).toBe("audit analytics Environment dev");
+    });
+    // Never run is last in either direction.
+    expect(names().at(-1)).toBe("nightly_sales analytics Environment dev");
+
+    await user.click(screen.getByRole("button", { name: /^Name/u }));
+    await waitFor(() => {
+      expect(names()[0]).toBe("audit analytics Environment dev");
+    });
+  });
+});

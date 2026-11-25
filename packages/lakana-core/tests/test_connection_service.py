@@ -3247,3 +3247,97 @@ def test_a_reader_who_may_not_read_the_runs_learns_nothing_of_them(
     assert [v.last_run_failure for v in service.list_all(world.analyst).items] == [None]
     assert service.get(world.analyst, "prod", "crm-db").last_run_failure is None
     assert asked == [(world.analyst, ["prod"])] * 3
+
+
+def _walk_connections(world: World, **sort: str) -> list[str]:
+    """Read every page of the `prod` connections, one a page, in a sort.
+
+    Parameters
+    ----------
+    world
+        The world.
+    **sort
+        `sort` and `order`, as the list takes them.
+
+    Returns
+    -------
+    list of str
+        The names, in the order the pages gave them.
+    """
+    seen: list[str] = []
+    cursor = None
+    while True:
+        page = world.connections().list(world.analyst, "prod", limit=1, cursor=cursor, **sort)
+        seen += [view.name for view in page.items]
+        cursor = page.next_cursor
+        if cursor is None:
+            return seen
+
+
+def test_connections_sort_by_name_and_by_last_test(world: World) -> None:
+    """Problems first, then tests still open, then those that passed; never tested last."""
+    for name in ("bravo", "alpha", "delta", "charlie", "echo"):
+        world.postgres(world.data_engineer, name=name, secret_values=None)
+    ids = {name: world.connection_id("prod", name) for name in ("alpha", "bravo", "charlie")}
+    done = ConnectionTestState.DONE
+    _add_test(world, ids["alpha"], at=_NOW, state=done, outcome=ConnectionTestOutcome.DNS)
+    _add_test(
+        world,
+        ids["alpha"],
+        at=_NOW + timedelta(minutes=1),
+        state=done,
+        outcome=ConnectionTestOutcome.OK,
+    )
+    _add_test(world, ids["bravo"], at=_NOW, state=done, outcome=ConnectionTestOutcome.TIMEOUT)
+    _add_test(world, ids["charlie"], at=_NOW, state=ConnectionTestState.RUNNING)
+
+    assert _walk_connections(world, sort="name") == ["alpha", "bravo", "charlie", "delta", "echo"]
+    assert _walk_connections(world, sort="name", order="desc") == [
+        "echo",
+        "delta",
+        "charlie",
+        "bravo",
+        "alpha",
+    ]
+    assert _walk_connections(world, sort="status") == ["bravo", "charlie", "alpha", "delta", "echo"]
+    assert _walk_connections(world, sort="status", order="desc") == [
+        "alpha",
+        "charlie",
+        "bravo",
+        "delta",
+        "echo",
+    ]
+
+
+def test_connections_refuse_an_unknown_sort_and_another_sorts_cursor(world: World) -> None:
+    for name in ("one", "two"):
+        world.postgres(world.data_engineer, name=name, secret_values=None)
+    service = world.connections()
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, name, status"):
+        service.list(world.analyst, "prod", sort="kind")
+    page = service.list(world.analyst, "prod", limit=1, sort="name")
+    with pytest.raises(
+        ValidationError, match="sorted by `status:asc`: it came from the list sorted by `name:asc`"
+    ):
+        service.list(world.analyst, "prod", sort="status", cursor=page.next_cursor)
+
+
+def test_the_cross_environment_list_sorts_by_name(world: World) -> None:
+    _environment(world, "stage")
+    made = [("prod", "p-1"), ("dev", "d-1"), ("stage", "s-1"), ("prod", "a-2"), ("dev", "d-2")]
+    for minute, (environment, name) in enumerate(made):
+        _made_at(world, environment, name, _NOW + timedelta(minutes=minute))
+    service = world.connections()
+    seen: list[str] = []
+    cursor = None
+    while True:
+        page = service.list_all(world.data_engineer, limit=1, cursor=cursor, sort="name")
+        seen += [view.name for view in page.items]
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert seen == ["a-2", "d-1", "d-2", "p-1"]
+    oldest = service.list_all(world.data_engineer, sort="created", order="asc")
+    assert [view.name for view in oldest.items] == ["p-1", "d-1", "a-2", "d-2"]
+    by_env = service.list_all(world.data_engineer, environment="dev", sort="name", order="desc")
+    assert [view.name for view in by_env.items] == ["d-2", "d-1"]

@@ -54,11 +54,15 @@ from lakana_core.pagination import (
     BAD_CURSOR,
     Page,
     SortedPosition,
+    SortField,
+    SortKey,
     after_sorted,
     check_list_limit,
     decode_tuple_cursor,
     encode_tuple_cursor,
+    parse_sort,
     sorted_order,
+    sorted_page,
 )
 
 SAVED_QUERY_NAME_MAX = 200
@@ -95,6 +99,10 @@ ONLY_OWNER_OR_ADMIN_DELETES = "Only the owner of a saved query or an administrat
 
 _ONE_ENVIRONMENT, _EVERY_ENVIRONMENT = "saved-queries", "all-saved-queries"
 """The cursor kinds of the per-environment list and of the cross-environment list."""
+
+SAVED_QUERY_SORTS: dict[str, bool] = {"name": False, "updated": True, "created": True}
+"""The fields the saved-query lists sort by, each with whether it runs from the largest down by
+default: names from A, the latest changed or saved first."""
 
 _OWNER_ACTIONS = ("update", "delete")
 _DELETE_ONLY = ("delete",)
@@ -682,6 +690,8 @@ class SavedQueryService:
         environment: str | None = None,
         limit: int = SAVED_QUERY_LIST_DEFAULT,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[SavedQueryView]:
         """List the saved queries the caller sees, by name, one page at a time, without their SQL.
 
@@ -692,7 +702,8 @@ class SavedQueryService:
         holds what the caller sees and where the previous page ended, ordered and cut in the
         database; it selects no SQL text. The order is the name in any letter case
         (`SavedQuery.name_key`), then the environment, then the id, each by code point; the two
-        lists have their own cursors.
+        lists have their own cursors. Another `sort` orders the same saved queries otherwise,
+        with a cursor of its own; it shows exactly what the list by name shows.
 
         Parameters
         ----------
@@ -703,7 +714,13 @@ class SavedQueryService:
         limit
             The page size, 1 to `SAVED_QUERY_LIST_MAX`.
         cursor
-            The `next_cursor` of the previous page of the same list, or `None` for the first.
+            The `next_cursor` of the previous page of the same list and sort, or `None` for the
+            first.
+        sort
+            What the list is sorted by: ``name`` (the default), ``updated`` or ``created``;
+            equal times by id.
+        order
+            ``asc`` or ``desc``; by default ``asc`` for ``name``, ``desc`` for the times.
 
         Returns
         -------
@@ -719,12 +736,14 @@ class SavedQueryService:
         NotFoundError
             If the named environment does not exist.
         ValidationError
-            If `limit` is out of range, or `cursor` is malformed or from the other list.
+            If `limit` is out of range, `sort` or `order` is unknown, or `cursor` is malformed,
+            from the other list or from another sort.
         AuditUnavailableError
             If the page holds someone else's private saved query (an administrator's list) and
             the view could not be recorded (`_audit_view`); nothing is returned.
         """
         _refuse_task_token(p)
+        chosen = parse_sort(sort, order, SAVED_QUERY_SORTS, "name")
         conditions: list[ColumnElement[bool]] = [LIVE_ENVIRONMENT]
         if environment is None:
             live = self._session.execute(
@@ -739,26 +758,48 @@ class SavedQueryService:
             conditions.append(SavedQuery.environment_id == env.id)
         check_list_limit(limit)
         kind = _EVERY_ENVIRONMENT if environment is None else _ONE_ENVIRONMENT
-        at = None if cursor is None else _position(kind, cursor)
         keys = [
             SavedQuery.name_key.expression,
             by_code_point(self._session.get_bind().dialect.name, Environment.name.expression),
         ]
         row_id = SavedQuery.id.expression
-        rows = self._session.execute(
+        listed = (
             select(*_LISTED, SavedQuery.name_key, Environment.name, Principal.name)
             .join(Environment, Environment.id == SavedQuery.environment_id)
             .outerjoin(Principal, Principal.id == SavedQuery.owner_id)
-            .where(*conditions, reader.visible(), after_sorted(keys, row_id, False, at))
-            .order_by(*sorted_order(keys, row_id, False))
-            .limit(limit + 1)
-        ).all()
+            .where(*conditions, reader.visible())
+        )
+        if chosen != ("name", False):
+            fields = {
+                "name": SortField(tuple(SortKey(key, str) for key in keys), descending=False),
+                "updated": SortField((SortKey(SavedQuery.updated_at, datetime),), descending=True),
+                "created": SortField((SortKey(SavedQuery.created_at, datetime),), descending=True),
+            }
+            found = sorted_page(
+                self._session,
+                listed,
+                kind=kind,
+                sort=chosen,
+                field=fields[chosen.field],
+                row_id=row_id,
+                limit=limit,
+                cursor=cursor,
+            )
+            rows, next_cursor = found.items, found.next_cursor
+        else:
+            at = None if cursor is None else _position(kind, cursor)
+            rows = self._session.execute(
+                listed.where(after_sorted(keys, row_id, False, at))
+                .order_by(*sorted_order(keys, row_id, False))
+                .limit(limit + 1)
+            ).all()
+            next_cursor = None
+            if len(rows) > limit:
+                # The cursor holds the last item's sort keys as stored, which the next page
+                # compares.
+                last = rows[limit - 1]
+                next_cursor = encode_tuple_cursor(kind, (last[-3], last[-2], str(last[0])))
         shown = [(_Fields(*row[: len(_LISTED)]), row[-2], row[-1]) for row in rows[:limit]]
-        next_cursor = None
-        if len(rows) > limit:
-            # The cursor holds the last item's sort keys as stored, which the next page compares.
-            last = rows[limit - 1]
-            next_cursor = encode_tuple_cursor(kind, (last[-3], last[-2], str(last[0])))
         page = Page(
             [reader.view(fields, env_name, owner, None) for fields, env_name, owner in shown],
             next_cursor,

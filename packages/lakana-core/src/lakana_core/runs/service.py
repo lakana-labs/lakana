@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, NamedTuple, cast
 
-from sqlalchemy import and_, case, func, or_, select, update
+from sqlalchemy import String, and_, case, func, or_, select, type_coerce, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -71,7 +71,17 @@ from lakana_core.models.run import (
     TERMINAL_TASK_STATUSES,
 )
 from lakana_core.notifications.views import NotificationView, notification_view
-from lakana_core.pagination import decode_cursor, encode_cursor, parse_choices
+from lakana_core.pagination import (
+    ListSort,
+    SortField,
+    SortKey,
+    decode_cursor,
+    encode_cursor,
+    name_order,
+    parse_choices,
+    parse_sort,
+    sorted_page,
+)
 from lakana_core.policy.schema_change import PolicyWarningView, schema_change_for_reader
 from lakana_core.projects.checks import (
     kept_check_tables,
@@ -136,6 +146,36 @@ _NOT_SERVICE_ACCOUNT_MESSAGE = (
     "`lakana deployments set-run-as`."
 )
 _RESUMABLE = frozenset({TaskStatus.FAILED, TaskStatus.UPSTREAM_FAILED, TaskStatus.CANCELLED})
+
+RUN_SORTS: dict[str, bool] = {"created": True, "name": False, "status": False}
+"""The fields the runs lists sort by, each with whether it runs from the largest down by default:
+the newest first, names and states from A."""
+
+
+def _run_sort_field(session: Session, field: str) -> SortField:
+    """Give the keys of a field of the runs lists.
+
+    Parameters
+    ----------
+    session
+        The session the list is read in, for the way its database compares names.
+    field
+        A key of `RUN_SORTS`.
+
+    Returns
+    -------
+    SortField
+        For ``created``, the creation time. For ``name``, the job's name, else the
+        repository's, in any letter case; for ``status``, the stored state; each then the
+        newest first.
+    """
+    newest = SortKey(Run.created_at, datetime, descending=True)
+    if field == "name":
+        name = name_order(session, func.coalesce(Run.job, Repository.name))
+        return SortField((SortKey(name, str), newest), descending=False)
+    if field == "status":
+        return SortField((SortKey(type_coerce(Run.status, String), str), newest), descending=False)
+    return SortField((SortKey(Run.created_at, datetime),), descending=True)
 
 
 class ActiveRunError(ConflictError):
@@ -2144,11 +2184,14 @@ class RunService:
         since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> tuple[list[RunView], str | None]:
         """List an environment's runs, newest first, one page at a time, without tasks.
 
         Every filter narrows the list; they combine with AND. Runs are ordered by creation time,
-        then id, newest first; a page continues strictly after the last run of the previous one.
+        then id, newest first, unless `sort` names another order; a page continues strictly
+        after the last run of the previous one.
 
         Parameters
         ----------
@@ -2171,7 +2214,14 @@ class RunService:
         limit
             Most runs returned.
         cursor
-            The `next_cursor` of the previous page. Send the same filters with every page.
+            The `next_cursor` of the previous page. Send the same filters and sort with every
+            page.
+        sort
+            What the list is sorted by: ``created`` (the default), ``name`` (the job's, else the
+            repository's, in any letter case) or ``status``; runs of one name or state come
+            newest first.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
@@ -2185,8 +2235,9 @@ class RunService:
         NotFoundError
             If the environment or the repository does not exist.
         ValidationError
-            If `limit` is below 1, a status or trigger is unknown, `since` has no time zone, or
-            `cursor` is not one this server issued for the runs list.
+            If `limit` is below 1, a status, trigger, `sort` or `order` is unknown, `since` has
+            no time zone, or `cursor` is not one this server issued for the runs list in this
+            sort.
         """
         self._authz.authorize(p, Action.READ_ENVIRONMENT, Securable.environment_scope(environment))
         env = self._environment(environment)
@@ -2200,6 +2251,7 @@ class RunService:
             since=since,
             limit=limit,
             cursor=cursor,
+            sort=parse_sort(sort, order, RUN_SORTS, "created"),
         )
         counts = self._task_counts([run.id for run in page])
         views = [self._view(run, env, p, with_tasks=False, counts=counts[run.id]) for run in page]
@@ -2220,6 +2272,8 @@ class RunService:
         since: datetime | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> tuple[list[RunView], str | None]:
         # jscpd:ignore-end
         """List the runs of every environment the caller may read, one page at a time.
@@ -2251,7 +2305,12 @@ class RunService:
         limit
             Page size, at least 1.
         cursor
-            What the previous page returned as its `next_cursor`, sent with the same filters.
+            What the previous page returned as its `next_cursor`, sent with the same filters
+            and sort.
+        sort
+            The field the list is sorted by, as `list_runs_page` names them.
+        order
+            ``asc`` or ``desc``, as `list_runs_page` takes it.
 
         Returns
         -------
@@ -2265,8 +2324,8 @@ class RunService:
         NotFoundError
             If `environment` or the repository does not exist.
         ValidationError
-            If `limit` is below 1, a status or trigger is unknown, `since` has no time zone, or
-            `cursor` is not one this server issued for this list.
+            If `limit` is below 1, a status, trigger, `sort` or `order` is unknown, `since` has
+            no time zone, or `cursor` is not one this server issued for this list in this sort.
         """
         if environment is not None:
             return self.list_runs_page(
@@ -2279,7 +2338,10 @@ class RunService:
                 since=since,
                 limit=limit,
                 cursor=cursor,
+                sort=sort,
+                order=order,
             )
+        chosen = parse_sort(sort, order, RUN_SORTS, "created")
         names = run_environments(self._session, self._authz, p)
         page, next_cursor = self._runs_page(
             "all-runs",
@@ -2291,6 +2353,7 @@ class RunService:
             since=since,
             limit=limit,
             cursor=cursor,
+            sort=chosen,
         )
         envs = {
             env.id: env
@@ -2317,8 +2380,9 @@ class RunService:
         since: datetime | None,
         limit: int,
         cursor: str | None,
+        sort: ListSort,
     ) -> tuple[list[Run], str | None]:
-        """Read one page of the runs of some environments, newest first, in one statement.
+        """Read one page of the runs of some environments, in one statement.
 
         Parameters
         ----------
@@ -2340,6 +2404,9 @@ class RunService:
             Most runs returned.
         cursor
             The `next_cursor` of the previous page.
+        sort
+            The sort; the newest first (``created:desc``) keeps the cursor of a time and an id,
+            any other is read by `sorted_page`.
 
         Returns
         -------
@@ -2352,7 +2419,7 @@ class RunService:
             If the repository does not exist.
         ValidationError
             If `limit` is below 1, a status or trigger is unknown, `since` has no time zone, or
-            `cursor` is not one this server issued for `kind`.
+            `cursor` is not one this server issued for `kind` in this sort.
         """
         if limit < 1:
             raise ValidationError(f"limit must be at least 1, got {limit}.")
@@ -2363,7 +2430,6 @@ class RunService:
                 "`since` has no time zone. Write it with one, for example 2026-10-18T00:00:00Z "
                 "or 2026-10-18T00:00:00+02:00."
             )
-        position = None if cursor is None else decode_cursor(kind, cursor)
         query = select(Run).where(Run.environment_id.in_(environment_ids))
         if repository is not None:
             query = query.where(Run.repository_id == self._repository(repository).id)
@@ -2375,6 +2441,19 @@ class RunService:
             query = query.where(Run.job == job)
         if since is not None:
             query = query.where(Run.created_at >= since)
+        if sort != ("created", True):
+            sorted_runs = sorted_page(
+                self._session,
+                query.join(Repository, Repository.id == Run.repository_id),
+                kind=kind,
+                sort=sort,
+                field=_run_sort_field(self._session, sort.field),
+                row_id=Run.id,
+                limit=limit,
+                cursor=cursor,
+            )
+            return sorted_runs.items, sorted_runs.next_cursor
+        position = None if cursor is None else decode_cursor(kind, cursor)
         if position is not None:
             query = query.where(
                 or_(

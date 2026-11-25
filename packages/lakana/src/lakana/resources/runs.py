@@ -342,6 +342,8 @@ class Runs:
         trigger: str | Sequence[str] | None = None,
         job: str | None = None,
         since: datetime | None = None,
+        sort: str | None = None,
+        order: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
     ) -> _RunList:
@@ -366,6 +368,12 @@ class Runs:
             Only runs of this job.
         since
             Only runs created at or after this time, which needs a time zone.
+        sort
+            What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
+            the repository's, in any letter case) or ``status``; runs of one name or state
+            come newest first. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         limit
             Most runs returned (1 to 200); `None` leaves it to the server (100).
         cursor
@@ -389,6 +397,8 @@ class Runs:
             trigger=trigger,
             job=job,
             since=since,
+            sort=sort,
+            order=order,
             limit=limit,
             cursor=cursor,
         ).items
@@ -402,6 +412,8 @@ class Runs:
         trigger: str | Sequence[str] | None = None,
         job: str | None = None,
         since: datetime | None = None,
+        sort: str | None = None,
+        order: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
     ) -> RunPage:
@@ -423,6 +435,12 @@ class Runs:
             Only runs of this job.
         since
             Only runs created at or after this time, which needs a time zone.
+        sort
+            What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
+            the repository's, in any letter case) or ``status``; runs of one name or state
+            come newest first. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         limit
             Most runs returned (1 to 200); `None` leaves it to the server (100).
         cursor
@@ -448,6 +466,8 @@ class Runs:
                 trigger=csv_param(trigger),
                 job=job,
                 since=None if since is None else since.isoformat(),
+                sort=sort,
+                order=order,
                 limit=limit,
                 cursor=cursor,
             ),
@@ -466,6 +486,8 @@ class Runs:
         trigger: str | Sequence[str] | None = None,
         job: str | None = None,
         since: datetime | None = None,
+        sort: str | None = None,
+        order: str | None = None,
         page_size: int = 100,
     ) -> Iterator[Run]:
         """Yield every matching run, newest first, fetching pages as needed.
@@ -484,6 +506,12 @@ class Runs:
             Only runs of this job.
         since
             Only runs created at or after this time, which needs a time zone.
+        sort
+            What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
+            the repository's, in any letter case) or ``status``; runs of one name or state
+            come newest first. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         page_size
             Runs per request (1 to 200).
 
@@ -501,6 +529,8 @@ class Runs:
                 trigger=trigger,
                 job=job,
                 since=since,
+                sort=sort,
+                order=order,
                 limit=page_size,
                 cursor=cursor,
             )
@@ -518,6 +548,8 @@ class Runs:
         trigger: str | Sequence[str] | None = None,
         job: str | None = None,
         since: datetime | None = None,
+        sort: str | None = None,
+        order: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
     ) -> RunPage:
@@ -544,6 +576,12 @@ class Runs:
             Only runs of this job.
         since
             Only runs created at or after this time, which needs a time zone.
+        sort
+            What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
+            the repository's, in any letter case) or ``status``; runs of one name or state
+            come newest first. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         limit
             Most runs returned (1 to 200); `None` leaves it to the server (100).
         cursor
@@ -575,6 +613,8 @@ class Runs:
                     trigger=csv_param(trigger),
                     job=job,
                     since=None if since is None else since.isoformat(),
+                    sort=sort,
+                    order=order,
                     limit=limit,
                     cursor=cursor,
                 ),
@@ -594,6 +634,8 @@ class Runs:
         trigger: str | Sequence[str] | None = None,
         job: str | None = None,
         since: datetime | None = None,
+        sort: str | None = None,
+        order: str | None = None,
         page_size: int = 100,
     ) -> Iterator[Run]:
         """Yield every matching run of every environment you may read, fetching pages as needed.
@@ -612,6 +654,12 @@ class Runs:
             Only runs of this job.
         since
             Only runs created at or after this time, which needs a time zone.
+        sort
+            What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else
+            the repository's, in any letter case) or ``status``; runs of one name or state
+            come newest first. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
         page_size
             Runs per request (1 to 200).
 
@@ -633,6 +681,8 @@ class Runs:
                 trigger=trigger,
                 job=job,
                 since=since,
+                sort=sort,
+                order=order,
                 limit=page_size,
                 cursor=cursor,
             )

@@ -32,7 +32,7 @@ Returns: `Run`. The queued run.
 
 ### `client.runs.list`
 
-Signature: `client.runs.list(environment: str, *, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, limit: int | None = None, cursor: str | None = None) -> list[Run]`
+Signature: `client.runs.list(environment: str, *, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, sort: str | None = None, order: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[Run]`
 
 List runs, newest first, without tasks.
 
@@ -46,6 +46,8 @@ The runs of one page; `list_page` also returns the cursor of the next one, and `
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these (``schedule``, ``api``, ``manual``, ``deploy``). |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `limit` | `int | None` | `None` | Most runs returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
 
@@ -57,7 +59,7 @@ Returns: `list of Run`. Newest first.
 
 ### `client.runs.list_page`
 
-Signature: `client.runs.list_page(environment: str, *, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, limit: int | None = None, cursor: str | None = None) -> RunPage`
+Signature: `client.runs.list_page(environment: str, *, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, sort: str | None = None, order: str | None = None, limit: int | None = None, cursor: str | None = None) -> RunPage`
 
 List one page of runs, newest first, with the cursor of the next page.
 
@@ -69,6 +71,8 @@ List one page of runs, newest first, with the cursor of the next page.
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these (``schedule``, ``api``, ``manual``, ``deploy``). |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `limit` | `int | None` | `None` | Most runs returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same filters with every page. |
 
@@ -80,7 +84,7 @@ Returns: `RunPage`. The runs, and the cursor for the next page (`None` on the la
 
 ### `client.runs.iter`
 
-Signature: `client.runs.iter(environment: str, *, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, page_size: int = 100) -> Iterator[Run]`
+Signature: `client.runs.iter(environment: str, *, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, sort: str | None = None, order: str | None = None, page_size: int = 100) -> Iterator[Run]`
 
 Yield every matching run, newest first, fetching pages as needed.
 
@@ -92,13 +96,15 @@ Yield every matching run, newest first, fetching pages as needed.
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these. |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `page_size` | `int` | `100` | Runs per request (1 to 200). |
 
 Yields: `Run`. Each run, once.
 
 ### `client.runs.list_all`
 
-Signature: `client.runs.list_all(*, environment: str | None = None, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, limit: int | None = None, cursor: str | None = None) -> RunPage`
+Signature: `client.runs.list_all(*, environment: str | None = None, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, sort: str | None = None, order: str | None = None, limit: int | None = None, cursor: str | None = None) -> RunPage`
 
 List one page of the runs of every environment you may read, newest first.
 
@@ -112,6 +118,8 @@ The environments are those where you hold `READ_ENVIRONMENT`; one where you do n
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these (``schedule``, ``api``, ``manual``, ``deploy``). |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `limit` | `int | None` | `None` | Most runs returned (1 to 200); `None` leaves it to the server (100). |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor` of this list. Send the same filters with every page. |
 
@@ -125,7 +133,7 @@ Returns: `RunPage`. The runs, and the cursor for the next page (`None` on the la
 
 ### `client.runs.iter_all`
 
-Signature: `client.runs.iter_all(*, environment: str | None = None, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, page_size: int = 100) -> Iterator[Run]`
+Signature: `client.runs.iter_all(*, environment: str | None = None, repository: str | None = None, status: str | Sequence[str] | None = None, trigger: str | Sequence[str] | None = None, job: str | None = None, since: datetime | None = None, sort: str | None = None, order: str | None = None, page_size: int = 100) -> Iterator[Run]`
 
 Yield every matching run of every environment you may read, fetching pages as needed.
 
@@ -137,6 +145,8 @@ Yield every matching run of every environment you may read, fetching pages as ne
 | `trigger` | `str | Sequence[str] | None` | `None` | Only runs started this way or one of these. |
 | `job` | `str | None` | `None` | Only runs of this job. |
 | `since` | `datetime | None` | `None` | Only runs created at or after this time, which needs a time zone. |
+| `sort` | `str | None` | `None` | What the runs are sorted by: ``created`` (the default), ``name`` (the job's, else the repository's, in any letter case) or ``status``; runs of one name or state come newest first. Send the same sort with every page. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 | `page_size` | `int` | `100` | Runs per request (1 to 200). |
 
 Yields: `Run`. Each run, once, in the order of `list_all`.

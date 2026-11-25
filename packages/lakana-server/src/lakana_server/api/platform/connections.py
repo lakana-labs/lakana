@@ -23,6 +23,7 @@ from pydantic import SecretStr
 from lakana_core.auth import PrincipalRef
 from lakana_core.connections.service import TEST_ALL_MAX, ConnectionService, ConnectionView
 from lakana_core.models import ConnectionTest
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam
 from lakana_server.api.platform.schemas import (
     ConnectionCreate,
     ConnectionEnvironmentOut,
@@ -205,7 +206,9 @@ def create_connection(
 def list_connections(
     environment_name: str,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: ConnectionService = Depends(get_connection_service),
 ) -> ConnectionPage:
@@ -215,8 +218,10 @@ def list_connections(
     test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a
     task token is refused with 403. Every reader gets the last test's `state`, `outcome` and
     `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of
-    `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers
-    404 when the environment does not exist and 422 for a cursor this list did not issue.
+    `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. `sort`
+    and `order` order the list by another field; one state is ordered by name. Answers 404
+    when the environment does not exist and 422 for an unknown `sort` or `order` or a cursor
+    this list did not issue in this order.
 
     Parameters
     ----------
@@ -226,6 +231,13 @@ def list_connections(
         Most connections returned (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by: `created` (the default), `name` (in any letter case) or
+        `status`, the last test: failed first, then queued or running, then passed, never
+        tested last; one state by name.
+    order
+        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the
+        others.
     principal
         The authenticated caller.
     service
@@ -236,7 +248,9 @@ def list_connections(
     ConnectionPage
         The connections of this page, and the cursor of the next.
     """
-    page = service.list(principal, environment_name, limit=limit, cursor=cursor)
+    page = service.list(
+        principal, environment_name, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     return ConnectionPage(
         items=[_to_out(view) for view in page.items], next_cursor=page.next_cursor
     )
@@ -536,7 +550,9 @@ def get_connection_test(
 def list_all_connections(
     environment: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: ConnectionService = Depends(get_connection_service),
 ) -> ConnectionPage:
@@ -549,9 +565,10 @@ def list_all_connections(
     answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers,
     with its 403 and 404. Each connection carries its last test and what you may do with it
     (`actions`), as in that list: the last test's `id`, `created_at`, `message` and
-    `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send
-    `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment
-    is refused with 422 here.
+    `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. `sort` and
+    `order` order the list as on the list of one environment. Send `next_cursor` back as
+    `cursor` with the same sort for the next page; a cursor of the list of one environment or
+    of another order is refused with 422 here.
 
     Parameters
     ----------
@@ -561,6 +578,10 @@ def list_all_connections(
         Most connections returned (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by, with the fields of the list of one environment.
+    order
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service
@@ -571,7 +592,9 @@ def list_all_connections(
     ConnectionPage
         The connections of this page, and the cursor of the next.
     """
-    page = service.list_all(principal, environment=environment, limit=limit, cursor=cursor)
+    page = service.list_all(
+        principal, environment=environment, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     return ConnectionPage(
         items=[_to_out(view) for view in page.items], next_cursor=page.next_cursor
     )

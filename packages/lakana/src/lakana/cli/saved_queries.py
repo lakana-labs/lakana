@@ -9,7 +9,7 @@ import typer
 
 from lakana._models import SavedQuery
 from lakana.cli import _output
-from lakana.cli._paging import more_results
+from lakana.cli._paging import ORDER, more_results, sort_option
 from lakana.cli._state import CliError, confirm, resolve_environment, state_of
 
 saved_app = typer.Typer(
@@ -149,8 +149,13 @@ def list_saved(
         str | None,
         typer.Option("--cursor", help="Continue after the page that printed this cursor."),
     ] = None,
+    sort: Annotated[
+        str | None,
+        sort_option("name (the default), updated or created (the latest first)"),
+    ] = None,
+    order: ORDER = None,
 ) -> None:
-    """List the saved queries you see in an environment, by name.
+    """List the saved queries you see in an environment, by name or by --sort and --order.
 
     You see your own, and those shared with everyone who may run queries in the
     environment. The SQL is not listed: read it with 'lakana query saved show ID'.
@@ -167,6 +172,10 @@ def list_saved(
         Most saved queries listed (1 to 200).
     cursor
         The cursor of the page to show.
+    sort
+        The field the saved queries are sorted by.
+    order
+        ``asc`` or ``desc``.
 
     Raises
     ------
@@ -177,7 +186,9 @@ def list_saved(
     if all_environments and env is not None:
         raise CliError("--all-environments lists every environment; leave out --env.")
     environment = None if all_environments else resolve_environment(state, env)
-    page = state.client().saved_queries.list(environment, limit=limit, cursor=cursor)
+    page = state.client().saved_queries.list(
+        environment, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     if not page.items and state.output != "json":
         where = "any environment" if environment is None else _output.inline(environment)
         typer.echo(f"No saved queries in {where}.")
@@ -195,6 +206,8 @@ def list_saved(
             "--env": environment,
             "--all-environments": all_environments,
             "--limit": limit if limit != 50 else None,
+            "--sort": sort,
+            "--order": order,
         },
         page.next_cursor,
     )

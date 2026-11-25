@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
 from lakana_core.access.managed import guard_change, lock_access
@@ -36,7 +36,21 @@ from lakana_core.identity.sessions import (
 )
 from lakana_core.languages import canonical_language, language_problem
 from lakana_core.models import AuditEventType, Principal, PrincipalType
-from lakana_core.pagination import Page, name_contains, newest_first
+from lakana_core.pagination import (
+    SMALLINT_KEY,
+    Page,
+    SortField,
+    SortKey,
+    name_contains,
+    name_order,
+    newest_first,
+    parse_sort,
+    sorted_page,
+)
+
+PRINCIPAL_SORTS: dict[str, bool] = {"created": True, "name": False, "status": False}
+"""The fields the principals list sorts by, each with whether it runs from the largest down by
+default: the newest first, names from A, the active first."""
 
 
 class PrincipalService:
@@ -253,6 +267,8 @@ class PrincipalService:
         q: str | None = None,
         limit: int = 100,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> Page[Principal]:
         """List principals, newest first, one page at a time.
 
@@ -266,26 +282,55 @@ class PrincipalService:
         limit
             Most principals returned.
         cursor
-            The `next_cursor` of the previous page. Send the same `q` with every page.
+            The `next_cursor` of the previous page. Send the same `q` and sort with every page.
+        sort
+            What the list is sorted by: ``created`` (the default), ``name`` (in any letter case)
+            or ``status``, the active before the deactivated, each by name.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others.
 
         Returns
         -------
         Page of Principal
-            The principals by creation time, newest first, equal times by id, and the cursor of
-            the next page.
+            The principals by creation time, newest first, equal times by id (or in the sort
+            asked for), and the cursor of the next page.
 
         Raises
         ------
         PermissionDenied
             If the acting principal may not manage principals.
         ValidationError
-            If `limit` is below 1 or `cursor` is not one this server issued for the principals
-            list.
+            If `limit` is below 1, `sort` or `order` is unknown, or `cursor` is not one this
+            server issued for the principals list in this sort.
         """
         self._authz.authorize(p, Action.MANAGE_PRINCIPAL, Securable.instance_scope())
+        chosen = parse_sort(sort, order, PRINCIPAL_SORTS, "created")
         query = select(Principal)
         if q is not None and q.strip():
             query = query.where(name_contains(Principal.name, q.strip()))
+        if chosen != ("created", True):
+            by_name = SortKey(name_order(self._session, Principal.name), str)
+            fields = {
+                "created": SortField((SortKey(Principal.created_at, datetime),), descending=True),
+                "name": SortField((by_name,), descending=False),
+                "status": SortField(
+                    (
+                        SortKey(case((Principal.is_active, 0), else_=1), SMALLINT_KEY),
+                        by_name._replace(descending=False),
+                    ),
+                    descending=False,
+                ),
+            }
+            return sorted_page(
+                self._session,
+                query,
+                kind="principals",
+                sort=chosen,
+                field=fields[chosen.field],
+                row_id=Principal.id,
+                limit=limit,
+                cursor=cursor,
+            )
         return newest_first(
             self._session,
             query,

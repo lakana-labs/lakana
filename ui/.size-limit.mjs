@@ -181,7 +181,9 @@ const NAMED_LIMITS = [
   // Lowered to the measured 3.69 kB (2026-11-18) + 10 %: the environments' states, a run's first
   // cells, the shared filter and the reads every 30 s moved into chunks the list shares with the
   // Runs and Deploys tabs (on the shared limit).
-  { name: "the Jobs list", prefix: "JobsList-", limit: "4.06 kB" },
+  // Raised to the measured 4.18 kB (2026-11-24) + 10 %: its columns sort on the server, the order
+  // kept in the address (#787).
+  { name: "the Jobs list", prefix: "JobsList-", limit: "4.6 kB" },
   // Measured 2.68 kB (2026-11-18) + 10 %: the Runs tab, loaded on /jobs/runs: the environment, State
   // (Queued or running as one choice), Trigger, the exact job name applied on Enter or when left,
   // and Period, all in the address; every run newest first, 50 a page with Show more, the first

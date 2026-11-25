@@ -10,8 +10,12 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { listSavedQueries, type SavedQueryOut } from "../api/savedQueries";
+import { When } from "../catalog/cells";
 import { ViewList } from "../catalog/views/ViewList";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { VisibleText } from "../shell/VisibleText";
 import { savedPath } from "./paths";
 import { useLibraryPages } from "./useLibraryPages";
@@ -39,6 +43,12 @@ export function savedWho(t: TFunction, saved: SavedQueryOut, me: string): string
   return words.join(" · ");
 }
 
+/** The columns the saved queries sort by: the name, A to Z, unless the address says otherwise. */
+const SAVED_SORTS: ListSortSpec<"name" | "updated"> = {
+  fields: { name: "asc", updated: "desc" },
+  natural: { field: "name", order: "asc" },
+};
+
 /** Properties of {@link SavedList}. */
 export interface SavedListProps {
   /** The person's principal name. */
@@ -51,7 +61,8 @@ export interface SavedListProps {
 
 /**
  * Renders the saved queries, 50 at a time with Show more: the name as the link to the saved
- * query, the environment, and who it is for.
+ * query, the environment, who it is for, and when it last changed. Name and Changed sort the
+ * list on the server; the order stays in the address.
  *
  * @param props - The person, the filter and the reload key.
  * @param props.me - The person's principal name.
@@ -61,7 +72,16 @@ export interface SavedListProps {
  */
 export function SavedList({ me, filter, reloadKey }: SavedListProps): JSX.Element {
   const { t } = useTranslation();
-  const pages = useLibraryPages(filter, reloadKey, (cursor) => listSavedQueries(filter, cursor));
+  const sorting = useListSort(SAVED_SORTS);
+  const sort = sorting.choice;
+  const pages = useLibraryPages(
+    filter,
+    reloadKey,
+    (cursor) => listSavedQueries(filter, cursor, sort),
+    JSON.stringify(sort),
+    // A saved query changed while the list is paged by Changed is shown once.
+    (saved) => saved.id,
+  );
   const rows = pages.items ?? [];
   return (
     <ViewList
@@ -73,7 +93,8 @@ export function SavedList({ me, filter, reloadKey }: SavedListProps): JSX.Elemen
       scroll="queries-list-scroll"
       head={
         <tr>
-          <th scope="col">{t("queries.library.name")}</th>
+          <SortHeader {...sorting.header("name")}>{t("queries.library.name")}</SortHeader>
+          <SortHeader {...sorting.header("updated")}>{t("queries.library.changed")}</SortHeader>
           <th scope="col">
             <span className="visually-hidden">{t("list.open")}</span>
           </th>
@@ -90,6 +111,9 @@ export function SavedList({ me, filter, reloadKey }: SavedListProps): JSX.Elemen
               </Link>{" "}
               <EnvironmentLabel environment={saved.environment} />
               {who !== "" && <span className="second">{who}</span>}
+            </td>
+            <td>
+              <When iso={saved.updated_at} never="" />
             </td>
             <td>
               <span className="chevron" aria-hidden="true">

@@ -13,7 +13,7 @@ Deploy history.
 
 Usage: `lakana deploys list [OPTIONS]`
 
-List deploy history, newest first.
+List deploy history, newest first, or sorted by --sort and --order.
 
 --all-environments lists the deploys of every environment you may read at once. A long list prints a "More results" line with the command that shows the next page.
 
@@ -24,6 +24,8 @@ List deploy history, newest first.
 | `--repo` | text | none | Only this repository. |
 | `--limit` | whole number, 1 to 200 | none | Most deploys to list (default 100). |
 | `--cursor` | text | none | Continue after the page that printed this cursor. |
+| `--sort` | text | none | What to sort by: created (the default, newest first) or status; deploys of one state come newest first. |
+| `--order` | text | none | asc or desc; without it, the direction each --sort field has by default. |
 
 ## `lakana deploys show`
 

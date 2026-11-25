@@ -14,7 +14,7 @@ from lakana_core.identity.pictures import PictureService
 from lakana_core.identity.principals import PrincipalService
 from lakana_core.models import Principal, PrincipalType
 from lakana_server.api.platform.grants import permissions_out
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
 from lakana_server.api.platform.namespace_forms import dotted_namespace
 from lakana_server.api.platform.schemas import (
     HeldGrantOut,
@@ -296,16 +296,20 @@ def list_principals(
     response: Response,
     q: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: PrincipalService = Depends(get_principal_service),
     pictures: PictureService = Depends(get_picture_service),
 ) -> list[PrincipalOut]:
     """List principals.
 
-    Lists the principals, newest first. Needs `MANAGE_PRINCIPAL` on the instance. The cursor
-    of the next page is in the `X-Next-Cursor` response header and is absent on the last
-    page.
+    Lists the principals, newest first, or in the order `sort` and `order` ask for. Needs
+    `MANAGE_PRINCIPAL` on the instance. The cursor of the next page is in the `X-Next-Cursor`
+    response header and is absent on the last page; send the same `q` and sort with every
+    page. Answers 422 for an unknown `sort` or `order`, or a cursor this list did not issue in
+    this order.
 
     Parameters
     ----------
@@ -317,6 +321,12 @@ def list_principals(
         Most principals returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page; send the same `q`.
+    sort
+        What the list is sorted by: `created` (the default), `name` (in any letter case) or
+        `status`, the active first, each by name.
+    order
+        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the
+        others.
     principal
         The authenticated caller.
     service
@@ -329,7 +339,9 @@ def list_principals(
     list of PrincipalOut
         The principals of this page.
     """
-    page = service.list_principals(principal, q=q, limit=limit, cursor=cursor)
+    page = service.list_principals(
+        principal, q=q, limit=limit, cursor=cursor, sort=sort, order=order
+    )
     set_next_cursor(response, page.next_cursor)
     return principals_out(page.items, pictures, service, principal)
 

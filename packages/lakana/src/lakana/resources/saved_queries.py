@@ -59,6 +59,8 @@ class SavedQueries:
         *,
         limit: int = 50,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> SavedQueryPage:
         """List one page of the saved queries you see, by name.
 
@@ -74,7 +76,12 @@ class SavedQueries:
         limit
             Most items returned (1 to 200).
         cursor
-            A previous page's `next_cursor` of the same list.
+            A previous page's `next_cursor` of the same list and sort.
+        sort
+            What the list is sorted by: ``name`` (the default, in any letter case), ``updated``
+            or ``created``; every sort lists the same saved queries.
+        order
+            ``asc`` or ``desc``; by default ``asc`` for ``name``, ``desc`` for the times.
 
         Returns
         -------
@@ -88,19 +95,19 @@ class SavedQueries:
         lakana.errors.NotFound
             With `environment`, if it does not exist.
         lakana.errors.ValidationError
-            If `limit` is outside 1 to 200, or `cursor` is not one the server issued for this
-            list.
+            If `limit` is outside 1 to 200, `sort` or `order` is unknown, or `cursor` is not
+            one the server issued for this list in this sort.
         """
         if environment is None:
             response = self._transport.request(
                 ROUTES["saved_queries.list_all"],
-                params=query_params(limit=limit, cursor=cursor),
+                params=query_params(limit=limit, cursor=cursor, sort=sort, order=order),
             )
         else:
             response = self._transport.request(
                 ROUTES["saved_queries.list"],
                 path_params={"env": environment},
-                params=query_params(limit=limit, cursor=cursor),
+                params=query_params(limit=limit, cursor=cursor, sort=sort, order=order),
             )
         body = response.json()
         return SavedQueryPage(
@@ -108,13 +115,23 @@ class SavedQueries:
             next_cursor=body["next_cursor"],
         )
 
-    def iter(self, environment: str | None = None) -> Iterator[SavedQuery]:
+    def iter(
+        self,
+        environment: str | None = None,
+        *,
+        sort: str | None = None,
+        order: str | None = None,
+    ) -> Iterator[SavedQuery]:
         """Yield every saved query you see, fetching pages as needed.
 
         Parameters
         ----------
         environment
             Only this environment; `None` for every environment.
+        sort
+            The sort, as `list` takes it.
+        order
+            ``asc`` or ``desc``, as `list` takes it.
 
         Yields
         ------
@@ -128,7 +145,9 @@ class SavedQueries:
         lakana.errors.NotFound
             As `list`.
         """
-        yield from every_page(lambda cursor: self.list(environment, cursor=cursor))
+        yield from every_page(
+            lambda cursor: self.list(environment, cursor=cursor, sort=sort, order=order)
+        )
 
     def create(
         self, environment: str, name: str, sql: str, *, visibility: str = "private"

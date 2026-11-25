@@ -20,7 +20,13 @@ from lakana_core.runs.checks import CheckResultView
 from lakana_core.runs.operator import operator_rights_each, run_actions
 from lakana_core.runs.selection import Selection
 from lakana_core.runs.service import RunService, RunView, TaskLogView, TaskRunView, WorkerView
-from lakana_server.api.platform.listing import set_next_cursor, split_values
+from lakana_server.api.platform.listing import (
+    CursorParam,
+    OrderParam,
+    SortParam,
+    set_next_cursor,
+    split_values,
+)
 from lakana_server.api.platform.schemas import (
     CheckResultOut,
     CheckResultPage,
@@ -220,18 +226,22 @@ def list_runs(
     job: str | None = Query(default=None, max_length=255),
     since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
     authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[RunOut]:
     """List runs.
 
-    Lists runs, newest first, one page at a time. The cursor of the next page is in the
-    `X-Next-Cursor` response header and is absent on the last page; send the same filters
-    with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or
-    repository does not exist and 422 for a `limit` below 1, an unknown status or trigger, a
-    `since` without a time zone, or a `cursor` this server did not issue.
+    Lists runs, newest first, one page at a time, or in the order `sort` and `order` ask for:
+    runs of one name or state come newest first. The cursor of the next page is in the
+    `X-Next-Cursor` response header and is absent on the last page; send the same filters and
+    sort with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or
+    repository does not exist and 422 for a `limit` below 1, an unknown status, trigger, `sort`
+    or `order`, a `since` without a time zone, or a `cursor` this server did not issue for this
+    list in this order.
 
     Parameters
     ----------
@@ -256,6 +266,13 @@ def list_runs(
         Most runs returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page.
+    sort
+        What the list is sorted by: `created` (the default), `name` (the job's, else the
+        repository's, in any letter case) or `status`; runs of one name or state come newest
+        first.
+    order
+        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the
+        others.
     principal
         The authenticated caller.
     service
@@ -278,6 +295,8 @@ def list_runs(
         since=since,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     set_next_cursor(response, next_cursor)
     words = run_words(authz, principal, [env])[env]
@@ -695,7 +714,9 @@ def list_all_runs(
     job: str | None = Query(default=None, max_length=255),
     since: datetime | None = None,
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: RunService = Depends(get_run_service),
     authz: AuthorizationService = Depends(get_grant_authorization),
@@ -707,11 +728,12 @@ def list_all_runs(
     `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left
     out, so this is never a 403 or a 404. With `environment`, it answers exactly what
     `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run
-    names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with
-    the same filters for the next page; a cursor of the list of one environment is refused with
-    422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to
-    200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server
-    did not issue for this list.
+    names its `environment` and comes without tasks. `sort` and `order` order the list as on
+    the list of one environment. Send `next_cursor` back as `cursor` with the same filters and
+    sort for the next page; a cursor of the list of one environment is refused with 422 here.
+    Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an
+    unknown status, trigger, `sort` or `order`, a `since` without a time zone, or a `cursor`
+    this server did not issue for this list in this order.
 
     Parameters
     ----------
@@ -732,6 +754,10 @@ def list_all_runs(
         Page size (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by, with the fields of the list of one environment.
+    order
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service
@@ -754,6 +780,8 @@ def list_all_runs(
         since=since,
         limit=limit,
         cursor=cursor,
+        sort=sort,
+        order=order,
     )
     words = run_words(authz, principal, [view.environment for view in views])
     return RunPageOut(

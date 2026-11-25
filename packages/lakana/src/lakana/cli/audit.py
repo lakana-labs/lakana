@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 
@@ -113,8 +113,12 @@ def list_events(
         str | None, typer.Option("--cursor", help="Continue from a previous page.")
     ] = None,
     all_pages: Annotated[bool, typer.Option("--all", help="Follow every page.")] = False,
+    order: Annotated[
+        str | None,
+        typer.Option("--order", help="desc (the default, newest first) or asc (oldest first)."),
+    ] = None,
 ) -> None:
-    """List audit events, newest first.
+    """List audit events, newest first (oldest first with --order asc).
 
     `--output json` shows each event's `detail`. Query text and column values in someone else's
     events are hidden unless you hold READ_QUERY_TEXT: a query's SQL text shows as its SHA-256
@@ -145,6 +149,8 @@ def list_events(
         A previous page's `next_cursor`.
     all_pages
         Follow `next_cursor` to the end.
+    order
+        ``desc`` or ``asc``.
 
     Raises
     ------
@@ -154,13 +160,14 @@ def list_events(
     state = state_of(ctx)
     if all_pages and cursor:
         raise CliError("--cursor and --all can't be combined")
-    filters = {
+    filters: dict[str, Any] = {
         "event_type": event_type,
         "kind": None if kind is None else kind.value,
         "environment": env,
         "principal_id": principal_id,
         "since": parse_timestamp(since, "--since"),
         "until": parse_timestamp(until, "--until"),
+        "order": order,
     }
     events = state.client().audit_events
     if all_pages:

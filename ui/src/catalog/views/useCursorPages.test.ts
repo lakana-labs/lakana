@@ -17,6 +17,41 @@ function page(items: number[], nextCursor: string | null): CursorPage<number> {
 }
 
 describe("useCursorPages", () => {
+  it("shows once a row a later page repeats, when it knows each row's identity", async () => {
+    // Paged by a value that changed: row 2 moved from the first page to the second.
+    const load = (cursor: string | null): Promise<CursorPage<number>> =>
+      Promise.resolve(cursor === null ? page([1, 2], "c1") : page([2, 3], null));
+    const { result } = renderHook(() => useCursorPages("a", load, "", String));
+    await waitFor(() => {
+      expect(result.current.items).toEqual([1, 2]);
+    });
+
+    await act(() => result.current.loadMore());
+
+    expect(result.current.items).toEqual([1, 2, 3]);
+  });
+
+  it("keeps the rows while a new order is read, then shows the new order", async () => {
+    let order = "a";
+    const { result, rerender } = renderHook(
+      ({ by }) =>
+        useCursorPages("k", () => Promise.resolve(page(by === "a" ? [1, 2] : [2, 1], null)), by),
+      { initialProps: { by: order } },
+    );
+    await waitFor(() => {
+      expect(result.current.items).toEqual([1, 2]);
+    });
+
+    order = "b";
+    rerender({ by: order });
+
+    expect(result.current.items).toEqual([1, 2]);
+    expect(result.current.busy).toBe(true);
+    await waitFor(() => {
+      expect(result.current.items).toEqual([2, 1]);
+    });
+  });
+
   it("reads the first page, appends the next with its cursor and stops at the last", async () => {
     const load = vi.fn((cursor: string | null) =>
       Promise.resolve(cursor === null ? page([1, 2], "c1") : page([3], null)),

@@ -438,3 +438,94 @@ def test_instant_key_orders_like_the_times() -> None:
     ]
     assert sorted(times, key=instant_key) == sorted(times)
     assert instant_key(times[2]) == "2026-01-01T09:00:00.000001Z"
+
+
+def test_a_name_is_ordered_in_lower_case_and_by_code_point_on_postgres() -> None:
+    """Postgres is told ``"C"``; SQLite compares by code point already. No connection is opened."""
+    import sqlalchemy as sa
+    from sqlalchemy.orm import Session
+
+    from lakana_core.models import Principal
+    from lakana_core.pagination import name_order
+
+    for url, collated in (("sqlite://", False), ("postgresql+pg8000://lakana@localhost/l", True)):
+        engine = sa.create_engine(url)
+        try:
+            with Session(engine) as session:
+                compiled = str(name_order(session, Principal.name).compile(dialect=engine.dialect))
+        finally:
+            engine.dispose()
+        assert compiled.startswith("lower(principals.name)")
+        assert compiled.endswith('COLLATE "C"') is collated
+
+
+def test_a_sorted_page_refuses_a_limit_below_one() -> None:
+    import sqlalchemy as sa
+    from sqlalchemy.orm import Session
+
+    from lakana_core.models import Principal
+    from lakana_core.pagination import ListSort, SortField, SortKey, sorted_page
+
+    engine = sa.create_engine("sqlite://")
+    try:
+        with (
+            Session(engine) as session,
+            pytest.raises(ValidationError, match="limit must be at least 1"),
+        ):
+            sorted_page(
+                session,
+                sa.select(Principal),
+                kind="principals",
+                sort=ListSort("name", False),
+                field=SortField((SortKey(Principal.name, str),), descending=False),
+                row_id=Principal.id,
+                limit=0,
+                cursor=None,
+            )
+    finally:
+        engine.dispose()
+
+
+def test_the_longest_cursors_fit_the_routes_limit() -> None:
+    """Keys of four-byte characters at every name's longest still fit `CURSOR_MAX_LENGTH`."""
+    from lakana_core.models import Environment, Principal, Repository, Run
+    from lakana_core.models.saved_query import NAME_KEY_MAX
+    from lakana_core.pagination import (
+        CURSOR_MAX_LENGTH,
+        LONGEST_KEY_CHARS,
+        decode_tuple_cursor,
+        encode_tuple_cursor,
+    )
+
+    def length(column: object) -> int:
+        """Read a text column's most characters.
+
+        Parameters
+        ----------
+        column
+            The mapped column.
+
+        Returns
+        -------
+        int
+            Its length.
+        """
+        found = getattr(getattr(column, "type", None), "length", None)
+        assert isinstance(found, int)
+        return found
+
+    env_max = length(Environment.name)
+    assert NAME_KEY_MAX + env_max == LONGEST_KEY_CHARS
+    for column in (Principal.name, Repository.name, Run.job):
+        assert length(column) <= LONGEST_KEY_CHARS
+    wide = "\U0001d538"  # four bytes in UTF-8
+    saved = encode_tuple_cursor("all-saved-queries", (wide * NAME_KEY_MAX, wide * env_max, str(ID)))
+    assert len(saved) <= CURSOR_MAX_LENGTH
+    assert decode_tuple_cursor("all-saved-queries", saved)[0] == wide * NAME_KEY_MAX
+    run = encode_sorted_cursor("all-runs", "name:desc", [wide * 255, _AT], ID)
+    assert len(run) <= CURSOR_MAX_LENGTH
+    assert (
+        decode_sorted_cursor("all-runs", "name:desc", run, [str, datetime]).values[0] == wide * 255
+    )
+    # A name of 45 Cyrillic letters once made a cursor of 532 characters, past the old 512.
+    assert len(encode_sorted_cursor("runs", "name:asc", ["ж" * 45, _AT], ID)) < 512
