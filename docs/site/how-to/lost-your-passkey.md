@@ -28,6 +28,17 @@ and Forward steps as soon as the page opens, but the browser keeps it in its own
 and may suggest it in the address bar. A recovery link opened but not continued still works
 from there until its hour is over: use it, or ask the administrator to withdraw it.
 
+## You sign in through your organisation's identity provider
+
+If your account is linked to the identity provider (the sign-in page's first button, **Sign in
+with** and its name), you have no passkey to lose: your passkeys no longer sign you in, and you
+sign in at the provider. When the provider refuses you or is down, ask an administrator. A
+recovery link an administrator issues for you offers only the provider; to get a passkey back, an
+administrator unlinks you first and then sends the link
+([Take someone off single sign-on](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)).
+A linked administrator is recovered by the server operator, below: their recovery link unlinks
+the administrator from the provider and asks for a new passkey.
+
 ## You still have a passkey
 
 Add a second one before you need it, on another device or a security key: open the menu under
@@ -65,6 +76,9 @@ bootstrap token:
   saved;
 - with the Compose bundle, the `team` profile, which `lakana bundle init` saved.
 
+For an administrator linked to the identity provider, using the operator's link also unlinks
+them from the provider and revokes their personal API tokens, whatever the provider says: it is
+the way back in when the provider is down or refuses them, and every administrator gets a notice.
 The link works for the instance's first administrator, too. On your own machine you rarely need
 it: `lakana server start --local` signs the browser in by itself, and the interface offers to add
 a passkey again.

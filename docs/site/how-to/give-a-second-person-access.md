@@ -11,7 +11,8 @@ the way in: a secret string that stands for one person.
 
 !!! tip "Someone who works in the web interface needs no token"
     Invite them instead: [Invite your team](invite-your-team.md) sends a link that creates their
-    account, and from then on a passkey signs them in. Then grant them a role as below. Issue a
+    account, and from then on a passkey, or your identity provider
+    ([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md)), signs them in. Then grant them a role as below. Issue a
     token (the steps after the grant) only to someone who also works from the command line; an
     invited person already exists, so skip "Create the person" for them. Such a person can also
     make their own token: on their account page (**Passkeys and sessions** in the menu under their
