@@ -63,7 +63,7 @@ from lakana_core.projects.definition import (
 )
 from lakana_server.api.platform.catalog import _no_nul
 from lakana_server.api.platform.languages import LANG_DESCRIPTION, reader_languages
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import TableCursorParam, set_next_cursor
 from lakana_server.api.platform.schemas import (
     AppendOut,
     ColumnOut,
@@ -2425,7 +2425,7 @@ def list_expiring_tables(
     within_days: int | None = Query(default=None),
     namespace: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: TableCursorParam = None,
     principal: PrincipalRef = Depends(get_principal),
     catalog: CatalogService = Depends(get_catalog),
 ) -> list[TableRetentionOut]:
