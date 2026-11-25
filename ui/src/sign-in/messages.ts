@@ -6,6 +6,7 @@
 import type { TFunction } from "i18next";
 
 import { ApiError } from "../api";
+import { ProviderRedirect } from "../api/oidc";
 import { markedText } from "../shell/VisibleText";
 
 /** The browser's WebAuthn refusals the interface names, with the key of their sentence. */
@@ -26,6 +27,8 @@ const ENDED_REASONS = new Set([
   "replaced",
   "deactivated",
   "token_revoked",
+  "token_window",
+  "oidc_unlinked",
   "recovery",
   "passkey_copied",
   "passkey_removed",
@@ -44,7 +47,8 @@ export function needsPasskey(error: unknown): boolean {
 
 /**
  * Names what went wrong: a passkey refusal of the browser, an unreachable server, an account
- * without a passkey to touch, or the server's own sentence, which names the cause and the next
+ * without a passkey to touch, a browser on its way to the identity provider (the action is to
+ * be done again on return), or the server's own sentence, which names the cause and the next
  * step. The server's sentence often names stored things (a repository, a table), so a hidden
  * character in it shows as a mark ({@link markedText}).
  *
@@ -59,6 +63,9 @@ export function problemText(t: TFunction, error: unknown): string {
   }
   if (needsPasskey(error)) {
     return t("passkey.none");
+  }
+  if (error instanceof ProviderRedirect) {
+    return t("errors.providerRedirect");
   }
   if (error instanceof ApiError) {
     return error.type === "NetworkError" ? t("errors.unreachable") : markedText(error.detail);

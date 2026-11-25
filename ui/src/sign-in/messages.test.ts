@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { endedReason, needsPasskey, problemText } from "./messages";
 
 import { ApiError } from "../api";
+import { ProviderRedirect } from "../api/oidc";
 import { initI18n } from "../i18n/i18n";
 
 const { t } = initI18n();
@@ -45,6 +46,12 @@ describe("problemText", () => {
     );
   });
 
+  it("says the browser is going to the identity provider", () => {
+    expect(problemText(t, new ProviderRedirect())).toMatch(
+      /^Your browser is going to the identity provider/,
+    );
+  });
+
   it("names anything else as the interface's own failure", () => {
     expect(problemText(t, new Error("boom"))).toMatch(/^Something went wrong in the interface/);
   });
@@ -55,6 +62,17 @@ describe("endedReason", () => {
     expect(endedReason(t, new ApiError(401, "SessionEndedError", "x", { reason: "idle" }))).toBe(
       "Your session ended after a time without activity. Sign in again.",
     );
+  });
+
+  it("says a token's session ended outside the token window, and after an unlink", () => {
+    expect(
+      endedReason(t, new ApiError(401, "SessionEndedError", "x", { reason: "token_window" })),
+    ).toMatch(
+      /^This session began with an API token .* Sign in again through the identity provider\.$/,
+    );
+    expect(
+      endedReason(t, new ApiError(401, "SessionEndedError", "x", { reason: "oidc_unlinked" })),
+    ).toMatch(/^An administrator unlinked your account from the identity provider/);
   });
 
   it("falls back to the server's sentence for a reason it does not know", () => {

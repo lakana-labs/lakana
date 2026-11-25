@@ -8,6 +8,7 @@ import { type JSX, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
+import { ProviderRedirect } from "../api/oidc";
 import { needsPasskey, problemText } from "./messages";
 
 /** What {@link useAttempt} hands back. */
@@ -28,7 +29,8 @@ export interface Attempt {
 }
 
 /**
- * Keeps the state of one action at a time.
+ * Keeps the state of one action at a time. An action that sent the browser to the identity
+ * provider (`ProviderRedirect`) ends without a failure: the page is being left.
  *
  * @returns The attempt.
  */
@@ -44,6 +46,9 @@ export function useAttempt(): Attempt {
       setAddPasskey(false);
       action()
         .catch((failure: unknown) => {
+          if (failure instanceof ProviderRedirect) {
+            return;
+          }
           setError(describe === undefined ? problemText(t, failure) : describe(failure));
           setAddPasskey(needsPasskey(failure));
         })
