@@ -70,6 +70,7 @@ const ARTIFACT = `/catalog/${n("prod")}/${n("ml")}/${n("model")}`;
 
 /** The paths `stubAccounts` answers. */
 const ACCOUNTS = [
+  "/api/v1/principals/admin",
   "/api/v1/invites",
   "/api/v1/recovery-links",
   "/api/v1/principals/admin/passkeys",
@@ -120,6 +121,7 @@ const LITERAL_CODES: Record<string, string> = {
   OnDemandTriggerOut: "kind",
   OrphanOut: "actions kind",
   OwnerOut: "kind",
+  ProviderTrip: "purpose",
   QueryListItemOut: "origin status",
   QueryRunOut: "origin status",
   QueryStatusOut: "status",
@@ -442,6 +444,14 @@ async function stubAccounts(page: Page): Promise<void> {
       ],
     }),
   );
+  // One's own page reads one's principal for the link to the identity provider: none here.
+  await page.route(
+    (url) => url.pathname === "/api/v1/principals/admin",
+    (route) =>
+      route.fulfill({
+        json: { name: "admin", type: "USER", is_active: true, picture: null, held_admin: true },
+      }),
+  );
   // The person page's grants and groups: none, as for a new administrator's own page.
   await page.route("**/api/v1/principals/admin/grants", (route) => route.fulfill({ json: [] }));
   await page.route("**/api/v1/groups?*", (route) => route.fulfill({ json: [] }));
@@ -583,6 +593,82 @@ walk("Settings › Configuration marks hidden characters in values", async ({ pa
   await stubConfiguration(poisoned(page));
   await visit(page, "/settings/configuration", ["ops-admin", "/srv/lakana/raw"]);
   expectOnlyStubbed(paths, [...STUBBED, ...SIGN_IN_STUBBED]);
+});
+
+walk(
+  "the identity provider's name, issuer and a link's e-mail and name mark hidden characters",
+  async ({ page }) => {
+    const paths = apiPaths(page);
+    await signInAsAdmin(poisoned(page));
+    await stubAccounts(poisoned(page));
+    const stub = poisoned(page);
+    await stub.route("**/api/v1/sign-in/oidc", (route) =>
+      route.fulfill({ json: { enabled: true, display_name: "Okta" } }),
+    );
+    await stub.route("**/api/v1/settings/sign-in", (route) =>
+      route.fulfill({
+        json: {
+          idle_timeout_minutes: 720,
+          absolute_lifetime_minutes: 10080,
+          bounds: {
+            idle_timeout_minutes_min: 15,
+            idle_timeout_minutes_max: 1440,
+            absolute_lifetime_minutes_min: 60,
+            absolute_lifetime_minutes_max: 43200,
+            token_provider_window_days_min: 1,
+            token_provider_window_days_max: 365,
+          },
+          token_provider_window_days: 30,
+          provider: {
+            display_name: "Okta",
+            issuer: "https://example.okta.com/oauth2/default",
+            linked_people: 12,
+            unlinked_admins: 1,
+          },
+        },
+      }),
+    );
+    await stub.route(
+      (url) => url.pathname === "/api/v1/principals/admin",
+      (route) =>
+        route.fulfill({
+          json: {
+            name: ADMIN_SESSION.name,
+            type: "USER",
+            is_active: true,
+            picture: null,
+            held_admin: true,
+            provider_link: {
+              issuer: "https://example.okta.com/oauth2/default",
+              email: "ada.berg@example.org",
+              name: "Ada Berg",
+              last_sign_in_at: AT,
+              token_window_ends_at: AT,
+            },
+          },
+        }),
+    );
+    await visit(page, "/settings/sign-in", ["Okta", "/oauth2/default"]);
+    await visit(page, `/settings/access/people/${n("admin")}`, [
+      "ada.berg@example.org",
+      "Ada Berg",
+    ]);
+    await visit(page, "/account", ["Okta"]);
+    expectOnlyStubbed(paths, [...STUBBED, ...ACCOUNTS]);
+  },
+);
+
+walk("the sign-in page marks hidden characters in the provider's name", async ({ page }) => {
+  const paths = apiPaths(page);
+  const stub = poisoned(page);
+  await stub.route("**/api/v1/sign-in/session", (route) =>
+    route.fulfill({ status: 401, json: { detail: "Sign in.", type: "AuthenticationError" } }),
+  );
+  await stub.route("**/api/v1/sign-in/oidc", (route) =>
+    route.fulfill({ json: { enabled: true, display_name: "Okta" } }),
+  );
+  await visit(page, "/sign-in", ["Okta"]);
+  expectOnlyStubbed(paths, ["/api/v1/sign-in/session", "/api/v1/sign-in/oidc"]);
 });
 
 walk("an invite link marks hidden characters in the name it signs in as", async ({ page }) => {

@@ -7473,9 +7473,11 @@ sign-in (#32)".
   rate: at the default rates 600 waiting sign-ins per address and 2,400 per network;
   `test_polls_have_buckets_of_their_own`); a poll too soon answers `slow_down` without a write,
   the interval counting from the last accepted poll (`test_a_too_fast_poll_writes_nothing`), so
-  polls that arrive one after another drive no commit per request (polls of one device code that
-  arrive at once all read the same `last_polled_at` and may each be accepted; PR 4 bounds them with
-  one conditional `UPDATE`); the SDK reads any 429 as `slow_down`, the CLI waiting
+  polls that arrive one after another drive no commit per request. Polls of one device code that
+  arrive at once all pass that read; the acceptance itself is one conditional `UPDATE` (`WHERE
+  last_polled_at IS NULL OR last_polled_at <= now - 4 s`), and a poll whose `UPDATE` matches no row
+  answers `slow_down` too, so a burst drives one commit per interval
+  (`test_two_polls_at_once_accept_only_one`); the SDK reads any 429 as `slow_down`, the CLI waiting
   5 seconds more and at least `Retry-After` (whole seconds, at most 60, the SDK's capped parser).
   The CLI stops at the code's expiry even if every poll is refused
   (`test_device_stops_at_the_codes_expiry_when_every_poll_is_refused`). The age on the page is the
@@ -7526,6 +7528,61 @@ sign-in (#32)".
   `safe_return_to` after a provider sign-in, which keeps exactly `/sign-in/cli` and
   `/sign-in/device` with their query (no fragment, no other spelling) and still turns every other
   `/sign-in…` path into `/` (`test_return_to_is_kept_only_when_it_is_an_app_path`).
+
+## OIDC sign-in in the interface (#32, PR 4)
+
+The web interface's side of the provider's flows (`ui/src/api/oidc.ts`, `ui/src/api/providerSession.ts`,
+`ui/src/sign-in/ProviderReturn.tsx`). It adds no route; the server's checks are PR 1's to PR 3's.
+Threat model: "OIDC sign-in (#32)".
+
+- **I1, no replay after the provider (U2).** A guarded action of a linked person whose touch is
+  stale sends nothing: `guarded` starts the provider step-up with the page's own path and query,
+  sends the browser to the provider and throws `ProviderRedirect`, and the return page goes back
+  there with a note that says to press the action again (`guarded sends a linked person through
+  the provider and sends nothing`; e2e `a linked person's Create token goes through the provider
+  and back`, which counts no POST before the second press). A write is never replayed after a page
+  load: the interface keeps no body across it, so nothing typed (a token's name, a secret's value)
+  is stored for the trip. The tab keeps only `{purpose, back}` in `sessionStorage`
+  (`lakana.oidc.trip`), read once by the return page and removed. Every write a route guards with
+  `require_step_up` goes through `guarded` but adding a passkey, where a person's first one has
+  no touch to give and the 403 fallback asks when the server does
+  (`packages/lakana-server/tests/test_step_up_ui.py` places every route of `STEP_UP_ROUTES`, so a
+  new one fails until its caller is checked); the 403 `StepUpRequired` fallback of `api.request`
+  (for a touch that ran out inside `guarded`'s 60-second margin) runs `confirmPresence`, which
+  sends a person the server answers with 409 `ProviderStepUpRequired` to the provider and retries
+  nothing (`a guarded call whose touch runs out inside the margin goes to the provider and is not
+  sent again`, `a linked person's connection create with a stale touch goes through the provider
+  and sends nothing`). The device page keeps a typed user code in `sessionStorage`
+  (`sign-in/keptCode.ts`) only while the browser is at the provider: the page takes and removes it
+  when it opens again, and it is removed when the approval is answered, on Cancel, when the
+  confirmation is refused, and when the page is left or shown again from the browser's history. The browser is sent only to an
+  `https:` or `http:` address (`goToProvider`); a `javascript:` or `data:` one from a broken
+  discovery document is refused.
+- **I2, where the browser goes back to.** The page to open after a sign-in stays on the server
+  (`return_to` of `start`, checked by `safe_return_to`); the interface follows the path the
+  finish answers, or a path a tab kept, only when it is local, by the server's own rule for `return_to`
+  (`sign-in/localPath.ts`): one leading `/`, no `//`, no `\`, no control or format character (a
+  tab or line feed the browser drops would turn `/\t/evil.example` into `//evil.example`), none of
+  these percent-encoded (decoded three times as Python's `unquote` decodes, a bad escape left as
+  it is and the others decoded), at most 2048 characters, and no sign-in page but `lakana login`'s two
+  confirmations (`isLocalPath`), else Home. The same rule now holds for the page a signed-out visit
+  left in the history state (`cameFrom`), which a stored `//evil.example/x` no longer leaves to
+  (`after sign-in follows only a local path`). Signing in through the provider from `lakana
+  login`'s confirmation pages sends their path with the query as `return_to`, which
+  `safe_return_to` keeps (`the provider's sign-in comes back to lakana login's page`).
+- **I3, a link's secret.** Choosing the provider on an invite or a recovery link sends `link_id`
+  and `secret` in the body of `POST /api/v1/sign-in/oidc/start` only, as `/links/redeem` does; the
+  fragment was taken out of the address before the first request (`choosing the provider sends
+  the link and removes the secret from history first`, e2e `an invite through the provider`).
+- **I4, once per flow.** Each return page finishes its flow once per page load, also when the
+  interface renders it again after the person's rights arrive (`ProviderReturn.tsx`, `Once`).
+- **I5, names from the provider** (the display name, the issuer, a linked person's e-mail and
+  name) are shown through `VisibleText` with hidden characters marked, as component slots of
+  `Trans`, never as markup (`marks hidden characters in the provider name`, and the walks of
+  `hidden-characters.spec.ts`). With OIDC off nothing mentions it and nothing but
+  `GET /api/v1/sign-in/oidc` is read (`nothing mentions a provider when it is off`).
+- **I6, refusals.** Each `OidcSignInRefused` reason has its own sentence with the next step, and
+  `identity_taken` names no account; an unknown reason shows the server's sentence, marked.
 
 ## Git fetch hardening (M5b)
 

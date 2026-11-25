@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -24,14 +24,19 @@ const STALE = { status: 200, body: { ...ADMIN_SESSION, name: "kim", step_up_unti
  * @param element - The page.
  * @param at - The address.
  * @param session - The session value; kim, signed in, by default.
+ * @param state - The history state of the address, such as a confirmation's note.
  * @returns A user-event session.
  */
 function renderAt(
   element: ReactNode,
   at: string,
   session = signedIn({ session: { ...ADMIN_SESSION, name: "kim" } }),
+  state: unknown = null,
 ): ReturnType<typeof userEvent.setup> {
-  const router = createMemoryRouter([{ path: "*", element }], { initialEntries: [at] });
+  const url = new URL(at, "http://localhost");
+  const router = createMemoryRouter([{ path: "*", element }], {
+    initialEntries: [{ pathname: url.pathname, search: url.search, state }],
+  });
   const user = userEvent.setup();
   render(
     <SessionContext value={session}>
@@ -396,6 +401,136 @@ describe("CliDevicePage", () => {
     expect(screen.getByText(/is the name the computer gave itself/)).toHaveTextContent(
       "“build-box” is the name the computer gave itself; Lakana cannot check it.",
     );
+  });
+
+  it("device: a linked person's approval goes to the provider and the code waits for the return", async () => {
+    const fake = deviceServer({
+      "GET /api/v1/sign-in/session": {
+        status: 200,
+        body: { step_up_until: null, provider_linked: true },
+      },
+      "POST /api/v1/sign-in/oidc/step-up/start": {
+        status: 200,
+        body: { authorization_url: "https://id.example.org/authorize" },
+      },
+    });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign, pathname: "/sign-in/device", search: "" });
+    const user = renderAt(<CliDevicePage />, "/sign-in/device");
+    await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("https://id.example.org/authorize");
+    });
+    expect(fake.sent.map((request) => request.path)).not.toContain(
+      "/api/v1/sign-in/cli/device/approve",
+    );
+    const kept = sessionStorage.getItem("lakana.cliSignIn.deviceCode");
+    expect(kept).toBe("BCDF-GHJK");
+    // The browser leaves for the provider without unmounting the page; a test's cleanup does
+    // unmount it, which forgets the code, so the next page load is set up as the browser leaves it.
+    cleanup();
+    sessionStorage.setItem("lakana.cliSignIn.deviceCode", kept ?? "");
+    vi.unstubAllGlobals();
+
+    renderAt(<CliDevicePage />, "/sign-in/device", undefined, {
+      providerConfirmed: { purpose: "step_up", provider: "Okta" },
+    });
+
+    const note = screen.getByText(
+      "Confirmed with Okta. Do it again now; it won't ask for 15 minutes.",
+    );
+    await waitFor(() => {
+      expect(note).toHaveFocus();
+    });
+    expect(screen.getByRole("textbox", { name: "Code" })).toHaveValue("BCDF-GHJK");
+    expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBeNull();
+    sessionStorage.clear();
+  });
+
+  it("device: a refused approval forgets the code it kept", async () => {
+    deviceServer({
+      "POST /api/v1/sign-in/cli/device/approve": {
+        status: 409,
+        body: { detail: "Already decided.", type: "ConflictError" },
+      },
+    });
+    const user = renderAt(<CliDevicePage />, "/sign-in/device");
+    await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
+    await user.click(await screen.findByRole("button", { name: "Create token" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Already decided.");
+    expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBeNull();
+  });
+
+  it("device: blocked storage keeps nothing and the page works", async () => {
+    deviceServer();
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const removeItem = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    try {
+      const user = renderAt(<CliDevicePage />, "/sign-in/device");
+      expect(screen.getByRole("textbox", { name: "Code" })).toHaveValue("");
+      await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
+      await user.click(await screen.findByRole("button", { name: "Create token" }));
+
+      expect(await screen.findByRole("status")).toHaveTextContent(
+        "Done. Go back to the terminal: lakana login finishes there.",
+      );
+    } finally {
+      getItem.mockRestore();
+      setItem.mockRestore();
+      removeItem.mockRestore();
+    }
+  });
+
+  it.each([
+    ["Cancel", "deny"],
+    ["a return from the browser's history", "pageshow"],
+    ["leaving the page", "leave"],
+  ])("device: %s forgets a kept code", async (_, how) => {
+    deviceServer();
+    const user = renderAt(<CliDevicePage />, "/sign-in/device");
+    await user.type(screen.getByRole("textbox", { name: "Code" }), "BCDF-GHJK{Enter}");
+    await screen.findByRole("button", { name: "Create token" });
+    sessionStorage.setItem("lakana.cliSignIn.deviceCode", "BCDF-GHJK");
+
+    if (how === "deny") {
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      await screen.findByRole("status");
+    } else if (how === "pageshow") {
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: false }));
+      });
+      expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBe("BCDF-GHJK");
+      act(() => {
+        window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+      });
+    } else {
+      cleanup();
+    }
+
+    expect(sessionStorage.getItem("lakana.cliSignIn.deviceCode")).toBeNull();
+  });
+
+  it("the loopback page shows the confirmation's note, focused", async () => {
+    renderAt(<CliSignInPage />, link(), undefined, {
+      providerConfirmed: { purpose: "step_up", provider: "Okta" },
+    });
+
+    const note = screen.getByText(
+      "Confirmed with Okta. Do it again now; it won't ask for 15 minutes.",
+    );
+    await waitFor(() => {
+      expect(note).toHaveFocus();
+    });
   });
 
   it("device: cancel refuses the sign-in", async () => {

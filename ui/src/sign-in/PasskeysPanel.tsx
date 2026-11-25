@@ -1,5 +1,6 @@
 /**
- * A person's passkeys: listed, each removed in place, and for one's own account a new one added.
+ * A person's passkeys: listed, each removed in place, and for one's own account a new one added;
+ * only listed for a person who signs in through the identity provider.
  *
  * @packageDocumentation
  */
@@ -17,6 +18,7 @@ import { useWhen } from "../shell/useWhen";
 import { AttemptStatus, useAttempt } from "./Attempt";
 import { PendingButton } from "../shell/PendingButton";
 import { markedText, VisibleText } from "../shell/VisibleText";
+import "./oidcStrings";
 
 /** Properties of {@link PasskeysPanel}. */
 export interface PasskeysPanelProps {
@@ -24,6 +26,11 @@ export interface PasskeysPanelProps {
   readonly name: string;
   /** True on one's own account: only there can a passkey be added. */
   readonly own: boolean;
+  /**
+   * True for a person who signs in through the identity provider: the passkeys are listed
+   * without Add or Remove, since they no longer sign in.
+   */
+  readonly readOnly?: boolean;
 }
 
 /**
@@ -34,9 +41,10 @@ export interface PasskeysPanelProps {
  * @param props - Whose passkeys, and whether they are one's own.
  * @param props.name - The person's principal name.
  * @param props.own - True on one's own account.
+ * @param props.readOnly - True for a person who signs in through the identity provider.
  * @returns The panel.
  */
-export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
+export function PasskeysPanel({ name, own, readOnly = false }: PasskeysPanelProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
   const heading = useId();
@@ -63,7 +71,7 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
         <h2 id={heading} ref={headingRef} tabIndex={-1}>
           {t("passkeys.title")}
         </h2>
-        {own && (
+        {own && !readOnly && (
           <PendingButton
             className="button button-primary"
             pending={attempt.busy}
@@ -78,6 +86,7 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
           </PendingButton>
         )}
       </div>
+      {readOnly && <p className="page-purpose">{t("oidc.section.keptPasskeys")}</p>}
       <Loaded resource={passkeys}>
         {(found) =>
           found.length === 0 ? (
@@ -97,15 +106,17 @@ export function PasskeysPanel({ name, own }: PasskeysPanelProps): JSX.Element {
                         <span className="second">{details(passkey)}</span>
                       </td>
                       <td>
-                        <Button
-                          className="button"
-                          aria-label={t("passkeys.removeOf", { name: markedText(label) })}
-                          onPress={() => {
-                            setRemoving({ id: passkey.id, label });
-                          }}
-                        >
-                          {t("passkeys.remove")}
-                        </Button>
+                        {!readOnly && (
+                          <Button
+                            className="button"
+                            aria-label={t("passkeys.removeOf", { name: markedText(label) })}
+                            onPress={() => {
+                              setRemoving({ id: passkey.id, label });
+                            }}
+                          >
+                            {t("passkeys.remove")}
+                          </Button>
+                        )}
                       </td>
                     </tr>
                   );

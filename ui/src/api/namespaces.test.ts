@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createExternalTable, createNamespace, deleteNamespace } from "./namespaces";
 
 import { manageRoutes } from "../test/manage";
-import { fakeServer } from "../test/server";
+import { fakeServer, withoutSessionReads } from "../test/server";
 
 describe("namespaces api", () => {
   it("creates with the path, empty properties and the reason in the body", async () => {
@@ -13,7 +13,9 @@ describe("namespaces api", () => {
     await createNamespace("prod", "gold.finance", "Wrong data in prod");
 
     expect(created).toEqual({ path: "gold.finance", properties: {} });
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([
       [
         "POST",
         "/api/v1/environments/prod/namespaces",
@@ -33,7 +35,7 @@ describe("namespaces api", () => {
     await deleteNamespace("prod", "silver", null);
     await deleteNamespace("prod", "silver", "fix it now please");
 
-    expect(server.sent.map((request) => [request.method, request.path])).toEqual([
+    expect(withoutSessionReads(server).map((request) => [request.method, request.path])).toEqual([
       ["DELETE", "/api/v1/environments/prod/namespaces/silver"],
       [
         "DELETE",
@@ -65,7 +67,9 @@ describe("namespaces api", () => {
       format: "csv",
       schema: { order_id: "int64", amount: "double" },
     });
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([
       [
         "POST",
         "/api/v1/environments/prod/namespaces/bronze/tables/external",
@@ -101,7 +105,7 @@ describe("namespaces api", () => {
     await createNamespace("a b", "a b", null);
     await deleteNamespace("a b", "a b", null);
 
-    expect(server.sent.map((request) => request.path)).toEqual([
+    expect(withoutSessionReads(server).map((request) => request.path)).toEqual([
       "/api/v1/environments/a%20b/namespaces",
       "/api/v1/environments/a%20b/namespaces/a%20b",
     ]);

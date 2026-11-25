@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
@@ -400,5 +400,175 @@ describe("PersonPage", () => {
     const sentence = await screen.findByText(/^It works once, for 1 hour/u);
     expect(sentence).toHaveTextContent("send it to kU+202Eim yourself.");
     expect(document.body.textContent).not.toMatch(/\u202E/u);
+  });
+
+  const LINK = {
+    issuer: "https://example.okta.com/oauth2/default",
+    email: "kim@example.org",
+    name: "Kim Lee",
+    last_sign_in_at: "2026-11-20T08:30:00Z",
+    token_window_ends_at: "2026-12-20T08:30:00Z",
+  };
+  const OKTA = { status: 200, body: { enabled: true, display_name: "Okta" } };
+
+  /**
+   * kim's principal, linked to the provider.
+   *
+   * @param link - The link, or null.
+   * @returns The fake route's answer.
+   */
+  const linked = (link: unknown = LINK) => ({
+    status: 200,
+    body: {
+      name: "kim",
+      type: "USER",
+      is_active: true,
+      picture: null,
+      held_admin: false,
+      provider_link: link,
+    },
+  });
+
+  it("shows Linked to provider with the email and last sign-in", async () => {
+    renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked(),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/oidc": OKTA,
+      },
+    });
+
+    const panel = await screen.findByRole("region", { name: "Linked to Okta" });
+    const facts = within(panel)
+      .getAllByRole("term")
+      .map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(facts[0]).toEqual(["E-mail", "kim@example.org"]);
+    expect(facts[1]).toEqual(["Name at the provider", "Kim Lee"]);
+    expect(facts[2]?.[0]).toBe("Last signed in through it");
+    expect(facts[2]?.[1]).toMatch(/2026/);
+    expect(within(panel).getByRole("button", { name: "Unlink" })).toBeVisible();
+  });
+
+  it("the unlink dialog names what goes and points to deactivation", async () => {
+    const { user } = renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked(),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/oidc": OKTA,
+      },
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Unlink" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Unlink kim from Okta?" });
+    expect(dialog).toHaveTextContent(
+      "This deletes the passkeys of kim, revokes every personal API token of theirs and ends every session they have.",
+    );
+    expect(dialog).toHaveTextContent("kim then needs a recovery link to sign in again");
+    expect(dialog).toHaveTextContent("To offboard someone, deactivate them instead.");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Linked to Okta" })).toBeInTheDocument();
+  });
+
+  it("unlink asks for the touch first and lands on the heading", async () => {
+    fakeWebAuthn();
+    let unlinkedYet = false;
+    const { user, server } = renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": () => linked(unlinkedYet ? null : LINK),
+        "GET /api/v1/principals/kim/passkeys": () => ({
+          status: 200,
+          body: unlinkedYet ? [] : [PASSKEY],
+        }),
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/oidc": OKTA,
+        "GET /api/v1/sign-in/session": STALE_SESSION,
+        ...STEP_UP_ROUTES,
+        "DELETE /api/v1/principals/kim/oidc-link": () => {
+          unlinkedYet = true;
+          return { status: 204 };
+        },
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: "Unlink" }));
+    const dialog = await screen.findByRole("dialog");
+    const from = server.sent.length;
+
+    await user.click(within(dialog).getByRole("button", { name: "Unlink" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 1, name: "kim" })).toHaveFocus();
+    });
+    expect(
+      server.sent.slice(from, from + 4).map((request) => `${request.method} ${request.path}`),
+    ).toEqual([
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/step-up/options",
+      "POST /api/v1/sign-in/step-up",
+      "DELETE /api/v1/principals/kim/oidc-link",
+    ]);
+    await waitFor(() => {
+      expect(screen.queryByRole("region", { name: "Linked to Okta" })).not.toBeInTheDocument();
+    });
+    expect(
+      server.sent.filter((request) => request.path === "/api/v1/principals/kim/passkeys"),
+    ).toHaveLength(2);
+  });
+
+  it("no Unlink on one's own page", async () => {
+    renderShell("/settings/access/people/admin", {
+      routes: {
+        "GET /api/v1/principals/admin": {
+          status: 200,
+          body: { ...linked().body, name: "admin", held_admin: true },
+        },
+        "GET /api/v1/principals/admin/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/oidc": OKTA,
+      },
+    });
+
+    const panel = await screen.findByRole("region", { name: "Linked to Okta" });
+    expect(within(panel).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("an unlinked person shows nothing about the provider", async () => {
+    const { server } = renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked(null),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: "Issue a recovery link" })).toBeVisible();
+    expect(document.body).not.toHaveTextContent(/Linked to|Unlink|provider/);
+    expect(server.sent.map((request) => request.path)).not.toContain("/api/v1/sign-in/oidc");
+  });
+
+  it("names the provider in general words when its name cannot be read, and hides empty facts", async () => {
+    renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked({
+          ...LINK,
+          email: null,
+          name: null,
+          last_sign_in_at: null,
+        }),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+      },
+    });
+
+    const panel = await screen.findByRole("region", { name: "Linked to the identity provider" });
+    expect(
+      within(panel)
+        .getAllByRole("term")
+        .map((term) => term.textContent),
+    ).toEqual(["Last signed in through it"]);
+    expect(within(panel).getByText("Not yet")).toBeInTheDocument();
   });
 });

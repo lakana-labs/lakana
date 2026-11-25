@@ -357,8 +357,8 @@ test("a data engineer's host change asks for the password again", async ({
   expect(await violations(page), "Edit with the password asked for").toEqual([]);
 
   await password.fill("the-new-password");
-  // The touch of the sign-in has gone stale: the server asks for a new one, which the virtual
-  // authenticator gives, and the change is sent again.
+  // The touch of the sign-in has gone stale: the interface asks for a new one before it sends
+  // the change (`guarded`), which the virtual authenticator gives.
   ageThePasskeyTouch(person);
   // Enter in the field sends the form: the error of the first Save goes when the field is left,
   // which moves Save up a line, so a press on the button would miss it.
@@ -371,7 +371,6 @@ test("a data engineer's host change asks for the password again", async ({
     secret_values: { password: "the-new-password" },
   });
   expect(sent).toEqual([
-    "PATCH /api/v1/environments/ENV/connections/" + name,
     "POST /api/v1/sign-in/step-up/options",
     "POST /api/v1/sign-in/step-up",
     "PATCH /api/v1/environments/ENV/connections/" + name,

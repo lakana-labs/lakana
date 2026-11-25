@@ -78,6 +78,25 @@ export interface PrincipalOut {
    * administrator. Absent from an older server.
    */
   readonly held_admin?: boolean | null;
+  /**
+   * The person's link to the identity provider; null when they are not linked, or for a caller
+   * who is neither an administrator nor the person. Absent from a server older than #32.
+   */
+  readonly provider_link?: ProviderLinkOut | null;
+}
+
+/** A person's link to the identity provider, as a principal's `provider_link` carries it. */
+export interface ProviderLinkOut {
+  /** The provider's issuer the person is linked to. */
+  readonly issuer: string;
+  /** The e-mail address of their last sign-in there, for showing only, or null. */
+  readonly email: string | null;
+  /** Their name at their last sign-in there, for showing only, or null. */
+  readonly name: string | null;
+  /** When they last signed in through the provider, or null. */
+  readonly last_sign_in_at: string | null;
+  /** Until when their personal API tokens work without another sign-in there, or null. */
+  readonly token_window_ends_at: string | null;
 }
 
 /** What the permissions route answers, as far as finding an administrator goes. */

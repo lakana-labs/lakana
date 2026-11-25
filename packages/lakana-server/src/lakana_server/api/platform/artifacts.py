@@ -81,7 +81,7 @@ from lakana_core.artifacts.service import (
 from lakana_core.auth import PrincipalRef
 from lakana_core.errors import ConflictError, ValidationError
 from lakana_core.identifiers import NamespacePath, TableRef, shown
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import TableCursorParam, set_next_cursor
 from lakana_server.api.platform.schemas import (
     ArtifactBlobOut,
     ArtifactCommitIn,
@@ -1144,7 +1144,7 @@ def list_artifacts(
     response: Response,
     namespace: str | None = Query(default=None, max_length=1024),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: TableCursorParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: ArtifactService = Depends(get_artifact_service),
 ) -> list[ArtifactOut]:

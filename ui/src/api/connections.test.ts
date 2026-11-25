@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createConnection,
@@ -12,7 +12,9 @@ import {
 } from "./connections";
 
 import { ENVIRONMENTS_ROUTE, aConnection, connectionRoutes } from "../test/connections";
-import { fakeServer } from "../test/server";
+import { ProviderRedirect } from "./oidc";
+
+import { fakeServer, withoutSessionReads } from "../test/server";
 
 const ENVIRONMENTS = [{ name: "prod", actions: ["create", "test"] as const }];
 
@@ -73,7 +75,9 @@ describe("connections api", () => {
     await createConnection("prod", create);
     await updateConnection("prod", "crm", update);
 
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([
       ["POST", "/api/v1/environments/prod/connections", create],
       ["PATCH", "/api/v1/environments/prod/connections/crm", update],
     ]);
@@ -128,5 +132,42 @@ describe("connections api", () => {
 
     expect(await requestConnectionTest("prod", "crm")).toEqual(body);
     expect(server.sent[0]?.path).toBe("/api/v1/environments/prod/connections/crm/tests");
+  });
+
+  it("a linked person's connection create with a stale touch goes through the provider and sends nothing", async () => {
+    const server = fakeServer({
+      "GET /api/v1/sign-in/session": {
+        status: 200,
+        body: { step_up_until: null, provider_linked: true },
+      },
+      "POST /api/v1/sign-in/oidc/step-up/start": {
+        status: 200,
+        body: { authorization_url: "https://id.example.org/authorize" },
+      },
+      "POST /api/v1/environments/prod/connections": { status: 201, body: aConnection() },
+    });
+    const assign = vi.fn();
+    vi.stubGlobal("location", {
+      assign,
+      pathname: "/connections/new",
+      search: "?environment=prod",
+    });
+
+    await expect(
+      createConnection("prod", {
+        name: "crm",
+        kind: "postgresql",
+        address: { host: "h" },
+        settings: {},
+        secret_values: { password: "s3cret" },
+      }),
+    ).rejects.toBeInstanceOf(ProviderRedirect);
+
+    expect(server.sent.map((request) => `${request.method} ${request.path}`)).toEqual([
+      "GET /api/v1/sign-in/session",
+      "POST /api/v1/sign-in/oidc/step-up/start",
+    ]);
+    expect(assign).toHaveBeenCalledWith("https://id.example.org/authorize");
+    sessionStorage.clear();
   });
 });

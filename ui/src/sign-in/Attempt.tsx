@@ -4,10 +4,11 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useState } from "react";
+import { type JSX, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
+import { ProviderRedirect } from "../api/oidc";
 import { needsPasskey, problemText } from "./messages";
 
 /** What {@link useAttempt} hands back. */
@@ -28,7 +29,10 @@ export interface Attempt {
 }
 
 /**
- * Keeps the state of one action at a time.
+ * Keeps the state of one action at a time. An action that sent the browser to the identity
+ * provider (`ProviderRedirect`) ends without a failure and stays busy, as the page is being
+ * left; a return to it from the browser's history (`pageshow` from the back-forward cache)
+ * clears that.
  *
  * @returns The attempt.
  */
@@ -37,19 +41,38 @@ export function useAttempt(): Attempt {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addPasskey, setAddPasskey] = useState(false);
+  // Back from the provider through the browser's history, the page is shown as it was left:
+  // nothing is under way any more.
+  useEffect(() => {
+    const shown = (event: PageTransitionEvent): void => {
+      if (event.persisted) {
+        setBusy(false);
+      }
+    };
+    window.addEventListener("pageshow", shown);
+    return () => {
+      window.removeEventListener("pageshow", shown);
+    };
+  }, []);
   const run = useCallback(
     (action: () => Promise<void>, describe?: (error: unknown) => string) => {
       setBusy(true);
       setError(null);
       setAddPasskey(false);
-      action()
-        .catch((failure: unknown) => {
+      action().then(
+        () => {
+          setBusy(false);
+        },
+        (failure: unknown) => {
+          if (failure instanceof ProviderRedirect) {
+            // The page is being left: the action stays busy, so a second press starts nothing.
+            return;
+          }
+          setBusy(false);
           setError(describe === undefined ? problemText(t, failure) : describe(failure));
           setAddPasskey(needsPasskey(failure));
-        })
-        .finally(() => {
-          setBusy(false);
-        });
+        },
+      );
     },
     [t],
   );

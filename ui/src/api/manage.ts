@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 import { api, ApiError } from "./client";
+import { guarded } from "./stepUpFirst";
 import { tableApiPath, type ModelReferenceOut, type TableOut, type TableRef } from "./table";
 
 /** The size of every page; it is the server's default, sent so a change there changes nothing here. */
@@ -217,7 +218,7 @@ export async function dropTable(
     query.set("purge", "true");
   }
   breakGlassQuery(options.breakGlassReason, query);
-  await api.request<undefined>("DELETE", withQuery(tableApiPath(ref), query));
+  await guarded<undefined>("DELETE", withQuery(tableApiPath(ref), query));
 }
 
 /**
@@ -256,7 +257,7 @@ export function rebuildTable(
   breakGlass: boolean,
 ): Promise<TableRebuildOut> {
   const query = breakGlassQuery(breakGlass ? reason : null);
-  return api.request<TableRebuildOut>("POST", withQuery(tableApiPath(ref, "/rebuild"), query), {
+  return guarded<TableRebuildOut>("POST", withQuery(tableApiPath(ref, "/rebuild"), query), {
     reason,
   });
 }
@@ -327,7 +328,7 @@ export function getReferences(ref: TableRef): Promise<TableReferencesOut> {
  */
 export async function dropArtifact(ref: TableRef, breakGlassReason: string | null): Promise<void> {
   const path = artifactApiPath(ref);
-  await api.request<undefined>("DELETE", withQuery(path, breakGlassQuery(breakGlassReason)));
+  await guarded<undefined>("DELETE", withQuery(path, breakGlassQuery(breakGlassReason)));
 }
 
 /**

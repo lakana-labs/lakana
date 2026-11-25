@@ -218,7 +218,7 @@ export async function waitForProbe(id: string, signal: AbortSignal): Promise<Rep
  * @returns When it is registered.
  */
 export async function createRepository(body: RepositoryCreate): Promise<void> {
-  await api.request("POST", "/api/v1/repositories", body);
+  await guarded("POST", "/api/v1/repositories", body);
 }
 
 /**
@@ -248,7 +248,7 @@ export async function getRepository(name: string): Promise<RegisteredRepository>
  * @returns The public keys, by environment, and the environments skipped.
  */
 export async function generateDeployKey(name: string): Promise<DeployKeyOut> {
-  return api.request<DeployKeyOut>(
+  return guarded<DeployKeyOut>(
     "POST",
     `/api/v1/repositories/${encodeURIComponent(name)}/deploy-key`,
     {},

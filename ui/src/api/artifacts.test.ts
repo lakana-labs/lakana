@@ -22,7 +22,7 @@ import {
   upload,
   version,
 } from "../test/artifacts";
-import { fakeServer } from "../test/server";
+import { fakeServer, withoutSessionReads } from "../test/server";
 
 const REF = { environment: "prod", namespace: "ml", name: "model" };
 const BASE = "/api/v1/environments/prod/namespaces/ml/artifacts/model";
@@ -39,7 +39,9 @@ describe("artifacts api", () => {
     expect(versions[2]).toEqual(deletedVersion());
     expect(three).toEqual(version({ files: three.files }));
     expect(three.files.map((file) => file.path)).toContain("models/model.pkl");
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([
       ["GET", BASE, undefined],
       ["GET", `${BASE}/versions`, undefined],
       ["GET", `${BASE}/versions/3`, undefined],
@@ -52,7 +54,9 @@ describe("artifacts api", () => {
     expect(await deleteVersion(REF, 3, null)).toEqual(DELETED);
     await deleteVersion(REF, 3, "fix it now please");
 
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([
       ["DELETE", `${BASE}/versions/3`, undefined],
       ["DELETE", `${BASE}/versions/3?break_glass_reason=fix+it+now+please`, undefined],
     ]);
@@ -66,7 +70,9 @@ describe("artifacts api", () => {
 
     expect(first).toEqual({ items: [upload()], nextCursor: "c1" });
     expect(second.nextCursor).toBeNull();
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([
       ["GET", "/api/v1/environments/prod/artifacts/uploads?name=ml.model&limit=100", undefined],
       [
         "GET",
@@ -81,9 +87,9 @@ describe("artifacts api", () => {
 
     await expect(withdrawUpload(REF, upload().upload_id)).resolves.toBeUndefined();
 
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
-      ["DELETE", `${BASE}/uploads/6f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f`, undefined],
-    ]);
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([["DELETE", `${BASE}/uploads/6f1e2d3c-4b5a-4968-8776-5a4b3c2d1e0f`, undefined]]);
   });
 
   it("downloads a file and checks its size and hash", async () => {
@@ -92,10 +98,10 @@ describe("artifacts api", () => {
     const blob = await downloadFile(REF, 3, WEIGHTS);
 
     expect(await blob.text()).toBe("weights");
-    expect(server.sent.map((request) => [request.method, request.path, request.body])).toEqual([
-      ["GET", `${BASE}/versions/3/blobs/${WEIGHTS.sha256}`, undefined],
-    ]);
-    expect(server.sent[0]?.headers.accept).toBe("application/octet-stream");
+    expect(
+      withoutSessionReads(server).map((request) => [request.method, request.path, request.body]),
+    ).toEqual([["GET", `${BASE}/versions/3/blobs/${WEIGHTS.sha256}`, undefined]]);
+    expect(withoutSessionReads(server)[0]?.headers.accept).toBe("application/octet-stream");
     expect(BROWSER_DOWNLOAD_LIMIT).toBe(268_435_456);
   });
 
@@ -132,7 +138,7 @@ describe("artifacts api", () => {
       downloadFile(REF, 3, { ...WEIGHTS, size: BROWSER_DOWNLOAD_LIMIT + 1 }),
     ).rejects.toBeInstanceOf(RangeError);
 
-    expect(server.sent).toEqual([]);
+    expect(withoutSessionReads(server)).toEqual([]);
   });
 
   it("encodes every part of a path", async () => {
@@ -146,7 +152,7 @@ describe("artifacts api", () => {
       listUploads("pro d", "a b.m/x", null),
     ]);
 
-    expect(server.sent.map((request) => request.path)).toEqual([
+    expect(withoutSessionReads(server).map((request) => request.path)).toEqual([
       "/api/v1/environments/pro%20d/namespaces/a%20b/artifacts/m%2Fx",
       "/api/v1/environments/pro%20d/namespaces/a%20b/artifacts/m%2Fx/versions/3",
       "/api/v1/environments/pro%20d/namespaces/a%20b/artifacts/m%2Fx/uploads/u%2F1",

@@ -20,7 +20,7 @@ import {
 import type { TableRef } from "./table";
 
 import { dropped, manageRoutes, orphan, references, REBUILT, retention } from "../test/manage";
-import { fakeServer } from "../test/server";
+import { fakeServer, withoutSessionReads } from "../test/server";
 import { TABLE } from "../test/table";
 
 const REF: TableRef = { environment: "prod", namespace: "gold.sales", name: "fact_sales" };
@@ -43,8 +43,8 @@ describe("manage api", () => {
 
     await dropTable(REF, { purge: true, breakGlassReason: "fix it now please" });
 
-    const { pathname, query } = parts(server.sent[0]?.path ?? "");
-    expect(server.sent[0]?.method).toBe("DELETE");
+    const { pathname, query } = parts(withoutSessionReads(server)[0]?.path ?? "");
+    expect(withoutSessionReads(server)[0]?.method).toBe("DELETE");
     expect(pathname).toBe(BASE);
     expect(query.get("purge")).toBe("true");
     expect(query.get("break_glass_reason")).toBe("fix it now please");
@@ -55,7 +55,7 @@ describe("manage api", () => {
 
     await dropTable(REF, { purge: false, breakGlassReason: null });
 
-    expect(server.sent[0]?.path).toBe(BASE);
+    expect(withoutSessionReads(server)[0]?.path).toBe(BASE);
   });
 
   it("undrops with new_name and break_glass_reason in the body", async () => {
@@ -66,9 +66,12 @@ describe("manage api", () => {
 
     expect(await undropTable(REF, { newName: "old", breakGlassReason: null })).toEqual(TABLE);
 
-    expect(server.sent[0]?.method).toBe("POST");
-    expect(server.sent[0]?.path).toBe(`${BASE}/undrop`);
-    expect(server.sent[0]?.body).toEqual({ new_name: "old", break_glass_reason: null });
+    expect(withoutSessionReads(server)[0]?.method).toBe("POST");
+    expect(withoutSessionReads(server)[0]?.path).toBe(`${BASE}/undrop`);
+    expect(withoutSessionReads(server)[0]?.body).toEqual({
+      new_name: "old",
+      break_glass_reason: null,
+    });
   });
 
   it("rebuilds with the reason, and as break-glass sends it in the query too", async () => {
@@ -77,12 +80,12 @@ describe("manage api", () => {
     expect(await rebuildTable(REF, "schema changed", false)).toEqual(REBUILT);
     await rebuildTable(REF, "schema changed", true);
 
-    expect(server.sent[0]?.path).toBe(`${BASE}/rebuild`);
-    expect(server.sent[0]?.body).toEqual({ reason: "schema changed" });
-    const second = parts(server.sent[1]?.path ?? "");
+    expect(withoutSessionReads(server)[0]?.path).toBe(`${BASE}/rebuild`);
+    expect(withoutSessionReads(server)[0]?.body).toEqual({ reason: "schema changed" });
+    const second = parts(withoutSessionReads(server)[1]?.path ?? "");
     expect(second.pathname).toBe(`${BASE}/rebuild`);
     expect(second.query.get("break_glass_reason")).toBe("schema changed");
-    expect(server.sent[1]?.body).toEqual({ reason: "schema changed" });
+    expect(withoutSessionReads(server)[1]?.body).toEqual({ reason: "schema changed" });
   });
 
   it("maintains with snake_case options and answers the query id", async () => {
@@ -90,8 +93,8 @@ describe("manage api", () => {
 
     expect(await maintainTable(REF, MAINTENANCE_DEFAULTS)).toBe("q-1");
 
-    expect(server.sent[0]?.path).toBe(`${BASE}/maintenance`);
-    expect(server.sent[0]?.body).toEqual({
+    expect(withoutSessionReads(server)[0]?.path).toBe(`${BASE}/maintenance`);
+    expect(withoutSessionReads(server)[0]?.body).toEqual({
       keep_days: 7,
       keep_last: 5,
       dry_run: false,
@@ -104,7 +107,7 @@ describe("manage api", () => {
 
     expect(await getRetention(REF)).toEqual(retention());
 
-    expect(server.sent[0]?.path).toBe(`${BASE}/retention`);
+    expect(withoutSessionReads(server)[0]?.path).toBe(`${BASE}/retention`);
   });
 
   it.each<[RetentionRule, unknown]>([
@@ -116,9 +119,9 @@ describe("manage api", () => {
 
     expect(await setRetention(REF, rule)).toEqual(retention());
 
-    expect(server.sent[0]?.method).toBe("PUT");
-    expect(server.sent[0]?.path).toBe(`${BASE}/retention`);
-    expect(server.sent[0]?.body).toEqual(body);
+    expect(withoutSessionReads(server)[0]?.method).toBe("PUT");
+    expect(withoutSessionReads(server)[0]?.path).toBe(`${BASE}/retention`);
+    expect(withoutSessionReads(server)[0]?.body).toEqual(body);
   });
 
   it("reads references", async () => {
@@ -126,7 +129,7 @@ describe("manage api", () => {
 
     expect(await getReferences(REF)).toEqual(references());
 
-    expect(server.sent[0]?.path).toBe(`${BASE}/references`);
+    expect(withoutSessionReads(server)[0]?.path).toBe(`${BASE}/references`);
   });
 
   it("drops an artifact through the artifact route", async () => {
@@ -136,9 +139,11 @@ describe("manage api", () => {
     await dropArtifact(ref, null);
     await dropArtifact(ref, "clean up now please");
 
-    expect(server.sent[0]?.method).toBe("DELETE");
-    expect(server.sent[0]?.path).toBe("/api/v1/environments/prod/namespaces/ml/artifacts/model");
-    expect(parts(server.sent[1]?.path ?? "").query.get("break_glass_reason")).toBe(
+    expect(withoutSessionReads(server)[0]?.method).toBe("DELETE");
+    expect(withoutSessionReads(server)[0]?.path).toBe(
+      "/api/v1/environments/prod/namespaces/ml/artifacts/model",
+    );
+    expect(parts(withoutSessionReads(server)[1]?.path ?? "").query.get("break_glass_reason")).toBe(
       "clean up now please",
     );
   });
@@ -182,7 +187,7 @@ describe("manage api", () => {
       nextCursor: "c2",
     });
 
-    expect(server.sent[0]?.path).toBe(
+    expect(withoutSessionReads(server)[0]?.path).toBe(
       "/api/v1/environments/prod/dropped-tables?limit=100&cursor=c1",
     );
   });
@@ -192,7 +197,9 @@ describe("manage api", () => {
 
     await listDropped("prod", null, null);
 
-    expect(server.sent[0]?.path).toBe("/api/v1/environments/prod/dropped-tables?limit=100");
+    expect(withoutSessionReads(server)[0]?.path).toBe(
+      "/api/v1/environments/prod/dropped-tables?limit=100",
+    );
   });
 
   it("lists dropped tables of one namespace as one page", async () => {
@@ -203,7 +210,7 @@ describe("manage api", () => {
       nextCursor: null,
     });
 
-    expect(server.sent[0]?.path).toBe(
+    expect(withoutSessionReads(server)[0]?.path).toBe(
       "/api/v1/environments/prod/namespaces/gold.sales/dropped-tables",
     );
   });
@@ -224,12 +231,12 @@ describe("manage api", () => {
     });
     await listExpiring("prod", null, "e1");
 
-    const first = parts(server.sent[0]?.path ?? "");
+    const first = parts(withoutSessionReads(server)[0]?.path ?? "");
     expect(first.pathname).toBe("/api/v1/environments/prod/expiring-tables");
     expect(first.query.get("namespace")).toBe("gold");
     expect(first.query.get("limit")).toBe("100");
     expect(first.query.has("cursor")).toBe(false);
-    const second = parts(server.sent[1]?.path ?? "");
+    const second = parts(withoutSessionReads(server)[1]?.path ?? "");
     expect(second.query.has("namespace")).toBe(false);
     expect(second.query.get("cursor")).toBe("e1");
   });
@@ -249,7 +256,9 @@ describe("manage api", () => {
       nextCursor: "o2",
     });
 
-    expect(server.sent[0]?.path).toBe("/api/v1/environments/prod/orphans?limit=100&cursor=o1");
+    expect(withoutSessionReads(server)[0]?.path).toBe(
+      "/api/v1/environments/prod/orphans?limit=100&cursor=o1",
+    );
   });
 
   it("encodes every part of a path", async () => {
@@ -262,7 +271,7 @@ describe("manage api", () => {
       { purge: false, breakGlassReason: null },
     );
 
-    expect(server.sent[0]?.path).toBe(
+    expect(withoutSessionReads(server)[0]?.path).toBe(
       "/api/v1/environments/my%20env/namespaces/a%20b/tables/t%201",
     );
   });

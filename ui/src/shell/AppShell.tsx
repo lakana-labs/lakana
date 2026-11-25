@@ -36,6 +36,7 @@ declare module "react-aria-components" {
 
 import type { AccessOut } from "../api";
 import { Notices } from "../sign-in/Notices";
+import { ProviderNote } from "../sign-in/ProviderNote";
 import { TourProvider } from "../tour/TourProvider";
 import { type AreaAccess, visibleAreas } from "./areas";
 import { CommandPalette } from "./CommandPalette";
@@ -234,6 +235,7 @@ export function AppShell({ access, me }: AppShellProps): JSX.Element {
               />
               <main className="shell-main" id="main" ref={main} tabIndex={-1}>
                 <Notices />
+                <ProviderNote />
                 <Outlet />
               </main>
               <CommandPalette

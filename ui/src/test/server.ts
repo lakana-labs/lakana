@@ -126,13 +126,28 @@ function headersOf(init: RequestInit | undefined): Record<string, string> {
 }
 
 /**
- * Replaces `fetch` with the fake server. Unknown routes answer 404 with a body that names them.
+ * The session read `guarded` sends before a write the server guards with step-up: a touch that
+ * lasts another 10 minutes, so the write goes at once. A test about the touch or the session
+ * answers the route itself.
+ *
+ * @returns The answer.
+ */
+function freshTouch(): FakeAnswer {
+  return { status: 200, body: { step_up_until: new Date(Date.now() + 600_000).toISOString() } };
+}
+
+/**
+ * Replaces `fetch` with the fake server. Unknown routes answer 404 with a body that names them;
+ * the session's read answers a fresh touch unless the test routes it ({@link freshTouch}).
  *
  * @param routes - The routes to start with.
  * @returns The server.
  */
 export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
-  const table = new Map<string, FakeRoute>(Object.entries(routes));
+  const table = new Map<string, FakeRoute>([
+    ["GET /api/v1/sign-in/session", freshTouch],
+    ...Object.entries(routes),
+  ]);
   const sent: SentRequest[] = [];
   const fetchStub = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(
@@ -182,4 +197,17 @@ export function fakeServer(routes: Record<string, FakeRoute> = {}): FakeServer {
       }
     },
   };
+}
+
+/**
+ * The requests a test sent but the session reads `guarded` sends before a step-up write: for a
+ * test about the write itself.
+ *
+ * @param server - The fake server.
+ * @returns The other requests, in order.
+ */
+export function withoutSessionReads(server: FakeServer): SentRequest[] {
+  return server.sent.filter(
+    (request) => !(request.method === "GET" && request.path === "/api/v1/sign-in/session"),
+  );
 }

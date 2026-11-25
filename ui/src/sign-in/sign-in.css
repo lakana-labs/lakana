@@ -67,6 +67,15 @@
   background: var(--color-accent-hover);
 }
 
+/* A button whose label holds a name from the server (the identity provider's): it wraps inside
+   the window, even a name without spaces. */
+.button-wrap {
+  max-width: 100%;
+  padding-block: var(--space-1);
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
 .button[data-disabled] {
   cursor: default;
   opacity: 0.6;

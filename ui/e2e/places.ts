@@ -8,7 +8,7 @@
 import type { Page } from "@playwright/test";
 
 import { mutatingRequests, stubStepUpCeremony } from "./manage";
-import { signInAsAdmin, STUBBED } from "./session";
+import { signInAsAdmin, STUBBED, freshTouch } from "./session";
 
 /** The path of `prod`. */
 const PROD = "/api/v1/environments/prod";
@@ -97,6 +97,7 @@ function startingTree(): Record<string, TreeNamespace[]> {
  */
 export async function stubPlaces(page: Page): Promise<void> {
   await signInAsAdmin(page);
+  await freshTouch(page);
   const namespaces = startingTree();
   const created = new Set<string>();
   await page.route(

@@ -18,6 +18,23 @@ const SETTINGS = {
   },
 };
 
+const OKTA = {
+  display_name: "Okta",
+  issuer: "https://example.okta.com/oauth2/default",
+  linked_people: 12,
+  unlinked_admins: 2,
+};
+const WITH_PROVIDER = {
+  ...SETTINGS,
+  bounds: {
+    ...SETTINGS.bounds,
+    token_provider_window_days_min: 1,
+    token_provider_window_days_max: 365,
+  },
+  token_provider_window_days: 30,
+  provider: OKTA,
+};
+
 /**
  * Sign-in's routes, with a stale passkey touch and a PATCH that answers what it was sent.
  *
@@ -278,5 +295,138 @@ describe("SignInSettings", () => {
     });
 
     expect(await screen.findByRole("alert")).toHaveTextContent("You need the ADMIN role.");
+  });
+
+  it("shows the provider, issuer and counts read-only", async () => {
+    renderShell("/settings/sign-in", {
+      routes: { "GET /api/v1/settings/sign-in": { status: 200, body: WITH_PROVIDER } },
+    });
+
+    const section = await screen.findByRole("region", { name: "Single sign-on" });
+    const facts = within(section)
+      .getAllByRole("term")
+      .map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(facts).toEqual([
+      ["Provider", "Okta"],
+      ["Issuer", "https://example.okta.com/oauth2/default"],
+      ["Linked people", "12"],
+      ["Unlinked administrators", "2"],
+    ]);
+    expect(within(section).queryByRole("textbox")).not.toBeInTheDocument();
+    expect(within(section).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(section).queryByText(/^Warning:/)).not.toBeInTheDocument();
+    const order = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+    expect(order).toEqual(["Single sign-on", "Session lengths"]);
+  });
+
+  it.each([
+    [1, "Only one administrator can still sign in with a passkey. Keep at least one"],
+    [0, "No administrator can sign in with a passkey."],
+  ])("warns when %i unlinked administrators are left", async (left, words) => {
+    renderShell("/settings/sign-in", {
+      routes: {
+        "GET /api/v1/settings/sign-in": {
+          status: 200,
+          body: { ...WITH_PROVIDER, provider: { ...OKTA, unlinked_admins: left } },
+        },
+      },
+    });
+
+    const section = await screen.findByRole("region", { name: "Single sign-on" });
+    const warning = within(section)
+      .getByText(/^Warning:/)
+      .closest("p") as HTMLElement;
+    expect(warning).toHaveTextContent(words);
+    expect(warning.querySelector("svg")).not.toBeNull();
+  });
+
+  it("saves the token window with the session lengths after the touch", async () => {
+    const webauthn = fakeWebAuthn();
+    const { user, server } = renderShell("/settings/sign-in", {
+      routes: staleRoutes({
+        "GET /api/v1/settings/sign-in": { status: 200, body: WITH_PROVIDER },
+        "PATCH /api/v1/settings/sign-in": (request) => ({
+          status: 200,
+          body: { ...WITH_PROVIDER, ...(request.body as object) },
+        }),
+      }),
+    });
+    const field = await screen.findByRole("textbox", { name: "Token window in days" });
+    expect(field).toHaveValue("30");
+    await user.clear(field);
+    await user.type(field, "90");
+    const from = server.sent.length;
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Saved. New sessions use these lengths.")).toBeInTheDocument();
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
+    expect(server.sent.slice(from).map((request) => request.method)).toEqual([
+      "GET",
+      "POST",
+      "POST",
+      "PATCH",
+    ]);
+    expect(server.sent.at(-1)?.body).toEqual({
+      idle_timeout_minutes: 720,
+      absolute_lifetime_minutes: 10080,
+      token_provider_window_days: 90,
+    });
+    expect(screen.getByRole("textbox", { name: "Token window in days" })).toHaveValue("90");
+  });
+
+  it.each(["0", "366", "thirty"])("refuses %s with the bound in words", async (typed) => {
+    const { user, server } = renderShell("/settings/sign-in", {
+      routes: staleRoutes({ "GET /api/v1/settings/sign-in": { status: 200, body: WITH_PROVIDER } }),
+    });
+    const field = await screen.findByRole("textbox", { name: "Token window in days" });
+    await user.clear(field);
+    await user.type(field, typed);
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The token window is between 1 and 365 days. Enter a whole number in that range.",
+    );
+    expect(server.sent.some((request) => request.method === "PATCH")).toBe(false);
+  });
+
+  it("hides single sign-on when it is off", async () => {
+    const webauthn = fakeWebAuthn();
+    const { user, server } = renderShell("/settings/sign-in", {
+      routes: staleRoutes({
+        "GET /api/v1/settings/sign-in": {
+          status: 200,
+          body: { ...SETTINGS, token_provider_window_days: 30, provider: null },
+        },
+      }),
+    });
+
+    await screen.findByRole("textbox", { name: "Idle timeout in minutes" });
+    expect(screen.queryByRole("region", { name: "Single sign-on" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Token window in days" })).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent(/provider|token window/i);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("Saved. New sessions use these lengths.");
+    expect(webauthn.get).toHaveBeenCalledTimes(1);
+    expect(server.sent.at(-1)?.body).not.toHaveProperty("token_provider_window_days");
+  });
+
+  it("a 255-character issuer wraps in its cell", async () => {
+    const issuer = `https://${"a".repeat(240)}.example/x`;
+    renderShell("/settings/sign-in", {
+      routes: {
+        "GET /api/v1/settings/sign-in": {
+          status: 200,
+          body: { ...WITH_PROVIDER, provider: { ...OKTA, issuer } },
+        },
+      },
+    });
+
+    const section = await screen.findByRole("region", { name: "Single sign-on" });
+    const code = within(section).getByText((_, element) => element?.tagName === "CODE");
+    expect(code).toHaveTextContent(issuer);
+    expect(code).toHaveClass("sso-issuer");
+    expect(code.closest("dd")).not.toBeNull();
   });
 });

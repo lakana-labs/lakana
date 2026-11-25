@@ -1,6 +1,6 @@
 /**
- * Settings → Sign-in: how long a browser session lasts, edited in place in its own section, so
- * that company login can later be a section beside it.
+ * Settings → Sign-in: how long a browser session lasts, edited in place in its own section, and
+ * with an identity provider its "Single sign-on" section and the token window.
  *
  * @packageDocumentation
  */
@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
 import { getSignInSettings, type SignInSettingsOut } from "../api";
+import type { SignInProviderOut } from "../api/settings";
 import { saveSignInSettings } from "../api/signInAdmin";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
@@ -19,6 +20,8 @@ import { SettingsFrame } from "./SettingsFrame";
 import "./settingsStrings";
 import "./signInStrings";
 import { PendingButton } from "../shell/PendingButton";
+import { VisibleText } from "../shell/VisibleText";
+import { StatusGlyph } from "../status/StatusGlyph";
 
 const HOUR = 60;
 const DAY = 24 * HOUR;
@@ -69,7 +72,7 @@ interface LengthsFormProps {
 }
 
 /**
- * The two lengths and Save. A value outside its bounds is refused before anything is sent, with
+ * The two lengths, with an identity provider the token window, and Save. A value outside its bounds is refused before anything is sent, with
  * the bounds named; Save asks for the passkey touch first when the session's is stale, and a
  * cancelled touch saves nothing and keeps what was typed.
  *
@@ -83,6 +86,13 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
   const bounds = current.bounds;
   const [idle, setIdle] = useState(String(current.idle_timeout_minutes));
   const [absolute, setAbsolute] = useState(String(current.absolute_lifetime_minutes));
+  // The token window is only for an instance with an identity provider; otherwise it is not sent.
+  const windowed = current.provider != null;
+  const [days, setDays] = useState(String(current.token_provider_window_days ?? 30));
+  const windowBounds = {
+    min: bounds.token_provider_window_days_min ?? 1,
+    max: bounds.token_provider_window_days_max ?? 365,
+  };
   const [problem, setProblem] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const idleBounds = { min: bounds.idle_timeout_minutes_min, max: bounds.idle_timeout_minutes_max };
@@ -91,7 +101,14 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
     max: bounds.absolute_lifetime_minutes_max,
   };
 
-  const check = (idleMinutes: number | null, absoluteMinutes: number | null): string | null => {
+  const check = (
+    idleMinutes: number | null,
+    absoluteMinutes: number | null,
+    windowDays: number | null,
+  ): string | null => {
+    if (windowed && !within(windowDays, windowBounds.min, windowBounds.max)) {
+      return t("settings.signIn.window.outOfBounds", windowBounds);
+    }
     if (!within(idleMinutes, idleBounds.min, idleBounds.max)) {
       return t("settings.signIn.idleOutOfBounds", idleBounds);
     }
@@ -111,7 +128,8 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
         setSaved(false);
         const idleMinutes = whole(idle);
         const absoluteMinutes = whole(absolute);
-        const refused = check(idleMinutes, absoluteMinutes);
+        const windowDays = whole(days);
+        const refused = check(idleMinutes, absoluteMinutes, windowDays);
         setProblem(refused);
         if (refused !== null) {
           return;
@@ -120,9 +138,11 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
           const changed = await saveSignInSettings({
             idle_timeout_minutes: idleMinutes as number,
             absolute_lifetime_minutes: absoluteMinutes as number,
+            ...(windowed ? { token_provider_window_days: windowDays as number } : {}),
           });
           setIdle(String(changed.idle_timeout_minutes));
           setAbsolute(String(changed.absolute_lifetime_minutes));
+          setDays(String(changed.token_provider_window_days ?? windowDays));
           setSaved(true);
         });
       }}
@@ -149,6 +169,13 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
           })}
         </Text>
       </TextField>
+      {windowed && (
+        <TextField className="field" value={days} onChange={setDays}>
+          <Label>{t("settings.signIn.window.label")}</Label>
+          <Input inputMode="numeric" />
+          <Text slot="description">{t("settings.signIn.window.help", windowBounds)}</Text>
+        </TextField>
+      )}
       <p>{t("settings.signIn.appliesLater")}</p>
       <div className="step-actions">
         <PendingButton type="submit" className="button button-primary" pending={attempt.busy}>
@@ -173,8 +200,62 @@ function LengthsForm({ current }: LengthsFormProps): JSX.Element {
   );
 }
 
+/** Properties of {@link SingleSignOn}. */
+interface SingleSignOnProps {
+  /** The identity provider and its counts. */
+  readonly provider: SignInProviderOut;
+}
+
 /**
- * Renders Settings → Sign-in: the purpose, then the session lengths in a section of their own.
+ * The identity provider, read-only: its name, issuer and counts, with a warning (the word and
+ * the glyph) when one unlinked administrator or none is left.
+ *
+ * @param props - The provider.
+ * @param props.provider - The identity provider and its counts.
+ * @returns The section.
+ */
+function SingleSignOn({ provider }: SingleSignOnProps): JSX.Element {
+  const { t } = useTranslation();
+  const heading = useId();
+  const left = provider.unlinked_admins;
+  return (
+    <section className="flat-panel settings-panel" aria-labelledby={heading}>
+      <h2 id={heading}>{t("settings.signIn.provider.title")}</h2>
+      <p className="page-purpose">{t("settings.signIn.provider.intro")}</p>
+      <dl className="fact-list">
+        <dt>{t("settings.signIn.provider.name")}</dt>
+        <dd>
+          <VisibleText text={provider.display_name} />
+        </dd>
+        <dt>{t("settings.signIn.provider.issuer")}</dt>
+        <dd>
+          <code className="sso-issuer">
+            <VisibleText text={provider.issuer} breakable />
+          </code>
+        </dd>
+        <dt>{t("settings.signIn.provider.linked")}</dt>
+        <dd className="number">{provider.linked_people}</dd>
+        <dt>{t("settings.signIn.provider.unlinked")}</dt>
+        <dd className="number">{left}</dd>
+      </dl>
+      {left <= 1 && (
+        <p className="step-warning sso-warning">
+          <StatusGlyph kind="warning" />
+          <span>
+            <span className="sso-warning-word">{t("settings.signIn.provider.warningWord")}</span>{" "}
+            {left === 1
+              ? t("settings.signIn.provider.oneLeft")
+              : t("settings.signIn.provider.noneLeft")}
+          </span>
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Renders Settings → Sign-in: the purpose, the identity provider's section when there is one,
+ * then the session lengths (and the token window) in a section of their own.
  *
  * @returns The place.
  */
@@ -185,6 +266,7 @@ export function SignInSettings(): JSX.Element {
   return (
     <SettingsFrame title={t("settings.places.signIn")}>
       <p className="page-purpose">{t("settings.signIn.intro")}</p>
+      {settings.data?.provider != null && <SingleSignOn provider={settings.data.provider} />}
       <section className="flat-panel settings-panel" aria-labelledby={lengthsHeading}>
         <h2 id={lengthsHeading}>{t("settings.signIn.lengths")}</h2>
         <Loaded resource={settings}>{(current) => <LengthsForm current={current} />}</Loaded>

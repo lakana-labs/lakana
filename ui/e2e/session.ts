@@ -801,6 +801,7 @@ const ENVIRONMENTS = "/api/v1/environments";
 export const STUBBED = [
   "/api/v1/sign-in/session",
   "/api/v1/sign-in/notices",
+  "/api/v1/sign-in/oidc",
   "/api/v1/whoami",
   "/api/v1/principals",
   "/api/v1/principals/admin/picture",
@@ -831,7 +832,8 @@ export const STUBBED = [
 ];
 
 /**
- * Answers the session routes as for a signed-in administrator without notices, Home (with a
+ * Answers the session routes as for a signed-in administrator without notices and without an
+ * identity provider, Home (with a
  * worker down, an update note and rows in every box), the Catalog (a tree and tables in every
  * health, and the page of `prod/gold.sales/fact_sales`), the administrator's profile picture,
  * Settings' People (under Access) and Sign-in (the session lengths), no environment to run a
@@ -843,6 +845,11 @@ export const STUBBED = [
 export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route("**/api/v1/sign-in/session", (route) => route.fulfill({ json: ADMIN_SESSION }));
   await page.route("**/api/v1/sign-in/notices", (route) => route.fulfill({ json: [] }));
+  // No identity provider: the interface mentions none (`oidc.ts` stubs one).
+  await page.route(
+    (url) => url.pathname === "/api/v1/sign-in/oidc",
+    (route) => route.fulfill({ json: { enabled: false, display_name: null } }),
+  );
   await page.route(
     (url) => url.pathname === "/api/v1/principals",
     (route) =>
@@ -972,6 +979,21 @@ export async function signInAsAdmin(page: Page): Promise<void> {
   await page.route(
     (url) => url.pathname === ENVIRONMENTS,
     (route) => route.fulfill({ json: [] }),
+  );
+}
+
+/**
+ * Answers the session with a passkey touch from a moment ago, on top of `signInAsAdmin`: a write
+ * that `guarded` sends (a drop, a namespace's deletion, a connection's save) goes at once, as for
+ * a person who just confirmed. A check of the touch itself stubs a stale one, or a 403.
+ *
+ * @param page - The page.
+ */
+export async function freshTouch(page: Page): Promise<void> {
+  await page.route("**/api/v1/sign-in/session", (route) =>
+    route.fulfill({
+      json: { ...ADMIN_SESSION, step_up_until: new Date(Date.now() + 3_600_000).toISOString() },
+    }),
   );
 }
 
