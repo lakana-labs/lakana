@@ -75,16 +75,44 @@ function renderRunning(
 }
 
 /**
- * Lets the reads and their renders finish.
+ * Moves the fake clock on and lets the timers that fell due run.
+ *
+ * @param ms - How far to move it.
  */
-async function settle(): Promise<void> {
-  for (let turn = 0; turn < 5; turn += 1) {
+async function advance(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
+/**
+ * Lets the reads and their renders run until `condition` holds, a turn of the event loop at a time.
+ * The fake clock stands still meanwhile, and Testing Library's own waits would hang under it (they
+ * end by waiting on the faked `setTimeout`), so this waits on the state, never on elapsed time. A
+ * state that does not come within a thousand turns fails the test and names what it waited for.
+ *
+ * @param condition - What must hold.
+ * @param what - The condition in words, for the failure.
+ */
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let turn = 0; !condition(); turn += 1) {
+    if (turn >= 1000) {
+      throw new Error(`Still waiting after ${String(turn)} turns for: ${what}`);
+    }
     await act(async () => {
       await new Promise((resolve) => {
         setImmediate(resolve);
       });
     });
   }
+}
+
+/**
+ * Waits until the poll has taken in the answer of its latest read and armed the next one: a read
+ * clears its timer while it is open, so one timer standing says the answer is in.
+ */
+async function nextReadArmed(): Promise<void> {
+  await until(() => vi.getTimerCount() === 1, "the next read to be armed (one timer standing)");
 }
 
 const page = (items: readonly RunOut[], next: string | null = null): FakeRoute => ({
@@ -99,6 +127,9 @@ afterEach(() => {
 
 describe("RunningNow", () => {
   it("lists queued and running runs with glyph, word, name, environment, start, duration and tasks", async () => {
+    // The durations read the clock: stand it still so a slow machine cannot move "14 min" on.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-25T10:00:00Z"));
     const run = running();
     const queued = running({
       id: "r-queued",
@@ -181,6 +212,51 @@ describe("RunningNow", () => {
     reload(1);
     expect(await screen.findByText("Nothing is running.")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("The run has already ended.");
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Running now (0)" })).toHaveFocus();
+    });
+  });
+
+  it("a refused cancel keeps the focus in the section when the list is read before the dialog hands the focus back", async () => {
+    // The dialog gives the focus back to the Cancel button on an animation frame. Hold the frames,
+    // as a loaded machine does, so the list is read again and the row is gone before it does.
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const { server, user, reload } = renderRunning({
+      [RUNS]: page([running()]),
+      "POST /api/v1/environments/prod/runs/r-running/cancel": {
+        status: 409,
+        body: { type: "ConflictError", detail: "The run has already ended." },
+      },
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Cancel the run of nightly_sales" }),
+    );
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel run" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent("The run has already ended.");
+    server.route({ [RUNS]: page([]) });
+    reload(1);
+    expect(await screen.findByText("Nothing is running.")).toBeInTheDocument();
+    act(() => {
+      for (const frame of frames.splice(0)) {
+        try {
+          frame(0);
+        } catch (error) {
+          // The dialog's own frame finds its button gone and its scope too, and React Aria's
+          // walker throws on that; any other error is a real one.
+          if (!String(error).includes("'currentNode' property on 'TreeWalker'")) {
+            throw error;
+          }
+        }
+      }
+    });
+
     expect(screen.getByRole("heading", { level: 2, name: "Running now (0)" })).toHaveFocus();
   });
 
@@ -243,22 +319,29 @@ describe("RunningNow", () => {
   it("keeps the rows through two failed reads and says why after the third", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { server } = renderRunning({ [RUNS]: page([running()]) });
-    await settle();
-    expect(screen.getByRole("link", { name: "nightly_sales" })).toBeInTheDocument();
+    await until(
+      () => screen.queryByRole("link", { name: "nightly_sales" }) !== null,
+      "the nightly_sales row to be shown",
+    );
+    await nextReadArmed();
 
     server.route({ [RUNS]: { status: 503, body: { detail: "The server is starting." } } });
-    for (const wait of [30_000, 60_000]) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(wait);
-      });
-      await settle();
+    // The waits double from 30 s up to 60 s after each failure; a read comes no sooner.
+    for (const [wait, reads] of [
+      [30_000, 2],
+      [60_000, 3],
+    ] as const) {
+      await advance(wait - 1);
+      expect(server.sent).toHaveLength(reads - 1);
+      await advance(1);
+      await nextReadArmed();
+      expect(server.sent).toHaveLength(reads);
+      expect(screen.queryByRole("alert")).toBeNull();
     }
-    expect(screen.queryByRole("alert")).toBeNull();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    await settle();
+    await advance(60_000);
+    await until(() => screen.queryByRole("alert") !== null, "the alert to be shown");
     expect(screen.getByRole("alert")).toHaveTextContent(/./u);
+    expect(server.sent).toHaveLength(4);
     expect(screen.getByRole("link", { name: "nightly_sales" })).toBeInTheDocument();
   });
 
@@ -269,23 +352,23 @@ describe("RunningNow", () => {
       () => visibility as DocumentVisibilityState,
     );
     const { server } = renderRunning({ [RUNS]: page([running()]) });
-    await settle();
+    await until(
+      () => screen.queryByRole("link", { name: "nightly_sales" }) !== null,
+      "the nightly_sales row to be shown",
+    );
+    await nextReadArmed();
     expect(server.sent).toHaveLength(1);
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
-    await settle();
+    await advance(30_000);
+    await nextReadArmed();
     expect(server.sent).toHaveLength(2);
 
     visibility = "hidden";
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(120_000);
-    });
-    await settle();
+    expect(vi.getTimerCount()).toBe(0);
+    await advance(120_000);
     expect(server.sent).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(0);
   });
