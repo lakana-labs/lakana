@@ -218,8 +218,38 @@ describe("the tour", () => {
     }
 
     expect(step).toHaveTextContent(
-      "The instance’s status, and for those who manage them, its environments, repositories, access, sign-in and configuration.",
+      "The instance’s status and what you may do. For those who manage them, also environments, repositories, access, sign-in and configuration.",
     );
+  });
+
+  it("links every step but the last to its guide on the documentation site", async () => {
+    const { user } = firstSignIn();
+    let step = await startTour(user);
+    const guides: string[] = [];
+    for (let index = 0; index < 7; index += 1) {
+      const links = within(step).getAllByRole("link");
+      expect(links, currentStep()).toHaveLength(1);
+      const [link] = links;
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noreferrer");
+      // jsdom drops the space before the hidden "(opens in a new tab)"; browsers keep it.
+      expect(link).toHaveAccessibleName(/new tab\)$/);
+      guides.push(
+        `${currentStep()}: ${link?.textContent.replace(/\s*\(opens in a new tab\)$/, "") ?? ""} → ${link?.getAttribute("href") ?? ""}`,
+      );
+      await user.click(within(step).getByRole("button", { name: "Next" }));
+      step = await screen.findByRole("dialog", { name: /./ });
+    }
+    const docs = "https://lakana-labs.github.io/lakana/";
+    expect(guides).toEqual([
+      `Home: What Home shows, box by box → ${docs}how-to/start-in-the-web-interface/#the-boxes-top-to-bottom`,
+      `Catalog: How to find a table → ${docs}how-to/find-a-table/#in-the-web-interface`,
+      `Queries: How to write and run a query → ${docs}how-to/start-in-the-web-interface/#queries`,
+      `Jobs: How to find what failed → ${docs}how-to/find-a-run/#find-what-failed-in-every-environment`,
+      `Connections: How to load data from a source → ${docs}how-to/load-data-from-a-source/#1-create-the-connection`,
+      `Settings: How to tell whether the instance is healthy → ${docs}how-to/instance-health/`,
+      `Search: Every keyboard shortcut → ${docs}how-to/start-in-the-web-interface/#keyboard-shortcuts`,
+    ]);
   });
 
   it("outlines the place each step is about", async () => {

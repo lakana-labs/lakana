@@ -781,25 +781,32 @@
     },
     "steps": {
       "home": {
-        "text": "Where every sign-in lands: whether the instance is well, what needs your attention and what you opened recently."
+        "text": "Where every sign-in lands: whether the instance is well, what needs your attention, what you opened recently and your work.",
+        "guide": "What Home shows, box by box"
       },
       "catalog": {
-        "text": "Every table you may read, with its columns, its health and where its data comes from."
+        "text": "Find any table you may read, and see its columns, its health and where its data comes from.",
+        "guide": "How to find a table"
       },
       "queries": {
-        "text": "Write SQL against the tables you may read, and see or download the result."
+        "text": "Write SQL against the tables you may read, see or download the result, and save a query to run it again.",
+        "guide": "How to write and run a query"
       },
       "jobs": {
-        "text": "The jobs your projects deploy and their runs: what ran, what failed and what runs next."
+        "text": "Your jobs, their runs and their deploys: what runs now, what failed and what runs next.",
+        "guide": "How to find what failed"
       },
       "connections": {
-        "text": "The databases and services your project loads its data from."
+        "text": "The databases and services your projects load their data from, and whether each one answers.",
+        "guide": "How to load data from a source"
       },
       "settings": {
-        "text": "The instance’s status, and for those who manage them, its environments, repositories, access, sign-in and configuration."
+        "text": "The instance’s status and what you may do. For those who manage them, also environments, repositories, access, sign-in and configuration.",
+        "guide": "How to tell whether the instance is healthy"
       },
       "search": {
-        "text": "Press {{keys}} anywhere to go to a place or run a command by typing a few letters."
+        "text": "Press {{keys}} anywhere to go to a place or run a command by typing a few letters.",
+        "guide": "Every keyboard shortcut"
       },
       "help": {
         "text": "Help brings back this tour and Get started, opens the documentation and lists the keyboard shortcuts."

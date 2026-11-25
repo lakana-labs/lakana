@@ -119,6 +119,57 @@ for (const theme of ["light", "dark"] as const) {
       expect(unexpected(errors)).toEqual([]);
     });
 
+    for (const provider of ["Okta", null] as const) {
+      test(`the first sign-in ${provider === null ? "without a provider" : "through the provider"} opens the welcome, and the tour is the same`, async ({
+        page,
+      }) => {
+        const errors = consoleErrors(page);
+        const world = await stubProvider(page, { name: provider, signedIn: provider === null });
+        // A first sign-in: the tour not yet seen (a later route wins over the session's stub).
+        await page.route(
+          (url) => url.pathname === "/api/v1/principals/admin/interface-state",
+          (route) =>
+            route.fulfill({
+              json: { tour_seen: false, get_started_hidden: true, update_note_seen: null },
+            }),
+        );
+        world.returnTo = "/";
+        await page.goto("/");
+        if (provider !== null) {
+          await page.getByRole("button", { name: "Sign in with Okta" }).click();
+        }
+
+        const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
+        await expect(welcome).toBeVisible();
+        await welcome.getByRole("button", { name: "Start the tour" }).click();
+        const seen: string[] = [];
+        for (;;) {
+          const step = page.getByRole("dialog", { name: /./ });
+          await expect(step).toBeVisible();
+          // Neither the way in nor the provider is a place of the tour.
+          await expect(step).not.toContainText(/passkey|provider|Okta/i);
+          seen.push((await step.getByRole("heading", { level: 2 }).textContent()) ?? "");
+          const next = step.getByRole("button", { name: "Next" });
+          if ((await next.count()) === 0) break;
+          await next.click();
+        }
+        expect(seen).toEqual([
+          "Home",
+          "Catalog",
+          "Queries",
+          "Jobs",
+          "Connections",
+          "Settings",
+          "Search",
+          "Help",
+        ]);
+        await page.getByRole("button", { name: "Finish" }).click();
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        expect(unstubbed(world)).toEqual([]);
+        expect(unexpected(errors)).toEqual([]);
+      });
+    }
+
     test("every refusal page passes axe, its heading focused", async ({ page }) => {
       const errors = consoleErrors(page);
       const world = await stubProvider(page, { signedIn: false });

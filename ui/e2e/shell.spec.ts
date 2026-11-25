@@ -475,6 +475,85 @@ test.describe("the theme switch", () => {
   });
 });
 
+/**
+ * Reads what moves around the tour: the page's running animations, every transition of the
+ * open dialog and of the outlined place that lasts longer than nothing, and how far the page
+ * has scrolled.
+ *
+ * @param page - A page showing the welcome or a step.
+ * @returns The animations' names, the lasting transitions and the scroll offset.
+ */
+async function tourMotion(
+  page: Page,
+): Promise<{ animations: string[]; transitions: string[]; scrolled: number }> {
+  return page.evaluate(() => {
+    const nodes = [
+      ...document.querySelectorAll('[role="dialog"], [role="dialog"] *, .tour-target'),
+    ];
+    const transitions = nodes.flatMap((node) => {
+      const style = getComputedStyle(node);
+      const lasting = style.transitionDuration.split(",").some((part) => part.trim() !== "0s");
+      return lasting
+        ? [`${node.tagName.toLowerCase()}.${node.className}: ${style.transitionDuration}`]
+        : [];
+    });
+    const animations = document
+      .getAnimations()
+      .map((animation) =>
+        animation instanceof CSSAnimation ? animation.animationName : animation.id,
+      );
+    return { animations, transitions, scrolled: window.scrollX + window.scrollY };
+  });
+}
+
+for (const width of [1280, 320]) {
+  test(`the tour moves nothing by itself, and nothing at all under reduced motion, at ${String(width)} px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 320 ? 640 : 800 });
+    await signInAsAdmin(page);
+    await firstSignIn(page);
+
+    // Without the preference, the tour starts no animation of its own.
+    await page.goto("/");
+    const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
+    await expect(welcome).toBeVisible();
+    expect((await tourMotion(page)).animations, "welcome").toEqual([]);
+    await welcome.getByRole("button", { name: "Start the tour" }).press("Enter");
+    for (let index = 0; index < 8; index += 1) {
+      await expect(page.getByRole("dialog", { name: /./ })).toBeVisible();
+      expect((await tourMotion(page)).animations, `step ${String(index + 1)}`).toEqual([]);
+      if (index < 7) {
+        await page.getByRole("button", { name: "Next" }).press("Enter");
+      }
+    }
+
+    // Under reduced motion, no transition lasts either, the hover fades included.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await expect(welcome).toBeVisible();
+    expect(await tourMotion(page), "welcome").toEqual({
+      animations: [],
+      transitions: [],
+      scrolled: 0,
+    });
+    await welcome.getByRole("button", { name: "Start the tour" }).click();
+    for (let index = 0; index < 8; index += 1) {
+      const step = page.getByRole("dialog", { name: /./ });
+      await expect(step).toBeVisible();
+      await step.getByRole("link").first().hover();
+      expect(await tourMotion(page), `step ${String(index + 1)}`).toEqual({
+        animations: [],
+        transitions: [],
+        scrolled: 0,
+      });
+      if (index < 7) {
+        await page.getByRole("button", { name: "Next" }).click();
+      }
+    }
+  });
+}
+
 for (const width of [1280, 600]) {
   test(`the palette opens centred over the whole window, in its upper third, at ${String(width)} px`, async ({
     page,
