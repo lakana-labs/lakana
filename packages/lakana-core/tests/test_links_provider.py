@@ -18,7 +18,8 @@ from test_identity_links import World, _Clock, parts
 
 from lakana_core.errors import LinkUnusableError, OidcSignInRefused
 from lakana_core.identity.links import Redeemed
-from lakana_core.identity.oidc_links import OidcLinkService, is_linked
+from lakana_core.identity.oidc_links import OidcLinkService
+from lakana_core.identity.provider_issuer import is_linked
 from lakana_core.models import (
     AuditEventType,
     BrowserSession,
@@ -304,7 +305,7 @@ def test_recovery_of_an_unlinked_person_may_link(world: World) -> None:
     redeemed = _claim(world, link.id, "erin")
     assert redeemed.started.principal.name == "erin"
     world.session.refresh(erin)
-    assert is_linked(erin)
+    assert is_linked(world.session, erin)
     [linked] = _events(world, AuditEventType.PRINCIPAL_OIDC_LINKED)
     assert linked["via"] == "recovery"
     assert _passkeys(world, erin) == 1
@@ -326,7 +327,7 @@ def test_recovery_of_someone_who_became_an_admin_is_closed(world: World) -> None
     )
     with pytest.raises(PermissionDenied):
         _claim(world, link.id, "frank")
-    assert not is_linked(frank)
+    assert not is_linked(world.session, frank)
 
 
 def test_describe_says_provider_only_for_a_linked_person(world: World) -> None:

@@ -79,6 +79,7 @@ def _provider_link_from_json(data: dict[str, Any]) -> ProviderLink:
         name=data.get("name"),
         last_sign_in_at=_when(data.get("last_sign_in_at")),
         token_window_ends_at=_when(data.get("token_window_ends_at")),
+        stale=bool(data.get("stale")),
     )
 
 
@@ -468,6 +469,7 @@ class Principals:
         lakana.errors.NotFound
             If no principal of this name exists.
         lakana.errors.Conflict
-            For yourself, or a person who is not linked.
+            For yourself, or a person with no link at all (a link to an issuer the server no
+            longer uses can be unlinked).
         """
         self._transport.request(ROUTES["principals.unlink_provider"], path_params={"name": name})

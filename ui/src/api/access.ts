@@ -97,6 +97,12 @@ export interface ProviderLinkOut {
   readonly last_sign_in_at: string | null;
   /** Until when their personal API tokens work without another sign-in there, or null. */
   readonly token_window_ends_at: string | null;
+  /**
+   * True when the link is to an issuer the server no longer uses, or single sign-on is off: it
+   * signs nobody in, but still holds their tokens to the window. Absent from a server older than
+   * #809.
+   */
+  readonly stale?: boolean;
 }
 
 /** What the permissions route answers, as far as finding an administrator goes. */

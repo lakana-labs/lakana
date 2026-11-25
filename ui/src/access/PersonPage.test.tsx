@@ -5,6 +5,7 @@ import { freshSession, STALE_SESSION, STEP_UP_ROUTES } from "../test/access";
 import { expectPending, held } from "../test/pending";
 import { renderShell } from "../test/render";
 import { fakeWebAuthn } from "../test/webauthn";
+import { issuerHost } from "./ProviderLink";
 
 const PASSKEY = {
   id: "p-1",
@@ -570,5 +571,124 @@ describe("PersonPage", () => {
         .map((term) => term.textContent),
     ).toEqual(["Last signed in through it"]);
     expect(within(panel).getByText("Not yet")).toBeInTheDocument();
+  });
+
+  const STALE = {
+    ...LINK,
+    issuer: "https://old-idp.example.com/realms/lakana",
+    token_window_ends_at: "2099-01-01T08:30:00Z",
+    stale: true,
+  };
+
+  it("shows a link to a provider that is no longer configured, with the tokens' end and Unlink", async () => {
+    const { user } = renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked(STALE),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/oidc": OKTA,
+      },
+    });
+
+    const panel = await screen.findByRole("region", {
+      name: "Linked to a provider that is no longer configured",
+    });
+    expect(panel).toHaveTextContent(
+      "kim was linked to old-idp.example.com, which this server no longer uses.",
+    );
+    expect(panel).toHaveTextContent(
+      "kim signs in with a passkey and may link to the current provider",
+    );
+    expect(panel).not.toHaveTextContent("Okta");
+    const facts = within(panel)
+      .getAllByRole("term")
+      .map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(facts.at(-1)?.[0]).toBe("Personal API tokens work until");
+    expect(facts.at(-1)?.[1]).toMatch(/2099/);
+
+    await user.click(within(panel).getByRole("button", { name: "Unlink" }));
+    expect(
+      await screen.findByRole("dialog", { name: "Unlink kim from old-idp.example.com?" }),
+    ).toBeVisible();
+  });
+
+  it("with single sign-on off, a stale link says only an unlink frees the tokens, which stopped", async () => {
+    renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked({
+          ...STALE,
+          token_window_ends_at: "2020-01-01T08:30:00Z",
+        }),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+        "GET /api/v1/sign-in/oidc": { status: 200, body: { enabled: false, display_name: null } },
+      },
+    });
+
+    const panel = await screen.findByRole("region", {
+      name: "Linked to a provider that is no longer configured",
+    });
+    await waitFor(() => {
+      expect(panel).toHaveTextContent("but single sign-on is off now");
+    });
+    expect(panel).toHaveTextContent("only an unlink frees them");
+    expect(panel).not.toHaveTextContent("may link to the current provider");
+    const facts = within(panel)
+      .getAllByRole("term")
+      .map((term) => [term.textContent, term.nextElementSibling?.textContent]);
+    expect(facts.at(-1)?.[0]).toBe("Personal API tokens stopped working on");
+    expect(facts.at(-1)?.[1]).toMatch(/2020/);
+  });
+
+  it("a stale link without a token window shows no tokens' end", async () => {
+    renderShell("/settings/access/people/kim", {
+      routes: {
+        "GET /api/v1/principals/kim": linked({ ...STALE, token_window_ends_at: null }),
+        "GET /api/v1/principals/kim/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/kim/sessions": { status: 200, body: [] },
+      },
+    });
+
+    const panel = await screen.findByRole("region", {
+      name: "Linked to a provider that is no longer configured",
+    });
+    expect(panel).not.toHaveTextContent("Personal API tokens work until");
+  });
+
+  it("one's own stale link gives the passkey note, not the provider's", async () => {
+    renderShell("/settings/access/people/admin", {
+      routes: {
+        "GET /api/v1/principals/admin": {
+          status: 200,
+          body: { ...linked(STALE).body, name: "admin", held_admin: true },
+        },
+        "GET /api/v1/principals/admin/passkeys": { status: 200, body: [] },
+        "GET /api/v1/principals/admin/sessions": { status: 200, body: [] },
+        "GET /api/v1/principals/admin/permissions": {
+          status: 200,
+          body: { permissions: [{ via: [{ role: "ADMIN" }] }] },
+        },
+      },
+    });
+
+    const panel = await screen.findByRole("region", {
+      name: "Linked to a provider that is no longer configured",
+    });
+    expect(within(panel).queryByRole("button")).not.toBeInTheDocument();
+    await screen.findByText(/If you lose every passkey/);
+    expect(document.body).toHaveTextContent("If you lose every passkey");
+    expect(document.body).not.toHaveTextContent(
+      "If you cannot sign in through the identity provider",
+    );
+  });
+});
+
+describe("issuerHost", () => {
+  it("names the host, or the whole text when there is none", () => {
+    expect(issuerHost("https://old-idp.example.com:8443/realms/x")).toBe(
+      "old-idp.example.com:8443",
+    );
+    expect(issuerHost("not a url")).toBe("not a url");
+    expect(issuerHost("urn:example:issuer")).toBe("urn:example:issuer");
   });
 });

@@ -195,23 +195,35 @@ discovery, the redirect URI, the client secret and the ID token. People link nex
 ## Changing the issuer later
 
 A person is linked to the issuer and the subject (`sub`) Keycloak gave them, never to their
-e-mail address. So when the issuer changes (a new realm, a renamed realm, Keycloak's host name
-changed), everyone linked keeps their link to the old one: Keycloak's new answers are
-refused as not linked, and their passkeys do not sign them in either. The same happens to one
-person whose Keycloak account was deleted and created again, since that gives them a new
-subject.
+e-mail address. When the issuer changes (a new realm, a renamed realm, a new host name), or
+`LAKANA_OIDC__ISSUER` is removed, everyone linked to the old one counts as unlinked until they
+link again:
 
-Each of them comes back the same way: an administrator unlinks them (on their page under
-**Settings → Access → People**, **Unlink**, or the command in
-[the team guide](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)), which
-deletes their passkeys, revokes their personal API tokens and ends their sessions, and then
-issues them a recovery link, on which they choose **Sign in with Keycloak**. An administrator's
-recovery link comes from the server operator. Plan an issuer change like an address change:
-keep the unlinked administrator, then unlink and send links right after it.
+- They sign in with their passkeys again, and link to the new realm from their profile
+  (**Sign-in**, **Link**). Someone without a passkey, such as a person who joined through an
+  invite with Keycloak, needs a recovery link from an administrator, on which they choose
+  **Sign in with Keycloak**. An administrator's recovery link comes from the server operator.
+- Their personal API tokens keep the token window: they stop working once the window since their
+  last sign-in at the old realm is over, and work again once the person has linked to the new
+  one.
+- With single sign-on turned off there is nothing to link to, so those tokens stay stopped. To
+  let someone use API tokens again, an administrator unlinks them: their page under
+  **Settings → Access → People** shows **Linked to a provider that is no longer configured**,
+  with **Unlink** (or the command in
+  [the team guide](bring-your-team-onto-single-sign-on.md#take-someone-off-single-sign-on)). An
+  unlink deletes their passkeys and revokes their tokens, so the administrator then sends them a
+  recovery link; they add a passkey and create new tokens, which have no window. An
+  administrator cannot unlink themselves: a sole administrator asks the server operator, who runs
+  `lakana principal unlink-provider NAME` with the bootstrap token and then
+  `lakana recovery create NAME`.
+- **Deactivate in Lakana anyone who left at the old realm** (`lakana principal deactivate NAME`):
+  with the issuer change their passkeys sign them in again. The server's start-up log names
+  everyone whose link stopped counting; the audit log has the change as
+  `SIGN_IN_SETTINGS_CHANGED` with `detail.source` `start-up` and `detail.links_not_counted`.
+- Nothing is deleted: set the old issuer back and the old links count again.
 
-This is how the current release behaves, and it is meant to change: an issuer change should not
-lock linked people out
-([issue 809](https://github.com/lakana-labs/lakana/issues/809)). This section changes with it.
+A person whose Keycloak account was deleted and created again gets a new subject: an
+administrator unlinks them and sends a recovery link.
 
 ## When something goes wrong
 

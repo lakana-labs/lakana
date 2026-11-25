@@ -84,7 +84,7 @@ from lakana_core.grants.break_glass import LAST_UNLINKED_ADMIN_MESSAGE, breaks
 from lakana_core.grants.service import active_instance_admin_ids
 from lakana_core.identity.links import has_passkey
 from lakana_core.identity.notices import NoticeService
-from lakana_core.identity.oidc_links import is_linked
+from lakana_core.identity.provider_issuer import is_linked
 from lakana_core.identity.sessions import (
     SessionService,
     StartedSession,
@@ -316,10 +316,10 @@ class PasskeyService:
         Returns
         -------
         bool
-            Whether they are linked to it (`lakana_core.identity.oidc_links.is_linked`).
+            Whether they are linked to it (`lakana_core.identity.provider_issuer.is_linked`).
         """
         principal = self._session.get(Principal, principal_id)
-        return principal is not None and is_linked(principal)
+        return principal is not None and is_linked(self._session, principal)
 
     def _require_admin(self, p: PrincipalRef) -> None:
         """Refuse unless `p` is an instance administrator (`require_principal_admin`).
@@ -1022,7 +1022,7 @@ class PasskeyService:
         parsed = self._parse(credential_json, AuthenticationError)
         challenge = self._use_sign_in_challenge(ceremony_id, parsed)
         _, principal = self._assert(parsed, challenge, AuthenticationError, owner=None)
-        if is_linked(principal):
+        if is_linked(self._session, principal):
             # After the check, so an unknown passkey still reads as a failed sign-in; the counter
             # just verified is kept, so a copy is still found later.
             self._session.commit()
