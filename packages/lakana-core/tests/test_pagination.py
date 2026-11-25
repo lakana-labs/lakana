@@ -534,6 +534,7 @@ def test_the_longest_cursors_fit_the_routes_limit() -> None:
 def test_the_longest_namespace_and_table_cursors_fit_their_routes_limits() -> None:
     """The widest key of each list stays within the `cursor` its route takes (#804)."""
     from lakana_core.models import Namespace, Repository, Table
+    from lakana_core.models.repository import REPOSITORY_NAME_MAX
     from lakana_core.pagination import (
         NAMESPACE_CURSOR_MAX_LENGTH,
         TABLE_CURSOR_MAX_LENGTH,
@@ -546,7 +547,7 @@ def test_the_longest_namespace_and_table_cursors_fit_their_routes_limits() -> No
     repository_max = Repository.name.type.length
     assert path_max == 1024
     assert name_max == 255
-    assert repository_max <= 255
+    assert repository_max == REPOSITORY_NAME_MAX
 
     wide = "\U0001d538"  # four bytes in UTF-8
     for letter in (wide, "ж", "a", '"', "\\"):

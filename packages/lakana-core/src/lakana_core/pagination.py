@@ -36,6 +36,7 @@ from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from lakana_core.errors import ValidationError
 from lakana_core.models.namespace import NAMESPACE_PATH_MAX
+from lakana_core.models.repository import REPOSITORY_NAME_MAX
 from lakana_core.models.table import TABLE_NAME_MAX
 
 _E = TypeVar("_E", bound=enum.StrEnum)
@@ -716,13 +717,14 @@ CURSOR_MAX_LENGTH = 4 * math.ceil((4 * LONGEST_KEY_CHARS + 512) / 3)
 lists whose cursors hold names take a `cursor` this long."""
 
 
-_BYTES_A_CHARACTER = 5
+_BYTES_A_CHARACTER = 6
 """The most bytes one character of a key's names takes in a key cursor of a list ordered in the
-database, the parts' own quotes and commas counted in. A letter is at most four bytes of UTF-8,
-and so is a quote or a backslash once the JSON of the key is a string in the cursor's JSON. A
-part of one such character, the shortest, adds five more bytes of quotes and comma, so the
-worst key is a path of one-character parts: nine bytes for each two characters, which five a
-character covers. A control character never counts: `decode_key_cursor` refuses one."""
+database, the parts' own quotes and separators counted in. A letter is at most four bytes of
+UTF-8, and so is a quote or a backslash once the JSON of the key is a string in the cursor's
+JSON. Each part adds six bytes (two quotes, each escaped again, and the `, ` between parts), so
+the worst key is a path of one-character parts: ten bytes for each two characters, which is
+five a character exactly. Six a character leaves room above that. A control character never
+counts: `decode_key_cursor` refuses one."""
 
 
 def key_cursor_max_length(chars: int) -> int:
@@ -737,7 +739,7 @@ def key_cursor_max_length(chars: int) -> int:
     -------
     int
         Base64 of the names at their widest, and 512 bytes for the JSON around them (the list's
-        kind, a time, an id and the quotes and commas between the parts).
+        kind, a time and an id).
     """
     return 4 * math.ceil((_BYTES_A_CHARACTER * chars + 512) / 3)
 
@@ -746,10 +748,13 @@ NAMESPACE_CURSOR_MAX_LENGTH = key_cursor_max_length(NAMESPACE_PATH_MAX)
 """The longest cursor of the namespaces list: the last path, at the longest the catalog stores
 (`NAMESPACE_PATH_MAX`). The route takes a `cursor` this long."""
 
-TABLE_CURSOR_MAX_LENGTH = key_cursor_max_length(NAMESPACE_PATH_MAX + 1 + TABLE_NAME_MAX + 255)
-"""The longest cursor of a list of tables: a namespace path, a dot and a table name, and for the
-orphans a repository's name (255) besides. The routes of the artifacts, expiring tables and
-orphans take a `cursor` this long."""
+TABLE_CURSOR_MAX_LENGTH = key_cursor_max_length(
+    NAMESPACE_PATH_MAX + 1 + TABLE_NAME_MAX + REPOSITORY_NAME_MAX
+)
+"""The longest cursor of a list of tables: the artifacts' key (a namespace path's parts, an empty
+part and a table name), the expiring tables' (a time, the dotted name and an id) and the orphans'
+(a repository's name and the dotted name). The budget is the path, a dot, the table name and the
+repository's name together. The routes of these lists take a `cursor` this long."""
 
 
 class SortKey(NamedTuple):
