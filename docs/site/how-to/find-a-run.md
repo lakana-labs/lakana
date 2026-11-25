@@ -140,8 +140,10 @@ the first line of its message, such as `36a4ec5 · Review 4-6: four jobs`; the I
 deploy from before Lakana stored that line), the repository, who asked for it and when, and the
 first line of a failed deploy's message. The newest successful deploy or rollback of each
 repository's current version says `current`; after a rollback to an earlier version, only the
-rollback does, not the deploy that first made it. Choose the repository under **Repository**; a job's
-page links to its repository's deploys from its facts. **Roll back to this…** beside an earlier
+rollback does, not the deploy that first made it. Choose the repository under **Repository**, which
+offers each repository deployed there now and each one whose deploys the list has shown, so one
+that is no longer deployed is there too once its deploys are listed (an older one may need
+**Show more** first); a job's page links to its repository's deploys from its facts. **Roll back to this…** beside an earlier
 successful deploy rolls the repository back to it (see
 [Deploy, dry-run, roll back](projects.md#deploy-dry-run-roll-back)).
 

@@ -207,12 +207,6 @@
   white-space: nowrap;
 }
 
-/* The sentence of an empty list, which takes the focus when Read again finds no run. */
-.jobs-tab-page .empty:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
 /* The line that says the Runs tab stopped reading again, with Read again beside it. */
 .jobs-again {
   display: flex;

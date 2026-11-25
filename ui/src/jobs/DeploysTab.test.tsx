@@ -135,6 +135,30 @@ describe("DeploysTab", () => {
     expect(screen.getByTestId("address")).toBeEmptyDOMElement();
   });
 
+  it("offers every repository with deploys listed, not only those deployed now, and keeps them", async () => {
+    const billing = aDeploy({ id: "d-billing", repository: "billing" });
+    const { user } = renderTab((request) =>
+      list(request.path.includes("repository=billing") ? [billing] : [NOW, billing]),
+    );
+    await screen.findByRole("region", { name: "Deploys of dev" });
+    const offered = async (): Promise<string[]> => {
+      await user.click(screen.getByRole("button", { name: /Repository/u }));
+      const names = (await screen.findAllByRole("option")).map((option) => option.textContent);
+      await user.keyboard("{Escape}");
+      return names;
+    };
+
+    // billing is no longer deployed in dev, but its deploys are in the list.
+    expect(await offered()).toEqual(["All repositories", "analytics", "billing"]);
+    await user.click(screen.getByRole("button", { name: /Repository/u }));
+    await user.click(await screen.findByRole("option", { name: "billing" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("address")).toHaveTextContent("?repository=billing");
+    });
+    // The list now holds billing's deploys only; the menu still offers the others seen.
+    expect(await offered()).toEqual(["All repositories", "analytics", "billing"]);
+  });
+
   it("offers a repository from the address that is not deployed, and says none was deployed", async () => {
     renderTab(list([]), "/jobs/deploys?repository=team%2Fbilling");
 
@@ -303,54 +327,77 @@ describe("DeploysTab", () => {
     });
   });
 
-  it("holds every Roll back to this… while a rollback is followed, of any repository", async () => {
-    const read = held();
-    const billingOld = aDeploy({
-      id: "d-billing",
-      repository: "billing",
-      resolved_sha: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
-      project_version_id: "4d5e6f70-8192-4a3b-9c4d-5e6f708192a3",
-    });
-    const { server, user } = renderTab(
-      list([NOW, aDeploy(), billingOld]),
-      "/jobs/deploys?environment=prod",
-      {
-        status: 200,
-        body: [CURRENT, aDeployment({ repository: "billing" })],
-      },
-    );
-    server.route({
-      "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
-      "GET /api/v1/environments/prod/deploys/d-rollback": () => read.route(),
-      [`GET /api/v1/environments/prod/deploys/${aDeploy().id}`]: {
-        status: 200,
-        body: aDeploy({ jobs: [] }),
-      },
-      "POST /api/v1/environments/prod/deploys": {
-        status: 202,
-        body: { id: "d-rollback", status: "queued" },
-      },
-    });
-    const analytics = await screen.findByRole("button", {
-      name: "Roll back to this… (analytics at 4f9d2a7)",
-    });
-    const billing = screen.getByRole("button", { name: "Roll back to this… (billing at 5e6f7a8)" });
-    await user.click(analytics);
-    await user.click(await screen.findByRole("button", { name: "Roll back" }));
-    await screen.findByText("Rolling back analytics in prod to 4f9d2a7…");
+  it.each([
+    {
+      end: "succeeded",
+      answer: aDeploy({ id: "d-rollback", kind: "rollback" }),
+      said: "Rolled back analytics in prod to 4f9d2a7.",
+    },
+    {
+      end: "failed",
+      answer: aDeploy({
+        id: "d-rollback",
+        kind: "rollback",
+        status: "failed",
+        error_message: "lakana.yaml at 4f9d2a7 is not valid",
+      }),
+      said: "The rollback failed: lakana.yaml at 4f9d2a7 is not valid",
+    },
+  ])(
+    "holds every Roll back to this… while a rollback is followed, of any repository, until it $end",
+    async ({ answer, said }) => {
+      const read = held();
+      const billingOld = aDeploy({
+        id: "d-billing",
+        repository: "billing",
+        resolved_sha: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
+        project_version_id: "4d5e6f70-8192-4a3b-9c4d-5e6f708192a3",
+      });
+      const { server, user } = renderTab(
+        list([NOW, aDeploy(), billingOld]),
+        "/jobs/deploys?environment=prod",
+        {
+          status: 200,
+          body: [CURRENT, aDeployment({ repository: "billing" })],
+        },
+      );
+      server.route({
+        "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
+        "GET /api/v1/environments/prod/deploys/d-rollback": () => read.route(),
+        [`GET /api/v1/environments/prod/deploys/${aDeploy().id}`]: {
+          status: 200,
+          body: aDeploy({ jobs: [] }),
+        },
+        "POST /api/v1/environments/prod/deploys": {
+          status: 202,
+          body: { id: "d-rollback", status: "queued" },
+        },
+      });
+      const analytics = await screen.findByRole("button", {
+        name: "Roll back to this… (analytics at 4f9d2a7)",
+      });
+      const billing = screen.getByRole("button", {
+        name: "Roll back to this… (billing at 5e6f7a8)",
+      });
+      await user.click(analytics);
+      await user.click(await screen.findByRole("button", { name: "Roll back" }));
+      await screen.findByText("Rolling back analytics in prod to 4f9d2a7…");
 
-    // Another repository's rollback would replace the note that follows this one.
-    expect(billing).toHaveAttribute("aria-disabled", "true");
-    expect(billing).toHaveAccessibleDescription("Rolling back analytics in prod to 4f9d2a7…");
-    await user.click(billing);
-    expect(screen.queryByRole("dialog")).toBeNull();
+      // Another repository's rollback would replace the note that follows this one.
+      expect(billing).toHaveAttribute("aria-disabled", "true");
+      expect(billing).toHaveAccessibleDescription("Rolling back analytics in prod to 4f9d2a7…");
+      await user.click(billing);
+      expect(screen.queryByRole("dialog")).toBeNull();
 
-    read.release({ status: 200, body: aDeploy({ id: "d-rollback", kind: "rollback" }) });
-    await screen.findByText("Rolled back analytics in prod to 4f9d2a7.");
-    await waitFor(() => {
-      expect(billing).not.toHaveAttribute("aria-disabled");
-    });
-  });
+      read.release({ status: 200, body: answer });
+      await screen.findByText(said);
+      await waitFor(() => {
+        expect(billing).not.toHaveAttribute("aria-disabled");
+      });
+      expect(analytics).not.toHaveAttribute("aria-disabled");
+      expect(billing).not.toHaveAccessibleDescription();
+    },
+  );
 
   it("hands the focus to the note when the list answers before the current versions", async () => {
     let rolledBack = false;
