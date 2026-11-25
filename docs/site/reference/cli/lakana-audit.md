@@ -13,7 +13,7 @@ Read the audit log.
 
 Usage: `lakana audit list [OPTIONS]`
 
-List audit events, newest first.
+List audit events, newest first (oldest first with --order asc).
 
 `--output json` shows each event's `detail`. Query text and column values in someone else's events are hidden unless you hold READ_QUERY_TEXT: a query's SQL text shows as its SHA-256 and length, an incremental write's watermark as {"hidden": true}. Your own events show in full. A page that shows other people's events, or `--principal-id` of someone else, is itself recorded in the audit log (ACTIVITY_VIEWED). An event of a type this release does not know shows as `UNKNOWN (<type as stored>)`.
 
@@ -28,3 +28,4 @@ List audit events, newest first.
 | `--limit` | whole number, 1 to 500 | `100` | Events per page. |
 | `--cursor` | text | none | Continue from a previous page. |
 | `--all` | flag | off | Follow every page. |
+| `--order` | text | none | desc (the default, newest first) or asc (oldest first). |

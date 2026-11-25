@@ -8,6 +8,7 @@
  * @packageDocumentation
  */
 import { api } from "./client";
+import { type ListSortChoice, setSort } from "./sorting";
 
 /** A new invite, as `POST /api/v1/invites` answers it; its link is only here. */
 export interface InviteOut {
@@ -149,13 +150,18 @@ interface PeoplePage {
  * {@link PEOPLE_LIMIT} people are all of them.
  *
  * @param words - Only those whose name contains this text; blank for all.
+ * @param sort - The sort (`name`, `status`); null for the newest first.
  * @returns The principals and whether there are more.
  */
-export async function listPeople(words: string): Promise<PeoplePage> {
+export async function listPeople(
+  words: string,
+  sort: ListSortChoice | null = null,
+): Promise<PeoplePage> {
   const query = new URLSearchParams({ limit: String(PEOPLE_LIMIT) });
   if (words !== "") {
     query.set("q", words);
   }
+  setSort(query, sort);
   const page = await api.page(`/api/v1/principals?${query.toString()}`);
   return { people: page.body as readonly PrincipalOut[], more: page.nextCursor !== null };
 }

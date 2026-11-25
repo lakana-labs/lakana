@@ -576,3 +576,25 @@ describe("JobRuns", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("JobRuns' sort", () => {
+  it("sorts by state on the server and keeps the filter in the address", async () => {
+    const run = aJobRun({ id: "r1", tasks: [] });
+    const { server } = renderRuns({ status: 200, body: [run] }, "?status=failed");
+    const user = userEvent.setup();
+    await screen.findByRole("link", { name: when(run.created_at) });
+    expect(screen.getByRole("columnheader", { name: /Created/u })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+
+    await user.click(screen.getByRole("button", { name: /^State/u }));
+    await waitFor(() => {
+      expect(queries(server.sent).at(-1)?.get("sort")).toBe("status");
+    });
+    expect(queries(server.sent).at(-1)?.get("status")).toBe("failed");
+    expect(screen.getByRole("status", { name: "where" })).toHaveTextContent(
+      "?status=failed&sort=status",
+    );
+  });
+});

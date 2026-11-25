@@ -84,6 +84,22 @@ function runReads(sent: readonly { method: string; path: string }[]): URLSearchP
     .map((request) => new URLSearchParams(request.path.split("?")[1]));
 }
 
+/**
+ * A filter's menu button; a column header that sorts carries the same word.
+ *
+ * @param name - The filter's name.
+ * @returns The button.
+ */
+function filterMenu(name: RegExp): HTMLElement {
+  const button = screen
+    .getAllByRole("button", { name })
+    .find((candidate) => candidate.closest("th") === null);
+  if (button === undefined) {
+    throw new Error(`no filter ${String(name)}`);
+  }
+  return button;
+}
+
 const page = (items: readonly RunOut[], next: string | null = null): FakeRoute => ({
   status: 200,
   body: { items, next_cursor: next },
@@ -260,7 +276,7 @@ describe("RunsTab", () => {
     });
     await screen.findByRole("link", { name: "nightly_sales" });
 
-    await user.click(screen.getByRole("button", { name: /State/u }));
+    await user.click(filterMenu(/State/u));
     await user.click(screen.getByRole("option", { name: "Failed" }));
     await waitFor(() => {
       expect(screen.queryByRole("link", { name: "nightly_sales" })).toBeNull();
@@ -419,9 +435,9 @@ describe("RunsTab", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy.");
 
     // A failed, then B, then back to A before B answers.
-    await user.click(screen.getByRole("button", { name: /State/u }));
+    await user.click(filterMenu(/State/u));
     await user.click(screen.getByRole("option", { name: "Failed" }));
-    await user.click(screen.getByRole("button", { name: /State/u }));
+    await user.click(filterMenu(/State/u));
     await user.click(screen.getByRole("option", { name: "All" }));
     await waitFor(() => {
       expect(allReads).toBe(2);
@@ -443,7 +459,7 @@ describe("RunsTab", () => {
     );
     expect(await screen.findByRole("alert")).toHaveTextContent("The server is busy.");
 
-    await user.click(screen.getByRole("button", { name: /State/u }));
+    await user.click(filterMenu(/State/u));
     await user.click(screen.getByRole("option", { name: "Failed" }));
     await waitFor(() => {
       expect(screen.queryByRole("alert")).toBeNull();
@@ -493,7 +509,11 @@ describe("RunsTab", () => {
     );
     await screen.findByRole("region", { name: "Runs listed" });
 
-    const buttons = screen.getAllByRole("button").map((button) => button.textContent);
+    // The column headers sort; none of them starts anything.
+    const buttons = screen
+      .getAllByRole("button")
+      .filter((button) => button.closest("th") === null)
+      .map((button) => button.textContent);
     expect(buttons.some((text) => /run|start/iu.test(text))).toBe(false);
   });
 
@@ -790,5 +810,68 @@ describe("RunsTab", () => {
       expect(row).not.toHaveTextContent("By hand");
       expect(within(row).getAllByText("Unknown").length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe("RunsTab's sort", () => {
+  it("sorts by a column on the server, keeps the filters and the order in the address", async () => {
+    const { server, user } = renderTab(page([older]), "/jobs/runs?status=failed");
+    await screen.findByRole("region", { name: "Runs listed" });
+    const created = screen.getByRole("columnheader", { name: /Created/u });
+    // The list's own order is the newest first: the Created column says so.
+    expect(created).toHaveAttribute("aria-sort", "descending");
+
+    await user.click(within(created).getByRole("button"));
+    await waitFor(() => {
+      expect(runReads(server.sent).at(-1)?.get("order")).toBe("asc");
+    });
+    const read = runReads(server.sent).at(-1);
+    expect(read?.get("sort")).toBe("created");
+    expect(read?.get("status")).toBe("failed");
+    expect(read?.has("cursor")).toBe(false);
+    expect(screen.getByTestId("address")).toHaveTextContent(
+      "?status=failed&sort=created&order=asc",
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("columnheader", { name: /Created/u })).toHaveAttribute(
+        "aria-sort",
+        "ascending",
+      );
+    });
+    // The list was drawn again: the header pressed keeps the focus.
+    expect(screen.getByRole("button", { name: /Created/u })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: /^State/u }));
+    await waitFor(() => {
+      expect(runReads(server.sent).at(-1)?.get("sort")).toBe("status");
+    });
+    expect(screen.getByTestId("address")).toHaveTextContent("?status=failed&sort=status");
+  });
+
+  it("opens a shared link sorted the same way", async () => {
+    const { server } = renderTab(page([older]), "/jobs/runs?sort=name&order=desc");
+    await screen.findByRole("region", { name: "Runs listed" });
+    const read = runReads(server.sent)[0];
+    expect([read?.get("sort"), read?.get("order")]).toEqual(["name", "desc"]);
+    expect(screen.getByRole("columnheader", { name: /Run/u })).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+  });
+});
+
+describe("RunsTab's pages in an order by a value that changes", () => {
+  it("shows once a run that a later page repeats", async () => {
+    const { user } = renderTab((request) =>
+      request.path.includes("cursor=c1")
+        ? { status: 200, body: { items: [older, oldest], next_cursor: null } }
+        : { status: 200, body: { items: [newer, older], next_cursor: "c1" } },
+    );
+    const region = await screen.findByRole("region", { name: "Runs listed" });
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    });
+    expect(within(region).getAllByRole("row")).toHaveLength(4);
   });
 });

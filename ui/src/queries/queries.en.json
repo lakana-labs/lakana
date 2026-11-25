@@ -68,6 +68,7 @@
     "recentRegion": "Recent queries",
     "name": "Name",
     "when": "When",
+    "changed": "Changed",
     "state": "State",
     "noSaved": "No saved queries yet. Save… keeps the query in the editor.",
     "noRecent": "No queries in the last {{days}} days.",

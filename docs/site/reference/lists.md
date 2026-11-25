@@ -96,13 +96,46 @@ the order of queries. The cursor belongs to its list: the cursor of the runs lis
 queries list, with `422` and a message that names both lists, and so is the cursor of the queries of
 one environment by the list of every environment. Start again without `cursor`.
 
+## Sorting
+
+Every list that can grow long sorts by a column on the server, so the order holds across every
+page: `--sort FIELD` and `--order asc|desc` on the command line, `sort` and `order` in the SDK and
+on the route. Without them a list keeps its own order, and without `--order` a field runs in its
+own direction. In the web interface the same order is chosen by pressing a column's header, and it
+stays in the address, so a shared link opens sorted the same way.
+
+| List | Command | Fields (default first) | Without `--order` |
+|---|---|---|---|
+| Runs, of one environment or every one | `lakana runs list` | `created`, `name` (the job's, else the repository's), `status` | `created` newest first; the others from A, runs of one name or state newest first |
+| Deploys, of one environment or every one | `lakana deploys list` | `created`, `status` | `created` newest first; `status` from A, deploys of one state newest first |
+| Jobs | `lakana job list` | `name`, `status` (the last run's), `last_run`, `next_run`; by repository, then name, without `--sort` | `last_run` latest first; the others from A or soonest first; a job without a value last |
+| Connections, of one environment or every one | `lakana connection list` | `created`, `name`, `status` (the last test: failed first, then queued or running, then passed, never tested last) | `created` newest first; the others ascending, one state by name |
+| Saved queries, of one environment or every one | `lakana query saved list` | `name`, `updated`, `created` | `name` from A; the times latest first |
+| Principals (Access › People) | `lakana principal list` | `created`, `name`, `status` (active first, then by name) | `created` newest first; the others ascending |
+| Audit log | `lakana audit list` | `occurred` (only `--order`) | newest first; `asc` is oldest first |
+
+Names sort by code point after lower-casing, so `alpha`, `Beta`, `gamma` come in that order. Only
+the letters A to Z are lower-cased the same everywhere: SQLite lower-cases ASCII letters only,
+PostgreSQL every letter its database's locale knows, and the jobs list folds names in Python
+(`ß` as `ss`), so a name with other letters can sort elsewhere on another database. Saved queries
+sort by their folded name (`casefold`), stored with them, the same everywhere. Equal values sort
+by the row's id, so a row whose sort value does not change while you page is never repeated or
+skipped. A row whose value changes between two pages (a run that starts while the list is sorted
+by state, a saved query edited while it is sorted by Changed) can move from one page to another:
+it may come again on a later page, or not at all. The web interface shows a row that comes again
+once. A sort shows exactly the rows the list shows without it: it never adds a row you may not
+see, and the audit log records a read the same way in every order. Send the same `sort` and `order` with every page: the cursor names its
+order, and a cursor of another order, or of the list's own order, is refused with `422` and a
+message that names both, instead of being read in the wrong order. Another field, or another
+direction, is `422` with the fields the list takes.
+
 ## Refusals
 
 | Cause | Answer |
 |---|---|
-| a status, trigger, origin or `limit` that is not allowed | `422`; the message names the parameter and the allowed values |
+| a status, trigger, origin, `sort`, `order` or `limit` that is not allowed | `422`; the message names the parameter and the allowed values |
 | `since` without a time zone, or not a time | `422`; the message shows how to write it |
-| a cursor that was not issued, or came from another list | `422` |
+| a cursor that was not issued, or came from another list or another order | `422` |
 | an unknown repository | `404` |
 | a caller who may not read the environment | `403` |
 | a manager's list that shows other people's queries, or a page of the audit log that shows other people's events, and could not be recorded in the audit log (see [Audit](#audit)) | `503` with `Retry-After`; nothing is listed, and the message names the cause |

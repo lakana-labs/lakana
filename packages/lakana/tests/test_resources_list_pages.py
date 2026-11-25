@@ -13,10 +13,15 @@ from lakana._config import ResolvedConfig
 from lakana._http import NEXT_CURSOR_HEADER, HttpTransport, csv_param
 from lakana.errors import NotFound
 from lakana.resources.artifacts import Artifacts
+from lakana.resources.audit_events import AuditEvents
+from lakana.resources.connections import Connections
 from lakana.resources.deploys import Deploys, OrphanTables
+from lakana.resources.jobs import Jobs
 from lakana.resources.namespaces import Namespaces
+from lakana.resources.principals import Principals
 from lakana.resources.queries import Queries
 from lakana.resources.runs import Runs
+from lakana.resources.saved_queries import SavedQueries
 from lakana.resources.tables import Tables
 
 _CONFIG = ResolvedConfig(url="http://api.example", token="lakana_pat_abc_supersecret")
@@ -599,3 +604,70 @@ def test_iter_all_runs_follows_every_page() -> None:
     assert [r.url.params.get("cursor") for r in seen] == [None, "r1", "r2"]
     assert all(r.url.params["status"] == "failed" for r in seen)
     assert all(r.url.params["limit"] == "1" for r in seen)
+
+
+_EMPTY_PAGE: dict[str, Any] = {"items": [], "next_cursor": None}
+"""A last page of a list that answers with an object."""
+
+_SORTED_CALLS: list[tuple[str, object, Callable[[HttpTransport], object]]] = [
+    ("runs", [], lambda t: Runs(t).list("dev", sort="name", order="desc")),
+    ("runs page", [], lambda t: Runs(t).list_page("dev", sort="name", order="desc")),
+    ("runs iter", [], lambda t: list(Runs(t).iter("dev", sort="name", order="desc"))),
+    ("all runs", _EMPTY_PAGE, lambda t: Runs(t).list_all(sort="name", order="desc")),
+    ("all runs iter", _EMPTY_PAGE, lambda t: list(Runs(t).iter_all(sort="name", order="desc"))),
+    ("deploys", [], lambda t: Deploys(t).list("dev", sort="name", order="desc")),
+    ("all deploys", _EMPTY_PAGE, lambda t: Deploys(t).list_all(sort="name", order="desc")),
+    (
+        "all deploys iter",
+        _EMPTY_PAGE,
+        lambda t: list(Deploys(t).iter_all(sort="name", order="desc")),
+    ),
+    ("jobs", [], lambda t: Jobs(t).list("dev", sort="name", order="desc")),
+    ("connections", _EMPTY_PAGE, lambda t: Connections(t).list("dev", sort="name", order="desc")),
+    (
+        "connections iter",
+        _EMPTY_PAGE,
+        lambda t: list(Connections(t).iter("dev", sort="name", order="desc")),
+    ),
+    ("all connections", _EMPTY_PAGE, lambda t: Connections(t).list_all(sort="name", order="desc")),
+    (
+        "all connections iter",
+        _EMPTY_PAGE,
+        lambda t: list(Connections(t).iter_all(sort="name", order="desc")),
+    ),
+    ("saved", _EMPTY_PAGE, lambda t: SavedQueries(t).list("dev", sort="name", order="desc")),
+    ("all saved", _EMPTY_PAGE, lambda t: SavedQueries(t).list(sort="name", order="desc")),
+    ("saved iter", _EMPTY_PAGE, lambda t: list(SavedQueries(t).iter(sort="name", order="desc"))),
+    ("principals", [], lambda t: Principals(t).list(sort="name", order="desc")),
+    ("principals iter", [], lambda t: list(Principals(t).iter(sort="name", order="desc"))),
+    ("audit", _EMPTY_PAGE, lambda t: AuditEvents(t).list(sort="name", order="desc")),
+    ("audit iter", _EMPTY_PAGE, lambda t: list(AuditEvents(t).iter(sort="name", order="desc"))),
+]
+"""Every SDK method of a list a person can sort, called with a sort."""
+
+
+@pytest.mark.parametrize(
+    ("body", "call"),
+    [(body, call) for _, body, call in _SORTED_CALLS],
+    ids=[n for n, _, _ in _SORTED_CALLS],
+)
+def test_every_sortable_list_sends_the_sort_and_the_order(
+    body: object, call: Callable[[HttpTransport], object]
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=body)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler), base_url=_CONFIG.url)
+    call(HttpTransport(_CONFIG, http_client=client))
+    assert [(r.url.params.get("sort"), r.url.params.get("order")) for r in seen] == [
+        ("name", "desc")
+    ]
+
+
+def test_a_list_without_a_sort_sends_none() -> None:
+    seen: list[httpx.Request] = []
+    Runs(_transport([([], None)], seen)).list("dev")
+    assert "sort" not in seen[0].url.params and "order" not in seen[0].url.params

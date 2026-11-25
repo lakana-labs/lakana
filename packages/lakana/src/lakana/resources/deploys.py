@@ -231,6 +231,8 @@ class Deploys:
         repository: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> _DeployList:
         """List an environment's deploy history, newest first.
 
@@ -246,6 +248,10 @@ class Deploys:
             Most deploys returned (1 to 200); `None` leaves it to the server (100).
         cursor
             A previous page's `next_cursor`. Send the same `repository` with every page.
+        sort
+            The sort, as `list_page` takes it.
+        order
+            ``asc`` or ``desc``, as `list_page` takes it.
 
         Returns
         -------
@@ -258,7 +264,14 @@ class Deploys:
             If `limit` is outside 1 to 200 or `cursor` is not one the server issued for the
             deploys list.
         """
-        return self.list_page(environment, repository=repository, limit=limit, cursor=cursor).items
+        return self.list_page(
+            environment,
+            repository=repository,
+            limit=limit,
+            cursor=cursor,
+            sort=sort,
+            order=order,
+        ).items
 
     def list_page(
         self,
@@ -267,6 +280,8 @@ class Deploys:
         repository: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> DeployPage:
         """List one page of an environment's deploy history, with the cursor of the next page.
 
@@ -280,6 +295,11 @@ class Deploys:
             Most deploys returned (1 to 200); `None` leaves it to the server (100).
         cursor
             A previous page's `next_cursor`. Send the same `repository` with every page.
+        sort
+            What the deploys are sorted by: ``created`` (the default) or ``status``, whose
+            deploys of one state come newest first. Send the same sort with every page.
+        order
+            ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for ``status``.
 
         Returns
         -------
@@ -295,7 +315,9 @@ class Deploys:
         response = self._transport.request(
             ROUTES["deploys.list"],
             path_params={"env": environment},
-            params=query_params(repository=repository, limit=limit, cursor=cursor),
+            params=query_params(
+                repository=repository, limit=limit, cursor=cursor, sort=sort, order=order
+            ),
         )
         return DeployPage(
             items=[deploy_from_json(item) for item in response.json()],
@@ -309,6 +331,8 @@ class Deploys:
         repository: str | None = None,
         limit: int | None = None,
         cursor: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> DeployPage:
         """List one page of the deploys of every environment you may read.
 
@@ -328,6 +352,10 @@ class Deploys:
         cursor
             A previous page's `next_cursor` of this list. Send the same `repository` with every
             page.
+        sort
+            The sort, as `list_page` takes it.
+        order
+            ``asc`` or ``desc``, as `list_page` takes it.
 
         Returns
         -------
@@ -349,7 +377,12 @@ class Deploys:
             response = self._transport.request(
                 ROUTES["deploys.list_all"],
                 params=query_params(
-                    environment=environment, repository=repository, limit=limit, cursor=cursor
+                    environment=environment,
+                    repository=repository,
+                    limit=limit,
+                    cursor=cursor,
+                    sort=sort,
+                    order=order,
                 ),
             )
         body = response.json()
@@ -363,6 +396,8 @@ class Deploys:
         *,
         environment: str | None = None,
         repository: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
         page_size: int = 100,
     ) -> Iterator[Deploy]:
         """Yield every deploy of every environment you may read, fetching pages as needed.
@@ -373,6 +408,10 @@ class Deploys:
             Only this environment.
         repository
             Only this repository's deploys.
+        sort
+            The sort, as `list_page` takes it.
+        order
+            ``asc`` or ``desc``, as `list_page` takes it.
         page_size
             Deploys per request (1 to 200).
 
@@ -388,7 +427,12 @@ class Deploys:
         """
         yield from every_page(
             lambda cursor: self.list_all(
-                environment=environment, repository=repository, limit=page_size, cursor=cursor
+                environment=environment,
+                repository=repository,
+                limit=page_size,
+                cursor=cursor,
+                sort=sort,
+                order=order,
             )
         )
 

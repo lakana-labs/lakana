@@ -419,3 +419,84 @@ def test_the_names_of_a_page_are_those_of_each_run(
         ("dev", f"repo{by_id[v.id] % 3}") for v in page
     ]
     assert len(page) == 9
+
+
+def _walk_deploys(service: DeployService, principal: PrincipalRef, **sort: str) -> list[uuid.UUID]:
+    """Read every page of the `dev` deploys, one a page, in a sort.
+
+    Parameters
+    ----------
+    service
+        The deploy service.
+    principal
+        The caller.
+    **sort
+        `sort` and `order`, as the list takes them.
+
+    Returns
+    -------
+    list of uuid.UUID
+        The ids, in the order the pages gave them.
+    """
+    seen: list[uuid.UUID] = []
+    cursor = None
+    while True:
+        page, cursor = service.history_page(principal, "dev", limit=1, cursor=cursor, **sort)
+        seen += [v.id for v in page]
+        if cursor is None:
+            return seen
+
+
+def test_deploys_sort_oldest_first_and_by_state(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session, "analytics")
+    old = _deploy(session, env, repo.id, 1)
+    failed = _deploy(session, env, repo.id, 2)
+    new = _deploy(session, env, repo.id, 3)
+    failed.status = DeployStatus.FAILED
+    session.commit()
+    service = _service(session)
+    assert _walk_deploys(service, principal, sort="created", order="asc") == [
+        old.id,
+        failed.id,
+        new.id,
+    ]
+    assert _walk_deploys(service, principal, sort="status") == [failed.id, new.id, old.id]
+    assert _walk_deploys(service, principal, sort="status", order="desc") == [
+        new.id,
+        old.id,
+        failed.id,
+    ]
+
+
+def test_deploys_refuse_an_unknown_sort_and_a_cursor_of_another_sort(
+    session: Session, env: Environment, principal: PrincipalRef
+) -> None:
+    repo = _repo(session, "analytics")
+    for minutes in (1, 2):
+        _deploy(session, env, repo.id, minutes)
+    service = _service(session)
+    with pytest.raises(ValidationError, match="`sort` must be one of: created, status; got 'name'"):
+        service.history_page(principal, "dev", sort="name")
+    _, by_state = service.history_page(principal, "dev", limit=1, sort="status")
+    assert by_state is not None
+    with pytest.raises(ValidationError, match="in its default order"):
+        service.history_page(principal, "dev", cursor=by_state)
+
+
+def test_all_deploys_sort_oldest_first(session: Session, admin: PrincipalRef) -> None:
+    runs = _three_environments(session)
+    service = DeployService(session, GrantAuthorization(session))
+    seen: list[uuid.UUID] = []
+    cursor = None
+    while True:
+        page, cursor = service.list_all_deploys_page(
+            admin, limit=3, cursor=cursor, sort="created", order="asc"
+        )
+        seen += [v.id for v in page]
+        if cursor is None:
+            break
+    assert seen == [r.id for r in runs]
+    page, _ = service.list_all_deploys_page(admin, environment="dev", sort="created", order="asc")
+    assert [v.id for v in page] == [runs[0].id, runs[3].id, runs[6].id]

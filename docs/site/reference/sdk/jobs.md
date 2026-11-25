@@ -11,7 +11,7 @@ List the jobs of a project, start one, pause and resume its schedule.
 
 ### `client.jobs.list`
 
-Signature: `client.jobs.list(environment: str, *, repository: str | None = None) -> list[Job]`
+Signature: `client.jobs.list(environment: str, *, repository: str | None = None, sort: str | None = None, order: str | None = None) -> list[Job]`
 
 List the jobs of the deployed repositories (needs `READ_ENVIRONMENT`).
 
@@ -19,8 +19,10 @@ List the jobs of the deployed repositories (needs `READ_ENVIRONMENT`).
 |---|---|---|---|
 | `environment` | `str` | required | Environment name. |
 | `repository` | `str | None` | `None` | Only this repository's jobs. |
+| `sort` | `str | None` | `None` | What the jobs are sorted by: ``name``, ``status`` (the last run's), ``last_run`` or ``next_run``; a job without a value comes last. Without it (and `order`), by repository, then name. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``last_run``, ``asc`` for the others. |
 
-Returns: `list of Job`. By repository, then name.
+Returns: `list of Job`. By repository, then name, unless sorted otherwise.
 
 ### `client.jobs.get`
 

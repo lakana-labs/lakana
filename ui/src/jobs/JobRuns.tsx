@@ -12,7 +12,10 @@ import type { RequestOptions } from "../api/client";
 import { listJobRuns, type RunOut } from "../api/jobs";
 import { ViewList } from "../catalog/views/ViewList";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
 import { settingParam, useAddressParams } from "../shell/useAddressParams";
+import { useListSort } from "../shell/useListSort";
 import { useWhen } from "../shell/useWhen";
 import { StatusLabel } from "../status/StatusLabel";
 import "./jobStrings";
@@ -22,6 +25,12 @@ import { runStatusKind } from "./status";
 import { useRunPages } from "./useRunPages";
 
 /** The states the list can be narrowed to; `all` is no narrowing. */
+/** The columns a job's runs sort by: the newest first unless the address says otherwise. */
+const JOB_RUN_SORTS: ListSortSpec<"status" | "created"> = {
+  fields: { status: "asc", created: "desc" },
+  natural: { field: "created", order: "desc" },
+};
+
 const STATUSES = ["all", "failed", "succeeded", "running", "queued", "cancelled"] as const;
 
 /** A choice of the Status menu. */
@@ -86,7 +95,9 @@ export function JobRuns({
   const heading = useId();
   const [params, update] = useAddressParams();
   const { status, period } = readFilter(params);
-  const key = JSON.stringify([environment, repository, job, status, period]);
+  const sorting = useListSort(JOB_RUN_SORTS);
+  const sort = sorting.choice;
+  const key = JSON.stringify([environment, repository, job, status, period, sort]);
   const load = useCallback(
     (cursor: string | null, options: RequestOptions) => {
       return listJobRuns(
@@ -96,12 +107,13 @@ export function JobRuns({
         {
           status: status === "all" ? null : status,
           since: sinceOf(period),
+          sort,
         },
         cursor,
         options,
       );
     },
-    [environment, repository, job, status, period],
+    [environment, repository, job, status, period, sort],
   );
   const pages = useRunPages(key, load, revision);
   const rows = (pages.items ?? []).map((row) =>
@@ -161,8 +173,8 @@ export function JobRuns({
         scroll="jobs-runs-scroll"
         head={
           <tr>
-            <th scope="col">{t("jobs.runs.columns.state")}</th>
-            <th scope="col">{t("jobs.runs.columns.created")}</th>
+            <SortHeader {...sorting.header("status")}>{t("jobs.runs.columns.state")}</SortHeader>
+            <SortHeader {...sorting.header("created")}>{t("jobs.runs.columns.created")}</SortHeader>
             <th scope="col" className="number">
               {t("jobs.runs.columns.duration")}
             </th>

@@ -187,7 +187,8 @@ They name the saved query's id and name, its visibility and its owner, and never
 
 The **Queries** screen keeps your saved queries beside the editor, under **Saved**; on a narrow
 window they are behind the **Queries ▾** button. **Show**, above the lists, narrows them (and
-**Recent**) to one environment, or shows **All environments**.
+**Recent**) to one environment, or shows **All environments**. **Saved** lists them by name;
+press **Changed** to list the latest changed first, and a header again for the other direction.
 
 **Save the query in the editor:**
 

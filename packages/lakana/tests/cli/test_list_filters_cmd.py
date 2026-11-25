@@ -198,3 +198,79 @@ def test_a_refused_filter_in_the_sdk_is_a_validation_error(tmp_path: Path) -> No
     api.on("GET", _RUNS, status=422, json={"detail": "bad", "type": "ValidationError"})
     with pytest.raises(ValidationError):
         api.client().runs.list("dev", status="done")
+
+
+def test_runs_list_sends_the_sort_and_keeps_it_in_the_next_page(tmp_path: Path) -> None:
+    api = _paged(_RUNS, [_run("failed")], "next-1")
+    result = invoke(
+        make_state(tmp_path, api),
+        "runs",
+        "list",
+        "--env",
+        "dev",
+        "--sort",
+        "name",
+        "--order",
+        "desc",
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[-1].url.params) == {"sort": "name", "order": "desc"}
+    assert (
+        "More results: lakana runs list --env dev --sort name --order desc --cursor next-1"
+        in result.stdout
+    )
+
+
+def test_deploys_list_sends_the_sort_and_keeps_it_in_the_next_page(tmp_path: Path) -> None:
+    api = _paged(_DEPLOYS, [_deploy("succeeded")], "d-1")
+    result = invoke(
+        make_state(tmp_path, api), "deploys", "list", "--env", "dev", "--sort", "status"
+    )
+    assert result.exit_code == 0, result.stderr
+    assert dict(api.requests[-1].url.params) == {"sort": "status"}
+    assert "More results: lakana deploys list --env dev --sort status --cursor d-1" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("args", "path", "body"),
+    [
+        (["job", "list", "--env", "dev"], "/api/v1/environments/dev/jobs", []),
+        (
+            ["connection", "list", "--env", "dev"],
+            "/api/v1/environments/dev/connections",
+            {"items": [], "next_cursor": None},
+        ),
+        (
+            ["connection", "list", "--all-environments"],
+            "/api/v1/connections",
+            {"items": [], "next_cursor": None},
+        ),
+        (
+            ["query", "saved", "list", "--env", "dev"],
+            "/api/v1/environments/dev/saved-queries",
+            {"items": [], "next_cursor": None},
+        ),
+        (["principal", "list"], "/api/v1/principals", []),
+    ],
+)
+def test_the_other_sortable_lists_send_the_sort(
+    tmp_path: Path, args: list[str], path: str, body: object
+) -> None:
+    api = FakeApi()
+    api.routes["GET", path] = lambda request: httpx.Response(200, json=body)
+    result = invoke(make_state(tmp_path, api), *args, "--sort", "name", "--order", "desc")
+    assert result.exit_code == 0, result.stderr
+    assert (api.requests[-1].url.params["sort"], api.requests[-1].url.params["order"]) == (
+        "name",
+        "desc",
+    )
+
+
+def test_audit_list_sends_the_order(tmp_path: Path) -> None:
+    api = FakeApi()
+    api.routes["GET", "/api/v1/audit-events"] = lambda request: httpx.Response(
+        200, json={"items": [], "next_cursor": None}
+    )
+    result = invoke(make_state(tmp_path, api), "audit", "list", "--order", "asc")
+    assert result.exit_code == 0, result.stderr
+    assert api.requests[-1].url.params["order"] == "asc"

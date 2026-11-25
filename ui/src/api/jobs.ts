@@ -8,6 +8,7 @@
  */
 import { api, type RequestOptions } from "./client";
 import { environmentPath, withQuery, type CursorPage } from "./manage";
+import { type ListSortChoice, setSort } from "./sorting";
 
 /** The state of a run. */
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -277,6 +278,8 @@ export interface JobRunFilter {
   readonly status: RunStatus | null;
   /** Only runs created at or after this time (ISO 8601 with a zone). */
   readonly since: string | null;
+  /** The sort (`created`, `status`); none for the newest first. */
+  readonly sort?: ListSortChoice | null;
 }
 
 /** What started a run, as the list of all runs filters by it. */
@@ -296,6 +299,8 @@ export interface AllRunsFilter {
   readonly repository: string | null;
   /** Only runs created at or after this time (ISO 8601 with a zone). */
   readonly since: string | null;
+  /** The sort (`created`, `name`, `status`); none for the newest first. */
+  readonly sort?: ListSortChoice | null;
 }
 
 /** One row of the failed runs: the run, its first failed task and why that task failed. */
@@ -404,6 +409,7 @@ export async function listJobRuns(
   if (filter.since !== null) {
     query.set("since", filter.since);
   }
+  setSort(query, filter.sort ?? null);
   query.set("limit", String(RUNS_PAGE));
   if (cursor !== null) {
     query.set("cursor", cursor);
@@ -418,14 +424,21 @@ export async function listJobRuns(
  *
  * @param environment - The environment.
  * @param repository - Only this repository's jobs; all of them by default.
+ * @param sort - The sort (`name`, `last_run`, `next_run`); null for repository, then name.
  * @returns The jobs.
  * @throws {ApiError} for a refusal; 404 for an environment or a repository that does not exist.
  */
-export function listJobs(environment: string, repository?: string): Promise<readonly JobOut[]> {
+export function listJobs(
+  environment: string,
+  repository?: string,
+  sort: ListSortChoice | null = null,
+): Promise<readonly JobOut[]> {
   const path = environmentPath(environment, "/jobs");
+  const query = repository === undefined ? new URLSearchParams() : repositoryQuery(repository);
+  setSort(query, sort);
   return api.request<readonly JobOut[]>(
     "GET",
-    repository === undefined ? path : withQuery(path, repositoryQuery(repository)),
+    query.size === 0 ? path : withQuery(path, query),
     undefined,
     { background: true },
   );
@@ -472,6 +485,7 @@ export async function listAllRuns(
   if (filter.since !== null) {
     query.set("since", filter.since);
   }
+  setSort(query, filter.sort ?? null);
   query.set("limit", String(limit));
   if (cursor !== null) {
     query.set("cursor", cursor);
@@ -699,6 +713,7 @@ const DEPLOYS_PAGE = 50;
  * @param environment - The environment.
  * @param repository - Only this repository's deploys; null for all.
  * @param cursor - The cursor of the page, or null for the first.
+ * @param sort - The sort (`created`, `status`); null for the newest first.
  * @returns The page, with the cursor from `X-Next-Cursor`.
  * @throws {ApiError} for a refusal; 404 for an environment or a repository that does not exist.
  */
@@ -706,11 +721,13 @@ export async function listDeploys(
   environment: string,
   repository: string | null,
   cursor: string | null,
+  sort: ListSortChoice | null = null,
 ): Promise<CursorPage<DeployOut>> {
   const query = new URLSearchParams();
   if (repository !== null) {
     query.set("repository", repository);
   }
+  setSort(query, sort);
   query.set("limit", String(DEPLOYS_PAGE));
   if (cursor !== null) {
     query.set("cursor", cursor);

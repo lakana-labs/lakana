@@ -25,14 +25,22 @@ from lakana_core.auth import Action, AuthorizationService, PrincipalRef, Securab
 from lakana_core.config import ViewAuditConfig
 from lakana_core.errors import ValidationError
 from lakana_core.models import AuditEvent, AuditEventType
+from lakana_core.pagination import parse_sort
 
 ACCESS_APPLY_KEY = "lakana.access_apply_id"
 """The `Session.info` key under which `lakana_core.access.managed.applying` keeps the apply's id."""
 
 
+AUDIT_SORTS: dict[str, bool] = {"occurred": True}
+"""The fields the audit log sorts by: when an event occurred, the newest first by default."""
+
+AUDIT_DEFAULT_SORT = "occurred:desc"
+"""The order of the audit log when none is asked: the newest first."""
+
+
 @dataclass(frozen=True)
 class AuditCursor:
-    """A position in `AuditService.query`'s newest-first order, for keyset paging.
+    """A position in `AuditService.query`'s order, for keyset paging.
 
     Parameters
     ----------
@@ -41,10 +49,14 @@ class AuditCursor:
     id
         The `id` of that event, breaking ties between events that share an
         `occurred_at`.
+    sort
+        The order the page was read in, ``occurred:desc`` (the newest first) or
+        ``occurred:asc``; a cursor resumes only the list in its own order.
     """
 
     occurred_at: datetime
     id: uuid.UUID
+    sort: str = AUDIT_DEFAULT_SORT
 
 
 @dataclass(frozen=True)
@@ -227,6 +239,8 @@ class AuditService:
         limit: int = 100,
         cursor: AuditCursor | None = None,
         kind: str | None = None,
+        sort: str | None = None,
+        order: str | None = None,
     ) -> AuditPage:
         """Read one page of audit events, most recently occurred first.
 
@@ -268,18 +282,25 @@ class AuditService:
             Only return events of this kind, if given: ``connection`` is every
             ``CONNECTION_*`` type. It combines with `event_type`, which must then be of the
             kind. A new kind is added in `EVENT_KINDS`.
+        sort
+            What the log is sorted by: ``occurred``, the only field, when nothing is given.
+            Every order shows the same events; only their sequence changes.
+        order
+            ``desc`` (the default, the newest first) or ``asc``, the oldest first.
 
         Returns
         -------
         AuditPage
-            Matching events, newest `occurred_at` first, and the cursor of the next page.
+            Matching events, newest `occurred_at` first unless `order` is ``asc``, and the
+            cursor of the next page.
 
         Raises
         ------
         ValidationError
             If this `AuditService` was constructed with no
-            `AuthorizationService`, `kind` is not a kind, `event_type` is not of `kind`, or
-            `event_type` is `UNKNOWN`.
+            `AuthorizationService`, `kind` is not a kind, `event_type` is not of `kind`,
+            `event_type` is `UNKNOWN`, `sort` or `order` is unknown, or `cursor` was read in
+            the other order.
         PermissionDenied
             If `p` may not read the audit log.
         AuditUnavailableError
@@ -291,6 +312,13 @@ class AuditService:
                 "this instance was constructed with none."
             )
         self._authz.authorize(p, Action.READ_AUDIT_LOG, Securable.instance_scope())
+        chosen = parse_sort(sort, order, AUDIT_SORTS, "occurred")
+        if cursor is not None and cursor.sort != chosen.name:
+            raise ValidationError(
+                f"The cursor is not valid for the list sorted by `{chosen.name}`: it came from "
+                f"the list sorted by `{cursor.sort}`. Send the same `sort` and `order` with every "
+                "page, or start the listing again without `cursor`."
+            )
         if event_type is AuditEventType.UNKNOWN:
             raise ValidationError(
                 "event_type UNKNOWN is not a filter: it stands for a stored type this release "
@@ -317,14 +345,25 @@ class AuditService:
             stmt = stmt.where(AuditEvent.occurred_at >= since)
         if until is not None:
             stmt = stmt.where(AuditEvent.occurred_at <= until)
-        if cursor is not None:
+        if cursor is not None and chosen.descending:
             stmt = stmt.where(
                 or_(
                     AuditEvent.occurred_at < cursor.occurred_at,
                     and_(AuditEvent.occurred_at == cursor.occurred_at, AuditEvent.id < cursor.id),
                 )
             )
-        stmt = stmt.order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc()).limit(limit + 1)
+        elif cursor is not None:
+            stmt = stmt.where(
+                or_(
+                    AuditEvent.occurred_at > cursor.occurred_at,
+                    and_(AuditEvent.occurred_at == cursor.occurred_at, AuditEvent.id > cursor.id),
+                )
+            )
+        if chosen.descending:
+            stmt = stmt.order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc())
+        else:
+            stmt = stmt.order_by(AuditEvent.occurred_at.asc(), AuditEvent.id.asc())
+        stmt = stmt.limit(limit + 1)
         found = [(row, str(raw)) for row, raw in self._session.execute(stmt).all()]
         rows = [row for row, _ in found[:limit]]
         raw_types = {row.id: raw for row, raw in found[:limit]}
@@ -343,7 +382,7 @@ class AuditService:
         )
         items = _shown(self._authz, p, rows, raw_types)
         last = rows[-1] if len(found) > limit else None
-        next_cursor = None if last is None else AuditCursor(last.occurred_at, last.id)
+        next_cursor = None if last is None else AuditCursor(last.occurred_at, last.id, chosen.name)
         return AuditPage(items=items, next_cursor=next_cursor)
 
     def _record_read(

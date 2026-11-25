@@ -11,7 +11,7 @@ The `audit-events` resource of the platform API.
 
 ### `client.audit_events.list`
 
-Signature: `client.audit_events.list(*, event_type: str | None = None, environment: str | None = None, principal_id: str | None = None, since: datetime | None = None, until: datetime | None = None, limit: int = 100, cursor: str | None = None, kind: str | None = None) -> AuditEventPage`
+Signature: `client.audit_events.list(*, event_type: str | None = None, environment: str | None = None, principal_id: str | None = None, since: datetime | None = None, until: datetime | None = None, limit: int = 100, cursor: str | None = None, kind: str | None = None, sort: str | None = None, order: str | None = None) -> AuditEventPage`
 
 List one page of audit events, newest first, optionally filtered.
 
@@ -27,17 +27,19 @@ Filters are not part of the cursor: pass the same ones with every page. `iter` d
 | `limit` | `int` | `100` | The maximum number of events to return. Must be between 1 and 500 inclusive; an out-of-range value is rejected by the server with a 422. |
 | `cursor` | `str | None` | `None` | A previous page's `next_cursor`, to fetch the page after it. |
 | `kind` | `str | None` | `None` | Only return events of this kind, if given: ``connection`` is every ``CONNECTION_*`` type. With `event_type`, the type must be of the kind. |
+| `sort` | `str | None` | `None` | What the log is sorted by: ``occurred``, the only field. |
+| `order` | `str | None` | `None` | ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order lists the same events. |
 
 Returns: `AuditEventPage`. Up to `limit` matching events, and the cursor for the next page.
 
 | Error | When |
 |---|---|
 | `lakana.PermissionDenied` | If the caller may not read the audit log. |
-| `lakana.ValidationError` | If `cursor` is not one the server issued, `kind` is not a kind, or `event_type` is not of `kind`. |
+| `lakana.ValidationError` | If `cursor` is not one the server issued in this order, `kind` is not a kind, `event_type` is not of `kind`, or `sort` or `order` is unknown. |
 
 ### `client.audit_events.iter`
 
-Signature: `client.audit_events.iter(*, event_type: str | None = None, environment: str | None = None, principal_id: str | None = None, since: datetime | None = None, until: datetime | None = None, page_size: int = 100, kind: str | None = None) -> Iterator[AuditEvent]`
+Signature: `client.audit_events.iter(*, event_type: str | None = None, environment: str | None = None, principal_id: str | None = None, since: datetime | None = None, until: datetime | None = None, page_size: int = 100, kind: str | None = None, sort: str | None = None, order: str | None = None) -> Iterator[AuditEvent]`
 
 Yield every matching audit event, newest first, fetching pages as needed.
 
@@ -50,6 +52,8 @@ Yield every matching audit event, newest first, fetching pages as needed.
 | `until` | `datetime | None` | `None` | Only yield events at or before this time, if given. |
 | `page_size` | `int` | `100` | Events per request, between 1 and 500 inclusive. |
 | `kind` | `str | None` | `None` | Only yield events of this kind, if given: ``connection`` is every ``CONNECTION_*`` type. |
+| `sort` | `str | None` | `None` | What the log is sorted by: ``occurred``, the only field. |
+| `order` | `str | None` | `None` | ``desc`` (the default, the newest first) or ``asc``, the oldest first. Every order lists the same events. |
 
 Yields: `AuditEvent`. Each matching event, once.
 

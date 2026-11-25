@@ -49,7 +49,7 @@ Answer fields: `DeployAccepted`
 
 List an environment's deploys
 
-Lists the deploy history, newest first, one page at a time. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same `repository` with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1 or a `cursor` this server did not issue.
+Lists the deploy history, newest first, one page at a time, or in the order `sort` and `order` ask for: deploys of one state come newest first. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same `repository` and sort with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1, an unknown `sort` or `order`, or a `cursor` this server did not issue for this list in this order.
 
 Parameters:
 
@@ -59,6 +59,8 @@ Parameters:
 | `repository` | query | no | text or null | Only this repository's deploys. |
 | `limit` | query | no | whole number | Most deploys returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default) or `status`; deploys of one state come newest first. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for `status`. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -326,7 +328,7 @@ Answer fields: `OrphansOut`
 
 List the deploys of every environment you may read
 
-Without `environment`, lists the deploys of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue for this list.
+Without `environment`, lists the deploys of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send `next_cursor` back as `cursor` with the same `repository` and sort for the next page; `sort` and `order` order the list as on the list of one environment, and a cursor of that list is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown `sort` or `order`, or a `cursor` this server did not issue for this list in this order.
 
 Parameters:
 
@@ -336,6 +338,8 @@ Parameters:
 | `repository` | query | no | text or null | Only this repository's deploys. |
 | `limit` | query | no | whole number | Page size (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by, with the fields of the list of one environment. |
+| `order` | query | no | text or null | `asc` or `desc`, each field's way by default, as on the list of one environment. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

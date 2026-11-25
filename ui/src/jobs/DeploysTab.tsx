@@ -7,14 +7,17 @@
 import { type JSX, lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { listDeployments, listDeploys } from "../api/jobs";
+import { type DeployOut, listDeployments, listDeploys } from "../api/jobs";
 import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { countWords, ListToolbar, useSteadyMore } from "../shell/ListToolbar";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
 import { settingParam, useAddressParams } from "../shell/useAddressParams";
+import { useListSort } from "../shell/useListSort";
 import { useResource } from "../shell/useResource";
 import { markedText } from "../shell/VisibleText";
 import { DeployRow } from "./DeployRow";
@@ -41,6 +44,21 @@ interface Rolled {
 
 /** The Repository menu's choice of every repository; a repository's choice is `repo:` and its name. */
 const ALL_REPOSITORIES = "all";
+
+/** The columns the deploys sort by: the newest first unless the address says otherwise. */
+const DEPLOY_SORTS: ListSortSpec<"status" | "created"> = {
+  fields: { status: "asc", created: "desc" },
+  natural: { field: "created", order: "desc" },
+};
+
+/**
+ * A deploy's identity, so a deploy a later page repeats (its state changed while the list was
+ * paged by state) is shown once.
+ *
+ * @param deploy - The deploy.
+ * @returns Its id.
+ */
+const deployId = (deploy: DeployOut): string => deploy.id;
 
 /** Properties of {@link DeploysOf}. */
 interface DeploysOfProps {
@@ -70,11 +88,19 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   const [params, update] = useAddressParams();
   const repository = params.get("repository");
   const deployments = useResource(useCallback(() => listDeployments(environment), [environment]));
+  const sorting = useListSort(DEPLOY_SORTS);
+  const sort = sorting.choice;
   const load = useCallback(
-    (cursor: string | null) => listDeploys(environment, repository, cursor),
-    [environment, repository],
+    (cursor: string | null) => listDeploys(environment, repository, cursor, sort),
+    [environment, repository, sort],
   );
-  const pages = useCursorPages(JSON.stringify([environment, repository]), load);
+  // A new sort reads the first page again; the rows stay until it arrives.
+  const pages = useCursorPages(
+    JSON.stringify([environment, repository]),
+    load,
+    JSON.stringify(sort),
+    deployId,
+  );
   const current = new Map(
     (deployments.data ?? []).map((deployment) => [
       deployment.repository,
@@ -122,7 +148,15 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
     }
   }, [pages.items, deployments.data]);
   const rows = pages.items ?? [];
-  const marked = currentDeploys(rows, current);
+  // Nothing is marked while a first page is on its way: after a new sort the rows of the old one
+  // stay until it arrives. Show more keeps the mark (its rows only add older ones in the newest
+  // first order). In another order than the newest first, a page still to be read may hold a
+  // repository's newest deploy: nothing is marked until every page is read.
+  const firstRead = pages.busy && !pages.hasMore;
+  const marked =
+    !firstRead && (sort === null || !pages.hasMore)
+      ? currentDeploys(rows, current)
+      : new Set<string>();
   const steadyMore = useSteadyMore(pages.hasMore, pages.busy);
   return (
     <div ref={area}>
@@ -173,12 +207,14 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
         scroll="jobs-deploys-scroll"
         head={
           <tr>
-            <th scope="col">{t("jobs.deploys.columns.result")}</th>
+            <SortHeader {...sorting.header("status")}>
+              {t("jobs.deploys.columns.result")}
+            </SortHeader>
             <th scope="col">{t("jobs.deploys.columns.kind")}</th>
             <th scope="col">{t("jobs.deploys.columns.commit")}</th>
             <th scope="col">{t("jobs.deploys.columns.repository")}</th>
             <th scope="col">{t("jobs.deploys.columns.who")}</th>
-            <th scope="col">{t("jobs.deploys.columns.when")}</th>
+            <SortHeader {...sorting.header("created")}>{t("jobs.deploys.columns.when")}</SortHeader>
             <th scope="col">
               <span className="visually-hidden">{t("jobs.deploys.columns.actions")}</span>
             </th>

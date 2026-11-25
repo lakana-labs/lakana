@@ -185,34 +185,6 @@
   min-width: 480px;
 }
 
-/* A column header that sorts: text that looks like the header, with the arrow of the sorted one. */
-.sort-head {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.sort-head[data-hovered] {
-  color: var(--color-text);
-  text-decoration: underline;
-}
-
-.sort-head[data-focus-visible] {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
-th[aria-sort] .sort-head {
-  color: var(--color-text);
-  font-weight: 500;
-}
-
 .health-word,
 .health-text {
   display: inline-flex;

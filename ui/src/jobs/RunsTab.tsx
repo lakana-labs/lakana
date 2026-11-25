@@ -15,6 +15,9 @@ import type { CursorPage } from "../api/manage";
 import { ViewList } from "../catalog/views/ViewList";
 import { ChoiceMenu } from "../shell/ChoiceMenu";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { Environments } from "./Environments";
 import { PERIOD_CHOICES } from "./period";
 import { RunRow } from "./RunRow";
@@ -28,6 +31,12 @@ interface RunsPage extends CursorPage<RunOut> {
   /** The starts that wait, newest request first; empty on a later page. */
   readonly waiting: readonly JobOut[];
 }
+
+/** The columns the Runs tab sorts by: the newest first unless the address says otherwise. */
+const RUN_SORTS: ListSortSpec<"status" | "name" | "created"> = {
+  fields: { status: "asc", name: "asc", created: "desc" },
+  natural: { field: "created", order: "desc" },
+};
 
 /** Properties of {@link JobField}. */
 interface JobFieldProps {
@@ -104,13 +113,18 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
   const filter = useRunsFilter(environments);
   const { choice } = filter;
   const jobInput = useRef<HTMLInputElement>(null);
-  const key = JSON.stringify(choice);
+  const sorting = useListSort(RUN_SORTS);
+  const sort = sorting.choice;
+  // A new sort starts again from the first page, as a new filter does; the filters stay.
+  const key = JSON.stringify([choice, sort]);
   const { environment, status, trigger, job, period } = choice;
   const names = JSON.stringify(environments.map((choice) => choice.name));
   const load = useCallback(
     async (cursor: string | null, options: RequestOptions): Promise<RunsPage> => {
       const filtered = toAllRunsFilter({ environment, status, trigger, job, period });
-      const runs = listAllRuns(filtered, cursor, { background: options.background === true });
+      const runs = listAllRuns({ ...filtered, sort }, cursor, {
+        background: options.background === true,
+      });
       if (cursor !== null) {
         return { ...(await runs), waiting: [] };
       }
@@ -121,7 +135,7 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
       ]);
       return { ...page, waiting };
     },
-    [environment, status, trigger, job, period, names],
+    [environment, status, trigger, job, period, names, sort],
   );
   const pages = useRunPages(key, load, 0);
   const rows = pages.items ?? [];
@@ -221,11 +235,15 @@ function RunsList({ environments }: RunsListProps): JSX.Element {
           regionRef={region}
           head={
             <tr>
-              <th scope="col">{t("jobs.runsTab.columns.state")}</th>
-              <th scope="col">{t("jobs.runsTab.columns.run")}</th>
+              <SortHeader {...sorting.header("status")}>
+                {t("jobs.runsTab.columns.state")}
+              </SortHeader>
+              <SortHeader {...sorting.header("name")}>{t("jobs.runsTab.columns.run")}</SortHeader>
               <th scope="col">{t("jobs.runsTab.columns.environment")}</th>
               <th scope="col">{t("jobs.runsTab.columns.startedBy")}</th>
-              <th scope="col">{t("jobs.runsTab.columns.created")}</th>
+              <SortHeader {...sorting.header("created")}>
+                {t("jobs.runsTab.columns.created")}
+              </SortHeader>
               <th scope="col" className="number">
                 {t("jobs.runsTab.columns.duration")}
               </th>

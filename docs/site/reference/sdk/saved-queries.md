@@ -13,7 +13,7 @@ A saved query is text and an environment. Running it is an ordinary query (`clie
 
 ### `client.saved_queries.list`
 
-Signature: `client.saved_queries.list(environment: str | None = None, *, limit: int = 50, cursor: str | None = None) -> SavedQueryPage`
+Signature: `client.saved_queries.list(environment: str | None = None, *, limit: int = 50, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> SavedQueryPage`
 
 List one page of the saved queries you see, by name.
 
@@ -23,7 +23,9 @@ You see your own, the shared ones (``everyone``) of an environment where you may
 |---|---|---|---|
 | `environment` | `str | None` | `None` | Only this environment; `None` for every environment. |
 | `limit` | `int` | `50` | Most items returned (1 to 200). |
-| `cursor` | `str | None` | `None` | A previous page's `next_cursor` of the same list. |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor` of the same list and sort. |
+| `sort` | `str | None` | `None` | What the list is sorted by: ``name`` (the default, in any letter case), ``updated`` or ``created``; every sort lists the same saved queries. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``asc`` for ``name``, ``desc`` for the times. |
 
 Returns: `SavedQueryPage`. The saved queries, and the cursor of the next page (`None` on the last).
 
@@ -31,17 +33,19 @@ Returns: `SavedQueryPage`. The saved queries, and the cursor of the next page (`
 |---|---|
 | `lakana.PermissionDenied` | With `environment`, if you may not query it and own no saved query there. |
 | `lakana.NotFound` | With `environment`, if it does not exist. |
-| `lakana.ValidationError` | If `limit` is outside 1 to 200, or `cursor` is not one the server issued for this list. |
+| `lakana.ValidationError` | If `limit` is outside 1 to 200, `sort` or `order` is unknown, or `cursor` is not one the server issued for this list in this sort. |
 
 ### `client.saved_queries.iter`
 
-Signature: `client.saved_queries.iter(environment: str | None = None) -> Iterator[SavedQuery]`
+Signature: `client.saved_queries.iter(environment: str | None = None, *, sort: str | None = None, order: str | None = None) -> Iterator[SavedQuery]`
 
 Yield every saved query you see, fetching pages as needed.
 
 | Name | Type | Default | Description |
 |---|---|---|---|
 | `environment` | `str | None` | `None` | Only this environment; `None` for every environment. |
+| `sort` | `str | None` | `None` | The sort, as `list` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list` takes it. |
 
 Yields: `SavedQuery`. Each saved query, once, in the order of `list`.
 

@@ -73,7 +73,7 @@ Answer fields: `RunOut`
 
 List runs
 
-Lists runs, newest first, one page at a time. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server did not issue.
+Lists runs, newest first, one page at a time, or in the order `sort` and `order` ask for: runs of one name or state come newest first. The cursor of the next page is in the `X-Next-Cursor` response header and is absent on the last page; send the same filters and sort with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment or repository does not exist and 422 for a `limit` below 1, an unknown status, trigger, `sort` or `order`, a `since` without a time zone, or a `cursor` this server did not issue for this list in this order.
 
 Parameters:
 
@@ -87,6 +87,8 @@ Parameters:
 | `since` | query | no | text (date-time) or null | Only runs created at or after this ISO 8601 time, with a time zone (`2026-10-18T00:00:00Z`). |
 | `limit` | query | no | whole number | Most runs returned (1 to 200). |
 | `cursor` | query | no | text or null | The `X-Next-Cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `name` (the job's, else the repository's, in any letter case) or `status`; runs of one name or state come newest first. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -493,7 +495,7 @@ Answers:
 
 List the runs of every environment you may read
 
-Without `environment`, lists the runs of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run names its `environment` and comes without tasks. Send `next_cursor` back as `cursor` with the same filters for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown status or trigger, a `since` without a time zone, or a `cursor` this server did not issue for this list.
+Without `environment`, lists the runs of every environment where you hold `READ_ENVIRONMENT`, newest first, in one list. An environment you may not read is left out, so this is never a 403 or a 404. With `environment`, it answers exactly what `GET /api/v1/environments/{env}/runs` answers, with its 403 and 404, in this body. Each run names its `environment` and comes without tasks. `sort` and `order` order the list as on the list of one environment. Send `next_cursor` back as `cursor` with the same filters and sort for the next page; a cursor of the list of one environment is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a `limit` outside 1 to 200, an unknown status, trigger, `sort` or `order`, a `since` without a time zone, or a `cursor` this server did not issue for this list in this order.
 
 Parameters:
 
@@ -507,6 +509,8 @@ Parameters:
 | `since` | query | no | text (date-time) or null | Narrow to runs created at or after this ISO 8601 time; a time zone is required. |
 | `limit` | query | no | whole number | Page size (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by, with the fields of the list of one environment. |
+| `order` | query | no | text or null | `asc` or `desc`, each field's way by default, as on the list of one environment. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:

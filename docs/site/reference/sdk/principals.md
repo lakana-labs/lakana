@@ -45,7 +45,7 @@ Returns: `Principal`. The principal.
 
 ### `client.principals.list`
 
-Signature: `client.principals.list(*, search: str | None = None, limit: int | None = None, cursor: str | None = None) -> list[Principal]`
+Signature: `client.principals.list(*, search: str | None = None, limit: int | None = None, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> list[Principal]`
 
 List principals, newest first.
 
@@ -55,13 +55,15 @@ The principals of one page; `list_page` also returns the cursor of the next one,
 |---|---|---|---|
 | `search` | `str | None` | `None` | Only principals whose name contains this text, in any letter case. |
 | `limit` | `int | None` | `None` | Most principals returned (1 to 200); `None` leaves it to the server (100). |
-| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` with every page. |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` and sort with every page. |
+| `sort` | `str | None` | `None` | The sort, as `list_page` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list_page` takes it. |
 
 Returns: `list of Principal`. Newest first.
 
 ### `client.principals.list_page`
 
-Signature: `client.principals.list_page(*, search: str | None = None, limit: int | None = None, cursor: str | None = None) -> PrincipalPage`
+Signature: `client.principals.list_page(*, search: str | None = None, limit: int | None = None, cursor: str | None = None, sort: str | None = None, order: str | None = None) -> PrincipalPage`
 
 List one page of principals, newest first, with the cursor of the next page.
 
@@ -69,13 +71,15 @@ List one page of principals, newest first, with the cursor of the next page.
 |---|---|---|---|
 | `search` | `str | None` | `None` | Only principals whose name contains this text, in any letter case. |
 | `limit` | `int | None` | `None` | Most principals returned (1 to 200); `None` leaves it to the server (100). |
-| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` with every page. |
+| `cursor` | `str | None` | `None` | A previous page's `next_cursor`. Send the same `search` and sort with every page. |
+| `sort` | `str | None` | `None` | What the principals are sorted by: ``created`` (the default), ``name`` (in any letter case) or ``status``, the active first, each by name. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``; by default ``desc`` for ``created``, ``asc`` for the others. |
 
 Returns: `PrincipalPage`. The principals, and the cursor for the next page (`None` on the last).
 
 ### `client.principals.iter`
 
-Signature: `client.principals.iter(*, search: str | None = None, page_size: int = 100) -> Iterator[Principal]`
+Signature: `client.principals.iter(*, search: str | None = None, page_size: int = 100, sort: str | None = None, order: str | None = None) -> Iterator[Principal]`
 
 Yield every matching principal, newest first, fetching pages as needed.
 
@@ -83,6 +87,8 @@ Yield every matching principal, newest first, fetching pages as needed.
 |---|---|---|---|
 | `search` | `str | None` | `None` | Only principals whose name contains this text, in any letter case. |
 | `page_size` | `int` | `100` | Principals per request (1 to 200). |
+| `sort` | `str | None` | `None` | The sort, as `list_page` takes it. |
+| `order` | `str | None` | `None` | ``asc`` or ``desc``, as `list_page` takes it. |
 
 Returns: `Iterator of Principal`. Each principal, once.
 

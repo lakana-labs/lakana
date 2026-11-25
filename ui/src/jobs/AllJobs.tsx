@@ -12,6 +12,9 @@ import type { JobOut, JobStartOut } from "../api/jobs";
 import { openFromCell } from "../catalog/cells";
 import { HOW_TO_URL } from "../shell/docs";
 import { EnvironmentLabel } from "../shell/EnvironmentLabel";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import { StatusLabel } from "../status/StatusLabel";
@@ -29,6 +32,12 @@ import { useJobsOf } from "./useJobsOf";
 
 /** The how-to that says how a job is declared and scheduled. */
 const SCHEDULE_HOW_TO = `${HOW_TO_URL}run-a-job-on-a-schedule/`;
+
+/** The columns the jobs sort by: by name unless the address says otherwise. */
+const JOB_SORTS: ListSortSpec<"name" | "last_run" | "next_run"> = {
+  fields: { name: "asc", last_run: "desc", next_run: "asc" },
+  natural: { field: "name", order: "asc" },
+};
 
 /** Properties of {@link AllJobs}. */
 export interface AllJobsProps {
@@ -76,7 +85,7 @@ function Schedule({ job }: ScheduleProps): JSX.Element {
 
 /**
  * Renders the section: the jobs of each environment, at most four read at once, every 30 s while
- * the tab is visible, sorted by name, repository and environment and narrowed by the search. Each
+ * the tab is visible, sorted by name (or the column whose header was pressed) and narrowed by the search. Each
  * row opens the job's page from its name and shows its repository, environment, schedule, last
  * run (glyph and word, or "never") and next run ("Waiting" while a start waits, with what it
  * waits for in the shared tooltip), with Run and Pause or Resume when the server
@@ -100,7 +109,8 @@ export function AllJobs({
 }: AllJobsProps): JSX.Element {
   const { t } = useTranslation();
   const when = useWhen();
-  const { rows, failed, poll } = useJobsOf(environments, reloadKey);
+  const sorting = useListSort(JOB_SORTS);
+  const { rows, failed, poll } = useJobsOf(environments, reloadKey, sorting.choice);
   const { busy } = poll;
   useEffect(() => {
     onBusy?.(busy);
@@ -171,12 +181,12 @@ export function AllJobs({
       ))}
       head={
         <>
-          <th scope="col">{t("jobs.list.columns.name")}</th>
+          <SortHeader {...sorting.header("name")}>{t("jobs.list.columns.name")}</SortHeader>
           <th scope="col">{t("jobs.list.columns.repository")}</th>
           <th scope="col">{t("jobs.list.columns.environment")}</th>
           <th scope="col">{t("jobs.list.columns.schedule")}</th>
-          <th scope="col">{t("jobs.list.columns.lastRun")}</th>
-          <th scope="col">{t("jobs.list.columns.nextRun")}</th>
+          <SortHeader {...sorting.header("last_run")}>{t("jobs.list.columns.lastRun")}</SortHeader>
+          <SortHeader {...sorting.header("next_run")}>{t("jobs.list.columns.nextRun")}</SortHeader>
         </>
       }
     >

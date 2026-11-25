@@ -11,7 +11,9 @@ import { Link } from "react-router";
 import { listPeople, PEOPLE_LIMIT } from "../api";
 import { Avatar } from "../profile/Avatar";
 import { countWords, ListToolbar } from "../shell/ListToolbar";
-import { ListHead } from "../shell/ListHead";
+import type { ListSortSpec } from "../shell/listSort";
+import { SortHeader } from "../shell/SortHeader";
+import { useListSort } from "../shell/useListSort";
 import { Loaded } from "../shell/Loaded";
 import { useResource } from "../shell/useResource";
 import { personPath } from "./personPath";
@@ -19,13 +21,20 @@ import { VisibleText } from "../shell/VisibleText";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
 
+/** The columns the people sort by; their own order, the newest first, is no column. */
+const PEOPLE_SORTS: ListSortSpec<"name" | "status"> = {
+  fields: { name: "asc", status: "asc" },
+  natural: null,
+};
+
 // How long typing must pause before the list is read again.
 const SEARCH_PAUSE_MS = 250;
 
 /**
  * Renders the search field and the list; every row opens its person and shows their picture or
  * initials. The list is read again once typing pauses, and says when it shows only the first
- * {@link PEOPLE_LIMIT}.
+ * {@link PEOPLE_LIMIT}. Name and State sort it on the server (the active first); the order stays
+ * in the address.
  *
  * @returns The place.
  */
@@ -41,7 +50,9 @@ export function PeoplePage(): JSX.Element {
       clearTimeout(timer);
     };
   }, [words]);
-  const load = useCallback(() => listPeople(query), [query]);
+  const sorting = useListSort(PEOPLE_SORTS);
+  const sort = sorting.choice;
+  const load = useCallback(() => listPeople(query, sort), [query, sort]);
   const people = useResource(load);
   return (
     <SettingsFrame title={t("settings.places.people")}>
@@ -66,7 +77,15 @@ export function PeoplePage(): JSX.Element {
                 <p className="page-purpose">{t("access.people.capped", { count: PEOPLE_LIMIT })}</p>
               )}
               <table className="list">
-                <ListHead columns={[t("list.name"), t("list.state")]} hidden={[t("list.open")]} />
+                <thead>
+                  <tr>
+                    <SortHeader {...sorting.header("name")}>{t("list.name")}</SortHeader>
+                    <SortHeader {...sorting.header("status")}>{t("list.state")}</SortHeader>
+                    <th scope="col">
+                      <span className="visually-hidden">{t("list.open")}</span>
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
                   {found.map((person) => (
                     <tr key={person.name}>

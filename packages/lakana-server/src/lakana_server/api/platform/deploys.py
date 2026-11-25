@@ -15,7 +15,7 @@ from lakana_core.auth import AuthorizationService, PrincipalRef
 from lakana_core.models import DeployKind
 from lakana_core.projects.deploys import DeploymentView, DeployRunView, DeployService
 from lakana_core.runs.operator import deploy_actions, operator_rights_each
-from lakana_server.api.platform.listing import set_next_cursor
+from lakana_server.api.platform.listing import CursorParam, OrderParam, SortParam, set_next_cursor
 from lakana_server.api.platform.schemas import (
     DeployAccepted,
     DeployCreate,
@@ -160,18 +160,21 @@ def list_deploys(
     response: Response,
     repository: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
     authz: AuthorizationService = Depends(get_grant_authorization),
 ) -> list[DeployOut]:
     """List an environment's deploys.
 
-    Lists the deploy history, newest first, one page at a time. The cursor of the next page
-    is in the `X-Next-Cursor` response header and is absent on the last page; send the same
-    `repository` with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the environment
-    or repository does not exist and 422 for a `limit` below 1 or a `cursor` this server did
-    not issue.
+    Lists the deploy history, newest first, one page at a time, or in the order `sort` and
+    `order` ask for: deploys of one state come newest first. The cursor of the next page is in
+    the `X-Next-Cursor` response header and is absent on the last page; send the same
+    `repository` and sort with every page. Needs `READ_ENVIRONMENT`. Answers 404 when the
+    environment or repository does not exist and 422 for a `limit` below 1, an unknown `sort`
+    or `order`, or a `cursor` this server did not issue for this list in this order.
 
     Parameters
     ----------
@@ -185,6 +188,12 @@ def list_deploys(
         Most deploys returned (1 to 200).
     cursor
         The `X-Next-Cursor` of the previous page.
+    sort
+        What the list is sorted by: `created` (the default) or `status`; deploys of one state
+        come newest first.
+    order
+        `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for
+        `status`.
     principal
         The authenticated caller.
     service
@@ -198,7 +207,7 @@ def list_deploys(
         Newest first.
     """
     views, next_cursor = service.history_page(
-        principal, env, repository=repository, limit=limit, cursor=cursor
+        principal, env, repository=repository, limit=limit, cursor=cursor, sort=sort, order=order
     )
     set_next_cursor(response, next_cursor)
     words = deploy_words(authz, principal, [env])[env]
@@ -516,7 +525,9 @@ def list_all_deploys(
     environment: str | None = Query(default=None, max_length=255),
     repository: str | None = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=200),
-    cursor: str | None = Query(default=None, max_length=512),
+    cursor: CursorParam = None,
+    sort: SortParam = None,
+    order: OrderParam = None,
     principal: PrincipalRef = Depends(get_principal),
     service: DeployService = Depends(get_deploy_service),
     authz: AuthorizationService = Depends(get_grant_authorization),
@@ -529,10 +540,11 @@ def list_all_deploys(
     out, so this is never a 403 or a 404. With `environment`, it answers exactly what
     `GET /api/v1/environments/{env}/deploys` answers, with its 403 and 404, in this body. Each
     deploy names its `environment`; `jobs` is `null` here, read one deploy for it. Send
-    `next_cursor` back as `cursor` with the same `repository` for the next page; a cursor of
-    the list of one environment is refused with 422 here. Answers 404 when `repository` does
-    not exist and 422 for a `limit` outside 1 to 200 or a `cursor` this server did not issue
-    for this list.
+    `next_cursor` back as `cursor` with the same `repository` and sort for the next page;
+    `sort` and `order` order the list as on the list of one environment, and a cursor of that
+    list is refused with 422 here. Answers 404 when `repository` does not exist and 422 for a
+    `limit` outside 1 to 200, an unknown `sort` or `order`, or a `cursor` this server did not
+    issue for this list in this order.
 
     Parameters
     ----------
@@ -544,6 +556,10 @@ def list_all_deploys(
         Page size (1 to 200).
     cursor
         The `next_cursor` of the previous page.
+    sort
+        What the list is sorted by, with the fields of the list of one environment.
+    order
+        `asc` or `desc`, each field's way by default, as on the list of one environment.
     principal
         The authenticated caller.
     service
@@ -557,7 +573,13 @@ def list_all_deploys(
         The deploys and the cursor of the next page (`null` on the last).
     """
     views, next_cursor = service.list_all_deploys_page(
-        principal, environment=environment, repository=repository, limit=limit, cursor=cursor
+        principal,
+        environment=environment,
+        repository=repository,
+        limit=limit,
+        cursor=cursor,
+        sort=sort,
+        order=order,
     )
     words = deploy_words(authz, principal, [view.environment for view in views])
     return DeployPageOut(

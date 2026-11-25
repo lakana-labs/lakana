@@ -64,7 +64,7 @@ Answer fields: `ConnectionOut`
 
 List the connections of an environment
 
-Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. Answers 404 when the environment does not exist and 422 for a cursor this list did not issue.
+Lists one page of connections, newest first, with the assets that declare each, its last test and what you may do with it (`actions`). Needs `READ_ENVIRONMENT` in the environment; a task token is refused with 403. Every reader gets the last test's `state`, `outcome` and `finished_at`; its `id`, `created_at`, `message` and `requested_by` only a holder of `MANAGE_CONNECTION` in the environment, and for anyone else those keys are absent. `sort` and `order` order the list by another field; one state is ordered by name. Answers 404 when the environment does not exist and 422 for an unknown `sort` or `order` or a cursor this list did not issue in this order.
 
 Parameters:
 
@@ -73,6 +73,8 @@ Parameters:
 | `environment_name` | path | yes | text | The environment. |
 | `limit` | query | no | whole number | Most connections returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by: `created` (the default), `name` (in any letter case) or `status`, the last test: failed first, then queued or running, then passed, never tested last; one state by name. |
+| `order` | query | no | text or null | `asc` or `desc`; by default `desc` for `created` (the newest first), `asc` for the others. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
@@ -290,7 +292,7 @@ Answer fields: `ConnectionTestOut`
 
 List the connections of every environment you may read
 
-Without `environment`, lists one page of the connections of every environment where you hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An environment where you do not hold it is left out, so this is never a 404, and never a 403 but for a task token, which is refused as every connection read is. With `environment`, it answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers, with its 403 and 404. Each connection carries its last test and what you may do with it (`actions`), as in that list: the last test's `id`, `created_at`, `message` and `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. Send `next_cursor` back as `cursor` for the next page; a cursor of the list of one environment is refused with 422 here.
+Without `environment`, lists one page of the connections of every environment where you hold `READ_ENVIRONMENT`, newest first over all of them; each names its `environment`. An environment where you do not hold it is left out, so this is never a 404, and never a 403 but for a task token, which is refused as every connection read is. With `environment`, it answers exactly what `GET /api/v1/environments/{environment_name}/connections` answers, with its 403 and 404. Each connection carries its last test and what you may do with it (`actions`), as in that list: the last test's `id`, `created_at`, `message` and `requested_by` only where you hold `MANAGE_CONNECTION`, and absent elsewhere. `sort` and `order` order the list as on the list of one environment. Send `next_cursor` back as `cursor` with the same sort for the next page; a cursor of the list of one environment or of another order is refused with 422 here.
 
 Parameters:
 
@@ -299,6 +301,8 @@ Parameters:
 | `environment` | query | no | text or null | Only this environment. |
 | `limit` | query | no | whole number | Most connections returned (1 to 200). |
 | `cursor` | query | no | text or null | The `next_cursor` of the previous page. |
+| `sort` | query | no | text or null | What the list is sorted by, with the fields of the list of one environment. |
+| `order` | query | no | text or null | `asc` or `desc`, each field's way by default, as on the list of one environment. |
 | `authorization` | header | no | text or null | The credential: `Bearer <token>` with a personal access token, task token or CI token. Without it, the web interface's session cookie counts instead. |
 
 Answers:
