@@ -134,6 +134,7 @@ def test_list_sends_every_filter_and_always_sends_the_sort() -> None:
         environment="dev",
         namespace="gold",
         q="x",
+        name="ord",
         model_kind="fact",
         order="asc",
         cursor="c",
@@ -143,6 +144,7 @@ def test_list_sends_every_filter_and_always_sends_the_sort() -> None:
         "environment": "dev",
         "namespace": "gold",
         "q": "x",
+        "name": "ord",
         "model_kind": "fact",
         "sort": "name",
         "order": "asc",
@@ -165,8 +167,9 @@ def test_iter_follows_next_cursor_until_the_last_page() -> None:
         {"items": [_item("b")], "next_cursor": None, "capped": False},
     ]
     catalog = Catalog(_transport(pages, sent))
-    assert [i.name for i in catalog.iter(environment="dev")] == ["a", "b"]
+    assert [i.name for i in catalog.iter(environment="dev", name="ord")] == ["a", "b"]
     assert [r.url.params.get("cursor") for r in sent] == [None, "c1"]
+    assert [r.url.params.get("name") for r in sent] == ["ord", "ord"]
 
 
 def test_tree_reads_environments_and_namespaces() -> None:

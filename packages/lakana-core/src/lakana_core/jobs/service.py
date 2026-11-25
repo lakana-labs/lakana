@@ -258,6 +258,14 @@ class JobView:
         What started it.
     last_run_at
         When it was created.
+    waiting_since
+        For a waiting start (``waiting`` or ``waiting to start``), when it was first requested;
+        `None` otherwise, or when the stored time cannot be read. Who asked is never shown.
+    waiting_trigger
+        For a waiting start, what first asked for it (``schedule``, ``api``, ``manual``,
+        ``deploy``), the request `waiting_since` names; `None` otherwise, and for a start stored
+        before it was recorded that stands for several requests. The run that begins can run as
+        another trigger: a schedule that merges into a start by hand makes it a scheduled run.
     on_deploy
         Whether the job starts after each deploy that changes the project version here.
     notify
@@ -287,6 +295,8 @@ class JobView:
     last_run_status: str | None
     last_run_trigger: str | None
     last_run_at: datetime | None
+    waiting_since: datetime | None = None
+    waiting_trigger: str | None = None
     on_deploy: bool = False
     notify: JobNotify | None = None
     commit_sha: str = ""
@@ -411,6 +421,46 @@ def _requested_at(pending: Mapping[str, Any]) -> datetime:
         park or a list into an error.
     """
     return _readable(pending.get("requested_at")) or datetime.now(UTC)
+
+
+def _first_trigger(pending: Mapping[str, Any]) -> object:
+    """Read the trigger of the first request a stored waiting start stands for.
+
+    Parameters
+    ----------
+    pending
+        The stored ``pending_start``.
+
+    Returns
+    -------
+    object
+        ``requested_trigger``; for a start stored before it existed, ``trigger`` when the start
+        stands for one request only, and `None` when several merged (which came first is lost).
+    """
+    if "requested_trigger" in pending:
+        return pending["requested_trigger"]
+    try:
+        merged = int(pending.get("merged", 1))
+    except (TypeError, ValueError):
+        return None
+    return pending.get("trigger") if merged == 1 else None
+
+
+def _known_trigger(value: object) -> str | None:
+    """Read the trigger of a stored waiting start for a view.
+
+    Parameters
+    ----------
+    value
+        The stored trigger.
+
+    Returns
+    -------
+    str or None
+        One of the `RunTrigger` values, or `None` for anything else, so that a damaged row
+        cannot turn a list into an error.
+    """
+    return value if isinstance(value, str) and value in {t.value for t in RunTrigger} else None
 
 
 def _readable(text: object) -> datetime | None:
@@ -736,6 +786,7 @@ class JobService:
         fresh: dict[str, Any] = {
             "trigger": trigger.value,
             "requested_at": now.isoformat(),
+            "requested_trigger": trigger.value,
             "requested_by": requested_by,
             "scheduled_for": scheduled_for.isoformat() if scheduled_for is not None else None,
             "missed": missed,
@@ -763,7 +814,14 @@ class JobService:
                 replaced = {"trigger": old.get("trigger"), "requested_by": old.get("requested_by")}
             # The wait counts from the first request: a job that is asked for often must not go
             # to the back of the queue each time, or a slower job would always go before it.
-            pending = {**pending, "requested_at": old.get("requested_at", fresh["requested_at"])}
+            # The first request's trigger goes with its time, so the view never pairs the time of
+            # a start by hand with the trigger of a schedule that merged into it.
+            first = (
+                {"requested_at": old["requested_at"], "requested_trigger": _first_trigger(old)}
+                if "requested_at" in old
+                else {"requested_at": fresh["requested_at"], "requested_trigger": trigger.value}
+            )
+            pending = {**pending, **first}
         row.pending_start = pending
         actor = p.id if p is not None else self._bound_principal(env_id, repo_id)
         AuditService(self._session).record(
@@ -1472,6 +1530,10 @@ class JobService:
             last_run_status=last[1].value if last else None,
             last_run_trigger=last[2].value if last and last[2] is not None else None,
             last_run_at=last[3] if last else None,
+            waiting_since=_readable(pending.get("requested_at")) if pending is not None else None,
+            waiting_trigger=_known_trigger(_first_trigger(pending))
+            if pending is not None
+            else None,
             on_deploy=job_on_deploy(entry),
             notify=job_notify({"jobs": {job: entry}}, job),
             commit_sha=version.commit_sha,

@@ -10,6 +10,7 @@ import {
   STALE_SESSION,
   STEP_UP_ROUTES,
 } from "../test/access";
+import { item } from "../test/catalog";
 import { held } from "../test/pending";
 import { renderShell } from "../test/render";
 import type { FakeRoute } from "../test/server";
@@ -35,6 +36,7 @@ function policyRoutes(more: Record<string, FakeRoute> = {}): Record<string, Fake
     },
     "GET /api/v1/row-filters": { status: 200, body: [] },
     "GET /api/v1/column-masks": { status: 200, body: [] },
+    "GET /api/v1/tables": { status: 200, body: { items: [], next_cursor: null, capped: false } },
     ...more,
   };
 }
@@ -79,7 +81,11 @@ async function fillFilter(shell: Opened, expression = "region = 'EU'"): Promise<
   await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "analysts");
   await chooseEnvironment(shell, "dev");
   await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
-  await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "station_ranking");
+  // Escape closes the list of suggestions and leaves the dialog open.
+  await user.type(
+    within(dialog).getByRole("combobox", { name: "Table" }),
+    "station_ranking{Escape}",
+  );
   await user.click(within(dialog).getByRole("textbox", { name: "Expression" }));
   await user.paste(expression);
 }
@@ -184,7 +190,101 @@ describe("AddPolicyDialog", () => {
     expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("maria");
     expect(within(dialog).getByRole("button", { name: /Environment$/ })).toHaveTextContent("dev");
     expect(within(dialog).getByRole("textbox", { name: "Namespace" })).toHaveValue("gold");
-    expect(within(dialog).getByRole("textbox", { name: "Table" })).toHaveValue("station_ranking");
+    expect(within(dialog).getByRole("combobox", { name: "Table" })).toHaveValue("station_ranking");
+  });
+
+  it("suggests the tables of the chosen environment and fills in the namespace of the chosen one", async () => {
+    const shell = await openDialog(
+      PATH,
+      policyRoutes({
+        "GET /api/v1/tables": {
+          status: 200,
+          body: {
+            items: [
+              item({ environment: "dev", namespace: "gold", name: "station_ranking" }),
+              item({ environment: "dev", namespace: "silver.weather", name: "station_daily" }),
+            ],
+            next_cursor: null,
+            capped: false,
+          },
+        },
+      }),
+    );
+    const { user, dialog, server } = shell;
+    const table = within(dialog).getByRole("combobox", { name: "Table" });
+    expect(table).toHaveAccessibleDescription("Choose the environment first to see its tables.");
+    await user.type(table, "sta");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(server.sent.some((request) => request.path.startsWith("/api/v1/tables"))).toBe(false);
+    await user.clear(table);
+
+    await chooseEnvironment(shell, "dev");
+    await user.type(table, "station");
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      "station_rankinggold",
+      "station_dailysilver.weather",
+    ]);
+    await user.click(options[1] as HTMLElement);
+
+    expect(table).toHaveValue("station_daily");
+    expect(within(dialog).getByRole("textbox", { name: "Namespace" })).toHaveValue(
+      "silver.weather",
+    );
+    expect(
+      server.sent.filter((request) => request.path.startsWith("/api/v1/tables")).map((r) => r.path),
+    ).toEqual(["/api/v1/tables?environment=dev&sort=name&limit=20&name=station"]);
+    expect(screen.getByRole("dialog", { name: "Add filter or mask" })).toBeInTheDocument();
+  });
+
+  it("offers no table of the environment chosen before", async () => {
+    const answer = held();
+    const shell = await openDialog(
+      PATH,
+      policyRoutes({
+        "GET /api/v1/tables": (request) =>
+          request.path.includes("environment=dev")
+            ? {
+                status: 200,
+                body: {
+                  items: [item({ environment: "dev", namespace: "gold", name: "station_ranking" })],
+                  next_cursor: null,
+                  capped: false,
+                },
+              }
+            : answer.route(),
+      }),
+    );
+    const { user, dialog } = shell;
+    const table = within(dialog).getByRole("combobox", { name: "Table" });
+    await chooseEnvironment(shell, "dev");
+    await user.type(table, "station");
+    expect(await screen.findByRole("option")).toHaveTextContent("station_ranking");
+    await user.keyboard("{Escape}");
+
+    await chooseEnvironment(shell, "prod");
+    await user.click(table);
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Looking for names…");
+    });
+    expect(screen.queryAllByRole("option")).toEqual([]);
+  });
+
+  it("says when no table of that name may be read there", async () => {
+    const shell = await openDialog();
+    const { user, dialog } = shell;
+    await chooseEnvironment(shell, "prod");
+
+    await user.type(within(dialog).getByRole("combobox", { name: "Table" }), "secret_salaries");
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "No table named “secret_salaries” that you may read in prod.",
+      );
+    });
+    expect(screen.queryAllByRole("option")).toEqual([]);
   });
 
   it("asks for every field", async () => {
@@ -199,7 +299,7 @@ describe("AddPolicyDialog", () => {
     await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
     expect(create).toBeDisabled();
     expect(create).toHaveAccessibleDescription("Name the table.");
-    await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "t");
+    await user.type(within(dialog).getByRole("combobox", { name: "Table" }), "t{Escape}");
     expect(create).toHaveAccessibleDescription("Write the expression.");
     await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "{Enter}");
 
@@ -219,7 +319,7 @@ describe("AddPolicyDialog", () => {
     expect(dialog).toHaveTextContent("An access file manages prod: add this in team.yaml instead.");
     await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
     await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
-    await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "t{Enter}");
+    await user.type(within(dialog).getByRole("combobox", { name: "Table" }), "t{Enter}");
     expect(shell.server.sent.some((request) => request.method === "POST")).toBe(false);
   });
 
@@ -245,7 +345,7 @@ describe("AddPolicyDialog", () => {
       expect(alert).toHaveFocus();
     });
     expect(within(dialog).getByRole("textbox", { name: "Expression" })).toHaveValue(long);
-    expect(within(dialog).getByRole("textbox", { name: "Table" })).toHaveValue("station_ranking");
+    expect(within(dialog).getByRole("combobox", { name: "Table" })).toHaveValue("station_ranking");
   });
 
   it("a cancelled touch creates nothing", async () => {
@@ -296,7 +396,7 @@ describe("AddPolicyDialog", () => {
     const { user, dialog } = shell;
 
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
-    await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "{Enter}");
+    await user.type(within(dialog).getByRole("combobox", { name: "Table" }), "{Enter}");
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog", { name: "Add filter or mask" })).toBeInTheDocument();
     expect(
@@ -323,7 +423,7 @@ describe("AddPolicyDialog", () => {
     const environment = within(dialog).getByRole("textbox", { name: "Environment" });
     await user.type(environment, " dev ");
     await user.type(within(dialog).getByRole("textbox", { name: "Namespace" }), "gold");
-    await user.type(within(dialog).getByRole("textbox", { name: "Table" }), "t");
+    await user.type(within(dialog).getByRole("combobox", { name: "Table" }), "t");
     await user.type(within(dialog).getByRole("textbox", { name: "Expression" }), "TRUE");
     await user.click(within(dialog).getByRole("button", { name: "Create" }));
 

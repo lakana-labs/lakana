@@ -224,5 +224,13 @@
       "cancelName": "Cancel the run of {{name}}",
       "resumeRunName": "Resume the run of {{name}}"
     }
+  },
+  "waiting": {
+    "label": "Waiting",
+    "since": "Requested {{when}} · {{trigger}}",
+    "sinceAt": "Requested {{when}}",
+    "forRun": "waits for run {{id}}",
+    "soon": "starts within seconds",
+    "unknown": "Unknown"
   }
 }

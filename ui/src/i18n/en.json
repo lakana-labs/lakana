@@ -500,6 +500,18 @@
     "open": "Open",
     "refresh": "Refresh"
   },
+  "picker": {
+    "suggestions": "Suggestions",
+    "searching": "Looking for names…",
+    "nothing": "Nothing to suggest yet. Type part of a name.",
+    "more_one": "The first {{count}} match. Type more of the name to narrow it down.",
+    "more_other": "The first {{count}} matches. Type more of the name to narrow them down.",
+    "failed": "Suggestions could not be read: {{reason}} You can still type the whole name.",
+    "marked": "With its hidden characters shown:",
+    "noPrincipal": "No principal named “{{name}}”. Check the spelling.",
+    "noGroup": "No group named “{{name}}”. Check the spelling.",
+    "noTable": "No table named “{{name}}” that you may read in {{environment}}."
+  },
   "dialog": {
     "cancel": "Cancel",
     "checkingProtection": "Checking whether the environment is protected…",

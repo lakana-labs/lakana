@@ -105,6 +105,8 @@ def test_the_list_pages_with_next_cursor_and_capped(client: TestClient) -> None:
         ({"environment": "a\x00b"}, "environment"),
         ({"namespace": "a\x00b"}, "namespace"),
         ({"q": "a\x00b"}, "`q`"),
+        ({"name": "a\x00b"}, "`name`"),
+        ({"name": " "}, "The name to look for must be between 1 and 255 characters"),
     ],
 )
 def test_a_bad_parameter_is_422_naming_the_next_step(
@@ -291,3 +293,20 @@ def test_the_list_items_say_which_file_owns_each_and_what_the_caller_may_do(
     assert items["clean"]["actions"] == ["drop", "rebuild", "maintain", "set_retention"]
     assert items["free"]["defined_by"] is None
     assert items["free"]["actions"] == ["drop", "maintain", "set_retention"]
+
+
+def test_name_finds_tables_by_their_own_name_alone(client: TestClient) -> None:
+    _table(client, "daily_orders")
+    _table(client, "stations")
+    found = client.get("/api/v1/tables", params={"name": "ORDERS"}, headers=AUTH_HEADER)
+    assert [i["name"] for i in found.json()["items"]] == ["daily_orders"]
+    # `gold` is the namespace of both, never a table's name
+    nothing = client.get("/api/v1/tables", params={"name": "gold"}, headers=AUTH_HEADER)
+    assert nothing.json()["items"] == []
+
+
+def test_name_gives_no_hint_of_a_table_the_caller_may_not_read(client: TestClient) -> None:
+    _table(client, "daily_orders")
+    rita = _person(client, "rita")
+    r = client.get("/api/v1/tables", params={"name": "daily_orders"}, headers=rita)
+    assert r.status_code == 200 and r.json() == {"items": [], "next_cursor": None, "capped": False}

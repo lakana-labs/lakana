@@ -13,6 +13,7 @@ import { HostLink } from "../catalog/table/SourceButton";
 import { useWhen } from "../shell/useWhen";
 import { VisibleText } from "../shell/VisibleText";
 import "./jobStrings";
+import { isWaiting, WaitingLabel } from "./JobWaiting";
 import { deploysPath, jobRunPath } from "./paths";
 import { describeSchedule } from "./schedule";
 
@@ -126,6 +127,7 @@ export interface JobFactsProps {
  */
 export function JobFacts({ environment, job }: JobFactsProps): JSX.Element {
   const { t } = useTranslation();
+  const when = useWhen();
   const heading = useId();
   const flags = [
     job.upstream ? ` ${t("jobs.facts.upstream")}` : "",
@@ -138,6 +140,11 @@ export function JobFacts({ environment, job }: JobFactsProps): JSX.Element {
       </h2>
       {job.waiting_for !== null && (
         <p className="jobs-waiting">
+          {isWaiting(job) && (
+            <>
+              <WaitingLabel job={job} />{" "}
+            </>
+          )}
           <VisibleText text={job.waiting_for.message} />
           {job.waits_for_run_id !== null && (
             <>
@@ -145,6 +152,17 @@ export function JobFacts({ environment, job }: JobFactsProps): JSX.Element {
               <Link to={jobRunPath(environment, job.waits_for_run_id)}>
                 {t("jobs.note.waitsFor")}
               </Link>
+            </>
+          )}
+          {isWaiting(job) && job.waiting_since !== null && (
+            <>
+              {" · "}
+              {job.waiting_trigger === null
+                ? t("jobs.waiting.sinceAt", { when: when(job.waiting_since) })
+                : t("jobs.waiting.since", {
+                    when: when(job.waiting_since),
+                    trigger: t(`jobs.trigger.${job.waiting_trigger}`),
+                  })}
             </>
           )}
         </p>

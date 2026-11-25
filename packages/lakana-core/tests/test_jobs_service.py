@@ -1507,3 +1507,164 @@ def test_get_shows_one_job_and_says_what_is_wrong_otherwise(
     monkeypatch.setattr(JobService, "list", lambda *_args: [])
     with pytest.raises(NotFoundError, match="No job is deployed there"):
         service.get(principal, "dev", "daily")
+
+
+def test_a_waiting_job_says_since_when_and_how_it_was_first_asked_for(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A later request merges into the waiting start and keeps its first time and trigger (#786)."""
+    service = _service(session)
+    first = service.start(principal, "dev", "analytics", "manual").run
+    assert first is not None
+    asked = datetime(2026, 10, 15, 3, 0, tzinfo=UTC)
+    _wait_with(session, "daily", trigger="api", requested_at=asked.isoformat())
+    service.start(principal, "dev", "analytics", "daily")
+    daily = service.get(principal, "dev", "daily")
+    assert (daily.state, daily.waits_for_run_id) == ("waiting", first.id)
+    assert (daily.waiting_since, daily.waiting_trigger) == (asked, "api")
+    row = _row(session, "daily").pending_start
+    assert row is not None and row["merged"] == 2 and row["trigger"] == "manual"
+
+
+def test_several_jobs_wait_for_one_run_each_with_its_own_request(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A run of no job holds the project; both jobs wait for it, each with its own request."""
+    runs = RunService(session, AllowAllAuthorization(), caps=RunCaps())
+    blocker = runs.start(principal, "dev", "analytics", Selection())
+    service = _service(session)
+    assert service.start(principal, "dev", "analytics", "daily").waiting is not None
+    _wait_with(
+        session,
+        "manual",
+        trigger="api",
+        requested_at=datetime(2026, 10, 15, 4, 0, tzinfo=UTC).isoformat(),
+    )
+    views = {v.name: v for v in service.list(principal, "dev")}
+    assert {name: (v.state, v.waits_for_run_id) for name, v in views.items()} == {
+        "daily": ("waiting", blocker.id),
+        "manual": ("waiting", blocker.id),
+    }
+    assert views["daily"].waiting_trigger == "manual"
+    assert views["daily"].waiting_since is not None
+    assert (views["manual"].waiting_since, views["manual"].waiting_trigger) == (
+        datetime(2026, 10, 15, 4, 0, tzinfo=UTC),
+        "api",
+    )
+
+
+def test_a_schedule_that_merges_into_a_start_by_hand_keeps_the_first_request(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """The run that begins is the scheduled one, but the start was first asked for by hand.
+
+    The view names the first request: its time and its trigger, never the schedule's trigger
+    with the time of the start by hand.
+    """
+    account = _account(session)
+    _bind(session, account.id)
+    service = _service(session)
+    service.start(principal, "dev", "analytics", "manual")
+    service.start(principal, "dev", "analytics", "daily")
+    asked = _row(session, "daily").pending_start
+    assert asked is not None
+    at = datetime(2026, 10, 15, 3, 0, tzinfo=UTC)
+    service.start(None, "dev", "analytics", "daily", trigger=RunTrigger.SCHEDULE, scheduled_for=at)
+    daily = service.get(principal, "dev", "daily")
+    assert daily.waiting_since == datetime.fromisoformat(asked["requested_at"])
+    assert daily.waiting_trigger == "manual"
+    row = _row(session, "daily").pending_start
+    assert row is not None and row["trigger"] == "schedule"
+
+
+def test_an_older_merged_start_without_its_first_trigger_shows_none(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A start stored before #786 that merged several requests cannot tell which came first."""
+    _wait_with(session, "daily", trigger="schedule", merged=2)
+    daily = _service(session).get(principal, "dev", "daily")
+    assert daily.waiting_since is not None and daily.waiting_trigger is None
+    _wait_with(session, "daily", trigger="schedule", merged=1)
+    assert _service(session).get(principal, "dev", "daily").waiting_trigger == "schedule"
+    # A count that cannot be read says nothing of how many merged, so nothing of which came first.
+    _wait_with(session, "daily", trigger="schedule", merged="several")
+    damaged = _service(session).get(principal, "dev", "daily")
+    assert (damaged.state, damaged.waiting_trigger) == ("waiting to start", None)
+
+
+def test_a_waiting_job_keeps_its_request_once_its_run_has_ended(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """After the blocking run ends the start still waits for the scheduler, with its request."""
+    _wait_with(session, "daily", trigger="schedule", requested_by=None)
+    daily = _service(session).get(principal, "dev", "daily")
+    assert (daily.state, daily.waits_for_run_id) == ("waiting to start", None)
+    assert daily.waiting_since == datetime(2026, 10, 15, 3, 0, tzinfo=UTC)
+    assert daily.waiting_trigger == "schedule"
+
+
+def test_a_job_that_never_ran_nor_waits_has_no_request(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A job never run shows no last run and no waiting start."""
+    manual = _service(session).get(principal, "dev", "manual")
+    assert (manual.last_run_id, manual.last_run_status) == (None, None)
+    assert (manual.waiting_since, manual.waiting_trigger, manual.waits_for_run_id) == (
+        None,
+        None,
+        None,
+    )
+
+
+def test_a_damaged_waiting_start_shows_no_time_rather_than_failing(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A stored start whose time or trigger cannot be read still lists the job, without them."""
+    _wait_with(session, "daily", requested_at="not a time", trigger=["manual"])
+    daily = _service(session).get(principal, "dev", "daily")
+    assert daily.state == "waiting to start"
+    assert (daily.waiting_since, daily.waiting_trigger) == (None, None)
+
+
+def test_a_reader_sees_the_waiting_start_but_not_who_asked(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """READ_ENVIRONMENT alone shows the start's time and trigger, never the requester."""
+    _wait_with(session, "daily", requested_by=str(principal.id))
+    reader = _service(session, ActionAllowList(Action.READ_ENVIRONMENT))
+    daily = reader.get(principal, "dev", "daily")
+    assert daily.waiting_trigger == "manual"
+    fields = {f.name for f in dataclasses.fields(daily)}
+    assert not {"requested_by", "waiting_requested_by"} & fields
+
+
+def test_cancelling_the_queued_run_a_job_waits_for_leaves_it_about_to_start(
+    session: Session, deployed: Repository, principal: PrincipalRef
+) -> None:
+    """A queued run another job waits for is cancelled: that job then waits for the scheduler.
+
+    Its request is kept; the cancelled job shows its run as cancelled, and once the waiting start
+    has begun, the job no longer waits.
+    """
+    service = _service(session)
+    first = service.start(principal, "dev", "analytics", "manual").run
+    assert first is not None and first.status == "queued"
+    service.start(principal, "dev", "analytics", "daily")
+    RunService(session, AllowAllAuthorization(), caps=RunCaps()).cancel(principal, "dev", first.id)
+    # Asked to cancel, the run holds the project until the scheduler has ended it.
+    asked = service.get(principal, "dev", "daily")
+    assert (asked.state, asked.waits_for_run_id) == ("waiting", first.id)
+    session.execute(update(Run).values(status=RunStatus.CANCELLED))
+    session.commit()
+    views = {v.name: v for v in service.list(principal, "dev")}
+    daily = views["daily"]
+    assert (daily.state, daily.waits_for_run_id) == ("waiting to start", None)
+    assert daily.waiting_since == asked.waiting_since and daily.waiting_trigger == "manual"
+    assert views["manual"].last_run_status == "cancelled"
+    assert views["manual"].waiting_since is None
+    started = JobService.start_waiting(session, _row(session, "daily"), caps=RunCaps())
+    assert started is not None
+    daily = service.get(principal, "dev", "daily")
+    assert (daily.waiting_since, daily.waiting_trigger, daily.waits_for_run_id) == (None,) * 3
+    assert daily.state == "no run principal"
+    assert (daily.last_run_id, daily.last_run_status) == (started.id, "queued")

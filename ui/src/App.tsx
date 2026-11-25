@@ -1,11 +1,13 @@
 /**
- * The root component of the interface: the browser's router inside the preferences.
+ * The root component of the interface: the browser's router inside the preferences, in the
+ * interface's language for React Aria.
  *
  * @packageDocumentation
  */
 import type { JSX } from "react";
 import { createBrowserRouter } from "react-router";
 
+import { LanguageProvider } from "./i18n/LanguageProvider";
 import { PreferencesProvider } from "./preferences/PreferencesProvider";
 import { Interface, type RouterFactory } from "./sign-in/Interface";
 
@@ -24,8 +26,10 @@ const browserRouter: RouterFactory = (routes) => createBrowserRouter(routes);
  */
 export function App(): JSX.Element {
   return (
-    <PreferencesProvider>
-      <Interface createRouter={browserRouter} />
-    </PreferencesProvider>
+    <LanguageProvider>
+      <PreferencesProvider>
+        <Interface createRouter={browserRouter} />
+      </PreferencesProvider>
+    </LanguageProvider>
   );
 }

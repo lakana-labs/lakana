@@ -77,6 +77,8 @@ Answer fields: `JobOut`
 | `last_run_status` | text or null | yes |  |
 | `last_run_trigger` | text or null | yes |  |
 | `last_run_at` | text (date-time) or null | yes |  |
+| `waiting_since` | text (date-time) or null | no |  |
+| `waiting_trigger` | text or null | no |  |
 | `triggers` | list of `ScheduleTriggerOut` or `DeployTriggerOut` or `OnDemandTriggerOut` | yes |  |
 | `actions` | list of text | no |  |
 | `commit_sha` | text | yes |  |
@@ -175,6 +177,8 @@ Answer fields: `JobOut`
 | `last_run_status` | text or null | yes |  |
 | `last_run_trigger` | text or null | yes |  |
 | `last_run_at` | text (date-time) or null | yes |  |
+| `waiting_since` | text (date-time) or null | no |  |
+| `waiting_trigger` | text or null | no |  |
 | `triggers` | list of `ScheduleTriggerOut` or `DeployTriggerOut` or `OnDemandTriggerOut` | yes |  |
 | `actions` | list of text | no |  |
 | `commit_sha` | text | yes |  |
@@ -233,6 +237,8 @@ Answer fields: `JobOut`
 | `last_run_status` | text or null | yes |  |
 | `last_run_trigger` | text or null | yes |  |
 | `last_run_at` | text (date-time) or null | yes |  |
+| `waiting_since` | text (date-time) or null | no |  |
+| `waiting_trigger` | text or null | no |  |
 | `triggers` | list of `ScheduleTriggerOut` or `DeployTriggerOut` or `OnDemandTriggerOut` | yes |  |
 | `actions` | list of text | no |  |
 | `commit_sha` | text | yes |  |

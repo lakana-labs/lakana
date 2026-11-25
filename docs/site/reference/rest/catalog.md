@@ -9,7 +9,7 @@ These routes of the platform API come from its [OpenAPI document](../openapi.jso
 
 List the tables you may read, across environments and namespaces
 
-Filtered by environment, namespace, model kind and a search text, sorted and paged by a cursor. What you may not read is left out, not refused: each table needs `READ_TABLE` on it, a list writes no `AUTHORIZATION_DENIED`, and no count of hidden tables is given. Every table shows its owner's name and kind, when it was last read and by how many principals in the last 7 UTC days (never who), and its health in one word. A table with no known value for the sort key comes last. A search text matches the same texts as the environment search, only in tables you may read; `capped` says it stopped early, at 5,000 readable candidates, so narrow it. Answers 404 when `environment` does not exist (to someone who may read environments; anyone else gets an empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`, `model_kind`, `lang` or `cursor` that is not valid.
+Filtered by environment, namespace, model kind and a search text, sorted and paged by a cursor. What you may not read is left out, not refused: each table needs `READ_TABLE` on it, a list writes no `AUTHORIZATION_DENIED`, and no count of hidden tables is given. Every table shows its owner's name and kind, when it was last read and by how many principals in the last 7 UTC days (never who), and its health in one word. A table with no known value for the sort key comes last. A search text matches the same texts as the environment search, only in tables you may read; `capped` says it stopped early, at 5,000 readable candidates, so narrow it. `name` matches a table's own name alone, ignoring the case of A to Z (a name picker, such as the table of a row filter, asks with it), under the same rights. Answers 404 when `environment` does not exist (to someone who may read environments; anyone else gets an empty page, as for one that exists), and 422 for a `sort`, `order`, `limit`, `q`, `name`, `model_kind`, `lang` or `cursor` that is not valid.
 
 Parameters:
 
@@ -18,6 +18,7 @@ Parameters:
 | `environment` | query | no | text or null | Only this environment. |
 | `namespace` | query | no | text or null | Only this namespace and the ones beneath it, dotted. |
 | `q` | query | no | text or null | Only tables whose name, label, description, grain, or a column's name, label, description or measure contains this text; 1 to 200 characters. |
+| `name` | query | no | text or null | Only tables whose own name contains this text, ignoring the case of A to Z (and of other letters on PostgreSQL, as its locale folds them); 1 to 255 characters. A namespace, a column or a description never matches it. |
 | `model_kind` | query | no | text or null | Only tables whose asset header declares this kind: fact, dimension, wide or staging. |
 | `sort` | query | no | text | What the list is sorted by: name, owner, health, rows, size, last_write, last_read, created. A table with no value sorts last, in either order. |
 | `order` | query | no | text or null | asc or desc; by default asc for name, owner and health, desc for the rest. |

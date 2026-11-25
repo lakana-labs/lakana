@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 import { type JSX, useCallback, useEffect, useId, useRef, useState } from "react";
-import { Button, Form, Heading, Input, Label, Text, TextField } from "react-aria-components";
+import { Button, Form, Heading } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
 
@@ -17,6 +17,7 @@ import { Avatar } from "../profile/Avatar";
 import "../settings/settingsStrings";
 import { ActionDialog } from "../shell/ActionDialog";
 import { ConfirmDialog } from "../shell/ConfirmDialog";
+import { NamePicker } from "../shell/NamePicker";
 import { Page } from "../shell/Page";
 import { PendingButton } from "../shell/PendingButton";
 import { useFocusAfter } from "../shell/useFocusAfter";
@@ -30,6 +31,7 @@ import { managedScopeOf } from "./managed";
 import { ManagedNote } from "./ManagedNote";
 import { GROUPS_PATH, grantsPath } from "./accessPaths";
 import { personPath } from "./personPath";
+import { usePrincipalSearch } from "./suggest";
 import { TypedName } from "./TypedName";
 import { useAccessStatus } from "./useAccessStatus";
 import { whatWords, whereText } from "./words";
@@ -288,6 +290,7 @@ export function GroupPage({ name }: GroupPageProps): JSX.Element {
   const field = useRef<HTMLInputElement>(null);
   const adding = useAttempt();
   const [principal, setPrincipal] = useState("");
+  const suggest = usePrincipalSearch();
   const [note, setNote] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -391,11 +394,16 @@ export function GroupPage({ name }: GroupPageProps): JSX.Element {
                     add();
                   }}
                 >
-                  <TextField className="field" isRequired value={principal} onChange={setPrincipal}>
-                    <Label>{t("access.groups.memberName")}</Label>
-                    <Input ref={field} autoComplete="off" />
-                    <Text slot="description">{t("access.groups.memberHelp")}</Text>
-                  </TextField>
+                  <NamePicker
+                    label={t("access.groups.memberName")}
+                    help={t("access.groups.memberHelp")}
+                    value={principal}
+                    onChange={setPrincipal}
+                    search={suggest}
+                    noMatch={(text) => t("picker.noPrincipal", { name: text })}
+                    inputRef={field}
+                    isRequired
+                  />
                   <PendingButton type="submit" className="button" pending={adding.busy}>
                     {t("access.groups.add")}
                   </PendingButton>

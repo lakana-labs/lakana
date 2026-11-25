@@ -3072,6 +3072,18 @@ def test_model_kind_and_lang_are_passed_across_namespaces(tmp_path: Path) -> Non
     }
 
 
+def test_name_is_passed_across_namespaces_and_kept_in_the_next_page_line(tmp_path: Path) -> None:
+    api = _catalog_api(_listed_item(match=None), next_cursor="abc")
+    result = invoke(make_state(tmp_path, api), "table", "list", "--env", "dev", "--name", "ord")
+    assert result.exit_code == 0, result.output
+    assert dict(api.requests[-1].url.params) == {
+        "environment": "dev",
+        "name": "ord",
+        "sort": "name",
+    }
+    assert "More results: lakana table list --env dev --name ord" in _plain(result.output)
+
+
 def test_a_refused_kind_across_namespaces_names_the_option(tmp_path: Path) -> None:
     api = FakeApi()
     api.on(
@@ -3208,6 +3220,7 @@ def test_table_list_without_tables_says_so(tmp_path: Path) -> None:
     "args,needle",
     [
         (["silver", "--search", "x"], "--under NAMESPACE"),
+        (["silver", "--name", "x"], "--under NAMESPACE"),
         (["silver", "--under", "x"], "--under NAMESPACE"),
         (["silver", "--all-environments"], "--under NAMESPACE"),
         (["silver", "--sort", "rows"], "--under NAMESPACE"),
@@ -3218,6 +3231,7 @@ def test_table_list_without_tables_says_so(tmp_path: Path) -> None:
         (["silver", "--dropped", "--limit", "5"], "--limit"),
         (["silver", "--cursor", "c"], "--under NAMESPACE"),
         (["--dropped", "--search", "x"], "--dropped without NAMESPACE"),
+        (["--dropped", "--name", "x"], "--dropped without NAMESPACE"),
         (["--dropped", "--all-environments"], "--dropped without NAMESPACE"),
         (["--all-environments", "--env", "dev"], "cannot be combined"),
     ],

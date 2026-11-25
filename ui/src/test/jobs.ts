@@ -46,6 +46,8 @@ export function aJob(over: Partial<JobOut> = {}): JobOut {
     last_run_id: JOB_RUN_ID,
     last_run_status: "succeeded",
     last_run_at: "2026-11-17T01:00:00Z",
+    waiting_since: null,
+    waiting_trigger: null,
     triggers: [
       {
         kind: "schedule",

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   accessStatusRoute,
+  aMember,
   aGrant,
   anEnvironment,
   freshSession,
@@ -32,6 +33,8 @@ function grantRoutes(more: Record<string, FakeRoute> = {}): Record<string, FakeR
       body: [anEnvironment("dev"), anEnvironment("prod")],
     },
     "GET /api/v1/grants": { status: 200, body: [] },
+    "GET /api/v1/principals": { status: 200, body: [] },
+    "GET /api/v1/groups": { status: 200, body: [] },
     ...more,
   };
 }
@@ -68,6 +71,51 @@ async function choose(
 }
 
 describe("AddGrantDialog", () => {
+  it("suggests people and service accounts, or groups, by the choice of who", async () => {
+    const shell = await openDialog(
+      PATH,
+      grantRoutes({
+        "GET /api/v1/principals": { status: 200, body: [aMember("maria"), aMember("marek")] },
+        "GET /api/v1/groups": { status: 200, body: [{ name: "marketing" }] },
+      }),
+    );
+    const { user, dialog, server } = shell;
+    const name = within(dialog).getByRole("combobox", { name: "Name" });
+
+    await user.type(name, "mar");
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "mariaPerson",
+      "marekPerson",
+    ]);
+    await user.keyboard("{Escape}");
+    await user.click(within(dialog).getByRole("radio", { name: "A group" }));
+    await user.click(name);
+    await user.keyboard("{ArrowDown}");
+
+    expect(await screen.findByRole("option", { name: "marketing" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^maria/ })).toBeNull();
+    await user.keyboard("{Enter}");
+    expect(name).toHaveValue("marketing");
+    expect(
+      server.sent
+        .map((request) => request.path)
+        .filter((path) => /^\/api\/v1\/(principals|groups)\?/.test(path)),
+    ).toEqual(["/api/v1/principals?limit=20&q=mar", "/api/v1/groups?limit=20&q=mar"]);
+  });
+
+  it("says when no group has that name", async () => {
+    const { user, dialog } = await openDialog();
+    await user.click(within(dialog).getByRole("radio", { name: "A group" }));
+
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "anlysts");
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "No group named “anlysts”. Check the spelling.",
+      );
+    });
+  });
+
   it("grants a role on a namespace", async () => {
     fakeWebAuthn();
     let granted = false;
@@ -86,7 +134,7 @@ describe("AddGrantDialog", () => {
     const { user, dialog, server } = shell;
 
     await user.click(within(dialog).getByRole("radio", { name: "A group" }));
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "analysts");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "analysts{Escape}");
     await choose(shell, /Role$/, /^ANALYST/);
     await user.click(within(dialog).getByRole("radio", { name: "A namespace" }));
     await choose(shell, /Environment$/, "dev");
@@ -119,7 +167,7 @@ describe("AddGrantDialog", () => {
     );
     const { user, dialog, server } = shell;
 
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     await user.click(within(dialog).getByRole("radio", { name: "A single action" }));
     await choose(shell, /Action$/, "Read tables");
     await user.click(within(dialog).getByRole("radio", { name: "A table" }));
@@ -144,7 +192,7 @@ describe("AddGrantDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Add grant" }));
     const again = await screen.findByRole("dialog", { name: "Add grant" });
-    await user.type(within(again).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(again).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     await user.click(within(again).getByRole("button", { name: /Role$/ }));
     await user.click(await screen.findByRole("option", { name: /^VIEWER/ }));
     await user.click(within(again).getByRole("radio", { name: "The whole instance" }));
@@ -167,7 +215,7 @@ describe("AddGrantDialog", () => {
     expect(
       within(dialog).getByRole("radio", { name: "A person or service account" }),
     ).toBeChecked();
-    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("maria");
+    expect(within(dialog).getByRole("combobox", { name: "Name" })).toHaveValue("maria");
     expect(within(dialog).getByRole("radio", { name: "An environment" })).toBeChecked();
     expect(within(dialog).getByRole("button", { name: /Environment$/ })).toHaveTextContent("dev");
     // An action that does nothing alone is not offered, so the filter's is not taken.
@@ -198,7 +246,7 @@ describe("AddGrantDialog", () => {
   it("sends nothing on Enter while the form is not complete", async () => {
     const { user, dialog, server } = await openDialog();
 
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria{Enter}");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Enter}");
 
     expect(screen.getByRole("dialog", { name: "Add grant" })).toBeInTheDocument();
     expect(server.sent.some((request) => request.method === "POST")).toBe(false);
@@ -217,7 +265,7 @@ describe("AddGrantDialog", () => {
     );
     const { user, dialog } = shell;
 
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     await user.click(within(dialog).getByRole("radio", { name: "The whole instance" }));
     await choose(shell, /Role$/, /^VIEWER/);
     await user.click(within(dialog).getByRole("button", { name: "Grant" }));
@@ -233,7 +281,7 @@ describe("AddGrantDialog", () => {
     const grant = within(dialog).getByRole("button", { name: "Grant" });
 
     expect(grant).toHaveAccessibleDescription("Name who the grant is for.");
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     expect(grant).toHaveAccessibleDescription("Choose a role or an action.");
     await choose(shell, /Role$/, /^VIEWER/);
     expect(grant).toBeDisabled();
@@ -269,9 +317,9 @@ describe("AddGrantDialog", () => {
     await user.click(prod);
 
     expect(within(dialog).queryByRole("button", { name: "Grant" })).toBeNull();
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     await choose(shell, /Role$/, /^VIEWER/);
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "{Enter}");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "{Enter}");
     expect(shell.server.sent.some((request) => request.method === "POST")).toBe(false);
     expect(dialog).toHaveTextContent(
       "An access file manages prod: give this grant in access.yaml instead.",
@@ -292,7 +340,7 @@ describe("AddGrantDialog", () => {
     );
     const { user, dialog } = shell;
 
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "mario");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "mario{Escape}");
     await choose(shell, /Role$/, /^VIEWER/);
     await choose(shell, /Environment$/, "dev");
     await user.click(within(dialog).getByRole("button", { name: "Grant" }));
@@ -302,7 +350,7 @@ describe("AddGrantDialog", () => {
     await waitFor(() => {
       expect(alert).toHaveFocus();
     });
-    expect(within(dialog).getByRole("textbox", { name: "Name" })).toHaveValue("mario");
+    expect(within(dialog).getByRole("combobox", { name: "Name" })).toHaveValue("mario");
     expect(within(dialog).getByRole("button", { name: /Role$/ })).toHaveTextContent("VIEWER");
     expect(within(dialog).getByRole("button", { name: /Environment$/ })).toHaveTextContent("dev");
   });
@@ -316,7 +364,7 @@ describe("AddGrantDialog", () => {
     );
     const { user, dialog, server } = shell;
 
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     await user.click(within(dialog).getByRole("radio", { name: "The whole instance" }));
     await choose(shell, /Role$/, /^VIEWER/);
     await user.click(within(dialog).getByRole("button", { name: "Grant" }));
@@ -332,11 +380,11 @@ describe("AddGrantDialog", () => {
     const shell = await openDialog(PATH, grantRoutes({ "POST /api/v1/grants": answer.route }));
     const { user, dialog } = shell;
 
-    await user.type(within(dialog).getByRole("textbox", { name: "Name" }), "maria");
+    await user.type(within(dialog).getByRole("combobox", { name: "Name" }), "maria{Escape}");
     await user.click(within(dialog).getByRole("radio", { name: "The whole instance" }));
     await choose(shell, /Role$/, /^VIEWER/);
     await user.click(within(dialog).getByRole("button", { name: "Grant" }));
-    await user.click(within(dialog).getByRole("textbox", { name: "Name" }));
+    await user.click(within(dialog).getByRole("combobox", { name: "Name" }));
     await user.keyboard("{Enter}");
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog", { name: "Add grant" })).toBeInTheDocument();

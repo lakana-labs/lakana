@@ -176,6 +176,10 @@ screen readers reach it; the whole row is clickable too. A list of facts can nam
 that has no page of its own, such as a dropped table or an upload: that name is plain text in
 the text colour, so only what opens something looks like it does.
 
+**Names are picked, not guessed.** A field that names a person, a service account or a table
+suggests, as you type, the names that exist and that you may see, so a typo shows before you save.
+The suggestions are help: what you type is still sent, and the server checks it.
+
 **Breadcrumbs.** Every detail page shows where it sits above its heading, for example
 Settings › Access › People › test1. Every part but the last is a link. A list or a tab of an area has no
 breadcrumb, because the sidebar already says where you are.
