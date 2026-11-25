@@ -82,37 +82,63 @@ export function ListSection({
   const id = useId();
   const section = useRef<HTMLElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
-  const inside = useRef(false);
+  // The element the focus was last on in the section, until the focus is somewhere that shows the
+  // person left it (a control elsewhere, a click on a blank part of the page).
+  const last = useRef<Node | null>(null);
   useEffect(() => {
     const element = section.current;
-    const onFocusIn = (): void => {
-      inside.current = true;
+    const onFocusIn = (event: FocusEvent): void => {
+      const target = event.target as Element;
+      if (element?.contains(target) === true) {
+        last.current = target;
+      } else if (target.closest('[role="dialog"]') === null) {
+        // Not the section, and not a question or palette the person went to from it and may come
+        // back from: they moved on.
+        last.current = null;
+      }
     };
     const onFocusOut = (event: FocusEvent): void => {
-      const { target, relatedTarget } = event;
-      if (relatedTarget === null) {
-        // Focus left for the page: a click on a blank part of it, or a removed row (Chrome tells
-        // that blur too). Only an element still in the page was left by the person.
-        setTimeout(() => {
-          if (target instanceof Node && target.isConnected) {
-            inside.current = false;
-          }
-        });
+      if (event.relatedTarget !== null) {
         return;
       }
-      inside.current = element?.contains(relatedTarget as Node) === true;
+      // Focus left for the page: a click on a blank part of it, or a removed element (Chrome tells
+      // that blur too). Only an element still in the page was left by the person.
+      const target = event.target as Node;
+      setTimeout(() => {
+        // A blank click puts the focus on the page; a window blur (a tab switch) leaves it where
+        // it was, and the person is still in the section.
+        if (target.isConnected && document.activeElement === document.body) {
+          last.current = null;
+        }
+      });
     };
-    element?.addEventListener("focusin", onFocusIn);
-    element?.addEventListener("focusout", onFocusOut);
+    document.addEventListener("focusin", onFocusIn);
+    document.addEventListener("focusout", onFocusOut);
     return () => {
-      element?.removeEventListener("focusin", onFocusIn);
-      element?.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("focusin", onFocusIn);
+      document.removeEventListener("focusout", onFocusOut);
     };
   }, []);
   useEffect(() => {
-    if (inside.current && document.activeElement === document.body) {
-      title.current?.focus();
+    if (last.current === null) {
+      return undefined;
     }
+    // On the next frame, after a dialog that just closed has handed the focus back to its button
+    // (it does so on a frame of its own): the focus fell to the page because the element that held
+    // it left this section. A focus on the page while that element is still there was the
+    // person's own doing, and stays.
+    const frame = requestAnimationFrame(() => {
+      if (last.current?.isConnected === false) {
+        // The element is gone either way: nothing may move the focus for it on a later render.
+        last.current = null;
+        if (document.activeElement === document.body) {
+          title.current?.focus();
+        }
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+    };
   });
   return (
     <section className="flat-panel jobs-section" aria-labelledby={id} ref={section}>
