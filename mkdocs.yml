@@ -92,6 +92,9 @@ nav:
       - Access and security:
           - how-to/give-a-second-person-access.md
           - how-to/invite-your-team.md
+          - how-to/sign-in-with-keycloak.md
+          - how-to/sign-in-with-entra-id.md
+          - how-to/bring-your-team-onto-single-sign-on.md
           - how-to/lost-your-passkey.md
           - how-to/keep-access-in-a-reviewed-file.md
           - how-to/why-may-someone-do-this.md

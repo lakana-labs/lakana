@@ -1,0 +1,111 @@
+{
+  "id": "lakana",
+  "realm": "lakana",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "lakana",
+      "name": "Lakana",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "http://localhost:8000",
+      "redirectUris": [
+        "http://localhost:8000/api/v1/sign-in/oidc/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "false"
+      },
+      "secret": "lakana-client-secret"
+    },
+    {
+      "clientId": "other",
+      "name": "Another application",
+      "protocol": "openid-connect",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "http://localhost:8000",
+      "redirectUris": [
+        "http://localhost:8000/api/v1/sign-in/oidc/callback"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "false"
+      },
+      "secret": "other-client-secret"
+    }
+  ],
+  "users": [
+    {
+      "username": "kim",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "kim@example.com",
+      "firstName": "Kim",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "kim-password-test",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "ola",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "ola@example.com",
+      "firstName": "Ola",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "ola-password-test",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "leaver",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "leaver@example.com",
+      "firstName": "Leaver",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "leaver-password-test",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "disabled-person",
+      "enabled": false,
+      "emailVerified": true,
+      "email": "disabled-person@example.com",
+      "firstName": "Disabled-person",
+      "lastName": "Example",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "disabled-person-password-test",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

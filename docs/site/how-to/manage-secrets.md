@@ -17,6 +17,9 @@ use** and **Delete** do what `lakana secret create`, `rotate`, `bind` and `revok
 typed into a password field, sent once and never shown again: the page has no way to reveal it,
 and closing the dialog forgets it. Adding, rotating and setting the use ask for a passkey touch
 first; Delete asks for the secret's name instead.
+Someone who signs in through the organisation's identity provider confirms there instead, then
+presses the action again
+([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 
 ## Webhook secrets
 

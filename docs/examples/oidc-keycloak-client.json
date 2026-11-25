@@ -1,0 +1,18 @@
+{
+  "clientId": "lakana",
+  "name": "Lakana",
+  "protocol": "openid-connect",
+  "enabled": true,
+  "publicClient": false,
+  "clientAuthenticatorType": "client-secret",
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "rootUrl": "https://lakana.example.com",
+  "redirectUris": ["https://lakana.example.com/api/v1/sign-in/oidc/callback"],
+  "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "oauth2.device.authorization.grant.enabled": "false"
+  }
+}

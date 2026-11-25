@@ -11,12 +11,16 @@ the way in: a secret string that stands for one person.
 
 !!! tip "Someone who works in the web interface needs no token"
     Invite them instead: [Invite your team](invite-your-team.md) sends a link that creates their
-    account, and from then on a passkey signs them in. Then grant them a role as below. Issue a
-    token (the steps after the grant) only to someone who also works from the command line; an
-    invited person already exists, so skip "Create the person" for them. Such a person can also
-    make their own token: on their account page (**Passkeys and sessions** in the menu under their
-    name), **API tokens** → **Create a token** asks for a passkey touch and shows the token once,
-    with the `lakana login` command to paste it into. The token carries exactly their rights.
+    account, and from then on a passkey, or your identity provider
+    ([Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md)), signs them in.
+    Then grant them a role as below. Issue a token (the steps after the grant) only to someone who
+    also works from the command line; an invited person already exists, so skip "Create the person"
+    for them. Such a person can also make their own token: on their account page (**Passkeys and
+    sessions** in the menu under their name), **API tokens** → **Create a token** asks for a passkey
+    touch and shows the token once, with the `lakana login` command to paste it into. The token
+    carries exactly their rights. Someone who signs in through the organisation's identity provider
+    confirms there instead, then presses the action again
+    ([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 
 The steps below give a person called `alice` access to the environment `dev`. Use your own names.
 

@@ -42,6 +42,9 @@ A how-to guide solves one task by the shortest path, for someone who knows what 
 
 - [Give a second person access](give-a-second-person-access.md): create a user, grant the smallest set to query one environment, issue a token, and take access away.
 - [Invite your team](invite-your-team.md): invite a colleague to the web interface by a link, confirm them before granting a role, recover a lost passkey, and end a person's sessions.
+- [Sign in through Keycloak](sign-in-with-keycloak.md): register Lakana as a client of a self-hosted Keycloak, set the server's `LAKANA_OIDC__` settings (also for a Keycloak on an internal network), check the round trip, what changing the issuer does, and every refusal with its fix.
+- [Sign in through Microsoft Entra ID](sign-in-with-entra-id.md): register Lakana in your Entra tenant with a client secret and the `auth_time` claim, set the issuer with the tenant ID, and what is particular to Entra ID when a sign-in is refused.
+- [Bring your team onto single sign-on](bring-your-team-onto-single-sign-on.md): keep an administrator who signs in with a passkey, link the people who are already here, invite newcomers through the provider, offboard, take someone off single sign-on, and get back in when the provider is down.
 - [Lost your passkey](lost-your-passkey.md): get back into the web interface with a recovery link, issue one as an administrator, recover an administrator as the server operator, and what changing the public address does to passkeys.
 - [Keep access in a reviewed file](keep-access-in-a-reviewed-file.md): export who has access to what as a file, review changes in a pull request, apply them from CI, and what a managed scope refuses.
 - [Why may (or may not) someone do this?](why-may-someone-do-this.md): see what a principal may do on an object, and through which grant, role or group.

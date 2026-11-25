@@ -26,6 +26,9 @@ to restore it.
 From the web interface, a drop asks for a recent passkey touch: one from the last 15 minutes, with
 or without purging the files. The browser asks you to touch your passkey when yours is older. The
 command line uses a token and is never asked. Restoring a table asks for no touch.
+Someone who signs in through the organisation's identity provider confirms there instead, then
+presses the action again
+([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)).
 
 In the web interface, open the table's page and choose **Actions**, then **Drop…**. The menu shows
 **Drop…** only if you may drop the table. The dialog says what a drop does: the table leaves the

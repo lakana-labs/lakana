@@ -1820,6 +1820,50 @@ other images it is a test container only, never part of a Lakana artifact.
   connection, locks the project with the driver, deploys it, and checks that the asset refuses to
   connect without a trust bundle.
 
+## Identity provider images
+
+`packages/lakana-server/tests/test_oidc_keycloak_integration.py` (`integration`, Linux only, in
+the `integration (services)` jobs) signs in through a real Keycloak (#32): invite linking, a
+second sign-in, an unlinked and a disabled account, the token window of a person disabled at
+the provider, a key rotation, a code issued to another client, a wrong client secret, provider
+step-up with `prompt=login` followed by `lakana login --device`, and the operator's recovery link
+with Keycloak paused.
+
+| Provider | Image (tag and digest) | Licence | Base image | TLS |
+|---|---|---|---|---|
+| Keycloak | `quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3` | Apache-2.0 (`/opt/keycloak/LICENSE.txt`) | Red Hat UBI 9.9 | `KC_HTTPS_CERTIFICATE_FILE` / `KC_HTTPS_CERTIFICATE_KEY_FILE` on 8443 |
+
+A test container only, never built into, copied into or shipped with a Lakana artifact (the
+judgement of "Object-store emulators" above). The tag was read with `docker buildx imagetools
+inspect` on 2026-11-25; Keycloak rebuilds a tag in place, so change a tag only together with its
+digest.
+
+- **The realm** is `packages/lakana-server/tests/keycloak/lakana-realm.json`, imported with
+  `start-dev --import-realm`: the client `lakana` with the settings the how-to "Sign in through
+  Keycloak" shows (`scripts/tests/test_oidc_how_tos.py`,
+  `test_the_how_to_s_client_is_the_tested_realm_s`, keeps the two equal but for the address), a
+  second client `other`, and the users `kim`, `ola`, `leaver` and `disabled-person`. The test
+  changes the realm through Keycloak's admin REST API (a user disabled and enabled again, a new
+  active RSA key), so the module's tests share one container in file order.
+- **Port and address.** Keycloak serves HTTPS on 8443 with `KC_HOSTNAME=https://keycloak.test:8443`,
+  so its issuer names the port, which the guarded fetcher allows (443 or the issuer's own port).
+  The test process reaches the container's bridge address directly (Linux only; Docker 29 names
+  the address only under `NetworkSettings.Networks`); `LAKANA_OIDC__ALLOW_HOSTS` lists
+  `keycloak.test`, and `lakana_core.net.https_json._resolve` is patched to answer the address.
+- **Certificates.** A test authority made in the module signs a leaf for `keycloak.test`, with
+  the key identifiers Python's strict verification (`VERIFY_X509_STRICT`) requires;
+  `LAKANA_OIDC__CA_BUNDLE` is the authority.
+- **The browser** is `tests/keycloak_browser.py`: requests go to the address with the `Host`
+  header and TLS server name `keycloak.test`, as `lakana_core.net.egress.pinned_request` builds
+  them; it keeps Keycloak's cookies, submits its login form, and stops at the redirect back to the
+  app's callback.
+- **Key rotation.** The key cache fetches again for an unknown key id at most once a minute: the
+  test signs in once right after the rotation (refused, `token_invalid`) and once with the
+  cache's clock 61 seconds later (signed in).
+
+The module takes about 26 seconds once the image (about 470 MB) is pulled, 18 of them for
+Keycloak's start.
+
 ## Python assets in the two tiers (M5c2a)
 
 **Unit tier.** `uv` is a scripted stand-in (`packages/lakana-worker/tests/test_venvs.py`), the
