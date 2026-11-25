@@ -83,16 +83,37 @@ export function ListSection({
   const section = useRef<HTMLElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
   const inside = useRef(false);
+  // The element a blur to the page left, until the focus comes back into the section.
+  const leaving = useRef<EventTarget | null>(null);
   useEffect(() => {
     const element = section.current;
+    // The dialog the focus went into from the section, until the focus goes anywhere else.
+    let dialog: Element | null = null;
+    const onDocumentFocusIn = (event: FocusEvent): void => {
+      const { target } = event;
+      if (
+        dialog !== null &&
+        target instanceof Node &&
+        !dialog.contains(target) &&
+        element?.contains(target) !== true
+      ) {
+        // On to something that is neither the section nor its question: the person has left.
+        dialog = null;
+        inside.current = false;
+      }
+    };
+    document.addEventListener("focusin", onDocumentFocusIn);
     const onFocusIn = (): void => {
       inside.current = true;
+      leaving.current = null;
+      dialog = null;
     };
     const onFocusOut = (event: FocusEvent): void => {
       const { target, relatedTarget } = event;
       if (relatedTarget === null) {
         // Focus left for the page: a click on a blank part of it, or a removed row (Chrome tells
         // that blur too). Only an element still in the page was left by the person.
+        leaving.current = target;
         setTimeout(() => {
           if (target instanceof Node && target.isConnected) {
             inside.current = false;
@@ -101,8 +122,12 @@ export function ListSection({
         return;
       }
       // A question the section's own control opened (a modal dialog) takes the focus out, and
-      // gives it back when it closes: the person is still in the section meanwhile.
-      if (relatedTarget instanceof Element && relatedTarget.closest('[role="dialog"]') !== null) {
+      // gives it back when it closes: the person is still in the section meanwhile, until the
+      // focus goes on to something that is neither the section nor that dialog.
+      const asked =
+        relatedTarget instanceof Element ? relatedTarget.closest('[role="dialog"]') : null;
+      if (asked !== null) {
+        dialog = asked;
         return;
       }
       inside.current = element?.contains(relatedTarget as Node) === true;
@@ -110,6 +135,7 @@ export function ListSection({
     element?.addEventListener("focusin", onFocusIn);
     element?.addEventListener("focusout", onFocusOut);
     return () => {
+      document.removeEventListener("focusin", onDocumentFocusIn);
       element?.removeEventListener("focusin", onFocusIn);
       element?.removeEventListener("focusout", onFocusOut);
     };
@@ -121,7 +147,8 @@ export function ListSection({
     // On the next frame, after the dialog that just closed has handed the focus back to its
     // button (it does so on a frame of its own): only a focus still on the page is lost.
     const frame = requestAnimationFrame(() => {
-      if (inside.current && document.activeElement === document.body) {
+      const blank = leaving.current instanceof Node && leaving.current.isConnected;
+      if (inside.current && !blank && document.activeElement === document.body) {
         title.current?.focus();
       }
     });

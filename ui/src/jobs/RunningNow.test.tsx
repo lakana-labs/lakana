@@ -88,13 +88,17 @@ async function advance(ms: number): Promise<void> {
 /**
  * Lets the reads and their renders run until `condition` holds, a turn of the event loop at a time.
  * The fake clock stands still meanwhile, and Testing Library's own waits would hang under it (they
- * end by waiting on the faked `setTimeout`), so this waits on the state, never on elapsed time;
- * a state that never comes ends in the test's timeout.
+ * end by waiting on the faked `setTimeout`), so this waits on the state, never on elapsed time. A
+ * state that does not come within a thousand turns fails the test and names what it waited for.
  *
  * @param condition - What must hold.
+ * @param what - The condition in words, for the failure.
  */
-async function until(condition: () => boolean): Promise<void> {
-  while (!condition()) {
+async function until(condition: () => boolean, what: string): Promise<void> {
+  for (let turn = 0; !condition(); turn += 1) {
+    if (turn >= 1000) {
+      throw new Error(`Still waiting after ${String(turn)} turns for: ${what}`);
+    }
     await act(async () => {
       await new Promise((resolve) => {
         setImmediate(resolve);
@@ -108,7 +112,7 @@ async function until(condition: () => boolean): Promise<void> {
  * clears its timer while it is open, so one timer standing says the answer is in.
  */
 async function nextReadArmed(): Promise<void> {
-  await until(() => vi.getTimerCount() === 1);
+  await until(() => vi.getTimerCount() === 1, "the next read to be armed (one timer standing)");
 }
 
 const page = (items: readonly RunOut[], next: string | null = null): FakeRoute => ({
@@ -243,8 +247,12 @@ describe("RunningNow", () => {
       for (const frame of frames.splice(0)) {
         try {
           frame(0);
-        } catch {
-          // The dialog's own frame finds its button gone and its scope too; that is no concern here.
+        } catch (error) {
+          // The dialog's own frame finds its button gone and its scope too, and React Aria's
+          // walker throws on that; any other error is a real one.
+          if (!String(error).includes("'currentNode' property on 'TreeWalker'")) {
+            throw error;
+          }
         }
       }
     });
@@ -311,7 +319,10 @@ describe("RunningNow", () => {
   it("keeps the rows through two failed reads and says why after the third", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const { server } = renderRunning({ [RUNS]: page([running()]) });
-    await until(() => screen.queryByRole("link", { name: "nightly_sales" }) !== null);
+    await until(
+      () => screen.queryByRole("link", { name: "nightly_sales" }) !== null,
+      "the nightly_sales row to be shown",
+    );
     await nextReadArmed();
 
     server.route({ [RUNS]: { status: 503, body: { detail: "The server is starting." } } });
@@ -328,7 +339,7 @@ describe("RunningNow", () => {
       expect(screen.queryByRole("alert")).toBeNull();
     }
     await advance(60_000);
-    await until(() => screen.queryByRole("alert") !== null);
+    await until(() => screen.queryByRole("alert") !== null, "the alert to be shown");
     expect(screen.getByRole("alert")).toHaveTextContent(/./u);
     expect(server.sent).toHaveLength(4);
     expect(screen.getByRole("link", { name: "nightly_sales" })).toBeInTheDocument();
@@ -341,7 +352,10 @@ describe("RunningNow", () => {
       () => visibility as DocumentVisibilityState,
     );
     const { server } = renderRunning({ [RUNS]: page([running()]) });
-    await until(() => screen.queryByRole("link", { name: "nightly_sales" }) !== null);
+    await until(
+      () => screen.queryByRole("link", { name: "nightly_sales" }) !== null,
+      "the nightly_sales row to be shown",
+    );
     await nextReadArmed();
     expect(server.sent).toHaveLength(1);
 

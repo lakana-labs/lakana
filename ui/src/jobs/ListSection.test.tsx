@@ -1,5 +1,5 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { LivePoll } from "../shell/useLivePoll";
 import { ListSection, RowEnd } from "./ListSection";
@@ -57,6 +57,24 @@ function blurWithoutNext(): void {
   });
 }
 
+/**
+ * Lets an animation frame and the timers after it run, after the section's own, which was asked for first.
+ */
+async function aFrame(): Promise<void> {
+  await act(
+    () =>
+      new Promise((done) => {
+        requestAnimationFrame(() => {
+          done(undefined);
+        });
+      }),
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("ListSection", () => {
   it("gives the focus to its heading when the row holding it leaves, also when the browser tells the blur", async () => {
     const { rerender } = render(section(true));
@@ -72,7 +90,7 @@ describe("ListSection", () => {
     await act(() => new Promise((done) => setTimeout(done)));
   });
 
-  it("leaves the focus alone once the person moved it away within the page", () => {
+  it("leaves the focus alone once the person moved it away within the page", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
       const { rerender } = render(section(true));
@@ -86,10 +104,88 @@ describe("ListSection", () => {
         vi.runAllTimers();
       });
       rerender(section(false));
+      await aFrame();
 
       expect(document.activeElement).toBe(document.body);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not take the focus when a frame runs before the timer of a blank click", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const frames: FrameRequestCallback[] = [];
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    try {
+      const { rerender } = render(section(true));
+      const cancel = screen.getByRole("button", { name: "Cancel" });
+      cancel.focus();
+      // A render while the focus is in the section schedules a frame ...
+      rerender(section(true));
+      // ... the person clicks a blank part of the page ...
+      blurWithoutNext();
+      cancel.blur();
+      // ... and the frame comes before the timer that records it.
+      act(() => {
+        frames.at(-1)?.(0);
+      });
+
+      expect(document.activeElement).toBe(document.body);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the focus of a person who went from the section into another dialog, then on to the page, and clicked a blank part", async () => {
+    const page = (): React.JSX.Element => (
+      <>
+        {section(true)}
+        <div role="dialog" aria-label="Commands">
+          <button type="button">Run</button>
+        </div>
+        <button type="button">Elsewhere</button>
+      </>
+    );
+    const { rerender } = render(page());
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    screen.getByRole("button", { name: "Run" }).focus();
+    screen.getByRole("button", { name: "Elsewhere" }).focus();
+    act(() => {
+      screen.getByRole("button", { name: "Elsewhere" }).blur();
+    });
+    // The next poll renders the section again.
+    rerender(page());
+    await aFrame();
+
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("still gives the focus back to the heading while a dialog of the section is open and the row leaves", async () => {
+    const view = render(
+      <>
+        {section(true)}
+        <div role="dialog" aria-label="Question">
+          <button type="button">Yes</button>
+        </div>
+      </>,
+    );
+    screen.getByRole("button", { name: "Cancel" }).focus();
+    screen.getByRole("button", { name: "Yes" }).focus();
+    screen.getByRole("button", { name: "Yes" }).blur();
+    view.rerender(
+      <>
+        {section(false)}
+        <div role="dialog" aria-label="Question">
+          <button type="button">Yes</button>
+        </div>
+      </>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { level: 2, name: "Running now" })).toHaveFocus();
+    });
   });
 });
