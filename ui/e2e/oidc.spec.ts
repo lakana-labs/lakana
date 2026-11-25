@@ -119,6 +119,83 @@ for (const theme of ["light", "dark"] as const) {
       expect(unexpected(errors)).toEqual([]);
     });
 
+    test("a first sign-in through the provider opens the welcome, and no step speaks of passkeys", async ({
+      page,
+    }) => {
+      const errors = consoleErrors(page);
+      // A person who signs in through the provider: the session says so once they are back.
+      const world = await stubProvider(page, { signedIn: false, linked: true });
+      // A first sign-in: the tour not yet seen (a later route wins over the session's stub).
+      await page.route(
+        (url) => url.pathname === "/api/v1/principals/admin/interface-state",
+        (route) =>
+          route.fulfill({
+            json: { tour_seen: false, get_started_hidden: true, update_note_seen: null },
+          }),
+      );
+      // Get started as the server answers it today for such a person: "Add a passkey" still open
+      // (#813 takes it out on the server), so the passkey check below has something to catch.
+      await page.route(
+        (url) => url.pathname === "/api/v1/home/get-started",
+        (route) =>
+          route.fulfill({
+            json: {
+              audience: "admin",
+              local: false,
+              steps: [
+                { id: "connect_repository", done: true },
+                { id: "invite_team", done: true },
+                { id: "add_passkey", done: false },
+                { id: "deploy_project", done: false },
+              ],
+              hidden: true,
+              complete: false,
+            },
+          }),
+      );
+      world.returnTo = "/";
+      await page.goto("/");
+      await page.getByRole("button", { name: "Sign in with Okta" }).click();
+
+      const welcome = page.getByRole("dialog", { name: "Welcome to Lakana" });
+      await expect(welcome).toBeVisible();
+      expect(world.sent).toContain("POST /api/v1/sign-in/oidc/finish");
+      await expect(welcome).not.toContainText(/passkey|provider|Okta/i);
+      await welcome.getByRole("button", { name: "Start the tour" }).click();
+      const seen: string[] = [];
+      for (;;) {
+        const step = page.getByRole("dialog", { name: /./ });
+        await expect(step).toBeVisible();
+        // The tour's own words name neither the way in nor the provider; only the next step,
+        // which repeats Get started's answer, may (here "Add a passkey", until #813).
+        const words = await step
+          .locator("h2, p, li")
+          .filter({ hasNotText: "Your next step:" })
+          .allTextContents();
+        expect(words.length).toBeGreaterThan(1);
+        expect(words.join(" ")).not.toMatch(/passkey|provider|Okta/i);
+        seen.push((await step.getByRole("heading", { level: 2 }).textContent()) ?? "");
+        const next = step.getByRole("button", { name: "Next" });
+        if ((await next.count()) === 0) break;
+        await next.click();
+      }
+      expect(seen).toEqual([
+        "Home",
+        "Catalog",
+        "Queries",
+        "Jobs",
+        "Connections",
+        "Settings",
+        "Search",
+        "Help",
+      ]);
+      await expect(page.getByText("Your next step:")).toContainText("Add a passkey");
+      await page.getByRole("button", { name: "Finish" }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      expect(unstubbed(world)).toEqual([]);
+      expect(unexpected(errors)).toEqual([]);
+    });
+
     test("every refusal page passes axe, its heading focused", async ({ page }) => {
       const errors = consoleErrors(page);
       const world = await stubProvider(page, { signedIn: false });
