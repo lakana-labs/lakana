@@ -468,6 +468,9 @@ describe("PersonPage", () => {
     );
     expect(dialog).toHaveTextContent("kim then needs a recovery link to sign in again");
     expect(dialog).toHaveTextContent("To offboard someone, deactivate them instead.");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Linked to Okta" })).toBeInTheDocument();
   });
 
   it("unlink asks for the touch first and lands on the heading", async () => {

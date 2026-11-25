@@ -602,11 +602,18 @@ export default [
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
   // first paint or is a string of en.json, and moving the tour's strings out alone would not fit.
+  // Raised to the measured 213.2 kB (2026-11-25; 211.81 kB on main in the same build) + 10 %:
+  // sign-in through the identity provider (#32 PR 4). What the first visit needs before anyone is
+  // signed in: the provider's read and the two starts without a session (api/oidc.ts), the sign-in
+  // page's and a sign-in link's provider buttons, the note a confirmation leaves on the page it
+  // returns to, the sentences of the two new session ends and of a provider redirect, and their
+  // strings (+1.39 kB). The return pages, the profile's section, Settings' single sign-on, Unlink
+  // and the calls behind them load on demand. main stood 0.19 kB under the old limit.
   {
     name: "JavaScript, first load",
     path: INITIAL.map((name) => `${ASSETS}/${name}`),
     gzip: true,
-    limit: "212 kB",
+    limit: "234.5 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
   // Raised from 8.03 kB: measured 7.42 kB with the Health and Access tabs' rules (their sections,

@@ -48,6 +48,14 @@ export const STRING_CODES: Readonly<Record<string, readonly string[]>> = {
  * serves.
  */
 export const READ_AS: Readonly<Record<string, string>> = {
+  '["display_name","enabled"]': "OidcInfoOut",
+  '["absolute_lifetime_minutes","bounds","idle_timeout_minutes","provider","token_provider_window_days"]':
+    "SignInSettingsOut",
+  '["absolute_lifetime_minutes_max","absolute_lifetime_minutes_min","idle_timeout_minutes_max","idle_timeout_minutes_min","token_provider_window_days_max","token_provider_window_days_min"]':
+    "SignInBoundsOut",
+  '["display_name","issuer","linked_people","unlinked_admins"]': "SignInProviderOut",
+  '["held_admin","is_active","name","picture","provider_link","type"]': "PrincipalOut",
+  '["email","issuer","last_sign_in_at","name","token_window_ends_at"]': "ProviderLinkOut",
   '["age_seconds","host","requested_at","requested_from"]': "CliDeviceHostOut",
   '["active_runs","heartbeat_at","holder","pending","ready","running"]': "SchedulerOut",
   '["created_at","created_by","credential_secret","credential_username","default_ref","deploy_keys","host_keys","id","kind","name","ssh_known_hosts","updated_at","url"]':

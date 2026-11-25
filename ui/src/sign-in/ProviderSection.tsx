@@ -94,6 +94,9 @@ export function ProviderSection({ account }: ProviderSectionProps): JSX.Element 
   const { t } = useTranslation();
   const heading = useId();
   const [linking, setLinking] = useState(false);
+  const close = (): void => {
+    setLinking(false);
+  };
   const name = <VisibleText text={account.provider} />;
   return (
     <section className="panel" aria-labelledby={heading}>
@@ -123,12 +126,8 @@ export function ProviderSection({ account }: ProviderSectionProps): JSX.Element 
           title={t("oidc.section.linkTitle", { provider: account.provider })}
           confirmLabel={t("oidc.section.continue")}
           onConfirm={() => linkToProvider("/account")}
-          onCancel={() => {
-            setLinking(false);
-          }}
-          onDone={() => {
-            setLinking(false);
-          }}
+          onCancel={close}
+          onDone={close}
         >
           <p>
             <Trans t={t} i18nKey="oidc.section.linkBody" components={{ name }} />

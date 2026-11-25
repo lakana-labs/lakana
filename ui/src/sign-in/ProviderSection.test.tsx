@@ -78,6 +78,17 @@ describe("ProviderSection", () => {
     expect(within(section).queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it("a linked person whose window cannot be read sees the section without it", async () => {
+    renderAccount(true, {
+      "GET /api/v1/sign-in/oidc": OKTA,
+      "GET /api/v1/whoami": { status: 503, body: { detail: "Busy.", type: "Busy" } },
+    });
+
+    const section = await panel("Sign-in");
+    expect(within(section).getByText("You sign in through Okta.")).toBeInTheDocument();
+    expect(within(section).queryByText(/^Your API tokens work until/)).not.toBeInTheDocument();
+  });
+
   it("a linked person's passkeys are listed without Add", async () => {
     renderAccount(true, {
       "GET /api/v1/sign-in/oidc": OKTA,
@@ -230,6 +241,8 @@ describe("ProviderSection", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
-    expect(open).toHaveFocus();
+    await waitFor(() => {
+      expect(open).toHaveFocus();
+    });
   });
 });

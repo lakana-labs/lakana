@@ -9,6 +9,7 @@ import { ProviderConfirmed, ProviderReturn } from "./ProviderReturn";
 import { ProviderNote } from "./ProviderNote";
 import { SessionContext, type SessionValue } from "./SessionProvider";
 
+import { held } from "../test/pending";
 import { fakeServer, type FakeRoute } from "../test/server";
 import { signedIn } from "../test/session";
 
@@ -98,8 +99,8 @@ function renderAt(path: string, routes: Record<string, FakeRoute>, start: Sessio
     { initialEntries: ["/", path], initialIndex: 1 },
   );
   const user = userEvent.setup();
-  render(<Session router={router} start={start} />);
-  return { router, server, user };
+  const view = render(<Session router={router} start={start} />);
+  return { router, server, user, view };
 }
 
 const SIGNED_OUT = signedIn({ state: "signed-out", session: undefined });
@@ -193,6 +194,68 @@ describe("ProviderReturn", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(router.state.location.pathname).toBe("/sign-in");
+  });
+});
+
+describe("finishing once per page load", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
+  it("a page shown again reads the first finish instead of finishing twice", async () => {
+    const request = held();
+    const { server, view } = renderAt(
+      "/sign-in/oidc",
+      { "POST /api/v1/sign-in/oidc/finish": request.route },
+      SIGNED_OUT,
+    );
+    view.unmount();
+    request.release(refusal("flow_expired"));
+    await waitFor(() => {
+      expect(server.sent).toHaveLength(1);
+    });
+
+    renderAt("/sign-in/oidc", {}, SIGNED_OUT);
+
+    expect(await screen.findByText(/Start again\.$/)).toBeInTheDocument();
+  });
+
+  it("a confirmation shown again reads the first finish too", async () => {
+    const request = held();
+    const { server, view } = renderAt(
+      "/sign-in/oidc/confirmed",
+      { "POST /api/v1/sign-in/oidc/finish-in-session": request.route },
+      signedIn(),
+    );
+    view.unmount();
+    request.release(refusal("identity_mismatch"));
+    await waitFor(() => {
+      expect(server.sent.length).toBeGreaterThan(0);
+    });
+
+    renderAt("/sign-in/oidc/confirmed", {}, signedIn());
+
+    expect(await screen.findByText(/as someone else/)).toBeInTheDocument();
+  });
+
+  it("a confirmation the tab did not start says the step-up's note", async () => {
+    renderAt(
+      "/sign-in/oidc/confirmed",
+      {
+        "POST /api/v1/sign-in/oidc/finish-in-session": {
+          status: 200,
+          body: { return_to: "/account", step_up_until: null },
+        },
+        "GET /api/v1/sign-in/oidc": { status: 200, body: { enabled: true, display_name: null } },
+      },
+      signedIn(),
+    );
+
+    expect(
+      await screen.findByText(
+        "Confirmed with the identity provider. Do it again now; it won't ask for 15 minutes.",
+      ),
+    ).toBeInTheDocument();
   });
 });
 

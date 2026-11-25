@@ -7529,6 +7529,43 @@ sign-in (#32)".
   `/sign-in/device` with their query (no fragment, no other spelling) and still turns every other
   `/sign-in…` path into `/` (`test_return_to_is_kept_only_when_it_is_an_app_path`).
 
+## OIDC sign-in in the interface (#32, PR 4)
+
+The web interface's side of the provider's flows (`ui/src/api/oidc.ts`, `ui/src/api/providerSession.ts`,
+`ui/src/sign-in/ProviderReturn.tsx`). It adds no route; the server's checks are PR 1's to PR 3's.
+Threat model: "OIDC sign-in (#32)".
+
+- **I1, no replay after the provider (U2).** A guarded action of a linked person whose touch is
+  stale sends nothing: `guarded` starts the provider step-up with the page's own path and query,
+  sends the browser to the provider and throws `ProviderRedirect`, and the return page goes back
+  there with a note that says to press the action again (`guarded sends a linked person through
+  the provider and sends nothing`; e2e `a linked person's Create token goes through the provider
+  and back`, which counts no POST before the second press). A write is never replayed after a page
+  load: the interface keeps no body across it, so nothing typed (a token's name, a secret's value)
+  is stored for the trip. The tab keeps only `{purpose, back}` in `sessionStorage`
+  (`lakana.oidc.trip`), read once by the return page and removed.
+- **I2, where the browser goes back to.** The page to open after a sign-in stays on the server
+  (`return_to` of `start`, checked by `safe_return_to`); the interface follows the path the
+  finish answers, or a path a tab kept, only when it is local: `/` followed by anything but `/` or
+  `\` (`sign-in/localPath.ts`), else Home. The same rule now holds for the page a signed-out visit
+  left in the history state (`cameFrom`), which a stored `//evil.example/x` no longer leaves to
+  (`after sign-in follows only a local path`). Signing in through the provider from `lakana
+  login`'s confirmation pages sends their path with the query as `return_to`, which
+  `safe_return_to` keeps (`the provider's sign-in comes back to lakana login's page`).
+- **I3, a link's secret.** Choosing the provider on an invite or a recovery link sends `link_id`
+  and `secret` in the body of `POST /api/v1/sign-in/oidc/start` only, as `/links/redeem` does; the
+  fragment was taken out of the address before the first request (`choosing the provider sends
+  the link and removes the secret from history first`, e2e `an invite through the provider`).
+- **I4, once per flow.** Each return page finishes its flow once per page load, also when the
+  interface renders it again after the person's rights arrive (`ProviderReturn.tsx`, `Once`).
+- **I5, names from the provider** (the display name, the issuer, a linked person's e-mail and
+  name) are shown through `VisibleText` with hidden characters marked, as component slots of
+  `Trans`, never as markup (`marks hidden characters in the provider name`, and the walks of
+  `hidden-characters.spec.ts`). With OIDC off nothing mentions it and nothing but
+  `GET /api/v1/sign-in/oidc` is read (`nothing mentions a provider when it is off`).
+- **I6, refusals.** Each `OidcSignInRefused` reason has its own sentence with the next step, and
+  `identity_taken` names no account; an unknown reason shows the server's sentence, marked.
+
 ## Git fetch hardening (M5b)
 
 `lakana_worker.git.fetch_commit` and `check_access` (one shared setup, `_prepared`) are the only

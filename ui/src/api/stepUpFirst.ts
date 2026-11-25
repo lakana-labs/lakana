@@ -22,7 +22,7 @@ export const STEP_UP_MARGIN_MS = 60_000;
  * @returns The provider's sign-in page.
  * @throws {ApiError} for a refusal.
  */
-export async function startProviderStepUp(returnTo: string): Promise<string> {
+async function startProviderStepUp(returnTo: string): Promise<string> {
   return startFlow("/api/v1/sign-in/oidc/step-up/start", { return_to: returnTo });
 }
 
