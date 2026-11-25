@@ -1578,7 +1578,8 @@ regression.
   as the artifact `visual-differences` (kept 7 days). `ui` waits for it, so it is required: the
   image is pinned by digest and platform, so the same commit draws the same pixels on every run,
   and a screen that changed without new baselines is exactly what review must see. Its share of
-  the time: the image pull (about 50 s), the install into the volume (about 10 s) and the shots in four workers (about a minute), within the `"ui (*)"` budget of 10 minutes. It adds nothing to the smoke
+  the time: the image pull (about 20 s), the install into the volume (about 20 s) and the
+  shots in four workers (1.3 minutes), 2.4 minutes for the whole job on #819, within the `"ui (*)"` budget of 10 minutes. It adds nothing to the smoke
   shards: `playwright.config.ts` runs only `*.spec.ts`, and the suite is `*.visual.ts`.
 - **Size.** Playwright writes 8-bit RGB PNGs at its own compression; a smaller lossless
   encoding would save about 3 % and be rewritten by the next update, so the baselines are what
