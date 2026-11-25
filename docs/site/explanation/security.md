@@ -39,7 +39,8 @@ their device or in their password manager, unlocked with a fingerprint, a face, 
 security key. Lakana stores only the public half. A link signs a person in only to start: an
 invite creates the account, a recovery link lets them back in, and both lead straight to adding a
 passkey ([Invite your team](../how-to/invite-your-team.md),
-[Lost your passkey](../how-to/lost-your-passkey.md)).
+[Lost your passkey](../how-to/lost-your-passkey.md)). A team with an identity provider signs in
+through it instead ([below](#signing-in-through-your-identity-provider)).
 
 - **A session is a credential, like a token.** Signing in gives the browser a session cookie that
   scripts cannot read (`HttpOnly`), that the browser sends only to the same site (`SameSite=Strict`)
@@ -75,7 +76,9 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
   to touch: the interface says so and links to **Passkeys and sessions**, in the menu under your
   name, where you add one first. A stolen session cookie alone is therefore
   not enough for any of them. A request with an API token needs no touch: the token is what the
-  command line uses.
+  command line uses. A person linked to the identity provider confirms by signing in there again
+  instead: the browser goes to the provider and back to the same page, and the person presses the
+  action again; nothing is sent on their behalf in between.
 - **A passkey is bound to the address.** The browser offers a passkey only to the site it was made
   for, and Lakana accepts its answer only from its own exact address, port included, so a
   look-alike site gets nothing. Changing the public address
@@ -85,6 +88,46 @@ passkey ([Invite your team](../how-to/invite-your-team.md),
 - **A new link or token is shown once.** The interface shows an invite or recovery link, and
   later an API token a person creates, exactly once and never stores it; the server keeps only a
   hash. The interface itself never uses a token and never sees an existing one.
+
+## Signing in through your identity provider
+
+An instance can sign people in through one OpenID Connect provider, such as Keycloak or Microsoft
+Entra ID ([Sign in through Keycloak](../how-to/sign-in-with-keycloak.md),
+[Sign in through Microsoft Entra ID](../how-to/sign-in-with-entra-id.md)). Lakana runs the
+provider's authorization-code flow with PKCE itself; no proxy in front of it signs anyone in.
+
+- **What Lakana trusts:** the provider's signing keys, fetched from the issuer you configured,
+  and the ID token's issuer (`iss`) and subject (`sub`). A person is found by those two only.
+- **What it never trusts:** an e-mail address or a name (shown beside a linked person, never
+  matched, since a provider may let people change them), an identity header from a proxy, and
+  the provider's word that someone should have an account. An identity linked to nobody is
+  refused; only a person Lakana already knows links, through an invite, from their profile after
+  a passkey touch, or with a recovery link.
+- **Each sign-in is bound to one browser and lasts 10 minutes.** Its state, nonce and PKCE
+  verifier stay on the server, tied to the browser by a short-lived cookie, and are used once. The
+  ID token's signature, issuer, audience, nonce and times are checked before anyone is looked up,
+  the browser returns only to the interface's own pages, and the session that follows is a new
+  one, like a passkey sign-in's. The client secret goes only to the provider's token endpoint.
+- **The server reaches the provider only over HTTPS,** on port 443 or the port the issuer names,
+  on public addresses unless you list a host name in `LAKANA_OIDC__ALLOW_HOSTS`, never on a
+  loopback, link-local or cloud metadata address, and without following redirects.
+- **One way in.** A linked person signs in only through the provider: their passkeys no longer sign
+  them in, none can be added, and a recovery link an administrator issues for them offers only
+  the provider.
+- **Nobody is locked out by an outage.** While any administrator is linked, at least one
+  administrator who is not linked and has a passkey for this address must remain, and Lakana refuses
+  what would leave none. The server operator's recovery link unlinks a linked administrator whatever
+  the provider says
+  ([Bring your team onto single sign-on](../how-to/bring-your-team-onto-single-sign-on.md#when-the-provider-is-down-or-refuses-an-administrator)).
+- **Offboarding reaches tokens.** A linked person's personal API tokens work only within the token
+  window after their last sign-in through the provider (30 days by default, 1 to 365). Someone
+  disabled at the provider therefore loses token access within the window, and an open browser
+  session within its session lengths; deactivating them in Lakana ends both at once. Task and CI
+  tokens act for a run or a CI job and are not under it.
+- **What it does not do.** Signing out of Lakana ends Lakana's session only, and signing out at
+  the provider does not end it: a Lakana session runs its course (12 hours without use, 7 days at
+  most) unless it is ended in Lakana. Lakana does not ask the provider whether a person is still
+  active, and reads no groups from it.
 
 ## How Lakana meets MFA requirements
 
@@ -96,8 +139,10 @@ makes no claim of certification or compliance with any standard.
   with something they are or know (a fingerprint, a face or the device's PIN). It is bound to
   Lakana's exact address, so it resists phishing: a look-alike site cannot ask for it, and an
   answer meant for another address is refused.
-- **Single sign-on, when it comes,** will leave the factors to your identity provider: a person
-  signing in through it gets whatever multi-factor rule the provider enforces.
+- **Single sign-on leaves the factors to your identity provider.** A person linked to it signs
+  in only through it, so they get whatever multi-factor rule the provider enforces; their
+  passkeys no longer sign them in. Confirming a sensitive action asks the provider for a new
+  sign-in, not one it remembers.
 - **API tokens are a single factor, by design.** Scripts, CI jobs and the command line use them.
   The server stores only a hash of each token; any token can be revoked at once; CI and task tokens
   expire on their own (a CI token after an hour). A task token minted with a personal token stops

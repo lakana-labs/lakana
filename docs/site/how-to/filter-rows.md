@@ -110,11 +110,15 @@ filter's name: the people and service accounts, or the groups, whose name contai
 typed. A policy manager who is not an administrator may not list principals or groups, so these
 fields suggest nothing to them and take the name as typed.
 **Delete** says who then sees more. Both ask for a passkey touch first, like the other changes of
-access. The server checks the expression as it does for `lakana row-filter create`, and its reason
-for a refusal shows in the form, with what you typed kept. A filter in an environment an access
-file manages is marked **⌂ Git** and cannot be changed there: change the file instead
-([Keep access in a reviewed file](keep-access-in-a-reviewed-file.md)). The table's own Access tab
-shows its filters and masks too, and links to the place.
+access.
+Someone who signs in through the organisation's identity provider confirms there instead, then
+presses the action again
+([single sign-on](bring-your-team-onto-single-sign-on.md#what-linking-changes-for-a-person)). The
+server checks the expression as it does for `lakana row-filter create`, and its reason for a refusal
+shows in the form, with what you typed kept. A filter in an environment an access file manages is
+marked **⌂ Git** and cannot be changed there: change the file instead ([Keep access in a reviewed
+file](keep-access-in-a-reviewed-file.md)). The table's own Access tab shows its filters and masks
+too, and links to the place.
 
 ## An expression must not fail on any stored value
 
