@@ -705,8 +705,8 @@ UI_GATES = (
     "pytest packages/lakana-server/tests/test_ui_real_build.py",
     "run size",
 )
-UI_WORK_JOBS = ("ui-gates", "ui-gate-proofs", "ui-e2e-smoke", "ui-e2e-server")
-"""The jobs that run the interface's gates side by side; ``ui`` waits for the four (#586)."""
+UI_WORK_JOBS = ("ui-gates", "ui-gate-proofs", "ui-e2e-smoke", "ui-e2e-server", "ui-visual")
+"""The jobs that run the interface's gates side by side; ``ui`` waits for the five (#586, #506)."""
 UI_E2E = {
     "ui-e2e-smoke": ("run e2e:smoke -- --shard=${{ matrix.shard }}/2",),
     "ui-e2e-server": ("uv sync --all-packages --locked", "run e2e:server -- --project=chromium"),
@@ -813,9 +813,43 @@ def test_the_smoke_suite_runs_in_two_shards() -> None:
     assert job["strategy"] == {"fail-fast": False, "matrix": {"shard": [1, 2]}}
 
 
+def test_the_visual_job_compares_screenshots_in_the_image_and_keeps_the_differences() -> None:
+    """``ui (visual)`` builds, runs ``visual`` (the pinned image) and uploads a failure's images.
+
+    The browser is the image's own, so the job installs none (#506).
+    """
+    job = _jobs("ci.yml")["ui-visual"]
+    assert job["name"] == "ui (visual)"
+    commands = _job_commands("ui-visual")
+    install = _first(commands, "npm ci --ignore-scripts --prefix ui")
+    build = _first(commands, "npm --prefix ui run build")
+    visual = _first(commands, "npm --prefix ui run visual")
+    assert install < build < visual
+    assert not any("playwright install" in c or "run e2e" in c for c in commands)
+    upload = next(s for s in job["steps"] if "upload-artifact" in str(s.get("uses")))
+    assert upload["if"] == "failure() && steps.scope.outputs.run == 'true'"
+    assert upload["with"]["path"] == "ui/test-results/visual"
+
+
+def test_the_visual_image_is_the_version_of_playwright_the_interface_pins() -> None:
+    """The image's tag is ``@playwright/test``'s version, its digest pinned (#506).
+
+    A Dependabot bump of Playwright fails here until the image and the baselines follow it.
+    """
+    package = json.loads((ROOT / "ui" / "package.json").read_text())
+    version = package["devDependencies"]["@playwright/test"]
+    script = (ROOT / "ui" / "scripts" / "visual.mjs").read_text()
+    images = re.findall(r'"(mcr\.microsoft\.com/playwright:[^"]+)"', script)
+    assert images == [images[0]]
+    assert re.fullmatch(
+        rf"mcr\.microsoft\.com/playwright:v{re.escape(version)}-noble@sha256:[0-9a-f]{{64}}",
+        images[0],
+    )
+
+
 @pytest.mark.parametrize("name", UI_WORK_JOBS)
 def test_each_ui_job_waits_only_for_changes_and_has_a_timeout(name: str) -> None:
-    """The four start together, right after ``changes``, under the same condition as ``ui``."""
+    """The five start together, right after ``changes``, under the same condition as ``ui``."""
     job = _jobs("ci.yml")[name]
     assert job["needs"] == "changes"
     assert job["timeout-minutes"] == 15
@@ -823,8 +857,8 @@ def test_each_ui_job_waits_only_for_changes_and_has_a_timeout(name: str) -> None
     assert job["name"].startswith("ui (")
 
 
-def test_the_required_check_ui_is_green_only_when_all_four_ui_jobs_were() -> None:
-    """``ui`` stays the required check: it waits for the four and names a failed one."""
+def test_the_required_check_ui_is_green_only_when_all_five_ui_jobs_were() -> None:
+    """``ui`` stays the required check: it waits for the five and names a failed one."""
     job = _jobs("ci.yml")["ui"]
     assert set(job["needs"]) == {"changes", *UI_WORK_JOBS}
     assert job["timeout-minutes"] == 5
@@ -840,18 +874,19 @@ def test_the_required_check_ui_is_green_only_when_all_four_ui_jobs_were() -> Non
 @pytest.mark.parametrize(
     ("results", "status"),
     [
-        (("success", "success", "success", "success"), 0),
-        (("success", "failure", "success", "success"), 1),
-        (("success", "success", "failure", "success"), 1),
-        (("success", "success", "success", "cancelled"), 1),
-        (("skipped", "success", "success", "success"), 1),
-        (("", "success", "success", "success"), 1),
+        (("success", "success", "success", "success", "success"), 0),
+        (("success", "failure", "success", "success", "success"), 1),
+        (("success", "success", "failure", "success", "success"), 1),
+        (("success", "success", "success", "cancelled", "success"), 1),
+        (("success", "success", "success", "success", "failure"), 1),
+        (("skipped", "success", "success", "success", "success"), 1),
+        (("", "success", "success", "success", "success"), 1),
     ],
 )
 def test_the_ui_check_fails_unless_every_ui_job_succeeded(
-    results: tuple[str, str, str, str], status: int
+    results: tuple[str, str, str, str, str], status: int
 ) -> None:
-    """Run the step of ``ui`` with the results its four jobs could have."""
+    """Run the step of ``ui`` with the results its five jobs could have."""
     (step,) = _jobs("ci.yml")["ui"]["steps"]
     env = {**os.environ}
     for name, result in zip(UI_WORK_JOBS, results, strict=True):
@@ -953,10 +988,15 @@ def test_the_ui_job_skips_a_change_outside_ui(path: str, tmp_path: Path) -> None
 
 @pytest.mark.parametrize("name", UI_WORK_JOBS)
 def test_every_ui_step_after_the_scope_waits_for_it(name: str) -> None:
-    """A skipped scope skips everything but the checkout and the scope step itself."""
+    """A skipped scope skips everything but the checkout and the scope step itself.
+
+    The one step that runs only after a failure (``ui (visual)`` uploading its differences)
+    asks the scope too.
+    """
     steps = _jobs("ci.yml")[name]["steps"]
     scope = next(i for i, s in enumerate(steps) if s.get("id") == "scope")
-    assert all(s["if"] == "steps.scope.outputs.run == 'true'" for s in steps[scope + 1 :])
+    ran = "steps.scope.outputs.run == 'true'"
+    assert all(s["if"] in {ran, f"failure() && {ran}"} for s in steps[scope + 1 :])
 
 
 def test_lint_measures_duplication_in_ui_too() -> None:
@@ -1367,6 +1407,7 @@ DRAFT_RUNS = (
     "ui-gate-proofs",
     "ui-e2e-smoke",
     "ui-e2e-server",
+    "ui-visual",
     "unit",
     "docs-examples",
     "docs-examples-shard",
@@ -1424,6 +1465,7 @@ SKIPPED_WHEN_TESTED = (
     "ui-gate-proofs",
     "ui-e2e-smoke",
     "ui-e2e-server",
+    "ui-visual",
     "test",
     "integration",
     "integration-services",
@@ -1572,6 +1614,7 @@ _FULL_RUN = {
     "ui-gate-proofs",
     "ui-e2e-smoke",
     "ui-e2e-server",
+    "ui-visual",
     "unit",
     "test",
     "unit-macos",
@@ -1596,6 +1639,7 @@ WHAT_RUNS = {
         "ui-gate-proofs",
         "ui-e2e-smoke",
         "ui-e2e-server",
+        "ui-visual",
         "unit",
         "test",
         "docs",
@@ -2878,6 +2922,7 @@ def test_every_ci_job_has_a_time_budget() -> None:
         "ui (e2e smoke, 1/2)",
         "ui (e2e smoke, 2/2)",
         "ui (e2e server)",
+        "ui (visual)",
     } <= set(names)
     errors, _ = check_jobs([JobTime(name, 0.0) for name in names], budgets)
     assert errors == []

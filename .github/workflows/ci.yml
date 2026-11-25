@@ -142,15 +142,16 @@ jobs:
       - name: duplication of ui/ (ratchet)
         run: uv run python scripts/duplication_ratchet.py --report jscpd-report-ui/jscpd-report.json --baseline scripts/duplication-baseline-ui.json
 
-  # The web interface (ui/) in four jobs side by side, so neither the Playwright suites nor the
+  # The web interface (ui/) in five jobs side by side, so neither the Playwright suites nor the
   # gates' proofs add to the gates' time (#586): `ui (gates)` runs every gate of
   # `npm --prefix ui run check` and the coverage ratchet; `ui (gate proofs)` builds the interface
   # again (about a second) and runs `prove-gates`, which shows each gate still fails on a
   # violation (split off because the two together ran over the "ui (*)" budget);
   # `ui (e2e smoke, N/2)` (two shards) and `ui (e2e server)` each build the interface again and
-  # run one Playwright suite, or a shard of it, on Chromium. The required check `ui` waits for the
-  # four. They run on drafts too, and only when the interface, a tool its gates run or this
-  # workflow changed; the four scope steps are the same (scripts/tests/test_workflows.py).
+  # run one Playwright suite, or a shard of it, on Chromium; `ui (visual)` compares screenshots
+  # inside the pinned Playwright image. The required check `ui` waits for the five. They run on
+  # drafts too, and only when the interface, a tool its gates run or this workflow changed; the
+  # five scope steps are the same (scripts/tests/test_workflows.py).
   # See docs/agent/testing.md, "The ui/ gates".
   ui-gates:
     name: ui (gates)
@@ -363,9 +364,61 @@ jobs:
           uv sync --all-packages --locked
           npm --prefix ui run e2e:server -- --project=chromium
 
+  # Screenshots of every screen in light and dark (and the main places at a phone's width),
+  # compared with the baselines committed in ui/e2e/visual/screenshots/. They are drawn inside
+  # the pinned Playwright image (ui/scripts/visual.mjs), the same one `npm --prefix ui run
+  # visual:update` uses locally, so fonts and rendering match. On a difference the expected,
+  # actual and diff images are uploaded. See docs/agent/testing.md, "Visual regression".
+  ui-visual:
+    name: ui (visual)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
+    runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Did the interface change?
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Anything but a pull request that provably changes nothing relevant runs the job.
+          if [ "$EVENT" != "pull_request" ] || ! git rev-parse --verify --quiet "$BASE_SHA^{commit}" > /dev/null \
+            || git diff --name-only "$BASE_SHA" HEAD | grep -qE '^(ui/|packages/lakana-(server|core)/|tools/jscpd/|scripts/(ui_coverage_ratchet|coverage_ratchet|duplication_ratchet)\.py|scripts/duplication-baseline-ui\.json|packages/lakana-server/(src/lakana_server/ui|tests/test_ui_real_build)\.py|\.github/workflows/ci\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change to ui/ or its gates: skipping the interface's gates."
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - if: steps.scope.outputs.run == 'true'
+        name: install
+        run: npm ci --ignore-scripts --prefix ui
+      - if: steps.scope.outputs.run == 'true'
+        name: build
+        run: npm --prefix ui run build
+      - if: steps.scope.outputs.run == 'true'
+        name: Screenshots in the Playwright image
+        run: npm --prefix ui run visual
+      - if: failure() && steps.scope.outputs.run == 'true'
+        name: Upload the differences
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
+        with:
+          name: visual-differences
+          path: ui/test-results/visual
+          if-no-files-found: ignore
+          retention-days: 7
+
   # The required check `ui`: green only when every interface job above was.
   ui:
-    needs: [changes, ui-gates, ui-gate-proofs, ui-e2e-smoke, ui-e2e-server]
+    needs: [changes, ui-gates, ui-gate-proofs, ui-e2e-smoke, ui-e2e-server, ui-visual]
     if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.already_tested != 'true' }}
     runs-on: ${{ (github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && vars.CI_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -376,9 +429,10 @@ jobs:
           GATE_PROOFS: ${{ needs.ui-gate-proofs.result }}
           E2E_SMOKE: ${{ needs.ui-e2e-smoke.result }}
           E2E_SERVER: ${{ needs.ui-e2e-server.result }}
+          VISUAL: ${{ needs.ui-visual.result }}
         run: |
           failed=0
-          for pair in "gates:$GATES" "gate proofs:$GATE_PROOFS" "e2e smoke:$E2E_SMOKE" "e2e server:$E2E_SERVER"; do
+          for pair in "gates:$GATES" "gate proofs:$GATE_PROOFS" "e2e smoke:$E2E_SMOKE" "e2e server:$E2E_SERVER" "visual:$VISUAL"; do
             if [ "${pair#*:}" != "success" ]; then
               echo "::error::The job 'ui (${pair%%:*})' ended with '${pair#*:}' (for e2e smoke, one of its shards 'ui (e2e smoke, N/2)'): its log names the failing step."
               failed=1

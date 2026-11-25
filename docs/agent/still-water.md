@@ -166,7 +166,8 @@ Every screen, every time (the end-to-end test `ui/e2e/layout.spec.ts` measures m
 - Contrast: body text 7:1, other text 4.5:1, glyphs, edges and focus 3:1.
 - A decorative SVG is `aria-hidden`; one that stands alone has `role="img"` and a name.
 - Works at 320 px wide (reflow), in forced colours, with reduced motion.
-- The axe smoke test passes; screenshots in light and dark for review.
+- The axe smoke test passes; screenshots in light and dark for review, and the visual
+  regression baselines updated for every screen the change touches.
 
 ## Forbidden
 
@@ -188,4 +189,6 @@ A screen with any of these is sent back:
 ## Reviewing a screen pull request
 
 Check it against each section above and say which rules it meets and which it breaks, with the
-file and line. Look at its light and dark screenshots at 1280 and 1440 px.
+file and line. Look at its light and dark screenshots at 1280 and 1440 px, and at every baseline
+it changes under `ui/e2e/visual/screenshots/` (`docs/agent/testing.md`, "Visual regression"): a
+changed picture is reviewed like code.
