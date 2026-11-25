@@ -130,40 +130,53 @@ it("lets a page take the full width, with a reading width for running text only"
   );
 });
 
+/** Blocks drawn as banners on purpose that no paragraph on a page wears, and why. */
+const NOT_A_PAGE_PARAGRAPH: Readonly<Record<string, string>> = {
+  ".home-update": "Home's update note is a <div>; its sentence is exempt as `.home-update > p`",
+  ".notice": "a sign-in notice is an <li> outside any page, with its own 720 px",
+};
+
 it("lets a paragraph that is a block span its column: a banner, a notice, the update note (#820)", () => {
   const cap = /\.page :where\(p:not\(([^{]*)\)\)\s*{/.exec(shell)?.[1] ?? "";
-  expect(cap.split(",").map((part) => part.trim())).toEqual([
+  const exempt = cap.split(",").map((part) => part.trim());
+  expect(exempt).toEqual([
     ".step-error",
     ".step-warning",
     ".step-notice",
     ".page-notice",
     ".home-update > p",
   ]);
-  // Every block drawn as a banner (a state's bar on the left, its tint behind). A new one is
-  // added here and, when a paragraph on a page wears it, to the exemptions above.
+  // Every block drawn as a banner: a visible bar on its starting side (any width, physical or
+  // logical) and a tint behind. Each is exempt from the cap, or a deliberate exception above.
+  const bar = /border-(?:left|inline-start)(?:-width)?:\s*(?!0[;\s]|none|transparent)[^;]*;/;
   const root = resolve(import.meta.dirname, "..");
   const banners = readdirSync(root, { recursive: true, encoding: "utf8" })
     .filter((path) => path.endsWith(".css"))
     .flatMap((path) =>
-      [...readFileSync(resolve(root, path), "utf8").matchAll(/([^{}]+){([^}]*)}/g)]
-        .filter(([, , body = ""]) => /border-left:\s*3px/.test(body) && /background:/.test(body))
-        .flatMap(([, selectors = ""]) =>
-          selectors
-            .replace(/\/\*[\s\S]*?\*\//g, "")
-            .split(",")
-            .map((one) => one.trim()),
-        ),
+      [
+        ...readFileSync(resolve(root, path), "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .matchAll(/([^{}]+){([^}]*)}/g),
+      ]
+        .filter(
+          ([, , body = ""]) =>
+            bar.test(body) &&
+            !/border-(?:left|inline-start)[^;]*transparent/.test(body) &&
+            /background(?:-color)?:\s*(?!none|transparent)/.test(body),
+        )
+        .flatMap(([, selectors = ""]) => selectors.split(",").map((one) => one.trim())),
     );
-  expect(banners.sort()).toEqual([
-    // Home's update note: a <div>, whose sentence is exempt above.
-    ".home-update",
-    // A sign-in notice: an <li> outside any page, with its own 720 px.
-    ".notice",
-    ".page-notice",
-    ".step-error",
-    ".step-notice",
-    ".step-warning",
-  ]);
+  expect(banners.length).toBeGreaterThan(0);
+  for (const banner of banners) {
+    expect(
+      exempt.includes(banner) || banner in NOT_A_PAGE_PARAGRAPH,
+      `${banner} is a banner: exempt it from the reading width, or explain why not`,
+    ).toBe(true);
+  }
+  // Each exception is still a banner, so the list cannot go stale.
+  for (const exception of Object.keys(NOT_A_PAGE_PARAGRAPH)) {
+    expect(banners).toContain(exception);
+  }
 });
 
 it("gives the shared buttons --control-height and the working area --page-gutter", () => {

@@ -10,6 +10,10 @@ import { SHOTS } from "./visual/shots";
 const SCREENS = [
   "sign-in",
   "sign-in-passkeys-only",
+  "sign-in-oidc-finishing",
+  "sign-in-oidc-refused",
+  "sign-in-oidc-confirming",
+  "sign-in-oidc-confirm-refused",
   "sign-in-invite",
   "sign-in-recovery",
   "sign-in-link-used",
@@ -122,6 +126,12 @@ for (const name of SCREENS) {
     await shot.stub(page);
     await page.goto(shot.path);
     await expect(shot.ready(page)).toBeVisible();
+    // A loading step shows its status before its heading: wait for the heading as well.
+    await expect(
+      page.locator("h1[tabindex='-1'], h2[tabindex='-1'], h3[tabindex='-1']").first(),
+    ).toBeVisible();
+    // Measured in the bundled fonts, not the fallback they swap from (as the visual suite does).
+    await page.evaluate(() => document.fonts.ready);
 
     const { checked, touches } = await ringsOverText(page);
     expect(checked, "headings that take the focus by script").toBeGreaterThan(0);

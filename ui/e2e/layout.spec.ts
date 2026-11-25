@@ -4,6 +4,7 @@ import { stubAccess, stubPolicies, stubSignInAndConfiguration, stubTokensSecrets
 import { PROD, stubConnections, WAREHOUSE } from "./connections";
 import { stubEnvironments } from "./environments";
 import { FAILED_ID, stubJobs, TIMED_OUT } from "./jobs";
+import { stubProvider } from "./oidc";
 import { SALES_SQL, stubQueries } from "./queries";
 import { stubRepositories } from "./repositories";
 import { signInAsAdmin } from "./session";
@@ -490,6 +491,8 @@ async function openShot(page: Page, name: string): Promise<void> {
   await shot.stub(page);
   await page.goto(shot.path);
   await expect(shot.ready(page)).toBeVisible();
+  // Measured in the bundled fonts, not the fallback they swap from (as the visual suite does).
+  await page.evaluate(() => document.fonts.ready);
 }
 
 /**
@@ -528,6 +531,17 @@ for (const [shot, selector] of [
     expect(Math.abs(await shortOfColumn(measured))).toBeLessThanOrEqual(0.5);
   });
 }
+
+test("Settings › Sign-in's warning (a .step-warning) spans its column", async ({ page }) => {
+  // The warning shows when at most one administrator can still sign in with a passkey.
+  await stubProvider(page, { unlinkedAdmins: 1 });
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/settings/sign-in");
+  const warning = page.locator(".page p.step-warning");
+  await expect(warning).toBeVisible();
+  await page.evaluate(() => document.fonts.ready);
+  expect(Math.abs(await shortOfColumn(warning))).toBeLessThanOrEqual(0.5);
+});
 
 test("running text keeps the reading width", async ({ page }) => {
   await openShot(page, "settings-environments");
