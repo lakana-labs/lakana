@@ -76,7 +76,8 @@ and nothing is created. The message names the grant that already gives the acces
 was created.` To take the access away, revoke that one grant with `lakana grant revoke ID`.
 
 In the web interface, an administrator does the same under **Settings → Access → Grants**: **Add
-grant** asks who (a person or a group), a role or a single action, and where, and it asks for the
+grant** asks who (a person or a group, whose name it suggests as you type), a role or a single
+action, and where, and it asks for the
 environment unless the grant is on the whole instance. **Settings → Access → Groups** creates a
 group and adds or removes its members; as you type a member's name, it suggests the people and
 service accounts whose name contains it, and a name nobody has is named before you save. Both ask for a passkey touch before a change, and a scope

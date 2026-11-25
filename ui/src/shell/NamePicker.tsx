@@ -132,7 +132,15 @@ function useNameSearch<T>(search: NameSearch<T> | null): NameSearchState<T> {
     running.current = null;
     round.current += 1;
   }, []);
-  useEffect(() => stop, [stop]);
+  // A new search (another environment's tables) stops waiting for the old one's answer...
+  useEffect(() => stop, [search, stop]);
+  // ...and shows none of its suggestions: they would name what the new one does not offer.
+  // Kept in an object: React would call a function handed to a state setter.
+  const [searchOf, setSearchOf] = useState({ search });
+  if (searchOf.search !== search) {
+    setSearchOf({ search });
+    setFound({ state: "idle" });
+  }
   const settle = useCallback(
     (choice: NameChoice<T>): void => {
       stop();
@@ -257,8 +265,8 @@ export function NamePicker<T>({
   const line = stateLine(t, found, noMatch);
   const shown = markedName(value);
   const choose = (key: Key | null): void => {
-    const choice = choices.find((one) => one.key === key);
-    if (choice === undefined) return;
+    // React Aria offers only the listed choices, so the key is one of them.
+    const choice = choices.find((one) => one.key === key) as NameChoice<T>;
     pickedByKey.current = true;
     setSelected(key);
     settle(choice);
@@ -278,7 +286,6 @@ export function NamePicker<T>({
         isDisabled={isDisabled}
         isInvalid={error !== null}
         onInputChange={(text) => {
-          if (text === value) return;
           setSelected(null);
           onChange(text);
           ask(text, PICKER_DELAY_MS);
@@ -326,9 +333,16 @@ export function NamePicker<T>({
         )}
         <FieldError>{error}</FieldError>
         <Popover className="float name-picker-float" placement="bottom start">
-          <ListBox<NameChoice<T>> className="menu">
+          <ListBox<NameChoice<T>> className="menu" aria-label={t("picker.suggestions")}>
             {(choice) => (
-              <ListBoxItem id={choice.key} className="menu-item" textValue={choice.name}>
+              <ListBoxItem
+                id={choice.key}
+                className="menu-item"
+                // The raw name goes into the field once chosen; the name a screen reader speaks
+                // (VoiceOver takes it for React Aria's announcements) shows hidden characters.
+                textValue={choice.name}
+                aria-label={markedName(choice.name)}
+              >
                 <span className="name-picker-name">
                   <VisibleText text={choice.name} name />
                 </span>

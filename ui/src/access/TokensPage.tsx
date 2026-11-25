@@ -5,14 +5,13 @@
  *
  * @packageDocumentation
  */
-import { type JSX, useCallback, useId, useMemo, useRef, useState } from "react";
+import { type JSX, useCallback, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
 
 import { listEnvironments } from "../api/environments";
 import { SettingsFrame } from "../settings/SettingsFrame";
 import "../settings/settingsStrings";
-import { useSettingsViewer } from "../settings/viewer";
 import { CopyLine } from "../shell/CopyLine";
 import { EnvironmentPicker } from "../shell/EnvironmentPicker";
 import { countWords, ListToolbar, useListState } from "../shell/ListToolbar";
@@ -20,7 +19,7 @@ import { NamePicker } from "../shell/NamePicker";
 import { useResource } from "../shell/useResource";
 import "./access.css";
 import { tokensPath } from "./accessPaths";
-import { principalSearch } from "./suggest";
+import { usePrincipalSearch } from "./suggest";
 import { PersonalTokens, TaskTokens } from "./TokenLists";
 import "./tokenStrings";
 
@@ -78,8 +77,7 @@ export function TokensPage(): JSX.Element {
     const next = text.trim() === "" ? null : text.trim();
     if (next !== owner) go({ owner: next, environment });
   };
-  const admin = useSettingsViewer().admin;
-  const suggest = useMemo(() => (admin ? principalSearch(t) : null), [admin, t]);
+  const suggest = usePrincipalSearch();
   return (
     <SettingsFrame title={t("settings.places.tokens")}>
       <section className="flat-panel access-section" aria-labelledby={personalId}>

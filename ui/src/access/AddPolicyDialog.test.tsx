@@ -237,6 +237,41 @@ describe("AddPolicyDialog", () => {
     expect(screen.getByRole("dialog", { name: "Add filter or mask" })).toBeInTheDocument();
   });
 
+  it("offers no table of the environment chosen before", async () => {
+    const answer = held();
+    const shell = await openDialog(
+      PATH,
+      policyRoutes({
+        "GET /api/v1/tables": (request) =>
+          request.path.includes("environment=dev")
+            ? {
+                status: 200,
+                body: {
+                  items: [item({ environment: "dev", namespace: "gold", name: "station_ranking" })],
+                  next_cursor: null,
+                  capped: false,
+                },
+              }
+            : answer.route(),
+      }),
+    );
+    const { user, dialog } = shell;
+    const table = within(dialog).getByRole("combobox", { name: "Table" });
+    await chooseEnvironment(shell, "dev");
+    await user.type(table, "station");
+    expect(await screen.findByRole("option")).toHaveTextContent("station_ranking");
+    await user.keyboard("{Escape}");
+
+    await chooseEnvironment(shell, "prod");
+    await user.click(table);
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Looking for names…");
+    });
+    expect(screen.queryAllByRole("option")).toEqual([]);
+  });
+
   it("says when no table of that name may be read there", async () => {
     const shell = await openDialog();
     const { user, dialog } = shell;

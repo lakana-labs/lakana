@@ -612,11 +612,15 @@ export default [
   // Help, the shortcuts and the tour, which en.json ships in the entry, 2026-11-11) + 10 %. Raised
   // from 192 kB: the tour and the shortcuts already load on demand; what is left is drawn on the
   // first paint or is a string of en.json, and moving the tour's strings out alone would not fit.
+  // Measured 212.23 kB (2026-11-25; 211.98 kB before): the whole interface stands in React
+  // Aria's I18nProvider (i18n/LanguageProvider.tsx), so React Aria's own words and formats follow
+  // the interface's language rather than the browser's (#784). Raised from 212 kB to 213 kB for
+  // its +0.25 kB; nothing else entered the first load.
   {
     name: "JavaScript, first load",
     path: INITIAL.map((name) => `${ASSETS}/${name}`),
     gzip: true,
-    limit: "212 kB",
+    limit: "213 kB",
   },
   ...onDemandChunks(INITIAL).map(onDemandCheck),
   // Raised from 8.03 kB: measured 7.42 kB with the Health and Access tabs' rules (their sections,

@@ -145,6 +145,57 @@ describe("NamePicker", () => {
     expect(field).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("names its list in the interface's words, not React Aria's", async () => {
+    // React Aria alone would name it in the browser's language: "Empfehlungen".
+    vi.spyOn(navigator, "language", "get").mockReturnValue("de-DE");
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+    act(() => {
+      window.dispatchEvent(new Event("languagechange"));
+    });
+
+    await user.type(screen.getByRole("combobox"), "ma");
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+
+    expect(screen.getByRole("listbox")).toHaveAttribute("aria-label", "Suggestions");
+    vi.restoreAllMocks();
+    act(() => {
+      window.dispatchEvent(new Event("languagechange"));
+    });
+  });
+
+  it("forgets the suggestions of an older search, such as another environment's tables", async () => {
+    const user = userEvent.setup();
+    const first = heldSearch();
+    const second = heldSearch();
+    const { rerender } = render(<Harness search={first.search} />);
+    await user.type(screen.getByRole("combobox"), "st");
+    await waitFor(() => {
+      expect(first.calls).toHaveLength(1);
+    });
+    act(() => {
+      first.calls[0]?.answer({ choices: [aChoice("station_ranking")], more: false });
+    });
+    await screen.findByRole("option");
+    await user.keyboard("{Escape}");
+
+    rerender(<Harness search={second.search} />);
+    await user.keyboard("{ArrowDown}");
+
+    await waitFor(() => {
+      expect(second.calls).toHaveLength(1);
+    });
+    expect(screen.queryAllByRole("option")).toEqual([]);
+    expect(screen.getByRole("status")).toHaveTextContent("Looking for names…");
+    act(() => {
+      first.calls[0]?.answer({ choices: [aChoice("late")], more: false });
+    });
+    expect(screen.queryAllByRole("option")).toEqual([]);
+  });
+
   it("drops an older text's answer and cancels its request", async () => {
     const user = userEvent.setup();
     const { search, calls } = heldSearch();
@@ -168,6 +219,29 @@ describe("NamePicker", () => {
 
     expect(await screen.findByRole("option", { name: /max/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: /maria/ })).toBeNull();
+  });
+
+  it("drops an older text's failure as it drops its answer", async () => {
+    const user = userEvent.setup();
+    const { search, calls } = heldSearch();
+    render(<Harness search={search} />);
+    const field = screen.getByRole("combobox");
+
+    await user.type(field, "ma");
+    await waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    await user.type(field, "x");
+    await waitFor(() => {
+      expect(calls).toHaveLength(2);
+    });
+    act(() => {
+      calls[0]?.fail(new ApiError(503, "ServiceUnavailable", "The catalog is busy."));
+      calls[1]?.answer({ choices: [aChoice("max")], more: false });
+    });
+
+    expect(await screen.findByRole("option", { name: "max" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).not.toHaveTextContent("could not be read");
   });
 
   it("says when nothing matches, in the list and to a screen reader", async () => {
@@ -265,6 +339,9 @@ describe("NamePicker", () => {
     });
     const [first] = await screen.findAllByRole("option");
     expect(first).toHaveTextContent("admU+202EnimdaPerson");
+    // The name a screen reader speaks (VoiceOver takes it for React Aria's announcements) is
+    // marked too.
+    expect(first).toHaveAccessibleName("admU+202Enimda");
     await user.click(first as HTMLElement);
 
     expect(held()).toBe(spoof);

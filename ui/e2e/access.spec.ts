@@ -112,8 +112,14 @@ for (const theme of ["light", "dark"] as const) {
       await tabTo(page, dialog.getByRole("radio", { name: "A person or service account" }));
       await page.keyboard.press("ArrowRight");
       await expect(dialog.getByRole("radio", { name: "A group" })).toBeChecked();
-      await tabTo(page, dialog.getByRole("textbox", { name: "Name" }));
-      await page.keyboard.type("ops");
+      await tabTo(page, dialog.getByRole("combobox", { name: "Name" }));
+      await page.keyboard.type("op");
+      // The group is chosen from the suggestions, by keyboard alone.
+      await expect(page.getByRole("option", { name: "ops" })).toBeVisible();
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("listbox")).toBeHidden();
+      await expect(dialog.getByRole("combobox", { name: "Name" })).toHaveValue("ops");
       await tabTo(page, dialog.getByRole("button", { name: /Role$/ }));
       await page.keyboard.press("Enter");
       await page.getByRole("option", { name: /^ANALYST/ }).focus();

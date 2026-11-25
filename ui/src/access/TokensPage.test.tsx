@@ -240,8 +240,7 @@ describe("TokensPage", () => {
     const field = await screen.findByRole("combobox", { name: "Owner" });
 
     await shell.user.type(field, "mar");
-    await screen.findAllByRole("option");
-    await shell.user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+    await shell.user.click(await screen.findByRole("option", { name: "marek" }));
 
     await waitFor(() => {
       expect(shell.router.state.location.search).toBe("?owner=marek");
@@ -252,6 +251,20 @@ describe("TokensPage", () => {
       "/api/v1/tokens?owner=marek&limit=50",
     ]);
     expect(sentTo(shell, "/api/v1/principals?")).toEqual(["/api/v1/principals?limit=20&q=mar"]);
+  });
+
+  it("says when no principal has the owner's name", async () => {
+    const shell = renderShell(PATH, {
+      routes: tokenRoutes({ "GET /api/v1/principals": { status: 200, body: [] } }),
+    });
+
+    await shell.user.type(await screen.findByRole("combobox", { name: "Owner" }), "nobody");
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "No principal named “nobody”. Check the spelling.",
+      );
+    });
   });
 
   it("clears the owner when the field is emptied and left", async () => {

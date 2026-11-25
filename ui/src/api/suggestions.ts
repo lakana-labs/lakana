@@ -41,6 +41,32 @@ export async function suggestPrincipals(
 }
 
 /**
+ * Suggests groups for a name picker: the first `limit` whose name contains the text, newest
+ * first. It needs the `ADMIN` role, as the Groups list does.
+ *
+ * @param text - What the name must contain; blank for the newest.
+ * @param limit - How many to ask for.
+ * @param signal - Cancels the read once a newer text is typed.
+ * @returns The groups' names and whether more match.
+ * @throws {ApiError} for a refusal or an unreachable server.
+ */
+export async function suggestGroups(
+  text: string,
+  limit: number,
+  signal: AbortSignal,
+): Promise<{ readonly names: readonly string[]; readonly more: boolean }> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (text !== "") {
+    query.set("q", text);
+  }
+  const page = await api.page(`/api/v1/groups?${query.toString()}`, { signal });
+  return {
+    names: (page.body as readonly { readonly name: string }[]).map((group) => group.name),
+    more: page.nextCursor !== null,
+  };
+}
+
+/**
  * Suggests tables for a name picker: the first `limit` of an environment whose own name contains
  * the text (`name`, never a namespace, a column or a description), by name. Only tables the
  * person may read are listed; one they may not read is left out, never refused.

@@ -307,7 +307,7 @@ export function AddPolicyDialog({
             set({ table: value });
           }}
           search={suggest}
-          noMatch={(text) => t("picker.noTable", { name: text, environment: known ?? "" })}
+          noMatch={(text) => t("picker.noTable", { name: text, environment })}
           onPick={(choice) => {
             set({ namespace: choice.data.namespace, table: choice.data.name });
           }}

@@ -1034,6 +1034,13 @@ walk("Groups, a group, Grants and What I may do mark hidden characters", async (
   await expect(page.getByRole("dialog")).toBeHidden();
   await page.getByRole("button", { name: "Add grant" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
+  // Add grant's Name suggests people and service accounts (#784).
+  await page.getByRole("dialog").getByRole("combobox", { name: "Name" }).fill("adm");
+  await expect(page.getByRole("listbox")).toContainText("adminU+202E");
+  await expectNoRaw(page, "Add grant's suggestions");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("listbox")).toBeHidden();
+  await expect(page.getByRole("dialog")).toBeVisible();
   await page
     .getByRole("dialog")
     .getByRole("button", { name: /Environment$/ })
