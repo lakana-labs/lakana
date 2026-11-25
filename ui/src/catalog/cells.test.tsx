@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { createPortal } from "react-dom";
 import i18next from "i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { kindWord, OwnerName, RowCount, Unknown, When } from "./cells";
+import { kindWord, openFromCell, OwnerName, RowCount, Unknown, When } from "./cells";
 
 describe("Unknown", () => {
   it("shows a dash to the eye and the words to a screen reader", () => {
@@ -113,5 +114,40 @@ describe("kindWord", () => {
   it("falls back to the entry kind", () => {
     expect(kindWord(t, "VIEW", null)).toBe("View");
     expect(kindWord(t, "TABLE", "unheard-of")).toBe("Table");
+  });
+});
+
+describe("openFromCell", () => {
+  it("opens the row from its cells, never from a portal the row rendered", () => {
+    const opened = vi.fn((event: Event) => {
+      event.preventDefault();
+    });
+    render(
+      <table>
+        <tbody>
+          <tr onClick={openFromCell}>
+            <td>
+              <a
+                className="row-name"
+                href="/jobs/prod/job/analytics/nightly_sales"
+                onClick={(e) => {
+                  opened(e.nativeEvent);
+                }}
+              >
+                nightly_sales
+              </a>
+            </td>
+            <td>Next run</td>
+            <td>{createPortal(<p>In a dialog</p>, document.body)}</td>
+          </tr>
+        </tbody>
+      </table>,
+    );
+
+    fireEvent.click(screen.getByText("In a dialog"));
+    expect(opened).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText("Next run"));
+    expect(opened).toHaveBeenCalledTimes(1);
   });
 });

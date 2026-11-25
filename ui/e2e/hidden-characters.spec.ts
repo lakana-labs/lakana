@@ -110,7 +110,7 @@ const LITERAL_CODES: Record<string, string> = {
   HealthSummaryOut: "state",
   HeldGrantOut: "kind",
   InstanceStatusOut: "state",
-  JobOut: "actions last_run_status",
+  JobOut: "actions last_run_status waiting_trigger",
   JobRunFilter: "status",
   LastMaintenanceOut: "status",
   LinkDescriptionOut: "kind state",

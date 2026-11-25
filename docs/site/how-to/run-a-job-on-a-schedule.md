@@ -166,7 +166,9 @@ environment to anyone who may read it; `--repo` limits it to one repository.
 In the web interface, **Jobs** in the menu lists every job of the environments you may read under
 **All jobs**: its name, which opens the job's page, its repository and environment, its schedule
 in words ("daily 06:00 Europe/Berlin", with "paused" while it is paused, or "by hand" for a job
-without one), its last run and its next run. **Environment** above the lists shows one
+without one), its last run and its next run. A job whose start waits for the run that holds its
+project shows **Waiting** as its next run, while its last run keeps its result; pointing at
+**Waiting**, or moving the focus to it with Tab, shows what it waits for. **Environment** above the lists shows one
 environment instead of all, and the page remembers your choice; **Search jobs** narrows the lists
 to the jobs and repositories whose names hold the words.
 
@@ -286,7 +288,10 @@ without a principal it is refused with a message that says to bind one.
 In the web interface, **Run now** on the job's page starts the job at once; it is there for anyone
 with `RUN` on the environment. The new run shows below the job's runs, and the page says "Started
 a run of" the job. When the project is busy, the page says that the start waits and links to the
-run it waits for.
+run it waits for. While it waits, the job's **Facts** begin with **Waiting**, what it waits for,
+a link to that run, and when the start was requested and how ("By hand", "Schedule"). The
+**Runs** tab of the Jobs page lists the waiting start above the runs, as **Waiting**, until it
+becomes a run.
 
 ## Start a job after each deploy
 

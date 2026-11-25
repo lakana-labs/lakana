@@ -171,6 +171,67 @@ describe("AllJobs", () => {
     expect(within(rowOf("fresh")).getAllByRole("cell")[4]).toHaveTextContent("never");
   });
 
+  it("shows Waiting as the next run of a job whose start waits, with why on hover (#786)", async () => {
+    const message = "A start of this job waits for run 1b2c3d4e of this project to finish.";
+    const { user } = renderAll(["prod"], {
+      [jobsOf("prod")]: {
+        status: 200,
+        body: [
+          aJob({
+            state: "waiting",
+            waiting_for: { code: "job_waits", message },
+            waits_for_run_id: "1b2c3d4e",
+            waiting_since: "2026-11-17T09:12:00Z",
+            waiting_trigger: "manual",
+          }),
+          aJob({
+            name: "about_to_start",
+            state: "waiting to start",
+            waiting_for: { code: "job_starts_soon", message: "It begins within a few seconds." },
+          }),
+          aJob({ name: "fresh", last_run_id: null, last_run_status: null, last_run_at: null }),
+        ],
+      },
+    });
+
+    await screen.findByRole("region", { name: "Every job listed" });
+    const cells = within(rowOf("nightly_sales")).getAllByRole("cell");
+    // The last result stays; the next run is the start that waits.
+    expect(within(cells[4] as HTMLElement).getByText("Succeeded")).toBeInTheDocument();
+    const next = cells[5] as HTMLElement;
+    expect(within(next).getByText("Waiting")).toBeInTheDocument();
+    expect(next).not.toHaveTextContent(when("2026-11-18T01:00:00Z"));
+    expect(next.querySelector("[data-tip]")).toHaveAttribute("data-tip", message);
+    expect(next).toHaveTextContent(message);
+    const soon = within(rowOf("about_to_start")).getAllByRole("cell")[5] as HTMLElement;
+    expect(within(soon).getByText("Waiting")).toBeInTheDocument();
+    const fresh = within(rowOf("fresh")).getAllByRole("cell");
+    expect(fresh[4]).toHaveTextContent("never");
+    expect(fresh[5]).not.toHaveTextContent("Waiting");
+    expect(fresh[5]).toHaveTextContent(when("2026-11-18T01:00:00Z"));
+
+    // A click on the pill opens the job, as the rest of the row does.
+    await user.click(within(next).getByText("Waiting"));
+    expect(screen.getByLabelText("where")).toHaveTextContent(
+      "/jobs/prod/job/analytics/nightly_sales",
+    );
+  });
+
+  it("a click inside a row's dialog never opens the row", async () => {
+    const { user } = renderAll(["prod"], { [jobsOf("prod")]: { status: 200, body: [aJob()] } });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Pause the schedule of nightly_sales" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    // The dialog is a portal: React hands its clicks to the row it was opened from.
+    await user.click(within(dialog).getByText("Pause the schedule of nightly_sales?"));
+    await user.click(document.querySelector(".palette-overlay") as HTMLElement);
+
+    expect(screen.getByLabelText("where")).toHaveTextContent(/^\/jobs$/u);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("Run starts the job and Pause asks first, each named by the row", async () => {
     const { server, onChanged, user } = renderAll(["prod"], {
       [jobsOf("prod")]: {
