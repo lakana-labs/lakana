@@ -261,10 +261,13 @@
   color: var(--color-text-muted);
 }
 
-/* Roll back to this… while a rollback runs: dimmed, as a disabled menu item is, and unchanged on
-   hover; its description is the note that says what runs. */
+/* Roll back to this… while a rollback runs: its label faint and its edge a hairline, and unchanged
+   on hover; its description is the note that says what runs. It keeps the focus, so only the
+   label and the edge are quieter, never the whole button: an opacity would dim its focus ring
+   below 3:1 (tokens.test.ts). */
 .jobs-deploys-scroll .button[aria-disabled="true"] {
-  opacity: 0.6;
+  border-color: var(--color-line);
+  color: var(--color-text-faint);
   cursor: default;
 }
 

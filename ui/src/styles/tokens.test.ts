@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -9,12 +9,58 @@ import {
   DARK,
   LIGHT,
   luminance,
+  over,
   PALETTES,
+  ratio,
   properties,
   TOKENS_CSS as tokens,
 } from "../test/palette";
 
 const modes = Object.keys(PALETTES);
+
+/** The source folder, whose stylesheets the held-control test reads. */
+const SRC = resolve(import.meta.dirname, "..");
+
+/**
+ * Every rule of the interface's stylesheets for a held control: one marked
+ * `aria-disabled="true"`, which (unlike a disabled one) keeps the focus, so its ring is seen.
+ *
+ * @returns Each rule's file, selector and declarations.
+ */
+function heldRules(): { file: string; selector: string; body: string }[] {
+  const files = readdirSync(SRC, { recursive: true, encoding: "utf8" }).filter((name) =>
+    name.endsWith(".css"),
+  );
+  return files.flatMap((file) =>
+    [
+      ...readFileSync(resolve(SRC, file), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .matchAll(/([^{}]+)\{([^{}]*)\}/g),
+    ]
+      .map((match) => ({ file, selector: (match[1] ?? "").trim(), body: match[2] ?? "" }))
+      .filter((rule) => rule.selector.includes('[aria-disabled="true"]')),
+  );
+}
+
+/**
+ * The contrast of a colour seen through an opacity against the background it is drawn on.
+ *
+ * @param palette - The palette.
+ * @param foreground - The colour's token.
+ * @param background - The background's token.
+ * @param opacity - The element's opacity, 0 to 1.
+ * @returns The ratio, 1 to 21.
+ */
+function seenContrast(
+  palette: Record<string, string>,
+  foreground: string,
+  background: string,
+  opacity: number,
+): number {
+  const ground = palette[background] ?? "";
+  const seen = over(palette[foreground] ?? "", ground, opacity);
+  return ratio(luminance(seen), luminance(ground));
+}
 
 describe("tokens", () => {
   it.each(modes)("body text reaches AAA on ground and surface (%s)", (mode) => {
@@ -74,6 +120,32 @@ describe("tokens", () => {
     expect(palette["--color-accent-hover"]).not.toBe(palette["--color-accent"]);
     expect(contrast(palette, "--color-accent-hover", "--color-surface")).toBeGreaterThanOrEqual(3);
   });
+
+  it("finds the rules of held controls", () => {
+    expect(heldRules().map((rule) => rule.file)).toContain("jobs/jobs.css");
+  });
+
+  it.each(modes)(
+    "a held control keeps its focus ring at 3:1 and its label at 4.5:1, never dimmed (%s)",
+    (mode) => {
+      const palette = PALETTES[mode] ?? {};
+      for (const { file, selector, body } of heldRules()) {
+        const opacity = Number(/(?<![-\w])opacity\s*:\s*([\d.]+)/.exec(body)?.[1] ?? "1");
+        const label = /(?<![-\w])color\s*:\s*var\((--[\w-]+)\)/.exec(body)?.[1] ?? "--color-text";
+        const where = `${file}: ${selector}`;
+        for (const ground of ["--color-ground", "--color-surface"]) {
+          expect(
+            seenContrast(palette, "--color-accent", ground, opacity),
+            `${where}: ring on ${ground}`,
+          ).toBeGreaterThanOrEqual(3);
+        }
+        expect(
+          seenContrast(palette, label, "--color-surface", opacity),
+          `${where}: label`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    },
+  );
 
   it("hovers the primary button with the token, never a filter", () => {
     const signIn = readFileSync(resolve(import.meta.dirname, "../sign-in/sign-in.css"), "utf8");
