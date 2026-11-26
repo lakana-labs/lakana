@@ -40,6 +40,10 @@ const TEXT_FORMS = [
   "text-placeholder.tsx",
   "text-alt.tsx",
   "text-attribute-template.tsx",
+  "text-concatenation.tsx",
+  "text-attribute-concatenation.tsx",
+  "text-prop-heading.tsx",
+  "text-prop-message.tsx",
 ];
 
 /**
@@ -74,13 +78,14 @@ describe("the ban on raw HTML", () => {
 
 describe("the ban on text not taken from i18next", () => {
   it("fails the lint on each form of literal text", { timeout: 120_000 }, async () => {
-    const results = await lint([...TEXT_FORMS, "text-allowed.tsx"]);
+    const results = await lint([...TEXT_FORMS, "text-allowed.tsx", "text-copy-command.tsx"]);
 
     for (const form of TEXT_FORMS) {
       const messages = results.get(form)?.messages.map((message) => message.message);
       expect(messages, form).toEqual([TEXT_MESSAGE]);
     }
     expect(results.get("text-allowed.tsx")?.messages).toEqual([]);
+    expect(results.get("text-copy-command.tsx")?.messages).toEqual([]);
   });
 
   it("leaves tests alone", { timeout: 120_000 }, async () => {

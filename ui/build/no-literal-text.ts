@@ -5,32 +5,97 @@
  *
  * @remarks
  * It reports JSX text with a letter in it, a string or template literal with a letter as a JSX
- * child, and the same as the value of an attribute a person reads or hears (`aria-label`,
- * `title`, `placeholder`, `alt` and the like), also as a branch of `?:`, `&&` or `||`. Glyphs and
- * punctuation (`·`, `—`, `→`, `×`) carry no letter and pass; so does every attribute no one reads
+ * child, and the same as the value of an attribute a person reads or hears ({@link READ_ATTRIBUTES}:
+ * `aria-label`, `title`, `placeholder`, `alt`, and the props of the interface's own components such
+ * as `heading` or `term`), also inside `?:`, `&&`, `||` or a `+` join. Glyphs and punctuation
+ * (`·`, `—`, `→`, `×`) carry no letter and pass; so does every attribute no one reads
  * (`className`, `data-testid`, `key`, `style`, `id`, `href`). `scripts/lint-ban.test.ts` proves it
  * fires once per form. A deliberate exception is `// eslint-disable-next-line
- * lakana/no-literal-text -- why`.
+ * lakana/no-literal-text -- why`. Words outside JSX (in a `.ts` file, a map of labels, a constant,
+ * a call) are out of its reach: see docs/agent/conventions.md.
  * @packageDocumentation
  */
 import type { Rule } from "eslint";
 import type { Node } from "estree";
 
-/** The attributes whose value a person reads or hears. */
-const READ_ATTRIBUTES = new Set([
+/**
+ * The attributes whose value a person reads or hears: the browser's and React Aria's, and the props
+ * of the interface's own components that render the text they are given. `no-literal-text.test.ts`
+ * fails when a prop given `t()` text in `ui/src` is in neither this list nor {@link NOT_READ}.
+ */
+export const READ_ATTRIBUTES: ReadonlySet<string> = new Set([
+  "action",
+  "after",
+  "all",
+  "also",
   "alt",
   "aria-description",
   "aria-label",
   "aria-placeholder",
   "aria-roledescription",
   "aria-valuetext",
+  "aside",
+  "body",
+  "choices",
+  "column",
+  "columns",
+  "commands",
+  "confirm",
+  "confirmLabel",
+  "controls",
+  "copyLabel",
   "description",
+  "done",
+  "element",
+  "empty",
+  "error",
   "errorMessage",
+  "failure",
+  "fallback",
+  "filters",
+  "head",
+  "heading",
+  "held",
+  "help",
+  "hidden",
+  "hiddenText",
   "label",
+  "loading",
+  "message",
+  "missing",
+  "more",
+  "never",
+  "note",
+  "nothing",
+  "options",
+  "place",
   "placeholder",
+  "reading",
+  "region",
+  "search",
+  "second",
+  "status",
+  "submit",
+  "term",
+  "text",
   "textValue",
   "title",
+  "tooBig",
+  "toolbar",
+  "trail",
+  "waiting",
+  "what",
+  "words",
 ]);
+
+/**
+ * The watched attributes that one component does not show as words, as `Element.attribute`, each
+ * with its reason.
+ */
+export const NOT_READ: Readonly<Record<string, string>> = {
+  "CopyLine.text":
+    "a command to copy and run, the same in every language (its button's name is read)",
+};
 
 /** A letter of any script: what makes a literal words rather than a glyph. */
 const LETTER = /\p{L}/u;
@@ -68,6 +133,10 @@ function wordLiterals(expression: Node | { readonly type: "JSXEmptyExpression" }
       return [...wordLiterals(expression.consequent), ...wordLiterals(expression.alternate)];
     case "LogicalExpression":
       return [...wordLiterals(expression.left), ...wordLiterals(expression.right)];
+    case "BinaryExpression":
+      return expression.operator === "+" && expression.left.type !== "PrivateIdentifier"
+        ? [...wordLiterals(expression.left), ...wordLiterals(expression.right)]
+        : [];
     default:
       return [];
   }
@@ -77,15 +146,21 @@ function wordLiterals(expression: Node | { readonly type: "JSXEmptyExpression" }
  * Whether an attribute's value is read by a person.
  *
  * @param attribute - The `JSXAttribute` node.
- * @returns True for `aria-label`, `title`, `placeholder`, `alt` and the like.
+ * @returns True for `aria-label`, `title`, `placeholder`, `alt`, `heading` and the like, unless
+ *   {@link NOT_READ} names it for its element.
  */
 function isRead(attribute: JsxNode | undefined): boolean {
-  return (
-    attribute?.type === "JSXAttribute" &&
-    attribute.name?.type === "JSXIdentifier" &&
-    typeof attribute.name.name === "string" &&
-    READ_ATTRIBUTES.has(attribute.name.name)
-  );
+  if (
+    attribute?.type !== "JSXAttribute" ||
+    attribute.name?.type !== "JSXIdentifier" ||
+    typeof attribute.name.name !== "string" ||
+    !READ_ATTRIBUTES.has(attribute.name.name)
+  ) {
+    return false;
+  }
+  const element = attribute.parent?.name;
+  const tag = element?.type === "JSXIdentifier" ? String(element.name) : "";
+  return !(`${tag}.${attribute.name.name}` in NOT_READ);
 }
 
 /** The rule. */

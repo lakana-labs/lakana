@@ -265,10 +265,12 @@ const PROBES = [
     files: {
       "src/probe/Words.tsx":
         'import type { JSX } from "react";\n\n/**\n * Probe.\n *\n * @returns A button.\n */\nexport function Probe(): JSX.Element {\n  return <button type="button" aria-label="Close the dialog">Close</button>;\n}\n',
+      "src/probe/Empty.tsx":
+        'import type { JSX } from "react";\n\n/**\n * Probe.\n *\n * @param props - The words.\n * @param props.heading - The heading.\n * @returns A heading.\n */\nfunction Empty({ heading }: { readonly heading: string }): JSX.Element {\n  return <h2>{heading}</h2>;\n}\n\n/**\n * Probe.\n *\n * @returns An empty state.\n */\nexport function Probe(): JSX.Element {\n  return <Empty heading="No tables yet" />;\n}\n',
     },
     run: npmRun("lint"),
     eslint: true,
-    expect: ["lakana/no-literal-text", "lakana/no-literal-text"],
+    expect: ["lakana/no-literal-text", "lakana/no-literal-text", "lakana/no-literal-text"],
   },
   {
     gate: "ESLint literal text (tests exempt)",
