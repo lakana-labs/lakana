@@ -91,8 +91,8 @@ function Schedule({ job }: ScheduleProps): JSX.Element {
 
 /**
  * "paused", with since when and by whom in the shell's one tooltip on hover and on focus (the
- * tooltip makes it a Tab stop) and for a screen reader; the job's page says the same in its
- * facts. Without a time from the server, the word alone.
+ * tooltip makes it a Tab stop) and, inside the same element, for a screen reader, so the focus
+ * reads it whole; the job's page says the same in its facts. Without a time from the server, the word alone.
  *
  * @param props - The job.
  * @param props.job - The job, whose schedule is paused.
@@ -110,12 +110,10 @@ function PausedWord({ job }: ScheduleProps): JSX.Element {
       ? t("jobs.list.all.pausedByDeleted", { when: when(job.paused_at) })
       : t("jobs.list.all.pausedBy", { when: when(job.paused_at), who: job.paused_by });
   return (
-    <>
-      <span className="jobs-paused" data-tip={sentence}>
-        {word}
-      </span>
+    <span className="jobs-paused" data-tip={sentence}>
+      {word}
       <span className="visually-hidden"> {sentence}</span>
-    </>
+    </span>
   );
 }
 

@@ -1811,11 +1811,16 @@ def test_a_paused_job_names_who_paused_it_and_since_when(
 def test_a_pause_whose_principal_was_deleted_keeps_its_time_without_a_name(
     session: Session, deployed: Repository, principal: PrincipalRef
 ) -> None:
-    """The row's principal is set to NULL with the principal; the pause and its time stay."""
+    """Deleting the principal sets the row's `paused_by` to NULL; the pause and its time stay."""
     service = _service(session)
-    service.pause(principal, "dev", "analytics", "daily")
-    session.execute(update(JobSchedule).where(JobSchedule.job == "daily").values(paused_by=None))
+    pauser = _person(session, "pauser", admin=True)
+    service.pause(pauser, "dev", "analytics", "daily")
+    assert _row(session, "daily").paused_by == pauser.id
+    session.execute(delete(Principal).where(Principal.id == pauser.id))
     session.commit()
+    session.expire_all()
+    assert session.get(Principal, pauser.id) is None
+    assert _row(session, "daily").paused_by is None
     daily = {v.name: v for v in service.list(principal, "dev")}["daily"]
     assert daily.paused and daily.paused_by is None
     assert daily.paused_at == _row(session, "daily").paused_at

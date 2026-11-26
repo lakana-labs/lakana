@@ -150,6 +150,13 @@ describe("DeploysTab", () => {
 
     // billing is no longer deployed in dev, but its deploys are in the list.
     expect(await offered()).toEqual(["All repositories", "analytics", "billing"]);
+    // The menu says where its choices come from.
+    await user.click(screen.getByRole("button", { name: /Repository/u }));
+    const note =
+      "Lists the repositories deployed in dev now and those whose deploys this list has shown.";
+    expect(screen.getByText(note)).toBeVisible();
+    expect(screen.getByRole("listbox")).toHaveAccessibleDescription(note);
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: /Repository/u }));
     await user.click(await screen.findByRole("option", { name: "billing" }));
     await waitFor(() => {

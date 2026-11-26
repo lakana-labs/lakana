@@ -175,6 +175,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
           <ChoiceMenu
             className="jobs-filter"
             label={t("jobs.deploys.repository")}
+            note={t("jobs.deploys.repositoryNote", { environment })}
             choices={[
               { id: ALL_REPOSITORIES, text: t("jobs.deploys.allRepositories") },
               ...repositories.map((name) => ({ id: `repo:${name}`, text: markedText(name) })),

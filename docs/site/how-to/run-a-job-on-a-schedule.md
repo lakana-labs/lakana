@@ -206,7 +206,8 @@ Resumed daily_silver in dev; next run 2026-10-15 06:00 Europe/Berlin (04:00 UTC)
 
 In the web interface, the job's page has **Pause schedule**, which asks first, and **Resume
 schedule** once the schedule is paused. The **Schedule** line then says since when and by whom it
-is paused ("paused since 16 Nov 2026, 14:20 by ana.nowak"), or when the next run is.
+is paused ("paused since Nov 16, 2026, 2:20 PM by ana.nowak", the time written in your
+browser's language and time zone), or when the next run is.
 `lakana job show` prints the same as a line of its own: `Paused since 2026-11-16 14:20 UTC by
 ana.nowak.` Everyone who may read the environment sees who paused it. Both buttons are there only for someone who may deploy in the environment.
 On the Jobs page, each row of **All jobs** has **Pause**, which asks first in the same way, or

@@ -53,8 +53,9 @@ Literal values the merged stylesheets use, and which stay allowed:
 - `z-index`, the visually-hidden pattern (1 px), and opacity for disabled controls and the
   running pulse (whose lowest point is tested at 3:1 in `colour-vision.test.ts`). Never opacity
   on a held control (`aria-disabled="true"`), which keeps the focus: it would dim the focus ring
-  too. Quieten its label and edge with tokens instead; `tokens.test.ts` checks every such rule's
-  ring at 3:1 and label at 4.5:1 in both themes.
+  too. Quieten its label and edge with tokens instead; `tokens.test.ts` fails on any opacity,
+  filter or outline of its own in a rule for `[aria-disabled]` (in any form) and checks its label
+  at 4.5:1 in both themes. A disabled control (`[data-disabled]`, which takes no focus) may dim.
 
 Anything else that needs a new value: add a token in its own reviewed step, with its test.
 Light and dark are equals: check both, every time. The documentation site wears the same colour

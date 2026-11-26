@@ -9,9 +9,7 @@ import {
   DARK,
   LIGHT,
   luminance,
-  over,
   PALETTES,
-  ratio,
   properties,
   TOKENS_CSS as tokens,
 } from "../test/palette";
@@ -21,45 +19,42 @@ const modes = Object.keys(PALETTES);
 /** The source folder, whose stylesheets the held-control test reads. */
 const SRC = resolve(import.meta.dirname, "..");
 
+/** A held control's attribute in any of its forms: `[aria-disabled]`, `="true"`, `='true'`, `=true`. */
+const HELD = /\[\s*aria-disabled\s*(?:=\s*(["']?)true\1\s*)?\]/;
+
 /**
- * Every rule of the interface's stylesheets for a held control: one marked
- * `aria-disabled="true"`, which (unlike a disabled one) keeps the focus, so its ring is seen.
+ * Every rule of the interface's stylesheets for a held control: one marked `aria-disabled`, which
+ * (unlike a disabled one, `[data-disabled]` with the `disabled` attribute) keeps the focus, so its
+ * ring is seen.
  *
+ * @param css - A stylesheet's text, by default every one under `src/`.
  * @returns Each rule's file, selector and declarations.
  */
-function heldRules(): { file: string; selector: string; body: string }[] {
-  const files = readdirSync(SRC, { recursive: true, encoding: "utf8" }).filter((name) =>
-    name.endsWith(".css"),
-  );
-  return files.flatMap((file) =>
-    [
-      ...readFileSync(resolve(SRC, file), "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .matchAll(/([^{}]+)\{([^{}]*)\}/g),
-    ]
+function heldRules(css?: string): { file: string; selector: string; body: string }[] {
+  const sheets =
+    css === undefined
+      ? readdirSync(SRC, { recursive: true, encoding: "utf8" })
+          .filter((name) => name.endsWith(".css"))
+          .map((file) => ({ file, text: readFileSync(resolve(SRC, file), "utf8") }))
+      : [{ file: "given", text: css }];
+  return sheets.flatMap(({ file, text }) =>
+    [...text.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)]
       .map((match) => ({ file, selector: (match[1] ?? "").trim(), body: match[2] ?? "" }))
-      .filter((rule) => rule.selector.includes('[aria-disabled="true"]')),
+      .filter((rule) => HELD.test(rule.selector)),
   );
 }
 
 /**
- * The contrast of a colour seen through an opacity against the background it is drawn on.
+ * What a held rule must not do: dim (an opacity, a filter) or restyle the focus ring (an outline
+ * of its own), each of which would take the ring below the accent's contrast.
  *
- * @param palette - The palette.
- * @param foreground - The colour's token.
- * @param background - The background's token.
- * @param opacity - The element's opacity, 0 to 1.
- * @returns The ratio, 1 to 21.
+ * @param body - The rule's declarations.
+ * @returns The properties it sets that it must not.
  */
-function seenContrast(
-  palette: Record<string, string>,
-  foreground: string,
-  background: string,
-  opacity: number,
-): number {
-  const ground = palette[background] ?? "";
-  const seen = over(palette[foreground] ?? "", ground, opacity);
-  return ratio(luminance(seen), luminance(ground));
+function heldFaults(body: string): string[] {
+  return [...body.matchAll(/(?<![-\w])(opacity|filter|outline(?:-[\w-]+)?)\s*:/g)].map(
+    (match) => match[1] ?? "",
+  );
 }
 
 describe("tokens", () => {
@@ -121,26 +116,47 @@ describe("tokens", () => {
     expect(contrast(palette, "--color-accent-hover", "--color-surface")).toBeGreaterThanOrEqual(3);
   });
 
-  it("finds the rules of held controls", () => {
+  it("finds the rules of held controls in every form of the attribute", () => {
     expect(heldRules().map((rule) => rule.file)).toContain("jobs/jobs.css");
+    const forms = [
+      '.a[aria-disabled="true"] { color: red; }',
+      ".a[aria-disabled='true'] { color: red; }",
+      ".a[aria-disabled=true] { color: red; }",
+      ".a[aria-disabled] { color: red; }",
+    ];
+    for (const css of forms) {
+      expect(heldRules(css), css).toHaveLength(1);
+    }
+    expect(heldRules(".a[data-disabled] { opacity: 0.6; }")).toEqual([]);
+  });
+
+  it("names a held rule's opacity, filter or outline as a fault", () => {
+    expect(heldFaults("opacity: var(--x); filter: opacity(0.6); outline-color: red;")).toEqual([
+      "opacity",
+      "filter",
+      "outline-color",
+    ]);
+    expect(heldFaults("border-color: var(--color-line); color: var(--color-text-faint);")).toEqual(
+      [],
+    );
   });
 
   it.each(modes)(
-    "a held control keeps its focus ring at 3:1 and its label at 4.5:1, never dimmed (%s)",
+    "a held control is never dimmed, its ring the accent at 3:1 and its label at 4.5:1 (%s)",
     (mode) => {
       const palette = PALETTES[mode] ?? {};
-      for (const { file, selector, body } of heldRules()) {
-        const opacity = Number(/(?<![-\w])opacity\s*:\s*([\d.]+)/.exec(body)?.[1] ?? "1");
-        const label = /(?<![-\w])color\s*:\s*var\((--[\w-]+)\)/.exec(body)?.[1] ?? "--color-text";
-        const where = `${file}: ${selector}`;
-        for (const ground of ["--color-ground", "--color-surface"]) {
-          expect(
-            seenContrast(palette, "--color-accent", ground, opacity),
-            `${where}: ring on ${ground}`,
-          ).toBeGreaterThanOrEqual(3);
-        }
+      for (const ground of ["--color-ground", "--color-surface"]) {
         expect(
-          seenContrast(palette, label, "--color-surface", opacity),
+          contrast(palette, "--color-accent", ground),
+          `ring on ${ground}`,
+        ).toBeGreaterThanOrEqual(3);
+      }
+      for (const { file, selector, body } of heldRules()) {
+        const where = `${file}: ${selector}`;
+        expect(heldFaults(body), where).toEqual([]);
+        const label = /(?<![-\w])color\s*:\s*var\((--[\w-]+)\)/.exec(body)?.[1] ?? "--color-text";
+        expect(
+          contrast(palette, label, "--color-surface"),
           `${where}: label`,
         ).toBeGreaterThanOrEqual(4.5);
       }

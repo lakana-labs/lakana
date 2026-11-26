@@ -411,6 +411,46 @@ for (const theme of ["light", "dark"] as const) {
       await expect(page.getByRole("heading", { level: 1, name: JOB })).toBeVisible();
     });
 
+    test("a paused schedule says since when and by whom on hover and focus, and its word opens the job", async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const errors = consoleErrors(page);
+      await openList(page);
+      await page.getByRole("button", { name: `Pause the schedule of ${JOB}` }).click();
+      await page
+        .getByRole("dialog", { name: `Pause the schedule of ${JOB}?` })
+        .getByRole("button", { name: "Pause schedule" })
+        .click();
+      await expect(page.getByText(`Paused the schedule of ${JOB}.`)).toBeVisible();
+      const row = page
+        .getByRole("region", { name: "Every job listed" })
+        .getByRole("row")
+        .filter({ has: page.getByRole("link", { name: JOB, exact: true }) });
+      const word = row.locator("[data-tip]");
+      const sentence = /^Paused since .+ by admin\.$/;
+      await expect(word).toHaveAttribute("data-tip", sentence);
+      await expect(word).toContainText("paused");
+      expect(await violations(page), "the list with a paused schedule").toEqual([]);
+
+      const tip = page.locator(".truncation-tip");
+      await word.hover();
+      await expect(tip).toHaveText(sentence);
+      await page.mouse.move(0, 0);
+      await expect(tip).toBeHidden();
+      await word.focus();
+      await expect(tip).toHaveText(sentence);
+      await page.keyboard.press("Escape");
+      await expect(tip).toBeHidden();
+
+      // A click on the word opens the job, as the rest of the row does.
+      await word.click();
+      await expect(page).toHaveURL(new RegExp(`${JOB_PAGE}$`));
+      await expect(page.getByRole("heading", { level: 1, name: JOB })).toBeVisible();
+      await expect(page.getByText(/· paused since .+ by admin$/)).toBeVisible();
+      expect(errors).toEqual([]);
+    });
+
     test("a control's press does not open its row", async ({ page }) => {
       await openList(page);
       const run = page.getByRole("button", { name: `Run ${JOB}` });

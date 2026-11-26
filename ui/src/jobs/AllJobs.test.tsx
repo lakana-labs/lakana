@@ -180,10 +180,13 @@ describe("AllJobs", () => {
     const sentence = `Paused since ${when("2026-11-16T08:30:00Z")} by maria.U+202Ekeller.`;
     const schedule = within(rowOf("nightly_sales")).getAllByRole("cell")[3] as HTMLElement;
     expect(schedule).toHaveTextContent("daily 02:00 Europe/Berlin · paused");
-    expect(within(schedule).getByText("paused")).toHaveAttribute("data-tip", sentence);
-    expect(schedule.querySelector(".visually-hidden")).toHaveTextContent(sentence);
+    const word = schedule.querySelector("[data-tip]");
+    expect(word).toHaveAttribute("data-tip", sentence);
+    // The element that takes the focus reads the sentence whole, as the Waiting pill does.
+    expect(word).toHaveTextContent(`paused ${sentence}`);
+    expect(word?.querySelector(".visually-hidden")).toHaveTextContent(sentence);
     const orphaned = within(rowOf("orphaned")).getAllByRole("cell")[3] as HTMLElement;
-    expect(within(orphaned).getByText("paused")).toHaveAttribute(
+    expect(orphaned.querySelector("[data-tip]")).toHaveAttribute(
       "data-tip",
       `Paused since ${when("2026-11-16T08:30:00Z")} by an account since deleted.`,
     );

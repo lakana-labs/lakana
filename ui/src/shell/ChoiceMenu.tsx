@@ -3,7 +3,7 @@
  *
  * @packageDocumentation
  */
-import type { JSX } from "react";
+import { type JSX, useId } from "react";
 import {
   Button,
   Label,
@@ -34,6 +34,8 @@ export interface ChoiceMenuProps<T extends string> {
   readonly onChoose: (id: T) => void;
   /** The class that lays out the label and the button; the Catalog's `sort-select` by default. */
   readonly className?: string;
+  /** A short line under the choices that says where they come from; it describes the list. */
+  readonly note?: string;
 }
 
 /**
@@ -46,6 +48,7 @@ export interface ChoiceMenuProps<T extends string> {
  * @param props.selected - The id of the chosen one.
  * @param props.onChoose - Called with the id of a choice.
  * @param props.className - The class of the menu.
+ * @param props.note - A line under the choices, if any.
  * @returns The menu.
  */
 export function ChoiceMenu<T extends string>({
@@ -54,7 +57,9 @@ export function ChoiceMenu<T extends string>({
   selected,
   onChoose,
   className = "sort-select",
+  note,
 }: ChoiceMenuProps<T>): JSX.Element {
+  const noteId = useId();
   return (
     <Select
       className={className}
@@ -70,7 +75,7 @@ export function ChoiceMenu<T extends string>({
         <span aria-hidden="true">▾</span>
       </Button>
       <Popover className="float" placement="bottom end">
-        <ListBox className="menu">
+        <ListBox className="menu" {...(note === undefined ? {} : { "aria-describedby": noteId })}>
           {choices.map((choice) => (
             <ListBoxItem
               key={choice.id}
@@ -83,6 +88,11 @@ export function ChoiceMenu<T extends string>({
             </ListBoxItem>
           ))}
         </ListBox>
+        {note !== undefined && (
+          <p className="menu-foot menu-note" id={noteId}>
+            {note}
+          </p>
+        )}
       </Popover>
     </Select>
   );
