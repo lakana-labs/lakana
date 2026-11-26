@@ -211,4 +211,25 @@ describe("CiTrustExplain", () => {
 
     expect(await screen.findByText("There is no rule yet.")).toBeInTheDocument();
   });
+
+  it("sends numbers as they are, and names a rule it cannot read by the server's words", async () => {
+    const { server, user } = renderShell(PATH, {
+      routes: ciTrustRoutes({
+        "POST /api/v1/ci-trust-rules/explain": {
+          status: 200,
+          body: { ...REPORT, verdict: "accepted by rule r-new", matching: ["r-new"], rules: [] },
+        },
+      }),
+    });
+
+    await fill(user, JSON.stringify({ ref: "refs/heads/main", run_attempt: 2, ok: true }));
+    await user.click(screen.getByRole("button", { name: "Explain" }));
+
+    expect(await screen.findByRole("region", { name: "Verdict" })).toHaveTextContent(
+      "Accepted by rule r-new",
+    );
+    expect(server.sent.find((request) => request.method === "POST")?.body).toMatchObject({
+      claims: { ref: "refs/heads/main", run_attempt: 2, ok: true },
+    });
+  });
 });
