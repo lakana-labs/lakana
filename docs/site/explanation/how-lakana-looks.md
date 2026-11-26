@@ -190,16 +190,18 @@ The web interface is built with accessibility as a goal, and the goal is WCAG 2.
 We treat it as an engineering rule, not a final polish: it is checked automatically on every
 change that touches the interface.
 
-- **axe** runs on every screen, in light and dark, with the WCAG 2.2 AA rules. A violation
-  fails the build.
-- **Keyboard-only walks** use each screen without a mouse, and a test checks that a focus ring
-  shows at every Tab stop.
+- **axe** runs with the WCAG 2.2 AA rules on every area of the interface, in light and dark,
+  and on the dialogs and states the tests open. A violation fails the build.
+- **Keyboard-only walks** cover the main screens and tasks, and on Queries, Connections and
+  Jobs a test also checks that a visible focus ring shows at every Tab stop.
 - **Contrast tests** check the colour tokens in both themes: body text at AAA, other text at
   AA, and edges and graphics at 3:1.
-- **Reflow at 320 px** is checked on every screen: nothing is cut off and nothing scrolls
-  sideways.
-- **Reduced motion** turns the interface's animations off.
-- **Forced colours** (high-contrast mode) are respected.
+- **Reflow at 320 px** is checked on every area and on the dialogs and states the tests open:
+  nothing is cut off and nothing scrolls sideways.
+
+Beyond these checks, motion turns off when your system asks for reduced motion, and the
+stylesheets have rules for forced colours (high-contrast mode). Of these, only the status
+glyphs are tested for forced colours.
 
 Lakana has **not been formally audited** for accessibility, so we make no statement that it
 conforms to WCAG or any other standard, and automatic checks cannot find every problem. If
