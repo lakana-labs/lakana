@@ -182,3 +182,93 @@ for (const theme of ["light", "dark"] as const) {
     await page.context().close();
   });
 }
+
+test("an administrator creates a service account and deactivates a person, whose session ends", async ({
+  browser,
+  browserName,
+  request,
+}) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
+  const { page } = await invitedPerson(browser, request, (person) =>
+    makeAdministrator(request, person),
+  );
+  await skipTheWelcome(page);
+  const errors = consoleErrors(page);
+  // Someone with no rights, signed in in a browser of their own.
+  const leaver = await invitedPerson(browser, request, () => Promise.resolve());
+  const account = uniqueName("svc");
+
+  await page.goto("/settings/access/people");
+  await page.getByRole("button", { name: "New service account" }).click();
+  const create = page.getByRole("dialog", { name: "New service account" });
+  await create.getByRole("textbox", { name: "Name" }).fill(account);
+  // The passkey touch is asked for first, answered by the virtual authenticator.
+  await create.getByRole("button", { name: "Create service account" }).click();
+  await expect(create).toBeHidden();
+  await expect(page.getByText(`Created the service account ${account}.`)).toBeVisible();
+  await page.getByRole("searchbox", { name: "Find people" }).fill(account);
+  const row = page.getByRole("row").filter({ hasText: account });
+  await expect(row).toContainText("Service account");
+  await expect(row).toContainText("Active");
+
+  // The same name again: the server's sentence stays in the dialog.
+  await page.getByRole("button", { name: "New service account" }).click();
+  await create.getByRole("textbox", { name: "Name" }).fill(account.toUpperCase());
+  await create.getByRole("button", { name: "Create service account" }).click();
+  await expect(create.getByRole("alert")).toContainText("differs only in letter case");
+  await create.getByRole("button", { name: "Cancel" }).click();
+
+  await page.goto(`/settings/access/people/${leaver.name}`);
+  await page.getByRole("button", { name: `Deactivate ${leaver.name}` }).click();
+  const deactivate = page.getByRole("dialog", { name: `Deactivate ${leaver.name}?` });
+  await deactivate
+    .getByRole("textbox", { name: `Type ${leaver.name} to confirm` })
+    .fill(leaver.name);
+  await deactivate.getByRole("button", { name: "Deactivate" }).click();
+  await expect(deactivate).toBeHidden();
+  await expect(page.getByText(`${leaver.name} is deactivated`)).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: leaver.name })).toBeFocused();
+  expect(await violations(page), "a deactivated person").toEqual([]);
+
+  await page.goto("/settings/access/people");
+  await page.getByRole("searchbox", { name: "Find people" }).fill(leaver.name);
+  await expect(page.getByRole("row").filter({ hasText: leaver.name })).toContainText("Deactivated");
+
+  // The person's session ended with the deactivation.
+  await leaver.page.reload();
+  await expect(leaver.page.getByText(/Your account is deactivated/)).toBeVisible();
+  // The browser logs the one refusal, of the taken name; nothing else.
+  expect(errors.filter((error) => !error.includes("status of 409"))).toEqual([]);
+  expect(errors.filter((error) => error.includes("status of 409"))).toHaveLength(1);
+  await leaver.page.context().close();
+  await page.context().close();
+});
+
+test("an administrator who deactivates their own account lands on the sign-in page", async ({
+  browser,
+  browserName,
+  request,
+}) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
+  const { page, name } = await invitedPerson(browser, request, (person) =>
+    makeAdministrator(request, person),
+  );
+  await skipTheWelcome(page);
+  const errors = consoleErrors(page);
+
+  await page.goto(`/settings/access/people/${name}`);
+  await page.getByRole("button", { name: `Deactivate ${name}` }).click();
+  const deactivate = page.getByRole("dialog", { name: "Deactivate your own account?" });
+  await expect(deactivate).toContainText("Every session of yours ends at once");
+  await deactivate.getByRole("textbox", { name: `Type ${name} to confirm` }).fill(name);
+  // The passkey touch is asked for first, answered by the virtual authenticator.
+  await deactivate.getByRole("button", { name: "Deactivate" }).click();
+
+  // The session ended with the account: the sign-in page says why.
+  await expect(page.getByText(/Your account is deactivated/)).toBeVisible();
+  await expect(page).toHaveURL(/\/sign-in/);
+  expect(await violations(page), "signed out after deactivating oneself").toEqual([]);
+  // The session read after the deactivation answers 401, which the browser logs.
+  expect(errors.filter((error) => !error.includes("status of 401"))).toEqual([]);
+  await page.context().close();
+});

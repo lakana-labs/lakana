@@ -9,7 +9,6 @@ import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router";
 
 import { listGroups } from "../api/groups";
-import { ReadFailed } from "../catalog/ReadFailed";
 import { useCursorPages } from "../catalog/views/useCursorPages";
 import { ViewList } from "../catalog/views/ViewList";
 import { SettingsFrame } from "../settings/SettingsFrame";
@@ -20,8 +19,7 @@ import { VisibleText } from "../shell/VisibleText";
 import "./access.css";
 import "./accessStrings";
 import { CreateGroupDialog } from "./CreateGroupDialog";
-import { managedScopeOf } from "./managed";
-import { ManagedNote } from "./ManagedNote";
+import { InstanceManagedNote, managedInstance } from "./InstanceManaged";
 import { groupPath } from "./accessPaths";
 import { useAccessStatus } from "./useAccessStatus";
 
@@ -127,7 +125,7 @@ export function GroupsPage(): JSX.Element {
       clearTimeout(timer);
     };
   }, [typed, words, setParams]);
-  const managed = status.data === undefined ? undefined : managedScopeOf(status.data.scopes, null);
+  const managed = managedInstance(status);
   return (
     <SettingsFrame
       title={t("settings.places.groups")}
@@ -145,18 +143,14 @@ export function GroupsPage(): JSX.Element {
         )
       }
     >
-      {status.error !== null && (
-        <ReadFailed
-          message={t("access.managed.readFailed", { sentence: status.error })}
-          onRetry={() => {
-            headingRef.current?.focus();
-            status.reload();
-          }}
-        />
-      )}
-      {managed !== undefined && managed !== null && (
-        <ManagedNote scope={managed} commands={[t("access.managed.groupsCommand")]} />
-      )}
+      <InstanceManagedNote
+        status={status}
+        commands={[t("access.managed.groupsCommand")]}
+        onRetry={() => {
+          headingRef.current?.focus();
+          status.reload();
+        }}
+      />
       <ListToolbar
         count={countWords(t, "access.groups", list.shown, list.more)}
         search={

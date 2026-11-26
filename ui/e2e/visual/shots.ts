@@ -759,6 +759,28 @@ export const SHOTS: readonly Shot[] = [
     ready: text("analysts"),
   },
   {
+    name: "settings-people-new-service-account",
+    stub: admin(stubAccess),
+    path: "/settings/access/people",
+    ready: (page) => page.locator(".list tbody tr").first(),
+    act: dialog("New service account"),
+    phone: true,
+  },
+  {
+    name: "settings-person-deactivate",
+    stub: admin(stubAccess),
+    path: "/settings/access/people/maria",
+    ready: text("analysts"),
+    act: dialog("Deactivate maria"),
+    phone: true,
+  },
+  {
+    name: "settings-person-deactivated",
+    stub: admin(stubAccess),
+    path: "/settings/access/people/ben",
+    ready: text("ben is deactivated"),
+  },
+  {
     name: "settings-groups",
     stub: admin(stubAccess),
     path: "/settings/access/groups",
