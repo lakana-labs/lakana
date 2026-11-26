@@ -48,12 +48,18 @@ interface Rolled {
   readonly commit: string;
 }
 
-/** An undeploy the server carried out, which the note says. */
+/** The repositories undeployed since the current versions were last read. */
 interface Undeployed {
+  /** The repositories, in the order they were undeployed. */
+  readonly repositories: readonly string[];
+  /** The current versions as read before them, so the list knows when they were read again. */
+  readonly before: readonly DeploymentOut[] | undefined;
+}
+
+/** An undeploy the note says was done; a new object for each, so the note takes the focus. */
+interface UndeployNote {
   /** The repository. */
   readonly repository: string;
-  /** The current versions as read before it, so the list knows when they were read again. */
-  readonly before: readonly DeploymentOut[] | undefined;
 }
 
 /** The Repository menu's choice of every repository; a repository's choice is `repo:` and its name. */
@@ -121,12 +127,14 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   );
   const [undeploying, setUndeploying] = useState<DeploymentOut | null>(null);
   const [undeployed, setUndeployed] = useState<Undeployed | null>(null);
-  // The current versions from before the last undeploy: they still name its repository, which
-  // is gone, until they are read again (or that read fails).
+  const [undeployNote, setUndeployNote] = useState<UndeployNote | null>(null);
+  // The current versions from before the undeploys: they still name those repositories, which
+  // are gone, until they are read again successfully (a failed read keeps the old ones).
   const stale = undeployed !== null && deployments.data === undeployed.before;
+  const gone: readonly string[] = stale ? undeployed.repositories : [];
   const current = new Map(
     (deployments.data ?? [])
-      .filter((deployment) => !stale || deployment.repository !== undeployed.repository)
+      .filter((deployment) => !gone.includes(deployment.repository))
       .map((deployment) => [deployment.repository, deployment.project_version_id]),
   );
   // The repositories of the deploys read so far: the menu keeps offering them while the list
@@ -183,10 +191,10 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
   }, [pages.items, deployments.data]);
   // The undeploy's note takes the focus at once: the row's Undeploy… left with the dialog.
   useEffect(() => {
-    if (undeployed !== null) {
+    if (undeployNote !== null) {
       note.current?.focus();
     }
-  }, [undeployed]);
+  }, [undeployNote]);
   const rows = pages.items ?? [];
   // Nothing is marked while a first page is on its way: after a new sort the rows of the old one
   // stay until it arrives. Show more keeps the mark (its rows only add older ones in the newest
@@ -292,10 +300,10 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
       </ViewList>
       {/* The status region stays in place, so the note is announced when it arrives. */}
       <div className="jobs-rollback-note" id={noteId} role="status" tabIndex={-1} ref={note}>
-        {undeployed !== null && (
+        {undeployNote !== null && (
           <p>
             {t("jobs.deploys.undeployNote", {
-              repository: undeployed.repository,
+              repository: undeployNote.repository,
               environment,
             })}
           </p>
@@ -321,7 +329,7 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
             deploy={rolling}
             protectedEnvironment={protectedEnvironment}
             onAccepted={(id) => {
-              setUndeployed(null);
+              setUndeployNote(null);
               setRolled({
                 id,
                 repository: rolling.repository,
@@ -343,8 +351,13 @@ function DeploysOf({ environment, protectedEnvironment }: DeploysOfProps): JSX.E
             runAs={undeploying.run_as}
             protectedEnvironment={protectedEnvironment}
             onDone={() => {
+              const { repository } = undeploying;
               setRolled(null);
-              setUndeployed({ repository: undeploying.repository, before: deployments.data });
+              setUndeployNote({ repository });
+              setUndeployed({
+                repositories: [...gone, repository],
+                before: deployments.data,
+              });
               setUndeploying(null);
               onEnded();
             }}

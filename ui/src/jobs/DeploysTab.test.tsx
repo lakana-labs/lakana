@@ -606,6 +606,104 @@ describe("DeploysTab", () => {
     expect(screen.queryByRole("button", { name: /^Roll back|^Undeploy/u })).toBeNull();
   });
 
+  describe("after a re-read of the current versions failed", () => {
+    const billingNow = aDeploy({
+      id: "d-billing-now",
+      repository: "billing",
+      project_version_id: "5e6f7081-92a3-4b4c-8d5e-6f708192a3b4",
+      resolved_sha: "6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a",
+    });
+    const billingOld = aDeploy({
+      id: "d-billing-old",
+      repository: "billing",
+      resolved_sha: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
+      project_version_id: "4d5e6f70-8192-4a3b-9c4d-5e6f708192a3",
+      created_at: "2026-11-15T09:00:00Z",
+    });
+    const billing = aDeployment({
+      repository: "billing",
+      project_version_id: billingNow.project_version_id ?? "",
+      commit_sha: billingNow.resolved_sha ?? "",
+    });
+
+    /**
+     * Renders the tab over `analytics` and `billing` deployed in `prod`, whose current versions
+     * fail to be read once anything was undeployed, and undeploys `analytics`.
+     *
+     * @returns The server and a user-event session.
+     */
+    async function undeployAnalytics() {
+      let changed = false;
+      const rendered = renderTab(
+        list([NOW, aDeploy(), billingNow, billingOld]),
+        "/jobs/deploys?environment=prod",
+        () =>
+          changed
+            ? { status: 503, body: { type: "Unavailable", detail: "The server is busy." } }
+            : { status: 200, body: [CURRENT, billing] },
+      );
+      const undeployed = (): FakeAnswer => {
+        changed = true;
+        return { status: 204 };
+      };
+      rendered.server.route({
+        "GET /api/v1/environments/prod/jobs": { status: 200, body: [] },
+        "DELETE /api/v1/environments/prod/deployments/analytics": undeployed,
+        "DELETE /api/v1/environments/prod/deployments/billing": undeployed,
+        "GET /api/v1/environments/prod/deploys/d-rollback": { status: 200, body: billingOld },
+        [`GET /api/v1/environments/prod/deploys/${billingOld.id}`]: {
+          status: 200,
+          body: { ...billingOld, jobs: [] },
+        },
+        "POST /api/v1/environments/prod/deploys": {
+          status: 202,
+          body: { id: "d-rollback", status: "queued" },
+        },
+      });
+      const { user } = rendered;
+      await user.click(
+        await screen.findByRole("button", { name: "Undeploy… (analytics from prod)" }),
+      );
+      await user.type(await screen.findByRole("textbox"), "analytics");
+      await user.click(screen.getByRole("button", { name: "Undeploy" }));
+      expect(
+        await screen.findByText(/The current versions could not be read/u),
+      ).toBeInTheDocument();
+      return rendered;
+    }
+
+    it("a second undeploy keeps the first repository gone", async () => {
+      const { user } = await undeployAnalytics();
+
+      await user.click(screen.getByRole("button", { name: "Undeploy… (billing from prod)" }));
+      await user.type(await screen.findByRole("textbox"), "billing");
+      await user.click(screen.getByRole("button", { name: "Undeploy" }));
+
+      expect(
+        await screen.findByText("Undeployed billing from prod. Its tables stay, as orphans."),
+      ).toBeInTheDocument();
+      const region = screen.getByRole("region", { name: "Deploys of prod" });
+      expect(region).not.toHaveTextContent("current");
+      expect(within(region).queryByRole("button", { name: /^Undeploy|^Roll back/u })).toBeNull();
+    });
+
+    it("a rollback of another repository keeps the undeployed one gone", async () => {
+      const { user } = await undeployAnalytics();
+
+      await user.click(
+        screen.getByRole("button", { name: "Roll back to this… (billing at 5e6f7a8)" }),
+      );
+      await user.click(await screen.findByRole("button", { name: "Roll back" }));
+
+      expect(await screen.findByText(/^Roll(ing|ed) back billing in prod/u)).toBeInTheDocument();
+      expect(
+        screen.queryByText("Undeployed analytics from prod. Its tables stay, as orphans."),
+      ).toBeNull();
+      expect(screen.queryByRole("button", { name: /analytics/u })).toBeNull();
+      expect(screen.getAllByRole("row")[1]).not.toHaveTextContent("current");
+    });
+  });
+
   it("a choice of environment writes the shared filter", async () => {
     const { server, user } = renderTab(list([NOW]));
     await screen.findByRole("region", { name: "Deploys of dev" });

@@ -35,15 +35,22 @@ export interface UndeployDialogProps {
 }
 
 /**
+ * The states the server gives a job whose start is pending (`waiting` for the active run,
+ * `waiting to start` once that run ended): the undeploy drops that start. `waiting_since` is no
+ * sign of it, as the server leaves it null when the start's stored time cannot be read.
+ */
+const PENDING_START_STATES: readonly string[] = ["waiting", "waiting to start"];
+
+/**
  * What goes with one job, in words: the job, its schedule when it has one here, and a start
- * that waits for the active run.
+ * that waits.
  *
  * @param job - The job.
  * @returns The key of its line.
  */
 function jobLine(job: JobOut): string {
   const scheduled = job.cron !== null;
-  const waiting = job.waiting_since !== null;
+  const waiting = PENDING_START_STATES.includes(job.state);
   if (scheduled) {
     return waiting
       ? "jobs.deploys.undeployDialog.jobScheduledWaiting"
@@ -76,10 +83,11 @@ function Reading({ label }: ReadingProps): JSX.Element {
  * and offers no Undeploy, so it never removes a job it did not name. Then it lists what goes:
  * each job (with its schedule, and a start waiting for the active run), the run principal when
  * one is bound, the repository's glossary terms and its tables' health effects; and says what
- * stays. Undeploy is held, and says why, until the repository's name is typed exactly. A
- * refusal (a run still active, the deployment already gone) stays in the dialog in the server's
- * words and takes the focus. While the request is open, Escape and Cancel do nothing. Undeploy
- * asks for no passkey touch: it stops code and hands out nothing.
+ * stays, and that a bound service account must be bound again after a new deploy. Undeploy is
+ * held, and says why, until the repository's name is typed exactly. A refusal (a run still
+ * active, the deployment already gone) stays in the dialog in the server's words and takes the
+ * focus. While the request is open, Escape and Cancel do nothing. Undeploy asks for no passkey
+ * touch: it stops code and hands out nothing.
  *
  * @param props - The environment, the repository, its run principal, the protection and the
  *   handlers.
@@ -157,7 +165,11 @@ export function UndeployDialog({
               <li>{t("jobs.deploys.undeployDialog.glossary", { environment })}</li>
               <li>{t("jobs.deploys.undeployDialog.health")}</li>
             </ul>
-            <p>{t("jobs.deploys.undeployDialog.kept")}</p>
+            <p>
+              {runAs === null
+                ? t("jobs.deploys.undeployDialog.kept")
+                : t("jobs.deploys.undeployDialog.keptRunAs", { account: runAs })}
+            </p>
             <TypedName
               label={t("jobs.deploys.undeployDialog.type", { repository })}
               typed={typed}

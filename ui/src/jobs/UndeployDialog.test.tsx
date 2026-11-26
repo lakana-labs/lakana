@@ -88,7 +88,31 @@ describe("UndeployDialog", () => {
       "The health effects of its tables: every health signal of these tables warns",
     ]);
     expect(dialog).toHaveTextContent(
-      "Its tables and their data stay, as orphans, and its deploys stay listed. Deploying it again brings its jobs back.",
+      "Its tables and their data stay, as orphans, and its deploys stay listed. Deploying it again brings its jobs back, but its scheduled jobs do not run until an administrator binds svc-analytics again, with a passkey touch.",
+    );
+  });
+
+  it("says a waiting start is dropped from the job's state, also when its time cannot be read", async () => {
+    renderDialog({
+      [JOBS]: {
+        status: 200,
+        body: [
+          aJob({ name: "nightly_sales", state: "waiting to start", waiting_since: null }),
+          aJob({
+            name: "orders_hourly",
+            state: "scheduled",
+            waiting_since: "2026-11-17T02:00:00Z",
+          }),
+        ],
+      },
+    });
+
+    const gone = await screen.findByRole("list", { name: "What the undeploy removes" });
+    expect(within(gone).getAllByRole("listitem")[0]).toHaveTextContent(
+      "nightly_sales: removed, with its schedule; its waiting start is dropped",
+    );
+    expect(within(gone).getAllByRole("listitem")[1]).toHaveTextContent(
+      /^orders_hourly: removed, with its schedule$/u,
     );
   });
 
@@ -97,8 +121,11 @@ describe("UndeployDialog", () => {
 
     expect(await screen.findByText("analytics defines no job in prod.")).toBeInTheDocument();
     expect(server.sent[0]?.path).toBe(`${ENV}/jobs?repository=analytics`);
-    // No run principal is bound, so none is named.
+    // No run principal is bound, so none is named, and nothing needs binding again.
     expect(screen.getByRole("dialog")).not.toHaveTextContent("service account");
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      /Its tables and their data stay, as orphans, and its deploys stay listed\. Deploying it again brings its jobs back\.Type/u,
+    );
   });
 
   it("names a protected environment so", async () => {
