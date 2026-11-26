@@ -2,7 +2,9 @@
 
 Every CLI command and every ``/api/v1`` route has one entry saying where the web interface
 covers it (class ``ui`` or ``read`` with a part 1-8), or why it does not (class ``git`` or
-``exception`` with a reason). The check walks the real command tree. The routes come from the
+``exception`` with a reason). A ``ui`` or ``read`` entry of a finished part must say
+``done: true``: what the interface does not show yet is class ``git`` with a reason that links the
+issue that builds it. The check walks the real command tree. The routes come from the
 committed ``docs/site/reference/openapi.json`` (importing the whole server takes seconds); CI's
 ``generate_reference.py --check`` step (``.github/workflows/ci.yml``, not a pytest test) keeps
 that file equal to the live application, so a new route cannot land without a decision.
@@ -11,7 +13,7 @@ that file equal to the live application, so a new route cannot land without a de
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,8 @@ OPENAPI_FILE = ROOT / "docs" / "site" / "reference" / "openapi.json"
 
 CLASSES = ("ui", "read", "git", "exception")
 PARTS = range(1, 9)
+FINISHED_PARTS = frozenset(PARTS)
+"""The parts whose screens have shipped (all of M7): their ui and read entries need ``done``."""
 EXCEPTIONS = frozenset({"task-token mint", "POST /api/v1/task-tokens"})
 """The only keys allowed class ``exception``; a new one is a visible diff here."""
 
@@ -124,7 +128,7 @@ def live_keys() -> set[str]:
     return keys
 
 
-def _invalid(key: str, entry: Mapping[str, Any]) -> str | None:
+def _invalid(key: str, entry: Mapping[str, Any], finished_parts: Collection[int]) -> str | None:
     """Say what is wrong with one entry.
 
     Parameters
@@ -133,6 +137,8 @@ def _invalid(key: str, entry: Mapping[str, Any]) -> str | None:
         The entry's key.
     entry
         Its value.
+    finished_parts
+        The parts whose ui and read entries must carry ``done: true``.
 
     Returns
     -------
@@ -162,6 +168,12 @@ def _invalid(key: str, entry: Mapping[str, Any]) -> str | None:
             )
         if "reason" in entry:
             return f"{key!r} is class {cls}; drop `reason:` (it belongs to git and exception)."
+        if part in finished_parts and "done" not in entry:
+            return (
+                f"{key!r} is class {cls} in part {part}, which is finished, but has no "
+                "`done: true`: set it if the interface shows it, or make it class git with a "
+                "reason that links the issue that builds it."
+            )
         return None
     if not entry.get("reason"):
         return f"{key!r} is class {cls} and needs a `reason:` (why the UI does not cover it)."
@@ -176,7 +188,11 @@ def _invalid(key: str, entry: Mapping[str, Any]) -> str | None:
     return None
 
 
-def problems(entries: Mapping[str, Mapping[str, Any]], live: set[str]) -> list[str]:
+def problems(
+    entries: Mapping[str, Any],
+    live: set[str],
+    finished_parts: Collection[int] = FINISHED_PARTS,
+) -> list[str]:
     """Compare the inventory with the live commands and routes.
 
     Parameters
@@ -185,6 +201,8 @@ def problems(entries: Mapping[str, Mapping[str, Any]], live: set[str]) -> list[s
         The inventory by key.
     live
         The keys the code defines.
+    finished_parts
+        The parts whose ui and read entries must carry ``done: true``; all of M7 by default.
 
     Returns
     -------
@@ -202,6 +220,6 @@ def problems(entries: Mapping[str, Mapping[str, Any]], live: set[str]) -> list[s
         for key in sorted(entries.keys() - live)
     ]
     for key, entry in entries.items():
-        if (message := _invalid(key, entry)) is not None:
+        if (message := _invalid(key, entry, finished_parts)) is not None:
             found.append(message)
     return found

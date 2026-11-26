@@ -192,7 +192,7 @@ gates are in "The `ui/` gates" in `docs/agent/testing.md`.
   the two task-token minting entries. `scripts/tests/test_ui_parity.py` walks the live command
   tree and reads the routes from the committed `docs/site/reference/openapi.json` (kept equal to the app
   by CI's `generate_reference.py --check`) and fails on a missing, stale or invalid entry, naming it and the next step.
-  A `ui` or `read` entry may carry `done: true` once the interface shows it (set by the pull request that builds it); `git` and `exception` entries refuse it, and only `true` is accepted.
+  A `ui` or `read` entry may carry `done: true` once the interface shows it (set by the pull request that builds it); `git` and `exception` entries refuse it, and only `true` is accepted. Every part of M7 is finished, so the test fails on a `ui` or `read` entry without `done: true` (`FINISHED_PARTS` in `scripts/check_ui_parity.py`); what the interface does not show yet is `class: git` with a reason that links the issue that builds it.
 - **Exact pins, one tool per pull request.** Every dependency is an exact version
   (`ui/.npmrc`: `save-exact`, `engine-strict`, `ignore-scripts`), Node is the `26` line
   (`ui/.nvmrc`, `engines.node`). Dependabot groups what ships (`ui-runtime`) and the few
