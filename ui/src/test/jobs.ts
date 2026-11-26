@@ -62,6 +62,8 @@ export function aJob(over: Partial<JobOut> = {}): JobOut {
     source_url: "https://github.com/acme/analytics/blob/4f9d2a7/lakana.yaml",
     notify: null,
     actions: ["run", "pause", "resume"],
+    paused_by: null,
+    paused_at: null,
     ...over,
   };
 }

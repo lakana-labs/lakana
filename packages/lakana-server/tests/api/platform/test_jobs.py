@@ -602,3 +602,25 @@ def test_a_waiting_job_shows_since_when_and_how_but_never_who_asked(client: Test
             None,
             None,
         )
+
+
+def test_a_paused_job_names_who_paused_it_and_since_when_to_every_reader(
+    client: TestClient,
+) -> None:
+    """Any reader of the environment sees who paused a schedule and when.
+
+    As a run's `triggered_by` is; both are null again after a resume.
+    """
+    _deploy_jobs(client)
+    deployer = _grant(client, "pauser", "DEPLOY")
+    paused = client.post(f"{_ENV}/jobs/daily/pause", headers=deployer, json=_BODY).json()
+    assert paused["paused_by"] == "pauser"
+    assert paused["paused_at"] is not None
+    reader = _reader(client)
+    for header in (reader, AUTH_HEADER):
+        shown = client.get(f"{_ENV}/jobs/daily", headers=header).json()
+        assert (shown["paused_by"], shown["paused_at"]) == ("pauser", paused["paused_at"])
+        listed = {j["name"]: j for j in client.get(f"{_ENV}/jobs", headers=header).json()}
+        assert (listed["manual"]["paused_by"], listed["manual"]["paused_at"]) == (None, None)
+    resumed = client.post(f"{_ENV}/jobs/daily/resume", headers=deployer, json=_BODY).json()
+    assert (resumed["paused_by"], resumed["paused_at"]) == (None, None)

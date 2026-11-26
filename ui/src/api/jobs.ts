@@ -105,6 +105,10 @@ export interface JobOut {
   readonly state: string;
   /** Whether the schedule is paused. */
   readonly paused: boolean;
+  /** The name of the principal that paused the schedule; null when not paused or since deleted. */
+  readonly paused_by: string | null;
+  /** When the schedule was paused; null when it is not paused. */
+  readonly paused_at: string | null;
   /** The next scheduled time (UTC); null when none. */
   readonly next_run_at: string | null;
   /** Why a start waits or the schedule cannot start; null otherwise. */

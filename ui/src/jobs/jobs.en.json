@@ -51,6 +51,8 @@
     "deploys": "Deploys of {{repository}}",
     "schedule": "Schedule",
     "paused": "paused",
+    "pausedBy": "paused since {{when}} by <who/>",
+    "pausedByDeleted": "paused since {{when}} by an account since deleted",
     "nextRun": "next run {{when}}",
     "noSchedule": "No schedule here; it starts by hand, through the API or after each deploy.",
     "runs": "Runs",

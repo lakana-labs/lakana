@@ -4379,6 +4379,12 @@ class Job:
     notify
         Where the job reports; `None` for a job without a notification, and from a server that
         predates it.
+    paused_by
+        The name of the principal that paused the schedule; `None` when it is not paused, when
+        that principal was deleted, and from a server that predates it.
+    paused_at
+        When the schedule was paused; `None` when it is not paused, and from a server that
+        predates it.
     """
 
     name: str
@@ -4406,6 +4412,8 @@ class Job:
     notify: JobNotify | None = None
     waiting_since: datetime | None = None
     waiting_trigger: str | None = None
+    paused_by: str | None = None
+    paused_at: datetime | None = None
 
 
 @dataclass(frozen=True)

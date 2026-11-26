@@ -6,7 +6,7 @@ import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
 import { MACHADO_2009, simulate, type Vision, VISIONS } from "../test/colour-vision";
-import { contrast, luminanceOf, PALETTES, ratio } from "../test/palette";
+import { contrast, luminanceOf, over, PALETTES, ratio } from "../test/palette";
 import { StatusGlyph } from "./StatusGlyph";
 import { PILL_TONES } from "./StatusLabel";
 import { STATUS_KINDS, type StatusKind } from "./status";
@@ -103,27 +103,6 @@ function pulseLow(): number {
     throw new Error("no opacity in @keyframes status-pulse");
   }
   return Number(opacity);
-}
-
-/**
- * A colour drawn at an opacity over a background, composited per channel in sRGB as browsers do.
- *
- * @param foreground - The colour, `#RRGGBB`.
- * @param background - The background, `#RRGGBB`.
- * @param opacity - The foreground's opacity, 0 to 1.
- * @returns The colour seen, `#RRGGBB`.
- */
-function over(foreground: string, background: string, opacity: number): string {
-  const channels = (hex: string): number[] =>
-    [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16));
-  const back = channels(background);
-  return `#${channels(foreground)
-    .map((channel, index) =>
-      Math.round(opacity * channel + (1 - opacity) * (back[index] ?? 0))
-        .toString(16)
-        .padStart(2, "0"),
-    )
-    .join("")}`;
 }
 
 /**

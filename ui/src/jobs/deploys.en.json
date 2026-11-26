@@ -6,6 +6,7 @@
   "oneAtATime": "Deploys are listed one environment at a time.",
   "repository": "Repository",
   "allRepositories": "All repositories",
+  "repositoryNote": "Lists the repositories deployed in {{environment}} now and those whose deploys this list has shown.",
   "loading": "Loading the deploys…",
   "region": "Deploys of {{environment}}",
   "empty": "No deploy in {{environment}} yet.",

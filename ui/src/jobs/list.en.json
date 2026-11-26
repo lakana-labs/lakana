@@ -51,6 +51,8 @@
     "readFailed": "The jobs of {{environment}} could not be read: {{sentence}}",
     "byHand": "by hand",
     "paused": "paused",
+    "pausedBy": "Paused since {{when}} by {{who}}.",
+    "pausedByDeleted": "Paused since {{when}} by an account since deleted.",
     "never": "never"
   }
 }

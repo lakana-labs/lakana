@@ -1576,8 +1576,9 @@ regression.
     loading skeleton, the Actions menu, the Retention dialog; an artifact's Overview, Versions,
     Lineage and Access;
   - Queries: the editor, a query's result (the completions closed), a saved query;
-  - Jobs: the Jobs list, Runs, Deploys, Deploys with none yet, the rollback dialog, a job's
-    page, its Pause dialog, a failed run, a task with its log, a run that does not exist;
+  - Jobs: the Jobs list, Runs, Deploys, Deploys with none yet, the rollback dialog, a rollback
+    followed (every Roll back to this… held, the pressed one focused), a job's page, its Pause
+    dialog, the page of a paused job, a failed run, a task with its log, a run that does not exist;
   - Connections: the list, the list with none yet, a connection, Edit, Add, the Delete dialog;
   - Settings: Status, Environments, an environment, its Change storage dialog, Repositories, a
     repository, Connect a repository, People, a person, Groups, a group, Grants, the Add grant
@@ -1603,8 +1604,8 @@ regression.
   shards: `playwright.config.ts` runs only `*.spec.ts`, and the suite is `*.visual.ts`.
 - **Size.** Playwright writes 8-bit RGB PNGs at its own compression; a smaller lossless
   encoding would save about 3 % and be rewritten by the next update, so the baselines are what
-  Playwright writes: 190 pictures (85 desktop shots in light and dark, 10 at the phone
-  width in both), about 11.9 MB in all, about 63 kB each.
+  Playwright writes: 194 pictures (87 desktop shots in light and dark, 10 at the phone
+  width in both), about 12.2 MB in all, about 63 kB each.
 
 ### Reviewing a part of the interface
 
