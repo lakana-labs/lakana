@@ -184,6 +184,29 @@ The suggestions are help: what you type is still sent, and the server checks it.
 Settings › Access › People › test1. Every part but the last is a link. A list or a tab of an area has no
 breadcrumb, because the sidebar already says where you are.
 
+## Accessibility
+
+The web interface is built with accessibility as a goal, and the goal is WCAG 2.2 level AA.
+We treat it as an engineering rule, not a final polish: it is checked automatically on every
+change that touches the interface.
+
+- **axe** runs on every screen, in light and dark, with the WCAG 2.2 AA rules. A violation
+  fails the build.
+- **Keyboard-only walks** use each screen without a mouse, and a test checks that a focus ring
+  shows at every Tab stop.
+- **Contrast tests** check the colour tokens in both themes: body text at AAA, other text at
+  AA, and edges and graphics at 3:1.
+- **Reflow at 320 px** is checked on every screen: nothing is cut off and nothing scrolls
+  sideways.
+- **Reduced motion** turns the interface's animations off.
+- **Forced colours** (high-contrast mode) are respected.
+
+Lakana has **not been formally audited** for accessibility, so we make no statement that it
+conforms to WCAG or any other standard, and automatic checks cannot find every problem. If
+something is hard or impossible to use, please
+[open an issue](https://github.com/lakana-labs/lakana/issues) and say what you tried and
+which tools you use.
+
 ## What we avoid
 
 The interface fails, even if every feature works, when it:
