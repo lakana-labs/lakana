@@ -241,7 +241,7 @@ request; [settings](../reference/settings.md)).
 Seeing other people's activity is recorded too. When a manager lists other people's queries
 (`lakana query list`), an administrator sees who read a table (`lakana table health`) or someone
 else's private saved query (`lakana query saved`), or someone reads other people's events in the
-audit log itself (`lakana audit list`), the log gets
+audit log itself (`lakana audit list`, Settings › Audit log), the log gets
 an `ACTIVITY_VIEWED` event: who looked, at which environment or table, with which filters, and how many
 rows of how many other people the answer showed, never their names or their SQL. It is written once per
 person and view per hour, so paging, other filters and a screen that refreshes itself add nothing; a

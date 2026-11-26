@@ -218,7 +218,7 @@ describe("the tour", () => {
     }
 
     expect(step).toHaveTextContent(
-      "The instance’s status and what you may do. For those who manage them, also environments, repositories, access, sign-in and configuration.",
+      "The instance’s status and what you may do. For those who manage them, also environments, repositories, access, sign-in, configuration and the audit log.",
     );
   });
 

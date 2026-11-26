@@ -148,7 +148,8 @@ one `ACTIVITY_VIEWED` event (a page of `--all-environments` one for each environ
 where the page shows someone else's query or `--submitter` names someone else), and so does seeing
 the readers of a table
 ([table health](table-health.md#audit)), reading the audit log itself (`lakana audit list`) when
-the page shows someone else's events or filters on someone else with `--principal-id`, and an
+the page shows someone else's events or filters on someone else with `--principal-id` (or the route's
+`principal`, a name, as Settings › Audit log sends it), and an
 administrator's read of someone else's private saved query (`lakana query saved list` or `show`;
 [Save and share a query](../how-to/save-and-share-a-query.md)), one event per environment shown:
 

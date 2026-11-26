@@ -1207,3 +1207,45 @@ export async function applyAccessFile(request: APIRequestContext, text: string):
 export function createRepository(request: APIRequestContext, body: object): Promise<void> {
   return create(request, "/api/v1/repositories", body);
 }
+
+/** One audit event, as much of it as the tests read. */
+export interface AuditEventRead {
+  /** Its type. */
+  readonly event_type: string;
+  /** Its principal's name, or null. */
+  readonly principal_name: string | null;
+  /** Its fields. */
+  readonly detail: Record<string, unknown>;
+}
+
+/**
+ * Reads the newest page of the audit log as the bootstrap administrator's token.
+ *
+ * @param request - The request context.
+ * @param query - The route's filters, such as `{ event_type: "ACTIVITY_VIEWED" }`.
+ * @returns The events, newest first.
+ */
+export async function auditEvents(
+  request: APIRequestContext,
+  query: Record<string, string>,
+): Promise<readonly AuditEventRead[]> {
+  const response = await request.get("/api/v1/audit-events", {
+    headers: { Authorization: `Bearer ${BOOTSTRAP_TOKEN}` },
+    params: query,
+  });
+  await ensureOk("GET /api/v1/audit-events", response);
+  return ((await response.json()) as { items: AuditEventRead[] }).items;
+}
+
+/**
+ * Creates a service account, as the bootstrap administrator.
+ *
+ * @param request - The request context.
+ * @param name - Its name.
+ */
+export async function createServiceAccount(
+  request: APIRequestContext,
+  name: string,
+): Promise<void> {
+  await create(request, "/api/v1/principals", { name, type: "SERVICE_ACCOUNT" });
+}
