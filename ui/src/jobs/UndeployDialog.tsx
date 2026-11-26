@@ -24,6 +24,11 @@ export interface UndeployDialogProps {
   readonly environment: string;
   /** The repository to undeploy. */
   readonly repository: string;
+  /**
+   * The project version the person sees as current: the server refuses the undeploy, in words
+   * the dialog shows, if the deployment points at another one by then.
+   */
+  readonly projectVersionId: string;
   /** The service account its runs write as; null when none is bound. */
   readonly runAs: string | null;
   /** Whether the environment is protected. */
@@ -85,7 +90,7 @@ function Reading({ label }: ReadingProps): JSX.Element {
  * one is bound, the repository's glossary terms and its tables' health effects; and says what
  * stays, and that a bound service account must be bound again after a new deploy. Undeploy is
  * held, and says why, until the repository's name is typed exactly. A refusal (a run still
- * active, the deployment already gone) stays in the dialog in the server's words and takes the
+ * active, a deploy or rollback queued, the deployment moved or already gone) stays in the dialog in the server's words and takes the
  * focus. While the request is open, Escape and Cancel do nothing. Undeploy asks for no passkey
  * touch: it stops code and hands out nothing.
  *
@@ -93,6 +98,7 @@ function Reading({ label }: ReadingProps): JSX.Element {
  *   handlers.
  * @param props.environment - The environment.
  * @param props.repository - The repository.
+ * @param props.projectVersionId - The project version seen as current.
  * @param props.runAs - The service account its runs write as, or null.
  * @param props.protectedEnvironment - Whether the environment is protected.
  * @param props.onDone - Called once it is undeployed.
@@ -102,6 +108,7 @@ function Reading({ label }: ReadingProps): JSX.Element {
 export function UndeployDialog({
   environment,
   repository,
+  projectVersionId,
   runAs,
   protectedEnvironment,
   onDone,
@@ -129,7 +136,7 @@ export function UndeployDialog({
           event.preventDefault();
           if (!matches || attempt.busy) return;
           attempt.run(async () => {
-            await undeploy(environment, repository);
+            await undeploy(environment, repository, projectVersionId);
             onDone();
           });
         }}

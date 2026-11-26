@@ -430,9 +430,15 @@ describe("the deploy calls", () => {
     });
 
     await undeploy("a b", "sales ops");
+    await undeploy("a b", "sales ops", "pv 7");
 
     expect(server.sent.map((each) => [each.method, each.path, each.body])).toEqual([
       ["DELETE", "/api/v1/environments/a%20b/deployments/sales%20ops", undefined],
+      [
+        "DELETE",
+        "/api/v1/environments/a%20b/deployments/sales%20ops?expected_project_version_id=pv+7",
+        undefined,
+      ],
     ]);
   });
 });

@@ -27,6 +27,7 @@ import {
   stubWaitingJob,
   TIMED_OUT,
   TIMEOUT_CAUSE,
+  VERSIONS,
   WAITING_JOB,
   WAITING_MESSAGE,
 } from "./jobs";
@@ -735,7 +736,8 @@ for (const theme of ["light", "dark"] as const) {
       const sent: string[] = [];
       page.on("request", (request) => {
         if (request.method() === "DELETE") {
-          sent.push(new URL(request.url()).pathname);
+          const url = new URL(request.url());
+          sent.push(url.pathname + url.search);
         }
       });
       await openDeploys(page);
@@ -766,7 +768,10 @@ for (const theme of ["light", "dark"] as const) {
       const note = page.getByText(UNDEPLOYED);
       await expect(note).toBeVisible();
       await expect(page.locator(".jobs-rollback-note")).toBeFocused();
-      expect(sent).toEqual([`/api/v1/environments/${ENV}/deployments/${REPOSITORY}`]);
+      // The version the row showed as current goes along, so a deployment moved since is refused.
+      expect(sent).toEqual([
+        `/api/v1/environments/${ENV}/deployments/${REPOSITORY}?expected_project_version_id=${VERSIONS.current}`,
+      ]);
       // Nothing is current any more, so nothing is offered: no rollback, no undeploy.
       await expect(rows).toHaveCount(6);
       await expect(page.getByRole("region", { name: `Deploys of ${ENV}` })).not.toContainText(

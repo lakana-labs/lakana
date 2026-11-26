@@ -606,9 +606,11 @@ active run, the service account its runs write as when one is bound, its glossar
 tables' health effects; and what stays: the tables and their data, as orphans, and the deploys,
 which stay listed. When it cannot read the jobs it says why and offers no undeploy, so nothing goes
 that the question did not name. Type the repository's name and press **Undeploy**; no passkey
-touch is asked, as an undeploy stops code and hands out nothing. While a run of the repository is
-queued or running the server refuses, and the question shows its sentence: cancel the run or wait
-for it, then try again. Once undeployed, the line under the list says so; no deploy of that
+touch is asked, as an undeploy stops code and hands out nothing. While a run, a deploy or a
+rollback of the repository is queued or running the server refuses, and the question shows its
+sentence: cancel the run or wait for it to end, then try again. The question sends the project
+version the row showed as current, so when someone deployed or rolled back meanwhile it is refused
+too, and nothing goes that you did not see. Once undeployed, the line under the list says so; no deploy of that
 repository is current any more, so none offers **Roll back to this…** or **Undeploy…**. Deploy
 it again (`lakana deploy`) to bring its jobs back, and bind its run principal again if it had one.
 The audit log records `UNDEPLOYED` with the repository and the project version, as from the

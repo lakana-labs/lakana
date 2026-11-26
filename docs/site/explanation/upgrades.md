@@ -254,8 +254,9 @@ repository again without the identity its runs use. The message names the deploy
 'analytics' is queued in 'dev'; wait for it to finish before undeploying.`): a script that
 undeploys right after queueing a deploy must wait for that deploy first. A dry run does not hold
 an undeploy. The DELETE also takes an optional `expected_project_version_id` and refuses (409)
-when the deployment points at another project version; a client that does not send it works as
-before ([Undeploy](../how-to/projects.md#undeploy)).
+when the deployment points at another project version; the web interface's **Undeploy…** sends
+the version its row showed, and a client that does not send it works as before
+([Undeploy](../how-to/projects.md#undeploy)).
 
 ### A deploy names its commit's subject
 

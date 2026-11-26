@@ -58,6 +58,7 @@ function renderDialog(
     <UndeployDialog
       environment="prod"
       repository="analytics"
+      projectVersionId="pv-7"
       runAs={runAs}
       protectedEnvironment={protectedEnvironment}
       onDone={onDone}
@@ -157,7 +158,7 @@ describe("UndeployDialog", () => {
     });
     expect(server.sent.map((each) => [each.method, each.path])).toContainEqual([
       "DELETE",
-      `${ENV}/deployments/analytics`,
+      `${ENV}/deployments/analytics?expected_project_version_id=pv-7`,
     ]);
   });
 
