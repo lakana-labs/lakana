@@ -297,9 +297,10 @@ with `lakana logout`.
 In the web interface, an administrator opens the person (or service account) under **Settings →
 Access → People** and chooses **Deactivate** at the end of the page. The dialog says what ends:
 every browser session of theirs, their personal API tokens and the task tokens made with them,
-and their open sign-in links, as well as the invites and recovery links they issued. Their grants,
-group memberships and audit entries stay on record. Type the name exactly, then touch your
-passkey. Deactivating cannot be undone in this release: nobody can reactivate the account, and
+the runs that act as them, and their open sign-in links, as well as the invites and recovery
+links they issued. Their grants, group memberships and audit entries stay on record. Type the name
+exactly, then touch your passkey; a name that holds a hidden character is typed as the dialog
+shows it, with the character written as its code (such as `U+202E`). Deactivating cannot be undone in this release: nobody can reactivate the account, and
 its name stays taken. The server refuses to deactivate the last active administrator, and the
 dialog shows its sentence: give another person the `ADMIN` role on the instance first.
 Deactivating your own account signs you out at once. A service account of an instance that an

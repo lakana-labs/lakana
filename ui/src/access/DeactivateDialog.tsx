@@ -14,7 +14,7 @@ import { deactivatePrincipal } from "../api/principals";
 import { ActionDialog } from "../shell/ActionDialog";
 import { useAttempt } from "../sign-in/Attempt";
 import "./principalStrings";
-import { TypedName } from "./TypedName";
+import { TypedName, typedMatches } from "./TypedName";
 
 /** Whose account is deactivated, as far as what ends goes. */
 export type DeactivatedKind = "own" | "person" | "service";
@@ -55,7 +55,7 @@ export function DeactivateDialog({
   const attempt = useAttempt();
   const [typed, setTyped] = useState("");
   const alert = useRef<HTMLParagraphElement>(null);
-  const matches = typed === name;
+  const matches = typedMatches(typed, name);
   useEffect(() => {
     if (attempt.error !== null) alert.current?.focus();
   }, [attempt.error]);
@@ -66,6 +66,11 @@ export function DeactivateDialog({
     own: "access.deactivate.endsOwn",
     person: "access.deactivate.endsPerson",
     service: "access.deactivate.endsService",
+  }[kind];
+  const kept = {
+    own: "access.deactivate.keptOwn",
+    person: "access.deactivate.keptPerson",
+    service: "access.deactivate.keptService",
   }[kind];
   return (
     <ActionDialog onClose={close}>
@@ -85,7 +90,7 @@ export function DeactivateDialog({
             : t("access.deactivate.dialogTitle", { name })}
         </Heading>
         <p>{t(ends, { name })}</p>
-        <p>{t("access.deactivate.kept")}</p>
+        <p>{t(kept)}</p>
         <p>{t("access.deactivate.final", { name })}</p>
         <TypedName
           label={t("access.deactivate.type", { name })}

@@ -747,9 +747,12 @@ describe("PersonPage's Deactivate", () => {
     await user.click(within(panel).getByRole("button", { name: "Deactivate kim" }));
     const dialog = await screen.findByRole("dialog", { name: "Deactivate kim?" });
     expect(dialog).toHaveTextContent(
-      "kim can no longer sign in. Every session of theirs ends now, their personal API tokens " +
-        "and the task tokens made with them stop working, and their open sign-in links are " +
-        "withdrawn, as are the invites and recovery links they issued.",
+      "kim can no longer sign in. Every session of theirs ends now; their personal API tokens " +
+        "and the task tokens made with them stop working, and runs that act as kim fail; their " +
+        "open sign-in links are withdrawn, as are the invites and recovery links they issued.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Their grants, group memberships and audit entries stay on record.",
     );
     expect(dialog).toHaveTextContent(
       "This cannot be undone in this release: nobody can reactivate kim, and the name stays taken.",
@@ -923,8 +926,13 @@ describe("PersonPage's Deactivate", () => {
     await user.click(await screen.findByRole("button", { name: "Deactivate admin" }));
     const dialog = await screen.findByRole("dialog", { name: "Deactivate your own account?" });
     expect(dialog).toHaveTextContent(
-      "You can no longer sign in: this session ends at once, and your personal API tokens and " +
-        "the task tokens made with them stop working.",
+      "You can no longer sign in. Every session of yours ends at once, this one included; " +
+        "your personal API tokens and the task tokens made with them stop working, and runs " +
+        "that act as you fail; your open sign-in links are withdrawn, as are the invites and " +
+        "recovery links you issued.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Your grants, group memberships and audit entries stay on record.",
     );
     await user.type(
       within(dialog).getByRole("textbox", { name: "Type admin to confirm" }),
@@ -935,6 +943,60 @@ describe("PersonPage's Deactivate", () => {
     await waitFor(() => {
       expect(session.refresh).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("deactivates a name with a hidden character, typed as its label shows it", async () => {
+    const name = "k\u202Eim";
+    const { user, server } = renderShell(`/settings/access/people/${encodeURIComponent(name)}`, {
+      routes: pageRoutes(name, principal(name, false), {
+        [`DELETE /api/v1/principals/${name}`]: { status: 204 },
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Deactivate kU+202Eim" }));
+    const dialog = await screen.findByRole("dialog", { name: "Deactivate kU+202Eim?" });
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Type kU+202Eim to confirm" }),
+      "kU+202Eim",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Deactivate" }));
+
+    await waitFor(() => {
+      expect(server.sent.find((request) => request.method === "DELETE")?.path).toBe(
+        `/api/v1/principals/${encodeURIComponent(name)}`,
+      );
+    });
+  });
+
+  it("puts the focus on the heading when the access files' status is read again", async () => {
+    let tries = 0;
+    const { user } = renderShell("/settings/access/people/ci-loader", {
+      routes: pageRoutes(
+        "ci-loader",
+        { status: 200, body: { name: "ci-loader", type: "SERVICE_ACCOUNT", is_active: true } },
+        {
+          "GET /api/v1/access/status": () => {
+            tries += 1;
+            return tries === 1
+              ? { status: 500, body: { detail: "The database is down." } }
+              : { status: 200, body: { scopes: [], overrides: [] } };
+          },
+        },
+      ),
+    });
+
+    const failed = await screen.findByText(
+      /nothing can be changed here for now: The database is down\./,
+    );
+    expect(screen.queryByRole("button", { name: "Deactivate ci-loader" })).toBeNull();
+    await user.click(
+      within(failed.closest(".read-failed") as HTMLElement).getByRole("button", {
+        name: "Try again",
+      }),
+    );
+
+    expect(await screen.findByRole("button", { name: "Deactivate ci-loader" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "ci-loader" })).toHaveFocus();
   });
 
   it("marks a hidden character of the name in the panel and the dialog", async () => {

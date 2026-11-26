@@ -4,7 +4,16 @@
  *
  * @packageDocumentation
  */
-import { type JSX, lazy, type ReactNode, Suspense, useCallback, useId, useState } from "react";
+import {
+  type JSX,
+  lazy,
+  type ReactNode,
+  type RefObject,
+  Suspense,
+  useCallback,
+  useId,
+  useState,
+} from "react";
 import { Button } from "react-aria-components";
 import { useTranslation } from "react-i18next";
 
@@ -130,6 +139,8 @@ interface UnlessManagedProps {
   readonly name: string;
   /** What to show while no access file manages the instance. */
   readonly children: ReactNode;
+  /** The page's heading, which takes the focus when the status is read again. */
+  readonly heading: RefObject<HTMLHeadingElement | null>;
 }
 
 /**
@@ -140,9 +151,10 @@ interface UnlessManagedProps {
  * @param props - The name and what to show.
  * @param props.name - The service account's name.
  * @param props.children - What to show while no file manages the instance.
+ * @param props.heading - The page's heading, focused on Try again.
  * @returns The panel, the note or nothing.
  */
-function UnlessManaged({ name, children }: UnlessManagedProps): ReactNode {
+function UnlessManaged({ name, children, heading }: UnlessManagedProps): ReactNode {
   const { t } = useTranslation();
   const status = useAccessStatus();
   if (managedInstance(status) === null) return children;
@@ -150,7 +162,11 @@ function UnlessManaged({ name, children }: UnlessManagedProps): ReactNode {
     <InstanceManagedNote
       status={status}
       commands={[t("access.deactivate.command", { name })]}
-      onRetry={status.reload}
+      onRetry={() => {
+        // Try again goes away with the failure: the focus waits on the heading.
+        heading.current?.focus();
+        status.reload();
+      }}
     />
   );
 }
@@ -289,7 +305,7 @@ export function PersonPage({ name }: PersonPageProps): JSX.Element {
       <SessionsPanel key={`sessions-${String(unlinked)}`} name={name} own={own} />
       {about?.active === true &&
         (kind === "service" ? (
-          <UnlessManaged name={name}>
+          <UnlessManaged name={name} heading={focus.target}>
             <DeactivatePanel
               name={name}
               onOpen={() => {

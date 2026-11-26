@@ -131,7 +131,13 @@
 "orphans": { class: ui, part: 3, done: true }
 "passkey list": { class: ui, part: 1 }
 "passkey remove": { class: ui, part: 1 }
-"principal create": { class: ui, part: 7, done: true }
+"principal create":
+  {
+    class: ui,
+    part: 7,
+    done: true,
+    note: "service accounts only; a person comes in through an invite (Settings › Sign-in › Invites)",
+  }
 "principal deactivate": { class: ui, part: 7, done: true }
 "principal get": { class: ui, part: 7 }
 "principal list": { class: ui, part: 7 }
@@ -600,7 +606,13 @@
 "POST /api/v1/groups": { class: ui, part: 7, done: true }
 "POST /api/v1/invites": { class: ui, part: 1, done: true }
 "POST /api/v1/package-indexes": { class: ui, part: 8 }
-"POST /api/v1/principals": { class: ui, part: 7, done: true }
+"POST /api/v1/principals":
+  {
+    class: ui,
+    part: 7,
+    done: true,
+    note: "service accounts only; a person comes in through an invite (Settings › Sign-in › Invites)",
+  }
 "POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
 "POST /api/v1/principals/{name}/recent":

@@ -293,6 +293,30 @@ describe("GroupPage", () => {
     });
   });
 
+  it("deletes a group whose name holds a hidden character, typed as its label shows it", async () => {
+    const name = "an\u202Ealysts";
+    const { user, server } = renderShell(`/settings/access/groups/${encodeURIComponent(name)}`, {
+      routes: groupRoutes({
+        [`GET /api/v1/groups/${name}/members`]: { status: 200, body: [] },
+        [`DELETE /api/v1/groups/${name}`]: { status: 204 },
+      }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Delete group anU+202Ealysts" }));
+    const dialog = await screen.findByRole("dialog", { name: "Delete group anU+202Ealysts?" });
+    await user.type(
+      within(dialog).getByRole("textbox", { name: "Type anU+202Ealysts to confirm" }),
+      "anU+202Ealysts",
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Delete group" }));
+
+    await waitFor(() => {
+      expect(server.sent.find((request) => request.method === "DELETE")?.path).toBe(
+        `/api/v1/groups/${encodeURIComponent(name)}`,
+      );
+    });
+  });
+
   it("deletes nothing on Enter before the name is typed, nor closes while deleting", async () => {
     const answer = held();
     const { user, server } = renderShell(PATH, {

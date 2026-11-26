@@ -243,3 +243,32 @@ test("an administrator creates a service account and deactivates a person, whose
   await leaver.page.context().close();
   await page.context().close();
 });
+
+test("an administrator who deactivates their own account lands on the sign-in page", async ({
+  browser,
+  browserName,
+  request,
+}) => {
+  test.skip(browserName !== "chromium", "signs in with a virtual authenticator");
+  const { page, name } = await invitedPerson(browser, request, (person) =>
+    makeAdministrator(request, person),
+  );
+  await skipTheWelcome(page);
+  const errors = consoleErrors(page);
+
+  await page.goto(`/settings/access/people/${name}`);
+  await page.getByRole("button", { name: `Deactivate ${name}` }).click();
+  const deactivate = page.getByRole("dialog", { name: "Deactivate your own account?" });
+  await expect(deactivate).toContainText("Every session of yours ends at once");
+  await deactivate.getByRole("textbox", { name: `Type ${name} to confirm` }).fill(name);
+  // The passkey touch is asked for first, answered by the virtual authenticator.
+  await deactivate.getByRole("button", { name: "Deactivate" }).click();
+
+  // The session ended with the account: the sign-in page says why.
+  await expect(page.getByText(/Your account is deactivated/)).toBeVisible();
+  await expect(page).toHaveURL(/\/sign-in/);
+  expect(await violations(page), "signed out after deactivating oneself").toEqual([]);
+  // The session read after the deactivation answers 401, which the browser logs.
+  expect(errors.filter((error) => !error.includes("status of 401"))).toEqual([]);
+  await page.context().close();
+});
