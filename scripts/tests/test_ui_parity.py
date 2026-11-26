@@ -35,7 +35,7 @@ def test_the_real_inventory_matches_the_live_commands_and_routes(live: set[str])
 
 def test_a_missing_entry_names_the_key_and_the_next_step() -> None:
     """A live key without an entry is reported with what to add."""
-    entries = {"table undrop": {"class": "ui", "part": 3}}
+    entries = {"table undrop": {"class": "ui", "part": 3, "done": True}}
     [message] = problems(entries, _LIVE)
     assert "GET /api/v1/jobs" in message
     assert "add it to ui/parity.yaml with class" in message
@@ -44,8 +44,8 @@ def test_a_missing_entry_names_the_key_and_the_next_step() -> None:
 def test_a_stale_entry_is_reported() -> None:
     """An entry whose command or route no longer exists is reported."""
     entries = {
-        "table undrop": {"class": "ui", "part": 3},
-        "GET /api/v1/jobs": {"class": "read", "part": 5},
+        "table undrop": {"class": "ui", "part": 3, "done": True},
+        "GET /api/v1/jobs": {"class": "read", "part": 5, "done": True},
         "gone": {"class": "git", "reason": "x"},
     }
     [message] = problems(entries, _LIVE)
@@ -156,3 +156,44 @@ def test_done_is_allowed_on_ui_and_read() -> None:
         "b": {"class": "read", "part": 5, "done": True},
     }
     assert problems(entries, set(entries)) == []
+
+
+def test_a_ui_or_read_entry_of_a_finished_part_without_done_is_refused() -> None:
+    """Every part of M7 is finished: an entry it places in the interface must be built."""
+    entries = {
+        "table undrop": {"class": "ui", "part": 3},
+        "GET /api/v1/jobs": {"class": "read", "part": 5},
+    }
+    messages = problems(entries, _LIVE)
+    assert len(messages) == 2
+    for key, message in zip(("table undrop", "GET /api/v1/jobs"), messages, strict=True):
+        assert repr(key) in message
+        assert "which is finished, but has no `done: true`" in message
+        assert "class git with a reason" in message
+
+
+def test_an_entry_of_a_part_not_yet_finished_may_lack_done() -> None:
+    """Only the finished parts require the flag; a later part's entry is a plan, not a gap."""
+    entries = {
+        "table undrop": {"class": "ui", "part": 3},
+        "GET /api/v1/jobs": {"class": "read", "part": 5, "done": True},
+    }
+    assert problems(entries, _LIVE, finished_parts=frozenset({5})) == []
+    [message] = problems(entries, _LIVE, finished_parts=frozenset({3}))
+    assert "'table undrop'" in message
+
+
+def test_the_real_inventory_fails_when_a_done_flag_is_removed(live: set[str]) -> None:
+    """Dropping one `done: true` from the real file is caught, naming the entry.
+
+    Parameters
+    ----------
+    live
+        The live keys.
+    """
+    entries = load_entries(PARITY_FILE)
+    key = next(k for k, entry in entries.items() if entry.get("done") is True)
+    del entries[key]["done"]
+    [message] = problems(entries, live)
+    assert repr(key) in message
+    assert "has no `done: true`" in message

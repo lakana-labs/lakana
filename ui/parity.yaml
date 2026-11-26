@@ -4,6 +4,8 @@
 # Key: CLI command path ("table undrop") or "METHOD /api/v1/path" as OpenAPI spells it.
 # class ui|read: part 1-8 of the interface (read = shown, not changed). class git|exception: reason.
 # done: true (ui and read only) = the interface already shows it; set by the PR that builds it.
+# Every part of M7 is finished, so each ui and read entry must be done; what the interface does
+# not show yet is class git with a reason that links the issue that builds it (#832 after M7).
 # Rule: docs/agent/conventions.md, "The ui/ project".
 
 "DELETE /api/v1/environments/{env}/saved-queries/{saved_query_id}":
@@ -48,7 +50,11 @@
 "artifact versions list": { class: ui, part: 3, done: true }
 "audit list": { class: ui, part: 8, done: true }
 "bundle init": { class: git, reason: "local deployment tooling (compose.yaml, .env)" }
-"check list": { class: read, part: 5 }
+"check list":
+  {
+    class: git,
+    reason: "after M7: the screen for `check list` comes with #832; until then the CLI and REST API do it",
+  }
 "check rows": { class: ui, part: 5, done: true }
 "ci-trust create": { class: ui, part: 7, done: true }
 "ci-trust delete": { class: ui, part: 7, done: true }
@@ -87,50 +93,99 @@
 "env unprotect": { class: ui, part: 8, done: true }
 "env usage":
   {
-    class: ui,
-    part: 8,
-    note: "each environment's usage is on its page; the workers' caches are not shown yet",
+    class: git,
+    reason: "after M7: the workers' caches of `env usage` (each environment's usage is on its page) comes with #832; until then the CLI and REST API do it",
   }
 "grant create": { class: ui, part: 7, done: true }
 "grant list": { class: ui, part: 7, done: true }
 "grant revoke": { class: ui, part: 7, done: true }
-"graph impact": { class: ui, part: 3 }
-"graph join-path": { class: ui, part: 3 }
+"graph impact":
+  {
+    class: git,
+    reason: "after M7: the screen for `graph impact` comes with #832; until then the CLI and REST API do it",
+  }
+"graph join-path":
+  {
+    class: git,
+    reason: "after M7: the screen for `graph join-path` comes with #832; until then the CLI and REST API do it",
+  }
 "graph lineage": { class: read, part: 3, done: true }
-"graph neighbours": { class: read, part: 3, note: "the Lineage tab does not use it" }
+"graph neighbours":
+  {
+    class: git,
+    reason: "after M7: the screen for `graph neighbours` comes with #832; until then the CLI and REST API do it",
+  }
 "group add-member": { class: ui, part: 7, done: true }
 "group create": { class: ui, part: 7, done: true }
 "group delete": { class: ui, part: 7, done: true }
 "group list": { class: ui, part: 7, done: true }
 "group members": { class: ui, part: 7, done: true }
 "group remove-member": { class: ui, part: 7, done: true }
-"index add": { class: ui, part: 8 }
-"index list": { class: ui, part: 8 }
-"index remove": { class: ui, part: 8 }
-"index show": { class: ui, part: 8 }
-"index update": { class: ui, part: 8 }
+"index add":
+  {
+    class: git,
+    reason: "after M7: the screen for `index add` comes with #832; until then the CLI and REST API do it",
+  }
+"index list":
+  {
+    class: git,
+    reason: "after M7: the screen for `index list` comes with #832; until then the CLI and REST API do it",
+  }
+"index remove":
+  {
+    class: git,
+    reason: "after M7: the screen for `index remove` comes with #832; until then the CLI and REST API do it",
+  }
+"index show":
+  {
+    class: git,
+    reason: "after M7: the screen for `index show` comes with #832; until then the CLI and REST API do it",
+  }
+"index update":
+  {
+    class: git,
+    reason: "after M7: the screen for `index update` comes with #832; until then the CLI and REST API do it",
+  }
 "init": { class: git, reason: "project init" }
 "invite create": { class: ui, part: 1, done: true }
 "invite list": { class: ui, part: 1, done: true }
 "invite withdraw": { class: ui, part: 1, done: true }
 "job list": { class: read, part: 5, done: true }
-"job notification": { class: ui, part: 5 }
-"job notify-test": { class: ui, part: 5 }
+"job notification":
+  {
+    class: git,
+    reason: "after M7: the screen for `job notification` comes with #832; until then the CLI and REST API do it",
+  }
+"job notify-test":
+  {
+    class: git,
+    reason: "after M7: the screen for `job notify-test` comes with #832; until then the CLI and REST API do it",
+  }
 "job pause": { class: ui, part: 5, done: true }
 "job resume": { class: ui, part: 5, done: true }
 "job run": { class: ui, part: 5, done: true }
 "job show": { class: read, part: 5, done: true }
 "load": { class: git, reason: "load of a local file; UI file load is #224/#29, optional in M7" }
-"login": { class: ui, part: 1 }
-"logout": { class: ui, part: 1 }
-"me set": { class: ui, part: 1 }
+"login": { class: ui, part: 1, done: true }
+"logout": { class: ui, part: 1, done: true }
+"me set":
+  {
+    class: git,
+    reason: "after M7: the screen for `me set` (the catalog-text language) comes with #832; until then the CLI and REST API do it",
+  }
 "ns create": { class: ui, part: 3, done: true, note: "properties are set from the CLI" }
 "ns delete": { class: ui, part: 3, done: true }
-"ns get": { class: read, part: 3 }
+"ns get":
+  {
+    class: read,
+    part: 3,
+    done: true,
+    note: "the Catalog tree shows the namespace (from GET /api/v1/tables/tree); properties are read from the CLI",
+  }
 "ns list": { class: read, part: 3, done: true, note: "properties are set from the CLI" }
 "orphans": { class: ui, part: 3, done: true }
-"passkey list": { class: ui, part: 1 }
-"passkey remove": { class: ui, part: 1 }
+"passkey list": { class: ui, part: 1, done: true }
+"passkey remove": { class: ui, part: 1, done: true }
 "principal create":
   {
     class: ui,
@@ -139,14 +194,18 @@
     note: "service accounts only; a person comes in through an invite (Settings › Sign-in › Invites)",
   }
 "principal deactivate": { class: ui, part: 7, done: true }
-"principal get": { class: ui, part: 7 }
-"principal list": { class: ui, part: 7 }
+"principal get": { class: ui, part: 7, done: true }
+"principal list": { class: ui, part: 7, done: true }
 "principal unlink-provider":
   { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink", done: true }
 "profile list": { class: git, reason: "local CLI credential file" }
 "profile remove": { class: git, reason: "local CLI credential file" }
 "profile use": { class: git, reason: "local CLI credential file" }
-"project-version show": { class: ui, part: 5 }
+"project-version show":
+  {
+    class: git,
+    reason: "after M7: the screen for `project-version show` comes with #832; until then the CLI and REST API do it",
+  }
 "query cancel": { class: ui, part: 4, done: true }
 "query list":
   {
@@ -180,7 +239,11 @@
 "row-filter create": { class: ui, part: 7, done: true }
 "row-filter list": { class: ui, part: 7, done: true }
 "row-filter revoke": { class: ui, part: 7, done: true }
-"run": { class: ui, part: 5 }
+"run":
+  {
+    class: git,
+    reason: 'a non-goal of part 5 (Jobs), whose design says: "Starting a run for an arbitrary selection of assets from the UI (the CLI''s `runs start` stays the way to do that; the Runs tab shows such runs)"; that command is `lakana run`, and Run now on a job page starts the whole job',
+  }
 "runs cancel": { class: ui, part: 5, done: true }
 "runs failed": { class: ui, part: 5, done: true }
 "runs list": { class: ui, part: 5, done: true }
@@ -188,7 +251,11 @@
 "runs resume": { class: ui, part: 5, done: true }
 "runs show": { class: ui, part: 5, done: true }
 "scheduler status": { class: ui, part: 8, done: true }
-"search": { class: ui, part: 1 }
+"search":
+  {
+    class: git,
+    reason: "after M7: the screen for `search` (across tables, columns, runs, people and terms) comes with #832; until then the CLI and REST API do it",
+  }
 "secret bind": { class: ui, part: 7, done: true }
 "secret create": { class: ui, part: 7, done: true }
 "secret list": { class: ui, part: 7, done: true }
@@ -198,8 +265,8 @@
 "server start": { class: git, reason: "local dev tooling" }
 "server status": { class: git, reason: "local dev tooling" }
 "server stop": { class: git, reason: "local dev tooling" }
-"session end": { class: ui, part: 1 }
-"session list": { class: ui, part: 1 }
+"session end": { class: ui, part: 1, done: true }
+"session list": { class: ui, part: 1, done: true }
 "sign-in settings": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
 "sign-in setup-link":
   { class: git, reason: "local deployment tooling: prints the first administrator's link" }
@@ -223,7 +290,11 @@
 "table expiring": { class: ui, part: 3, done: true }
 "table get": { class: read, part: 3, done: true }
 "table health": { class: read, part: 3, done: true }
-"table lineage": { class: read, part: 3, note: "run lineage is not shown on the table page" }
+"table lineage":
+  {
+    class: git,
+    reason: "after M7: the run lineage of `table lineage` on the table page comes with #832; until then the CLI and REST API do it",
+  }
 "table list": { class: ui, part: 3, done: true }
 "table maintain": { class: ui, part: 3, done: true }
 "table merge":
@@ -241,13 +312,25 @@
 "table retention": { class: ui, part: 3, done: true }
 "table undrop": { class: ui, part: 3, done: true }
 "table rebuild": { class: ui, part: 3, done: true }
-"task history": { class: read, part: 5 }
+"task history":
+  {
+    class: git,
+    reason: "after M7: the screen for `task history` comes with #832; until then the CLI and REST API do it",
+  }
 "task-token list": { class: ui, part: 7, done: true }
 "task-token mint":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
 "task-token revoke": { class: ui, part: 7, done: true }
-"term get": { class: read, part: 3 }
-"term list": { class: read, part: 3 }
+"term get":
+  {
+    class: git,
+    reason: "after M7: the screen for `term get` comes with #832; until then the CLI and REST API do it",
+  }
+"term list":
+  {
+    class: git,
+    reason: "after M7: the screen for `term list` comes with #832; until then the CLI and REST API do it",
+  }
 "token issue":
   {
     class: ui,
@@ -258,7 +341,7 @@
 "token list": { class: ui, part: 7, done: true }
 "token revoke": { class: ui, part: 7, done: true }
 "undeploy": { class: ui, part: 5, done: true }
-"whoami": { class: read, part: 1 }
+"whoami": { class: read, part: 1, done: true }
 "worker list": { class: ui, part: 8, done: true }
 "DELETE /api/v1/ci-trust-rules/{rule_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/column-masks/{column_mask_id}": { class: ui, part: 7, done: true }
@@ -282,19 +365,23 @@
 "DELETE /api/v1/groups/{name}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/invites/{invite_id}": { class: ui, part: 1, done: true }
-"DELETE /api/v1/package-indexes/{name}": { class: ui, part: 8 }
+"DELETE /api/v1/package-indexes/{name}":
+  {
+    class: git,
+    reason: "after M7: the screen for `index remove` comes with #832; until then the CLI and REST API do it",
+  }
 "DELETE /api/v1/principals/{name}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/principals/{name}/oidc-link":
   { class: ui, part: 7, note: "OIDC sign-in (#32): Access › a person, Unlink", done: true }
-"DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1 }
-"DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2 }
-"DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
+"DELETE /api/v1/principals/{name}/passkeys/{passkey_id}": { class: ui, part: 1, done: true }
+"DELETE /api/v1/principals/{name}/picture": { class: ui, part: 2, done: true }
+"DELETE /api/v1/principals/{name}/sessions": { class: ui, part: 1, done: true }
 "DELETE /api/v1/principals/{name}/tokens/{key_id}": { class: ui, part: 7, done: true }
 "DELETE /api/v1/recovery-links/{link_id}": { class: ui, part: 1, done: true }
 "DELETE /api/v1/repositories/{name}": { class: ui, part: 8, done: true }
 "DELETE /api/v1/row-filters/{row_filter_id}": { class: ui, part: 7, done: true }
-"DELETE /api/v1/sign-in/notices/{notice_id}": { class: ui, part: 1 }
-"DELETE /api/v1/sign-in/session": { class: ui, part: 1 }
+"DELETE /api/v1/sign-in/notices/{notice_id}": { class: ui, part: 1, done: true }
+"DELETE /api/v1/sign-in/session": { class: ui, part: 1, done: true }
 "DELETE /api/v1/task-tokens/{key_id}": { class: ui, part: 7, done: true }
 "GET /api/v1/access/export":
   { class: ui, part: 7, note: "a download of the live access as an access file", done: true }
@@ -318,7 +405,13 @@
   }
 "GET /api/v1/connections": { class: ui, part: 6, done: true }
 "GET /api/v1/connections/environments": { class: ui, part: 6, done: true }
-"GET /api/v1/deploys": { class: read, part: 5 }
+"GET /api/v1/deploys":
+  {
+    class: read,
+    part: 5,
+    done: true,
+    note: "Jobs › Deploys lists them one environment at a time, through GET …/{env}/deploys",
+  }
 "GET /api/v1/environments": { class: ui, part: 8, done: true }
 "GET /api/v1/environments/{environment_name}/connections": { class: ui, part: 6, done: true }
 "GET /api/v1/environments/{environment_name}/connections/{connection_name}":
@@ -327,6 +420,7 @@
   {
     class: ui,
     part: 6,
+    done: true,
     note: "the screen follows a test through the connection's last_test (PR 2, C4)",
   }
 "GET /api/v1/environments/{environment_name}/secrets": { class: ui, part: 7, done: true }
@@ -338,21 +432,46 @@
     note: "artifacts are rows of the Catalog list, with the tables",
   }
 "GET /api/v1/environments/{env}/artifacts/uploads": { class: ui, part: 3, done: true }
-"GET /api/v1/environments/{env}/checks": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/checks":
+  {
+    class: git,
+    reason: "after M7: the screen for `check list` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/deployments": { class: read, part: 5, done: true }
 "GET /api/v1/environments/{env}/deploys": { class: read, part: 5, done: true }
 "GET /api/v1/environments/{env}/deploys/{deploy_id}": { class: read, part: 5, done: true }
 "GET /api/v1/environments/{env}/expiring-tables": { class: ui, part: 3, done: true }
-"GET /api/v1/environments/{env}/graph/impact": { class: ui, part: 3 }
-"GET /api/v1/environments/{env}/graph/join-path": { class: ui, part: 3 }
+"GET /api/v1/environments/{env}/graph/impact":
+  {
+    class: git,
+    reason: "after M7: the screen for `graph impact` comes with #832; until then the CLI and REST API do it",
+  }
+"GET /api/v1/environments/{env}/graph/join-path":
+  {
+    class: git,
+    reason: "after M7: the screen for `graph join-path` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/graph/lineage": { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/graph/neighbours":
-  { class: read, part: 3, note: "the Lineage tab does not use it" }
+  {
+    class: git,
+    reason: "after M7: the screen for `graph neighbours` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/jobs": { class: read, part: 5, done: true }
 "GET /api/v1/environments/{env}/jobs/{job}": { class: read, part: 5, done: true }
-"GET /api/v1/environments/{env}/jobs/{job}/tasks/{task}/attempts": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/jobs/{job}/tasks/{task}/attempts":
+  {
+    class: git,
+    reason: "after M7: the screen for `task history` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/namespaces": { class: read, part: 3, done: true }
-"GET /api/v1/environments/{env}/namespaces/{path}": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}":
+  {
+    class: read,
+    part: 3,
+    done: true,
+    note: "the Catalog tree shows the namespace (from GET /api/v1/tables/tree); properties are read from the CLI",
+  }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}":
   { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/artifacts/{name}/versions":
@@ -369,7 +488,13 @@
 "GET /api/v1/environments/{env}/namespaces/{path}/dropped-tables":
   { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/dropped-tables": { class: ui, part: 3, done: true }
-"GET /api/v1/environments/{env}/namespaces/{path}/tables": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/namespaces/{path}/tables":
+  {
+    class: read,
+    part: 3,
+    done: true,
+    note: "the Catalog list shows a namespace's tables through GET /api/v1/tables with its namespace filter",
+  }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}":
   { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/definition":
@@ -380,19 +505,29 @@
   { class: read, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/health/signals":
   {
-    class: read,
-    part: 3,
-    note: "the Health tab shows the current signals from /health; the signal history comes with part 5",
+    class: git,
+    reason: "after M7: the signal history on the table's Health tab comes with #832; until then the CLI and REST API do it",
   }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/lineage":
-  { class: read, part: 3, note: "run lineage is not shown on the table page" }
+  {
+    class: git,
+    reason: "after M7: the run lineage of `table lineage` on the table page comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/references":
   { class: ui, part: 3, done: true }
 "GET /api/v1/environments/{env}/namespaces/{path}/tables/{name}/retention":
   { class: ui, part: 3, done: true }
-"GET /api/v1/environments/{env}/notifications/{delivery_id}": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/notifications/{delivery_id}":
+  {
+    class: git,
+    reason: "after M7: the screen for `job notification` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/orphans": { class: ui, part: 3, done: true }
-"GET /api/v1/environments/{env}/project-versions/{project_version_id}": { class: ui, part: 5 }
+"GET /api/v1/environments/{env}/project-versions/{project_version_id}":
+  {
+    class: git,
+    reason: "after M7: the screen for `project-version show` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/raw":
   { class: ui, part: 3, done: true, note: "Browse… beside Location in New external table" }
 "GET /api/v1/environments/{env}/queries":
@@ -407,11 +542,27 @@
 "GET /api/v1/environments/{env}/runs":
   { class: ui, part: 5, done: true, note: "the job page lists its job's runs with this filter" }
 "GET /api/v1/environments/{env}/runs/{run_id}": { class: ui, part: 5, done: true }
-"GET /api/v1/environments/{env}/runs/{run_id}/checks": { class: read, part: 5 }
+"GET /api/v1/environments/{env}/runs/{run_id}/checks":
+  {
+    class: git,
+    reason: "after M7: the screen for `check list` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{env}/runs/{run_id}/tasks/{asset}/log": { class: ui, part: 5, done: true }
-"GET /api/v1/environments/{env}/search": { class: ui, part: 1 }
-"GET /api/v1/environments/{env}/terms": { class: read, part: 3 }
-"GET /api/v1/environments/{env}/terms/{key}": { class: read, part: 3 }
+"GET /api/v1/environments/{env}/search":
+  {
+    class: git,
+    reason: "after M7: the screen for `search` (across tables, columns, runs, people and terms) comes with #832; until then the CLI and REST API do it",
+  }
+"GET /api/v1/environments/{env}/terms":
+  {
+    class: git,
+    reason: "after M7: the screen for `term list` comes with #832; until then the CLI and REST API do it",
+  }
+"GET /api/v1/environments/{env}/terms/{key}":
+  {
+    class: git,
+    reason: "after M7: the screen for `term get` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/environments/{name}": { class: ui, part: 8, done: true }
 "GET /api/v1/environments/{name}/orphaned-locations": { class: ui, part: 8, done: true }
 "GET /api/v1/environments/{name}/storage": { class: ui, part: 8, done: true }
@@ -425,24 +576,38 @@
   }
 "GET /api/v1/groups": { class: ui, part: 7, done: true }
 "GET /api/v1/groups/{name}/members": { class: ui, part: 7, done: true }
-"GET /api/v1/home/attention": { class: read, part: 2 }
-"GET /api/v1/home/get-started": { class: ui, part: 2 }
-"GET /api/v1/home/work": { class: read, part: 2 }
+"GET /api/v1/home/attention": { class: read, part: 2, done: true }
+"GET /api/v1/home/get-started": { class: ui, part: 2, done: true }
+"GET /api/v1/home/work": { class: read, part: 2, done: true }
 "GET /api/v1/info": { class: read, part: 8, done: true }
 "GET /api/v1/invites": { class: ui, part: 1, done: true }
-"GET /api/v1/package-indexes": { class: ui, part: 8 }
-"GET /api/v1/package-indexes/{name}": { class: ui, part: 8 }
+"GET /api/v1/package-indexes":
+  {
+    class: git,
+    reason: "after M7: the screen for `index list` comes with #832; until then the CLI and REST API do it",
+  }
+"GET /api/v1/package-indexes/{name}":
+  {
+    class: git,
+    reason: "after M7: the screen for `index show` comes with #832; until then the CLI and REST API do it",
+  }
 "GET /api/v1/principals":
   {
     class: ui,
     part: 7,
+    done: true,
     note: "Settings › Access › People lists and finds people from 1b; the full screen in 7",
   }
 "GET /api/v1/principals/{name}":
-  { class: ui, part: 7, note: "1b reads the type: no recovery link for a service account" }
-"GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
+  {
+    class: ui,
+    part: 7,
+    done: true,
+    note: "1b reads the type: no recovery link for a service account",
+  }
+"GET /api/v1/principals/{name}/interface-state": { class: ui, part: 2, done: true }
 "GET /api/v1/principals/{name}/grants": { class: read, part: 7, done: true }
-"GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
+"GET /api/v1/principals/{name}/passkeys": { class: ui, part: 1, done: true }
 "GET /api/v1/principals/{name}/permissions":
   {
     class: ui,
@@ -450,9 +615,9 @@
     done: true,
     note: "1b asks it whether a person is an administrator (recovery links); the table page's Access tab and Settings › Access › What I may do show its answer",
   }
-"GET /api/v1/principals/{name}/picture": { class: ui, part: 2 }
-"GET /api/v1/principals/{name}/recent": { class: ui, part: 2 }
-"GET /api/v1/principals/{name}/sessions": { class: ui, part: 1 }
+"GET /api/v1/principals/{name}/picture": { class: ui, part: 2, done: true }
+"GET /api/v1/principals/{name}/recent": { class: ui, part: 2, done: true }
+"GET /api/v1/principals/{name}/sessions": { class: ui, part: 1, done: true }
 "GET /api/v1/principals/{name}/tokens":
   {
     class: ui,
@@ -479,7 +644,7 @@
 "GET /api/v1/settings/configuration":
   { class: read, part: 8, done: true, note: "Settings › Configuration" }
 "GET /api/v1/settings/sign-in": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
-"GET /api/v1/sign-in/notices": { class: ui, part: 1 }
+"GET /api/v1/sign-in/notices": { class: ui, part: 1, done: true }
 "GET /api/v1/sign-in/oidc":
   { class: ui, part: 1, note: "OIDC sign-in (#32): the sign-in page's button", done: true }
 "GET /api/v1/sign-in/oidc/callback":
@@ -489,7 +654,7 @@
     note: "OIDC sign-in (#32): the provider sends the browser here",
     done: true,
   }
-"GET /api/v1/sign-in/session": { class: ui, part: 1 }
+"GET /api/v1/sign-in/session": { class: ui, part: 1, done: true }
 "GET /api/v1/status": { class: read, part: 2, done: true }
 "GET /api/v1/tables": { class: read, part: 3, done: true }
 "GET /api/v1/tables/tree": { class: read, part: 3, done: true }
@@ -497,7 +662,7 @@
   { class: git, reason: "task-only (lakana.ingest inside asset code)" }
 "GET /api/v1/task-tokens": { class: ui, part: 7, done: true }
 "GET /api/v1/tokens": { class: ui, part: 7, done: true }
-"GET /api/v1/whoami": { class: read, part: 1 }
+"GET /api/v1/whoami": { class: read, part: 1, done: true }
 "GET /api/v1/workers":
   {
     class: ui,
@@ -514,11 +679,19 @@
   { class: ui, part: 3, done: true }
 "PATCH /api/v1/environments/{name}": { class: ui, part: 8, done: true }
 "PATCH /api/v1/environments/{name}/storage": { class: ui, part: 8, done: true }
-"PATCH /api/v1/package-indexes/{name}": { class: ui, part: 8 }
-"PATCH /api/v1/principals/{name}/interface-state": { class: ui, part: 2 }
+"PATCH /api/v1/package-indexes/{name}":
+  {
+    class: git,
+    reason: "after M7: the screen for `index update` comes with #832; until then the CLI and REST API do it",
+  }
+"PATCH /api/v1/principals/{name}/interface-state": { class: ui, part: 2, done: true }
 "PATCH /api/v1/repositories/{name}": { class: ui, part: 8, done: true }
 "PATCH /api/v1/settings/sign-in": { class: ui, part: 8, done: true, note: "Settings › Sign-in" }
-"PATCH /api/v1/whoami": { class: ui, part: 1 }
+"PATCH /api/v1/whoami":
+  {
+    class: git,
+    reason: "after M7: the screen for `me set` (the catalog-text language) comes with #832; until then the CLI and REST API do it",
+  }
 "POST /api/v1/access/apply":
   {
     class: git,
@@ -555,7 +728,11 @@
     note: "only the rollback form is in the UI; the CLI deploy of a new commit is Git",
     done: true,
   }
-"POST /api/v1/environments/{env}/jobs/{job}/notify-test": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/jobs/{job}/notify-test":
+  {
+    class: git,
+    reason: "after M7: the screen for `job notify-test` comes with #832; until then the CLI and REST API do it",
+  }
 "POST /api/v1/environments/{env}/jobs/{job}/pause": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/jobs/{job}/resume": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/jobs/{job}/runs": { class: ui, part: 5, done: true }
@@ -595,7 +772,11 @@
   { class: ui, part: 3, done: true }
 "POST /api/v1/environments/{env}/queries": { class: ui, part: 4, done: true }
 "POST /api/v1/environments/{env}/queries/{query_id}/cancel": { class: ui, part: 4, done: true }
-"POST /api/v1/environments/{env}/runs": { class: ui, part: 5 }
+"POST /api/v1/environments/{env}/runs":
+  {
+    class: git,
+    reason: 'a non-goal of part 5 (Jobs), whose design says: "Starting a run for an arbitrary selection of assets from the UI (the CLI''s `runs start` stays the way to do that; the Runs tab shows such runs)"; that command is `lakana run`, and Run now on a job page starts the whole job',
+  }
 "POST /api/v1/environments/{env}/runs/{run_id}/cancel": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/runs/{run_id}/checks/rows": { class: ui, part: 5, done: true }
 "POST /api/v1/environments/{env}/runs/{run_id}/resume": { class: ui, part: 5, done: true }
@@ -605,7 +786,11 @@
 "POST /api/v1/grants": { class: ui, part: 7, done: true }
 "POST /api/v1/groups": { class: ui, part: 7, done: true }
 "POST /api/v1/invites": { class: ui, part: 1, done: true }
-"POST /api/v1/package-indexes": { class: ui, part: 8 }
+"POST /api/v1/package-indexes":
+  {
+    class: git,
+    reason: "after M7: the screen for `index add` comes with #832; until then the CLI and REST API do it",
+  }
 "POST /api/v1/principals":
   {
     class: ui,
@@ -613,8 +798,8 @@
     done: true,
     note: "service accounts only; a person comes in through an invite (Settings › Sign-in › Invites)",
   }
-"POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1 }
-"POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1 }
+"POST /api/v1/principals/{name}/passkeys": { class: ui, part: 1, done: true }
+"POST /api/v1/principals/{name}/passkeys/options": { class: ui, part: 1, done: true }
 "POST /api/v1/principals/{name}/recent":
   { class: ui, part: 2, note: "called by the detail pages from part 3", done: true }
 "POST /api/v1/principals/{name}/recovery-link": { class: ui, part: 1, done: true }
@@ -629,8 +814,8 @@
 "POST /api/v1/repositories/{name}/deploy-key": { class: ui, part: 2, done: true }
 "POST /api/v1/repository-probes": { class: ui, part: 2, done: true }
 "POST /api/v1/row-filters": { class: ui, part: 7, done: true }
-"POST /api/v1/sign-in/links/describe": { class: ui, part: 1 }
-"POST /api/v1/sign-in/links/redeem": { class: ui, part: 1 }
+"POST /api/v1/sign-in/links/describe": { class: ui, part: 1, done: true }
+"POST /api/v1/sign-in/links/redeem": { class: ui, part: 1, done: true }
 "POST /api/v1/sign-in/local-link":
   { class: git, reason: "local tooling: server start --local signs the browser in" }
 "POST /api/v1/sign-in/cli/approvals":
@@ -655,12 +840,12 @@
 "POST /api/v1/sign-in/oidc/start": { class: ui, part: 1, note: "OIDC sign-in (#32)", done: true }
 "POST /api/v1/sign-in/oidc/step-up/start":
   { class: ui, part: 1, note: "OIDC sign-in (#32): step-up of a linked person", done: true }
-"POST /api/v1/sign-in/passkey": { class: ui, part: 1 }
-"POST /api/v1/sign-in/passkey/options": { class: ui, part: 1 }
+"POST /api/v1/sign-in/passkey": { class: ui, part: 1, done: true }
+"POST /api/v1/sign-in/passkey/options": { class: ui, part: 1, done: true }
 "POST /api/v1/sign-in/setup-link":
   { class: git, reason: "local deployment tooling: the Compose set-up prints the first link" }
-"POST /api/v1/sign-in/step-up": { class: ui, part: 1 }
-"POST /api/v1/sign-in/step-up/options": { class: ui, part: 1 }
+"POST /api/v1/sign-in/step-up": { class: ui, part: 1, done: true }
+"POST /api/v1/sign-in/step-up/options": { class: ui, part: 1, done: true }
 "POST /api/v1/task-tokens":
   { class: exception, reason: "debugging tool; minted by the platform for running tasks" }
 "PUT /api/v1/environments/{environment_name}/secrets/{secret_name}/use":
@@ -679,4 +864,4 @@
   { class: ui, part: 3, done: true }
 "PUT /api/v1/environments/{name}/retention": { class: ui, part: 8, done: true }
 "PUT /api/v1/groups/{name}/members/{principal_name}": { class: ui, part: 7, done: true }
-"PUT /api/v1/principals/{name}/picture": { class: ui, part: 2 }
+"PUT /api/v1/principals/{name}/picture": { class: ui, part: 2, done: true }
